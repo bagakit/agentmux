@@ -1,0 +1,9 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+commands:
+- npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/topic-agent-status.test.ts apps/desktop/test/stylesheet-organisation.test.ts apps/desktop/test/rendered-class-has-rule.test.ts => pass (0)
+- npx vitest run apps/desktop/test/surface-scale-contract.test.ts apps/desktop/test/surface-radius-contract.test.ts apps/desktop/test/surface-selection-contract.test.ts => pass (0)
+- pnpm --filter @agentmux/desktop typecheck => pass (0)

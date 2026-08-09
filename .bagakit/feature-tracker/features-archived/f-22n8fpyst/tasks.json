@@ -1,0 +1,246 @@
+{
+  "version": 2,
+  "feat_id": "f-22n8fpyst",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+    "docs/plans/agentmux-provider-timeline-executors.md",
+    "docs/plans/agentmux-agent-native-browser-workspace.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-provider-timeline-executors.md",
+        "docs/plans/agentmux-agent-native-browser-workspace.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-provider-timeline-executors.md",
+        "docs/plans/agentmux-agent-native-browser-workspace.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "直接切换低熵身份与意图协议",
+      "objective": "将公共 View/viewId 和旧 Composition 命令树直接替换为 Tab/Region/Surface 与 inspect/list/open/send/focus/arrange/output/interrupt/resume/stop 的类型化 Control 协议。",
+      "outcome": "Agent 只用一套用户意图心智查看和控制 Desktop；Core、RuntimeController、Main Browser owner 与 Renderer Layout Store 仍分别持有唯一真相。",
+      "acceptance": [
+        "Core 公共 Control schema、control.sock receipt、CLI JSON 和 Desktop 投影只使用 tabId/regionId/agentSessionId/runId/browserId，不暴露 viewId、tabGroupId、paneId 或 Surface ID。",
+        "长期 Desktop Control Host 是所有 CLI mutation 的唯一入口；CLI 不直接创建短命 mutation client，Desktop 不绕过 Core 管理 Agent/Terminal Run。",
+        "self 在 wire 中是独立 selector，caller 单独携带受管 Agent Session identity；Tab self 按 tabId 去重且必须唯一，Region self 必须恰好一个。",
+        "request 与 receipt 保留同一 schemaVersion/requestId/operation；success/error exactly-one；公开错误码封闭，MESSAGE_TARGET_NOT_UNIQUE 必须返回 typed candidates。",
+        "send 只提交给运行中的精确 Agent Session，绝不隐式 Resume；只有显式 resume 可以创建 replacement Run。",
+        "旧 context、launch、session/region/surface 命令、Composition socket/export 和兼容字段直接删除，不保留 alias、migration、fallback 或第二 Runtime owner。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "封闭 request/result/error union、socket 关联身份、CLI 解析、selector 歧义和旧命令删除通过 Core 公共测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+          "proves": "公共心智、Owner 依赖方向、失败边界和非目标由一份需求 SSOT 定义。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "packages/core/src/control.ts",
+        "packages/core/src/control-host.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "打通 Agent、Terminal 与 Browser 的类型化 open",
+      "objective": "在同一 open 合同下交付 Agent prompt、Terminal shellCommand 和 Browser URL，并使用互斥方位进入新 Tab、四向 Split 或 Launcher Region。",
+      "outcome": "Agent 可用同一可发现命令在精确方位打开三类内容，每类 payload 只到达一次正确 owner。",
+      "acceptance": [
+        "open 必须恰好提供 --left-of/--right-of/--above/--below、--new-tab-after 或 --in-region 一种 destination，不保留 placement/relative-to 或隐式默认方位。",
+        "Agent 创建与已有 Session 打开经长期 RuntimeController；prompt 只交付一次，失败或 owner 丢失时清理本次新资源和布局。",
+        "Terminal shellCommand 在 Desktop 边界一次映射为 host shell executable 加 -lc，再进入 Core createTerminal；不在 attach 后模拟键盘，不建第二 PTY/Run owner。",
+        "Browser URL 由现有 Main Browser owner 校验和创建；browserId 与 regionId 独立，Renderer 不复制 WebContents/Profile/DevTools 真相。",
+        "--in-region 只填充 Launcher Region；已有内容、过期目标、取消或 owner 丢失都失败关闭，不暗中替换 Surface。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "Desktop Control 端到端覆盖三类 open、六种 destination、成功、取消和逐 owner rollback。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/control.ts",
+          "proves": "Control 只编排 owner 事务，空间变化继续由唯一 Renderer Layout owner 完成。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-agent-native-browser-workspace.md",
+        "docs/plans/agentmux-provider-timeline-executors.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "title": "交付布局预设、Tab handoff 与内置 Skill",
+      "objective": "在 Renderer 唯一布局 owner 中实现三列、四/六/九宫格、balance 和 active-first，并让 Tab 菜单和 agentmux --skill 教会 Agent 使用新协议。",
+      "outcome": "用户能快速组合 Writer/Reviewer 与大规模并发工作面，也能复制 Tab ID、唯一 Session ID 或可执行 handoff，不依赖隐藏 UI 事实。",
+      "acceptance": [
+        "columns-3、grid-4、grid-6 和 grid-9 保留现有 Region reading order并用 Launcher 填充空位；Region 超量时失败且不改布局。",
+        "balance 按 split 子树 leaf 数均分最终面积；active-first 只把 active Region 移到 reading-order 首位；两者只由显式 arrange 触发。",
+        "Tab 菜单复制原始 Tab ID 与 POSIX shell-safe Agent handoff；只有整张 Tab 恰好一个不同 Agent Session 时才显示 Copy Session ID。",
+        "agentmux --skill 包含 Agent/Terminal/Browser、四向/new-tab/in-region、grid-4/6/9、三列 Writer+Reviewer、typed send、self 歧义和稳定 receipt 的可执行示例。",
+        "布局不在后台自动重排，不从 Terminal bytes、标题或最近焦点推断活跃性。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "Layout reducer、Tab menu、handoff 文本和 Desktop Control 投影行为通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/agentmux-cli-help.ts",
+          "proves": "内置 Skill 与帮助只描述同版本已实现的意图协议。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "packages/core/src/agentmux-cli-help.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-view-layout.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "title": "证明同一候选的包、Desktop 与协议边界",
+      "objective": "在一个稳定候选上串行验证 Core 公共 consumer、Desktop Control owner、production build、完整 repository Gate、SSOT residue 和独立审查。",
+      "outcome": "新协议从打包 CLI 到真实 Desktop owner 可重复端到端工作，并在文档、Skill、Tracker 与公开行为上只有一份真相。",
+      "acceptance": [
+        "Core package consumer 验证安装后的 agentmux --skill、新命令解析、版本化 receipt、typed candidates、UTF-8 多字节分片与对端提前关闭。",
+        "Desktop 定向测试覆盖 Tab/Region selector、三类 open、send 唯一/歧义、显式 resume、布局事务、取消回滚和 exact new-tab insertion。",
+        "同一稳定候选串行通过逐级 help、pnpm typecheck、test:fast、test:native、test:security、build、check 与 git diff --check；不缩小公开 Gate 冒充绿灯。",
+        "残留审计确认 Main/Preload/shared/Core 无旧 Composition public surface；Renderer 内部 layout 术语不升格为公开协议。",
+        "独立审查确认无第二 Runtime/Layout/Browser owner、兼容、fallback、重试掩盖或预防性抽象；需求 SSOT、Feature Tracker 与实际 --help/--skill 一致。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "最终候选的 Core、Desktop、测试和 production build 公开 Gate 统一通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/test/fixtures/packed-consumer.mjs",
+          "proves": "独立打包消费者可使用完整新协议而不依赖工作树私有路径。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "The owning Control requirement and layer-specific architecture, session, managed-agent, ctxmux, and testing documents now describe only the current Tab/Region protocol and owner boundaries.",
+      "refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "The receipt and owner-leak findings are already enforced by code oracles and the repository no-fallback, single-owner principles; another learning store would duplicate truth.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "AGENTS.md and the owning Control requirement already hold the durable owner and no-compatibility rules; no additional knowledge surface is warranted.",
+      "refs": []
+    }
+  }
+}

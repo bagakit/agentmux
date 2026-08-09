@@ -1,0 +1,37 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v2",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-2248f4yx5",
+  "semantic_revision": "60be6090324376315d32866f9d22ec9bd096b53af9ca21b16a45404498c9959e",
+  "lifecycle_status": "blocked",
+  "continuation": "blocked",
+  "active_item_ids": [],
+  "blockers": [
+    {
+      "item_id": "T-019",
+      "class": "internal_blocker",
+      "reason": "P0 竖切成立（startDiscussion 有 agentmux discuss 与 Board Canvas 两个真实入口；凭证、Thread、重启恢复均经变异验证）。P1 只交付 Core 侧状态机纯函数，竖切未闭合，不能盖章：(1) 去掉 client.ts 自身后，checkDeliveries/ackDeliveryBatch/answerAsk/cancelAsk/handOff/openDispatch/recordDispatchEvent 七个动作全仓零调用者——无 IPC、无 CLI、无 UI；(2) SSOT 要求的 send/acceptMessage/reply 三个 API 不存在，导致 accepted 与 replied 两状态在生产路径上不可达；(3) agent-session-store.ts 对 AgentThread/threadId/DeliveryQueue 零命中，Thread 与 consumer 游标活不过重启，'Core 重启后恢复同一 Thread 与未读 Inbox 投影'这条 oracle 无从谈起；(4) 九个 Provider 的 replyCorrelation 全为 none，correlated-reply 一类在 catalog 里没有素材，三类 Provider 竖切矩阵无法构造；(5) A→B→A cycle、hop/waiter/retry/token/Inbox 上限未实现，只有复用自 Prompt 的 64KB；(6) 消息侧 Remote typed unsupported 未接，REMOTE_UNSUPPORTED 只在 Run 路径；(7) Discussion Canvas 只读一个 delivered 常量，无 Thread 视图与回复/取消/超时。更正：上一轮我据 12 处变异验证写下'P1 全部机制已交付'，该结论已推翻并改正 docs/reviews/agentmux-agent-communication-final.md——变异证明代码被测试用到，不证明能力接到产品上。P1 量级与 P0 相当，建议单独立项。"
+    },
+    {
+      "item_id": "T-021",
+      "class": "external_blocker",
+      "reason": "仓库内 vendored 的 @ctxmux/sdk@0.0.0 公开面（attachment/client/control/index/integration/stop-operation/validation/wire）对 ssh|Remote|RemoteConnector|remoteHost 全部零命中：没有版本化 Remote connector、没有 Host/Build/Capability 身份、没有部署升级与 partition recovery 的公开类型。T-021 验收第一条要求 Remote 能力必须来自 ctxmux 公开合同且 AgentMux 不得自建 proxy wire，故现在无法诚实交付；自建 SSH 通道会违反该验收与架构往长做原则，并制造上游合同落地后必须拆掉的第二运行时。现状 execution-host.ts:86/:93 返回 typed REMOTE_UNSUPPORTED 是诚实占位。核实见 artifacts/T-021-external-blocker-verification.md。等 ctxmux 发布带 Remote 合同的版本化 SDK 后解锁。"
+    },
+    {
+      "item_id": "T-023",
+      "class": "external_blocker",
+      "reason": "ctxmux 协议没有任何回收动词。SDK 生成的 dist/generated/Request.d.ts 列出全部 13 个请求：start / discover_tmux / import_tmux / fork / list / status / input / recoverable_input / resize / signal / stop / attach_recoverable_stop / attach——没有一个能删除或过期已终止的 Run。stop 只是把 Run 推入终止态：实测旧 endpoint 的 62 个 Run 全部已终止（exited 42 / interrupted 20），仍占 110.2MB，replay_chunks 280184 行中 44.8MB 属已终止 Run。CLI 侧同样无 prune/gc 子命令。state.sqlite3（表 runs / replay_chunks）是 ctxmux 私有存储，AgentMux 只是走 unix socket 的协议客户端，绕过协议直接改写会与活着的 daemon 抢写并踩坏 stop/attach/replay 语义，违反架构往长做原则。ctxmux 无本地源码，仅 vendored 产物（manifest upstream commit 073e206407ce28331aa882c2c80e9354cfe2879a, protocol 13），故须走上游。上游需求：一个能回收已终止 Run 及其 replay 的协议动词，按时间窗或容量上界，显式豁免 running 与正被 attach 的 Run。我方能自闭环的孤儿目录回收已拆到 T-022。核实见 artifacts/plan-review-r13.md。"
+    }
+  ],
+  "replacement_ref": null,
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features/f-2248f4yx5/state.json",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/tasks.json",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/goal.md"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features/f-2248f4yx5/state.json": "0fb6e2375e219d60002c5a2198a796f9c57f5c61df1ea40b03cd4c0dda25858f",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/tasks.json": "dde6fb41b8aec75e482ffb7ab6ce843b5b7bbe7b8d2cf656337ce23a23a7dbf7",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/goal.md": "591f04229007aeecfca7479cd1933c1fe637ebe8be26c81c6ea0466413b2045e"
+  }
+}

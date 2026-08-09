@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "feat_id": "f-23r8fq5nw",
+  "title": "成熟度追赶：运行时保真、工程韧性与交互摩擦",
+  "slug": "maturity-parity",
+  "goal": "把 AgentMux 在实现质量上落后于成熟同类产品的地方逐项补齐。三个维度由三个独立 subagent 交叉核实，每条差距均有我方 file:line 证据。（一）运行时保真：中断被涂成故障、一次工具调用显示成两条且在途状态永不点亮、working 状态无衰减导致永远转圈、退出原因分不清人为与崩溃、子代理未结束就报完成。（二）工程韧性：写盘缺 fsync 断电即可能截断连续性主干、会话存储一字节损坏即整份作废、崩溃事后零信号、双开抢同一份运行时状态。（三）交互摩擦：无 Unicode 11 宽度表导致中文与 emoji 列错位、键盘够不着关闭/切换/分屏、终端搜索已有能力未露出。参考项目一律只作机制参考，绝不抄代码，也不写进 AgentMux 代码或设计文档。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 16
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "npx vitest run test/attention-event.test.ts --root apps/desktop",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "npx vitest run test/agent-run-exit-wiring.test.ts test/agent-run-exit.test.ts --root packages/core",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-23r8fq5nw/artifacts/gate-T-001-r16-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-008"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-007"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-009"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-009 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-001 => internal_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-011"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-008 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-011 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-011 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-007 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-007 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-012"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-012 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-012 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

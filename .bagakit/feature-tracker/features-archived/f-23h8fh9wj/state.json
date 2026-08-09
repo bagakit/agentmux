@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "feat_id": "f-23h8fh9wj",
+  "title": "Topic-owned Tab Creation",
+  "slug": "topic-bound-tab-creation",
+  "goal": "在 Scratch 中选中 Topic 后，从当前工作线新建的 Tab/View 继承该 Topic 绑定；未选中时保持未绑定，不新增第二份 Topic 或 Layout 状态。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "npx vitest run apps/desktop/test/topic-tab-inheritance.test.ts apps/desktop/test/scratch-topic-layout.test.ts apps/desktop/test/scratch-topic-agents.test.ts apps/desktop/test/workspace-selection.test.ts apps/desktop/test/open-http-link-store.test.ts apps/desktop/test/control.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-23h8fh9wj/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

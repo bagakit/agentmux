@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "feat_id": "f-23b8fh58m",
+  "title": "AgentMux Surface Language & Live Region",
+  "slug": "agentmux-surface-language",
+  "goal": "把设计语言从散落的字面值收成可执行的规范，并补齐三处用户点名的体验缺口。一、尺度系统：16 种字号、32 种间距、330 处硬编码颜色、4 个悬空 token 引用全部收进 --fs-*/--sp-*/颜色 token，由 surface-scale-contract 从 CSS 反推守住；页面级标题六个字号收敛到一档。二、控件语言：ban 掉左侧竖条选中态并由 surface-selection-contract 守住，样式表按表面拆成八个文件、:root 只留一处。三、Topic 与终端：当前 Topic 从活动 Tab 的绑定派生而非只靠面板赋值，Topic 行改为 Agent 头像列表（身份看图标、状态看边框、hover 抬升+tooltip、点击走 selectSession）、行上只留定位动作、改名进右键菜单、去掉无信息的行首图标；隐藏的 Region 保住终端实例使切回不再重放恢复态，且不可见终端零布局零渲染、不建绕过 Region 生命周期的缓存池。设计 SSOT 为 docs/design/agentmux-surface-density.md 与 agentmux-desktop-interaction.md。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 9
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-107",
+    "last_check_commands": [
+      {
+        "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "npx vitest run apps/desktop/test",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-23b8fh58m/artifacts/gate-T-107-r9-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-102"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-102 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-102 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-102 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-108"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-108 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-108 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-103"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-103 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-103 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-101"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-101 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-101 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-105"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-105 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-105 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-104"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-104 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-104 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-106"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-106 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-106 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-107"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-107 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-107 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

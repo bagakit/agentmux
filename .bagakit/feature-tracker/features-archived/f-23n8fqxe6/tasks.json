@@ -1,0 +1,258 @@
+{
+  "version": 2,
+  "feat_id": "f-23n8fqxe6",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": "docs/reviews/ctxmux-durable-io-fault-regression-plan.md",
+  "source_refs": [
+    "docs/reviews/ctxmux-durable-io-fault-regression-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "AGENTS.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md",
+      "source_refs": [
+        "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "AGENTS.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/ctxmux-durable-io-fault-regression-plan.md",
+      "source_refs": [
+        "docs/reviews/ctxmux-durable-io-fault-regression-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "AGENTS.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "冻结 WAL busy checkpoint 的可重复回归",
+      "objective": "在隔离 ctxmux state 上制造 WAL 超过 admission 阈值并让独立 SQLite reader 持有短暂锁，证明当前错误来自瞬态 busy 而非损坏，并把 owner-level 行为写成回归测试。",
+      "outcome": "测试能区分 busy、disk-full、corruption 与成功归零；不触碰用户正在使用的 runtime state。",
+      "acceptance": [
+        "隔离 fixture 的 quick_check 通过，busy checkpoint 在释放 reader 后可归零。",
+        "测试在当前实现下能观察到 busy 不应永久拒绝后续 mutation 的失败基线，且没有手工修改真实 state。",
+        "测试不依赖 sleep 竞态，使用明确 barrier/reader 生命周期并限制 fixture 文件大小。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "proves": "ctxmux persistence owner 的 busy fixture 与分类回归可执行。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "有界恢复 WAL checkpoint，不永久锁存瞬态 busy",
+      "objective": "在 ctxmux persistence owner 内实现有界、可取消的 busy checkpoint retry/backoff；成功归零后继续原 FIFO mutation，其他错误维持 fail-closed。",
+      "outcome": "短暂 reader 争用不再让 Terminal 创建或 resume 永久收到 durable state rejected；重试耗尽仍给出分类错误并保护 WAL 上限。",
+      "acceptance": [
+        "busy 在预算内重试并最终归零时，后续 mutation 成功且 failure latch 保持为空。",
+        "busy 超过预算、corruption、disk-full、物理上限和 shutdown 各有独立断言；不能折叠成无限重试。",
+        "故意删除 retry 或把 busy 当 fatal 时对应测试变红；没有重复提交已成功事务或破坏 actor FIFO。",
+        "新增 retry helper 若为 pub(crate) 以外符号，必须有定义文件之外的生产调用者；纯内部 helper 不能被伪造为公开能力。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cargo fmt --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml --all -- --check && cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "proves": "Rust 格式与 persistence owner 的 retry、failure classification、FIFO/shutdown 回归通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "cargo fmt --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml --all -- --check && cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "消费精确 ctxmux candidate 并完成 Terminal/resume smoke",
+      "objective": "将通过 owner tests 的精确 ctxmux commit/binary 更新到 AgentMux vendor/manifest，验证 Desktop 走同一 public boundary。",
+      "outcome": "新包中的 ctxmuxd 与源码 candidate 一致；打开 Terminal、创建 Run、关闭/重启后 semantic resume 不再命中旧 WAL 错误。",
+      "acceptance": [
+        "vendor/manifest 记录可复现的精确 ctxmux identity，不依赖 sibling 源码路径或未审计二进制。",
+        "真实 daemon smoke 覆盖 WAL 接近阈值、短暂 reader、后续 mutation 与明确错误分类。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-session-continuity.test.ts test/client.test.ts",
+          "proves": "AgentMux 接线保持类型安全且 continuity API 不绕过 ctxmux owner。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/ctxmux-run-adapter.ts",
+        "apps/desktop/src/main/index.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-session-continuity.test.ts test/client.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-003"
+      ],
+      "title": "打包安装与重启后连续性验收",
+      "objective": "在干净 candidate 上生成并安装最新 macOS 包，确认安装 bundle 携带 WAL 修复、durable session path、capability timeout 降级和 cold-park 变更，并完成真实重启 smoke。",
+      "outcome": "用户打开 Terminal 即可工作；应用/机器重启后布局和可恢复 Session 自动接回；旧状态不会被静默裁剪。",
+      "acceptance": [
+        "package:mac 与 package:mac:install 在 clean candidate 成功，安装路径与 bundle hash/ctxmux manifest 可核对。",
+        "真实 smoke 记录 Terminal open、Topic/Project 回访、应用重启与机器重启边界。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test && pnpm build && pnpm --filter @agentmux/desktop package:mac:install",
+          "proves": "全仓回归、生产构建和安装包验证在同一 clean candidate 上通过。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/package.json",
+        "apps/desktop/src/main/index.ts",
+        "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test && pnpm build && pnpm --filter @agentmux/desktop package:mac:install",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "隔离注入 SQLite I/O 失败并验证重启恢复",
+      "objective": "在 ctxmux persistence 测试 fixture 中注入一次 typed SQLITE_IOERR，冻结本次 durable state database failed 事故的 failure-latch 与重启恢复边界。",
+      "outcome": "注入只发生在临时 state-dir；同一 actor 明确拒绝后续 mutation，关闭并重新打开同一隔离 state 后既有 Run 可恢复且新的 mutation 成功。",
+      "acceptance": [
+        "测试观察到精确的 SQLite I/O 错误分类与 durable mutation 拒绝，证明注入确实击中 persistence actor。",
+        "重启/重新打开后 quick_check 与既有 durable Run 恢复通过，后续 start/finalize 可写。",
+        "测试不填满宿主磁盘、不修改真实 runtime、不终止宿主应用；test-only hook 不进入生产 artifact。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cargo fmt --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml --all -- --check && cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "proves": "隔离 SQLite I/O fault 注入、failure-latch 分类、重启恢复及既有 persistence 回归全部通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/ctxmux-durable-io-fault-regression-plan.md",
+        "AGENTS.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "cargo fmt --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml --all -- --check && cargo test --manifest-path /Users/bytedance/proj/priv/bagaking/ctxmux/Cargo.toml -p ctxmux-daemon persistence",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "ctxmux WAL persistence、Protocol 14 与桌面安装连续性文档已同步并在本次 gate 中核对。",
+      "refs": [
+        "docs/reviews/ctxmux-wal-checkpoint-resilience-plan.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "本次是已审查的上游 runtime cutover 与打包验收，没有新增待提升的通用学习条目。",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "无需提升为新的流程或策略变更。",
+      "refs": []
+    }
+  }
+}

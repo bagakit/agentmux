@@ -1,0 +1,90 @@
+{
+  "version": 2,
+  "feat_id": "f-24j8fxknj",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-runtime-ownership-2026-09-09.md",
+  "source_refs": [
+    "docs/reviews/agentmux-runtime-ownership-2026-09-09.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-runtime-ownership-2026-09-09.md",
+      "source_refs": [
+        "docs/reviews/agentmux-runtime-ownership-2026-09-09.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "兼容 Runtime 与 owner 权限解耦",
+      "objective": "兼容 daemon 可用，归属不确定只降级提示且禁止危险清理",
+      "outcome": "旧 App daemon 可继续服务已有 Agent，身份不兼容仍拒绝",
+      "acceptance": [
+        "Runtime identity/能力/artifact/endpoint/state 兼容但 owner receipt 缺失时 connect 成功并标记未确认",
+        "未确认归属不能触发本进程终止或清理；服务窗持续可见",
+        "变异测试变红，生产调用存在"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run packages/core/test/ctxmux-owner-compatibility.test.ts apps/desktop/test/runtime-ownership-notice.test.tsx",
+          "proves": "兼容性与归属权限边界"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agentmux-runtime-ownership-2026-09-09.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm exec vitest run packages/core/test/ctxmux-owner-compatibility.test.ts apps/desktop/test/runtime-ownership-notice.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "用户确认的持久 Runtime 与兼容性边界已写入设计 SSOT；安装验证及限制已记录。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "已记录启动来源、兼容性和请求身份绑定的区别，以及隔离构建和安装恢复证据。",
+      "refs": [
+        "docs/reviews/agentmux-runtime-ownership-2026-09-09.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "已有项目原则 11 与设计 SSOT 覆盖健康 Agent 不受流程阻断，不新增并行原则存储。",
+      "refs": []
+    }
+  }
+}

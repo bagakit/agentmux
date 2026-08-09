@@ -1,0 +1,187 @@
+{
+  "version": 2,
+  "feat_id": "f-23k8f8avd",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-surface-memory-plan.md",
+  "source_refs": [
+    "docs/reviews/agentmux-surface-memory-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-surface-memory-plan.md",
+      "source_refs": [
+        "docs/reviews/agentmux-surface-memory-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立同条件 AgentMux 内存基线",
+      "objective": "分别测量单活动 Workspace、多个隐藏 Workbench、Terminal、Monaco 与 Browser 的进程 working set 和资源 owner，确认主要增长来自哪一层。",
+      "outcome": "有可重复、带 commit 与 ctxmux 身份的分阶段基线，不把总 RSS 或单个 Chromium helper 当作泄漏结论。",
+      "acceptance": [
+        "基线报告包含 idle、单隐藏 Workspace、多个隐藏 Workspace/Tab、Terminal、Monaco、Browser 阶段及 owner counts。",
+        "每个阶段记录 AgentMux commit、Electron、ctxmux manifest 与平台，重复运行不会修改工作树。",
+        "报告明确区分 Core/ctxmux 事实与 Renderer/Main surface 内存，不提出未经测量的数值承诺。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop measure:desktop",
+          "proves": "已有资源探针能产出带身份的分阶段 working-set 与 owner 报告。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/scripts/measure-desktop-resources.mjs",
+        "apps/desktop/src/main/resource-probe.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop measure:desktop",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "Terminal 有限 hot-retain 与 cold-park",
+      "objective": "在窗口级 Workbench 保活合同之上，为长期隐藏且可重建的 Terminal surface 增加 TTL、数量上限和 cooldown。",
+      "outcome": "近期工作面无闪烁回访，超出预算的 Terminal Renderer 释放，Core Session/Run/attachment 事实不被复制或删除。",
+      "acceptance": [
+        "活动与近期 Terminal 在 TTL 内保持挂载；超过 hot-retain 上限且满足可重建条件才 cold-park。",
+        "cold-park 前后同一 Session ID、Run binding 与布局 Region 保持不变，回访经过单一 replay/attach owner 恢复。",
+        "pending startup、activity portal、不可重建 PTY、测量窗口和 cooldown 条件会阻止 parking；重复切换不发生 mount/unmount thrash。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run --maxWorkers=1 test/workspace-workbench-registry.test.ts test/terminal*",
+          "proves": "保活、冷停、回访和保护条件的行为契约。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop measure:desktop",
+          "proves": "同场景 working-set 与 owner counts 在 cold-park 后收敛。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/App.tsx",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "packages/core/src/ctxmux-run-adapter.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run --maxWorkers=1 test/workspace-workbench-registry.test.ts test/terminal*",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop measure:desktop",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "Browser 与 Monaco 独立预算及质量审计",
+      "objective": "对 Browser WebContentsView 与 Monaco model/editor 建立独立的重建和释放策略，完成变异、零调用者和只读架构审计。",
+      "outcome": "不同 surface 的内存责任清晰，任何释放策略改坏都会红，且没有第二套 Runtime 或隐藏缓存池。",
+      "acceptance": [
+        "Browser 与 Monaco 只有在各自 owner/rebuild 证明存在时才进入 budget；不借用 Terminal 的 parking 判据。",
+        "故意移除 release、Session/Region 保留或保护条件时对应测试变红；新增公开 symbol 有生产调用者。",
+        "独立 reviewer 从正确性、边界、鲁棒性、复杂度和可解释性审计，残余风险写入 review artifact。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test",
+          "proves": "Core/Desktop 回归保持全绿。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "surface budget 接线不越过 Core/ctxmux 边界。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/main/browser-view-manager.ts",
+        "apps/desktop/src/renderer/src/lib/resource-usage-panel.ts",
+        "docs/reviews/agentmux-surface-memory-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "已把 Projects 选择/运行分离与有限 surface memory/cold-park 约束同步到设计 SSOT，并以最终 baseline/audit 记录实现边界。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "复核了 gate 失败（宿主环境注入与 stale Monaco mock）、正式 receipt、mutation/zero-caller 证据和 P2 residual；保留可复用的清洁环境与 worktree 稳定性判据。",
+      "refs": [
+        "docs/reviews/agentmux-surface-memory-audit.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "本 Feature 的经验已局部记录在审计与设计 SSOT；没有需要升级为全局新原则的重复候选。",
+      "refs": []
+    }
+  }
+}

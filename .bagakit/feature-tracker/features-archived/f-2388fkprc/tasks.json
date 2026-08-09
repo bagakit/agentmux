@@ -1,0 +1,135 @@
+{
+  "version": 2,
+  "feat_id": "f-2388fkprc",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/design/agentmux-desktop-interaction.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/design/agentmux-desktop-interaction.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "切 Topic 就换那一组 Tab，像切 Branch 一样",
+      "objective": "让当前 Topic 成为显式状态，Tab 条按它投影；布局仍只有一份，过滤发生在渲染时。",
+      "outcome": "在 Scratch 里切 Topic 的体验与在项目里选 Branch 一致：那一组 Tab 跟着换。",
+      "acceptance": [
+        "纯函数完成过滤：输入 layout + tabs + 当前 topicId，输出投影后的 layout；不碰 Store、不碰 Electron。",
+        "不新增数据维度——tab.topicId 已存在，按它过滤；Topic 的真相仍在文件系统，不建第二份 Tab 状态。",
+        "未绑定任何 Topic 的 Tab 始终可见：它不属于任何 Topic，藏起来就再也找不回了。",
+        "活动 Tab 跟着 Topic 走，判据是「它属于这个 Topic」而非「它还看得见」——让未绑定的 Tab 在切换后继续当活动项，等于切过去却什么也没发生。",
+        "没有选中 Topic 时显示全部，不做无谓隐藏。",
+        "端到端可达：切 Topic 的动作真的写入当前 Topic 状态，渲染层真的经过该纯函数。",
+        "断言针对派生的 tabOrder 与 activeTabId，不针对 CSS。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/scratch-topic-layout.test.ts",
+          "proves": "按 Topic 过滤、未绑定 Tab 始终可见、活动项跟着 Topic 走、无选中时显示全部、纯函数不改输入。改动前必红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "状态与渲染层的接线类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/scratch-topic-layout.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "完成验收并把「切 Topic 换 Tab 组」写进设计 SSOT",
+      "objective": "统一门禁通过，交互合同记录该行为与两条边界。",
+      "outcome": "这条行为在设计合同里只有一份真相。",
+      "acceptance": [
+        "统一门禁通过（类型、测试、构建）；打包 E2E 闸门未被削弱。",
+        "交互合同记录：切 Topic 换那一组 Tab、与选 Branch 同源的理由（布局按 Workspace 键控而 Topic 共用一个 Workspace）、以及两条边界（未绑定 Tab 始终可见、活动项跟着 Topic 走）。",
+        "本 Feature 的实现必须经一个未参与实现的独立 Reviewer 审查后才算完成，重点：是否出现第二份 Tab 状态、未绑定 Tab 是否会丢失、以及测试能否在这些不变量被破坏时变红。审查结论记录在本 Feature 的 artifacts 下。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "类型、测试与构建在最终候选上统一通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "交互合同记录：切 Topic 就换那一组 Tab，和项目里选 Branch 是同一种体验；并说明同源的理由——Branch 天然换 Tab 条是因为布局按 Workspace 键控而每个 worktree 就是一个 Workspace，Scratch 的所有 Topic 共用一个 Workspace 故需显式投影。同时写明两条边界：未绑定任何 Topic 的 Tab 始终可见（藏起来就再也找不回），活动 Tab 跟着 Topic 走（判据是它属于这个 Topic，而非它还看得见）。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "不新增数据维度：tab.topicId 已存在，按它过滤即可，布局仍只有一份、过滤发生在渲染时，不建第二份 Tab 状态。另记一个被测试逼出来的真实缺陷：活动项初版判据是「还看得见就保留」，于是未绑定 Topic 的 Tab（始终可见）会在切换后继续当活动项——用户切过去却什么也没发生。判据应是「它属于这个 Topic」。",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-2388fkprc/artifacts/implementation-review-T-002.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "复用既有 Workspace/Topic 分层与投影而非新建状态，已是既有 SSOT 原则；本次为执行。",
+      "refs": []
+    }
+  }
+}

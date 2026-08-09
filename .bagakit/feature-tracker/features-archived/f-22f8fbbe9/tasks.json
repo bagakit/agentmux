@@ -1,0 +1,202 @@
+{
+  "version": 2,
+  "feat_id": "f-22f8fbbe9",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+    "docs/plans/agentmux-managed-agent-guide.md",
+    "docs/testing/strategy.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-managed-agent-guide.md",
+        "docs/testing/strategy.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "让 Agent 看见当前 Tab 的空间地图",
+      "objective": "从 Renderer 的唯一布局真相投影当前 View 全部 Region 的归一化位置，并通过版本化 Core Composition context 与 CLI Skill 交给受管 Agent。",
+      "outcome": "Agent 面对三块不对称分屏时，可以选择左侧整块并把它上下分成 2×2，不再只能机械地切自己。",
+      "acceptance": [
+        "Core context 返回当前 View 全部 Region 的精确 id、内容种类和 0..1 bounds，但不保存布局状态。",
+        "Renderer 从现有 Workbench View layout 计算 bounds，不建立第二份 Region Registry 或 App 自动猜方向逻辑。",
+        "CLI Skill 要求非平凡布局先读 context，再用精确 region id；relative-to self 只用于单 Region、明确相邻或确实要切自己。",
+        "Composition schema 直接升级，不保留旧 receipt 兼容解析、migration 或 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/test/composition-control.test.ts",
+          "proves": "Core 协议解析并校验空间 context。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/test/composition.test.ts",
+          "proves": "Renderer 返回三块布局的真实归一化 Region bounds。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+          "proves": "整张 Tab 的方向语义写回原需求真相。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-managed-agent-guide.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "补齐慢启动反馈和 Grok 默认权限",
+      "objective": "让尚未产生首段终端输出的 Agent Region 显示真实启动中状态，并让内置 Grok Profile 使用官方 bypass permission 参数。",
+      "outcome": "TraeX 启动慢时不再像黑屏失败；新建默认配置里的 Grok 直接使用免确认模式。",
+      "acceptance": [
+        "Agent Run 已创建但没有 Replay 或 Live 输出时显示正在启动的 Agent 名称，首段输出后立即隐藏。",
+        "进程退出、attach 失败和恢复错误继续显示真实状态，不通过重试或假 ready 掩盖。",
+        "内置 Grok Profile args 为 --permission-mode bypassPermissions，Settings 和启动 argv 仍使用同一份 Profile args。",
+        "不新增 permission 配置层，不修改用户显式保存的自定义 args，不写 migration。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/test/config-store.test.ts",
+          "proves": "默认 Grok Profile 使用官方免确认参数。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/test/terminal-interaction-latency.test.ts",
+          "proves": "首段输出前后的启动状态切换是确定的。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/testing/strategy.md",
+          "proves": "空间 context、慢启动反馈和 Profile 默认值进入长期测试策略。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "title": "验证真实四窗布局和启动体验",
+      "objective": "在生产打包 Desktop 中验证 context 空间地图、精确 Region 分屏、TraeX 启动反馈和 Grok 默认参数。",
+      "outcome": "用户截图中的布局场景按整张 Tab 的空间意图工作，且慢启动和权限默认值可直接观察。",
+      "acceptance": [
+        "pnpm check 与 Feature Gate 通过。",
+        "打包 App 中 context 返回三块布局的空间地图，按精确左侧 Region 分屏后形成 2×2 且 Tab 数不变。",
+        "慢启动 Agent 在首段输出前显示启动中，输出到达后显示真实 TUI。",
+        "默认 Grok Profile 的实际启动 argv 包含 --permission-mode bypassPermissions。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "全仓类型、测试和生产构建通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+          "proves": "真实产品验收继续绑定同一份需求 SSOT。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Confirmed spatial Composition, slow-start feedback, durable View restoration, reusable Terminal ownership, and Browser resize behavior were written into the existing product and test SSOT.",
+      "refs": [
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/plans/agentmux-project-rail-navigation.md",
+        "docs/testing/strategy.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "The reusable ownership rule is already captured by the repository requirements and deterministic tests; another knowledge surface would duplicate truth.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No cross-repository principle or new reusable package was introduced.",
+      "refs": []
+    }
+  }
+}

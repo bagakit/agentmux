@@ -1,0 +1,49 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+node:internal/errors:985
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /private/tmp/agentmux-packed-ctxmux-nNM51F/consumer/node_modules/.bin/agentmux resume --session codex-semantic-1 --text packed native resume prompt
+{"schemaVersion":5,"requestId":"c9ac48fe-aa06-48d5-ba91-a48ee94bd8f1","ok":false,"operation":"resume","error":{"code":"CONTROL_TIMEOUT","message":"Control request timed out."}}
+
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at ChildProcess.exithandler (node:child_process:417:12)
+    at ChildProcess.emit (node:events:508:28)
+    at maybeClose (node:internal/child_process:1100:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:305:5) {
+  code: 1,
+  killed: false,
+  signal: null,
+  cmd: '/private/tmp/agentmux-packed-ctxmux-nNM51F/consumer/node_modules/.bin/agentmux resume --session codex-semantic-1 --text packed native resume prompt',
+  stdout: '',
+  stderr: '{"schemaVersion":5,"requestId":"c9ac48fe-aa06-48d5-ba91-a48ee94bd8f1","ok":false,"operation":"resume","error":{"code":"CONTROL_TIMEOUT","message":"Control request timed out."}}\n'
+}
+
+Node.js v24.14.1
+ ❯ packages/core/test/package-consumer.integration.test.ts (1 test | 1 failed) 71373ms
+   × packed @agentmux/core ctxmux consumer > runs the Shell vertical outside the checkout with the pinned SDK and binaries 71373ms
+     → packed-consumer.mjs exited with code=1 signal=null
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/core/test/package-consumer.integration.test.ts > packed @agentmux/core ctxmux consumer > runs the Shell vertical outside the checkout with the pinned SDK and binaries
+Error: packed-consumer.mjs exited with code=1 signal=null
+ ❯ ChildProcess.<anonymous> packages/core/test/package-consumer.integration.test.ts:634:18
+    632|           consumer.once('close', (code, signal) => {
+    633|             if (code === 0) return settle({ stdout })
+    634|             fail(new Error(`packed-consumer.mjs exited with code=${cod…
+       |                  ^
+    635|           })
+    636|         })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  04:04:05
+   Duration  71.62s (transform 39ms, setup 0ms, collect 52ms, tests 71.37s, environment 0ms, prepare 43ms)
+

@@ -1,0 +1,39 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-shell-environment-2026-09-09.md"
+  },
+  "source_refs": [
+    "docs/reviews/agentmux-shell-environment-2026-09-09.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "本地 shell 导出环境贯通 Agent 与 Terminal",
+      "objective": "登录配置的导出变量进入每个新 Run，显式覆盖优先，读取失败不阻断且持续可见",
+      "outcome": "GUI 与常驻 daemon 场景均使用当前应用导出环境",
+      "depends_on": [],
+      "acceptance": [
+        "真实隔离 zshrc 导出含空值、换行和等号的变量能进入子进程，banner 不污染结果",
+        "Core Run 不依赖 daemon 旧环境，显式 env 覆盖 shell 导出值",
+        "交互失败但登录成功仍标部分读取；全失败保留环境；服务窗持续可见",
+        "变异打红对应行为测试；生产调用排除定义文件后仍非空"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/login-shell-environment.test.ts apps/desktop/test/shell-environment-notice.test.tsx packages/core/test/run-environment.test.ts",
+          "proves": "真实 shell、Run 环境及服务窗行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agentmux-shell-environment-2026-09-09.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

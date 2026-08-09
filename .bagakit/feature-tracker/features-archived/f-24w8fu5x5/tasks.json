@@ -1,0 +1,169 @@
+{
+  "version": 2,
+  "feat_id": "f-24w8fu5x5",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-restart-recovery-regression-2026-09-11.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agentmux-restart-recovery-regression-2026-09-11.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-restart-recovery-regression-2026-09-11.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-restart-recovery-regression-2026-09-11.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "启动恢复失败时保留 Tab/Region 拓扑",
+      "objective": "保证 hydration 后的持久化 Workbench 在 Runtime snapshot 暂空、自动 recover 抛错或 Hook 流程故障时仍作为可见投影存在，且不会被空 fallback 写回覆盖。",
+      "outcome": "重启后布局先回来；Session 恢复失败停在原 Region 并给出服务窗告示。",
+      "acceptance": [
+        "Tab Group、Region 树、焦点与 split ratio 在恢复流程失败时保持不变。",
+        "故障路径不会把空布局写入 localStorage；Core 明确 retired 时才移除 Region。",
+        "变异删除保留投影或服务窗分支时对应测试变红，且生产调用者位于 store.initialize。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts",
+          "proves": "启动恢复失败与布局拓扑保留契约。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-persistence.ts",
+        "apps/desktop/test/store-persistence.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "重启后回收 stale lifecycle owner",
+      "objective": "修正 lifecycle reservation 的 owner 判定，避免旧 PID 被复用或已过期租约阻断新进程 resume；保留真正存活 owner 的冲突语义。",
+      "outcome": "手动 resume 不再因已退出的旧进程被误报为其他进程；真实并发操作仍安全互斥。",
+      "acceptance": [
+        "owner PID 已退出、租约过期或 owner 身份属于已结束进程时可回收并继续 resume。",
+        "owner 可证明仍活着且租约未过期时仍返回 AGENT_SESSION_BUSY/冲突。",
+        "变异把回收条件改回仅 PID 存活时测试变红，且有 Core 生产调用者。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run packages/core/test/agent-session-store-process.test.ts packages/core/test/agent-session-continuity.test.ts",
+          "proves": "跨进程 reservation 回收与真实冲突边界。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-session-store.ts",
+        "packages/core/src/agent-session-registry.ts",
+        "packages/core/test/agent-session-store-process.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run packages/core/test/agent-session-store-process.test.ts packages/core/test/agent-session-continuity.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "重启恢复端到端回归",
+      "objective": "用 Desktop persistence、Core continuity、类型检查验证同一候选上的布局恢复、Session resume 与冲突提示。",
+      "outcome": "核心第一优先级的布局与 Session 回复具备可重复验证证据。",
+      "acceptance": [
+        "针对性测试全绿。",
+        "零调用者检查能在生产源码中找到恢复与 stale owner 能力的调用。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts packages/core/test/agent-session-store-process.test.ts packages/core/test/agent-session-continuity.test.ts && pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
+          "proves": "Desktop/Core 恢复回归与类型边界。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/test/store-persistence.test.ts",
+        "packages/core/test/agent-session-store-process.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts packages/core/test/agent-session-store-process.test.ts packages/core/test/agent-session-continuity.test.ts && pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "强化重启后布局与 Session 必须恢复的项目原则，并补充交互与密度设计合同。",
+      "refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "启动恢复失败时保留 hydrated Workbench，避免异常路径将持久化布局覆盖为空。",
+      "refs": [
+        "docs/reviews/agentmux-restart-recovery-regression-2026-09-11.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "现有项目原则已覆盖该约束。",
+      "refs": []
+    }
+  }
+}

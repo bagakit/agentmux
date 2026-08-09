@@ -1,0 +1,95 @@
+{
+  "version": 2,
+  "feat_id": "f-2368fh2tg",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-2368fh2tg/artifacts/plan-review-r1.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-2368fh2tg/artifacts/plan-review-r1.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "让 fail-closed 的拒绝说人话，而不削弱那道门",
+      "objective": "把 readiness 家族的拒绝从 Core 的内部词汇翻译成用户能照着做的一句话，翻译发生在 main 进程（code 尚存处），同时剥掉 Electron 跨 IPC 加的传输外壳。门本身不动。",
+      "outcome": "用户 mid-turn steer codex 时看到的是「它正在生成，等它回到输入行、或按 ■ 中断这一轮」，而不是一个内部错误码裹在 IPC 栈信息里。",
+      "acceptance": [
+        "**不削弱 readiness 门**：Core 仍然拒绝，`client.ts` 的判定逻辑不改。codex 的 mid-turn fail-closed 是已封合同，这次只改它的说法。",
+        "翻译发生在 main 进程按 **error code** 识别（readiness 家族四码），不在 renderer 按 message 正则匹配——Electron 跨 ipcRenderer.invoke 会丢 `.code`，到 renderer 只剩字符串，那会是更脆的第二处真相。",
+        "翻译后仍**保留 code 与 detail**，供 main 侧日志与任何程序分支使用；只有面向人的 message 变。",
+        "renderer 剥掉 Electron 的 `Error invoking remote method '<channel>':` 与 `AgentMuxError:` 前缀，使横幅显示 main 实际抛出的那句话，而不是传输信封。",
+        "不新增第二处翻译表：main 按 code 翻译是唯一真相，renderer 只负责不把信封念出来。",
+        "被拒时既有行为不变：草稿保留（诚实的「没送出去」信号），且不产生任何 user 回合。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/runtime-controller.test.ts apps/desktop/test/session-launch-lifecycle.test.ts",
+          "proves": "main 侧按 code 翻译且保留 code、renderer 侧剥掉 IPC 外壳，均有断言；把翻译摘掉会红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "翻译与错误呈现的接线类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/runtime-controller.test.ts apps/desktop/test/session-launch-lifecycle.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "Feature task and gate are complete; current interaction documentation remains accurate.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "No additional reusable learning artifact is required for this bounded fix.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No further promotion is needed for this completed bounded feature.",
+      "refs": []
+    }
+  }
+}

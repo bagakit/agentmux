@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "feat_id": "f-24p8fqgte",
+  "title": "Explorer 真实文件与快捷键位置",
+  "slug": "explorer-links",
+  "goal": "键盘入口移到设置右侧；显示忽略项；软链接类型图标和原地展开",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 2
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-002",
+    "last_check_commands": [
+      {
+        "command": "pnpm exec vitest run apps/desktop/test/workspace-files.test.ts apps/desktop/test/explorer-links.test.tsx",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-24p8fqgte/artifacts/gate-T-002-r2-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=feat/168-file-tree-git-status"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

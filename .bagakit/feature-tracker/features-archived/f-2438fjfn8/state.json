@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "feat_id": "f-2438fjfn8",
+  "title": "Workspace 导航与路径恢复细化",
+  "slug": "workspace-navigation-recovery-polish",
+  "goal": "从左侧菜单移除 Project 视图、为移动后的 Workspace 重设路径，并让分组成员有清晰轻量缩进。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 4
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-004",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck && npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/workspace-navigation-recovery.test.tsx apps/desktop/test/workspace-navigation-wiring.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2438fjfn8/artifacts/gate-T-004-r4-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

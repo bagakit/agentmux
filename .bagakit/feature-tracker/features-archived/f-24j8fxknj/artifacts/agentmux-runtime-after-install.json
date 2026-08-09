@@ -1,0 +1,711 @@
+{
+  "identity": {
+    "daemonInstanceId": "0b6798b5-4b27-4c5a-8d94-194b7d2cbcd8",
+    "protocolVersion": 14,
+    "buildIdentity": "ctxmux@0.1.0+c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7"
+  },
+  "ownership": "unverified",
+  "runs": [
+    {
+      "id": "037f182b-4ab9-4378-a734-10d69689ee75",
+      "pid": 25092,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "03a2925a-a661-4e53-9bae-deca138ebf3e",
+      "pid": 12381,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "0835ef55-eb2d-47c1-8297-c03c621cb87b",
+      "pid": 82234,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "0a1cd115-0900-4824-aa9f-a67d8a81190e",
+      "pid": 61133,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "0edf2752-265a-454e-a2c1-875cdf62bf1e",
+      "pid": 3277,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "116d6cda-1b9a-4dc8-83c3-7c1fa2ecac98",
+      "pid": 55979,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "11766da4-2fd9-4839-a15d-6f7a8299b1c5",
+      "pid": 15883,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "11a5c532-55ee-483d-bb86-199c20417c0e",
+      "pid": 67651,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "15fea0d8-6c25-4843-bcf5-a1f4ba75d5a3",
+      "pid": 15426,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "19a61cce-1344-49ee-bbda-bdf9638f35da",
+      "pid": 88043,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "227f7be8-2cb1-4884-8cbd-be478f817216",
+      "pid": 78741,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "23302336-2115-4f25-8a1d-1771e9341a8c",
+      "pid": 56919,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "270cbfb9-8a56-4a97-a362-e96fc58f9099",
+      "pid": 6154,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "2e696724-982f-4791-aa2f-81a45434bab3",
+      "pid": 33384,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "30a56fac-25c3-47e5-8ec1-6cecf3d00448",
+      "pid": 54306,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "3123fd85-6902-4710-86af-e2155b092761",
+      "pid": 90003,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "34afc996-81db-404d-b028-408ac1391a14",
+      "pid": 60452,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "39ab49dc-c01a-455c-9f0a-3edd2f04edad",
+      "pid": 89770,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "3d818656-8ab7-447e-8d09-4e519173cd9f",
+      "pid": 51106,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "41f90b91-c0c0-414b-a4e3-d835b952e8b0",
+      "pid": 58711,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "4333c89c-071d-4af2-946e-be5bd19056f3",
+      "pid": 1907,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "4706cbc3-eb22-4b6c-b527-9b908aad81a7",
+      "pid": 32607,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "4746d127-2eee-4eab-a070-c24613dcd1a6",
+      "pid": 1922,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "4bad6b7c-8901-4d55-a635-f0cfd05e83b1",
+      "pid": 50116,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "4ce54203-10fd-4a0c-a4ce-7592ea4d3a8e",
+      "pid": 2071,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "55f665e4-25a8-44c0-9d09-e3ce90ab25a6",
+      "pid": 17745,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "57e36cb9-315f-44f9-8d3c-bf681af0dd92",
+      "pid": 87227,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "58542ecb-dc2e-493d-afde-f7a562530de3",
+      "pid": 45311,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "59853cec-f222-44de-868c-190721d92dd6",
+      "pid": 81479,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "5ac071d7-5870-47de-a273-bc3908f536a9",
+      "pid": 48973,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "5c6ed178-fbed-4693-bdd5-7ba4a541ed9d",
+      "pid": 41720,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "605a2be3-1fc5-4e97-9f39-b84e6ed96800",
+      "pid": 66658,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "636e49dd-3474-4106-b3ed-0145893cacb8",
+      "pid": 21040,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "6912c285-25e5-4ada-889e-a8c99283c2b2",
+      "pid": 85805,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "6b3c0243-74ca-4ced-b544-096bdecca182",
+      "pid": 85003,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "6ee346de-4e72-49ec-be5a-3f7bc4d8374a",
+      "pid": 85121,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "6fab3c94-075e-4ae2-88f9-fadd909a87d8",
+      "pid": 49993,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "71541fad-c48e-4bc3-a78f-b543df8490cb",
+      "pid": 2037,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "77b6d21d-351a-4d41-bac5-b326c2424b6c",
+      "pid": 14409,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "7ba98ca6-1b10-4a1f-ad98-262d9969ec8e",
+      "pid": 93569,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "7bdca9c9-a073-4a42-b441-966fbee2e813",
+      "pid": 94707,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "7c946832-610a-4695-96aa-67369e5556e5",
+      "pid": 69166,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "802d3779-0c98-44c2-94c0-b848ad062a2b",
+      "pid": 33680,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "80fafbd7-bef7-4407-892e-e0ea99d56efc",
+      "pid": 90576,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "84459847-8019-44f4-9dbb-a81fe3d9b657",
+      "pid": 12554,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "85dc1d72-7186-491e-8a07-b5d2c3ce06c0",
+      "pid": 23577,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "880ea8a0-0271-4490-90cc-bc413d7757c6",
+      "pid": 94327,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "8a53abe5-671a-42b7-b0b1-d7b5410095bd",
+      "pid": 1940,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "8ed3450a-7a63-4fef-a27e-05ec72da74b9",
+      "pid": 35701,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "93879728-8570-4d16-b342-40ee0554ecea",
+      "pid": 33902,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "93b6012a-0b4a-4ce8-9928-9f2fc1e5b4a8",
+      "pid": 54539,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "93d53149-06c6-4720-8510-6287975f15a2",
+      "pid": 35493,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "a0982bd2-d72c-478c-b0d2-324ca97376f2",
+      "pid": 51737,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "a1ca4196-75f8-4e4a-803e-433eb6b83ac8",
+      "pid": 75179,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "a44cad71-d34a-4791-b58c-4abb5204f94e",
+      "pid": 72344,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "a6174173-043b-4c2c-a407-cbd274ab84e9",
+      "pid": 2035,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "aaf8b030-3e29-495c-a1f8-3ea5ff0c567c",
+      "pid": 89831,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "acfa3260-ca17-4aa2-b645-996bdd893b0c",
+      "pid": 15237,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "adec0ae0-7fa4-4388-b418-fb8231cb18dc",
+      "pid": 1965,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "b1014e08-07ff-454e-9be7-64f1c8847e60",
+      "pid": 1345,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "b4a3aa97-0184-4a3d-8845-55c9ec820ae0",
+      "pid": 84402,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "b555da04-05a8-4342-94bc-cc3e3aa2b94c",
+      "pid": 64101,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "bdf66d45-aea1-434d-8fcb-5011bed86562",
+      "pid": 1960,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "be632edc-f355-485e-89e6-4abfedc08e34",
+      "pid": 2079,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "bf9cafed-bada-4942-b3ce-595bf23c1e35",
+      "pid": 68222,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "c0a5e6eb-5cb2-414b-8211-13f9754060c3",
+      "pid": 38112,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "c491e464-2eb1-44b9-a7c9-68d174600dae",
+      "pid": 38376,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "c8e6ecfc-d17b-4ac6-8bd2-28d006c75342",
+      "pid": 74434,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "cb549e70-cf48-4178-a00c-1595fc830edc",
+      "pid": 28170,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "cc76c9e7-dec4-4847-9555-12725ab78930",
+      "pid": 10605,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "cda40e9c-6765-4b31-9f10-fb80caae1454",
+      "pid": 1963,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "d1890c94-5ae7-454a-a85d-5bd9b538ddcd",
+      "pid": 53569,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "d6a8a35e-1533-407c-908c-36476e75d2b6",
+      "pid": 33015,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "d8dfbb29-549e-49c6-8b3c-d026f213beb1",
+      "pid": 87292,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "e17a836a-b88e-4839-aa90-dac94f6d01a2",
+      "pid": 49783,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "e3c7f465-12e0-4198-952d-13b06c20bb49",
+      "pid": 99727,
+      "state": {
+        "type": "exited",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "id": "e9e3af2f-04df-4aa1-a8a2-0a1f70a04a6b",
+      "pid": 2027,
+      "state": {
+        "type": "running"
+      }
+    },
+    {
+      "id": "ee254ff9-f2cd-4bdf-b18e-bac85ee2684a",
+      "pid": 47623,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "ee2fb16b-1751-4a0a-b30a-11aa515d1356",
+      "pid": 1955,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "id": "f6979e33-43f8-490f-8455-0d177eae08f0",
+      "pid": 19406,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "fb2ea5dc-8656-4166-85d1-c9ea139d6e27",
+      "pid": 33174,
+      "state": {
+        "type": "exited",
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "id": "fba6b2b4-373a-4889-a02d-b604263b251f",
+      "pid": 89010,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    },
+    {
+      "id": "fd2eb1de-a71e-4cef-9d4c-6cccbb2d7de8",
+      "pid": 94013,
+      "state": {
+        "type": "exited",
+        "code": 1,
+        "signal": "Killed: 9"
+      }
+    }
+  ]
+}

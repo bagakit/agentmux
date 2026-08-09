@@ -1,0 +1,116 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-workspace-navigation-recovery-plan.md"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agentmux-workspace-navigation-recovery-plan.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Project Rail 支持安全移除视图",
+      "objective": "在项目行的 context menu 提供 Remove from Project Rail；确认后移除该 Project 的全部 Workspace 注册，保护 Scratch，当前项目移除后选择仍可用的 Workspace，并保留磁盘、布局、Session 与 Agent 事实。",
+      "outcome": "用户可以把不再需要的项目从左栏收起，而不会误删目录或停止 Agent。",
+      "acceptance": [
+        "右键 Project 行能看到 Remove from Project Rail，确认文案明确只移除侧栏注册，不删除磁盘内容。",
+        "保存只过滤同一 projectRail workspaceProjectId 的记录；Scratch 没有移除入口。",
+        "移除当前 Project 后 activeWorkspaceId 落到 Scratch 或另一个可用 Project，Session 与 Runtime 不被 stop/delete。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/project-rail.test.tsx",
+          "proves": "Project Rail context menu、移除确认、Scratch 保护和 fallback selection 行为。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx",
+        "apps/desktop/src/renderer/src/components/ProjectRailContextMenu.tsx",
+        "apps/desktop/test/project-rail.test.tsx"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "失效 Workspace 路径可原地重设",
+      "objective": "为 Could not read workspace 错误面接入本地目录选择器与 rebind IPC；更新原 Workspace record 的 path 而不更换 id，并在成功后重新读取根目录。",
+      "outcome": "项目目录被移动后，用户可从错误面恢复同一工作面，不必删掉再新建项目。",
+      "acceptance": [
+        "本地 folder Workspace 的 rootError 同时提供 Retry 与 Choose new folder；取消选择保留原错误与路径。",
+        "rebind API 在 contracts/preload/main/mock 四层可达，main 使用配置事务保存并保留 Workspace id/name/kind。",
+        "成功重设后 Explorer 根目录刷新，已有 Session、布局和 workspace id 不变。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/workspace-navigation-recovery.test.tsx apps/desktop/test/workspace-navigation-wiring.test.ts",
+          "proves": "错误面恢复行为与 rebind IPC/preview 接线。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/FileExplorer.tsx",
+        "apps/desktop/src/renderer/src/components/file-tree/useWorkspaceFileTree.ts",
+        "apps/desktop/src/main/ipc.ts",
+        "apps/desktop/src/preload/index.ts",
+        "apps/desktop/src/shared/contracts.ts"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "分组成员增加一层轻量缩进",
+      "objective": "在既有 path-derived Project Rail tree 上把有分组头的成员整体向内一格，真实嵌套继续叠加深度，保持未分组项目与行高不变。",
+      "outcome": "扫读时能区分分组标签和成员归属，同时不引入第二份层级事实。",
+      "acceptance": [
+        "分组顶层项目的 rail depth 为 1，分组内嵌套项目为 1+真实深度，未分组项目仍为 0。",
+        "缩进沿用 --rail-depth 与 token padding，不使用左边框/竖线，也不改变项目行高度。",
+        "分组头仍低于项目标题的元信息层级。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/workspace-projects.test.ts",
+          "proves": "分组/嵌套深度和 CSS 缩进契约。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx",
+        "apps/desktop/src/renderer/src/lib/workspace-projects.ts",
+        "apps/desktop/src/renderer/src/styles/chrome.css"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": ["T-001", "T-002", "T-003"],
+      "title": "桌面导航恢复回归与构建",
+      "objective": "运行三项行为测试、Desktop 类型检查和生产构建，确认导航、路径恢复与既有工作面没有跨层回归。",
+      "outcome": "同一份候选源码通过集成回归，可进入 macOS 打包。",
+      "acceptance": [
+        "针对性 Vitest 与 Desktop typecheck 全绿。",
+        "生产构建成功，且 rebind 与 context menu 没有新增 Runtime/ctxmux 生命周期副本。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/workspace-navigation-recovery.test.tsx apps/desktop/test/workspace-navigation-wiring.test.ts",
+          "proves": "三项行为、接线和 Desktop 类型边界。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/test/project-rail.test.tsx",
+        "apps/desktop/test/workspace-navigation-recovery.test.tsx",
+        "apps/desktop/test/workspace-navigation-wiring.test.ts"
+      ],
+      "supersedes": []
+    }
+  ]
+}

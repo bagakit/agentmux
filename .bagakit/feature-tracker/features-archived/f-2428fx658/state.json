@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "feat_id": "f-2428fx658",
+  "title": "Prompt readiness 诊断分类",
+  "slug": "prompt-readiness-diagnostics",
+  "goal": "让四类 readiness 拒绝保留精确 code、非敏感诊断和可执行下一步，健康 Agent 不被流程误报为仍在工作。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm exec vitest run apps/desktop/test/runtime-controller.test.ts apps/desktop/test/session-launch-lifecycle.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "rg -n \"humanizePromptDeliveryError|AGENT_PROMPT_(NOT_READY|READINESS_CONSUMED|SUBMISSION_BUSY|READINESS_CONFLICT)\" apps/desktop/src/main/runtime-controller.ts apps/desktop/test/runtime-controller.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2428fx658/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

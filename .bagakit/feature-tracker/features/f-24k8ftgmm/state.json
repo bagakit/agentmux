@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "feat_id": "f-24k8ftgmm",
+  "title": "文件树目录作为项目打开",
+  "slug": "file-tree-open-as-project",
+  "goal": "在文件树目录右键菜单中提供作为项目打开，并保持目录分组视觉清晰",
+  "status": "ready",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=feat/168-file-tree-git-status"
+    }
+  ],
+  "plan_status": "ready",
+  "plan_revision": 1,
+  "review_ref": "docs/reviews/project-navigation-2026-09-09.md"
+}

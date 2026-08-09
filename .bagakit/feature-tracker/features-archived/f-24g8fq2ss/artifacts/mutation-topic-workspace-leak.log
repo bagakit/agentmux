@@ -1,0 +1,37 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ❯ apps/desktop/test/board-data-flow.test.tsx (4 tests | 1 failed) 37ms
+   ✓ Board request ownership > one read supplies the real Board and dock; Refresh updates both 28ms
+   ✓ Board request ownership > shows read failure in both surfaces instead of an empty Board or endless loading 4ms
+   ✓ Board request ownership > does not read repositories when the Board is inactive 1ms
+   × Topic request lifetime > never renders old Topics under a new Workspace, even before effects run; ignores late replies 4ms
+     → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/desktop/test/board-data-flow.test.tsx > Topic request lifetime > never renders old Topics under a new Workspace, even before effects run; ignores late replies
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ apps/desktop/test/board-data-flow.test.tsx:99:91
+     97|     expect(container.textContent).toBe('A-only')
+     98|     await act(async () => root.render(createElement(Observer, { worksp…
+     99|     expect(observed.filter((x) => x.workspaceId === 'B').every((x) => …
+       |                                                                                           ^
+    100|     expect(observed.some((x) => x.workspaceId === 'B')).toBe(true)
+    101|     await act(async () => root.render(createElement(Observer, { worksp…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  04:02:43
+   Duration  1.32s (transform 334ms, setup 0ms, collect 890ms, tests 37ms, environment 138ms, prepare 48ms)
+

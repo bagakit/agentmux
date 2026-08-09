@@ -1,0 +1,70 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ❯ apps/desktop/test/login-shell-environment.test.ts (6 tests | 3 failed) 51ms
+   ✓ login shell exported environment > preserves empty, multiline, equals and ANSI bytes without parsing banner text 1ms
+   × login shell exported environment > loads real /bin/zsh profile exports into a child without exporting shell-local variables 28ms
+     → expected { ok: true, shell: '/bin/zsh', …(1) } to deeply equal { ok: true, shell: '/bin/zsh', …(1) }
+   × login shell exported environment > loads real /bin/bash profile exports into a child without exporting shell-local variables 20ms
+     → expected { ok: true, shell: '/bin/bash', …(1) } to deeply equal { ok: true, shell: '/bin/bash', …(1) }
+   × login shell exported environment > reports partial success after interactive failure and preserves inherited PATH entries 1ms
+     → expected "spy" to be called 2 times, but got 1 times
+   ✓ login shell exported environment > preserves all inherited values on total failure and returns a non-secret warning 0ms
+   ✓ login shell exported environment > does not launch a shell on unsupported platforms 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/desktop/test/login-shell-environment.test.ts > login shell exported environment > loads real /bin/zsh profile exports into a child without exporting shell-local variables
+AssertionError: expected { ok: true, shell: '/bin/zsh', …(1) } to deeply equal { ok: true, shell: '/bin/zsh', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "mode": "interactive-login",
++   "mode": "login",
+    "ok": true,
+    "shell": "/bin/zsh",
+  }
+
+ ❯ apps/desktop/test/login-shell-environment.test.ts:42:22
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  apps/desktop/test/login-shell-environment.test.ts > login shell exported environment > loads real /bin/bash profile exports into a child without exporting shell-local variables
+AssertionError: expected { ok: true, shell: '/bin/bash', …(1) } to deeply equal { ok: true, shell: '/bin/bash', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "mode": "interactive-login",
++   "mode": "login",
+    "ok": true,
+    "shell": "/bin/bash",
+  }
+
+ ❯ apps/desktop/test/login-shell-environment.test.ts:42:22
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  apps/desktop/test/login-shell-environment.test.ts > login shell exported environment > reports partial success after interactive failure and preserves inherited PATH entries
+AssertionError: expected "spy" to be called 2 times, but got 1 times
+ ❯ apps/desktop/test/login-shell-environment.test.ts:62:20
+     60|     expect(env.PWD).toBeUndefined()
+     61|     expect(loginShellEnvironmentWarning(result)).toContain('.zshrc cou…
+     62|     expect(runner).toHaveBeenCalledTimes(2)
+       |                    ^
+     63|   })
+     64| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 3 passed (6)
+   Start at  02:55:45
+   Duration  380ms (transform 29ms, setup 0ms, collect 32ms, tests 51ms, environment 0ms, prepare 76ms)
+

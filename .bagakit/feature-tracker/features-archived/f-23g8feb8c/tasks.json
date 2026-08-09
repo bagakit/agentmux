@@ -1,0 +1,189 @@
+{
+  "version": 2,
+  "feat_id": "f-23g8feb8c",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-handshake-degrade-plan.md",
+  "source_refs": [
+    "docs/reviews/agentmux-handshake-degrade-plan.md",
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "packages/core/src/client.ts",
+    "apps/desktop/src/renderer/src/lib/terminal-kitty-keyboard.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-handshake-degrade-plan.md",
+      "source_refs": [
+        "docs/reviews/agentmux-handshake-degrade-plan.md",
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "packages/core/src/client.ts",
+        "apps/desktop/src/renderer/src/lib/terminal-kitty-keyboard.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "服务窗：失败先分三类，第 2 类放行但不静默",
+      "objective": "原则 11（AGENTS.md:34-51）今天在代码里没有任何落点——core 与 renderer grep degrad/serviceWindow/capabilityUnknown 全空。先建这个公共底座：一个纯分类器把失败判成『完全坏了 / Agent 没坏是我们的流程坏了 / 完全好的』，加一个停在旁边的告示把第 2 类说清楚。两个消费方（握手降级 T-002、恢复失败分类 f-23f8f4eb2/T-002）共用它，不各写一份。",
+      "outcome": "一个健康但缺了某项能力的 Agent，能继续干活，同时用户看得见自己在降级状态里、以及怎么恢复。",
+      "acceptance": [
+        "分类器是纯函数，判据是『Agent 还能干活吗』而不是『我们的检查过了吗』；三类各有断言。",
+        "第 2 类绝不静默：断言放行的同时必定产出一条告示；把告示去掉要让测试变红——静默降级本身就是违例。",
+        "未知不得当成第 3 类：类型里要有显式的『分不清』分支并被呈现，把它默认成好的要让测试变红。",
+        "告示说清三件事：哪一步没走通、现在按什么状态在跑、要恢复完整能力该做什么。缺任一件要红。",
+        "形态不是 toast（会消失）也不是错误弹窗（会挡路）：条件解决才消失，不靠用户 dismiss，不抢焦点。",
+        "承重断言落在 lib/ 的纯函数上——本仓没有能跑 useEffect 的测试环境（renderToStaticMarkup），源码文本断言只作补充。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "三类分类、不许静默、不许把未知当好的、告示三要素各有断言。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "AGENTS.md",
+          "proves": "原则 11 是这条 task 的 SSOT，用户原话在设计文档同名章节。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "握手超时不再杀掉健康的 Agent，四个调用点各按其性质处置",
+      "objective": "ensureTerminalHandshake 的四个调用点今天全部 fatal。client.ts:492 的 connect 循环最狠：任何一个 session 握手超时，外层 catch 执行 kernel.disconnect() 并 rethrow，一条慢探测拆掉整条连接、所有健康 Agent 陪葬。client.ts:1504 的 submitAgentPrompt 把握手当成发 prompt 的前置门，而 [?u 是 codex 一次性启动输出，对旧 run 早已不可达——那个 run 之后每一条 prompt 被永久挡住。:999/:1274 在 throw 时回滚，等于用一次慢探测杀掉刚启动好的 Agent。",
+      "outcome": "探测超时不再中止任何东西：Agent 继续干活，用户看到一条说明降级的告示。",
+      "acceptance": [
+        "只接超时：AGENT_TERMINAL_HANDSHAKE_TIMEOUT 降级；run 退出抛的 AGENT_TERMINAL_HANDSHAKE_FAILED 保持中止（那是第 1 类，Agent 真没了）；STATE_INVALID/receipt 不匹配保持 fatal（数据损坏不是慢探测）。把这三者折叠成一种处置要红。",
+        "降级时从 daemon 播种输入游标（照抄无握手分支 client.ts:1937-1939 的 run.acceptedInputBytes），让首条 prompt 栅栏正确。",
+        "绝不伪造受据：没送 [?0u 就不许写 acknowledged:true，terminalHandshake 保持未设。伪造会撞上 acceptedInputBytes >= endByte 断言并污染崩溃恢复幂等性。",
+        "submitAgentPrompt 不得被握手拦住：断言握手未完成时 prompt 依然送出。",
+        "connect 循环的爆炸半径收敛到单个 session：断言一个 session 握手失败不会导致 kernel.disconnect()。",
+        "降级必定可见——复用 T-001 的服务窗，不新建第二条失败通路。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run packages/core/test/ apps/desktop/test --exclude packages/core/test/package-consumer.integration.test.ts --exclude packages/core/test/reliability-stress.integration.test.ts",
+          "proves": "四个调用点各自的降级/中止行为、超时与退出分流、prompt 不被拦、爆炸半径收敛各有断言。 排除两个 packaging/stress 集成用例：它们的 prepack 会在别的用例正在执行 dist/ 里的 CLI 时重建同一份 dist，撞出与被测行为无关的加载错误（项目所有既有 test 脚本同样排除它们，由 test:native / test:reliability 单独串行跑）。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-handshake-degrade-plan.md",
+          "proves": "逐个调用点的定性、byte-range claim 到底建立了什么、以及为什么降级不影响按键编码，都有源码出处。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/client.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run packages/core/test/ apps/desktop/test --exclude packages/core/test/package-consumer.integration.test.ts --exclude packages/core/test/reliability-stress.integration.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "验证 codex 在无人应答 [?u 时是否仍宣告 kitty",
+      "objective": "降级安全性依赖一个我们仓库里看不出来的假设：codex 遵守 progressive enhancement——查询没人应答就当不支持，启用时必发 CSI > flags u。渲染层只匹配这个 push（terminal-kitty-keyboard.ts:34），从不看查询应答形式，所以只要 codex 守约，两条分支的 Shift+Enter 编码都自洽。若 codex 反而按内部默认启用 kitty 解码却不发 push，渲染层会漏看，Shift+Enter 会送错字节——那种静默出错比 abort 更糟。按原则 11 第二条边界，分不清就不许当成好的。",
+      "outcome": "降级安全这件事从『推理上成立』变成『测过』，或者暴露出必须改方案。",
+      "acceptance": [
+        "在 ctxmux 下双跑 codex：一次保留 [?0u 写入、一次屏蔽，各自抓原始 PTY 输出。",
+        "比较两件事：是否出现 CSI > flags u；物理 Shift+Enter 被如何解释（CSI-u \\x1b[13;2u 还是 legacy \\x1b\\r）。",
+        "若屏蔽后解释变了却没有对应的 push，结论是降级不安全，T-002 的方案必须改成先把 [?0u 送出去再继续——如实记录该结论，不得为了让 T-002 通过而软化。",
+        "结论写回 docs/reviews/agentmux-handshake-degrade-plan.md 的对应小节，替换掉当前标注的『未验证』。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/terminal-shortcuts.test.ts",
+          "proves": "渲染层只认 codex 自己推的 CSI >=< u、从不看查询应答形式这条前提仍然成立——实验的推理正建立在它之上；若哪天 parser 改成也匹配 CSI ? u，本实验的结论即失效。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-handshake-degrade-plan.md",
+          "proves": "双跑对比的原始输出与结论有 SSOT 出处，未验证标注被替换成实测结果。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/terminal-kitty-keyboard.ts",
+        "apps/desktop/src/renderer/src/lib/terminal-shortcuts.ts",
+        "packages/core/src/agent-provider.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/terminal-shortcuts.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "握手降级方案里唯一诚实标注的『未验证』小节已被实测替换：codex 双分支抓包逐字节相同、两次都推 ESC[>7u，且推入发生在查询之前——结论不变但理由要换（不是它守 progressive enhancement，而是它压根没有『等应答再决定』这个决策点）。同时作废了原文『codex 若认定支持并推』这个条件句，实测里没有『若』。并写明该结论的有效期绑在两件事上（parser 不匹配 ?、codex 仍先推后问），后者是别人的实现细节可能随升级改变。",
+      "refs": [
+        "docs/reviews/agentmux-handshake-degrade-plan.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "两条：其一，实验做到一半的停滞不能当结论——第一次只答 kitty 一项，codex 卡在 91 字节，若就此收工会得出『两边都没推』的反向错误结论；补全 CPR/DA1/OSC 应答后才是 3999 字节的稳态。判据是先确认被测程序真的进入了稳态，再读它的输出。其二，文档里写着『刻意不匹配 X』而没有断言守着，等于没有——本轮补的两条断言（含真实抓包开场序列）在 parser 放宽到匹配 ? 时会红，而在补之前那个支点可以被删掉且唯一症状是 Shift+Enter 静默送错字节。",
+      "refs": [
+        "docs/reviews/agentmux-handshake-degrade-plan.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "原则 11 的三态分流与两条边界（不静默放行第 2 类、不把未知当好的）已是仓库既有原则，本 feature 三个 task 都是它的应用；本轮没有产生需要新增或与之竞争的规则。",
+      "refs": []
+    }
+  }
+}

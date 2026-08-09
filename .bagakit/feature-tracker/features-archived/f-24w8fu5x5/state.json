@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "feat_id": "f-24w8fu5x5",
+  "title": "Restart layout and session recovery regression",
+  "slug": "restart-layout-session-recovery",
+  "goal": "重启后恢复持久化 Tab/Region 布局并自动恢复 Session，旧进程租约不误报为其他进程",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 3
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-003",
+    "last_check_commands": [
+      {
+        "command": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts packages/core/test/agent-session-store-process.test.ts packages/core/test/agent-session-continuity.test.ts && pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-24w8fu5x5/artifacts/gate-T-003-r3-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=feat/168-file-tree-git-status"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

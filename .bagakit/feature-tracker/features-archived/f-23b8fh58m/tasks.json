@@ -1,0 +1,494 @@
+{
+  "version": 2,
+  "feat_id": "f-23b8fh58m",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-surface-language-plan.md",
+  "source_refs": [
+    "docs/design/agentmux-surface-density.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/reviews/agentmux-surface-language-plan.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-surface-language-plan.md",
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "task_ids": [
+        "T-102",
+        "T-103",
+        "T-108",
+        "T-101",
+        "T-105",
+        "T-104",
+        "T-107",
+        "T-106"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-102",
+      "depends_on": [],
+      "title": "尺度 token 落地：字号、间距、颜色收进唯一来源，并由契约测试守住",
+      "objective": "样式表里 16 种字号、32 种间距、330 处硬编码颜色，font-size: var() 零处——设计决策全藏在字面值里，改一档要靠 grep。按 SSOT《尺度系统》立 --fs-* / --sp-* token，替换全部字面值，并让静态检查从 CSS 反推出违规。",
+      "outcome": "维护者改一档字号或一个 Surface 颜色，改动真的传导到全部下游；新写一个裸字面值或悬空 var() 会被测试当场挡下。Topic 标题那两行因引用未定义 --text-1 而从未生效的颜色被修好。",
+      "acceptance": [
+        "styles.css 的 :root 定义 --fs-micro/meta/body/prose/title/display/code 七档字号与 --sp-1..--sp-7 间距刻度，值与 SSOT 表格一致。",
+        "apps/desktop/test/surface-scale-contract.test.ts 从样式表反推事实而非手工清单：解析全部规则，收集 font-size / gap / padding / margin 的像素字面值与非 :root 区域的 hex，核对是否落在 token 或已声明例外清单内。",
+        "该测试断言扫描结果非空——扫不到东西的检查会全绿地什么也不说。",
+        "该测试断言不存在悬空 token 引用：当前 --text-1(×2)、--border-subtle、--shadow 被引用却从未定义，那两行 Topic 标题颜色从未生效，必须修掉且此后加一个新的悬空引用会红。",
+        "无人引用的 --violet 删除。",
+        "7px 与 9px 字号消除；状态点内嵌字形 .status__dot::after 若保留 7px 必须在例外清单里具名并在合同写明理由（它是图形符号不是文字）。",
+        "10.5px 与 11.5px 半像素字号全部归入相邻档位。",
+        "变异测试：把任一处 var(--fs-*) 改回字面值、或加一处悬空 var(--nope)，对应测试变红。",
+        "零调用者检查：新建的例外清单常量在测试文件外无生产引用是正常的，但契约测试本身必须被 vitest 收集执行（出现在 test run 输出中）。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-103",
+      "depends_on": [
+        "T-102"
+      ],
+      "title": "禁掉左侧竖条选中态，并由契约测试守住这条禁令",
+      "objective": "用户原话：\"现在 topic 左边的窄边表示选中, 太难看了, AI 味道重, 不够现代化… 能不能吧这种样式全 ban 了\"。改一行 CSS 只解决当前这一处，下一个人还会写；要的是一条被测试守住的禁令。",
+      "outcome": "Topic 选中态不再是贴边亮条，读起来是干净的填充；此后任何人在任何列表行加回 inset 竖条都会红，这条禁令不靠记忆维持。",
+      "acceptance": [
+        "styles.css:377 的 .workspace-topic-item.current 不再使用 box-shadow: inset <n>px 0 表达选中；改为 SSOT 控件语言规定的干净 Surface 填充。",
+        "apps/desktop/test/surface-selection-contract.test.ts 从 CSS 反推出所有水平方向的 inset 竖条（inset <n>px 0 形状），并断言它们不出现在任何表达选中的选择器上（.current / .selected / .active / [aria-selected=true] / --selected 等，模式从样式表推出而非手工枚举）。",
+        "该测试断言扫描到的选中态选择器集合非空，否则规则形同虚设。",
+        "SSOT《控件语言》已写入该禁令（本轮已完成），测试注释指向它。",
+        "变异测试：给任一选中态选择器加回 box-shadow: inset 2px 0 0 var(--green-2)，测试变红。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-108",
+      "depends_on": [
+        "T-102"
+      ],
+      "title": "页面级标题收敛到一档",
+      "objective": "Board 23px、Settings 24px、New Tab 20px、Welcome 31px、Discussion 19px、Launch/Tool Summary 16px——六处说同一件事\"这一屏叫什么\"却给了六个字号。层级靠留白与位置表达，不靠尺度买。",
+      "outcome": "Board、Settings、New Tab、Welcome 四屏的标题看起来属于同一个产品；层级由留白与位置表达，改一处标题尺度会同时作用于全部页面。",
+      "acceptance": [
+        "上述六处全部改用 --fs-display；letter-spacing 的差异若保留必须有理由（不同字号下的视觉补偿在同一字号下不再需要）。",
+        "视觉层级不因字号统一而丢失：页面标题与其下内容的区分改由留白与字重承担，人工在 Production Electron 里核对 Board / Settings / New Tab / Welcome 四屏。",
+        "surface-scale-contract 断言不存在 --fs-display 之外的 >=15px 字号（或该值在例外清单里具名）。",
+        "变异测试：把任一页面标题改回硬编码 23px，契约测试变红。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-101",
+      "depends_on": [],
+      "title": "当前 Topic 从活动 Tab 的绑定派生，而不是只由面板点击赋值",
+      "objective": "用户原话：\"现在选择 topic , 没有像 branch 那样只展示自己的 tabs, 而是展示所有, 这个看起来很混乱\"。根因是 activeScratchTopicId 只在 openScratchTopic 里被赋值，从别的路径进入 Topic 时为 null，layoutForActiveTopic 于是不过滤。修法不是在每条入口补赋值（那是第二第三条绑定路径），而是让当前 Topic 从 Tab 的绑定派生——Tab 知道自己属于哪个 Topic，那就是唯一真相。",
+      "outcome": "选中一个 Topic 之后，无论从面板点击、点该 Topic 的 Tab、还是会话恢复进入，看到的都只有它自己的 Tab；普通 workspace tab 不被误藏。",
+      "acceptance": [
+        "开工第一步：读 72369ef feat: isolate topic tabs in the workbench，核对它实际闭合到哪一步，只补未闭合的部分，不重做。若已完全闭合则本 task 记 done 并在 summary 说明。",
+        "当前 Topic 由活动 Tab 的绑定派生；activeScratchTopicId 若仍存在，其值不得成为过滤的唯一依据。",
+        "断言：从非 openScratchTopic 的路径进入一个 Topic（点该 Topic 的 Tab、会话恢复后的初始活动 Tab、Board 行跳转）之后，可见 tab 集合只含该 Topic 的 tab。三条路径各一条断言。",
+        "断言：不属于任何 Topic 的 tab（普通 workspace tab）不因该派生逻辑被误藏。",
+        "变异测试：把派生改回读 activeScratchTopicId 字段，上述至少一条路径的断言变红。",
+        "零调用者检查（排除定义文件）：新增的派生函数在生产代码里有真实调用者。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-desktop-interaction.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-105",
+      "depends_on": [
+        "T-102"
+      ],
+      "title": "Topic 行动作按频次分层，去掉无信息的行首图标，文件树默认收窄",
+      "objective": "用户反馈 2/3/5：\"默认情况下, 上面的文件系统高度可以窄\"、\"跳转文件的图标换一个表示 聚焦定位 的更好, 而改名不用给个专门图标, 可以放进 topic 右键菜单\"、\"Topic 左侧的图标没有任何含义, 不如去掉\"。",
+      "outcome": "Topic 行只剩一个高频动作，标题拿回被图标挤走的宽度；改名仍然可用，只是移到了右键菜单。文件树默认不再占掉 Topic 面板的高度。",
+      "acceptance": [
+        "Topic 行上只保留\"定位到目录\"一个动作，图标表达聚焦定位（Crosshair/Locate 一类）而非打开文件夹。",
+        "改名从行上的常驻图标移入 Topic 右键菜单，复用既有 context menu 基座（不新建第二套菜单），改名功能本身不退化：断言右键菜单能触发改名且改名后 Topic id 不变。",
+        "行首的 Topic 图标去掉；标题可用宽度相应增加。",
+        "Topic 面板与文件树共用内容槽时，默认高度偏向 Topic 面板（文件树收窄），且该默认值不覆盖用户已拖拽过的偏好。",
+        "断言：Topic 行的常驻按钮数量为 1。",
+        "变异测试：把改名按钮加回行上，上述断言变红。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-104",
+      "depends_on": [
+        "T-102",
+        "T-105"
+      ],
+      "title": "Topic 行的 Agent 呈现为头像列表：身份看图标，状态看边框",
+      "objective": "用户原话：\"每个 item 的用点样式表示执行情况, 方向正确, 但是是不是最好用缩小的 Agent 图标, 做成类似于人员头像列表, 用边框类型表示状态, 鼠标划过有 mac 导航栏的悬停效果 + tooltip 显示信息 + 点击跳转\"。一枚方块同时承载身份与状态，省掉\"点讲状态、文字讲身份\"要读两处。",
+      "outcome": "扫一眼 Topic 行就知道这里跑着谁、各自什么状态；hover 给出名字与状态，点一下直接到那个 Agent。状态颜色与状态点、Attention Bar 三处永远一致。",
+      "acceptance": [
+        "Topic 行的 Agent 渲染为 18px Provider 图标头像，成簇靠右、3px 间距（SSOT 密度表）。",
+        "状态由头像边框表达，颜色读共享 status--<state> 语汇与 AttentionCategory——不新建第二份\"状态到颜色\"的映射。断言：该映射在生产代码里只有一处定义。",
+        "hover 有轻量抬升，配 tooltip 给出 Agent 名与状态。",
+        "点击定位到该 Agent，走全局同一个 selectSession（不另写跳转路径）。",
+        "不重复呈现同一事实：移除 N agents 计数与 Current 文字标签（整行高亮已表达）。",
+        "没有 live Session 的协作者如实显示 disconnected，不假装在跑。",
+        "键盘可达：头像可聚焦、有可见 focus、Enter 等价于点击（SSOT 可访问性要求每个图标按钮有 tooltip、aria-label 与可见键盘 focus）。",
+        "变异测试：把边框状态改成读一份新写的本地映射，\"只有一处定义\"的断言变红；把点击改成不走 selectSession，对应断言变红。",
+        "零调用者检查（排除定义文件）：头像组件在 Topic 面板里有真实调用者。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-107",
+      "depends_on": [
+        "T-102"
+      ],
+      "title": "样式表按表面分文件，:root 只留一处",
+      "objective": "2464 行单文件不是\"文件大\"的问题，是改一个表面要先 grep 出它散在哪几段、改完不知道有没有漏。按 SSOT《样式表的组织》拆成 tokens/base/chrome/dock/workbench/surfaces/agent/overlays 八个文件。排在 T-102 之后：先有 token 再搬家，否则搬完还要再改一遍。",
+      "outcome": "改一个表面时打开一个文件就能看到它的全部规则；token 只有一处可改，层叠顺序由文件顺序决定而非选择器打架。",
+      "acceptance": [
+        "八个文件按 SSOT 命名与职责建立；入口按规定顺序 @import，层叠顺序即文件顺序。",
+        ":root 只在 tokens.css 出现一次——断言：全部样式文件中 :root { 的出现次数为 1。",
+        "拆分是纯搬运：拆分前后计算样式无变化。用规则计数与选择器集合比对证明（拆分后所有文件的规则集合等于拆分前的规则集合）。",
+        "单文件不超过 400 行；超出的按表面继续拆，不用注释分节假装分层。",
+        "既有契约测试（surface-radius / surface-scale / surface-selection / presence-exit-animation）改为读全部样式文件而非硬编码 styles.css 单一路径，否则拆分会让它们扫描到空内容却全绿。",
+        "变异测试：在 base.css 里加第二个 :root，断言变红；把某个规则搬丢，选择器集合比对变红。",
+        "npx vitest run apps/desktop/test/ 全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-106",
+      "depends_on": [
+        "T-101"
+      ],
+      "title": "隐藏的 Region 保住终端实例，切回不再重放恢复态",
+      "objective": "用户原话：\"现在切换是都会 restoring terminal, 但是 orca 就不会, 可以看看差距在哪儿\"。差距是一个决定：WorkspaceWorkbench.tsx:647 的 {activeTab ? <PaneNode/> : null} 把\"不可见\"实现为\"不渲染\"，切走即卸载、xterm 实例销毁，切回时 TerminalView.tsx:115 的 useState(true) 让 hydrating 从 true 起步，必然重放。orca 把\"不可见\"实现为\"渲染但隐藏\"。修法在保住实例，不在加速重放。",
+      "outcome": "切回一个已经打开过的终端立刻看到内容，不再重放 Restoring terminal…；隐藏期间的输出不丢，且隐藏的终端不消耗布局与渲染，开十个 tab 不会让窗口变慢。",
+      "acceptance": [
+        "切回一个已经打开过的终端不出现 Restoring terminal…：断言同一 Region 在 tab 切走再切回后 TerminalView 未被卸载重挂（实例同一）。",
+        "恢复态只在真正需要重放时出现：首次 attach、断连重连、replay gap 三种情形仍显示，各有一条断言。",
+        "不可见终端零布局零渲染工作——这是首要约束不是优化项：断言隐藏的 Region 不触发 fit/resize/渲染循环，且不新增常驻定时器或监听。这类退化不会让任何现有测试变红，必须显式断言。",
+        "实例存活边界严格等于 Region 的存活边界：关闭 Region 即销毁实例。不得建终端实例缓存池（那会造出第二套终端生命周期，与 SSOT 冲突且泄漏时无人回收）。断言：关闭 Region 后实例被销毁。",
+        "隐藏期间 PTY 输出不丢：切回后看到的内容包含隐藏期间产生的输出。",
+        "开多个 tab 不产生累积开销：断言 N 个隐藏终端的活动监听/定时器总数不随 N 线性增长（或为零）。",
+        "变异测试：把隐藏改回卸载，\"切回不重挂\"断言变红；去掉隐藏时的渲染抑制，\"零渲染工作\"断言变红。",
+        "npx vitest run apps/desktop/test/ 全绿，且 pnpm check 通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "proves": "改动通过全项目类型检查，没有靠 any 或断言绕过。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "本 task 的断言成立，且不回归既有 1100+ 条桌面端测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-desktop-interaction.md",
+          "proves": "本 task 的行为约束有 SSOT 出处，不是实现者的临场判断。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-surface-language-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx tsc --noEmit -p apps/desktop/tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "六条 Topic 反馈与终端恢复态需求都落进了设计 SSOT：交互约束（当前 Topic 由活动 Tab 派生、切回开过的 Tab 不重来一遍）写进 agentmux-desktop-interaction.md，视觉与控件语言（禁左侧竖条选中态、状态到颜色只说一次、样式表按表面分文件的 11 文件清单与约束）写进 agentmux-surface-density.md，每条都点名了守它的测试文件。",
+      "refs": [
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "本 Feature 按最短竖切推进：先 T-101 让当前 Topic 有正确来源，再逐条收视觉，最后两条（T-106 隐藏 Region 保住终端、T-107 拆样式表）是架构面的，放在行为正确之后而不是之前。可复用的一条已提升进 AGENTS.md：扫描式契约测试存在第三种白绿——扫到空内容，必须自证扫描有收获、从来源反推而非手写清单、破例按选择器点名不按值点名。另一条留在本 Feature 内不外推：CSS 文件拆分要证明是纯搬家，规则字节相同还不够，还得检查有没有一对规则相对顺序翻转且能命中同一元素、同等特异性、共享属性。",
+      "refs": [
+        "AGENTS.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "promoted",
+      "rationale": "并入 AGENTS.md 既有的\"两把尺\"一节，作为同一类失效模式的第三种，而不是另起一条竞争规则；没有需要删除的过时指引。",
+      "refs": [
+        "AGENTS.md"
+      ]
+    }
+  }
+}

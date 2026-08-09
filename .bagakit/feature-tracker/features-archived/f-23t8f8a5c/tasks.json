@@ -1,0 +1,215 @@
+{
+  "version": 2,
+  "feat_id": "f-23t8f8a5c",
+  "plan_status": "reviewed",
+  "plan_revision": 3,
+  "supersedes_revision": 2,
+  "review_ref": "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+    "apps/desktop/src/main/login-shell-path.ts",
+    "apps/desktop/src/renderer/src/store.ts",
+    "apps/desktop/src/renderer/src/components/AgentAvatar.tsx"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+        "apps/desktop/src/main/login-shell-path.ts",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+        "apps/desktop/src/main/login-shell-path.ts",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-host-restart-topic-visual-plan.md",
+        "apps/desktop/src/main/login-shell-path.ts",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "修复 GUI Host PATH 探测降级",
+      "objective": "让 Electron/LaunchServices 启动在交互 login-shell 探测失败时仍能合并可靠 PATH，Provider discovery 不再把可执行 CLI 判成 missing。",
+      "outcome": "已安装的 codex/claude 在 GUI 启动的 AVAILABLE AGENTS 中可见；探测降级仍可被用户看到。",
+      "acceptance": [
+        "交互 login-shell 失败时会尝试非交互 login-shell/已有 PATH 合并，并保留可见的 probe-failed 服务窗事实。",
+        "codex 与 claude 的实际可执行路径能被 hasExecutable 发现；删掉 fallback 或合并逻辑时接线测试变红。",
+        "零调用者检查确认 hydration 由 Desktop 启动路径调用，而不是只有定义文件测试命中。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run test/login-shell-path.test.ts --root apps/desktop && npx vitest run test/agent-provider.test.ts --root packages/core",
+          "proves": "PATH fallback、可执行 Agent discovery 与启动接线回归。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/main/login-shell-path.ts",
+        "apps/desktop/src/main/index.ts",
+        "packages/core/src/client.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run test/login-shell-path.test.ts --root apps/desktop && npx vitest run test/agent-provider.test.ts --root packages/core",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "恢复持久化 Workbench 布局与 Agent Session",
+      "objective": "在重启时从同一个 Electron userData 恢复布局索引与 Core Session candidate，snapshot 暂缺不能静默删除原 Region。",
+      "outcome": "重启后原 Tab/Region 先出现，Session 自动尝试恢复并沿用原布局；只有权威确认缺失才收敛。",
+      "acceptance": [
+        "Renderer 与 Core session store 的路径由同一个 userData owner 计算，打包/开发启动不分叉。",
+        "snapshot 暂不可用或为空时 persisted Region 保留为待校验投影；有效 candidate 到达后恢复同一 sessionId 与 View/Region。",
+        "删掉保留逻辑或恢复接线时对应 persistence/lifecycle 测试变红，并完成 zero-caller 检查。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run test/store-persistence.test.ts test/workbench-persistence.test.ts test/session-launch-lifecycle.test.ts --root apps/desktop",
+          "proves": "布局先恢复、Session candidate 自动恢复、snapshot 未决不裁剪的回归。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-persistence.ts",
+        "apps/desktop/src/main/agent-session-store-path.ts",
+        "apps/desktop/src/main/config-store.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run test/store-persistence.test.ts test/workbench-persistence.test.ts test/session-launch-lifecycle.test.ts --root apps/desktop",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "调整 Topic Agent 头像运行态视觉",
+      "objective": "Topic 头像默认无边框；只有 working/running 才显示外描边或 glow，未运行状态灰度处理。",
+      "outcome": "Topic 行不会把静态 Agent 误读成运行中，同时仍保留 Provider 图标、tooltip 和点击导航。",
+      "acceptance": [
+        "CSS 不再给所有 .agent-avatar 画常驻 border；working/running 有可见外部效果，非运行态有 grayscale。",
+        "Provider 图标、状态 tooltip 与 selectSession 点击导航不变；删掉 class 接线时测试变红。",
+        "zero-caller 检查确认状态 class 来自 Topic Agent 生产渲染路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run test/topic-agent-status.test.ts test/surface-scale-contract.test.ts --root apps/desktop",
+          "proves": "头像边框/外描边/灰度契约与 Topic 生产接线回归。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+        "apps/desktop/src/renderer/src/styles/agent.css",
+        "apps/desktop/test/topic-agent-status.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run test/topic-agent-status.test.ts test/surface-scale-contract.test.ts --root apps/desktop",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Updated both design SSOT files with Host, restart recovery, and Topic avatar contracts.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "Reflog/package identity evidence and runtime store path mismatch were recorded in the approved plan.",
+      "refs": [
+        "docs/reviews/agentmux-host-restart-topic-visual-plan.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No reusable skill promotion needed.",
+      "refs": []
+    }
+  }
+}

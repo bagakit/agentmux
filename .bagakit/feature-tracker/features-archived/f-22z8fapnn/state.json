@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "feat_id": "f-22z8fapnn",
+  "title": "Interactive Activity Timeline",
+  "slug": "interactive-activity-timeline",
+  "goal": "让 Activity 顶部的时间轴可用而不只是可看：能点击某个位置跳过去、能框出当前正在看的那段范围、悬停能读到具体时间。参考 deepseek-harness(MIT) 与 traexon(无 LICENSE，仅可读机制) 的做法，避免自己从零发明。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 3
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-005",
+    "last_check_commands": [
+      {
+        "command": "pnpm check",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-22z8fapnn/artifacts/gate-T-005-r3-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

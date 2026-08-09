@@ -1,0 +1,470 @@
+{
+  "version": 1,
+  "feat_id": "f-2248f4yx5",
+  "title": "AgentMux Core Maturity",
+  "slug": "agentmux-core-maturity",
+  "goal": "Raise packages/core from a tmux-first vertical slice to a transport-neutral, durable, externally consumable local Agent host with ACP and Terminal backends plus an optional AHP client boundary.",
+  "status": "blocked",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 35
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-022",
+    "last_check_commands": [
+      {
+        "command": "pnpm check",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2248f4yx5/artifacts/gate-T-022-r35-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "dag_dependencies_updated",
+      "detail": "depends_on=f-2238fbdxh"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=4; supersedes_revision=3"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> a44494a8490c8ce7b97ed16db55fda1a0a367d1b80400860f5ffed7cdaddb31d"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-007"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-007 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-007 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-007 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-008"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-008 => blocked"
+    },
+    {
+      "action": "blocked_reason_set",
+      "detail": "T-008 => internal_blocker"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=5; supersedes_revision=4"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "a44494a8490c8ce7b97ed16db55fda1a0a367d1b80400860f5ffed7cdaddb31d -> b10cbf58a955f86351232a279be32d6cedb0214cb82702f18b00e43bce1fcefc"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-011"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-011 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-011 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-011 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-012"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-012 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-012 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-012 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-013"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-013 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-013 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-014"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-014 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-014 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-014 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-015"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-015 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-015 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-016"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-016 => blocked"
+    },
+    {
+      "action": "blocked_reason_set",
+      "detail": "T-016 => external_blocker"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=6; supersedes_revision=5"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "b10cbf58a955f86351232a279be32d6cedb0214cb82702f18b00e43bce1fcefc -> 481ba912c33ed444da83684a21470461494ee16e1be15afdeaafbb278e9e2f7a"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=7; supersedes_revision=6"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=8; supersedes_revision=7"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=9; supersedes_revision=8"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "481ba912c33ed444da83684a21470461494ee16e1be15afdeaafbb278e9e2f7a -> 56582e3f648af0e1f8af4bda56eb90d774ee3244095c50e1db4a2cd2549b540b"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-020"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "56582e3f648af0e1f8af4bda56eb90d774ee3244095c50e1db4a2cd2549b540b -> 7651718868b622d102e6e89040a5d36f4615b970bec3215f3da643feb6c80e7c"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "7651718868b622d102e6e89040a5d36f4615b970bec3215f3da643feb6c80e7c -> d7dccf3910ca8b5e966683f72e816029915060f3d7825e50f4f58587f364ba15"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-020 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-020 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-020 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-017"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-017 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-017 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-018"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => pass"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "d7dccf3910ca8b5e966683f72e816029915060f3d7825e50f4f58587f364ba15 -> 591f04229007aeecfca7479cd1933c1fe637ebe8be26c81c6ea0466413b2045e"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-018 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-021"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-021 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-021 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-019"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-019 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-019 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-019 => internal_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-019"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-019 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-019 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-019 => internal_blocker"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=11; supersedes_revision=10"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=12; supersedes_revision=11"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-023"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-023 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-023 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-022"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-022 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-022 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-022 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-022 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-022 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-022 => done"
+    }
+  ],
+  "depends_on": [
+    "f-2238fbdxh"
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-2248f4yx5/goal.md",
+    "revision": "591f04229007aeecfca7479cd1933c1fe637ebe8be26c81c6ea0466413b2045e"
+  }
+}

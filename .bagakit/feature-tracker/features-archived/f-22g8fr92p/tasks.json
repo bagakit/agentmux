@@ -1,0 +1,208 @@
+{
+  "version": 2,
+  "feat_id": "f-22g8fr92p",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/plans/agentmux-provider-timeline-executors.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-provider-timeline-executors.md",
+    "docs/orca-agent-runtime-notes.md",
+    "docs/testing/strategy.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/plans/agentmux-provider-timeline-executors.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-provider-timeline-executors.md",
+        "docs/orca-agent-runtime-notes.md",
+        "docs/testing/strategy.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "固定 Provider、执行器与 Timeline 的长期边界",
+      "objective": "审计现有 Provider、配置、Session 和 Activity 链路，删除 Provider 身份与首屏 Agent 身份混用的概念，并把用户确认的模型写回需求 SSOT。",
+      "outcome": "Provider、执行器、Agent Session、Run 和 View 各自只有一个明确含义，后续实现不需要兼容层或第二套配置。",
+      "acceptance": [
+        "需求文档用大白话说明 Provider、执行器、Agent Session 和 Activity 的关系。",
+        "架构结论明确 Provider 属于 Core，执行器是绑定 Provider 的用户启动配置，首屏展示执行器。",
+        "架构结论明确 Timeline 由 Core 拥有，Desktop 不解析 Terminal，也不写 Provider 特例。",
+        "计划明确不实现旧 agents 配置兼容、migration、fallback、Provider 插件系统或新的 Fork 交互。"
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-provider-timeline-executors.md",
+          "proves": "用户确认的术语、行为、分层、非目标和验收条件有唯一需求入口。"
+        },
+        {
+          "kind": "command",
+          "ref": ".bagakit/feature-tracker/runtime-policy.json#gate",
+          "proves": "Feature Tracker 状态和需求文档通过仓库 Gate。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-provider-timeline-executors.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "交付一个 Provider 下的多个执行器",
+      "objective": "用 Provider 加执行器的单一模型替换当前一个 Provider 一条命令的 agents 配置，并让检测、启动、Resume、设置和首屏都使用执行器身份。",
+      "outcome": "用户可以为同一个 Provider 保存并启动多个不同命令配置，Session 同时保留 Provider 与执行器身份。",
+      "acceptance": [
+        "Core 公共创建和 Session 类型分别携带 providerId 与 executorId，Provider Registry 只按 providerId 工作。",
+        "Desktop 配置只保留 executors；每个执行器有名称、providerId、命令、参数、环境变量和指南注入开关。",
+        "设置页可以新增、编辑和删除执行器，新建时必须选择现有 Provider。",
+        "首屏、Workspace 创建和 Board 启动面展示并选择执行器，同时显示所属 Provider。",
+        "检测执行器自己的命令；启动和 Resume 使用执行器配置以及它绑定的 Provider 行为。",
+        "直接删除旧 agents 配置和 agentId 公共命名，不加兼容读取、migration 或 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "Provider Registry、Session 身份、启动和 Resume 对多个执行器保持正确。"
+        },
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "设置、检测、首屏和 Desktop 启动链路使用执行器。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/shared/contracts.ts",
+          "proves": "Desktop IPC 明确区分 Provider 和执行器。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-provider-timeline-executors.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "title": "交付 Core-owned Session Timeline 与流式 Activity",
+      "objective": "把 Hook、ACP 和用户消息归一成 Session Timeline，让 Desktop Activity 只消费统一增量，并诚实声明各 Provider 的结构化 Activity 能力。",
+      "outcome": "同一个 Session 可以在 Terminal 和 Activity 之间切换；结构化消息按身份流式更新，Provider 差异停留在 Core Driver。",
+      "acceptance": [
+        "Core 定义统一 Timeline 条目和增量操作，包含用户消息、Agent 回复、工具、权限和生命周期。",
+        "Provider Driver 把原生 Hook 或 ACP 事件映射到统一 Timeline；没有结构化来源时明确 unavailable。",
+        "同一消息的增量复用稳定身份并在原位置合并，Desktop 不产生重复卡片。",
+        "Activity 与 Terminal 使用同一个 agentSessionId；切换视图不创建、恢复或停止 Agent。",
+        "Desktop Renderer 没有 Provider 名称分支，也不读取 ANSI、PTY 或第三方 Session 格式。",
+        "测试覆盖完整条目、流式增量、工具生命周期、Session 隔离和无能力 Provider。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "统一 Timeline、Provider 映射、增量合并和 Session 隔离通过 Core 合同测试。"
+        },
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "Core、Desktop、IPC、Activity UI 和生产构建通过仓库回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-provider-timeline-executors.md",
+          "proves": "最终行为仍符合 Provider、执行器和对话视图的需求 SSOT。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-provider-timeline-executors.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "The owning plan now records the confirmed Provider, Executor, Session Timeline, and Desktop Activity behavior.",
+      "refs": [
+        "docs/plans/agentmux-provider-timeline-executors.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "The reviewed task plan preserves the architecture corrections, race-condition proof, and final gates for future reference.",
+      "refs": [
+        "docs/plans/agentmux-provider-timeline-executors-tasks.json"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "The implementation follows the existing Core and Desktop ownership principles without adding a new repository-wide rule.",
+      "refs": []
+    }
+  }
+}

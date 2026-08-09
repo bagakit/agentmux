@@ -1,0 +1,19 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v2",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-2268fqs8a",
+  "semantic_revision": "5e99da15d53c70a988ef83962038cc23f00784bde84e924900400b4e353abdf6",
+  "lifecycle_status": "discarded",
+  "continuation": "superseded",
+  "active_item_ids": [],
+  "blockers": [],
+  "replacement_ref": ".bagakit/feature-tracker/features/f-2248f4yx5/owner-receipt.json",
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features-discarded/f-2268fqs8a/state.json",
+    ".bagakit/feature-tracker/features-discarded/f-2268fqs8a/tasks.json"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features-discarded/f-2268fqs8a/state.json": "ea70aafc792209103380ecdbbfc3ade3a7ef20e5cb9d62afaaa18ff7608cd151",
+    ".bagakit/feature-tracker/features-discarded/f-2268fqs8a/tasks.json": "56b4355d21b641bfab2008da232b757f795ddada21e32df70c32f4eb38d0d9b0"
+  }
+}

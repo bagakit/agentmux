@@ -1,0 +1,298 @@
+{
+  "version": 2,
+  "feat_id": "f-2258fa79w",
+  "plan_status": "reviewed",
+  "plan_revision": 5,
+  "supersedes_revision": 4,
+  "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/artifacts/plan-review-reorg.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/mux-runtime-decision.md",
+    "docs/plans/ctxmux-cutover.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/testing/strategy.md",
+    ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/design/orca-surface-density-manifest.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-capability-audit.md",
+        "docs/design/orca-surface-density-manifest.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-cutover.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-cutover.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": ".bagakit/feature-tracker/features/f-2258fa79w/artifacts/plan-review-reorg.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-cutover.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "定义授权媒体输入与跨层 Receipt 合同",
+      "objective": "定义 AgentMux 调用方授权、Agent 媒体能力、目标 Run、stage/input/release receipts 和 Desktop 状态投影，同时明确 ctxmux 是唯一 Run-host artifact owner。",
+      "outcome": "产品语义和运行原语各有一个权威边界；Desktop、CLI 与外部 Client 不需要复制权限决策或上传状态机。",
+      "acceptance": [
+        "使用方独占 clipboard/drop/picker 授权；Core 只接收已授权 bytes/metadata，且没有读取系统剪贴板、相册或任意宿主路径的 API。",
+        "公共类型区分 media request、Agent capability、exact Semantic Session/Run target、ctxmux artifact receipt、input receipt、release result 与用户可见状态。",
+        "状态不能把 staged 当 sent、sent 当 consumed、terminal idle 当 replied；拒绝、过期、Run replacement、unsupported 和 unknown disposition 均有结构化结果。",
+        "合同只引用 CtxmuxRunAdapter port，不泄漏 ctxmux wire、Electron clipboard 对象、xterm 私有类型或 Provider-specific 图片参数。",
+        "Feature 明确要求 exact ctxmux version/capability evidence；缺失时 fail closed，不恢复 AgentMux 自研 uploader。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "媒体能力、授权和 receipt 公共类型保持 UI/Kernel 中立。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md",
+          "proves": "跨仓所有权、失败边界与 transfer checks 已评审。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-cutover.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "通过 CtxmuxRunAdapter 组合 Artifact 与 Input",
+      "objective": "消费发布且能力匹配的 ctxmux artifact/status/input/release 公共 API，在确保目标 Run 后完成 Local/SSH 图片交付，不在 AgentMux 重建 staging。",
+      "outcome": "图片只落到目标 ctxmuxd 所在 Host 的目标 Run，AgentMux 保留产品 receipt 和权限语义但不拥有上传 wire、临时文件或清理逻辑。",
+      "acceptance": [
+        "Adapter 只使用版本锁定的 @ctxmux/sdk/public protocol；禁止导入 ctxmux 源码内部模块、手写 wire frame、保留旧 remote artifact server 或添加 fallback。",
+        "Core 先确保 Semantic Session 得到 exact live RunId，再 stage；Provider resume 或 Run replacement 后旧 artifact receipt 无效，必须为新 Run 明确 restage 或失败。",
+        "Local 与 SSH 共享同一 Adapter 方法；SSH 通过既有认证到远端 ctxmuxd 并返回远端 RunHostPath，不复制私钥、不接收本地目标路径、不另启上传通道。",
+        "Stage、correlated input、status query 和 release 分别记录结果；lost response、input failure、disconnect、expiry 和 cleanup 不被折叠成 sent。",
+        "Agent media capability 与 Provider prompt composition 位于 AgentMux；ctxmux 只看到 opaque bytes、RunId 和普通 input。",
+        "Core consumer tests使用真实发布候选证明 capability mismatch fail closed，且没有 AgentMux 文件 staging 或 daemon artifact owner 残留。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core test",
+          "proves": "Adapter capability、Local/SSH routing、Run replacement、receipt disagreement 和 public consumer tests 通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/ctxmux-cutover.md",
+          "proves": "使用的 ctxmux artifact/input/version 能力有精确运行证据。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/ctxmux-cutover.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "depends_on": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "交付 Desktop 图片与鼠标优先体验",
+      "objective": "在 Composer、Terminal 和文件交互面接入图片预览、授权、目标能力、跨层 receipts 与一致的鼠标/选择/paste 行为。",
+      "outcome": "用户可以低摩擦地把图片交给正确 Host/Agent，也能自然选择、滚动和操作 TUI；每个失败和权限决定均可见。",
+      "acceptance": [
+        "Composer 支持 clipboard image、drag/drop 和 file picker，发送前显示预览、大小、目标 Host/Agent、媒体 capability 和授权状态。",
+        "用户可逐次授权或使用调用方显式策略；拒绝、无权限、ctxmux capability 缺失、Agent 不支持、stage/input 失败和过期不会显示已发送。",
+        "Terminal 对 SGR mouse、普通选择、滚动、右键/菜单、复制、文本 paste 与 bracketed paste 建立单一跨平台且键盘可达的事件策略。",
+        "Desktop Main 只负责 OS 授权读取与 IPC 翻译；Renderer/Main 均通过 Core/Adapter receipts，不持有私有 artifact 生命周期。",
+        "UI 在 Run replacement 时取消或重新确认发送，不把预览阶段绑定的旧 Run 路径送给新 Agent。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Desktop 授权、Composer、Terminal 和 receipts 接入类型完整。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "图片输入、状态投影、Run replacement 和 mouse/paste 优先级自动回归通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/AgentComposer.tsx",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "depends_on": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "完成权限、跨层 Receipt 与输入保真回归",
+      "objective": "通过真实 ctxmux public boundary、Local/SSH 和 Desktop E2E 证明授权、Run targeting、图片交付与鼠标输入正确，而不重复验证 ctxmux 私有文件实现。",
+      "outcome": "AgentMux 能证明产品链路和所有权接缝；安全、字节和状态不会因 mock、fallback 或重复测试真相而漂移。",
+      "acceptance": [
+        "真实 controlling PTY 覆盖 Desktop 产生的 SGR mouse、bracketed paste、UTF-8 和分片 escape sequence，经 CtxmuxRunAdapter 后 bytes 完全一致；ctxmux 内部 PTY tests 仅作为版本前置证据。",
+        "真实图片覆盖 PNG/JPEG/WebP、Unicode name、clipboard/drop/picker、Local/SSH、拒绝、Run replacement、response loss、input failure、expiry 与 release/stop cleanup 的消费者结果。",
+        "安全回归证明 OSC 52、TUI output、历史授权或恶意 prompt 不能触发后台 clipboard read、绕过用户策略或选择 ctxmux 物理目标路径。",
+        "测试明确区分 AgentMux consumer contract 与 ctxmux owner contract，不复制 protocol parser、filesystem atomicity、quota 或 daemon cleanup 私测。",
+        "最终 candidate 运行 repository check、security/nightly 和人工 Desktop smoke；精确记录 ctxmux build/capabilities 与仍不支持的 Provider media mode。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "最终候选通过类型、测试与构建总 Gate。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm test:nightly",
+          "proves": "AgentMux 权限、Adapter 故障、Local/SSH 和资源接缝通过高风险回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/testing/strategy.md",
+        "docs/plans/ctxmux-cutover.md",
+        ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "depends_on": [
+        "T-003"
+      ]
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "not_applicable",
+      "rationale": "该 Feature 停留在 proposal，四个 task 全未开工，未向任何 SSOT 引入过公共行为，因此没有需要更新或核实的拥有方文档。已交付的简化路径（贴图落盘为路径引用、xterm 鼠标优先）本就记录在 agentmux-desktop-interaction.md 的 Composer 与 Terminal 条款里，不受本次丢弃影响。",
+      "refs": []
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "教训是范围而非执行：本 Feature 的 load-bearing task（T-002，T-003/T-004 都依赖它）要求 ctxmux 的 artifact-ingress 合同，而 Protocol 13 里根本不存在该能力，且它是 ctxmux-cutover.md:170-171 明列的非目标。也就是说这个 proposal 从写下时起就依赖一个我们不拥有、且被明令禁止自造的上游合同。与此同时，用户的实际需求（把图片交给一个从磁盘读文件的 CLI agent）已由远为简单的落盘加路径引用满足。结论：跨层 receipt 合同是未被购买的复杂度。写 proposal 时应先核实其 load-bearing 前置在依赖的当前协议里是否存在。",
+      "refs": [
+        "ideas/index.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "该教训已随决定一并记录在 ideas/index.md 的「从 tracker 卸载的决定」表中，含放弃的能力与重新考虑的条件；既有的 no-fallback / 单一 owner 原则已覆盖'不私造上游 wire'。另起知识面会重复。",
+      "refs": []
+    }
+  }
+}

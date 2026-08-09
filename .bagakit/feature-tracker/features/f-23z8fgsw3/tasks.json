@@ -1,0 +1,857 @@
+{
+  "version": 2,
+  "feat_id": "f-23z8fgsw3",
+  "plan_status": "reviewed",
+  "plan_revision": 4,
+  "supersedes_revision": 3,
+  "review_ref": "docs/reviews/agentmux-provider-parity-plan.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agentmux-provider-parity-plan.md",
+    "packages/core/src/agent-provider.ts",
+    "packages/core/src/hook-normalizer.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-provider-parity-plan.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-provider-parity-plan.md",
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/hook-normalizer.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/agentmux-provider-parity-plan.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-provider-parity-plan.md",
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/hook-normalizer.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/agentmux-provider-parity-plan.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-provider-parity-plan.md",
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/hook-normalizer.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/agentmux-provider-parity-plan.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-provider-parity-plan.md",
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/hook-normalizer.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立可并行的 Provider 模块边界与一致性夹具",
+      "objective": "Owned change surface: packages/core/src/providers/*、内建 registry composition 与 provider-conformance 测试夹具。Known shared hotspots: packages/core/src/types.ts、packages/core/src/agent-provider.ts 的公开 Provider 接口；这些共享改动只由本 Task 收口。把现有内建 Provider 描述拆成每 Provider 一个实现模块，registry 只负责组合，不改变任何现有运行行为。预计 Agent effort: 1-2h；这是为消除共享文件冲突而不可安全再拆的 heavy object。",
+      "outcome": "每个 Provider 有独立可编辑、可单测的模块；registry 的组合点和 capability conformance 夹具稳定，后续 Provider 分支无需并行修改同一实现文件。",
+      "acceptance": [
+        "现有九个内建 Provider 的 catalog、launch、hook、resume 行为与拆分前逐项一致。",
+        "Provider module 的公共输入/输出只依赖 AgentProvider 合同，registry 不承载 provider-specific 分支。",
+        "conformance 夹具能从 registry 枚举 Provider 并检查 capability 声明、resume strategy、hook strategy 与实际方法是否一致。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-provider.test.ts test/provider-conformance.test.ts",
+          "proves": "模块拆分不改变九个现有 Provider 的行为，且共享 capability conformance 夹具可执行。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/types.ts",
+        "packages/core/test/agent-provider.test.ts",
+        "packages/core/test/provider-conformance.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-provider.test.ts test/provider-conformance.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "收口 Core Provider 协议并统一 Hook/native handle 归一化",
+      "objective": "Owned change surface: packages/core/src/types.ts、packages/core/src/agent-hook-command.ts、packages/core/src/hook-normalizer.ts 及 protocol/canonicalization fixtures。Known shared hotspots: AgentProviderDefinition、AgentCatalogEntry 与 AgentProvider.normalizeHook（只消费 T-001 已冻结的模块边界）。把 capability、evidence、Hook、permission、resume、prompt delivery 与 reply-correlation 收口为一份 Provider-neutral Core protocol，再让厂商字段和事件名在 Core 内归一化，不替 Provider 猜测语义。预计 Agent effort: 1h。",
+      "outcome": "Core Provider protocol 对所有 Provider 提供同一组可验证能力轴；Hook command 能接受 camelCase 与 snake_case 的事件/handle 字段，输出同一 canonical event；未知事件与未知字段保持可诊断而不误判。",
+      "acceptance": [
+        "公共 Provider protocol 明确 capability、evidence、Hook、permission、resume、prompt delivery 与 reply-correlation 的边界，新增 Provider 不需要修改 Desktop 或 ctxmux。",
+        "hookEventName、eventName、hook_event_name 均能映射到 canonical event，snake_case 生命周期名按显式映射表归一化。",
+        "sessionId/session_id、transcriptPath/transcript_path 等 handle 只被保留为 provider payload，由 Provider 解释。",
+        "无法归一化的事件不会伪造 working/done，诊断包含原始事件名。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-provider-protocol.test.ts test/agent-hook-command.test.ts test/hook-normalizer.test.ts",
+          "proves": "Core Provider protocol 的能力轴、camelCase/snake_case 事件、handle 和未知事件的 canonicalization 行为有回归覆盖。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/types.ts",
+        "packages/core/src/agent-hook-command.ts",
+        "packages/core/src/hook-normalizer.ts",
+        "packages/core/src/types.ts",
+        "packages/core/test/agent-hook-command.test.ts",
+        "packages/core/test/hook-normalizer.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-provider-protocol.test.ts test/agent-hook-command.test.ts test/hook-normalizer.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Grok：接通 managed Hook 与 native resume",
+      "objective": "Owned change surface: packages/core/src/providers/grok.ts、Grok Hook installer fixture 与 Grok provider tests。Known shared hotspots: provider registry 由 T-017 统一接线，canonical Hook parser 只消费 T-002。依据真实 grok --help 与 Hook 文档接通 sessionId、snake_case 事件、managed install、permission/posture 与 grok --resume。预计 Agent effort: 1h。",
+      "outcome": "Grok catalog 不再 terminal-only；有可信 handle 时可 resume，Hook 安装失败只产生非阻断诊断。",
+      "acceptance": [
+        "Grok catalog 声明 managed Hook、native session-id resume 与实际 permission/posture 能力。",
+        "Hook payload 的 hookEventName/sessionId 能驱动 status/timeline，并保留未知事件诊断。",
+        "resume argv 精确为 grok --resume <session-id>（或 CLI 核实的等价形式），缺 handle 时 fail closed。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/grok.test.ts test/provider-conformance.test.ts",
+          "proves": "Grok Hook、handle、resume argv、能力声明与失败边界通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/grok.ts",
+        "packages/core/src/agent-hook-command.ts",
+        "packages/core/test/providers/grok.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/grok.test.ts test/provider-conformance.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Gemini：接通 managed Hook 与 native resume",
+      "objective": "Owned change surface: packages/core/src/providers/gemini.ts、Gemini settings merge fixture 与 Gemini tests。Known shared hotspots: provider registry 由 T-017 接线，Hook canonicalization 只消费 T-002。按 Gemini BeforeAgent/AfterAgent/BeforeTool/AfterTool 与 gemini --resume 真实合同接入，不把 Antigravity 的共享 ~/.gemini 配置误当成 Gemini 事件。预计 Agent effort: 1h。",
+      "outcome": "Gemini 的 status/timeline 和 resume 能力可发现、可恢复，配置 merge 保留用户设置。",
+      "acceptance": [
+        "Gemini catalog 声明 managed Hook 与 provider-native session-id resume。",
+        "四类 Gemini Hook 能映射为 canonical working/done/tool 事实，缺失字段不伪造状态。",
+        "resume argv 精确为 gemini --resume <id>，Hook/settings merge 只写 AgentMux 自有条目。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/gemini.test.ts test/provider-conformance.test.ts",
+          "proves": "Gemini Hook、resume、settings merge 与能力声明通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/gemini.ts",
+        "packages/core/src/managed-hook-installer.ts",
+        "packages/core/test/providers/gemini.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/gemini.test.ts test/provider-conformance.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Pi：完成扩展/Hook 自动部署闭环",
+      "objective": "Owned change surface: packages/core/src/providers/pi.ts、Pi extension overlay installer 与 Pi tests。Known shared hotspots: registry 由 T-017 接线，Agent Session store 只消费既有 native locator。把现有 transcript-path resume 与 Orca 的 Pi/OMP/Prime extension 部署闭环接上，不把 extension 私有状态复制进 ctxmux。预计 Agent effort: 1h。",
+      "outcome": "Pi 首次启动能按 managed policy 安装/校正状态扩展，resume locator 与 Hook receipt 可 round-trip。",
+      "acceptance": [
+        "Pi catalog 的 native resume、Hook/status 与 extension deployment 状态一致，不再声明 unmanaged 但暗中依赖安装。",
+        "部署幂等、只更新 AgentMux marker，失败保留 Agent 可用并给出服务窗诊断。",
+        "transcript-path 缺失时不创建冒充旧上下文的新 Run。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/pi.test.ts",
+          "proves": "Pi extension deployment、resume locator、幂等 merge 与降级行为通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/pi.ts",
+        "packages/core/src/managed-hook-installer.ts",
+        "packages/core/test/providers/pi.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/pi.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_blocker": {
+        "class": "external_blocker",
+        "reason": "Pi CLI 未安装在本机（command -v pi 失败，无 ~/.pi），因此 T-005 验收的核心「首次启动能按 managed policy 安装/校正状态扩展」无法核实。\n\n关键点不是「没装所以懒得测」，而是这条要求 AgentMux **自己写一个 Pi 扩展文件**：唯一有此实现的参考项目把扩展内容当作调用方传入的字符串（piExtensionSource，见其 relay/plugin-overlay.ts 与 wsl-install-plugins-handler.ts），内容本身来自该宿主自带的资源，仓库里读不到；它落盘的路径与 marker 机制可参考，但**扩展要调用的 Pi 扩展 API 一行都无法核实**。按 Goal 的证据优先级（真实 CLI 实测 > 多参考互相印证 > 单一参考），这属于单一参考且是宿主专有产物，不足以支撑一条能力声明——写出来就是凭猜实现一个会静默失效的安装器。\n\n现状是诚实的、不需要改：pi 的 hookStrategy 声明 unmanaged，client.ts 的 explicit-managed 闸门因此根本不会为它解析 plan（见 ensureManagedHooks 注释），没有「声明 unmanaged 但暗中依赖安装」的情况。已实现的 transcript-path resume 与缺失时 fail-closed 的诊断（providerId=pi resumeLocator=transcript-path missingField=transcriptPath reason=hook-has-not-reported-session-file）在 T-002/T-003 中已接线并有测试。\n\n解除条件（任一）：1) 本机装上 pi，实测其扩展目录与扩展 API；2) 拿到 Pi 官方扩展文档以核实 API；3) 与用户确认把「AgentMux 自带 Pi 扩展」降为独立 Feature，本 task 仅收口 catalog 一致性。"
+      }
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Claude：补齐失败、压缩与队友生命周期事件",
+      "objective": "Owned change surface: packages/core/src/providers/claude.ts 与 Claude managed settings fixtures/tests。Known shared hotspots: registry 由 T-017 接线，公共 timeline 只消费 canonical event。补齐 StopFailure、PostToolUseFailure、TeammateIdle、PostCompact 等 Orca 已核实且 Claude CLI 可提供的事件，同时保持子代理未结束时不提前 done。预计 Agent effort: 0.5-1h。",
+      "outcome": "Claude 的失败、压缩、队友空闲与主/子代理完成语义完整且可验证。",
+      "acceptance": [
+        "Claude managed settings 安装所有已核实事件，保留用户 foreign hooks。",
+        "StopFailure/PostToolUseFailure 不再被折成成功；TeammateIdle/PostCompact 映射为明确的中性或 lifecycle 事实。",
+        "SubagentStart/SubagentStop 与主 Stop 的压制规则继续成立。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/claude.test.ts test/hook-normalizer.test.ts",
+          "proves": "Claude 事件安装、失败语义和子代理生命周期通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/claude.ts",
+        "packages/core/src/hook-normalizer.ts",
+        "packages/core/test/providers/claude.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/claude.test.ts test/hook-normalizer.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Hermes：补齐 approval 与 session lifecycle parity",
+      "objective": "Owned change surface: packages/core/src/providers/hermes.ts、Hermes plugin/overlay installer 与 Hermes tests。Known shared hotspots: registry 由 T-017 接线，Hook canonicalization 只消费 T-002。将 shell-hook 六事件升级为 Orca 已核实的 plugin overlay 事件，补 pre_approval_request、post_approval_response、on_session_finalize、on_session_reset。预计 Agent effort: 1h。",
+      "outcome": "Hermes approval 等待/响应和 session finalize/reset 都能进入同一 status/timeline 合同，安装仍幂等且不扩大权限。",
+      "acceptance": [
+        "Hermes managed hooks 覆盖 approval 与 session lifecycle 事件，且 rules 引用的每个事件都真被装进 config.yaml 与 shell-hooks-allowlist.json 两份文件。",
+        "post_tool_call 的成败、正文与 tool_call_id 都能读出——它们全在两层 wire 的 extra 子对象里，顶层读不到；status 'blocked' 判失败而非成功。",
+        "subagent_start 未被证据佐证 id 键，故不声明 subagentTracking，也不装半残的记账。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/hermes.test.ts test/hook-normalizer.test.ts test/hook-tool-outcome.test.ts test/agent-provider.test.ts test/agent-provider-protocol.test.ts test/managed-hook-installer.test.ts",
+          "proves": "Hermes 的两层 extra wire 解包（失败/正文/id 收敛三样）、授权门两端的安装与语义、以及解包对其余 Provider 的无害性。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/hermes.ts",
+        "packages/core/src/managed-hook-installer.ts",
+        "packages/core/test/providers/hermes.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/hermes.test.ts test/hook-normalizer.test.ts test/hook-tool-outcome.test.ts test/agent-provider.test.ts test/agent-provider-protocol.test.ts test/managed-hook-installer.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-008",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Cursor：接通 status Hook 与 trust preflight",
+      "objective": "Owned change surface: packages/core/src/providers/cursor.ts、Cursor Hook/trust marker installer 与 Cursor tests。Known shared hotspots: registry 由 T-017 接线；不修改 resume 合同，因为 Cursor 无 native resume。接入 beforeSubmitPrompt、stop、preToolUse、postToolUse、failure、shell/MCP 与 afterAgentResponse，并预置真实 Cursor trust marker。预计 Agent effort: 0.5-1h。",
+      "outcome": "Cursor 的运行状态、工具失败和首次 trust 不再吞掉首个 prompt；native resume 继续诚实显示 unsupported。",
+      "acceptance": [
+        "Cursor managed Hook 事件安装并归一化，工具失败不会画成成功。",
+        "workspace trust preflight 只写 Cursor 认可的 marker，不改动用户其他设置。",
+        "catalog 明确 hookEvents=true、providerResume=true（bundle 实测 `--resume [chatId]` 直传 chat id，推翻计划期写的 false）；同时不声明 nativeHandle，因为 hook 负载给的 conversation_id 不是 --resume 吃的 chat id——UI 因此不会出现一个恢复必失败的 Resume。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/cursor.test.ts test/agent-launch-option.test.ts test/agent-provider.test.ts test/agent-provider-protocol.test.ts test/hook-normalizer.test.ts test/hook-tool-outcome.test.ts",
+          "proves": "Cursor Hook 八事件/trust marker/launch 与 resume argv、跨 Provider 方言并集、以及 postToolUseFailure 不被画成成功，全部通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/cursor.ts",
+        "packages/core/src/managed-hook-installer.ts",
+        "packages/core/test/providers/cursor.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/cursor.test.ts test/agent-launch-option.test.ts test/agent-provider.test.ts test/agent-provider-protocol.test.ts test/hook-normalizer.test.ts test/hook-tool-outcome.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-009",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 OpenCode Provider",
+      "objective": "Owned change surface: packages/core/src/providers/opencode.ts 与 OpenCode tests。Known shared hotspots: registry 由 T-017 接线。依据真实 executable、Hook、session 与 resume 证据实现完整 Provider；不可核实的能力不声明。预计 Agent effort: 1h。",
+      "outcome": "OpenCode 可发现、启动、接收 status/Hook，并在可信 handle 下 native resume。",
+      "acceptance": [
+        "OpenCode 的 launch、ready、Hook、permission、resume 与 reply-correlation 能力逐项声明并有来源证据。",
+        "resume 只使用 provider-native handle，缺失或冲突时明确 unavailable。",
+        "Provider 不把 OpenCode 私有 wire 或 PTY 事实泄漏到公共 Core 合同。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/opencode.test.ts",
+          "proves": "OpenCode 的 catalog、launch、Hook 与 native resume 通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/opencode.ts",
+        "packages/core/test/providers/opencode.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/opencode.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_blocker": {
+        "class": "external_blocker",
+        "reason": "OpenCode 不提供 shell-command hook 通路。读 @opencode-ai/plugin@1.18.25 的 Hooks 接口：所有 hook 都是 JS/TS 函数 (input, output) => Promise<void>，靠就地改 output 对象生效，由 CLI 同进程加载插件模块——没有任何「往配置文件写一条命令、CLI 在事件发生时执行它并用 stdin/stdout 交换 JSON」的形态，而 AgentMux 整个 managed-hook 架构正建立在后者之上（command.execute.before 的 command 是被执行的斜杠命令名，不是给我们注册的 hook）。第二条通路存在：@opencode-ai/sdk 的 event.subscribe 是 SSE 长连接，事件名如 session.idle / session.compacted / permission.updated / message.part.updated。但那与 hook 是不同接入类型，需要 Core 新增起服务、连接生命周期、重连、与 ctxmux Run 生命周期对齐一整套机制。选 JS 插件还是 SSE 属架构决策，待用户定夺。证据：@opencode-ai/plugin dist/index.d.ts:173 起 Hooks 接口；@opencode-ai/sdk dist/gen/sdk.gen.d.ts:375 的 subscribe。"
+      }
+    },
+    {
+      "id": "T-010",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Mimo Code Provider",
+      "objective": "Owned change surface: packages/core/src/providers/mimo-code.ts 与 Mimo Code tests。Known shared hotspots: registry 由 T-017 接线。按真实 CLI/Hook/session 证据实现，不复制 Orca 私有状态。预计 Agent effort: 1h。",
+      "outcome": "Mimo Code 的生命周期能力在 AgentMux catalog 与 Core session 中可用且可恢复。",
+      "acceptance": [
+        "launch、Hook、permission/status 与 native resume 能力均有可执行断言。",
+        "handle 不可信或 Provider 缺席时 fail closed 并保留原投影。",
+        "零调用者检查命中 Core registry/launch/recovery 真实路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/mimo-code.test.ts",
+          "proves": "Mimo Code Provider 的 catalog、launch、Hook 与 resume 通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/mimo-code.ts",
+        "packages/core/test/providers/mimo-code.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "cancelled",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "cancel_reason": "转 deferred（Goal 第 48 行的 Non-goal 机制）：Mimo Code 无第一方发行物（npm view mimo-code 404，2026-09-01 实测），仓库内零痕迹——不存在可对照的本地产物。这不是「等一个会到来的上游事实」，而是「按 Goal 规定记为 deferred 并从计划里退出」；理由与解锁条件保留在 T-017 的 deferred inventory。若日后拿到第一方发行物或官方 hook 文档，另开新 Task，不要复活本条。"
+    },
+    {
+      "id": "T-011",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Droid Provider",
+      "objective": "Owned change surface: packages/core/src/providers/droid.ts 与 Droid tests。Known shared hotspots: registry 由 T-017 接线。实现 Orca 已核实的 Hook/session/resume 能力，并保持宿主路径与 AgentMux 公共类型隔离。预计 Agent effort: 1h。",
+      "outcome": "Droid 可被发现、启动、观测并在 verified handle 下恢复。",
+      "acceptance": [
+        "Droid 的 Hook、resume、permission/status 声明与真实 executable 一致。",
+        "Provider unavailable 与 native handle missing 两类恢复失败可区分。",
+        "Droid 的私有配置只经 installer seam，不进入 ctxmux。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/droid.test.ts",
+          "proves": "Droid Provider 的 lifecycle、resume 和失败分类通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/droid.ts",
+        "packages/core/test/providers/droid.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/droid.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-012",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Devin Provider",
+      "objective": "Owned change surface: packages/core/src/providers/devin.ts 与 Devin tests。Known shared hotspots: registry 由 T-017 接线。按真实 Devin CLI/Hook/session 证据接入完整 lifecycle，未知能力保持未声明。预计 Agent effort: 1h。",
+      "outcome": "Devin 的 status、Hook、session 与 resume 在 AgentMux 中有真实能力声明和端到端调用者。",
+      "acceptance": [
+        "Devin catalog 与 native resume argv 由真实 CLI 证据锁定。",
+        "Hook 安装/回调失败按流程降级，不阻断健康 Agent。",
+        "零调用者检查命中 discovery、launch 与 recovery 路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/devin.test.ts",
+          "proves": "Devin Provider 的 catalog、Hook、launch 与 resume 通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/devin.ts",
+        "packages/core/test/providers/devin.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "cancelled",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "cancel_reason": "转 deferred（Goal 第 48 行的 Non-goal 机制）：npm 上的 devin 是同名占位包（作者 devjmetivier，version 0.0.0），不是那个 Agent CLI（2026-09-01 实测）；仓库内零痕迹，无本地产物可对照。按 Goal 记为 deferred 并退出计划，理由与解锁条件留在 T-017 的 deferred inventory。日后拿到第一方发行物请另开新 Task。"
+    },
+    {
+      "id": "T-013",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 OMP Provider",
+      "objective": "Owned change surface: packages/core/src/providers/omp.ts 与 OMP tests。Known shared hotspots: registry 由 T-017 接线；extension overlay 与 Pi/Prime Agent 分开拥有。按真实 Hook/session/resume 证据实现 OMP。预计 Agent effort: 1h。",
+      "outcome": "OMP 的 extension、status 与 resume 能力形成可恢复的 Agent Session 闭环。",
+      "acceptance": [
+        "OMP extension overlay 幂等部署且不复制第三方状态。",
+        "native handle、resume argv 与 Hook event 关联可 round-trip。",
+        "未核实的模型或权限选项不进入 catalog。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/omp.test.ts",
+          "proves": "OMP extension、Hook、resume 与 capability contract 通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/omp.ts",
+        "packages/core/test/providers/omp.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "cancelled",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "cancel_reason": "转 deferred（Goal 第 48 行的 Non-goal 机制）：npm 上的 omp 是同名空壳包（description 'new '，version 1.0.0），不是那个 Agent CLI（2026-09-01 实测）；仓库内无 omp provider。按 Goal 记为 deferred 并退出计划。留一条实现线索：日后若拿到第一方证据，可复用 pi.ts:110-118 的 piFamilyExtensionDir 合同（Pi/OMP/Prime 共享扩展目录形状，见 pi.ts:94-108 注释），另开新 Task。"
+    },
+    {
+      "id": "T-014",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Prime Agent Provider",
+      "objective": "Owned change surface: packages/core/src/providers/prime-agent.ts 与 Prime Agent tests。Known shared hotspots: registry 由 T-017 接线，extension overlay 只消费既有部署合同。预计 Agent effort: 1h。",
+      "outcome": "Prime Agent 的 Hook/status/session/resume 能力可被 catalog 发现并接到 recovery。",
+      "acceptance": [
+        "Prime Agent provider-native handle 与 resume 命令经过真实 CLI 证据锁定。",
+        "extension 部署失败只发布非阻断诊断，Agent 仍可输入。",
+        "Core 公共类型不泄漏 Prime Agent 私有 wire。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/prime-agent.test.ts",
+          "proves": "Prime Agent Provider 的 launch、Hook、resume 与降级行为通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/prime-agent.ts",
+        "packages/core/test/providers/prime-agent.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "cancelled",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "cancel_reason": "转 deferred（Goal 第 48 行的 Non-goal 机制）：npm view prime-agent 返回 404（2026-09-01 实测），仓库内无 prime-agent provider。注意 test/pi-verified-against-canonical-source.test.ts 专门断言 prime-agent 是与 Pi 不同的产品，不得混淆。按 Goal 记为 deferred 并退出计划，日后拿到第一方发行物另开新 Task。"
+    },
+    {
+      "id": "T-015",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Copilot Provider",
+      "objective": "Owned change surface: packages/core/src/providers/copilot.ts 与 Copilot tests。Known shared hotspots: registry 由 T-017 接线。实现 Orca 已核实的 managed Hook/status 与 native resume 语义，不把 GitHub/宿主认证 token 带进 AgentMux store。预计 Agent effort: 1h。",
+      "outcome": "Copilot 可发现、可观测、可恢复，认证边界保持由其 CLI/环境负责。",
+      "acceptance": [
+        "Copilot Hook、resume 与 permission/status 能力均有 provider-specific 测试。",
+        "认证缺失与 Provider 缺席只形成可操作诊断，不写入持久 Session。",
+        "launch/recovery 调用者均走 Core 公共 API。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/copilot.test.ts",
+          "proves": "Copilot Provider 的 discovery、Hook、resume 与认证边界通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/copilot.ts",
+        "packages/core/test/providers/copilot.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/copilot.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-016",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "纳入 Kimi Provider",
+      "objective": "Owned change surface: packages/core/src/providers/kimi.ts 与 Kimi tests。Known shared hotspots: registry 由 T-017 接线。依据真实 Kimi CLI/Hook/session/resume 证据实现，不为模型字符串编造 launch option。预计 Agent effort: 1h。",
+      "outcome": "Kimi 的 lifecycle、status、Hook 与 native resume 进入统一 Provider 合同。",
+      "acceptance": [
+        "Kimi 的 executable、launch、Hook、permission 与 resume 能力逐项声明并可执行验证。",
+        "native handle 失效时保留原投影并返回明确 unavailable 分类。",
+        "Provider-specific 逻辑不进入 ctxmux 或 Desktop。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/providers/kimi.test.ts",
+          "proves": "Kimi Provider 的 catalog、Hook、resume 与失败分类通过。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/providers/kimi.ts",
+        "packages/core/test/providers/kimi.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/providers/kimi.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-017",
+      "depends_on": [
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-011",
+        "T-015",
+        "T-016"
+      ],
+      "title": "[集成] 收口 registry、catalog 与 deferred inventory",
+      "objective": "Owned change surface: packages/core/src/agent-provider.ts 的 registry composition、内建 catalog snapshot 与 docs/reviews/agentmux-provider-parity-plan.md 的 evidence inventory。Known shared hotspots: index exports 与 provider conformance suite；只在本 Task 修改这些共享面。把所有已完成 Provider 接进一个 registry，逐项核对 Orca-only 条目并把 launch-only/宿主专属项标成 deferred，不增加隐形 fallback。预计 Agent effort: 1-2h；registry 与跨 Provider inventory 是不可安全并行的 heavy object。",
+      "outcome": "所有分支结果在同一 Feature workspace 中可共同发现；已纳入、暂缓纳入、Provider 专属 wrapper 三类条目有单一可审计归类。",
+      "acceptance": [
+        "registry.catalog() 包含所有本 Feature 已实现 Provider，重复 id 与遗漏 id 都会失败。",
+        "Orca 对照 inventory 的每个条目只有 implemented、deferred 或 not-comparable 一种归类，deferred 必须写原因，不把它当成功能。",
+        "Desktop/CLI discovery 只消费 Core registry，不新增第二份 Provider 清单。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/agent-provider.test.ts",
+          "proves": "全部分支已集成到唯一 registry，Provider inventory 分类完整且无重复/遗漏。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-provider.ts",
+        "packages/core/test/provider-conformance.test.ts",
+        "packages/core/test/agent-provider-protocol.test.ts",
+        "docs/reviews/agentmux-provider-parity-plan.md",
+        "packages/core/test/agent-provider.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-018",
+      "depends_on": [
+        "T-017"
+      ],
+      "title": "[验收] Provider parity 跨模块、变异与零调用者门禁",
+      "objective": "Owned change surface: only acceptance fixtures and verification scripts；不修改 Provider 实现。Known shared hotspots: 完整 Core test/build 与 Desktop discovery consumer。对集成后的 Feature candidate 运行跨 Provider contract、package consumer、Desktop discovery、变异测试和零调用者检查，证明能力真实接到产品调用路径。预计 Agent effort: 1h。",
+      "outcome": "Feature 的 Provider parity 不是“定义+单测全绿”，而是从 catalog 到启动、Hook、恢复和 UI/CLI consumer 的完整可达路径。",
+      "acceptance": [
+        "所有已实现 Provider 的 capability matrix、Hook/resume failure classification、managed install 与 discovery consumer 通过。",
+        "对 Grok/Gemini native resume、Hook canonicalization、Pi deployment、Cursor trust 至少各做一次破坏实现的 mutation，测试必须变红后恢复。",
+        "对每个新增 Provider 运行零调用者检查；若命中只在定义/测试文件，Task 必须保持未完成。",
+        "干净外部 Node consumer、Core typecheck/build 与 Desktop provider catalog 通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "Core/Desktop typecheck、全量测试与构建在集成 candidate 上通过。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts",
+          "proves": "跨 Provider contract、方言合并面与干净 consumer 证据成立。mutation 证据按任务纪律逐个 Task 手工执行（破坏实现→必须变红→恢复），结果记在各 Task 的完成记录里——它不是一个测试文件能自证的东西。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/test/provider-conformance.test.ts",
+        "packages/core/test/package-consumer.integration.test.ts",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "packages/core/test/agent-provider-protocol.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

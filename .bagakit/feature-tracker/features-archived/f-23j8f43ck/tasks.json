@@ -1,0 +1,441 @@
+{
+  "version": 2,
+  "feat_id": "f-23j8f43ck",
+  "plan_status": "reviewed",
+  "plan_revision": 4,
+  "supersedes_revision": 3,
+  "review_ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+    "docs/plans/agentmux-semantic-session.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+        "docs/plans/agentmux-semantic-session.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+        "docs/plans/agentmux-semantic-session.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+        "docs/plans/agentmux-semantic-session.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+        "docs/plans/agentmux-semantic-session.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "持久化 Agent Session 身份与 verified Provider locator",
+      "objective": "把 Agent Session record、native handle 与 timeline 放到宿主 durable data root，并保证 Provider hook 到达前后以及进程重开都能安全 round-trip。",
+      "outcome": "机器重启后 Core 仍能读到同一个 Agent Session ID 和经过校验的 Provider-native resume locator；ctxmux runtime 目录仍保持临时边界。",
+      "acceptance": [
+        "Desktop 注入的 AgentSessionStore 位于 Electron userData，session 文件与 timeline 同根且不在 tmpdir；ctxmux socket/state 不被搬走。",
+        "写入带 nativeHandle 的 session 后，新实例从同一 durable path 读回 token、providerId、workspacePath 与 lifecycle；Hook 后更新是原子且可重复的。",
+        "拒绝控制字符、相对路径、超长 locator 或 providerId/sessionId 不匹配；不读旧临时目录、不双写、不新增 migration/fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run packages/core/test/agent-session-store.test.ts apps/desktop/test/agent-session-store-path.test.ts",
+          "proves": "durable root、timeline 同根、边界校验与 reopen round-trip 断言；改回 tmpdir 会红。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run packages/core/test/agent-native-locator.test.ts",
+          "proves": "守 acceptance#3「providerId 不匹配」与 acceptance#2「Hook 后更新原子可重复」的跨字段一致性 guard，断言同时匹配 code 与具体 message 以分辨是哪条 guard。变异证据：(1) 把 normalizeStoredAgentSession 里 provider guard 条件 `session.nativeHandle.providerId !== session.providerId` 换成 `false /*MUT*/ && (...)` → 只有 'rejects a native provider locator whose providerId is not the Agent provider' 红在 agent-native-locator.test.ts:72 的 toThrowError，hookReceipt 用例仍绿，证明两者可分辨；(2) 把 hookReceipt guard 整条 `session.hookReceipt &&` 前置 `false /*MUT*/ &&` 关掉 → 'rejects a hook receipt that does not identify its Agent Session' 红在 :100，别的 guard 一个都没接住这三种不匹配；(3) 只关 hookReceipt 的 providerId 一臂 → 同测试仍红，证明断言粒度到单臂而非只到 code。三处均反向 patch 还原，grep MUT 零残留，agent-session-store.ts 仍是并行 agent 的 15 insertions/1 deletion（未被本任务改动）。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+          "proves": "Core/ctxmux durable ownership boundary。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-session-store.ts",
+        "packages/core/src/types.ts",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/main/agent-session-store-path.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run packages/core/test/agent-session-store.test.ts apps/desktop/test/agent-session-store-path.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run packages/core/test/agent-native-locator.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "统一恢复候选、去重与失败分类",
+      "objective": "让 Core 以 Agent Session 为单位决定 attach、Provider-native resume、unavailable、conflict 或 retired，并把未知流程故障变成不阻断但可见的服务窗状态。",
+      "outcome": "同一 Session 的并发恢复最多产生一个新 Run；缺 handle、provider unsupported、identity conflict 各自有稳定 discriminator，调用方不再拼接条件或 argv。",
+      "acceptance": [
+        "running exact Run 只 attach；Run missing 且 capability/verified handle 满足时才 native resume；不满足时不 spawn 冒牌新上下文。",
+        "恢复结果包含 stable reason code 与可读 detail：provider-unsupported、native-handle-unavailable、continuity-conflict 至少可区分；旧事件不能覆盖新 binding。",
+        "显式 retired Session 不进入自动恢复；恢复计划按 providerId+locator 去重并有 ownership fence。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run packages/core/test/agent-session-continuity.test.ts packages/core/test/agent-provider.test.ts",
+          "proves": "决策矩阵、并发去重、失败 discriminator 与 stale-event 栅栏。原计划把第二个文件写成 packages/core/test/client.test.ts，该文件从未存在——vitest 对不存在的路径静默忽略并 exit 0，于是这道 gate 会在只跑了一半的情况下记 pass（按遗漏造成的假绿）。改为实际承载 client 侧恢复与 Provider 契约断言的 agent-provider.test.ts，共 60 条。变异证据（四条 acceptance 逐条打红，均由断言而非编译错误）：(1) acceptance#1 把 live-Run 分支的 kind 从 reattachable 改成 unavailable → 'keeps a matching live Run attach-only even when Provider resume is available' 红；(2) acceptance#2 把 reason 'provider-resume-unsupported' 折叠成 'provider-unavailable' → 1 条红；(3) acceptance#2 把 'native-handle-unavailable' 折叠 → 2 条红；(4) acceptance#3 给退役守卫前置 false && → 'returns retired only from persisted retired Run truth' 与 'keeps a remote user-retirement visible after the Session record is removed' 双红。四处均反向还原，grep MUT 零残留。另注：acceptance#2 列举的 provider-unsupported / continuity-conflict 是计划期的近似命名，实现里的稳定 discriminator 为 provider-resume-unsupported、native-handle-unavailable、provider-unavailable、session-run-changed、lifecycle-busy，语义与「至少可区分」一致。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/agent-session-continuity.ts",
+          "proves": "恢复策略由单一 Kernel-neutral Core owner 承担。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-session-continuity.ts",
+        "packages/core/src/client.ts",
+        "packages/core/src/agent-provider.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run packages/core/test/agent-session-continuity.test.ts packages/core/test/agent-provider.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "Desktop 启动自动恢复且保留失败投影",
+      "objective": "启动时以持久化布局和 Core recovery candidates 的稳定身份做全量匹配，先恢复布局再自动 attach/resume；失败时保留 View/Region/Topic 并展示原因。",
+      "outcome": "应用或机器重启后打开即看到原工作面，可恢复 Session 自动恢复，不要求点击 Resume；不可恢复 Session 不会从布局中消失。",
+      "acceptance": [
+        "initialize 不再只扫旧 attached id 或把 active workspace 硬编码为第一个；所有持久化 Agent projection 与 candidate 稳定匹配。",
+        "恢复成功沿用原 View/Region/Topic 与 Agent Session ID，Run ID 可变化；失败保留 projection 并呈现三类 reason code，不静默删除 tab/region。",
+        "startup recovery 是幂等的，重复 initialize 不重复 attach/spawn；Provider 流程故障不阻断健康 Agent，并有服务窗提醒。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts apps/desktop/test/renderer-state-owners.test.ts",
+          "proves": "自动恢复、失败投影保留、active workspace 匹配与幂等行为。原计划用 glob `apps/desktop/test/store* apps/desktop/test/*recovery* apps/desktop/test/workbench-persistence*`，有两个问题：(1) 它漏掉 renderer-state-owners.test.ts，而那里才是 acceptance#2「不静默删除 tab/region」的守卫所在——实测把 session-state.ts 的空快照 fail-open 换成 `if (false)`（即用户报的「切换走再切换回来有些 Region 会消失」那个缺陷本体），原 glob 全绿 36/36；加上这个文件后立刻双红（「一份空快照不删仍在跑的 Agent Region」「本地没有 Agent 时空快照原样返回」）。(2) `*recovery*` 当时匹配到一个尚未入 git 的在途文件，别人 checkout 后 gate 会指向不存在的路径。改为显式列出三个tracked 文件，共 54 条。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Renderer/Main 只使用 Core continuity 公开结果，类型接线完整。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/main/runtime-controller.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-persistence.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts apps/desktop/test/renderer-state-owners.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "跨 Workspace Workbench keep-alive",
+      "objective": "将 Workbench owner 提升到窗口级，所有已打开 Workspace 的 Terminal/xterm/attachment 保持挂载；非活动 Workspace 隐藏并停工。",
+      "outcome": "切换项目再回来不出现 Earlier scrollback is unavailable、Restoring terminal 或 TUI 二次 loading；真正关闭时才释放资源。",
+      "acceptance": [
+        "切换 Workspace 前后每个已打开 Workbench、SessionPane、TerminalView 的 mount 次数不增加，ctxmux attachment 不重新创建。",
+        "非活动 Workbench 不执行 fit/resize/native browser bounds 或高频 timer；回访直接显示离开前画面。",
+        "关闭 Workspace/Region 或显式 stop 才卸载并释放 attachment；布局与 Topic 归属不被 keep-alive 改写。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/workspace-workbench* apps/desktop/test/terminal* apps/desktop/test/workspace-selection.test.ts",
+          "proves": "跨 Workspace mount/attachment 计数、隐藏停工和真正关闭释放；改回单 active mount 会红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "窗口级 owner 与 pane 生命周期接线完整。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/hidden-tab-terminal-retention.test.ts",
+          "proves": "钉住 keep-alive 的三条 acceptance：隐藏 Tab 仍整体渲染进 DOM（active 只翻属性，不改渲染与否）证明切换前后 mount 次数不增加、attachment 不重建；nativeSurfacesVisible 随非活动收敛、且无 setInterval/ResizeObserver/IntersectionObserver 证明非活动 Workbench 停工不跑 fit/resize/高频 timer；terminal.dispose() 只挂在关闭 Region、且无 instancePool/keepAlive 缓存池，证明真正关闭才卸载释放而 keep-alive 不改写 Region/Session/Composer 真相。此文件不匹配既有 workspace-workbench*/terminal* glob，是唯一直接证明 T-004 核心承诺的测试。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/App.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/workspace-workbench* apps/desktop/test/terminal* apps/desktop/test/workspace-selection.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test/hidden-tab-terminal-retention.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "持久化 active Workspace、布局、窗口几何与 shutdown flush",
+      "objective": "补齐 UI 展示事实的持久化字段和退出边界，保证重启后先恢复用户离开的窗口形状，再启动语义 Session 恢复。",
+      "outcome": "active Workspace、dock/rail/tool 状态、split/tab/region 布局及窗口尺寸位置最大化状态在正常退出、崩溃恢复和机器重启后尽可能保持。",
+      "acceptance": [
+        "activeWorkspaceId、toolDockWidth、projectRailOpen、toolsOpen、workspaceTool 进入 persist 白名单，启动不再硬置首个 Workspace。",
+        "窗口 bounds/最大化状态以校验过的 durable 数据保存并恢复，不再每次固定 1480×940；非法或越界几何安全回到系统可见区域。",
+        "renderer pagehide/beforeunload 与 main shutdown 有 debounce 后的 trailing flush；只写布局展示事实，不写 PTY、scrollback、PID 或 Provider transcript 内容。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/*persistence* apps/desktop/test/*window* apps/desktop/test/agent-session-store-path.test.ts",
+          "proves": "字段 round-trip、窗口几何校验与 unload/shutdown flush；删掉任一字段或 flush 会红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "主进程/渲染器持久化契约接线完整。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-persistence.ts",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/main/use-persisted-ui-writer.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/*persistence* apps/desktop/test/*window* apps/desktop/test/agent-session-store-path.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "title": "端到端恢复证明与独立质量审计",
+      "objective": "在真实 Desktop/Core 边界上验证首次启动、切换 Workspace、应用重启、机器重启模拟和三类失败，并完成变异测试、零调用者检查与只读审计。",
+      "outcome": "Feature 的第一性恢复行为有可重复证据，任何关键实现被改坏都会红，且每个公开能力有真实产品调用者。",
+      "acceptance": [
+        "集成场景证明同一 Agent Session ID 在新 Run 上自动恢复、原 Region/Topic/Workspace 保留，重复启动不重复 spawn。",
+        "对自动恢复、失败保留、跨 Workspace keep-alive、activeWorkspace/window round-trip 各做一次故意破坏并确认对应测试变红。",
+        "对新增公开 symbol 执行 grep 零调用者检查（排除定义文件和测试）；独立 reviewer 从正确性、架构、鲁棒性、复杂度、自解释性和工艺感给出结论。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test",
+          "proves": "全仓（test:fast + test:native）作为端到端回归基线，不挑文件跑。"
+        },
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts apps/desktop/test/renderer-state-owners.test.ts apps/desktop/test/workspace-navigation-recovery.test.tsx packages/core/test/agent-session-continuity.test.ts packages/core/test/agent-session-registry.test.ts",
+          "proves": "恢复行为的四个面各自被守：自动恢复与失败投影保留、跨 Workspace 的成员快照 fail-open、路径失效后的重设恢复、Core 侧决策矩阵与原子 lifecycle 预留。变异证据（均由断言打红、反向还原、grep MUT 零残留）：(1) session-state.ts 空快照 fail-open 改 `if (false)` → renderer-state-owners 双红，而这恰是用户报的「切换走再切换回来有些 Region 会消失」；(2) restoredWorkspaceId 丢掉持久化偏好 → store-persistence 红；(3) 拿掉 agent-session-registry 原子 reserveLifecycle → 4 红（含并发恢复去重）；(4) live-Run 分支 kind 由 reattachable 改 unavailable → 红；(5) 两个 unavailable reason 各自折叠 → 分别 1/2 红；(6) 退役守卫前置 false && → 双红。workspace-navigation-recovery.test.tsx 在 2dc4d78 入 git 后列入（T-003 的 gate 已执行、语义冻结，故补在此处而非改写已执行任务）。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
+          "proves": "Renderer/Main/Core 类型接线完整；两侧均已实测通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-first-class-session-continuity-plan.md",
+          "proves": "零调用者结论与独立审查结论写在此处。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/test",
+        "apps/desktop/test",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npx vitest run apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts apps/desktop/test/renderer-state-owners.test.ts apps/desktop/test/workspace-navigation-recovery.test.tsx packages/core/test/agent-session-continuity.test.ts packages/core/test/agent-session-registry.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "恢复合同的归类表已按 agent-session-continuity.ts:21 的实际 union 更正（原表列了两个 Core 里不存在的 code），并补写 T-006 收口证据：零调用者结论、两处真缺陷（跨 Workspace 归属的接受侧、运行时成员对齐删掉 Core 说可恢复的 Agent）及其变异证据，以及一处跨三层的待决（conflict 两类折叠）。只改这一份 owning SSOT，没有为过 closeout 而编文档。",
+      "refs": [
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "三条经得起复用的教训，均已写进该 plan 的收口证据节：(1) 一个 && 有两侧出口，覆盖了拒绝侧不等于覆盖了接受侧——守卫按出口数不按条件数，两处真缺陷同属此形；(2) 用错形状的 fixture（把 SessionSnapshot 摊进 recoveryCandidate 位置，身份字段 id vs agentSessionId 不同名）写出的测试看起来覆盖了那条路径、实际一次也没有；(3) 最小端到端先行的顺序是对的——T-001..T-005 先跑通，T-006 的独立审计才有东西可查，且它查出的两处都是既有测试的盲点而非新功能缺失。",
+      "refs": [
+        "docs/reviews/agentmux-first-class-session-continuity-plan.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "没有新增仓库级原则：两处缺陷都是既有原则（fail open 面对不可逆删除、恢复失败不裁剪布局）在第二条出口上没被落实，属执行遗漏而非原则缺失；对应守卫已进 test:fast 常驻。跨层的 conflict 归类待决已单列跟踪，需先与用户定两类各自的用户动作，不适合此刻promote 成规则。",
+      "refs": []
+    }
+  }
+}

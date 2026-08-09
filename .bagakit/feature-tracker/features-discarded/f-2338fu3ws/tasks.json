@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "feat_id": "f-2338fu3ws",
+  "plan_status": "draft",
+  "plan_revision": 0,
+  "supersedes_revision": null,
+  "review_ref": "",
+  "source_refs": [],
+  "plan_history": [],
+  "tasks": [],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "not_applicable",
+      "rationale": "缺陷已在本轮别处交付，判定逻辑未新增公开行为，无需新增或修改设计合同条款。",
+      "refs": []
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "用户建议「按 provider 匹配」，核实后未照字面实现：那会在 command 指向不存在路径时谎称 installed，是另一种不诚实。真正目的是「别因为我改了 command 就骗我说没装」，现有实现（探测用户实际配置的那个可执行文件）精确满足该目的，两个方向的诚实都保住。收口前做了变异验证：恢复 bug 后 2 条断言变红。",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-2338fu3ws/artifacts/verification-already-delivered.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "未产生需要提升为仓库级原则的新规则；据实报告而非两头讨好已是既有诚实性原则。",
+      "refs": []
+    }
+  }
+}

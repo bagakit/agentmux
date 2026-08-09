@@ -1,0 +1,38 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agent-region-move-2026-09-09.md"
+  },
+  "source_refs": [
+    "docs/reviews/agent-region-move-2026-09-09.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Agent 控制入口明确搬动 Region 到新 Tab",
+      "objective": "复用 GUI 的移动 owner，让 Agent 搬动分屏时不再误用 open 复制视图",
+      "outcome": "CLI、协议与 Renderer 串起明确移动语义，帮助区分 open 和 move",
+      "depends_on": [],
+      "acceptance": [
+        "搬出双 Region Tab 中一格后，源余一格、目标一格，Region 和 Session 身份不变，零 launch/stop/resume 调用",
+        "单格不创建重复 Tab，无效来源不修改布局；额外投影语义仍可用",
+        "变异摘除来源逻辑使对应测试变红；生产调用检查排除定义文件仍非空"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run packages/core/test/agentmux-cli.test.ts packages/core/test/control-host.test.ts apps/desktop/test/control.test.ts apps/desktop/test/promote-region-to-tab.test.ts",
+          "proves": "CLI、协议、真实 store 移动行为与既有 GUI owner"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-region-move-2026-09-09.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

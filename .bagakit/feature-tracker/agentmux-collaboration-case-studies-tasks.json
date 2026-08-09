@@ -1,0 +1,40 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-collaboration-case-studies-plan.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/reviews/agentmux-collaboration-case-studies-plan.md",
+    "docs/casestudy/shared-worktree-commit-contamination.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "记录共享工作树提交污染案例",
+      "objective": "把 c7db679/d4613b8 的并发提交事故写成按现象可检索的案例，保留 session、文件范围和修复证据。",
+      "outcome": "Agent 遇到提交里出现他人文件、功能状态像半成品等现象时，可以沿案例中的排查路径确认归属，而不会用 stash/reset 抹掉共享修改。",
+      "acceptance": [
+        "案例同时记录现象、根因、危险动作、正确处理、证据和可复用教训。",
+        "案例明确共享 git add 允许，但提交前必须检查 git diff --cached，并以 c7db679 与 d4613b8 作为可核对证据。",
+        "案例链接到设计合同中的共享工作树约束，且不新增独立的 Git 状态真相。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -s docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'c7db679' docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'd4613b8' docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'git diff --cached' docs/casestudy/shared-worktree-commit-contamination.md",
+          "proves": "首篇案例存在且包含两次真实提交证据与 staged diff 排查动作。"
+        }
+      ],
+      "source_refs": [
+        "docs/casestudy/shared-worktree-commit-contamination.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "c7db679",
+        "d4613b8"
+      ],
+      "supersedes": []
+    }
+  ]
+}

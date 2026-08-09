@@ -1,0 +1,369 @@
+{
+  "version": 2,
+  "feat_id": "f-22p8f93c8",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": ".bagakit/feature-tracker/features/f-22p8f93c8/artifacts/plan-review-r2.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-22p8f93c8/artifacts/plan-review-r1.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": ".bagakit/feature-tracker/features/f-22p8f93c8/artifacts/plan-review-r2.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "让 Composer 的失败可见，并为渲染进程建立未观测 rejection 的兜底",
+      "objective": "把 Composer 里已知会静默吞掉的失败接到既有 reportError 面，并让任何未被观测的 renderer promise rejection 不再无声消失。",
+      "outcome": "用户粘一张过大或写盘失败的图片时看到明确失败而不是\"什么也没发生\"；此后同类遗漏由兜底捕获而非静默。",
+      "acceptance": [
+        "粘贴图片的保存失败经既有 reportError 面浮现，与同一 Composer 上 submit/send/setPosture 的失败呈现一致；不新增第二套错误状态机。",
+        "main 侧已存在的可达 throw（空图、超出 MAX_PASTED_IMAGE_BYTES、mkdir/writeFile 磁盘错误）都被覆盖，草稿不被清空。",
+        "renderer 建立一个未观测 rejection 的兜底并汇入同一 reportError 面；兜底是最后一道网，不用来替代具体 catch。",
+        "失败路径有自动化断言证明错误确实到达了报错面，而不仅仅是不抛出。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "粘贴失败与未观测 rejection 都到达 reportError 面，且草稿保留。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Composer 与错误面接线类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "把\"哪次状态跃迁值得打扰用户\"收敛为一个纯判定",
+      "objective": "用一个可测的纯函数决定某次 Agent 状态跃迁是否构成一次值得打扰的注意力事件，不在 UI 组件里散落条件。",
+      "outcome": "通知、上卷和名册三个面消费同一个判定，不各自猜测什么算\"完成\"或\"需要你\"。",
+      "acceptance": [
+        "判定是纯函数：输入前后 AgentStatus 与窗口/会话可见性事实，输出是否打扰及其类别（完成 / 需要你 / 错误），不读 Store、不碰 Electron。",
+        "只有跃迁才打扰：同一状态重复上报、启动噪声和 disconnected 都不产生完成通知；needs-you 与 error 复用既有共享状态语汇，不新增第四种含义。",
+        "用户正在看的那一个不打扰：窗口聚焦且该 Session 的 Region 可见时不产生通知，避免为用户眼前正在发生的事发系统提醒。",
+        "判定不依赖 provider 分支，也不从 terminal 字节推断语义。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "跃迁判定覆盖重复上报、启动噪声、可见性抑制与三种类别。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "交付后台完成的系统通知，并让点击回到那个 Session",
+      "objective": "把 T-002 的判定接到 Desktop main 拥有的原生通知能力上，让并行跑的 Agent 在完成或需要你时主动被看见。",
+      "outcome": "人离开工位后回来，不必逐个 pane 扫状态点；通知点击直接落到对应 Session。",
+      "acceptance": [
+        "原生通知能力只由 Desktop main 持有并经 typed IPC 暴露；renderer 不直接触达 OS 通知，也不持有第二份通知状态。",
+        "通知点击聚焦窗口并激活该 Session 所在的 View/Region，复用既有激活动作，不新建第二条导航路径。",
+        "平台不支持或用户在系统层关闭通知时明确降级：不静默假装已通知，也不加兼容层或轮询补偿。",
+        "通知可由用户关闭；关闭后完成事实仍照常进入状态点与 Board，不因为关通知而丢失可见性。",
+        "不为通知引入新的 Session、Run 或状态生命周期。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "通知发起、点击路由、降级与开关都有自动化断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "main 通知 owner 与 typed IPC 边界类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "让注意力沿导航树上卷，而不止于一个计数",
+      "objective": "把\"这一层里有 Agent 需要你\"沿 Workspace 侧栏与项目行向上表达，使人不必展开每一层才知道该先处理谁。",
+      "outcome": "折叠状态下也能一眼定位到需要处理的那一支，而不是只看到一个总数。",
+      "acceptance": [
+        "上卷复用共享状态语汇与同一份 Session 投影，不新增第二个聚合管线。",
+        "\"需要你\"不只靠颜色区分：形状/字形规则与既有状态点契约一致，5px 角标的既有例外保持不变。",
+        "计数为零时保持中性，不制造常驻告警感；已有的全窗口汇总栏与新的行级表达不重复讲同一件事。",
+        "断言针对派生结果而非 CSS 声明本身。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "行级上卷的派生状态与共享语汇一致，零值保持中性。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "交付可枚举的全窗口 Agent 名册，并显示每个 Agent 的启动授权范围",
+      "objective": "把现有的\"跳到等待最久的那一个\"升级为一份可枚举、带作用域、可跳转的名册，并把已持久化但从未显示的 launchOptions 授权范围呈现出来。",
+      "outcome": "并行 Agent 变多时不必逐 pane 去找去答；每行自带\"它被允许做什么\"，用户不需要回忆启动时选了什么。",
+      "acceptance": [
+        "名册是一个面而不是两个：同一处枚举跨 Workspace/Tab Group/折叠 Pane 的 Agent，并可跳转到具体 Session；不为待处理请求再建第二个列表。",
+        "每行显示该 Agent 启动时固定的授权范围，来源是已持久化的 launchOptions 声明；未声明即不显示，绝不显示禁用占位或推测值。",
+        "名册只读既有 Session 投影与 Core 已有的 pending interaction 事实，不新增 Core 合同、不新增消息状态机、不预建结构化消息层。",
+        "折叠态只占一枚计数徽章，展开才付出空间；徽章与既有全窗口汇总栏共享同一份聚合真相。",
+        "没有诚实的单一 status.source 可用时不伪造证据来源，与既有汇总栏的处理保持一致。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "名册枚举、跳转、授权范围投影与未声明即隐藏都有自动化断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "授权范围经既有 DESCRIBE 半边跨 IPC，renderer 仍看不到 argv。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "ideas/index.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [],
+      "title": "收口圆角契约与实现之间的漂移",
+      "objective": "让设计合同关于圆角的说法与 styles.css 的实际取值一致，并让这条规则此后可被静态检查。",
+      "outcome": "调整圆角 token 时不再有约十四个具名控件悄悄不跟随。",
+      "acceptance": [
+        "合同与实现取其一改到一致：要么让这些紧凑控件走 token，要么在合同里把例外写清楚并说明为什么这些控件不同。",
+        "结论由静态检查守住，且该检查在漂移重现时会红。",
+        "不引入第四档圆角 token，也不为此加运行时开关。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test:fast",
+          "proves": "圆角契约与实现一致，且漂移会被静态检查捕获。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test:fast",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "depends_on": [
+        "T-001",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "title": "完成整体验收并把结论回填到 ideas 对照表",
+      "objective": "在统一门禁上验证本 Feature 的全部交付，并把对照表里被本次改动影响的行改成核实后的真实状态。",
+      "outcome": "ideas/index.md 不再停留在动手前的判断；下次读它的人看到的是当前事实而不是过期结论。",
+      "acceptance": [
+        "统一门禁通过，包含类型、测试与构建；打包 E2E 闸门未被削弱（不放宽超时、不放松断言）。",
+        "ideas/index.md 中受本 Feature 影响的行更新为核实后的状态并附 file:line 证据；已完成项从\"无/部分\"改判，且明确标注哪些仍是判断而非事实。",
+        "回填同时更正表里已知的错误结论，至少包括：把统一 Inbox 与 Agent 间通信标注为早已存在于 f-2248f4yx5 T-019 的计划，而非本次新提议。",
+        "设计合同按需更新为唯一 SSOT；不把本次实现细节抄进对照表，也不让对照表变成第二份需求真相。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "类型、测试与构建在最终候选上统一通过。"
+        }
+      ],
+      "source_refs": [
+        "ideas/index.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "交互合同新增四条已交付的公共行为：汇总栏总数段作为名册入口、名册行显示启动授权范围的两条诚实规则、注意力沿导航树上卷、以及后台通知的纯判定与 typed 投递结果。密度合同的圆角条款改为如实开放两类例外并由静态检查守住。仅更新拥有这些行为的 SSOT，未把实现细节抄进别处。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "四条经过验证的教训。其一，验收证据必须可执行：计划把 gate 写成 path#scripts.name 这种引用式，而 tracker 会原样交给 shell，于是 exit 127 —— 闸门从未运行却看起来像失败过，仓库里既有 feature 同样如此。其二，守卫必须双向验证：Presence 动画与圆角两条静态检查都确认过在漂移重现时会红，其中 Presence 守卫随后在本轮新增的名册 CSS 上真实生效。其三，先闭合最小端到端路径是对的：T-001 交付的报错通路成为后续所有面的失败可见性基础。其四，动手前必须查 SSOT —— 我把早已存在于 T-019 的 Inbox 计划当成新提议，并把基本未开工的 f-2258fa79w 说成已交付。",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-22p8f93c8/artifacts/plan-review-r2.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "四条教训都已落在既有归属处：可执行 gate 与守卫双向验证由 tasks.json 的 verification 与两个静态检查测试自身承载，最小端到端优先与 SSOT 优先已是 skill 与 AGENTS.md 的既有规则。另起一个知识面会与这些真相竞争。",
+      "refs": []
+    }
+  }
+}

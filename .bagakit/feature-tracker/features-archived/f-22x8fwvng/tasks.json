@@ -1,0 +1,174 @@
+{
+  "version": 2,
+  "feat_id": "f-22x8fwvng",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-22x8fwvng/artifacts/plan-review-r1.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/plans/agentmux-wiki-first-scratch.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-22x8fwvng/artifacts/plan-review-r1.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/plans/agentmux-wiki-first-scratch.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "停止用 tabId 当 topicId，让新建 Agent 落进指定的 Topic",
+      "objective": "移除 store.ts:1258 那条把 tabId 当作 topicId 的推导，改为由调用方显式给出目标 topic；未给出时不得凭 tab 身份编造一个。",
+      "outcome": "在 Scratch 里新开一个 Agent 不再顺带造出一个 Topic——一个 Topic 能容纳多个 Agent，这本来就是磁盘侧的既有设计（prepareAgent 把每个 agent 追加进 collaborators 数组）。",
+      "acceptance": [
+        "`plan.kind === 'tab'` 时不再把 `plan.tabId` 当作 topicId。目标 topic 由启动意图显式携带；缺失时该次启动不绑定任何 topic，而不是发明一个。",
+        "**不引入第二份 Topic Registry**：Topic 的唯一真相仍是 Scratch 文件系统（合同 Owner 边界表）。renderer 只携带用户选中的 topicId，不缓存 topic 列表作为真相。",
+        "`topic--*` 目录名与 `topicId` 的稳定性不变——Agent cwd 与 View 绑定依赖它们稳定（合同 :24）。",
+        "既有的 `REGION_TOPIC_MISMATCH` 校验保留：非法 topicId 仍 fail closed，不静默降级为无 topic。",
+        "不为旧行为留 fallback：用 tabId 当 topicId 是缺陷，直接删（项目原则：过时的直接删）。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/scratch-topic-agents.test.ts",
+          "proves": "同一个 topic 能承载多个 Agent 启动、缺失 topicId 时不编造、非法 topicId 仍 fail closed。改动前必红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "启动意图携带 topic 的类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/scratch-topic-agents.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "让 Topic 面板成为切换 Topic 的地方，并显示每个 Topic 下的 Agent",
+      "objective": "把 Topic 切换收到 Topic 自己的面板上（用户原话），并在面板里如实呈现一个 Topic 当前有哪些 Agent。",
+      "outcome": "用户从 Topic 面板选 Topic、看见它下面的多个 Agent，而不是靠新开 Agent 顺带切走。",
+      "acceptance": [
+        "Topic 面板列出 Topic 并支持切换；切换复用既有导航动作，不新建第二条导航路径。",
+        "每个 Topic 行显示其下的 Agent（来源是 Topic 快照的 collaborators + 现有 Session 投影），数量为零时如实显示为空而不是隐藏该 Topic。",
+        "Topic 列表来自文件系统快照，**不从打开的 View 反推**——合同 :22 明确禁止那个方向，而那正是本 Feature 要修的缺陷。",
+        "在某个 Topic 上新建 Agent 时，该 Agent 落进这个 Topic（与 T-001 的显式携带对接），面板随即显示它。",
+        "断言针对派生结果（列出了哪些 Topic、每个 Topic 关联到哪些 Agent、切换调用了哪个动作），不针对 CSS。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/scratch-topic-agents.test.ts",
+          "proves": "面板列出 Topic 与其下多个 Agent、切换经既有动作、列表源自文件系统而非 View。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-wiki-first-scratch.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/scratch-topic-agents.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "完成验收并把「一 Topic 多 Agent」写进 SSOT",
+      "objective": "在统一门禁上验证，并把 Topic 与 Agent 的一对多关系、以及 Topic 切换的归属写进需求文档。",
+      "outcome": "下一个读文档的人不会再把 topicId 从 tabId 推导出来。",
+      "acceptance": [
+        "统一门禁通过（类型、测试、构建）；打包 E2E 闸门未被削弱。",
+        "SSOT 记录：一个 Topic 容纳多个 Agent（磁盘侧以 collaborators 表达）；Topic 切换归 Topic 面板；Topic 列表来自文件系统，绝不从 View 反推；topicId 不得由 tabId 派生。",
+        "本 Feature 的实现必须经**一个未参与实现的独立 Reviewer** 审查后才算完成，重点是：是否出现第二份 Topic Registry、是否仍有从 View 反推 Topic 的残留、以及测试能否在 topicId 被重新派生时变红。审查结论记录在本 Feature 的 artifacts 下。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "类型、测试与构建在最终候选上统一通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-wiki-first-scratch.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "SSOT 记录：一个 Topic 容纳多个 Agent（磁盘侧以 collaborators 表达）；Topic 切换归 Topic 面板；Topic 列表来自文件系统快照，绝不从 View 反推；topicId 不得由 tabId 派生。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "缺陷根因是 topicId ?? tabId：因为 launcher:<uuid> 恰好满足 Topic-id 文法，这个 ?? 会静默为每次启动铸出新 Topic。更重要的是固化该缺陷的断言是当时全仓唯一的失败测试，连带卡住四个无关 Feature 的统一门禁——一条错误断言的传染半径远超它所在的 Feature，遇到长期红的门禁应先查断言本身是否固化了缺陷。",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-22x8fwvng/artifacts/implementation-review-T-003.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "不建第二份 Registry、不从投影反推磁盘真相，均为既有 Owner 边界原则；本次为执行。",
+      "refs": []
+    }
+  }
+}

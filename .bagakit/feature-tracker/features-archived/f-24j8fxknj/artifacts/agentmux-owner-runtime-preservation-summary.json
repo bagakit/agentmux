@@ -1,0 +1,28 @@
+{
+  "identityUnchanged": true,
+  "recordsBefore": 83,
+  "recordsAfter": 83,
+  "missingIds": [],
+  "changedPids": [],
+  "retainedRunning": 23,
+  "stateChanges": [
+    {
+      "before": {
+        "id": "7c946832-610a-4695-96aa-67369e5556e5",
+        "pid": 69166,
+        "state": {
+          "type": "running"
+        }
+      },
+      "after": {
+        "id": "7c946832-610a-4695-96aa-67369e5556e5",
+        "pid": 69166,
+        "state": {
+          "type": "exited",
+          "code": 1,
+          "signal": "Killed: 9"
+        }
+      }
+    }
+  ]
+}

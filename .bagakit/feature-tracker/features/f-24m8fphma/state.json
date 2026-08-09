@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-24m8fphma",
+  "title": "Agent 自助创建与空间操作闭环",
+  "slug": "agent-spatial-control",
+  "goal": "自定义 Agent 可发现可创建，分屏搬动不复制，空间决策和操作回执与可见布局一致，并由独立布局包承载通用实现",
+  "status": "ready",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=feat/168-file-tree-git-status"
+    }
+  ]
+}

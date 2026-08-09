@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "feat_id": "f-2228fpnqm",
+  "title": "AgentMux tmux Runtime and Desktop Workbench",
+  "slug": "agentmux-runtime-desktop",
+  "goal": "Deliver a reusable tmux-based runtime for Codex, Claude, Hermes, and Pi plus a desktop workbench that configures, runs, observes, edits files, and splits panes.",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "HEAD",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "current_task_id": null,
+  "runtime_role": "standalone",
+  "blocked_reason_class": "none",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 6
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-005",
+    "last_check_commands": [
+      {
+        "command": "test -s docs/orca-agent-runtime-notes.md",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/core typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/core test",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/core build",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2228fpnqm/artifacts/gate-T-005-r6-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=HEAD; root_branch=detached"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=detached"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> b7bf50011003d4d92ed445fd2ac5df187382f2ddaf7246dac28ca9121546b28e"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "b7bf50011003d4d92ed445fd2ac5df187382f2ddaf7246dac28ca9121546b28e -> 2ead2b68ca9200a214776df34c8e995c67dc44cc21754da8845b6061c112bd1d"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "2ead2b68ca9200a214776df34c8e995c67dc44cc21754da8845b6061c112bd1d -> 83e15194b6cc46bff57200697d146251c6a7d2d11ebf0eefe64ca7a911fea92f"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "moved + cleaned"
+    }
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features-archived/f-2228fpnqm/goal.md",
+    "revision": "83e15194b6cc46bff57200697d146251c6a7d2d11ebf0eefe64ca7a911fea92f"
+  },
+  "closed_from_status": "done",
+  "archived_cleanup": {
+    "workspace_mode": "current_tree",
+    "base_ref": "HEAD",
+    "branch_merged": false,
+    "worktree_removed": false,
+    "worktree_pruned": false,
+    "branch_deleted": false,
+    "note": "worktree mode removes/prunes worktree and deletes merged branch; current_tree/proposal_only only archive feat metadata",
+    "preserved_root_entries": [
+      "artifacts/closeout-preserved-root/proposal.md",
+      "artifacts/closeout-preserved-root/verification.md"
+    ]
+  }
+}

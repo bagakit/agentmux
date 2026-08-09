@@ -1,0 +1,108 @@
+{
+  "version": 2,
+  "feat_id": "f-22a8fj56c",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+    "docs/architecture/terminal-runtime.md",
+    "docs/plans/agentmux-terminal-interaction-latency.md",
+    "docs/testing/strategy.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+        "docs/architecture/terminal-runtime.md",
+        "docs/plans/agentmux-terminal-interaction-latency.md",
+        "docs/testing/strategy.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "恢复 Replay Gap 后的可用终端画面",
+      "objective": "让 Desktop 在有界 Replay 已淘汰早期 TUI 字节时，通过现有 Viewport Owner 自动触发并允许用户重试一次真实 PTY 重绘，同时把缺失历史作为不会被终端清掉的 UI 状态展示。",
+      "outcome": "用户重新打开仍在运行的长时会话时不再只看到黑屏和终端内错误；同一个 Run 保持运行，历史缺失被诚实说明，已结束 Run 保持只读。",
+      "acceptance": [
+        "Running Run 的 Gap 恢复按临时尺寸、最终尺寸顺序走唯一 TerminalViewportSynchronizer Resize 路径，不发送输入、不创建或恢复 Run。",
+        "自动重绘发生在保留 Replay 写入之后，期间的 Live Output 继续由启动缓冲排序，最终 byte cursor 不倒退也不重复确认。",
+        "Gap 提示位于 xterm 字节流之外；Running Run 提供手动重新绘制，Historical Run 不提供控制按钮且不调用 Resize。",
+        "无 Gap 的 attach、历史只读、普通 Resize 和交互拖拽语义保持不变。",
+        "需求、运行时架构和测试说明只描述已交付行为，不把丢失的滚动记录伪装为可恢复。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "Core、Desktop、打包 Consumer 和生产构建通过仓库统一检查。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/test/terminal-viewport-sync.test.ts",
+          "proves": "自动与手动 Gap 重绘只通过 Viewport Owner 提交临时和最终尺寸。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+          "proves": "用户可见行为、Owner、失败边界和非目标有单一简明说明。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-terminal-replay-gap-recovery.md",
+        "docs/architecture/terminal-runtime.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Replay Gap 的用户行为、唯一 Resize Owner、历史 Run 边界和验证范围已经写回仓库文档。",
+      "refs": [
+        "docs/plans/agentmux-terminal-replay-gap-recovery.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "本次结论已落在 Feature 文档和现有终端架构边界内，没有独立于该修复的可复用候选。",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "没有需要提升到仓库原则或共享知识层的新规则。",
+      "refs": []
+    }
+  }
+}

@@ -1,0 +1,14 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ✓ apps/desktop/test/login-shell-environment.test.ts (6 tests) 132ms
+ ✓ packages/core/test/run-environment.test.ts (1 test) 29ms
+ ✓ packages/core/test/ctxmux-version-binding.test.ts (8 tests) 23ms
+ ✓ apps/desktop/test/store-persistence.test.ts (21 tests) 13ms
+ ✓ apps/desktop/test/shell-environment-notice.test.tsx (1 test) 13ms
+
+ Test Files  5 passed (5)
+      Tests  37 passed (37)
+   Start at  02:59:02
+   Duration  3.28s (transform 674ms, setup 0ms, collect 1.92s, tests 209ms, environment 366ms, prepare 217ms)
+

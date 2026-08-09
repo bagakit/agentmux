@@ -1,0 +1,97 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/desktop-delivery-goal-2026-09-10.md"
+  },
+  "source_refs": [
+    "docs/reviews/hover-menu-2026-09-10.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/desktop-delivery-goal-2026-09-10.md",
+    "docs/delivery/desktop-experience-update-2026-09-10.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "悬停菜单接入同类入口",
+      "objective": "实际菜单悬停展开，间隙与子菜单可穿越，动作一次点击执行，保留焦点/键盘/触屏/disabled，原生视图让位正确",
+      "outcome": "实际菜单悬停展开，间隙与子菜单可穿越，动作一次点击执行，保留焦点/键盘/触屏/disabled，原生视图让位正确",
+      "depends_on": [],
+      "acceptance": [
+        "实际菜单悬停展开，间隙与子菜单可穿越，动作一次点击执行，保留焦点/键盘/触屏/disabled，原生视图让位正确",
+        "实现任务须有变异红绿与生产调用证据；安装任务须有实际产物与重启证据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/hover-dropdown-menu.test.tsx",
+          "proves": "实际菜单悬停展开，间隙与子菜单可穿越，动作一次点击执行，保留焦点/键盘/触屏/disabled，原生视图让位正确"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/hover-menu-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "验证候选并安装重启",
+      "objective": "候选类型/构建/打包 gate 通过，安装身份匹配且新 App 运行，记录会话重连事实",
+      "outcome": "候选类型/构建/打包 gate 通过，安装身份匹配且新 App 运行，记录会话重连事实",
+      "depends_on": [
+        "T-001"
+      ],
+      "acceptance": [
+        "候选类型/构建/打包 gate 通过，安装身份匹配且新 App 运行，记录会话重连事实",
+        "实现任务须有变异红绿与生产调用证据；安装任务须有实际产物与重启证据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm typecheck && pnpm package:mac:install",
+          "proves": "候选类型/构建/打包 gate 通过，安装身份匹配且新 App 运行，记录会话重连事实"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/hover-menu-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "已安装版本的更新回切与会话连续性验收",
+      "objective": "在共同安装候选上证明前端激活、回切与现有会话及用户状态连续性",
+      "outcome": "可核对的已安装版本更新回切验收证据，覆盖交付清单全部输入 Feature",
+      "depends_on": [
+        "T-002"
+      ],
+      "acceptance": [
+        "清单七个 Feature 的已验证实现确实属于同一候选，提交、安装副本与运行实例身份一致；记录可恢复的 Git 候选引用。",
+        "在已安装 loader 上实际激活相容前端并回切，回执确认加载成功，测试候选清理后留下预期版本。",
+        "安装重启及前端切换前后对比 Session、Run、PID；纯前端更新维持 Main 和 Run，草稿、未保存内容、布局不丢，必要的 semantic resume 如实记录。",
+        "汇集实现任务变异红绿与非空生产调用证据；区分合成输入测试与系统输入法观察，不能用单测代替安装后证据。",
+        "其余六个输入 Feature 完成各自 closeout；本 Feature 在任务完成后执行 closeout，仍待 closeout 时不报告完整交付。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/layered-updates.test.ts apps/desktop/test/renderer-update.test.ts apps/desktop/test/terminal-ime.test.ts apps/desktop/test/terminal-redraw-feedback.test.tsx",
+          "proves": "共同候选的更新、回切与终端行为合同回归；不替代下述安装实例证据"
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/reviews/desktop-installed-update-verification-2026-09-10.md",
+          "proves": "必须实际生成候选绑定的安装身份、激活回切回执、Session/Run/PID 和用户状态对比、清单证据及 closeout 核对；该证据不存在时不得完成任务"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/desktop-delivery-goal-2026-09-10.md",
+        "docs/delivery/desktop-experience-update-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    }
+  ]
+}

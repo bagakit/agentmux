@@ -1,0 +1,133 @@
+{
+  "version": 2,
+  "feat_id": "f-23u8fapwh",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-terminal-responsiveness-plan.md",
+  "source_refs": [
+    "docs/reviews/agentmux-terminal-responsiveness-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "packages/core/src/client.ts",
+    "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+    "apps/desktop/src/renderer/src/lib/terminal-replay.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-terminal-responsiveness-plan.md",
+      "source_refs": [
+        "docs/reviews/agentmux-terminal-responsiveness-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "packages/core/src/client.ts",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/lib/terminal-replay.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "并发且隔离 terminal capability 探测",
+      "objective": "连接恢复时各个 running Session 的 terminal handshake 不再按 Session 串行等待；每个探测仍绑定精确 Run，超时只降级该 Session，未知错误仍失败关闭。",
+      "outcome": "多开 Agent 时探测总等待窗口由最长单个探测决定，健康 Session 不被其他 Session 的十秒超时拖住。",
+      "acceptance": [
+        "多个 running Session 的 handshake 可以并发进行，不能一个完成后才启动下一个。",
+        "一个 Session 超时会得到 unknown/degraded 并继续可提交 prompt，不会 disconnect 共享连接或阻断其他 Session。",
+        "Run 消失或未知错误仍按既有 fatal 分类处理，不把未知当成健康。",
+        "剪掉并发接线或误恢复串行 await 必须让测试变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-terminal-handshake-outcome.test.ts",
+          "proves": "并发启动、单 Session 降级、共享连接不被拆除及 fatal 分类接线。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/client.ts",
+        "packages/core/test/agent-terminal-handshake-outcome.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-terminal-handshake-outcome.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "终端 replay 与 live 输出保持事件循环公平",
+      "objective": "xterm retained replay 和切回后的 live backlog 使用有界写入，并在批次之间让出宿主事件循环；输出仍按 byte cursor 有序，恢复完成前的输入门控语义不变。",
+      "outcome": "大量 TUI 输出切回时画面继续追上，但切换、关闭和输入等界面操作不会被一次大 parser 工作或无穷串行 outputTail 饿死。",
+      "acceptance": [
+        "大 replay 不再合并成一次不可抢占的 xterm write；达到批次上限后分批写并让出事件循环。",
+        "live output backlog 的串行 drain 在每个有界工作单元后让出事件循环，保持 cursor 顺序且不丢数据（已有上限丢弃提示除外）。",
+        "replay 的小输入仍保持原有顺序和 cursor，gap/redraw 恢复顺序不变。",
+        "删除批次让出或 live drain 的公平点必须让测试变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-replay.test.ts test/terminal-interaction-latency.test.ts",
+          "proves": "大 replay 分批/让出、live drain 公平性与既有恢复顺序。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/terminal-replay.ts",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/test/terminal-replay.test.ts",
+        "apps/desktop/test/terminal-interaction-latency.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-replay.test.ts test/terminal-interaction-latency.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Updated interaction and surface-density SSOT with renderer fairness and per-session probe isolation.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md,docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "No reusable learning artifact beyond the reviewed plan.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "Fix is local to AgentMux runtime and renderer.",
+      "refs": []
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "version": 2,
+  "feat_id": "f-24f8fru6a",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-browser-visible-launch.md",
+  "source_refs": [
+    "docs/reviews/agentmux-browser-visible-launch.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx",
+    "apps/desktop/src/renderer/src/store.ts",
+    "apps/desktop/test/workspace-selection.test.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-browser-visible-launch.md",
+      "source_refs": [
+        "docs/reviews/agentmux-browser-visible-launch.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/test/workspace-selection.test.ts"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "让 New Browser 在非 launcher 聚焦 Pane 可见落地",
+      "objective": "修复 Browser Tools 的静默早退，并保证聚焦非 launcher pane 仍能创建可见 Browser Tab/Region；创建失败必须投影到错误面。",
+      "outcome": "用户点击 New Browser 后能看到 Browser，或看到可执行错误，不再出现无变化点击。",
+      "acceptance": [
+        "聚焦非 launcher Tab/Region 时，New Browser 创建的 Browser surface 出现在同一 focused Tab Group，原有 Tab/Region 保留。",
+        "没有 focused pane 或 Main 创建失败时，Browser Tools surface 显示确定性错误。",
+        "renderer regression 覆盖 Tab、Region、kind、browserId、url 和 active Tab 的变化；恢复静默早退时测试变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-selection.test.ts test/surface-tool-dock.test.tsx",
+          "proves": "非 launcher focused pane 的 Browser Tab/Region 投影与 Browser Tools 可见错误路径。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/test/workspace-selection.test.ts",
+        "apps/desktop/test/surface-tool-dock.test.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-selection.test.ts test/surface-tool-dock.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Design SSOT records visible New Browser success/error contract.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "No reusable learning beyond existing Browser ownership contract.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No reusable skill promotion needed",
+      "refs": []
+    }
+  }
+}

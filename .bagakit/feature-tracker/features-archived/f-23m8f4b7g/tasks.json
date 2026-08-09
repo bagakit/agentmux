@@ -1,0 +1,157 @@
+{
+  "version": 2,
+  "feat_id": "f-23m8f4b7g",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-terminal-reveal-deadline-plan.md",
+  "source_refs": [
+    "docs/reviews/agentmux-terminal-reveal-deadline-plan.md",
+    "AGENTS.md",
+    "docs/architecture/terminal-runtime.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+    "apps/desktop/src/renderer/src/lib/service-window-notice.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-terminal-reveal-deadline-plan.md",
+      "source_refs": [
+        "docs/reviews/agentmux-terminal-reveal-deadline-plan.md",
+        "AGENTS.md",
+        "docs/architecture/terminal-runtime.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/lib/service-window-notice.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "揭示不再被我们自己的步骤挡住：replay 写完即揭示 + deadline 兜底",
+      "objective": "恢复态今天只有两个出口（全链成功 TerminalView.tsx:524、attach 抛错 :535），所以『链上某处永不 settle』在界面上就是永久转圈，而 ctxmux/Run/PTY 全好着——用户原话『ctxmux 明明存在还在打开时显示 restoring』。最可能的死锁：startLiveSynchronization 排在揭示之前（:509），经 resize 与 attach 争用同一把按 Run 串行的锁（runtime-controller.ts:1128），该 Run 上任一卡住操作都让揭示永不到来。修法两条：揭示的前提收敛为画面正确真正依赖的那一步（replay 字节写完），live 同步与 gap redraw 移到揭示之后不阻塞；外加 deadline 兜住链上任意一处卡死。",
+      "outcome": "一个健康的终端永远不会被我们自己的步骤永久藏起来：到点画布交还用户，同时用户看得见哪一步没走通、现在按什么状态在跑、怎么恢复。",
+      "acceptance": [
+        "deadline 判定是纯函数并各有断言：未到点保持恢复态、到点判为强制揭示。承重断言落在 lib/ 纯函数上——本仓没有能跑 useEffect 的测试环境（renderToStaticMarkup）。",
+        "强制揭示绝不静默：断言揭示的同时必定产出一条服务窗告示；把告示去掉要让测试变红。",
+        "三态分流复用 f-23g8feb8c/T-001 的 classifyServiceNotice，不新建第二条失败通路：Run running→第 2 类放行、exited→交既有恢复横幅、interrupted→如实说分不清。把三者折叠成一种处置要红。",
+        "告示说清三件事：哪一步没走通、现在按什么状态在跑、怎么恢复完整能力。缺任一件要红。",
+        "揭示不再等 live 同步：断言 replay 写完即可揭示，而 finishTerminalReplayRecovery 内部 ['live','release','redraw'] 顺序不被改动（terminal-replay.test.ts:43 钉住它，那个顺序是对的）。",
+        "恢复态本身保留：首次 attach、断连重连、replay gap 仍显示恢复态；hidden-tab-terminal-retention.test.ts 既有断言全绿，不靠删恢复态满足本 task。",
+        "既有六组 phase 行为不变（terminal-interaction-latency.test.ts:83-99），且 terminal-startup.ts 不出现 'visible' 子串（retention:100，注释也算）。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "deadline 判定、不许静默、三态分流、告示三要素、既有恢复态与 phase 契约各有断言且全绿。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/architecture/terminal-runtime.md",
+          "proves": "『原子揭示有 deadline，超时后揭示优先于原子性』这条合同变更有 SSOT 出处，含锁竞争的定位。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/lib/terminal-startup.ts",
+        "apps/desktop/src/renderer/src/lib/service-window-notice.ts",
+        "docs/architecture/terminal-runtime.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "恢复态用品牌语言，而不是十六处共用的通用转圈",
+      "objective": "用户原话『restoring 的动画太简单, 没有品牌感』。恢复态今天用 LoaderCircle className=\"spin\"（base.css:27），与 Loading branches 完全同款——最显眼的整格等待态让给了最没有信息的图形。兄弟态 .terminal-agent-startup 是居中卡片且同样没用绿，所以绿色是可用的差异化手段；App 已有两个现成绿色母题（主操作渐变、签名径向光晕）可复用。同时 tokens.css 声称拥有『动效』却没有任何动效 token，本轮一并补齐这个文档与实现的偏差。",
+      "outcome": "整格恢复态看上去属于 AgentMux 自己，且与兄弟启动态同族；行内小 spinner 不受影响。",
+      "acceptance": [
+        "动效节奏与曲线成为 token，恢复态不再手写毫秒数；新增 token 全部有 var() 落点（surface-scale-contract.test.ts:182 判无人引用即红），含把既有 cubic-bezier(.16,1,.3,1) 提为具名并回填 menu-in 调用点。",
+        "恢复态不再引用通用 .spin；断言从样式表/源码反推得出，且断言扫描有收获（不得扫到空内容全绿）。",
+        "与兄弟态同族：复用同一套居中卡片语汇（surface-1 / line-soft / radius-sm / elev-1），差异只在动效与色相。",
+        "prefers-reduced-motion 下静态首帧仍读得出『正在工作』：base.css:152-154 是全局 animation-duration:0s，会冻结 keyframe，所以不得靠动起来才说得清。",
+        "无障碍不退步：保留 role=\"status\" aria-live=\"polite\"。",
+        "行内小 spinner（16 个文件）不动：本 task 只改整格覆盖层，不做全站替换。",
+        "terminal.css 不超过 400 行（stylesheet-organisation.test.ts）。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "动效 token 有落点、无悬空引用、恢复态不用通用 spin、样式表组织约束全绿。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/agentmux-surface-density.md",
+          "proves": "《动效》一节是本 task 的设计 SSOT：动效即 token，整格覆盖层用品牌语言而行内 spinner 不变，动效不得是唯一信息载体。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/styles/tokens.css",
+        "apps/desktop/src/renderer/src/styles/terminal.css",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "三份设计 SSOT 在编码前先改：terminal-runtime.md 承认原子揭示有 deadline 且超时后揭示优先于原子性并写清锁竞争定位；desktop-interaction.md 把终端揭示登记为原则 11 的第二个消费方；surface-density.md 新增《动效》一节定义四档节奏 token 与整格覆盖层/行内 spinner 的分界",
+      "refs": [
+        "docs/architecture/terminal-runtime.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "两条都已在 commit 正文与 review artifact 中留痕，且都是通用教训而非本 Feature 独有：(1) 断言取样区间切得太宽会被邻近的同族声明蹭绿——恢复态改用 surface-2 仍全绿；(2) 把状态变更收进 helper 后，比较该变更在源码中的下标即恒真，必须断言调用点所在的区间。两者都是靠变异测试而非测试通过发现的",
+      "refs": [
+        "docs/reviews/agentmux-terminal-reveal-deadline-plan.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "本轮未产生新原则：修法完全落在 AGENTS.md 既有原则 11（三种状态）与两把尺（变异测试、零调用者检查）之下，服务窗也复用 f-23g8feb8c 建好的既有分类器，未新建第二条失败通路",
+      "refs": []
+    }
+  }
+}

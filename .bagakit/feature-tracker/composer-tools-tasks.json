@@ -1,0 +1,37 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/composer-tools-2026-09-10.md"
+  },
+  "source_refs": [
+    "docs/reviews/composer-tools-2026-09-10.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "接通快捷输入工具并重设计",
+      "objective": "文件、系统选区截图、真实技能及 Provider 快捷指令进入当前会话草稿，可收起恢复且中断只停止当轮",
+      "outcome": "文件、系统选区截图、真实技能及 Provider 快捷指令进入当前会话草稿，可收起恢复且中断只停止当轮",
+      "depends_on": [],
+      "acceptance": [
+        "文件、系统选区截图、真实技能及 Provider 快捷指令进入当前会话草稿，可收起恢复且中断只停止当轮",
+        "变异红绿与生产调用非空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/agent-composer.test.tsx apps/desktop/test/agent-session-composer.test.tsx apps/desktop/test/composer-tools.test.ts",
+          "proves": "文件、系统选区截图、真实技能及 Provider 快捷指令进入当前会话草稿，可收起恢复且中断只停止当轮"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/composer-tools-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "feat_id": "f-2468fk4ff",
+  "title": "AgentMux 协作事故案例集",
+  "slug": "agentmux-collaboration-case-studies",
+  "goal": "把并发 Agent 协作中已经发生过的事故写成可按现象回忆的案例，先记录共享工作树误把他人改动一起提交这一例。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "test -s docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'c7db679' docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'd4613b8' docs/casestudy/shared-worktree-commit-contamination.md && rg -q 'git diff --cached' docs/casestudy/shared-worktree-commit-contamination.md",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2468fk4ff/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "feat_id": "f-2428fx658",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-prompt-readiness-diagnostics-plan.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/reviews/agentmux-prompt-readiness-diagnostics-plan.md",
+    "apps/desktop/src/main/runtime-controller.ts",
+    "packages/core/src/prompt-submission.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-prompt-readiness-diagnostics-plan.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-prompt-readiness-diagnostics-plan.md",
+        "apps/desktop/src/main/runtime-controller.ts",
+        "packages/core/src/prompt-submission.ts"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "按四类 readiness 原因输出可执行诊断并接入真实提交路径",
+      "objective": "保留四个 Core readiness error code，在 Core detail 与 Desktop Main message 中分别说明事实、当前 Run/epoch/submission 诊断和下一步动作；不削弱 readiness 门、不停止健康 Agent、不丢草稿。",
+      "outcome": "用户或受管 Agent 能从错误本身判断应等待、等待已有交付、刷新 canonical Session 重试，还是检查 Provider readiness marker，而不是把四种情况误认为 Agent 仍在工作。",
+      "acceptance": [
+        "AGENT_PROMPT_NOT_READY、AGENT_PROMPT_READINESS_CONSUMED、AGENT_PROMPT_SUBMISSION_BUSY、AGENT_PROMPT_READINESS_CONFLICT 四类均保留原 code，并各自有不含用户正文的 detail。",
+        "RuntimeController 只按 code 选择四条稳定文案；每条文案说明发生了什么、当前按什么状态运行和可执行的下一步；不得按 message 再建分类器。",
+        "submitPrompt 的生产路径仍经该分类器；Core readiness gate、输入 cursor、草稿保留和 user turn 记账行为不变。",
+        "四类 error 的单测与 Electron IPC 包装后的 renderer banner 回归均存在；删除任一映射、detail 或调用接线时测试变红。",
+        "零调用者检查命中 RuntimeController 的 submitPrompt 生产调用（排除定义文件自身后仍有调用者），且未触碰其他 Agent 正在修改的 Provider parity 共享文件。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/runtime-controller.test.ts apps/desktop/test/session-launch-lifecycle.test.ts",
+          "proves": "四类 main-side 分类、detail 保留和 renderer IPC framing 回归通过。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "RuntimeController、contracts 与 renderer 接线类型完整。"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"humanizePromptDeliveryError|AGENT_PROMPT_(NOT_READY|READINESS_CONSUMED|SUBMISSION_BUSY|READINESS_CONFLICT)\" apps/desktop/src/main/runtime-controller.ts apps/desktop/test/runtime-controller.test.ts",
+          "proves": "四类分类器同时有生产调用和行为测试覆盖。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/agentmux-prompt-readiness-diagnostics-plan.md",
+        "apps/desktop/src/main/runtime-controller.ts",
+        "apps/desktop/test/runtime-controller.test.ts",
+        "packages/core/src/prompt-submission.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm exec vitest run apps/desktop/test/runtime-controller.test.ts apps/desktop/test/session-launch-lifecycle.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "rg -n \"humanizePromptDeliveryError|AGENT_PROMPT_(NOT_READY|READINESS_CONSUMED|SUBMISSION_BUSY|READINESS_CONFLICT)\" apps/desktop/src/main/runtime-controller.ts apps/desktop/test/runtime-controller.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Prompt readiness 四类拒绝约束已写入交互设计文档并由实现提交落地。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "暂无需提升为独立可复用学习条目。",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "无需额外晋升。",
+      "refs": []
+    }
+  }
+}

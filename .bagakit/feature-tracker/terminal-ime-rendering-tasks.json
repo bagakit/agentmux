@@ -1,0 +1,56 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/terminal-ime-rendering-2026-09-10.md"
+  },
+  "source_refs": [
+    "docs/reviews/terminal-ime-rendering-2026-09-10.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "IME input ownership",
+      "objective": "Prevent duplicate committed Chinese text after cursor movement without intercepting composition keys",
+      "outcome": "Prevent duplicate committed Chinese text after cursor movement without intercepting composition keys",
+      "depends_on": [],
+      "acceptance": [
+        "Prevent duplicate committed Chinese text after cursor movement without intercepting composition keys",
+        "Mutation red/green and nonempty production callers; native observations distinguished from synthetic tests"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/terminal-ime.test.ts",
+          "proves": "Prevent duplicate committed Chinese text after cursor movement without intercepting composition keys"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/terminal-ime-rendering-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Terminal rendering stability",
+      "objective": "Keep terminal output and viewport synchronization coherent without manual window resizing",
+      "outcome": "Keep terminal output and viewport synchronization coherent without manual window resizing",
+      "depends_on": [],
+      "acceptance": [
+        "Keep terminal output and viewport synchronization coherent without manual window resizing",
+        "Mutation red/green and nonempty production callers; native observations distinguished from synthetic tests"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/terminal-viewport-sync.test.ts apps/desktop/test/terminal-replay.test.ts",
+          "proves": "Keep terminal output and viewport synchronization coherent without manual window resizing"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/terminal-ime-rendering-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    }
+  ]
+}

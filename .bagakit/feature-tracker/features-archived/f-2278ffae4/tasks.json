@@ -1,0 +1,267 @@
+{
+  "version": 2,
+  "feat_id": "f-2278ffae4",
+  "plan_status": "reviewed",
+  "plan_revision": 3,
+  "supersedes_revision": 2,
+  "review_ref": ".bagakit/feature-tracker/features/f-2278ffae4/artifacts/plan-review-reorg.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-semantic-session.md",
+    ".bagakit/feature-tracker/features/f-2278ffae4/proposal.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-2278ffae4/proposal.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/plans/ctxmux-capability-audit.md",
+        "docs/testing/strategy.md",
+        ".bagakit/feature-tracker/features/f-2278ffae4/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/plans/agentmux-semantic-session.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-semantic-session.md",
+        ".bagakit/feature-tracker/features/f-2278ffae4/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": ".bagakit/feature-tracker/features/f-2278ffae4/artifacts/plan-review-reorg.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-semantic-session.md",
+        ".bagakit/feature-tracker/features/f-2278ffae4/proposal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "冻结 Kernel-neutral Continuity 决策合同",
+      "objective": "定义 Core 公共决策，把 Agent Session、用户 lifecycle、Provider handle/capability 与权威 Run facts 映射为 attached、resumed、unavailable、retired 或 conflict。",
+      "outcome": "Desktop reopen、CLI reconnect 和未来消息投递共享同一恢复语义，不等待 ctxmux，也不由调用方拼条件。",
+      "acceptance": [
+        "合同明确 Agent Session ID、old/new RunRef、Provider handle、evidence、user lifecycle 和结果 discriminator；Terminal replay、command equality 或 Tab identity 不能证明语义连续。",
+        "running exact Run 只允许 attach；terminal/missing Run 只有 verified matching handle 与 positive Host capability 才允许 Provider-native resume；否则 unavailable。",
+        "Provider resume 保留 Agent Session ID 但创建新 Run；respawn 创建新 Agent Session；显式 retire 禁止自动恢复。",
+        "app quit、hide/detach 与 destructive retirement 是不同公共意图；不保留旧 close 语义、migration 或 alias。",
+        "公共类型只依赖 AgentMux Run port，不 import ctxmux、自建 daemon、Electron 或第三方 wire。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core test",
+          "proves": "Continuity 决策矩阵和身份边界有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-semantic-session.md",
+          "proves": "Reattach、Provider resume、respawn 与 retirement 是单一架构真相。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-semantic-session.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "实现幂等 Agent Session Continuity Owner",
+      "objective": "在 Core 内通过注入的 Run inventory/attach/create port、Provider resume plan 和 Agent Session Store 实现并发安全的 ensureContinuity，不依赖具体 Kernel。",
+      "outcome": "Client 重开、Run loss 与并发恢复得到确定结果；不会重复 Agent、错绑旧 Run 或形成第二份 Runtime 真相。",
+      "acceptance": [
+        "Owner 先读取并 fence exact RunRef/state；running 走 attach-only，exited/interrupted/missing 才进入 Provider handle/capability验证。",
+        "Resume plan 由 Provider 构造，Run port 只执行 explicit RunSpec；operation key 与 Agent Session reservation 使并发 ensure 收敛到一个新 Run。",
+        "Agent Session Store 以 old Run binding 作为 optimistic fence 原子更新；失败停止未发布的新 Run并回滚，cleanup error 与主错误同时保留。",
+        "旧 Run data/exit/hook、迟到 create response、Transport loss 和 Client crash 不能覆盖 new Run binding；Transport loss本身不授权 resume。",
+        "当前过渡 Adapter 只作为合同实现运行测试；不新增旧 daemon 能力、私有持久 Map、ctxmux 类型或 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core test",
+          "proves": "Attach/resume/unavailable/retired、并发、回滚和 stale event 合同通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/agent-session-continuity.ts",
+          "proves": "恢复策略由单一 Kernel-neutral Core owner 承担。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "depends_on": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "交付 Desktop reopen 与 retire 语义",
+      "objective": "让 Desktop 只调用 Core Continuity API 并明确表达 detach/hide、reattach、resume、unavailable 与 retire，不持有第二恢复状态机。",
+      "outcome": "应用重开恢复正确 Agent 上下文且不重复 Tab/Run；用户明确结束的 Session 不会被产品擅自复活。",
+      "acceptance": [
+        "Desktop reopen 展示 attached、resumed、unavailable、retired 或 conflict；Renderer/Main 不拼 Provider argv、不缓存第二份决策状态。",
+        "应用完全退出而权威 Run 仍在时保持 same RunRef 并 attach，不创建第二个 Agent。",
+        "Run lost 且 verified handle 存在时保持 Agent Session ID、创建新 Run 并 Provider-resume；无 handle 时 unavailable。",
+        "显式 stop/delete 持久化 retired 意图；hide/detach 保持可恢复。",
+        "重复 reopen、Store failure、late old event 与 lost create response 有确定结果和无重复进程 oracle。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm test",
+          "proves": "Core 与 Desktop 在当前 Run port 上通过 reopen/retire 行为回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/runtime-controller.ts",
+          "proves": "Desktop 只投影 Core Continuity 结果。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "depends_on": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "在最终 CtxmuxRunAdapter 上重验 Continuity",
+      "objective": "ctxmux 发布且能力匹配后，只映射 Run inventory、attach、idempotent create 与 stop port，并重跑同一 Continuity 合同和 Local/SSH 故障矩阵。",
+      "outcome": "最终 Kernel 切换不重写 Agent Session 恢复策略，ctxmux 只替换物理 Run 权威。",
+      "acceptance": [
+        "Adapter 不含 Agent Session policy、Provider argv、私有 Map、旧 daemon fallback 或双 Runtime selector。",
+        "Local/SSH、Partition、daemon loss、lost response 和 stale event 使用同一 Core Continuity Suite。",
+        "缺失 ctxmux capability/version/identity 时任务阻塞而不是降级。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm check",
+          "proves": "最终 AgentMux+ctxmux candidate 通过统一 Gate。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/ctxmux-cutover.md",
+          "proves": "最终所需 ctxmux 能力有精确公开证据。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/plans/ctxmux-cutover.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "depends_on": [
+        "T-002"
+      ]
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "拥有本 Feature 的 SSOT 是 docs/plans/agentmux-semantic-session.md，已完整描述交付的决策矩阵（attached/resumed/unavailable/retired/conflict 五种结果）、retirement 键、Store v5 边界与已验证的集成场景，与实现一致，无需改动。交互合同只在 Owner 边界表引用 semantic resume 归 packages/core，不重复抄写决策矩阵——把它抄进第二处会制造第二份真相。",
+      "refs": [
+        "docs/plans/agentmux-semantic-session.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "本 Feature 四个 task 的实质早已交付（decideAgentSessionContinuity 纯决策只 import type、ensureAgentContinuity 并发串行化含 exact-RunRef 栅栏、runtime-controller 全权委托 Core、9 个确定性测试加一个对真实 ctxmuxd 的重启集成测试），tracker 却长期显示 0/4。根因是它的 gate 写成不可执行的引用式（path#scripts.name 被原样交给 shell，exit 127），另有一条 gate 检查一个已删除的文件，因此闸门从未真正执行、任务永远收不掉。教训：验收证据必须可执行且引用真实存在的产物，否则 tracker 会对'什么在进行中'长期说谎。",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-2278ffae4/artifacts/plan-review-reorg.md",
+        "packages/core/src/agent-session-continuity.ts"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "教训已落在既有归属：可执行 gate 由 tasks.json 的 verification 契约强制，恢复语义的唯一真相在 agentmux-semantic-session.md。另起知识面会与二者竞争。",
+      "refs": []
+    }
+  }
+}

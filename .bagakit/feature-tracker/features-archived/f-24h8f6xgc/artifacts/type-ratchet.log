@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ✓ apps/desktop/test/type-tree-typecheck.test.ts (9 tests) 141ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  02:59:31
+   Duration  12.45s (transform 22ms, setup 0ms, collect 12.11s, tests 141ms, environment 0ms, prepare 43ms)
+

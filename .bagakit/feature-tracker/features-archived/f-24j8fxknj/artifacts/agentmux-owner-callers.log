@@ -1,0 +1,24 @@
+apps/desktop/src/shared/contracts.ts:891:  runtimeOwnershipWarnings?: string[]
+packages/core/src/client.ts:921:  runtimeIdentity(): AgentMuxRuntimeIdentity {
+packages/core/src/client.ts:925:      ...(this.kernel.runtimeOwnership ? { ownership: this.kernel.runtimeOwnership } : {}),
+packages/core/src/doctor.ts:122:    const identity = options.client.runtimeIdentity()
+packages/core/src/ctxmux-run-adapter.ts:592:  runtimeOwnership: 'owned' | 'unverified' | null = null
+packages/core/src/ctxmux-run-adapter.ts:638:    this.runtimeOwnership = null
+packages/core/src/ctxmux-run-adapter.ts:667:        this.runtimeOwnership = 'owned'
+packages/core/src/ctxmux-run-adapter.ts:672:          this.runtimeOwnership = 'unverified'
+packages/core/src/ctxmux-run-adapter.ts:731:          this.runtimeOwnership = 'owned'
+packages/core/src/ctxmux-run-adapter.ts:735:          this.runtimeOwnership = 'unverified'
+packages/core/src/ctxmux-run-adapter.ts:766:    this.runtimeOwnership = null
+apps/desktop/src/renderer/src/store.ts:233:  runtimeOwnershipWarnings: string[]
+apps/desktop/src/renderer/src/store.ts:1318:          return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [] }
+apps/desktop/src/renderer/src/store.ts:1646:  runtimeOwnershipWarnings: [],
+apps/desktop/src/renderer/src/store.ts:1879:        runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [],
+apps/desktop/src/main/runtime-controller.ts:436:      const identity = prepared.client.runtimeIdentity()
+apps/desktop/src/main/runtime-controller.ts:536:    const runtimeOwnershipWarnings = projections.flatMap(({ client, projection }) => (
+apps/desktop/src/main/runtime-controller.ts:537:      client.runtimeIdentity().ownership === 'unverified' ? [projection.hostId] : []
+apps/desktop/src/main/runtime-controller.ts:541:      ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {})
+apps/desktop/src/main/runtime-controller.ts:1100:          ownerInstanceId: client.runtimeIdentity().instanceId,
+apps/desktop/src/renderer/src/App.tsx:6:import { RuntimeOwnershipNotice } from './components/RuntimeOwnershipNotice'
+apps/desktop/src/renderer/src/App.tsx:268:        <RuntimeOwnershipNotice />
+apps/desktop/src/renderer/src/components/RuntimeOwnershipNotice.tsx:4:export function RuntimeOwnershipNotice() {
+apps/desktop/src/renderer/src/components/RuntimeOwnershipNotice.tsx:5:  const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)

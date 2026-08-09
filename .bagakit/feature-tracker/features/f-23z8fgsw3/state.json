@@ -1,0 +1,343 @@
+{
+  "version": 1,
+  "feat_id": "f-23z8fgsw3",
+  "title": "Orca-informed Provider Parity",
+  "slug": "provider-parity",
+  "goal": "把 AgentMux 内建 Provider 与真实 CLI 能力和 Orca 对照到诚实的生命周期合同：补齐现有 Provider 的 Hook、status、permission、native resume 与部署闭环，按证据选择性纳入高价值新 Provider，并明确记录不纳入的 launch-only 或宿主专属 Agent；所有 Provider 逻辑留在 packages/core，ctxmux 继续只拥有 Run/PTY/Replay 等运行时事实。",
+  "status": "ready",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 14
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-005",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/core exec vitest run test/providers/pi.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-23z8fgsw3/artifacts/gate-T-005-r14-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_unstarted",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> bad65ab82f2e581d18ad19dcb8a19463622bd3b088dc67c3c34da4dedb9ec268"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-005 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-008"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-008 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-007"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-007 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-007 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-009"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-009 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-009 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-016"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-016 => pass"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-011"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-011 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-011 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-010 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-012"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-012 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-012 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-013"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-013 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-013 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-014"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-014 => blocked"
+    },
+    {
+      "action": "task_blocker_set",
+      "detail": "T-014 => external_blocker"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-016 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-016 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-015"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-015 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-015 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-009"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-009 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => cancelled"
+    },
+    {
+      "action": "task_cancelled",
+      "detail": "T-010 => plan rework"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-012"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-012 => cancelled"
+    },
+    {
+      "action": "task_cancelled",
+      "detail": "T-012 => plan rework"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-013"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-013 => cancelled"
+    },
+    {
+      "action": "task_cancelled",
+      "detail": "T-013 => plan rework"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-014"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-014 => cancelled"
+    },
+    {
+      "action": "task_cancelled",
+      "detail": "T-014 => plan rework"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=4; supersedes_revision=3"
+    }
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-23z8fgsw3/goal.md",
+    "revision": "bad65ab82f2e581d18ad19dcb8a19463622bd3b088dc67c3c34da4dedb9ec268"
+  }
+}

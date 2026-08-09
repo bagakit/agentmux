@@ -1,0 +1,185 @@
+{
+  "version": 2,
+  "feat_id": "f-23f8f4eb2",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/agentmux-restart-persistence-plan.md",
+  "source_refs": [
+    "docs/reviews/agentmux-restart-persistence-plan.md",
+    "docs/plans/agentmux-semantic-session.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "packages/core/src/agent-session-store.ts",
+    "packages/core/src/runtime-paths.ts",
+    "apps/desktop/src/main/index.ts",
+    "apps/desktop/src/main/config-store.ts",
+    "apps/desktop/src/renderer/src/store.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-restart-persistence-plan.md",
+      "source_refs": [
+        "docs/reviews/agentmux-restart-persistence-plan.md",
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "packages/core/src/agent-session-store.ts",
+        "packages/core/src/runtime-paths.ts",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/main/config-store.ts",
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Agent Session 身份落到 durable 目录，重启后 resume token 还在",
+      "objective": "把 AgentMuxFileAgentSessionStore 的根目录从临时目录（macOS /private/tmp 按 3 天清理，Linux tmpdir reboot 即清）改到 Electron userData——config 与 browser profile 早已落在那里，唯独 session 身份放错了地方。agent-timelines 由同一 path 派生（dirname(this.path)），因此一并救回。恢复链已完整实现并通电（client.open → recoveryCandidates → store.initialize 的 recover → decideAgentSessionContinuity 的 run-missing 分支），本 task 只是给它喂一个还活着的 token，不写新的恢复逻辑。",
+      "outcome": "机器重启后重新打开 AgentMux，布局里那些 Agent tab 能自动 Resume 回来，而不是全部消失。",
+      "acceptance": [
+        "session 身份文件落在 Electron userData 下，且断言它不在 tmpdir/私有临时目录下——这是本 task 的全部根因，路径写回临时目录必须让测试变红。",
+        "agent-timelines 与 session 文件同根，一次改动两者都 durable；断言 timeline 路径也不在临时目录下。",
+        "ctxmux 的 socket 与 state 目录仍留在机器级 runtime 临时目录，不被一起搬走——它们是 ephemeral 的，搬走会改变 daemon adopt 路径。有断言守住这条边界。",
+        "store 往返可读回 nativeHandle：写入一个带 nativeHandle 的 session，用新实例从同一 durable 路径载入，token 完好。",
+        "不写 migration、不读旧的临时目录、不做双写兜底——旧位置的数据本来就会被系统删掉，为它写兼容层是给一个不存在的资产做保险。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/ packages/core/test/agent-session-store.test.ts",
+          "proves": "durable 路径、timeline 同根、daemon 临时目录边界、nativeHandle 往返各有断言；把路径改回临时目录会红。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-restart-persistence-plan.md",
+          "proves": "根因、已存在的恢复链、以及本质救不回来的边界有 SSOT 出处。"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-session-store.ts",
+        "packages/core/src/runtime-paths.ts",
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/main/config-store.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/ packages/core/test/agent-session-store.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "恢复不了的 session 要说清楚是哪一类，而不是静默消失",
+      "objective": "T-001 之后仍有本质恢复不了的情况：provider 的 resumeStrategy 是 none（traex/hermes/grok/gemini/cursor）、nativeHandle 从未被 provider 吐出过、或 Core 返回 conflict。现在这些 tab 会被 restorePersistedWorkbench 直接剔除，用户只看到东西没了，无从判断是自己记错了还是应用丢了数据。",
+      "outcome": "重启后恢复失败的 Agent 会留下一条说得出原因的记录，而不是凭空消失。",
+      "acceptance": [
+        "恢复失败按原因分类呈现：provider 本身不支持 resume、token 缺失、Core 报 conflict 三类要能区分开——合成一句『恢复失败』等于没说。",
+        "不伪装成功：绝不为恢复不了的 session 静默开一个新 run 冒充原来那个，那会让用户以为上下文还在。",
+        "既有的 recoveryFailures 通路已经把失败带回渲染层（store.ts 的 recoveryFailures），在它上面表达，不新建第二条失败通路。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "三类失败原因各有断言；把分类折叠成一句通用错误会红。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "packages/core/src/agent-session-continuity.ts",
+        "packages/core/src/agent-provider.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "布局字段补齐，硬关机不丢最近一次调整",
+      "objective": "布局本体（split 树、ratio、tab group、region 树）已持久化且 graceful 重启下是活的，但两处缺口独立于 session 侧根因：一批 UI 字段根本不在 persist 白名单里，任何重启都回默认；localStorage 异步刷盘且 renderer 没有任何 flush，硬关机会丢最近一批写入。",
+      "outcome": "重启后 dock 宽度、rail 开关、当前 workspace 与窗口几何都还是关机前的样子。",
+      "acceptance": [
+        "toolDockWidth、projectRailOpen、toolsOpen、workspaceTool、activeWorkspaceId 进入持久化白名单，重启后不回默认；activeWorkspaceId 当前被硬置为 config.workspaces[0]，这条必须一并去掉。",
+        "窗口几何（尺寸/位置/最大化）持久化，不再每次固定 1480×940。",
+        "硬关机场景有 flush：断言存在一条在页面卸载时把布局落盘的路径，缺了它最近一次拖动会丢。",
+        "持久化的仍只是『session 在哪张 view 哪个 region』，不把 session 内容、PID 或终端字节写进布局——那是 Core 的职责边界。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test",
+          "proves": "白名单字段往返、activeWorkspaceId 不被硬置、flush 路径存在各有断言。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/lib/workbench-persistence.ts",
+        "apps/desktop/src/main/index.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "交互合同的《Session 恢复》原先只列三类失败且其中两个 code 名（provider-unsupported / continuity-conflict）在 Core 中不存在；已按 agent-session-continuity.ts:21 的实际四值 union 更正，并补上界面对每一类欠的东西（按钮永远说得出下一步、Core 没给原因时如实说不知道、原因分支不设 default）。同一对错误 code 也出现在 continuity review doc 的表里，一并更正。",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "本 feature 三个 task 各暴露一次同形的假绿：测试自己把被断言的值喂进 fixture，于是『代码跑了』与『代码被删了』无法区分。T-003 是 layout restore 整个关掉仍全绿（fixture 种的是已合法的值）；T-002 是 store 丢掉 continuityReason 仍全绿（pane 测试把它直接种进 session fixture）。两次的修法相同：断言必须落在被测函数的返回值上，为此把 module-private 的投影函数导出。这是第六种源码扫描/断言假绿模式，值得记住的判据是——把这行代码删掉，测试会不会红？",
+      "refs": [
+        "docs/reviews/agentmux-restart-persistence-plan.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "两把尺子（变异测试 + 零调用者检查）已在 AGENTS.md:69-75 作为 done 的判据存在，本轮只是又一次应用它并抓到两个假绿，没有产生与现有原则竞争或需要新增的规则。",
+      "refs": []
+    }
+  }
+}

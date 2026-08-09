@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "feat_id": "f-24y8fdb3h",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/executor-yolo-2026-09-11.md",
+  "source_refs": [
+    "docs/reviews/executor-yolo-2026-09-11.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/executor-yolo-2026-09-11.md",
+      "source_refs": [
+        "docs/reviews/executor-yolo-2026-09-11.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Claude 与 Codex 一键 YOLO",
+      "objective": "设置中一键保存 Claude/Codex YOLO 参数，保留其他 Executor 配置并显示保存失败",
+      "outcome": "用户一次点击即可为 Claude/Codex 的后续启动设置 YOLO",
+      "acceptance": [
+        "全局及单 Executor 操作立即保存对应 Provider 参数，保留其他参数且清除已知冲突项",
+        "保存失败可见，运行中 Session 不被重启或更改",
+        "挂载测试、变异红绿与生产调用者检查有证据"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/executor-yolo.test.tsx",
+          "proves": "真实设置按钮保存与 Provider 参数兑现"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/executor-yolo-2026-09-11.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/executor-yolo.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Added one-click YOLO interaction and density constraints to design SSOT.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "Compared Orca explicit provider launch args and recorded Claude outside-read setting evidence.",
+      "refs": [
+        "docs/reviews/executor-yolo-2026-09-11.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No repository-wide principle change required.",
+      "refs": []
+    }
+  }
+}

@@ -1,0 +1,620 @@
+[WARN] Your node_modules are out of sync with your lockfile. The workspace structure has changed since last install
+$ node scripts/package-macos.mjs --install
+$ node scripts/audit-feature-history.mjs
+{
+  "schema": "agentmux.feature-history-audit.v1",
+  "source": "design-contract-anchors",
+  "repositoryRoot": "/private/tmp/agentmux-owner-release-ztetimme",
+  "anchors": [
+    {
+      "id": "terminal-open-destination",
+      "source": "apps/desktop/src/renderer/src/components/OpenDestinationBar.tsx",
+      "symbol": "OpenDestinationPopover",
+      "callers": [
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/components/SessionPane.tsx"
+      ],
+      "tests": [
+        "apps/desktop/test/terminal-open-destination.test.ts",
+        "apps/desktop/test/open-destination-bar.test.tsx"
+      ],
+      "sourcePresent": true,
+      "productionCallerCount": 3,
+      "productionCallerHits": [
+        "apps/desktop/src/renderer/src/components/SessionPane.tsx:331:      <OpenDestinationPopover",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx:78:  OpenDestinationPopover,",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx:1171:      <OpenDestinationPopover"
+      ],
+      "testHitCount": 6,
+      "testHits": [
+        "apps/desktop/test/open-destination-bar.test.tsx:8:  OpenDestinationPopover,",
+        "apps/desktop/test/open-destination-bar.test.tsx:261:describe('OpenDestinationPopover', () => {",
+        "apps/desktop/test/open-destination-bar.test.tsx:265:      <OpenDestinationPopover",
+        "apps/desktop/test/open-destination-bar.test.tsx:282:      <OpenDestinationPopover",
+        "apps/desktop/test/open-destination-bar.test.tsx:297:      <OpenDestinationPopover",
+        "apps/desktop/test/open-destination-bar.test.tsx:310:      <OpenDestinationPopover"
+      ],
+      "ok": true
+    },
+    {
+      "id": "scratch-topic-inheritance",
+      "source": "apps/desktop/src/renderer/src/lib/workbench-tabs.ts",
+      "symbol": "inheritedTopicIdForNewTab",
+      "callers": [
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "tests": [
+        "apps/desktop/test/topic-tab-inheritance.test.ts"
+      ],
+      "sourcePresent": true,
+      "productionCallerCount": 7,
+      "productionCallerHits": [
+        "apps/desktop/src/renderer/src/store.ts:143:  inheritedTopicIdForNewTab,",
+        "apps/desktop/src/renderer/src/store.ts:2521:    const topicId = inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)",
+        "apps/desktop/src/renderer/src/store.ts:3511:      : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)",
+        "apps/desktop/src/renderer/src/store.ts:3706:      : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)",
+        "apps/desktop/src/renderer/src/store.ts:3872:      : inheritedTopicIdForNewTab(workspace.id, get().layouts[workspace.id], state.tabs, tabGroupId)",
+        "apps/desktop/src/renderer/src/store.ts:3963:      : inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, tabGroupId)",
+        "apps/desktop/src/renderer/src/store.ts:4051:        const topicId = inheritedTopicIdForNewTab("
+      ],
+      "testHitCount": 2,
+      "testHits": [
+        "apps/desktop/test/topic-tab-inheritance.test.ts:12:  inheritedTopicIdForNewTab,",
+        "apps/desktop/test/topic-tab-inheritance.test.ts:207:    expect(inheritedTopicIdForNewTab('project', layout, { [boundProjectTab.id]: boundProjectTab }))"
+      ],
+      "ok": true
+    },
+    {
+      "id": "window-agent-status-and-resources",
+      "source": "apps/desktop/src/renderer/src/components/AgentStatusBar.tsx",
+      "symbol": "AgentStatusBar",
+      "callers": [
+        "apps/desktop/src/renderer/src/App.tsx"
+      ],
+      "tests": [
+        "apps/desktop/test/agent-status-bar.test.tsx",
+        "apps/desktop/test/agent-roster-surface.test.tsx"
+      ],
+      "sourcePresent": true,
+      "productionCallerCount": 1,
+      "productionCallerHits": [
+        "apps/desktop/src/renderer/src/App.tsx:271:      <AgentStatusBar />"
+      ],
+      "testHitCount": 21,
+      "testHits": [
+        "apps/desktop/test/agent-roster-surface.test.tsx:5:// 这条 surface 现在（经 AgentStatusBar）连着资源面板，而资源面板要读 api，api 在模块加载时",
+        "apps/desktop/test/agent-roster-surface.test.tsx:30:import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar.js'",
+        "apps/desktop/test/agent-roster-surface.test.tsx:105:    const markup = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-roster-surface.test.tsx:126:    expect(renderToStaticMarkup(createElement(AgentStatusBar))).toBe('')",
+        "apps/desktop/test/agent-status-bar.test.tsx:27:import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar.js'",
+        "apps/desktop/test/agent-status-bar.test.tsx:203:describe('AgentStatusBar', () => {",
+        "apps/desktop/test/agent-status-bar.test.tsx:206:    expect(renderToStaticMarkup(createElement(AgentStatusBar))).toBe('')",
+        "apps/desktop/test/agent-status-bar.test.tsx:211:    const markup = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:225:    const idle = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:230:    const active = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:246:    fireClick(AgentStatusBar() as ReactElement, 'needs-you')",
+        "apps/desktop/test/agent-status-bar.test.tsx:257:    fireClick(AgentStatusBar() as ReactElement, 'error')",
+        "apps/desktop/test/agent-status-bar.test.tsx:264:    const markup = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:273:    const single = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')",
+        "apps/desktop/test/agent-status-bar.test.tsx:275:    const singleError = findByAttention(AgentStatusBar() as ReactElement, 'error')",
+        "apps/desktop/test/agent-status-bar.test.tsx:284:    const many = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')",
+        "apps/desktop/test/agent-status-bar.test.tsx:286:    const manyError = findByAttention(AgentStatusBar() as ReactElement, 'error')",
+        "apps/desktop/test/agent-status-bar.test.tsx:296:    const markup = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:308:    const markup = renderToStaticMarkup(createElement(AgentStatusBar))",
+        "apps/desktop/test/agent-status-bar.test.tsx:313:    expect(renderToStaticMarkup(createElement(AgentStatusBar))).toContain('data-active=\"true\"')",
+        "apps/desktop/test/agent-status-bar.test.tsx:318:    expect(renderToStaticMarkup(createElement(AgentStatusBar))).toBe('')"
+      ],
+      "ok": true
+    },
+    {
+      "id": "workspace-path-rebind",
+      "source": "apps/desktop/src/renderer/src/lib/workspace-path-recovery.ts",
+      "symbol": "applyWorkspacePathRebind",
+      "callers": [
+        "apps/desktop/src/renderer/src/components/FileExplorer.tsx"
+      ],
+      "tests": [
+        "apps/desktop/test/workspace-navigation-recovery.test.tsx",
+        "apps/desktop/test/workspace-rebind.test.ts"
+      ],
+      "sourcePresent": true,
+      "productionCallerCount": 1,
+      "productionCallerHits": [
+        "apps/desktop/src/renderer/src/components/FileExplorer.tsx:694:      setConfig(applyWorkspacePathRebind(current, updated))"
+      ],
+      "testHitCount": 3,
+      "testHits": [
+        "apps/desktop/test/workspace-navigation-recovery.test.tsx:4:import { applyWorkspacePathRebind } from '../src/renderer/src/lib/workspace-path-recovery.js'",
+        "apps/desktop/test/workspace-navigation-recovery.test.tsx:21:    const next = applyWorkspacePathRebind(config, {",
+        "apps/desktop/test/workspace-navigation-recovery.test.tsx:37:    expect(source).toContain('applyWorkspacePathRebind(current, updated)')"
+      ],
+      "ok": true
+    },
+    {
+      "id": "package-source-identity",
+      "source": "apps/desktop/scripts/package-identity.mjs",
+      "symbol": "createPackageIdentity",
+      "callers": [
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs"
+      ],
+      "tests": [
+        "apps/desktop/test/package-identity.test.ts"
+      ],
+      "sourcePresent": true,
+      "productionCallerCount": 2,
+      "productionCallerHits": [
+        "apps/desktop/scripts/package-macos.mjs:26:  createPackageIdentity,",
+        "apps/desktop/scripts/package-macos.mjs:198:    `${JSON.stringify(createPackageIdentity({"
+      ],
+      "testHitCount": 4,
+      "testHits": [
+        "apps/desktop/test/package-identity.test.ts:8:  createPackageIdentity,",
+        "apps/desktop/test/package-identity.test.ts:30:    const identity = createPackageIdentity(expected)",
+        "apps/desktop/test/package-identity.test.ts:44:    expect(() => createPackageIdentity({ ...expected, sourceTree: '' })).toThrow(/sourceTree/)",
+        "apps/desktop/test/package-identity.test.ts:45:    const actual = createPackageIdentity(expected)"
+      ],
+      "ok": true
+    }
+  ],
+  "deletedHistory": [
+    {
+      "commit": "0ac0a0bc00235987c59f987b5f3396f2de2c28e5",
+      "subject": "Fix shell environment inheritance and reconnect compatible runtimes",
+      "path": "apps/desktop/src/main/login-shell-path.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "e04567b021eccfb78e01224e5064423b0930c4d7",
+      "subject": "fix(desktop): 完成通知的「在屏上吗」改由唯一实现回答（#563）",
+      "path": "apps/desktop/src/renderer/src/lib/visible-tab-groups.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "15b5f668e89d4d793384ba0c9554f178f50b6924",
+      "subject": "feat(desktop): 把平台探测与文件管理器文案收成一处",
+      "path": "apps/desktop/src/renderer/src/components/ProjectRailContextMenu.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "0092a395747b4433996a82cb7211818611fa048b",
+      "subject": "refactor(desktop): 删掉 SHORTCUT_WIRING 表，摩擦落在测试侧",
+      "path": "apps/desktop/src/renderer/src/lib/shortcut-wiring.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "38bbecc53193b05cdf4c7a2d8cbe8e7814f56513",
+      "subject": "fix(desktop): make the shortcut cheat-sheet reachable off mac",
+      "path": "apps/desktop/src/renderer/src/lib/quick-switch-shortcut.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "0404a57705c3b3a40c0c9ad759f220fc9faa424f",
+      "subject": "refactor(desktop): wire both link surfaces to the one-row picker and delete the menu",
+      "path": "apps/desktop/src/renderer/src/components/OpenDestinationMenu.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "cbcaf4793f5d726828bf8fbb774513e0e3392b80",
+      "subject": "feat(core): 出站消息收敛到单一出口并加 amux 署名信封",
+      "path": "packages/core/src/agent-launch-prompt.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "101c3c511cf9d7910c4e38a8fbf770d2cf9b3406",
+      "subject": "refactor(desktop): split the stylesheet by surface, and prove the split changed nothing",
+      "path": "apps/desktop/src/renderer/src/styles.css",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "7f9cf7aa3cdb889f17eafa648153a67a0614b619",
+      "subject": "fix: constrain bracketed paste to provider opt-in, enforce single semantic stop action without enter interrupt, and remove renderer pseudo cards",
+      "path": "apps/desktop/src/renderer/src/components/AgentInteractiveCard.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "19a855588493fecfa1534df8cdfeaf3c7bddee7e",
+      "subject": "feat(desktop): execute typed control transactions",
+      "path": "apps/desktop/src/main/composition-ipc-bridge.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "19a855588493fecfa1534df8cdfeaf3c7bddee7e",
+      "subject": "feat(desktop): execute typed control transactions",
+      "path": "apps/desktop/src/renderer/src/lib/composition-api.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "19a855588493fecfa1534df8cdfeaf3c7bddee7e",
+      "subject": "feat(desktop): execute typed control transactions",
+      "path": "apps/desktop/src/renderer/src/lib/composition.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "821a136265539b2e3872a517b0562159f217cfb0",
+      "subject": "feat(core): replace composition with typed control host",
+      "path": "packages/core/src/composition-control.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "821a136265539b2e3872a517b0562159f217cfb0",
+      "subject": "feat(core): replace composition with typed control host",
+      "path": "packages/core/src/composition.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "d365560dea9fa2c2ca193cd5d16b437e91f5baf1",
+      "subject": "build(ctxmux): bind exact Protocol 13 runtime artifact",
+      "path": "packages/core/src/ctxmux-sdk-private.d.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "614a7d772038146d840b7a1e77bb2a29f6162f51",
+      "subject": "feat(desktop): make Composer Agent-session owned",
+      "path": "apps/desktop/src/renderer/src/components/RichComposer.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "6bfc2ad2b66bdc3235e7565a14dd37a94c4e14ea",
+      "subject": "feat(desktop): no-project scratch, composition CLI, latency fix, single-surface launcher",
+      "path": "apps/desktop/src/renderer/src/components/LaunchAgent.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "6bfc2ad2b66bdc3235e7565a14dd37a94c4e14ea",
+      "subject": "feat(desktop): no-project scratch, composition CLI, latency fix, single-surface launcher",
+      "path": "apps/desktop/src/renderer/src/lib/view-focus.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "6bfc2ad2b66bdc3235e7565a14dd37a94c4e14ea",
+      "subject": "feat(desktop): no-project scratch, composition CLI, latency fix, single-surface launcher",
+      "path": "packages/core/src/desktop-focus-control.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "8322cbf205d80709f79dc7e7f40982f8b871adfc",
+      "subject": "feat(core): restore codex over ctxmux",
+      "path": "apps/desktop/src/main/agent-session-store.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/agentmuxd.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-client.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-connector.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-diagnostics.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-endpoint.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-protocol.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-server.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-session-journal.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/daemon-session-manager.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/local-daemon.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/posix-process-identity.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/posix-pty-process-groups.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/remote-artifact-builder.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/ssh-daemon-connector.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "523e144bb7c1cc7e5c501e57e5561412b7b898fa",
+      "subject": "feat(core): cut shell runs over to ctxmux",
+      "path": "packages/core/src/ssh-remote-daemon.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "a18c66377145aed08a01a6a6b8af5fda2d71e548",
+      "subject": "refactor(core): separate agent sessions from physical runs",
+      "path": "packages/core/src/semantic-session-registry.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "2ec6d6abc757094456503f957d491fa26bccf28d",
+      "subject": "feat(runtime): cut desktop over to agentmuxd",
+      "path": "packages/core/src/tmux-client.ts",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "5aa99064f4e82d64a6da61a33ed057242d673f9c",
+      "subject": "feat(agentmux): deliver the agent-native workbench foundation",
+      "path": "apps/desktop/src/renderer/src/components/AgentSession.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    },
+    {
+      "commit": "5aa99064f4e82d64a6da61a33ed057242d673f9c",
+      "subject": "feat(agentmux): deliver the agent-native workbench foundation",
+      "path": "apps/desktop/src/renderer/src/components/CreateWorktreeDialog.tsx",
+      "reviewRequired": false,
+      "anchorId": null,
+      "replacementPresent": null
+    }
+  ],
+  "blockingDeletions": [],
+  "ok": true
+}
+$ node scripts/build.mjs
+$ pnpm build:workspace-move-helper
+$ node scripts/build-workspace-move-helper.mjs
+$ electron-vite build
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 59 modules transformed.
+rendering chunks...
+out/main/chunks/browser-profile-import-source-BppA5hxh.js   24.05 kB
+out/main/index.js                                          388.97 kB
+✓ built in 591ms
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 3 modules transformed.
+rendering chunks...
+out/preload/index.cjs  11.29 kB
+✓ built in 30ms
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 3378 modules transformed.
+rendering chunks...
+../../out/renderer/index.html                                   0.74 kB
+../../out/renderer/assets/icon-128-DIfXDxkG.png                15.99 kB
+../../out/renderer/assets/codicon-Brq4_Ui5.ttf                140.96 kB
+../../out/renderer/assets/editor.worker-BwBjdhCz.js           584.83 kB
+../../out/renderer/assets/json.worker-Cq5111FN.js             883.99 kB
+../../out/renderer/assets/html.worker-1zZHDAzE.js           1,285.52 kB
+../../out/renderer/assets/css.worker-D_2p-Q7z.js            1,909.93 kB
+../../out/renderer/assets/ts.worker-B_w3UDAD.js            13,307.94 kB
+../../out/renderer/assets/EditorPane-BwxubRqT.css             224.58 kB
+../../out/renderer/assets/index-BpcKTAHM.css                  276.58 kB
+../../out/renderer/assets/azcli-BEAhqcuE.js                     1.30 kB
+../../out/renderer/assets/javascript-CIQJpuj9.js                1.34 kB
+../../out/renderer/assets/ini-BcQysCTb.js                       1.67 kB
+../../out/renderer/assets/csp-D_3BK2Wp.js                       1.70 kB
+../../out/renderer/assets/workers-vepJxop5.js                   2.12 kB
+../../out/renderer/assets/scheme-D7PxodDG.js                    2.36 kB
+../../out/renderer/assets/bat-Bqkp9Cfu.js                       2.66 kB
+../../out/renderer/assets/flow9-ZSTChSMd.js                     2.76 kB
+../../out/renderer/assets/xml-C51UerJ8.js                       2.79 kB
+../../out/renderer/assets/sb-Chfc_wZF.js                        2.81 kB
+../../out/renderer/assets/pla-DEV89yYj.js                       2.87 kB
+../../out/renderer/assets/dockerfile--oxj0cAH.js                3.02 kB
+../../out/renderer/assets/pascaligo-VA_LQ1oU.js                 3.25 kB
+../../out/renderer/assets/lua-hNsuGJkO.js                       3.43 kB
+../../out/renderer/assets/bicep-DIlfshcM.js                     3.44 kB
+../../out/renderer/assets/objective-c-B1L1C5EC.js               3.48 kB
+../../out/renderer/assets/cameligo-CLaaYNMV.js                  3.51 kB
+../../out/renderer/assets/graphql-BeiGgjIU.js                   3.77 kB
+../../out/renderer/assets/lexon-C1U0m2n9.js                     3.81 kB
+../../out/renderer/assets/typespec-R77Ln7Jb.js                  3.90 kB
+../../out/renderer/assets/sparql-DxuVdnRl.js                    3.94 kB
+../../out/renderer/assets/mips-CJm71dS3.js                      4.14 kB
+../../out/renderer/assets/m3-6ko6q9-_.js                        4.15 kB
+../../out/renderer/assets/sophia-D7pU0Y1d.js                    4.27 kB
+../../out/renderer/assets/shell-vZEubQ82.js                     4.48 kB
+../../out/renderer/assets/go-brnMpFrj.js                        4.49 kB
+../../out/renderer/assets/fsharp-D2uoxuLH.js                    4.51 kB
+../../out/renderer/assets/pascal-DMQyD4Xk.js                    4.71 kB
+../../out/renderer/assets/r-CtqYUQ6l.js                         4.80 kB
+../../out/renderer/assets/less-B7Qaxw-O.js                      5.00 kB
+../../out/renderer/assets/tcl-Bb4GCwBr.js                       5.05 kB
+../../out/renderer/assets/liquid-BN6ZO_IE.js                    5.11 kB
+../../out/renderer/assets/qsharp-BWK6YLKm.js                    5.14 kB
+../../out/renderer/assets/cypher-D0--_GAN.js                    5.15 kB
+../../out/renderer/assets/java-Dt3iMn2o.js                      5.16 kB
+../../out/renderer/assets/kotlin-Ddo1SjA5.js                    5.20 kB
+../../out/renderer/assets/hcl-CrX1Es2W.js                       5.21 kB
+../../out/renderer/assets/redis-O7gSt3oh.js                     5.25 kB
+../../out/renderer/assets/restructuredtext-B-KQCVu_.js          5.33 kB
+../../out/renderer/assets/powershell-BXiKvz7Z.js                5.39 kB
+../../out/renderer/assets/coffee-CzJ5oEdj.js                    5.51 kB
+../../out/renderer/assets/mdx-C0_2_Wse.js                       5.80 kB
+../../out/renderer/assets/yaml-C1nuoobA.js                      5.85 kB
+../../out/renderer/assets/css-i3rI3_64.js                       6.10 kB
+../../out/renderer/assets/cssMode-BqScYb2y.js                   6.22 kB
+../../out/renderer/assets/rust-B1c0VCeq.js                      6.27 kB
+../../out/renderer/assets/apex-DVGUZ64i.js                      6.39 kB
+../../out/renderer/assets/python-m22AGhu0.js                    6.47 kB
+../../out/renderer/assets/dart-vLMHv35g.js                      6.48 kB
+../../out/renderer/assets/markdown-B0YTnTxW.js                  6.65 kB
+../../out/renderer/assets/swift-CbF6f74o.js                     6.92 kB
+../../out/renderer/assets/msdax-BBeIktCY.js                     6.95 kB
+../../out/renderer/assets/htmlMode-D-hrObid.js                  6.96 kB
+../../out/renderer/assets/csharp-BJeIuvde.js                    6.98 kB
+../../out/renderer/assets/html-Fb2YRfzJ.js                      7.59 kB
+../../out/renderer/assets/typescript-rgwrui9A.js                7.88 kB
+../../out/renderer/assets/ecl-CeuUgzaZ.js                       7.94 kB
+../../out/renderer/assets/cpp-CcN6f0ik.js                       8.22 kB
+../../out/renderer/assets/pug-BxCXwerb.js                       8.26 kB
+../../out/renderer/assets/vb-Bm6ESA0Q.js                        8.33 kB
+../../out/renderer/assets/scss-B42qMyAu.js                      9.07 kB
+../../out/renderer/assets/wgsl-_KPae5vw.js                      9.78 kB
+../../out/renderer/assets/st-C-b0Dh53.js                       10.15 kB
+../../out/renderer/assets/twig-DvgEGWAV.js                     10.26 kB
+../../out/renderer/assets/handlebars-BPu30JCO.js               10.37 kB
+../../out/renderer/assets/julia-Cm3ItYL_.js                    10.54 kB
+../../out/renderer/assets/scala-DbVzH-3O.js                    10.70 kB
+../../out/renderer/assets/systemverilog-BOC0OOdC.js            11.63 kB
+../../out/renderer/assets/php-Bkx1qpkQ.js                      12.48 kB
+../../out/renderer/assets/protobuf-CndvAUGu.js                 12.68 kB
+../../out/renderer/assets/perl-DC0Z0tlO.js                     12.82 kB
+../../out/renderer/assets/razor-CCTKnJRb.js                    13.30 kB
+../../out/renderer/assets/clojure-fcgFaMHx.js                  13.94 kB
+../../out/renderer/assets/ruby-DCd4DmAr.js                     15.31 kB
+../../out/renderer/assets/sql-BAGepFCR.js                      15.56 kB
+../../out/renderer/assets/mysql-BWiizXSn.js                    16.16 kB
+../../out/renderer/assets/redshift-CvYMMYZY.js                 16.33 kB
+../../out/renderer/assets/pgsql-DaSGFTLp.js                    18.25 kB
+../../out/renderer/assets/elixir-eLfY1jWH.js                   18.74 kB
+../../out/renderer/assets/postiats-CVVurEnu.js                 19.30 kB
+../../out/renderer/assets/powerquery-BQ_t1ZiQ.js               21.65 kB
+../../out/renderer/assets/abap-D5KwWAsZ.js                     22.97 kB
+../../out/renderer/assets/solidity-yHOxYChb.js                 26.03 kB
+../../out/renderer/assets/jsonMode-CFR4Qlvm.js                 29.19 kB
+../../out/renderer/assets/tsMode-BEa_xBiU.js                   40.39 kB
+../../out/renderer/assets/freemarker2-CLGxFHZM.js              42.13 kB
+../../out/renderer/assets/lspLanguageFeatures-CJVVottG.js      61.70 kB
+../../out/renderer/assets/index-DpHRjjOA.js                 3,085.82 kB
+../../out/renderer/assets/EditorPane-CEQkyKcO.js            7,743.80 kB
+✓ built in 19.14s
+packaged_workspace_move_helper=passed
+mounted_desktop_interactions=passed
+file:///private/tmp/agentmux-owner-release-ztetimme/apps/desktop/scripts/package-macos.mjs:84
+      else reject(new Error(`${command} exited with ${signal ?? code}${stderr ? `: ${stderr.trim()}` : ''}`))
+                  ^
+
+Error: ditto exited with 1: ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Frameworks/AgentMux Helper (GPU).app/Contents/PkgInfo: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/Info.plist: No space left on device
+ditto: /Users/bytedance/Applications/.AgentMux.install-55790.app/Contents/PkgInfo: No space left on device
+    at ChildProcess.<anonymous> (file:///private/tmp/agentmux-owner-release-ztetimme/apps/desktop/scripts/package-macos.mjs:84:19)
+    at Object.onceWrapper (node:events:623:26)
+    at ChildProcess.emit (node:events:508:28)
+    at ChildProcess._handle.onexit (node:internal/child_process:294:12)
+
+Node.js v24.14.1
+/private/tmp/agentmux-owner-release-ztetimme/apps/desktop:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @agentmux/desktop@0.1.0 package:mac:install: `node scripts/package-macos.mjs --install`
+Exit status 1

@@ -1,0 +1,194 @@
+{
+  "version": 2,
+  "feat_id": "f-22m8fkpar",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/design/orca-interaction-review.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/orca-interaction-review.md",
+    "docs/testing/strategy.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        "docs/testing/strategy.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "交付 revision-aware 原子保存与外部冲突",
+      "objective": "在 Desktop Main 的唯一文件 Owner 中建立内容 revision、原子替换、冲突判定和文件观察，并让 Renderer 以单文件保存串行化和显式编辑状态消费这些事实。",
+      "outcome": "保存期间继续编辑、Agent 或外部工具改盘、写入失败和文件删除都得到确定结果；用户草稿不被静默覆盖，原文件不被失败写入截断。",
+      "acceptance": [
+        "文件读取返回内容和不透明 revision；保存携带 expected revision，并只返回 written、conflict 或 error，不保留旧无 revision 写入签名、alias、migration 或 fallback。",
+        "Desktop Main 在 Workspace Root 约束内完成完整临时写入和同步后原子替换，并保留必要文件 mode；注入临时写入或替换失败时原文件字节不变。",
+        "Renderer 按文件串行保存并绑定提交 generation；保存 B 期间继续输入 C 时，B 可以落盘，但 buffer 保持 C 且仍为 dirty。",
+        "Main 的单文件观察只发布权威失效事实，内容由 Renderer 重新读取；clean 文档自动采用新 revision，dirty 文档保留草稿并进入 conflict，读取失败不能伪装成删除。",
+        "冲突界面至少提供 Reload 与显式 Overwrite；Overwrite 仍使用最新 observed revision 再提交，磁盘再次变化时继续冲突，不能绕开 optimistic check。",
+        "Local 竖切有 owner-level unit、故障注入和 mounted Desktop E2E；当前不可达的 SSH 文件能力明确不计入产品 parity。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "Main 文件合同、Renderer 保存 generation、冲突与外部失效行为有自动回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/orca-interaction-review.md",
+          "proves": "Workspace 文件 Owner、revision、原子保存和冲突语义保持单一正式设计真相。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "交付跨目录 Move 与打开文档路径事务",
+      "objective": "在第一竖切稳定后，把跨目录 no-clobber move 接入文件树，并用一个预验证的路径事务同步已打开 Tab、Document、Dirty、Selection、Expanded 与 Last Active。",
+      "outcome": "移动文件或目录后，磁盘与所有打开视图原位跟随；碰撞、非法自包含或磁盘失败不会留下半更新 UI。",
+      "acceptance": [
+        "Explorer 只提交 move intent；Desktop Main 在 Workspace Root 内执行 no-clobber move，并拒绝目标碰撞、目录移入自身和跨 Workspace/Host move。",
+        "Renderer 在落盘前预计算并验证 segment-aware 路径映射，等待受影响文件保存静止；磁盘成功后通过一个纯 reducer 一次性 rekey 所有文件工作台状态。",
+        "目录移动只影响真实子路径，移动 src/app 不得改写 src/application.ts；source 和 destination parent 精确失效，不刷新无关子树。",
+        "目标碰撞、非法路径和磁盘失败时磁盘与 Renderer 状态均不变化；无法确认最终落盘位置时明确报错并重新读取 owner 事实，不能猜测回滚成功。",
+        "最小交互覆盖鼠标拖放和键盘/菜单可达操作，复用现有 @dnd-kit、path helper 和 mutation reducer，不增加新依赖或第二 mutation store。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "Move owner、segment-aware rekey、碰撞和失败不变式通过自动回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/file-workbench-state.ts",
+          "proves": "打开文件状态通过单一 reducer 收敛，不由各组件复制路径 mutation。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/orca-interaction-review.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "title": "完成文件工作流整体审查与真实验收",
+      "objective": "在精确当前候选上重跑完整检查、mounted Desktop 行为验收和独立 owner 审查，并清理被新合同取代的旧路径与过期文档。",
+      "outcome": "文件树与 Editor 从用户动作到磁盘事实形成可维护、无双写、无兼容层的完整工作流，且正式文档不保留实现来源或过期状态。",
+      "acceptance": [
+        "真实 Desktop 覆盖打开、编辑、保存中继续输入、外部改盘、冲突 Reload/Overwrite、删除、跨目录 move、碰撞和失败反馈。",
+        "最终检查确认 Renderer 不直接读写磁盘、不持有 watcher truth，packages/core 不出现 Workspace File Service，Main 没有旧无 revision 写入入口。",
+        "独立审查从正确性、owner 分层、竞态、鲁棒性、复杂度、自解释性和工艺感给出当前 candidate 结论；blocking finding 必须修复后重验。",
+        "正式 SSOT 只保留当前产品行为、Owner、oracle 与非目标，不写外部来源、日期流水或已完成任务状态。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "最终候选通过类型、测试和构建总 Gate。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/testing/strategy.md",
+          "proves": "mounted Desktop 与 owner-level 证据按统一策略汇合。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "Workspace file ownership, save/conflict, move/path-transaction, and mounted Desktop contracts are current on the exact final candidate.",
+      "refs": [
+        "docs/design/orca-interaction-review.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "The causal corrections are embodied in owner-level tests and current contracts; a separate learning artifact would duplicate truth.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No new cross-feature principle emerged; existing project ownership and testing contracts already own the durable rules.",
+      "refs": []
+    }
+  }
+}

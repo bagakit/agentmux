@@ -1,0 +1,253 @@
+{
+  "version": 2,
+  "feat_id": "f-23q8faabh",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+  "source_refs": [
+    "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "AGENTS.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "AGENTS.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "屏幕验证失败时服务窗降级，不挡健康 Agent 的提交",
+      "objective": "在 render-then-submit 路径上，当 payload receipt 已确认且 Run 仍存活，但屏幕验证因 OUTPUT_GAP / render timeout 失败时，照常发出提交键，并发布不可静默的服务窗降级事实；Run 退出或 payload 未接受仍 fail-closed。",
+      "outcome": "长会话或 replay 截断不再因我们的验证流程挡住 \\r；用户能看见「本次交付未经完整屏幕确认」的告示。",
+      "acceptance": [
+        "构造 truncated replay / OUTPUT_GAP fixture：payload 已 receipt 后 submit 仍完成，并发布带原因与恢复指引的降级事件或 Session 事实。",
+        "Run 已退出或 payload 未接受时仍 fail-closed，不得被降级路径放行。",
+        "故意恢复为验证失败即抛错阻断提交时，对应测试变红；降级告示被删除时测试变红（不许静默）。",
+        "新增跨模块符号在定义文件之外有生产调用者；纯内部 helper 不伪称为公开能力。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts test/agent-session-continuity.test.ts",
+          "proves": "屏幕观察与提交连续性在 gap/降级语义下可回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "packages/core/src/client.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts test/agent-session-continuity.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "有界增量屏幕证据，提交观察不再从 byte 0 全量重放",
+      "objective": "为活跃 AgentSession 维护长命增量屏幕证据，或从最近完整 TUI 帧起点观察；resize/重连/gap 时失效重建。不在 AgentMux 缓存第二份 Run 字节史。",
+      "outcome": "submit / readiness 观察路径相对会话历史长度有界；临时大 scrollback xterm 尖峰消失。",
+      "acceptance": [
+        "同一 Session 连续两次屏幕观察不重复从 byte 0 重放已消费前缀（可用 cursor / 帧起点证明）。",
+        "历史体积放大时，验证路径延迟或重放字节量有明确上界断言（相对全量基线）。",
+        "失效后重建仍能正确判定 composer/readiness；变异去掉有界起点时测试变红。",
+        "零调用者：增量屏幕 owner 接到 client 提交/readiness 生产路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts test/terminal-interaction-latency.test.ts 2>/dev/null || pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts && pnpm --filter @agentmux/desktop exec vitest run --maxWorkers=1 test/terminal-interaction-latency.test.ts",
+          "proves": "有界屏幕证据与交互延迟回归可执行。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "packages/core/src/agent-terminal-screen.ts",
+        "packages/core/src/client.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts test/terminal-interaction-latency.test.ts 2>/dev/null || pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-terminal-screen.test.ts && pnpm --filter @agentmux/desktop exec vitest run --maxWorkers=1 test/terminal-interaction-latency.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "削减 prompt 路径上 session store / timeline 写放大",
+      "objective": "timeline 改为 per-session JSONL append（加载容忍截断尾行，可 compaction）；高频 receipt 类字段合并或延迟持久化，CAS JSON 保留低频权威字段。",
+      "outcome": "一次两阶段提交的整文件 rewrite 次数下降；多 Agent 并发减少锁排队。",
+      "acceptance": [
+        "截断 JSONL 尾行仍可加载；compaction 后语义不变。",
+        "一次成功的 render-then-submit 路径对 store/timeline 的全量 rewrite 次数低于改前基线（测试可证伪）。",
+        "崩溃恢复：允许丢失的高频字段可从 receipt / ctxmux 事实重推；故意破坏恢复路径时测试变红。",
+        "不引入第二套 SQLite；不在 Desktop 旁路写 Core store。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-session-store.test.ts test/agent-session-continuity.test.ts",
+          "proves": "store/timeline 持久化与连续性回归通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "packages/core/src/agent-session-store.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/agent-session-store.test.ts test/agent-session-continuity.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-002",
+        "T-003"
+      ],
+      "title": "按 Owner 拆出 prompt-submission 与 screen-evidence 内部模块",
+      "objective": "公开 AgentMuxClient API 不动；把两阶段提交状态机与屏幕证据 owner 抽成内部模块，client 退化为 facade。",
+      "outcome": "后续 conformance 与帧起点改动有独立落地文件；client.ts 行数与关注点下降。",
+      "acceptance": [
+        "prompt-submission 与 screen-evidence 各有独立源文件；生产路径经 facade 调用而非复制逻辑。",
+        "pnpm --filter @agentmux/core test:fast 或等价 vitest 子集全绿。",
+        "搬移不改变对外错误码与事件形状；行为漂移由现有连续性/屏幕测试捕获。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1",
+          "proves": "Core 包在拆分后全量单测通过。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "packages/core/src/client.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_blocker": {
+        "class": "external_blocker",
+        "reason": "验证命令是 core 全量 vitest，但 HEAD 上 package-consumer 与 reliability-stress 两个 integration 测试在本机已红（与本 Feature 无关，stash 本 Feature 改动后仍红，证据见 gate 日志与会话记录）；未经用户批准不得改 verification 命令，为避免在无法收绿的门上落一次大重构，T-004 拆分未动工。恢复条件：修复两个 integration 红测或用户批准调整 T-004 验证命令后再做拆分。"
+      }
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-004"
+      ],
+      "title": "Codex recorded-PTY prompt-render conformance 骨架",
+      "objective": "用 recorded PTY fixture 驱动 Provider 无关断言：readiness、promptRender 匹配、提交验证降级合同；先以 Codex 全绿，变异改坏 matcher 必须变红。",
+      "outcome": "「catalog 声明 = 测试合同」有第一条可执行纵切；为 Claude 第二接入留同一 harness 入口。",
+      "acceptance": [
+        "harness 对 Codex fixture 全绿；故意改坏 Codex promptRender matcher 时 conformance 变红。",
+        "断言来自 fixture 扫描/匹配结果且 expect(found).toBeGreaterThan(0)，不维护易漂移手写清单。",
+        "Claude 尚未接入时不得伪造其 readiness 通过；harness 入口存在且被 Codex 路径调用（零调用者尺）。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/provider-conformance",
+          "proves": "Provider conformance harness 可执行且 Codex 路径受测。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/core-prompt-path-screen-evidence-plan.md",
+        "packages/core/src/agent-provider.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run --maxWorkers=1 test/provider-conformance",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "本 feature 全部是提交前验证的内部机制（屏幕证据窗口、prompt-submission/screen-evidence 模块边界、Codex render 合同），公共行为未变，owning SSOT docs/design/agentmux-surface-density.md 与 docs/design/agentmux-desktop-interaction.md 的相关条目已与代码一致，无需改写。",
+      "refs": [
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "两条可复用教训：1) 从声明本身合成的 fixture 等于把自证搬进 fixture——T-005 首版 transcript 用 provider.terminalPromptRender 合成，改坏 marker 与对调帧边界两个变异都在 6/6 全绿下存活，锚点必须是独立于声明的固定录制；2) grep 守卫（readFileSync+toContain）对任何控制流变异完全失明，方法首行一句早退即可让实现静默变 no-op 而 205 条全绿。均已落地为守卫测试而非文档。",
+      "refs": [
+        "packages/core/test/provider-render-conformance.test.ts"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "两条教训都属既有原则「测试要能被变异打红」的具体形态，已由本轮新增的守卫测试自身承载，无需在 Principle Layer 另立竞争规则。",
+      "refs": []
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-24c8fqsgc",
+  "title": "窗口外壳：自有标题栏与系统按钮",
+  "slug": "window-chrome",
+  "goal": "启动后左上角的自有图标与 macOS 交通灯按钮叠在一起（用户截图确认）。用户同时问了一个设计问题：这些系统按钮能不能换成我们自己的。目标先修重叠这个明确缺陷，再据用户拍板决定是否接管窗口按钮（titleBarStyle: hidden + 自绘控件，参考实现都这么做）——后者会把窗口的最小化/最大化/关闭语义从系统手里接过来，包括全屏、双击标题栏缩放、辅助功能，属于需要显式决定的范围。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}

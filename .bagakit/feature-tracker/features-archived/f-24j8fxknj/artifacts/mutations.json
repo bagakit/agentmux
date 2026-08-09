@@ -1,0 +1,32 @@
+[
+  {
+    "mutation": "receipt-blocks-compatible-runtime",
+    "source": "packages/core/src/ctxmux-run-adapter.ts",
+    "test": "packages/core/test/ctxmux-owner-compatibility.test.ts",
+    "killed": true
+  },
+  {
+    "mutation": "compatibility-check-missing",
+    "source": "packages/core/src/ctxmux-run-adapter.ts",
+    "test": "packages/core/test/ctxmux-owner-compatibility.test.ts",
+    "killed": true
+  },
+  {
+    "mutation": "ownership-not-projected",
+    "source": "apps/desktop/src/main/runtime-controller.ts",
+    "test": "apps/desktop/test/runtime-controller.test.ts",
+    "killed": true
+  },
+  {
+    "mutation": "notice-lost-at-startup",
+    "source": "apps/desktop/src/renderer/src/store.ts",
+    "test": "apps/desktop/test/runtime-ownership-notice.test.tsx",
+    "killed": true
+  },
+  {
+    "mutation": "notice-hidden",
+    "source": "apps/desktop/src/renderer/src/components/RuntimeOwnershipNotice.tsx",
+    "test": "apps/desktop/test/runtime-ownership-notice.test.tsx",
+    "killed": true
+  }
+]

@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ✓ apps/desktop/test/runtime-controller.test.ts (51 tests) 105ms
+ ✓ apps/desktop/test/runtime-ownership-notice.test.tsx (1 test) 14ms
+ ✓ packages/core/test/ctxmux-owner-compatibility.test.ts (8 tests) 163ms
+
+ Test Files  3 passed (3)
+      Tests  60 passed (60)
+   Start at  14:39:35
+   Duration  1.16s (transform 670ms, setup 0ms, collect 1.10s, tests 282ms, environment 332ms, prepare 311ms)
+

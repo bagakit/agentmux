@@ -1,0 +1,32 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ❯ apps/desktop/test/login-shell-environment.test.ts (6 tests | 1 failed) 108ms
+   ✓ login shell exported environment > preserves empty, multiline, equals and ANSI bytes without parsing banner text 1ms
+   ✓ login shell exported environment > loads real /bin/zsh profile exports into a child without exporting shell-local variables 60ms
+   ✓ login shell exported environment > loads real /bin/bash profile exports into a child without exporting shell-local variables 43ms
+   × login shell exported environment > reports partial success after interactive failure and preserves inherited PATH entries 4ms
+     → the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+   ✓ login shell exported environment > preserves all inherited values on total failure and returns a non-secret warning 0ms
+   ✓ login shell exported environment > does not launch a shell on unsupported platforms 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/desktop/test/login-shell-environment.test.ts > login shell exported environment > reports partial success after interactive failure and preserves inherited PATH entries
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ apps/desktop/test/login-shell-environment.test.ts:61:50
+     59|     expect(env).toMatchObject({ PATH: '/opt/bin:/bin:/client/bin', KEE…
+     60|     expect(env.PWD).toBeUndefined()
+     61|     expect(loginShellEnvironmentWarning(result)).toContain('.zshrc cou…
+       |                                                  ^
+     62|     expect(runner).toHaveBeenCalledTimes(2)
+     63|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  02:55:46
+   Duration  486ms (transform 25ms, setup 0ms, collect 27ms, tests 108ms, environment 0ms, prepare 47ms)
+

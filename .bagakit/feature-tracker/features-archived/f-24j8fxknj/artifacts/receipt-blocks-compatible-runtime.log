@@ -1,0 +1,45 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ❯ packages/core/test/ctxmux-owner-compatibility.test.ts (8 tests | 3 failed) 139ms
+   × Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a missing receipt without rewriting or stopping it 27ms
+     → promise rejected "AgentMuxError: The responding CtxMux peer… { …(2) }" instead of resolving
+   × Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a malformed receipt without rewriting or stopping it 14ms
+     → promise rejected "AgentMuxError: The responding CtxMux peer… { …(2) }" instead of resolving
+   × Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a mismatch receipt without rewriting or stopping it 14ms
+     → promise rejected "AgentMuxError: The responding CtxMux peer… { …(2) }" instead of resolving
+   ✓ Runtime compatibility independent of launch provenance > rejects incompatible public Runtime identity without spawning a replacement: {"protocolGeneration":15} 16ms
+   ✓ Runtime compatibility independent of launch provenance > rejects incompatible public Runtime identity without spawning a replacement: {"buildId":"ctxmuxd/incompatible"} 13ms
+   ✓ Runtime compatibility independent of launch provenance > rejects incompatible public Runtime identity without spawning a replacement: {"capabilities":{}} 14ms
+   ✓ Runtime compatibility independent of launch provenance > rejects incompatible public Runtime identity without spawning a replacement: {"runtimeIdPersistence":"ephemeral"} 13ms
+   ✓ Runtime compatibility independent of launch provenance > keeps a valid persistent launch record across app restarts and install relocation 26ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/core/test/ctxmux-owner-compatibility.test.ts > Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a missing receipt without rewriting or stopping it
+ FAIL  packages/core/test/ctxmux-owner-compatibility.test.ts > Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a malformed receipt without rewriting or stopping it
+ FAIL  packages/core/test/ctxmux-owner-compatibility.test.ts > Runtime compatibility independent of launch provenance > connects to the same compatible Runtime with a mismatch receipt without rewriting or stopping it
+AssertionError: promise rejected "AgentMuxError: The responding CtxMux peer… { …(2) }" instead of resolving
+ ❯ packages/core/test/ctxmux-owner-compatibility.test.ts:45:37
+     43|     Object.assign(client, { kernel: adapter })
+     44|     try {
+     45|       await expect(adapter.connect()).resolves.toBeUndefined()
+       |                                     ^
+     46|       expect(await adapter.list()).toEqual([])
+     47|       expect(client.runtimeIdentity()).toMatchObject({ instanceId: '11…
+
+Caused by: AgentMuxError: The responding CtxMux peer is not the artifact-owned AgentMux daemon: ENOENT: no such file or directory, stat '/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/amx-ownership-ymbpOC/owner.json'
+ ❯ verifyOwnerReceipt packages/core/src/ctxmux-run-adapter.ts:534:11
+ ❯ CtxmuxRunAdapter.connect packages/core/src/ctxmux-run-adapter.ts:666:9
+ ❯ packages/core/test/ctxmux-owner-compatibility.test.ts:45:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN', detail: undefined }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 5 passed (8)
+   Start at  14:43:44
+   Duration  890ms (transform 229ms, setup 0ms, collect 391ms, tests 139ms, environment 0ms, prepare 92ms)
+

@@ -1,0 +1,8 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+commands:
+- npx vitest run apps/desktop/test/*persistence* apps/desktop/test/*window* apps/desktop/test/agent-session-store-path.test.ts => pass (0)
+- pnpm --filter @agentmux/desktop typecheck => pass (0)

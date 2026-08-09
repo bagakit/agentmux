@@ -1,0 +1,111 @@
+{
+  "version": 2,
+  "feat_id": "f-22c8fsuma",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/plans/agentmux-managed-agent-guide.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/plans/agentmux-managed-agent-guide.md",
+    "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+    "docs/testing/strategy.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/plans/agentmux-managed-agent-guide.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-managed-agent-guide.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
+        "docs/testing/strategy.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "让受管 Agent 自动发现 AgentMux 空间能力",
+      "objective": "在既有 Agent 启动数据中加入可按 Profile 关闭的简短运行环境指南，让 Agent 知道遇到 Tab、分屏、方向或其他 Agent 请求时先读取 agentmux --skill。",
+      "outcome": "用户可以直接说“在右边打开 Claude”；受管 Agent 不需要碰运气发现 CLI，也不会因为指南而绕过 AgentMux 配置或让 App 猜布局意图。",
+      "acceptance": [
+        "Desktop 的每个 Agent Profile 有且只有一个注入开关，内置 Profile 默认开启，用户可以在 Agents 设置中关闭。",
+        "Core 统一把固定指南和用户原任务组装成两个清楚部分；用户任务只出现一次，空任务明确等待用户。",
+        "所有既有 Provider 复用同一 Core 组装结果，不新增 Provider 私有指南、Renderer 参数拼接或自然语言拦截。",
+        "开关关闭时保持原启动内容；完整 split/tab、精确 identity 和失败关闭规则仍只由 agentmux --skill 持有。",
+        "配置格式直接前进到新版本，不保留旧格式 migration、alias 或 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "Core、Desktop、设置和生产构建通过统一检查。"
+        },
+        {
+          "kind": "command",
+          "ref": "packages/core/test/client.test.ts",
+          "proves": "Core 对开启、关闭、有任务和空任务的启动内容有确定行为。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/test/runtime-controller.test.ts",
+          "proves": "Desktop 从 Agent Profile 把唯一开关交给 Core。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-managed-agent-guide.md",
+          "proves": "用户可见行为、分层和非目标有简明需求真相。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-managed-agent-guide.md",
+        "docs/plans/agentmux-ai-native-desktop-composition-cli.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "启动指南、逐 Profile 开关、分层和关闭语义已写入需求与测试策略。",
+      "refs": [
+        "docs/plans/agentmux-managed-agent-guide.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "这次是沿既有 Config、Core launch contract 和 CLI Skill 的直接纵向接线，没有独立于本功能的新通用规则。",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "行为真相已经落在本功能需求和现有 CLI Skill，不需要再建立推广入口。",
+      "refs": []
+    }
+  }
+}

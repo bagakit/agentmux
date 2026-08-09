@@ -1,0 +1,1653 @@
+{
+  "version": 2,
+  "feat_id": "f-2238fbdxh",
+  "plan_status": "reviewed",
+  "plan_revision": 9,
+  "supersedes_revision": 8,
+  "review_ref": "docs/design/orca-interaction-review.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/orca-interaction-review.md",
+    ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": []
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": []
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-005"
+      ]
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-009"
+      ]
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-014",
+        "T-011",
+        "T-015",
+        "T-016",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-010",
+        "T-012",
+        "T-013"
+      ]
+    },
+    {
+      "revision": 6,
+      "supersedes_revision": 5,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-011",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021",
+        "T-022",
+        "T-023",
+        "T-024",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-014",
+        "T-015",
+        "T-016"
+      ]
+    },
+    {
+      "revision": 7,
+      "supersedes_revision": 6,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-011",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021",
+        "T-022",
+        "T-025",
+        "T-026",
+        "T-027",
+        "T-028",
+        "T-029",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-023",
+        "T-024"
+      ]
+    },
+    {
+      "revision": 8,
+      "supersedes_revision": 7,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-011",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021",
+        "T-022",
+        "T-025",
+        "T-026",
+        "T-027",
+        "T-028",
+        "T-030",
+        "T-006"
+      ],
+      "superseded_task_ids": [
+        "T-029"
+      ]
+    },
+    {
+      "revision": 9,
+      "supersedes_revision": 8,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-007",
+        "T-008",
+        "T-011",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021",
+        "T-022",
+        "T-025",
+        "T-026",
+        "T-027",
+        "T-028",
+        "T-030",
+        "T-031",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {
+        "T-030": [
+          "T-029"
+        ]
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "重建 Workspace 交互基础",
+      "objective": "删除固定三栏 Renderer，改为 Workspace-owned Universal Tab、Focused Pane Group、Recursive Split Tree，以及 Orca 式 Tab 拖拽排序、移动和边缘分屏。",
+      "outcome": "File、Agent Session 和 Launch Surface 可以进入用户自行安排的可调整 Pane，同时不改变 tmux Core 的所有权边界。",
+      "acceptance": [
+        "每个 Workspace 拥有 Recursive Leaf/Split Layout 和 Last Focused Pane。",
+        "Tab 可在 Pane 内排序、在 Pane 间移动，并通过可见 Edge Target 创建 Left/Right/Up/Down Split。",
+        "Split Ratio 可调整；空的 Secondary Pane 会折叠；最后一个 Root Pane 保留 Create Surface。",
+        "不保留固定布局的 Compatibility State 或 Migration。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.typecheck",
+          "proves": "新的 Renderer 所有权模型在 Store 和 Component 之间完整编译。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx",
+          "proves": "单一 Component Boundary 拥有 Recursive Pane Workspace。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core build",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "让 File 和 Terminal 成为一等 Pane Content",
+      "objective": "实现 Orca 式层级 File Explorer 与 Pane-local Terminal/Editor State，并补齐受 Workspace Root 约束的 Local/SSH File Mutation、Terminal Recovery 和关闭行为。",
+      "outcome": "开发者可以在同一 Universal Pane Model 中管理文件并操作可恢复的 Agent Terminal。",
+      "acceptance": [
+        "Explorer 以 Folder 为先，支持折叠、搜索、刷新、键盘阅读，并表达 Selection/Dirty。",
+        "File/Folder Create、Rename、Delete 均显式触发，并受 Selected Local/SSH Workspace Root 约束。",
+        "File 作为 Editor Tab 打开到 Focused Pane，并保持独立 Dirty State。",
+        "Terminal Pane 显示 Provider、Host、Status、Activity/Terminal Mode，以及 Empty/Error/Disconnected Recovery 和 Running Session Close Confirmation。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Tree、Pane Layout 和 Root-confined File Behavior 有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/workspace-files.ts",
+          "proves": "File Mutation 仍由 Main Process 的 Local/SSH Boundary 负责。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core build",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "title": "采用 Orca 的 Settings 与共享状态模型",
+      "objective": "用 General、Agents、Hosts、Workspaces 分组 Settings 替代平铺 Drawer，并让 Host-scoped Detection/Health Truth 统一服务 Settings 和 Launch Surface。",
+      "outcome": "Codex、Claude、TraeX、Hermes、Pi 与 SSH Host 成为可理解的操作对象，而不是一组无差别配置输入框。",
+      "acceptance": [
+        "Settings 有分组导航和搜索，并分别呈现 General、Agents、Hosts、Workspaces Pane。",
+        "Agents 对 Selected Host 分成 Detected/Not Installed，支持 Refresh，并以 Disclosure 显示 Command/Args/Env。",
+        "SSH Host 显示 Connection Test State 和明确 Edit/Remove，不保存 Private Key 内容。",
+        "Workspace Creation 按 Project、Run on、Name/Branch、Agent 排列，Advanced Field 只在需要时展开。",
+        "Launch Choice 消费 Settings 展示的同一份 Host-scoped Detection State。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.typecheck",
+          "proves": "Shared Host/Agent Status Contract 贯穿 Core、Main、Preload、Renderer 并编译通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/SettingsPanel.tsx",
+          "proves": "Desktop 暴露分组 Settings，旧平铺配置表单已删除。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core build",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "title": "重做 Workspace 导航与看板",
+      "objective": "将 Orca 的 Workspace Evidence Hierarchy、Filter、Shared Card 和 Host-aware Worktree Creation 引入 AgentMux Sidebar/Board。",
+      "outcome": "List 与 Board 一致表达 Branch、Path、Host 和 Agent Attention State。",
+      "acceptance": [
+        "Sidebar Card 展示 Identity、Branch/Path、Host、Aggregate Status 和 Inline Agent Row，不重复矛盾标签。",
+        "Board 支持 Search、Status/Host Filter，并复用 Sidebar 的 Status Hierarchy。",
+        "New Workspace/Worktree Composer 只选择 Ready Local/SSH Host，Git 成功后才注册 Workspace。",
+        "Empty、Loading、No Match State 都提供相关下一步动作。"
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/WorkspaceBoard.tsx",
+          "proves": "Board 提供受筛选的 Workspace Truth。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx",
+          "proves": "主 Workspace List 承载统一 Status Hierarchy。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core test",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core build",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "title": "联动 Explorer、Branches 与 Worktree 工作分区",
+      "objective": "将左侧重构为紧凑 Project/Workspace Rail 和 Warp 式大二级面板；二级面板以上下可调整分栏同时承载 Explorer 与 Branches，并让 Selected Worktree 成为文件上下文真相。",
+      "outcome": "开发者可以从真实 Branch/Worktree 关系选择工作分区，文件树、Breadcrumb 和后续 New Tab 上下文随之切换，而已有 Tab 保持原 Workspace 绑定。",
+      "acceptance": [
+        "最左 Project/Workspace Rail 只负责工程切换；大二级面板上半为 Explorer、下半为 Branches，分隔线可调整且两区保持最小可操作高度；Workspace/Board 切换位于右侧主区。",
+        "Branches 从 Local/SSH Git 真相展示已绑定 Worktree 与未绑定 Worktree 的分支，并显示 Worktree Path、当前分支和可获得的状态，不从 UI 配置复制一份冲突清单。",
+        "选择已有 Worktree 的 Branch 会原子更新 Selected Worktree Workspace、Explorer Root、Breadcrumb 和后续 New Tab Context；已经打开的 File、Terminal、Agent、Browser Tab 不被静默换根。",
+        "选择未绑定 Worktree 的 Branch 不隐式 checkout，也不显示错误文件树；界面提供 Create Worktree，只有 Git 成功、Workspace 注册成功后才选中并联动 Explorer。",
+        "旧的孤立 Worktree 按钮、重复创建表单和不受 Branch Selection 驱动的文件上下文直接删除，不保留 Compatibility State 或 Fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Branch/Worktree 投影、Local/SSH 路径和 Selected Worktree 联动有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/WorkspaceToolPanel.tsx",
+          "proves": "同一高容量二级面板拥有 Explorer/Branches 上下分栏与联动选择。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 3,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-008",
+      "title": "将加号升级为多内容 New Tab",
+      "objective": "保留点击加号立即创建 Tab 的交互，将只显示 Agent Launcher 的初始页改为 Warp 式 Terminal、Agent、Browser 内容创建器。",
+      "outcome": "Focused Pane 可以用同一个 New Tab 入口创建三类真实内容，且它们统一参与 Tab、Pane、拖拽分屏和关闭生命周期。",
+      "acceptance": [
+        "点击 Focused Pane 的加号会立即插入并激活一个 New Tab；Terminal、Agent 或 Browser 选定后在同一个 Tab 内替换创建面板，不额外创建 Tab。",
+        "Terminal 和 Agent 都只通过 packages/core 公共 Session API 启动、输入、Resize、监听和停止，内部继续复用当前 tmux Runtime；Renderer 不直接管理进程，本任务不替换 mux 架构。",
+        "Browser 是可实际导航、返回、前进、刷新和恢复错误的嵌入内容，采用 Electron 维护中的 WebContentsView 与 Typed IPC，不使用普遍受 X-Frame-Options/CSP 阻断的 iframe Fallback。",
+        "Terminal、Agent、Browser、File Tab 都可在 Pane 内排序、跨 Pane 移动、四向分屏和关闭；运行中资源按各自生命周期确认并释放。",
+        "Create Surface 采用 Warp 式高密度 Command/Content Picker 组件语言，支持键盘选择、可见 Focus、Empty/Error/Unavailable 状态。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "New Tab 状态转换、三类内容所有权和关闭生命周期有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/NewTabSurface.tsx",
+          "proves": "一个 Pane-local 创建器在原 Tab 内选择 Terminal、Agent 或 Browser。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 3,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-011",
+      "title": "直接移植 Orca 的 Explorer 与 Editor 基础",
+      "objective": "基于固定 Orca Commit 与源码清单，移植成熟的文件类型、语言识别和文件树交互基础，并按 AgentMux 的 Local/SSH 与 Workspace Root 边界做最小适配。",
+      "outcome": "Explorer 与 Editor 不再依赖少量扩展名分支和自制缩水交互，而由可追溯、集中、经过测试的成熟实现承担基础行为。",
+      "acceptance": [
+        "记录 Orca Commit、FileExplorerRow、language-detect、file-type-icons、file-explorer-keyboard-navigation 等源路径，以及逐项 Copy/Adaptation Manifest。",
+        "移植集中式 Language Detection 与 File Type Icon Registry，覆盖 Orca 已支持且适用于 AgentMux 的文件类型，并为扩展名、文件名、无扩展文件和未知类型提供确定性测试。",
+        "移植并验证文件夹点击展开／收起、选择、键盘导航、Reveal、Watch/Refresh、Stale Response 与文件变更后的状态保持；文件创建、重命名、删除继续走显式确认。",
+        "保留 Monaco、Local/SSH Main Process Boundary 和 Workspace Root Confinement；不把 Orca Daemon、账户、Issue Integration 或兼容历史带入 AgentMux。",
+        "Orca 已解决且适用的基础能力不得另写功能缩水的替代实现；无法直接移植的项必须在 Manifest 说明技术原因和等价验收证据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "语言识别、图标映射、文件树交互和 Local/SSH Root 边界有确定性回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/orca-interaction-review.md",
+          "proves": "固定 Orca 来源、Copy/Adaptation Manifest 与明确排除项可被审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-017",
+      "title": "修复 Core Session 启动原子性与动态 Host 发现",
+      "objective": "让 packages/core 的 Session Launch 成为可回滚事务，并让 Desktop 动态加入或替换 Execution Host 后立即发现该 Host 已存在的 AgentMux tmux Session。",
+      "outcome": "启动失败不会留下幽灵 Session；Local/SSH Host 无论在进程启动前还是运行中加入，都由同一 Core Discovery 语义恢复已有 Session。",
+      "acceptance": [
+        "tmux 启动失败后，Runtime Snapshot 不保留失败 Session、Activity 或 Watcher；若失败 Session 已发布，必须发送 removed 使所有 Client 收敛。",
+        "同一 Session ID 在失败清理后可再次启动，且并发重复 ID 仍被拒绝。",
+        "RuntimeController 新增或替换 Host 后调用 Core Discovery；该 Host 上已有 agentmux 前缀 Session 被恢复、监听并通过既有 Runtime Event 广播一次。",
+        "已有 Session 的 Host 配置保护不被削弱；不引入第二套 Session Registry、重试层、兼容层或 mux 替换。",
+        "Local 与 SSH 的失败、发现和恢复走同一公共 Runtime 合同。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "失败回滚、同 ID 重试、动态 Host Discovery 和 Local/SSH Session 恢复有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/runtime.ts",
+          "proves": "Session 生命周期仍由独立 Core Runtime 单点拥有。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/orca-agent-runtime-notes.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-018",
+      "title": "收紧内嵌 Browser 的权限与导航边界",
+      "objective": "以 Electron Main Process 的 Session 与 Navigation API 建立 fail-closed Browser 边界，统一校验初始加载、地址栏导航、页面自身导航、重定向与弹窗。",
+      "outcome": "嵌入网页只能在受支持协议内导航，页面权限默认拒绝，同时保留真实 Browser 生命周期与 0.9 初始缩放。",
+      "acceptance": [
+        "Browser Partition 同时安装 Permission Check 与 Permission Request Handler；未显式允许的摄像头、麦克风、定位、通知、MIDI、剪贴板等权限全部拒绝。",
+        "初始加载、navigate、window.open、will-navigate 与 will-redirect 使用同一协议策略，仅允许 http、https 与内部空白页；不支持的导航在提交前阻止并投影为当前 Browser Error。",
+        "权限与导航拒绝不会打开外部窗口、不会泄漏 Node/Electron 能力，也不会破坏 Back、Forward、Reload、Bounds、Close 和 Render Recovery。",
+        "Browser WebContents 继续由 Main Process 单点拥有，Renderer 只走 Typed IPC；不添加 iframe、Fallback Browser 或自制权限配置层。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "权限 request/check、页面导航、重定向、弹窗与正常 Web 导航有确定性回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/browser-view-manager.ts",
+          "proves": "所有 WebContents 权限和导航策略由 Main Process 统一持有。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-019",
+      "title": "建立 Workspace 身份唯一性",
+      "objective": "在 ConfigStore 的单一 Schema Boundary 强制 Workspace ID 与规范化 (hostId, path) 唯一，覆盖手工添加、本地目录选择与 Worktree 注册。",
+      "outcome": "一个物理工作区只对应一份 Workspace、Layout 与全局 Tab 身份，不会因重复配置产生跨 Project 所有权冲突。",
+      "acceptance": [
+        "Workspace ID 在配置内唯一，重复 ID 的完整配置保存被拒绝。",
+        "同一 Host 上规范化后相同的 Workspace Path 只能注册一次；Local 使用平台路径语义，SSH 使用 POSIX 路径语义，不把不同 Host 的相同 Path 合并。",
+        "workspaces:add、chooseLocalFolder 与 Git Worktree 成功后的注册都经过同一 Schema Boundary；失败不改变内存或磁盘配置。",
+        "不添加 Migration、Alias、重复 Workspace 自动合并或 Renderer 侧补偿去重。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "重复 ID、Local/SSH 路径近似、跨 Host 同路径和失败原子性有配置边界测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/config-store.ts",
+          "proves": "Workspace Identity 由唯一持久化入口校验，而不是由各 UI 调用方手工维护。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-020",
+      "title": "统一文件子树与 Mutation 状态收敛",
+      "objective": "把 Explorer 与 Workbench 对文件子树的判断统一到一个 segment-aware 路径语义，并修复 Rename/Delete 后 Tab、Document、Dirty、Selection 与 Last Active File 的原子收敛。",
+      "outcome": "重命名或删除 src/app 只影响该节点及其后代，不会误改 src/application.ts 等字符串前缀近邻。",
+      "acceptance": [
+        "所有文件子树判断使用 exact-or-path-separator 语义；裸 startsWith 不再参与 Rename/Delete 资源归属判断。",
+        "Rename 对真正后代一致重映射 Tab ID、Document Key、Dirty State、Layout 和 Last Active File；Delete 对同一集合一致清理。",
+        "Explorer Selection/Expansion 与 Store 使用同一纯路径 helper，不在 Component、Store 和 Main 各复制一份近似判断。",
+        "测试覆盖 src/app 与 src/application.ts、同名嵌套目录、文件本身和目录后代；不借机重写 File System Boundary。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Rename/Delete 的资源集合与字符串前缀近邻有确定性回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/workspace-paths.ts",
+          "proves": "Renderer 的相对 Workspace Path 语义只有一个无 UI 依赖的 owner。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-021",
+      "title": "让 Monaco 语言识别只声明真实能力",
+      "objective": "把文件语言 detector 的输出收敛为 Monaco 0.56 内置或 AgentMux 明确注册的 Language ID，并用注册表级测试替代字符串自证。",
+      "outcome": "Editor 不再向 Monaco 传入未注册语言；扩展名覆盖与真实 tokenizer 能力保持一致。",
+      "acceptance": [
+        "测试枚举 detector 可产生的全部 Language ID，并断言它们属于 Monaco 实际注册集合。",
+        "notebook、mermaid、makefile、cmake、erlang、haskell、csv、tsv 等未注册映射被删除或在已有依赖足以支持时直接注册；不能只保留名字伪装高亮。",
+        "Vue、Svelte、Astro、JSONL 的 Orca-derived 注册继续保留；未知或明确未支持类型确定性返回 plaintext。",
+        "文件名优先、扩展名大小写和 Monaco 正确基础 ID 保持集中式测试；没有明确产品需求不新增 TextMate、Oniguruma 或语言包。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Detector 输出全集与 Monaco 注册全集存在可执行包含关系。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/language-detect.ts",
+          "proves": "文件类型到编辑器能力的声明集中且可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-022",
+      "title": "按资源所有权收敛 Renderer Store 熵",
+      "objective": "在不改变 Zustand 公共消费方式的前提下，把已经稳定成形的 Session、Workbench、Document 与 Browser 状态转换从单体 store.ts 移到各自的纯领域模块，让 Store 只负责组合和跨资源编排。",
+      "outcome": "资源一致性由可独立测试的 owner 维护，后续 Board 与 Workspace 改动不再继续堆积手写同步分支。",
+      "acceptance": [
+        "先记录现有 State/Action 所有权与交叉写入清单，只拆已有真实边界，不创建通用插件、事件总线、Repository 层或第二套 Store。",
+        "Session Runtime Event、Browser Event、Workbench Layout 和 File Document Mutation 各有一个纯状态转换 owner；跨资源调用仍由顶层 Store 显式编排。",
+        "删除迁移后重复的 helper、旧 action 与兼容导出；不保留新旧 reducer 双路径。",
+        "现有 React 调用方无需兼容层即可继续消费同一个 useAppStore；资源行为测试与完整 typecheck 证明行为未漂移。",
+        "不新增依赖；拆分结果必须减少 store.ts 中手工维护的多资源同步代码，而不是只移动行数或增加样板。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "状态所有权拆分通过完整测试、类型检查和构建。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/store.ts",
+          "proves": "顶层 Store 只保留公共组合与跨资源编排，不再直接实现每类资源算法。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-025",
+      "title": "收紧 Core Launch Reservation 与 tmux 回滚真相",
+      "objective": "把 Session ID 占用前移到所有异步准备之前，并让一次 Launch 只清理自己拥有的 reservation、Session 与 tmux 资源；tmux 后置配置和回滚同时失败时必须保留可诊断真相。",
+      "outcome": "并发同 ID 启动最多只有一个请求进入真实 tmux 创建；任何失败请求都不能删除另一请求的成功 Session，清理失败也不会被伪装成已移除。",
+      "acceptance": [
+        "Session ID 在 Provider detect、SSH 端口暴露和 tmux assert/start 之前完成同步 reservation；并发同 ID 请求只有一个能继续。",
+        "Launch transaction 使用 attempt identity 或等价所有权判断，失败清理不得删除另一 attempt 已发布的 Session、Activity、Watcher 或输入队列。",
+        "Runtime 首次并发启动共享同一 readiness；Hook Server 尚未完成时不能向后续 Launch 暴露半启动状态。",
+        "tmux 创建后配置失败会尝试 kill；kill 也失败时错误同时携带原始失败与清理失败，Runtime 不发送虚假的 removed 真相，并允许显式 Stop/Discovery 收敛。",
+        "测试确定性覆盖同 ID 并发、成功与失败交错、配置失败加 kill 失败，以及重试不会创建两个真实 tmux Session。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "Launch reservation、首次启动 readiness 与双重回滚失败有确定性回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/runtime.ts",
+          "proves": "Core 只有一条按 attempt 所有权发布和清理 Session 的路径。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/orca-agent-runtime-notes.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-026",
+      "title": "让 File Document Cache 服从关闭、丢弃与 Mutation 生命周期",
+      "objective": "由 File Workbench owner 统一维护 File Tab、Document Cache、Dirty State、Layout 与 Last Active File，让关闭、Discard、Rename 和 Delete 对打开或已关闭文档采用同一资源集合。",
+      "outcome": "Discard & Close 真正丢弃内存修改；重新打开会读取磁盘，重命名或删除后旧路径缓存不会复活。",
+      "acceptance": [
+        "关闭 File Tab 后，该文件不再保留可复活的 Document 或 Dirty State；确认 Discard 后重开必须重新读取 Main Process 返回的磁盘内容。",
+        "Rename/Delete 直接遍历 Document owner 的全部 key，而不是只从当前打开的 File Tab 反推缓存集合。",
+        "文件与目录 Mutation 继续使用 exact-or-path-separator 语义；关闭文档、删除后同路径重建和目录子树均有覆盖。",
+        "File Tab、Document、Dirty、Layout 与 Last Active File 在一个纯 reducer transaction 中收敛，不新增第二套 cache、migration 或 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "关闭丢弃、重开磁盘、Rename/Delete 与删除后重建有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/file-workbench-state.ts",
+          "proves": "文件资源生命周期只有一个纯状态转换 owner。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-027",
+      "title": "把配置持久化与 Runtime 切换收敛成一次事务",
+      "objective": "以候选 Runtime prepare、配置原子持久化、无失败 commit 的顺序替代当前先写盘和提前改 Host signature 的流程。",
+      "outcome": "Host Discovery 或配置保存失败时，磁盘、IPC 读取与活动 Runtime 仍一致指向旧配置；原配置可确定性重试。",
+      "acceptance": [
+        "RuntimeController 在候选 Host Discovery 完成前不替换活动 Runtime、Host 集合或 signature；失败候选会完整 dispose。",
+        "IPC 保存流程先 prepare 候选 Runtime，再原子写入配置，最后以不含异步失败点的 commit 交换活动 Runtime。",
+        "配置持久化失败不会留下新 Runtime；Discovery 失败不会写盘，同一配置重试不得因提前更新 signature 而跳过。",
+        "Runtime Event 订阅在交换后继续只投影活动 Runtime，不新增双 Runtime fallback 或兼容路由。",
+        "测试覆盖 Discovery 失败、持久化失败、相同配置重试和成功交换后的旧 Runtime dispose。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "配置 prepare、save、commit 与 rollback 顺序有确定性故障注入测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/runtime-controller.ts",
+          "proves": "活动 Runtime 与候选 Runtime 的所有权和交换边界集中在 Main Process。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/orca-agent-runtime-notes.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-028",
+      "title": "统一 Launcher 与 Launching Tab 生命周期真相",
+      "objective": "删除 New Tab 的组件本地 mode，并以 Tab 是否仍存在作为异步 Launch 能否落地的唯一所有权条件，让关闭中的 Launch 不会被迟到 Promise 复活。",
+      "outcome": "Launcher Back、重新挂载和关闭 Launching Session 都遵循 Store 单一真相；用户确认关闭后 Tab 不会回来。",
+      "acceptance": [
+        "NewTabSurface 只读取和更新 launcher.view，不保留本地 mode 或重新挂载后恢复旧视图的分叉。",
+        "关闭 launching Tab 会立即从 Layout/Tab owner 移除；Launch resolve/reject 只有在原 Tab 仍存在且仍拥有同一请求时才能替换或恢复 Launcher。",
+        "已被关闭的 Launch 若随后在 Core 成功，Store 会立即停止该 Session 且不重新创建 Tab；失败也不恢复已关闭 Tab。",
+        "普通 Session Close、Launcher Back、Agent Picker 与错误重试复用同一 reducer 语义，不增加 cancellation compatibility state。",
+        "测试覆盖重新挂载、Back、关闭前成功、关闭后成功、关闭后失败和重复关闭。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Launcher 与异步 Launch 的所有关键顺序有确定性状态测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/session-state.ts",
+          "proves": "Session Tab 的 attach、close、late result 与 failure 由一个 owner 决定。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-030",
+      "title": "建立 Production 内存基线并收敛资源回收",
+      "objective": "先为冷启动、Workspace/File Tree、Monaco、Terminal/tmux 和 Browser WebContentsView 建立可重复的 Production 多进程内存与活资源基线，再只修复有证据的常驻占用、未回收 owner 或重复打开/关闭增长。",
+      "outcome": "AgentMux 的主要 Surface 具有可审计的内存成本和确定性释放边界；关闭资源不会留下孤儿 WebContents、tmux Session、Monaco Model、Document Cache、Watcher 或订阅。",
+      "acceptance": [
+        "使用同一 Production Build、隔离 user-data、固定窗口与明确稳定等待点，至少记录冷启动、Workspace/File Tree、单 Monaco Editor、单 Terminal、单 Browser、全部关闭及重复循环后的原始样本。",
+        "样本按 Electron Main、主 Renderer、Browser Renderer、GPU 和 Utility 分进程记录 RSS，并在系统 API 可靠时记录 Private/Working Set；文档不直接相加包含共享页的 RSS，保留测量命令、时间和场景。",
+        "连续完成至少 5 轮 Editor、Terminal 和 Browser 的打开/关闭；每轮核对 WebContents/Process、Core Session、tmux Session、Monaco Model、Document/Dirty Cache、Watcher 与 Event Subscription 数量，关闭后不得持续累积孤儿资源。",
+        "先检查已有 Electron、Monaco、xterm 与项目依赖的生命周期能力；只在基线指向具体 owner 时修改代码，不新增性能框架、全局 Cache 层、强制 GC、预防性配置项、Migration 或 Fallback。",
+        "对确认的泄漏或过度常驻补 owner-level 生命周期测试，使用同一 Production 矩阵复测并记录优化前后对比；`pnpm check`、Tracker validation 与 `git diff --check` 全部通过。",
+        "verification.md 新增独立 T-030 章节，包含测量方法、原始基线、资源计数、归因、实际改动、复测结果和诚实残余风险；T-006 mux 讨论仍保持最后一项。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "内存与资源回收收口不破坏 Core 和 Desktop 公共行为。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production 多进程基线、重复循环、资源数量与优化前后证据可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md"
+      ],
+      "supersedes": [
+        "T-029"
+      ],
+      "introduced_in_revision": 8,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-031",
+      "title": "重建二维 Branch × Status 看板与 Inbox Discussion Canvas",
+      "objective": "采用 Orca 已验证的 Project Scope 看板空间结构，把 Board 重建为纵向按 Branch/Worktree 分泳道、横向按工作状态分列的二维矩阵，并让 Inbox 成为可拉起现有 Core/tmux Agent 讨论的入口。",
+      "outcome": "用户可以按 Branch 观察 Run 在 Inbox、Working、Needs You、Done 之间的横向进展，并从任一 Branch 的 Inbox 直接进入讨论 Canvas；Board、Workspace、Branch 与 Session 继续共享单一项目真相。",
+      "acceptance": [
+        "Board 主体采用二维矩阵：Project 下每个 Branch/Worktree 对应一条纵向泳道（视觉上为一行），横向固定展示 Inbox、Working、Needs You、Done 状态列；不再使用只按 Agent 状态分组的四条纵向列表。",
+        "Run 卡片位置由稳定的 `(branchId, status)` 共同决定；同一 Branch 中的 Agent 状态变化只在该行内横向移动，不能因为状态变化跳到另一 Branch 泳道。",
+        "Bound Worktree、Unbound Branch、当前 Branch、Host、Workspace Path 与 Session/Provider 状态复用现有 Project/Branch/Core Snapshot；无 Worktree 的 Branch 明确显示不可启动原因和 Create Worktree 动作，不隐式 checkout。",
+        "Inbox 是 Board 本体的第一状态列，不再是 Board Tools 的独立子 Tab；空 Inbox 单元格和已有 Inbox 卡片都可以打开 Discussion Canvas，并携带当前 Branch 上下文。",
+        "Discussion Canvas 提供最少的讨论主题、Branch/Workspace 和 Provider 选择，提交后复用现有 Core/tmux Agent Launch 路径创建真实 Session；成功 Run 回落到对应 Branch 泳道，失败保持可见且不产生幽灵卡片。",
+        "Board 支持 Project Scope 的横向滚动、纵向 Branch 浏览、紧凑卡片与状态/Host 筛选，在常见窗口宽度下保留 Branch 标签和状态列头；不引入第二套 Board Store、通用 Canvas 框架、任务数据库、插件系统或 mux Runtime 改造。",
+        "更新中文设计文档、Goal 不变量与 Production 验收证据，明确二维轴、Inbox 归属、Canvas 启动边界和 Orca Copy/Adapt/Omit 依据；T-006 mux 讨论继续保持最后一项。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Branch × Status 投影、Run 横向迁移、Inbox Canvas 上下文和 Launch 成败有确定性状态测试。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Board 展示二维矩阵、Branch/Worktree 语义、Inbox Canvas 与真实 Agent Launch 闭环。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 9,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "title": "与用户讨论并确定 mux 方案",
+      "objective": "在桌面交互验收完成后，基于 AgentMux 当前真实 tmux Runtime 与 Orca 的 embeddable PTY、daemon、SSH Provider 实现证据，和用户讨论 mux 的长期所有权与运行方式。",
+      "outcome": "形成经用户明确确认、可指导后续独立实现工作的 mux 架构决策；本任务不改动 mux Runtime。",
+      "acceptance": [
+        "对照当前 AgentMux 与 Orca 源码，明确比较进程持有、会话持久化、Local/SSH、输入输出、Resize、停止、状态监听和嵌入边界。",
+        "向用户说明保留真实 tmux、采用 Orca-like embeddable Runtime，以及必要时其他真实候选的收益、代价和失败边界，不虚构方案差异。",
+        "将用户确认的选择、理由、非目标、迁移边界和验收条件记录为中文决策文档。",
+        "用户确认前不修改 mux 代码、配置或公共 API；若决定实施，通过后续 Feature 或 Task Plan Revision 明确排期，不在讨论任务中夹带实现。"
+      ],
+      "verification": [
+        {
+          "kind": "manual",
+          "ref": "docs/plans/mux-runtime-decision.md",
+          "proves": "记录了源码证据、真实备选方案、用户确认结果与实施边界。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/orca-agent-runtime-notes.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "title": "端到端验收重构后的 Desktop",
+      "objective": "运行自动化检查，操作 Production Electron，检查 Responsive/Rendered State，并完成 Design Core Result Checkpoint。",
+      "outcome": "重构以可工作的 Desktop Tool 被证明，而不是只存在于源码或 Mockup。",
+      "acceptance": [
+        "pnpm check 通过。",
+        "Rendered Verification 覆盖 Universal Tab、四个 Split Target、Resize/Move/Collapse、Terminal/Activity、Editor Dirty/Save、File Tree Action、Agent Detection、SSH、Board Filter。",
+        "Production Electron 在目标窗口尺寸启动，无 Renderer Error 或 Overflow。",
+        "Design Result Checkpoint 诚实记录剩余差距。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "完整 Repository Proof Suite 通过。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Desktop 的交互和视觉层级已检查。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "blocked",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "superseded_by": [
+        "T-009"
+      ],
+      "last_blocker": {
+        "class": "internal_blocker",
+        "reason": "Superseded by T-009 before it could close: the work was re-planned under a new task id rather than finished under this one."
+      }
+    },
+    {
+      "id": "T-009",
+      "title": "端到端验收重构后的 Desktop",
+      "objective": "运行自动化检查，操作干净配置的 Production Electron，检查 Responsive/Rendered State，并完成 Design Core Result Checkpoint。",
+      "outcome": "新的工作分区联动、多内容 New Tab 和既有 Desktop 能力以可工作的工具被证明，而不是只存在于源码或 Mockup。",
+      "acceptance": [
+        "pnpm check 通过。",
+        "Rendered Verification 覆盖 Project/Workspace Rail、Explorer/Branches 上下 Resize、Bound/Unbound Branch、Worktree Selection 联动、Workspace/Board、Terminal/Agent/Browser/File New Tab。",
+        "Rendered Verification 同时覆盖四个 Split Target、Resize/Move/Collapse、Terminal/Activity、Editor Dirty/Save、Local/SSH File Action、Agent Detection、SSH 和 Board Filter。",
+        "Production Electron 使用干净 user-data 目录在目标窗口尺寸启动，无 Renderer Error、严重 Overflow 或旧配置 Compatibility Fallback。",
+        "Design Result Checkpoint 诚实记录剩余差距。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "完整 Repository Proof Suite 通过。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Desktop 的交互、视觉层级和 Worktree/File Context 联动已检查。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-005"
+      ],
+      "introduced_in_revision": 3,
+      "status": "blocked",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "superseded_by": [
+        "T-013"
+      ],
+      "last_blocker": {
+        "class": "internal_blocker",
+        "reason": "Superseded by T-013 before it could close: the work was re-planned under a new task id rather than finished under this one."
+      }
+    },
+    {
+      "id": "T-010",
+      "title": "重建面性视觉、Titlebar 与二级工具菜单",
+      "objective": "以固定版本 Orca 为可审计的风格参考，降低线框和过量 Padding，修正顶部空行，并把文件专用面板重构为可收起的 Workspace 二级工具菜单。",
+      "outcome": "AgentMux 保留 Graphite/Mint 身份，同时获得由 Surface、密度和局部层级主导的成熟桌面构成；Workspace 工具入口有清晰且有限的所有权。",
+      "acceptance": [
+        "在实现前记录 Orca 参考版本、Reference Provenance、Surface 层级、Density Budget、Control Ownership 和重复视觉 Token；Orca 被标记为 style_reference，而非像素级换皮。",
+        "删除不承担语义的连续 1px 网格和过大统一 Padding；Topbar 进入 draggable Titlebar Plane，只为 macOS Traffic Lights 保留安全区，右侧主区不再被全局 38px 空行下推。",
+        "原文件专用面板变为可整体收起／展开的二级工具菜单，并在 Workspace 模式记住所选工具、宽度和展开状态。",
+        "首批工具仅为 Explorer、Web Bookmarks、Quick Terminal、Agent Launch；它们分别打开或聚焦 File/Browser/Terminal/Agent Universal Tab，不拥有第二套进程、Session 或状态生命周期。",
+        "不引入插件发现、市场、脚本运行时或通用扩展框架；不存在的能力显示明确 Unavailable，而不伪装成可用控件。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "Renderer 结构、样式和状态重构通过完整检查。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "并排截图证明顶部空行消失、Surface 与密度改善，二级工具菜单的收起／恢复及四个入口真实可用。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 4,
+      "status": "blocked",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 1,
+          "status": "fail"
+        }
+      ],
+      "notes": [],
+      "superseded_by": [
+        "T-014"
+      ],
+      "last_blocker": {
+        "class": "internal_blocker",
+        "reason": "Superseded by T-014 before it could close: the work was re-planned under a new task id rather than finished under this one."
+      }
+    },
+    {
+      "id": "T-014",
+      "title": "修复渲染清晰度并重建双 Surface Tools",
+      "objective": "修复过小字号和 Tab 内容默认尺度造成的低分辨率感，把共享 Tools 入口移动到右侧主区 Titlebar 最左侧、标题之前，并让 Workspace 与 Board 使用同一容器但恢复各自子 Tab。",
+      "outcome": "Production Electron 画面与 Terminal/Editor 默认内容清晰；Tools 在 Workspace/Board 都有稳定位置、共享展开和宽度 truth，同时保持 Surface-specific 子 Tab。",
+      "acceptance": [
+        "保留已固定的 Orca Reference Provenance、Surface/Density 和 Titlebar Plane 证据；删除右侧主区顶部空行，Tools 按钮位于右侧主区最左侧、Workspace/Board 标题之前。",
+        "审计 Production Electron 的 devicePixelRatio、xterm Canvas backing size 与 Monaco Font Info；操作文字以 11–13px 为主，Terminal/Editor 默认 14–15px，不添加 CSS transform 或二次缩放层。",
+        "Workspace 与 Board 共用 Tools 的展开状态和像素宽度，但分别记住所选子 Tab；切换 Surface、收起／恢复和 Resize 后不得串用或丢失状态。",
+        "Workspace 子 Tab 仅为 Files + Branches、Browser Favorites、Terminal Shortcuts；Board 子 Tab 仅为 Branch Lanes、Inbox。Agent Launch 从 Tools 删除，继续由 Universal New Tab 提供。",
+        "Files + Branches 保持现有 Selected Worktree 联动；Browser Favorites 与 Terminal Shortcuts 只路由现有 Browser/Terminal Universal Tab；Board 子 Tab 只选择 Project-scoped 主内容，不形成第二套进程或插件架构。",
+        "不存在的收藏、快捷指令或 Inbox 能力必须显示明确 Unavailable/Empty State，不能用临时按钮伪装持久化。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "清晰度、Tools 状态模型和 Renderer 重构通过完整检查。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production/Rendered 证据证明清晰度、DPR、标题前 Tools、Workspace/Board 子 Tab 与状态恢复。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-010"
+      ],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "superseded_by": [
+        "T-024"
+      ]
+    },
+    {
+      "id": "T-015",
+      "title": "实现 Board 的 Branch Lanes 与 Inbox Tools",
+      "objective": "把 Board 从 Agent 状态看板改成 Project 全局的 Branch/Worktree 泳道与 Inbox，并接入共享 Tools 容器的 Board-specific 子 Tab。",
+      "outcome": "用户可以通过 Board Tools 在 Branch Lanes 与 Inbox 间切换，跨 Workspace 理解每条 Branch 上的 Run、Agent 活动和需要处理的事项。",
+      "acceptance": [
+        "Board 泳道身份由 Project 下的 Branch/Worktree 决定；Agent Status 不再决定泳道，只作为卡片或 Run 元数据。",
+        "Branch 泳道消费现有 Git/Worktree/Run 状态真相，不复制一份冲突配置；未绑定 Branch、空泳道和无匹配状态都有明确下一步。",
+        "Board 保留标题前的共享 Tools 入口与 Dock，子 Tab 仅为 Branch Lanes、Inbox；返回 Workspace 会恢复 Workspace 子 Tab，反向切换也恢复 Board 子 Tab与共享宽度。",
+        "Inbox 以 Project Scope 汇总真实 Attention/Disconnected/Waiting/Failed 等需要用户处理的对象，并能聚焦对应 Workspace/Session；无事项时显示明确完成状态，不复制一份配置真相。",
+        "音乐游戏只作为平行泳道、节奏间距、活动落点与进展方向的构图隐喻，不加入积分、皮肤、装饰性游戏机制或影响可读性的动效。",
+        "搜索和筛选保持 Project Scope，并验证切换 Project 后不会泄漏前一 Project 的 Branch、卡片或选择状态。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Branch/Worktree 泳道、Inbox 投影、Project 隔离与 Surface-specific Tool 恢复有确定性测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/components/WorkspaceBoard.tsx",
+          "proves": "Board 主内容可由 Project-scoped Branch Lanes / Inbox 子 Tab 选择。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-012"
+      ],
+      "introduced_in_revision": 5,
+      "status": "blocked",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [],
+      "superseded_by": [
+        "T-023"
+      ],
+      "last_blocker": {
+        "class": "internal_blocker",
+        "reason": "Superseded by T-023 before it could close: the work was re-planned under a new task id rather than finished under this one."
+      }
+    },
+    {
+      "id": "T-023",
+      "title": "隔离 Project Snapshot 并收口 Branch Board",
+      "objective": "在保留已实现 Branch Lanes 与 Inbox 投影的基础上，让异步 Branch Snapshot 携带 Workspace/Project 身份，并完成 Board 的 Project Scope 交互与视觉收口。",
+      "outcome": "切换 Project 的第一帧和所有异步返回都不会显示上一 Project 数据，Branch Lanes/Inbox 成为可验收的真实项目看板。",
+      "acceptance": [
+        "Hook 暴露的有效 Snapshot 与请求 Workspace Identity 绑定；Workspace ID 改变后的同步首帧不组合新 Project 与旧 Snapshot。",
+        "过期 Local/SSH 请求不能覆盖当前 Project；Loading、Error、Empty、Search、Filter 与 Selection 也按 Project 隔离。",
+        "Board 泳道身份由 Project 下真实 Branch/Worktree 决定，Agent/Terminal 只作为 Run 卡片；Inbox 只投影真实 Waiting、Blocked、Disconnected、Error Session。",
+        "Board 与 Workspace 继续共享标题前 Tools 容器并分别恢复子 Tab；音乐游戏只保留平行泳道与节奏构图，不加入装饰性游戏机制。",
+        "保留 T-015 已完成的可用实现与证据，删除被替代的 Agent 状态泳道和重复配置真相，不添加兼容路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "同步首帧、乱序响应、Project 切换、Branch Lanes 与 Inbox 投影有确定性测试。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Board 的双 Project 切换、Branch Lanes、Inbox 与 Tools 恢复有渲染证据。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-015"
+      ],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "superseded_by": [
+        "T-029"
+      ]
+    },
+    {
+      "id": "T-024",
+      "title": "完成安全、Runtime 与成熟交互的 Production 验收",
+      "objective": "在 Core、Browser、Workspace/File/Monaco 一致性、Renderer 熵与 Board 收口后，重新运行完整自动化和 Production Electron 验收。",
+      "outcome": "AgentMux 的架构边界、数据安全和成熟桌面交互同时被证明可交付，不再以局部测试或截图掩盖 P1/P2 缺口。",
+      "acceptance": [
+        "pnpm check、Tracker validation 与 git diff --check 全部通过，不存在已知未处置 P1/P2；失败 Session 回滚和动态 Host Discovery 有集成证据。",
+        "Browser 权限默认拒绝，页面导航与重定向协议受控；Production 仍验证 Browser Zoom Factor 为 0.9。",
+        "Workspace 身份唯一、文件 Mutation 使用 segment-aware 子树、Detector 输出属于 Monaco 注册集合、Project 切换首帧不泄漏。",
+        "目标窗口截图覆盖标题前纯图标 Tools、Workspace 三个子 Tab、Board Branch Lanes/Inbox、Explorer/Branches、Universal Tab、四向 Split、Editor/Terminal/Browser 默认尺度和错误恢复。",
+        "Production Electron 使用干净 user-data 目录启动，无 Renderer Error、严重 Overflow、幽灵 Session、权限提示漂移、旧 Agent Status 泳道或 Compatibility Fallback。",
+        "Verification 记录 Source Manifest、Interaction Matrix、DPR/字号/Zoom、代码所有权变化和诚实残余风险；视觉证据不能替代安全与状态测试。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "完整 Repository Proof Suite 覆盖 Core 与 Desktop。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Desktop 的安全、Runtime、交互、清晰度与残余风险完成最终复审。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-014",
+        "T-016"
+      ],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "superseded_by": [
+        "T-029"
+      ]
+    },
+    {
+      "id": "T-029",
+      "title": "撤销过早验收并重新完成 Production Gate",
+      "objective": "在 T-025 至 T-028 全部完成后，重新审计 T-023/T-024 的能力与证据，补足并发、缓存、双重回滚、配置故障和 Launch 关闭顺序测试，再运行完整自动化与 Production Electron 验收。",
+      "outcome": "T-024 的过早关闭被显式纠正；Feature 只在没有已知未处置 P1/P2、生命周期测试稳定且 Production 行为与文档一致时恢复可交付结论。",
+      "acceptance": [
+        "pnpm check、Tracker validation 与 git diff --check 全部通过；tmux 真实集成测试连续复跑稳定，不以一次偶然通过替代生命周期证明。",
+        "回归套件覆盖并发同 ID、tmux 配置与 kill 双失败、Discard 后重开、关闭文档 Mutation、配置失败重试、Launcher 重挂载和关闭 launching Tab。",
+        "重新核对 Project Snapshot、Branch Board、Browser 权限、Workspace 身份、Monaco 注册与文件子树既有证据，确认本轮没有回归。",
+        "Production Electron 使用干净 user-data 目录验证 Editor、Terminal、Browser、Workspace、Board 与 Session Close，无幽灵 Session、复活 Tab、复活文档或配置分叉。",
+        "verification.md 新增独立 T-029 章节，明确记录 T-024 过早关闭原因、Source Manifest、Interaction Matrix、故障注入证据与诚实残余风险。",
+        "不存在已知未处置 P1/P2；T-006 mux 讨论仍保持最后一项，本任务不实施 mux 替换。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "完整 Repository Proof Suite 覆盖 Core 与 Desktop。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Desktop 的生命周期、安全、交互与残余风险完成纠错复审。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md",
+        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+      ],
+      "supersedes": [
+        "T-023",
+        "T-024"
+      ],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "superseded_by": [
+        "T-030"
+      ]
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "The interaction and density contracts now describe the current surface language, owner boundaries, and navigation model directly, without the comparative review framing this feature was planned under.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/plans/agentmux-project-rail-navigation.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "Its long supersession chain is the lesson: acceptance was declared early more than once and had to be revoked (T-024 and T-029 exist only because a Production gate was called passed before it was). The correction now lives as a standing rule that behaviour verification in a packaged build outranks a CSS or screenshot claim, enforced by the acceptance sections of the design contracts and the testing strategy.",
+      "refs": [
+        "docs/testing/strategy.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "The rule is repository-specific and already binding through the design contracts' acceptance sections and the testing SSOT; a separate store would fragment that truth.",
+      "refs": []
+    }
+  }
+}

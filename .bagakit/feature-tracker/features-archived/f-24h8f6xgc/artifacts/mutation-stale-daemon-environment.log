@@ -1,0 +1,34 @@
+
+ RUN  v3.2.7 /Users/bytedance/proj/priv/bagakit/agentmux
+
+ ❯ packages/core/test/run-environment.test.ts (1 test | 1 failed) 6ms
+   × local Run environment > sends current exports on every start, with explicit Run overrides authoritative 6ms
+     → expected undefined to be 'after-daemon' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/core/test/run-environment.test.ts > local Run environment > sends current exports on every start, with explicit Run overrides authoritative
+AssertionError: expected undefined to be 'after-daemon' // Object.is equality
+
+- Expected: 
+"after-daemon"
+
++ Received: 
+undefined
+
+ ❯ packages/core/test/run-environment.test.ts:36:50
+     34|       await expect(client.createTerminal({ workspacePath: '/tmp', comm…
+     35|         .rejects.toThrow('captured at SDK boundary')
+     36|       expect(captured[0]!.env.AGENTMUX_TEST_ENV).toBe('after-daemon')
+       |                                                  ^
+     37|       expect(captured[1]!.env.AGENTMUX_TEST_ENV).toBe('changed-again')
+     38|       expect(captured[2]!.env.AGENTMUX_TEST_OVERRIDE).toBe('explicit')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  02:55:47
+   Duration  774ms (transform 307ms, setup 0ms, collect 497ms, tests 6ms, environment 0ms, prepare 62ms)
+

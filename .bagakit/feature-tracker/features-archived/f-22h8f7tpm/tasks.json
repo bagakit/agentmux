@@ -1,0 +1,103 @@
+{
+  "version": 2,
+  "feat_id": "f-22h8f7tpm",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/design/orca-interaction-review.md",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/orca-interaction-review.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/design/orca-interaction-review.md",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "交付 Agent Session Composer",
+      "objective": "把 Composer 从 Activity 条件分支提升为 Agent Session Region 的稳定输入面，并拆成可复用受控组件与 Session adapter。",
+      "outcome": "Agent 在 Terminal 与 Activity 中都拥有同一个可扩展 Composer，切换投影不丢草稿；Raw Terminal 无 Composer，表面没有黑色填充或投影。",
+      "acceptance": [
+        "Agent Terminal 与 Agent Activity 都显示同一个 Composer；投影切换不卸载组件或清空未发送草稿。",
+        "launching、disconnected、exited 与 interrupted Agent 仍显示 Composer，但不可交互；Renderer 不猜测 Core Prompt readiness。",
+        "Raw Terminal 永远不显示 Agent Composer。",
+        "AgentComposer 是受控且无 Store 依赖的可复用组件；AgentSessionComposer 唯一绑定草稿、当前文件、Submit 与 Interrupt。",
+        "Composer 表面透明，只保留边界与 focus ring，不使用黑色填充或黑色 drop shadow。",
+        "正式产品规则只由 docs/design/orca-interaction-review.md 持有，旧计划不复制第二份。",
+        "定向 Renderer 测试、Desktop typecheck、完整 fast suite 与 git diff check 通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:fast",
+          "proves": "Agent Composer 行为没有破坏 Core 与 Desktop 快速回归。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.typecheck",
+          "proves": "受控组件、Session adapter 与 SessionPane 边界保持类型正确。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/orca-interaction-review.md",
+          "proves": "Composer 的对象归属、状态、Raw Terminal 非目标和视觉合同保持唯一记录。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/orca-interaction-review.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm check",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "The owning Desktop interaction SSOT now defines Composer ownership, lifecycle visibility, reusable component boundary, Prompt readiness boundary, Raw Terminal non-goal, and transparent surface.",
+      "refs": [
+        "docs/design/orca-interaction-review.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "The change repaired one local ownership condition and component coupling without revealing a reusable repository-level principle beyond the existing design and coding rules.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No cross-repository runtime or skill capability changed; the result belongs in the AgentMux Desktop design SSOT and code.",
+      "refs": []
+    }
+  }
+}

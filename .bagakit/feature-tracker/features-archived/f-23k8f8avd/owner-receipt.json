@@ -1,0 +1,21 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v2",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-23k8f8avd",
+  "semantic_revision": "e7c1adfa45c95c666da8823b68151b9261b0bb8b64f76a005be63f203306ef12",
+  "lifecycle_status": "archived",
+  "continuation": "complete",
+  "active_item_ids": [],
+  "blockers": [],
+  "replacement_ref": null,
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/state.json",
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/tasks.json",
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/goal.md"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/state.json": "4a0274af5bdffc9684774a47d2f02f140e2519100dc35e7a891c8ab5770aa4ad",
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/tasks.json": "a2224751975ced2618b85568557bb8b09ea6e44f391f00262b0c324b41d821e3",
+    ".bagakit/feature-tracker/features-archived/f-23k8f8avd/goal.md": "daf135433d8a68ab30455179fb3e1cb011d2691934063e405b41ba43ed89b22a"
+  }
+}

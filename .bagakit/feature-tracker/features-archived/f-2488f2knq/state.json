@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "feat_id": "f-2488f2knq",
+  "title": "Terminal HTTP Link Boundary",
+  "slug": "terminal-http-link-boundary",
+  "goal": "让终端裸 HTTP(S) 链接不吞掉相邻中文正文或中文标点，同时保留合法 URL 内容和 OSC 8 链接出口。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-http-link-boundary.test.ts test/terminal-link-provider-coverage.test.ts test/terminal-open-destination.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2488f2knq/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

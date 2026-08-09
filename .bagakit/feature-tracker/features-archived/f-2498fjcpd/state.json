@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "feat_id": "f-2498fjcpd",
+  "title": "配置数据耐久性：版本升级不得销毁用户创作数据",
+  "slug": "config-durability",
+  "goal": "用户的项目列表在 09-01 与 09-03 两次因 CONFIG_VERSION 递增被清空（实测 8 个项目 → 0，第二次靠会话记录才捞回两个新加的）。根因是同一份文件里混了两类数据：用户手写的（workspaces/hosts，无任何默认表能重建）与可推导的（executors/appearance/browser/notifications，来自内置 catalog 与默认值），共用一个 version 闸。目标是让'刷新可推导那半'不再需要'销毁手写那半'，并给每个持久化存储装上同类守卫，使'版本递增导致用户数据减少'成为一条会变红的不变量。",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/config-store.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2498fjcpd/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

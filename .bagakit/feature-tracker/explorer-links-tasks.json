@@ -1,0 +1,60 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/explorer-links-2026-09-10.md"
+  },
+  "source_refs": [
+    "docs/reviews/explorer-links-2026-09-10.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "键盘入口移到底部",
+      "objective": "键盘帮助位于设置右侧且顶部无重复入口",
+      "outcome": "键盘帮助位于设置右侧且顶部无重复入口",
+      "depends_on": [],
+      "acceptance": [
+        "键盘帮助位于设置右侧且顶部无重复入口",
+        "变异红绿与生产调用非空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/shortcut-help-affordance.test.tsx apps/desktop/test/project-rail-toolbar.test.ts",
+          "proves": "键盘帮助位于设置右侧且顶部无重复入口"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/explorer-links-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "显示忽略项并浏览软链接",
+      "objective": "实际目录读取返回忽略项状态、链接目标类型并按链接路径展开，循环有边界，生产树消费这些事实",
+      "outcome": "实际目录读取返回忽略项状态、链接目标类型并按链接路径展开，循环有边界，生产树消费这些事实",
+      "depends_on": [],
+      "acceptance": [
+        "实际目录读取返回忽略项状态、链接目标类型并按链接路径展开，循环有边界，生产树消费这些事实",
+        "变异红绿与生产调用非空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/workspace-files.test.ts apps/desktop/test/explorer-links.test.tsx",
+          "proves": "实际目录读取返回忽略项状态、链接目标类型并按链接路径展开，循环有边界，生产树消费这些事实"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/explorer-links-2026-09-10.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

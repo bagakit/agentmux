@@ -1,0 +1,959 @@
+{
+  "version": 2,
+  "feat_id": "f-2538fz2rm",
+  "plan_status": "reviewed",
+  "plan_revision": 8,
+  "supersedes_revision": 7,
+  "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+  "source_refs": [
+    "docs/reviews/continuous-progress-followup-2026-09-12.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-001",
+            "to": "T-003"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 6,
+      "supersedes_revision": 5,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014"
+      ],
+      "superseded_task_ids": [
+        "T-005"
+      ],
+      "supersedes_by_task": {
+        "T-014": [
+          "T-005"
+        ]
+      },
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 7,
+      "supersedes_revision": 6,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {
+        "T-014": [
+          "T-005"
+        ]
+      },
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 8,
+      "supersedes_revision": 7,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-006",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016"
+      ],
+      "superseded_task_ids": [
+        "T-007"
+      ],
+      "supersedes_by_task": {
+        "T-014": [
+          "T-005"
+        ],
+        "T-016": [
+          "T-007"
+        ]
+      },
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Make Explorer projection receipts owner-scoped and monotonic",
+      "objective": "Keep probe evidence in a stable renderer owner/store across Workspace remounts without feedback loops.",
+      "outcome": "Workspace revisit and move assertions observe monotonic receipts and no duplicate projection notifications.",
+      "acceptance": [
+        "Evidence survives Workspace switch/remount",
+        "Repeated reads do not mutate or schedule renders"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+          "proves": "projection behavior"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "Convergent and idempotent native Agent stop cleanup",
+      "objective": "Ensure shutdown and probe cleanup stop only owned runs and converge when a run is already exiting or absent.",
+      "outcome": "No native session remains live after graceful and forced stop phases; repeated stop is safe.",
+      "acceptance": [
+        "Already exited or missing run resolves cleanup without stale live process",
+        "Stop path remains bounded and ownership-scoped"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
+          "proves": "stop lifecycle behavior"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "验证 operation-scoped Explorer receipt",
+      "objective": "Replace aggregate DOM counter assumptions with operation and epoch scoped mounted verification.",
+      "outcome": "Mounted Move verification survives Workspace remounts without lost or duplicate evidence.",
+      "acceptance": [
+        "Receipt identifies workspace, epoch and operation",
+        "Repeated reads do not mutate state"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop package:mac",
+          "proves": "Mounted packaged verification"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop package:mac",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "Message Tools 与 Context 语义闭环",
+      "objective": "审计并补齐全局 message tools、引用/命令/skill 能力、Context 语义及失败保留输入。",
+      "outcome": "初始页与 Agent 对话复用同一 message tool，失败不丢输入，context 显示可理解的剩余比例语义。",
+      "acceptance": [
+        "生产调用链复用同一组件",
+        "发送失败草稿保留且可重试",
+        "context label 明确表达剩余容量/压缩阈值"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/composer-file-reference.test.ts test/markdown-file-reference.test.tsx test/composer*.test.ts --maxWorkers=1",
+          "proves": "Message Tools/Context 行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 3,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/composer-file-reference.test.ts test/markdown-file-reference.test.tsx test/composer*.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [],
+      "title": "Managed Agent handoff and conversation entry",
+      "objective": "让 Agent 能通过稳定角色目录找到维护者并定向交接。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-handoff.test.ts test/agent-handoff-cli.test.ts test/agent-session-identity-redaction.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-23d8fwq4z/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-handoff.test.ts test/agent-handoff-cli.test.ts test/agent-session-identity-redaction.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-008",
+      "depends_on": [],
+      "title": "Theme switching and appearance follow",
+      "objective": "支持多套完整外观与跟随系统设置。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/app-appearance.test.ts test/terminal-theme.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24b8f37dv/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/app-appearance.test.ts test/terminal-theme.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-009",
+      "depends_on": [],
+      "title": "Window chrome and system controls",
+      "objective": "提供自有标题栏与系统按钮的一致交互。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/traffic-light-inset.test.ts test/main-window-setup.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24c8fqsgc/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/traffic-light-inset.test.ts test/main-window-setup.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-010",
+      "depends_on": [],
+      "title": "Conversation image attachments",
+      "objective": "对话中的图片以缩略图和可复用附件呈现。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-attachments.test.tsx test/agent-session-composer.test.tsx --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24d8fcuhy/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-attachments.test.tsx test/agent-session-composer.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-011",
+      "depends_on": [],
+      "title": "Arbitrary region layout and rearrangement",
+      "objective": "支持 Region 任意元数与可预测重排。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workbench-region-invariant.test.ts test/tab-drop-zone.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24e8ffbzq/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/workbench-region-invariant.test.ts test/tab-drop-zone.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-012",
+      "depends_on": [],
+      "title": "Open directory as project",
+      "objective": "Explorer 目录右键可作为项目打开并正确绑定 Workspace。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24k8ftgmm/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-013",
+      "depends_on": [],
+      "title": "Agent self-create and spatial operations",
+      "objective": "Agent 可通过稳定 control intent 创建 Agent 并选择合理空间。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/control.test.ts test/promote-region-to-tab.test.ts test/workbench-region-invariant.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24m8fphma/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/control.test.ts test/promote-region-to-tab.test.ts test/workbench-region-invariant.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-014",
+      "depends_on": [],
+      "title": "Tab 排序与 Split 方位交互验证修复",
+      "objective": "在现有 Tab/Split 实现上使用可执行的显式测试路径完成交互 gate。",
+      "outcome": "普通拖动排序、边缘拖放建 Region、Split 默认向右与 hover 方位菜单均有可重复验证。",
+      "acceptance": [
+        "Tab drop-zone 与 hover 菜单行为测试通过",
+        "生产调用者保持 WorkspaceWorkbench 与 PaneSplitMenu"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/tab-drop-zone.test.ts test/hover-dropdown-menu.test.tsx --maxWorkers=1",
+          "proves": "Tab/Region/Split interaction"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [
+        "T-005"
+      ],
+      "introduced_in_revision": 6,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/tab-drop-zone.test.ts test/hover-dropdown-menu.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-015",
+      "depends_on": [],
+      "title": "项目维护者角色目录与精确交接发现",
+      "objective": "通过 .agents 显式角色绑定解析维护者 Session，检查过期并返回可解释的 unresolved 结果，不按标题或布局猜测。",
+      "outcome": "维护者角色可注册、查询并由 Agent 使用稳定身份寻址；过期绑定保留草稿且不广播。",
+      "acceptance": [
+        "角色目录 schema 与 typed resolver 有生产调用者",
+        "有效绑定解析到精确 Session，过期或缺失返回 MAINTAINER_TARGET_UNRESOLVED",
+        "变异破坏精确校验时行为测试变红"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-role-directory.test.ts test/agent-handoff-cli.test.ts --maxWorkers=1",
+          "proves": "角色目录解析与交接寻址"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "Core typed API 编译"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-role-directory.test.ts test/agent-handoff-cli.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-016",
+      "depends_on": [],
+      "title": "有界会话续接行为验证",
+      "objective": "从选中消息生成有界的新会话续接提示并由 ActivityView 生产调用者触发。",
+      "outcome": "续接只包含选中点之前的可见消息，明确创建新 Session，不冒充原生 fork。",
+      "acceptance": [
+        "continuation utility 与 ActivityView 生产调用者接线",
+        "未知 cutoff 拒绝且后续消息不泄漏"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.ts --maxWorkers=1",
+          "proves": "bounded continuation behavior"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production caller compiles"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [
+        "T-007"
+      ],
+      "introduced_in_revision": 8,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "Tab 排序与 Split 方位交互",
+      "objective": "区分 Tab 同 Region 排序与拖到边缘创建 Region，并让 Split 默认向右且复用方位组件。",
+      "outcome": "用户可无歧义地排序 Tab 或创建分栏，菜单与布局可行性一致。",
+      "acceptance": [
+        "普通拖动只改变 Tab 顺序",
+        "边缘拖放创建 Region 并可选择方位",
+        "点击 Split 默认向右，hover 菜单复用方位组件"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/*tab*.test.ts* test/*split*.test.ts* --maxWorkers=1",
+          "proves": "Tab/Region/Split interaction"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 4,
+      "status": "failed",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/*tab*.test.ts* test/*split*.test.ts* --maxWorkers=1",
+          "exit_code": 1,
+          "status": "fail"
+        }
+      ],
+      "notes": [],
+      "failure": {
+        "reason": "Vitest glob resolved no split test and exited non-zero; implementation tests are available at explicit paths.",
+        "assumption": "The reviewed glob command would discover the intended tab and split tests."
+      },
+      "superseded_by": [
+        "T-014"
+      ]
+    },
+    {
+      "id": "T-007",
+      "depends_on": [],
+      "title": "Session fork and continuation",
+      "objective": "支持从一条消息安全创建并延续新会话。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24a8f93p7/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "failed",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
+          "exit_code": 1,
+          "status": "fail"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "failure": {
+        "reason": "The actual focused test is test/session-continuation.test.ts; TSX path does not exist.",
+        "assumption": "The continuation test path used the TSX extension."
+      },
+      "superseded_by": [
+        "T-016"
+      ]
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Design SSOT updated with the final appearance, continuation, attachment, maintainer and layout owner constraints.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "Reviewed the failed glob gate, operation receipt remount fixes, and exact candidate packaging evidence; retained only durable lessons.",
+      "refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "routed_for_review",
+      "rationale": "No new requirement authority was created; reusable execution lessons remain routed through the existing review record.",
+      "refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ]
+    }
+  }
+}

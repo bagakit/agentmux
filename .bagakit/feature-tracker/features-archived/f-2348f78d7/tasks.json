@@ -1,0 +1,96 @@
+{
+  "version": 2,
+  "feat_id": "f-2348f78d7",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-2348f78d7/artifacts/plan-review-r1.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-2348f78d7/artifacts/plan-review-r1.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "按 shell 语义切分启动参数，而不是只按换行切",
+      "objective": "把 Arguments 文本框到 argv 的转换从 split('\\n') 换成按 shell 语义切分，使一行里写多个 flag 时每个 flag 与它的值各自成为独立 argv 元素，引号被当作语法剥离而非值的一部分。",
+      "outcome": "用户按自然的一行写法填启动参数不再触发下游 CLI 的 unknown option；界面提示也不再教一种会出错的写法。",
+      "acceptance": [
+        "用户报告的原串 `--dangerously-skip-permissions --model 'default' --effort 'ultracode'` 切分为 5 个 argv 元素，引号被剥离（引号是 shell 语法，不属于值）。",
+        "带空格的引用值保持为一个 argv 元素（如 `--model \"gpt 5\"` → `['--model','gpt 5']`）。",
+        "连续空白折叠；换行仍作分隔符，因此旧的每行一个 flag 的写法继续可用——这不是兼容层，而是同一套 shell 语义的自然结果。",
+        "空输入与纯空白输入产出空 argv，不产生空字符串元素（空元素会被下游当作一个空参数）。",
+        "用成熟库承担切分（转义与混合引号的边界由被维护的解析器负责），不手写；先确认仓库既有依赖不足以胜任再引入。",
+        "界面提示同步更正为「空格或换行分隔」；否则界面仍在教用户用会出错的写法。",
+        "声明式枚举选项那条路（resolveLaunchOptionArgv 产出已切分数组）不受影响，不为此新增第二处 argv 组装。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "npx vitest run apps/desktop/test/agent-settings-pane.test.tsx",
+          "proves": "原串切分、带空格的引用值、连续空白与换行、空输入，均有断言；改回按换行切分会红。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "切分函数与调用点类型完整。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "npx vitest run apps/desktop/test/agent-settings-pane.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "Feature task and gate are complete; current interaction documentation remains accurate.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "no_reusable_learning",
+      "rationale": "No additional reusable learning artifact is required for this bounded fix.",
+      "refs": []
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "No further promotion is needed for this completed bounded feature.",
+      "refs": []
+    }
+  }
+}
