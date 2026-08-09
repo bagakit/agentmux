@@ -826,9 +826,15 @@
       "heavy": true,
       "heavy_reason": "跨持久化 loop、Session Run 替换和观察状态投影",
       "introduced_in_revision": 3,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-recovery.test.ts test/continuous-progress-recovery.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
