@@ -1,8 +1,9 @@
-import { ContinuousProgressScheduler, type ContinuousProgressLoop } from '@agentmux/core'
+import { ContinuousProgressScheduler, decideContinuousProgress, type ContinuousProgressLoop, type ContinuousProgressObservation } from '@agentmux/core'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
 export type LoopTickHandler = (loop: ContinuousProgressLoop, tickId: string) => Promise<LoopTickOutcome>
+export type LoopObservationProvider = (loop: ContinuousProgressLoop, tickId: string, now: number) => Promise<ContinuousProgressObservation>
 
 /** Main-process owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
@@ -10,7 +11,7 @@ export class ContinuousProgressLoopManager {
   private timer: ReturnType<typeof setInterval> | null = null
   private checkPromise: Promise<void> | null = null
   private running = false
-  constructor(private readonly store: ContinuousProgressLoopStore, private readonly onTick: LoopTickHandler, now?: () => number) {
+  constructor(private readonly store: ContinuousProgressLoopStore, private readonly onTick: LoopTickHandler, now?: () => number, private readonly observe?: LoopObservationProvider) {
     this.scheduler = new ContinuousProgressScheduler({ ...(now ? { now } : {}) })
   }
   async start(): Promise<void> {
@@ -44,7 +45,14 @@ export class ContinuousProgressLoopManager {
     await this.store.save(this.scheduler.list())
     for (const claim of claims) {
       let outcome: LoopTickOutcome = 'unknown'
-      try { outcome = await this.onTick(claim.loop, claim.tickId) } catch { outcome = 'unknown' }
+      try {
+        if (this.observe) {
+          const observation = await this.observe(claim.loop, claim.tickId, now ?? Date.now())
+          const decision = decideContinuousProgress(observation)
+          if (decision.kind === 'skip') outcome = 'skipped'
+          else outcome = await this.onTick(claim.loop, claim.tickId)
+        } else outcome = await this.onTick(claim.loop, claim.tickId)
+      } catch { outcome = 'unknown' }
       const current = this.scheduler.list().find((loop) => loop.loopId === claim.loop.loopId)
       if (current && outcome === 'unknown') {
         this.scheduler.restore(this.scheduler.list().map((loop) => loop.loopId === current.loopId ? { ...loop, status: 'paused', lastOutcome: 'unknown' } : loop))
