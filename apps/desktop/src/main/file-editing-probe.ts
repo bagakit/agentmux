@@ -473,7 +473,7 @@ async function selectWorkspaceProject(
   await nativeClick(window, description, projectRowSource(workspaceId))
   await waitFor(`active ${description}`, async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(workspaceId)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(workspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(workspaceId)}`
     ) as boolean
   ))
 }
@@ -516,7 +516,7 @@ async function runExplorerInteractionProbe(options: {
   await nativeClick(window, 'alternate Workspace project', projectRowSource(options.alternateWorkspaceId))
   await waitFor('active alternate Workspace project', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.alternateWorkspaceId)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.alternateWorkspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(options.alternateWorkspaceId)}`
     ) as boolean
   ))
   await waitFor('alternate Workspace Explorer', async () => (
@@ -596,7 +596,7 @@ async function runExplorerInteractionProbe(options: {
   await nativeClick(window, 'alternate Workspace during committed move', projectRowSource(options.alternateWorkspaceId))
   await waitFor('active alternate Workspace during committed move', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.alternateWorkspaceId)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.alternateWorkspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(options.alternateWorkspaceId)}`
     ) as boolean
   ))
   await waitFor('alternate Workspace tree during committed move', async () => (
@@ -640,7 +640,7 @@ async function runExplorerInteractionProbe(options: {
   await nativeClick(window, 'primary Workspace after committed move', projectRowSource(options.workspaceId))
   await waitFor('active primary Workspace after committed move', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.workspaceId)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.workspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(options.workspaceId)}`
     ) as boolean
   ))
   const menuMoveObserved = await waitFor('moved Radix menu row', async () => (
