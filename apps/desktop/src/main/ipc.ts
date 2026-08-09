@@ -469,6 +469,14 @@ export async function registerIpc(args: {
     if (!catalog) throw new Error('Agent Provider is unavailable')
     return await discoverAgentSkills({ catalog, workspacePath: session.workspacePath, home: app.getPath('home') })
   })
+  handleWithEvent('ui:listWorkspaceSkills', async (event, workspaceId: string, providerId: string) => {
+    requireTrustedSender('ui:listWorkspaceSkills', event)
+    const workspace = config.workspaces.find((item) => item.id === workspaceId)
+    if (!workspace || workspace.hostId !== 'local') throw new Error('Workspace skill discovery is available for local workspaces.')
+    const catalog = args.runtime.providerCatalog().find((item) => item.id === providerId)
+    if (!catalog) throw new Error('Agent Provider is unavailable')
+    return await discoverAgentSkills({ catalog, workspacePath: workspace.path, home: app.getPath('home') })
+  })
   handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
     requireTrustedSender('ui:savePastedImage', event)
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies

@@ -33,6 +33,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:rendererUpdateReady': 'renderer update',
   'ui:captureScreenshot': 'screenshot',
   'ui:listAgentSkills': 'Agent skills',
+  'ui:listWorkspaceSkills': 'Workspace agent skills',
   'ui:savePastedImage': 'pasted image',
   'ui:notifyAgentAttention': 'notification',
   'browser:switchProfile': 'Browser Profile',

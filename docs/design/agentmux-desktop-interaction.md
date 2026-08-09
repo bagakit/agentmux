@@ -632,3 +632,19 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 - `Activity by work line` 折叠态保留工作线摘要和“选择一行打开”；展开箭头只在确实有额外可操作或诊断信息时出现。
 - 展开项不得重复聚合行已经表达的名称、Provider 数量和状态。明细优先显示 Agent 图标、最近活动、状态原因、空闲/停止时长和可直接处理的动作；没有新增信息时保持折叠或隐藏展开控件。
+
+### 启动页 Resume 快捷入口
+
+- 启动页只对当前 workspace/Host 存在、身份和 Provider 能力均可验证的 recovery candidate 显示 Resume；不得按标题、Provider 或最近活动猜测目标。
+- Resume 前显示候选 Agent、workspace、当前 Run 与恢复原因；执行中、权限等待、stale binding、不可用 Provider 和已终止候选不显示为可点击 Resume。
+- Resume 失败保留启动页输入草稿和候选信息，显示可处理原因；Resume 只是显式恢复 Run，不等同于发送 prompt、开启 loop 或批准权限。
+
+### 通知关闭后的稳定性
+
+- 用户关闭某条 transient error 后，同一错误由重复事件、轮询或恢复重放再次到达时不得重新弹出。只有新的错误内容，或用户主动选择重新查看，才能恢复提示。
+- 原始错误事实继续保留在可重新打开入口；关闭的是当前展示，不是删除诊断记录。
+
+### Status Bar 状态图标与 Activity 详情
+
+- Status Bar 的 Agents、Needs You、Error 必须使用语义图标加紧凑数量，不能只用点或无来源的装饰形状；hover/辅助文本说明对象、数量和动作。
+- Activity 展开应是诊断/处理面板，不重复聚合行已有信息；单 Agent 且无额外诊断时不显示展开箭头，多 Agent 或有原因/时长时才展开。
