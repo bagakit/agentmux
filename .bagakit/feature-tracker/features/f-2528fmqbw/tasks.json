@@ -1300,9 +1300,15 @@
       "supersedes": [],
       "estimate_hours": 1.0,
       "introduced_in_revision": 14,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/open-destination-bar.test.tsx test/file-explorer*.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     }
   ]

@@ -4,7 +4,7 @@
   "title": "AgentMux 持续推进、消息工具与工作面体验",
   "slug": "continuous-progress-loop",
   "goal": "完成持久定时 loop、条件投递、重启恢复、全局 Message Tools、Context 语义，以及清晰紧凑的工作面观测体验。",
-  "status": "ready",
+  "status": "done",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 34
+    "round_count": 35
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-020",
+    "last_task_id": "T-021",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop exec vitest run test/top-row-chrome.test.tsx test/activity-view-wiring.test.tsx",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/open-destination-bar.test.tsx test/file-explorer*.test.tsx",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2528fmqbw/artifacts/gate-T-020-r34-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2528fmqbw/artifacts/gate-T-021-r35-0001.log"
   },
   "history": [
     {
@@ -377,6 +377,18 @@
     {
       "action": "task_finished",
       "detail": "T-020 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-021"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-021 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-021 => done"
     }
   ],
   "goal_contract": {
