@@ -2,11 +2,12 @@
   "version": 2,
   "feat_id": "f-2538fz2rm",
   "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
+  "plan_revision": 3,
+  "supersedes_revision": 2,
   "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-followup-2026-09-12.md",
+    "docs/design/agentmux-desktop-interaction.md",
     "docs/design/agentmux-desktop-interaction.md"
   ],
   "plan_history": [
@@ -46,6 +47,28 @@
             "to": "T-003"
           }
         ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
         "removed": []
       }
     }
@@ -141,6 +164,34 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "Message Tools 与 Context 语义闭环",
+      "objective": "审计并补齐全局 message tools、引用/命令/skill 能力、Context 语义及失败保留输入。",
+      "outcome": "初始页与 Agent 对话复用同一 message tool，失败不丢输入，context 显示可理解的剩余比例语义。",
+      "acceptance": [
+        "生产调用链复用同一组件",
+        "发送失败草稿保留且可重试",
+        "context label 明确表达剩余容量/压缩阈值"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/composer-file-reference.test.ts test/markdown-file-reference.test.tsx test/composer*.test.ts --maxWorkers=1",
+          "proves": "Message Tools/Context 行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 3,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

@@ -2,7 +2,7 @@
   "schema": "bagakit.execution-owner-receipt.v2",
   "owner_kind": "feature_tracker",
   "owner_id": "f-2538fz2rm",
-  "semantic_revision": "aac73ce24b6bbac91edbe0a243561a520f9059bcc4fb7d5bf87e1649e1a3db0b",
+  "semantic_revision": "91afc0134c67384a96f1d0f74090c8abbe185e5fa627e726268bcda7667faea7",
   "lifecycle_status": "in_progress",
   "continuation": "continue",
   "active_item_ids": [
@@ -13,10 +13,12 @@
   "replacement_ref": null,
   "evidence_refs": [
     ".bagakit/feature-tracker/features/f-2538fz2rm/state.json",
-    ".bagakit/feature-tracker/features/f-2538fz2rm/tasks.json"
+    ".bagakit/feature-tracker/features/f-2538fz2rm/tasks.json",
+    ".bagakit/feature-tracker/features/f-2538fz2rm/goal.md"
   ],
   "evidence_hashes": {
-    ".bagakit/feature-tracker/features/f-2538fz2rm/state.json": "b491dbc8a741f76dcf56709b98819b3846769465d65648317e88c05787ca4635",
-    ".bagakit/feature-tracker/features/f-2538fz2rm/tasks.json": "40e4bd506bc0ad19c10292c5e08a058b15d60199162444678ffe23de0a1a87e1"
+    ".bagakit/feature-tracker/features/f-2538fz2rm/state.json": "de6989388033a21c345a41d1f86b15d017ceb330349ba0489d196ab5450ab8ba",
+    ".bagakit/feature-tracker/features/f-2538fz2rm/tasks.json": "bc102577bcbc5927796a1068e916c117ae182b259fb2ae43a223069ba768a09b",
+    ".bagakit/feature-tracker/features/f-2538fz2rm/goal.md": "59617af4c7d0324beb3b04fb5967a6a2bf74073ae23ac10d0d6d4be6df4b5b17"
   }
 }

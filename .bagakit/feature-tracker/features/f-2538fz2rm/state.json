@@ -53,6 +53,19 @@
     {
       "action": "task_plan_set",
       "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 59617af4c7d0324beb3b04fb5967a6a2bf74073ae23ac10d0d6d4be6df4b5b17"
     }
-  ]
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-2538fz2rm/goal.md",
+    "revision": "59617af4c7d0324beb3b04fb5967a6a2bf74073ae23ac10d0d6d4be6df4b5b17"
+  }
 }
