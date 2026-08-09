@@ -28,3 +28,12 @@ describe('queued steer delivery', () => {
     expect(useAppStore.getState().agentSteerQueues.s).toEqual(['retry me'])
   })
 })
+
+  it('does not report success as failure when an identical prompt was already queued', async () => {
+    const session = { id: 's', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId: 'r' } }, status: { state: 'working', observedAt: 1 }, processState: 'running' }
+    useAppStore.setState({ sessions: [session as never] })
+    vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+    useAppStore.getState().enqueueAgentSteer('s', 'same')
+    await expect(useAppStore.getState().send('s', 'same')).resolves.toBeUndefined()
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+  })
