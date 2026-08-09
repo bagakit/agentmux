@@ -27,7 +27,7 @@ async function pause() { await act(async () => { await new Promise((r) => setTim
 async function split(disabled = false) {
   const action = vi.fn(), open = vi.fn()
   await act(async () => root.render(<><input aria-label="editor" /><PaneSplitMenu disabled={disabled} regionCount={2} onSplit={action} onArrange={vi.fn()} onOpenChange={open} /></>))
-  return { trigger: container.querySelector('button')!, action, open }
+  return { trigger: container.querySelector<HTMLButtonElement>('.pane-action--split-menu')!, action, open }
 }
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
 it('production Split opens without a click, preserves the editor caret and executes once', async () => {
@@ -93,7 +93,7 @@ it('switching hover menus closes the previous owner and unmount releases the act
   expect(second).toHaveBeenLastCalledWith(false)
 })
 it('all existing dropdown consumers import the shared hover adapter, with nonempty discovery', () => {
-  const dir = resolve('apps/desktop/src/renderer/src/components')
+  const dir = resolve('../../apps/desktop/src/renderer/src/components')
   const consumers = readdirSync(dir).filter((f) => f.endsWith('.tsx')).filter((f) => readFileSync(join(dir, f), 'utf8').includes('<DropdownMenu.Root'))
   expect(consumers.length).toBeGreaterThan(0)
   for (const file of consumers) expect(readFileSync(join(dir, file), 'utf8'), file).toContain("import * as DropdownMenu from './HoverDropdownMenu'")
