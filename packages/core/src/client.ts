@@ -1149,9 +1149,15 @@ export class AgentMuxClient {
 
   async stopTerminal(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
-    // 先记停止意图，再动内核：若退出事件在 stop 返回前就到（自退与我们的 stop 撞车），分类仍读得到意图。
+    // Reserve the operation before recording intent. A failed preparation must
+    // not leave a stale "user stopped" marker that misclassifies a later exit.
+    const operation = await this.kernel.prepareStop(ref.runId)
     this.stopRequestedRuns.add(ref.runId)
-    await this.kernel.stop(await this.kernel.prepareStop(ref.runId))
+    try {
+      await this.kernel.stop(operation)
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code !== 'CTXMUX_run_not_found') throw error
+    }
     this.runPids.delete(ref.runId)
     this.publisher.publish({
       type: 'run-removed',
@@ -2220,7 +2226,6 @@ export class AgentMuxClient {
     }
     // 停止意图落台账。用户主动停止走的干净路径是 run-removed（下方），但进程可能在我们的 stop 生效前就
     // 自退——那条 exit 事件会先到 acceptKernelEvent；先记意图，才能让它诚实归为 user-stopped 而非 crashed。
-    this.stopRequestedRuns.add(expectedRun.runId)
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'stop',
       agentSessionId,
@@ -2237,6 +2242,9 @@ export class AgentMuxClient {
       lifecycleOperationId,
       stopOperation
     )
+    // Record intent only after both prepare and reservation succeeded. This
+    // keeps exit classification honest when setup itself fails.
+    this.stopRequestedRuns.add(expectedRun.runId)
     let preserveReservation = false
     try {
       let run: CtxmuxAdapterRun | null = null
@@ -2256,8 +2264,11 @@ export class AgentMuxClient {
           if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
             preserveReservation = true
           } else {
-          preserveReservation = error instanceof AgentMuxError && error.detail === 'unknown'
-          throw error
+            // Any non-vanished error leaves submission state uncertain. Keep
+            // the reservation for startup recovery instead of releasing it
+            // and losing an accepted/in-flight stop.
+            preserveReservation = true
+            throw error
           }
         }
         preserveReservation = true
