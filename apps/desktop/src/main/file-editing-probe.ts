@@ -931,6 +931,7 @@ export async function runDesktopFileEditingProbe(options: {
       phases,
       error: error instanceof Error ? error.message : String(error)
     })
+    console.error('file_editing_probe_failed=' + JSON.stringify(error instanceof Error ? error.message : String(error)))
     throw error
   } finally {
     options.control.cancelWriteBarrier()

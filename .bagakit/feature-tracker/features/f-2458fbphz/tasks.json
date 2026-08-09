@@ -1,0 +1,214 @@
+{
+  "version": 2,
+  "feat_id": "f-2458fbphz",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": "docs/reviews/probe-process-ownership.md",
+  "source_refs": [
+    "docs/reviews/agentmux-package-ssot-and-history-audit.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/scripts/package-macos.mjs",
+    "apps/desktop/scripts/report-desktop-package.mjs",
+    "docs/reviews/probe-process-ownership.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/agentmux-package-ssot-and-history-audit.md",
+      "source_refs": [
+        "docs/reviews/agentmux-package-ssot-and-history-audit.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/probe-process-ownership.md",
+      "source_refs": [
+        "docs/reviews/agentmux-package-ssot-and-history-audit.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs",
+        "docs/reviews/probe-process-ownership.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "收敛唯一候选与 canonical 安装/运行身份",
+      "objective": "让打包、安装和重启都核对同一份 source identity，并报告同名旧副本而不误删数据。",
+      "outcome": "用户能明确知道当前候选、安装副本和运行实例是否是同一次 clean build。",
+      "acceptance": [
+        "package Gate 只接受 clean source 生成的 release candidate；out、临时 App、DMG 挂载目录不能作为安装输入。",
+        "report 输出 candidate、canonical install、/Applications、开发缓存副本和运行 executable path 的身份与 mismatch。",
+        "安装失败不替换现有 canonical App；清理旧 App 使用可恢复的 Trash 移动且不触碰用户数据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/package-identity.test.ts test/package-install-path.test.ts test/package-launch-source.test.ts",
+          "proves": "身份核对、canonical path、旧副本检测和运行路径判定。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop report:package",
+          "proves": "候选与安装报告来自 bundle 身份而非版本号。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs",
+        "apps/desktop/scripts/package-identity.mjs"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "blocked",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/package-identity.test.ts test/package-install-path.test.ts test/package-launch-source.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop report:package",
+          "exit_code": 1,
+          "status": "fail"
+        }
+      ],
+      "notes": [],
+      "last_blocker": {
+        "class": "external_blocker",
+        "reason": "Current tree is not clean and no release/mac/AgentMux.app candidate exists; package:mac must run from a clean checkout before report can pass."
+      }
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "建立关键功能的删除/替代审计",
+      "objective": "从设计合同维护关键能力锚点，对当前源码、生产调用者、测试和 Git 删除记录做可执行比对。",
+      "outcome": "并发 Agent 删除或只改测试不接产品时，在提交/发包前出现明确报告。",
+      "acceptance": [
+        "审计来源是设计合同中的能力表；每个锚点同时要求实现文件存在、定义文件之外有生产调用者、测试有有效断言。",
+        "Git 删除记录列出删除文件、最近替代路径和是否仍有生产调用者；无法判定时标为 review-required，不静默通过。",
+        "故意移除一个关键实现或生产调用者时审计命令失败，恢复后通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop audit:features",
+          "proves": "关键能力来源→实现→调用者→测试链路与删除记录。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "apps/desktop/scripts/audit-feature-history.mjs",
+        "apps/desktop/test/feature-history-audit.test.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop audit:features",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "验证 runner 失败后有界回收所有自有进程",
+      "objective": "快速 probe 失败、超时、信号退出时终止本次进程组及独立临时路径绑定的 detached 进程，并复核零残留。",
+      "outcome": "验证 runner 失败后有界回收所有自有进程",
+      "acceptance": [
+        "失败信号触发 teardown，不等待完整 4 分钟预算。",
+        "TERM 被忽略时升级 KILL；workspace observer 无 userData 参数仍回收。",
+        "清理失败如实报错；正式实例与其他验证实例不受影响。",
+        "实际 Node 子进程测试及变异测试证明生产 runner 的 cleanup 路径。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/probe-process-cleanup.test.ts --maxWorkers=1",
+          "proves": "真实子进程的资源归属与有界回收行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/probe-process-ownership.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/probe-process-cleanup.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "文件 observer 随宿主死亡退出",
+      "objective": "通过宿主 IPC 生命周期终止真实 local workspace observer，保留显式 dispose 和文件变更行为。",
+      "outcome": "文件 observer 随宿主死亡退出",
+      "acceptance": [
+        "正常观察和 dispose 仍工作。",
+        "宿主被 SIGKILL 后 observer 在有界时间内退出，无父 PID 轮询。",
+        "实际进程测试、变异变红和 IPC/WorkspaceFiles 调用者证明产品连接。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-observer-owner.test.ts --maxWorkers=1",
+          "proves": "真实子进程的资源归属与有界回收行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/probe-process-ownership.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

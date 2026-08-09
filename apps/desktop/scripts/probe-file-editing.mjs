@@ -1,13 +1,11 @@
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
-import { createInterface } from 'node:readline'
-import { promisify } from 'node:util'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 
-const execFileAsync = promisify(execFile)
+import { runProbeProcess } from './probe-process.mjs'
 
 // Fast dev runner for the mounted file-editing E2E probe. Instead of the 15-minute package→sign→DMG→mount→
 // LaunchServices path (package-macos.mjs), this launches the raw Electron binary directly on the freshly
@@ -56,71 +54,6 @@ function run(command, args, options = {}) {
   })
 }
 
-/**
- * Reap the detached ctxmuxd this run spawned, scoped by its unique socket path so it can never match the
- * user's real daemon. SIGTERM first, then SIGKILL any survivor. Best-effort: a failed `ps` or an already
- * exited daemon is not an error.
- */
-async function reapProbeDaemon(runtimeRoot) {
-  const socketPath = join(runtimeRoot, 'ctxmux.sock')
-  const pidsFor = async () => {
-    let stdout = ''
-    try {
-      ({ stdout } = await execFileAsync('ps', ['-axo', 'pid=,command=']))
-    } catch {
-      return []
-    }
-    return stdout.split('\n').flatMap((line) => {
-      const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-      if (!match || !match[2].includes('ctxmuxd') || !match[2].includes(socketPath)) return []
-      return [Number(match[1])]
-    })
-  }
-  const signal = (pids, sig) => {
-    for (const pid of pids) {
-      try {
-        process.kill(pid, sig)
-      } catch {
-        // ESRCH (already gone) or a race — nothing to do.
-      }
-    }
-  }
-  // A daemon only becomes findable once execve has replaced its argv with `ctxmuxd --socket <path>`; between
-  // core's fork and that execve the child still wears Electron's command line and matches nothing. If the run
-  // dies mid-`connect()`, a single snapshot can land in that window and miss the daemon entirely. So when the
-  // first sweep comes up empty, look again a few times before concluding there is nothing to reap. The window
-  // is microseconds wide, so the common "no daemon spawned at all" case costs a handful of cheap `ps` calls.
-  let pids = await pidsFor()
-  for (let attempt = 0; pids.length === 0 && attempt < 6; attempt += 1) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
-    pids = await pidsFor()
-  }
-  signal(pids, 'SIGTERM')
-  const deadline = Date.now() + 3_000
-  let remaining = await pidsFor()
-  while (remaining.length > 0 && Date.now() < deadline) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
-    remaining = await pidsFor()
-  }
-  if (remaining.length > 0) {
-    signal(remaining, 'SIGKILL')
-    process.stderr.write(`probe runner: SIGKILL'd surviving ctxmuxd ${remaining.join(', ')}\n`)
-  }
-}
-
-// Electron helpers are not children in the OS process tree on macOS. Reap every process that still
-// points at this run's isolated user-data directory, otherwise a failed probe leaks renderer/GPU
-// processes and can exhaust the host before the next attempt.
-async function reapProbeProcesses(userData) {
-  let stdout = ''
-  try { ({ stdout } = await execFileAsync('ps', ['-axo', 'pid=,command='])) } catch { return }
-  const pids = stdout.split('\n').flatMap((line) => {
-    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-    return match && match[2].includes(userData) ? [Number(match[1])] : []
-  })
-  for (const pid of pids) { try { process.kill(pid, 'SIGKILL') } catch {} }
-}
-
 async function main() {
   if (!skipBuild) {
     // Rebuild BOTH halves so the probe runs against current source. `@agentmux/core` is externalized by
@@ -150,100 +83,37 @@ async function main() {
     throw error
   }
 
-  let child = null
-  let killTimer = null
-  let overallTimer = null
-  // The last probe description the probe reported "waiting" on but never "completed". If the run dies, this
-  // names the exact assertion that hung — the whole point of streaming the progress lines.
   let lastWaiting = null
-  let timedOut = false
-
-  const cleanup = async () => {
-    if (killTimer) clearTimeout(killTimer)
-    if (overallTimer) clearTimeout(overallTimer)
-    if (child && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM')
-      await Promise.race([new Promise((resolveKill) => {
-        const forceKill = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-        }, 3_000)
-        forceKill.unref()
-        child.once('exit', () => {
-          clearTimeout(forceKill)
-          resolveKill()
-        })
-      }), new Promise((resolve) => setTimeout(resolve, 3_500))])
-    }
-    // Core spawns ctxmuxd DETACHED (the adopt model), so it outlives the Electron process — the same reason
-    // package-macos.mjs reaps the daemon separately. Scope the reap to OUR unique runtime socket path so it
-    // can never touch the user's real daemon. Without this the fast loop leaks a daemon per run.
-    await reapProbeDaemon(runtimeRoot)
-    await reapProbeProcesses(userData)
-    await rm(temporaryRoot, { recursive: true, force: true })
-  }
-
-  // SIGINT (Ctrl-C) must still tear down the Electron child and temp dirs — otherwise a manual abort orphans
-  // the daemon and leaks a socket. Clean up, then re-signal ourselves so the exit code reflects the signal.
-  const onSigint = () => {
-    void cleanup().finally(() => {
-      process.removeListener('SIGINT', onSigint)
-      process.kill(process.pid, 'SIGINT')
-    })
-  }
-  process.on('SIGINT', onSigint)
-
-  const exitCode = await new Promise((resolvePromise) => {
-    child = spawn(electronExecutable, [join(desktopRoot, 'out', 'main', 'index.js')], {
+  let execution
+  try {
+    execution = await runProbeProcess(electronExecutable, [join(desktopRoot, 'out', 'main', 'index.js')], {
+      temporaryRoot,
       cwd: desktopRoot,
-      stdio: ['ignore', 'inherit', 'pipe'],
+      timeoutMs: OVERALL_TIMEOUT_MS,
       env: {
         ...process.env,
         AGENTMUX_DESKTOP_USER_DATA: userData,
         AGENTMUX_RUNTIME_DIRECTORY: runtimeRoot,
         AGENTMUX_DESKTOP_READY_FILE: readyFile,
         AGENTMUX_DESKTOP_FILE_EDITING_REPORT: fileEditingReport
+      },
+      onLine(line) {
+        process.stderr.write(`${line}\n`)
+        const match = /^file_editing_probe_(waiting|completed|timed-out)=(.*)$/.exec(line)
+        if (!match) return
+        const [, status, rawDescription] = match
+        let description = rawDescription
+        try { description = JSON.parse(rawDescription) } catch {}
+        if (status === 'waiting' || status === 'timed-out') lastWaiting = description
+        else if (status === 'completed' && lastWaiting === description) lastWaiting = null
       }
     })
-
-    overallTimer = setTimeout(() => {
-      timedOut = true
-      process.stderr.write(`\nprobe runner: overall ${OVERALL_TIMEOUT_MS}ms budget exceeded — killing Electron\n`)
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
-      killTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      }, 3_000)
-      killTimer.unref()
-    }, OVERALL_TIMEOUT_MS)
-    overallTimer.unref()
-
-    // The probe writes its progress to the child's stderr as `file_editing_probe_<status>=<json description>`
-    // lines. Pass every stderr line through (so ordinary main-process logs stay visible) and additionally
-    // track the last "waiting" that never "completed" so a hang can be named precisely.
-    const stderr = createInterface({ input: child.stderr })
-    stderr.on('line', (line) => {
-      process.stderr.write(`${line}\n`)
-      const match = /^file_editing_probe_(waiting|completed|timed-out)=(.*)$/.exec(line)
-      if (!match) return
-      const [, status, rawDescription] = match
-      let description = rawDescription
-      try {
-        description = JSON.parse(rawDescription)
-      } catch {
-        // Leave the raw text if it is not valid JSON — better than dropping the signal.
-      }
-      if (status === 'waiting') lastWaiting = description
-      else if (status === 'completed' && lastWaiting === description) lastWaiting = null
-      else if (status === 'timed-out') lastWaiting = description
-    })
-
-    child.once('error', (error) => {
-      process.stderr.write(`probe runner: failed to launch Electron: ${error.message}\n`)
-      resolvePromise(1)
-    })
-    child.once('exit', (code, signal) => {
-      resolvePromise(signal ? 1 : code ?? 1)
-    })
-  })
+  } catch (error) {
+    // Keep ownership paths if teardown could not be verified, so diagnosis and
+    // targeted cleanup remain possible. Never report a failed ps as zero owners.
+    throw new Error(`Probe failed; retained diagnostics at ${temporaryRoot}`, { cause: error })
+  }
+  const { exitCode, timedOut, interruption } = execution
 
   // The report is the authority on whether the FEATURE works, but it is written before `app.quit()`, so it
   // cannot speak for teardown. `before-quit` disposes the runtime (client + daemon); if that throws, the main
@@ -257,10 +127,9 @@ async function main() {
     report = null
   }
 
-  await cleanup()
-  process.removeListener('SIGINT', onSigint)
+  await rm(temporaryRoot, { recursive: true, force: true })
 
-  if (report?.ok === true && exitCode === 0 && !timedOut) {
+  if (report?.ok === true && exitCode === 0 && !timedOut && !interruption) {
     process.stdout.write('file_editing_probe=ok\n')
     return 0
   }
