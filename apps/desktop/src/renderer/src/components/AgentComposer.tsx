@@ -14,6 +14,9 @@ export type AgentComposerProps = {
   queuedCount?: number
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
+  skills?: Array<{ text: string; description: string }>
+  references?: Array<{ text: string; description: string }>
+  onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => void
   // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
@@ -38,6 +41,9 @@ export function AgentComposer({
   contextUsage,
   queuedCount = 0,
   commands = [],
+  skills = [],
+  references = [],
+  onSelectSuggestion,
   primaryAction = 'send',
   postureControl,
   onChange,
@@ -51,7 +57,10 @@ export function AgentComposer({
 }: AgentComposerProps) {
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
-  const suggestions = /^\/[^\s]*$/.test(value) ? commands.filter((command) => command.text.startsWith(value) && command.text !== value) : []
+  const trigger = value.match(/(?:^|\s)([\/$@][^\s]*)$/)?.[1] ?? ''
+  const suggestionKind = trigger.startsWith('/') ? 'command' : trigger.startsWith('$') ? 'skill' : trigger.startsWith('@') ? 'reference' : null
+  const source = suggestionKind === 'command' ? commands : suggestionKind === 'skill' ? skills : suggestionKind === 'reference' ? references : []
+  const suggestions = source.filter((item) => item.text.startsWith(trigger) && item.text !== trigger)
   return (
     <details open className="composer" data-agent-composer="true">
       {/* 受控 + 认识 IME 组字：为什么这一格不能是裸 <textarea>，见 ComposerTextarea 与
@@ -165,9 +174,9 @@ export function AgentComposer({
           )}
         </div>
       </div>
-      {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label="Agent commands">
+      {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
         {suggestions.map((command) => <button type="button" role="option" aria-selected="false" key={command.text}
-          onClick={() => onChange(`${command.text} `)}>{command.text}<small>{command.description}</small></button>)}
+          onClick={() => { onSelectSuggestion?.(command.text, suggestionKind!); onChange(`${command.text} `) }}>{command.text}<small>{command.description}</small></button>)}
       </div> : null}
       <summary className="composer__disclosure" title="Collapse or expand message tools">
         <MessageSquare size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />
