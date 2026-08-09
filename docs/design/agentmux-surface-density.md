@@ -424,3 +424,13 @@ styles/
 
 - Status Bar 用统一语义图标语言承载 Agents/Needs You/Error，数字仅作辅助；低对比但可识别。
 - Activity 展开项只占用承载新增信息的高度；没有新增信息就不提供展开控件。
+
+### Activity Agent 明细与 Agents 单入口
+
+- Agent 明细采用紧凑两行：第一行 Project/Workspace 与 Provider 图标，第二行状态、最近活动、时长；统计信息用短徽标，不堆叠大数字。
+- Agents 入口在左侧统一承载，右侧不再重复显示同一 roster；状态栏只保留跨窗口摘要。
+
+### CPU/Memory 面板密度
+
+- 资源面板使用紧凑列表行，优先显示对象与 CPU/Memory，Project/Workspace 和 idle 时长作为次级信息；总览仍保持一行摘要。
+- 沿用 Agents/Activity 的 Provider 图标、圆角、行高和 hover 说明，避免出现第三套列表视觉语言。
