@@ -122,6 +122,7 @@ export function WorkspaceSidebar({
         title={`${project.repoPath} · ${countTitle}`}
         aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
         data-workspace-id={preferred ?? undefined}
+        {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
         // 缩进只表达"这个 Project 在上一个 Project 的目录里"。深度走自定义属性而不是内联
         // padding：具体几像素归样式表（密度合同《Project Rail Nesting Indent》），这里只报层数。
         {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
