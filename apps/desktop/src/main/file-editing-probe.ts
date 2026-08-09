@@ -625,7 +625,7 @@ async function runExplorerInteractionProbe(options: {
       moveProjectionEvidenceBefore,
       await explorerProjectionEvidence(window)
     )
-    return evidence.total === 1 && evidence.rejectedDirectoryLoads.length === 2
+    return evidence.byWorkspace[options.workspaceId] === 1 && evidence.rejectedDirectoryLoads.length === 2
   })
   assertProbe(
     await explorerProjectionSettles(window),
