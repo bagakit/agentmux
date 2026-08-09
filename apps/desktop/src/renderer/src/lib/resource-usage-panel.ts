@@ -13,6 +13,8 @@ export type UsagePanelRow = {
   label: string
   cpuText: string
   rssText: string
+  contextText: string
+  stateText: string
 }
 
 /**
@@ -62,18 +64,25 @@ export function formatCpu(cpuPercent: number | null): string {
  */
 export function usagePanelRows(
   snapshot: UsageSnapshot | null,
-  sessions: readonly SessionSnapshot[]
+  sessions: readonly SessionSnapshot[],
+  now = Date.now()
 ): UsagePanelRow[] {
   if (!snapshot) return []
-  const labelByRunId = new Map<string, string>()
+  const contextByRunId = new Map<string, { label: string; context: string; state: string }>()
   for (const session of sessions) {
     if (session.kind !== 'agent') continue
-    labelByRunId.set(session.control.run.runId, session.label)
+    const project = session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) ?? session.workspacePath
+    const state = session.status.state
+    const age = Math.max(0, Math.floor((now - session.updatedAt) / 1000))
+    const idle = state === 'working' ? '' : age < 60 ? `${age}s idle` : age < 3600 ? `${Math.floor(age / 60)}m idle` : `${Math.floor(age / 3600)}h idle`
+    contextByRunId.set(session.control.run.runId, { label: session.label, context: `${session.providerId} · ${project}`, state: idle || state })
   }
   return snapshot.runs.map((run) => ({
     key: run.runId,
-    label: labelByRunId.get(run.runId) ?? run.runId.slice(0, 8),
+    label: contextByRunId.get(run.runId)?.label ?? run.runId.slice(0, 8),
     cpuText: formatCpu(run.cpuPercent),
-    rssText: formatRss(run.rssKib)
+    rssText: formatRss(run.rssKib),
+    contextText: contextByRunId.get(run.runId)?.context ?? 'Unknown project',
+    stateText: contextByRunId.get(run.runId)?.state ?? 'unknown'
   }))
 }
