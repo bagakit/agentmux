@@ -1,6 +1,6 @@
 import { Palette, SquareTerminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppearanceConfig, TerminalThemeId } from '../../../../shared/contracts'
+import type { AppearanceConfig, AppAppearanceId, TerminalThemeId } from '../../../../shared/contracts'
 import {
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
@@ -12,20 +12,22 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
   onSave: (appearance: AppearanceConfig) => Promise<void>
 }) {
+  const [appAppearance, setAppAppearance] = useState<AppAppearanceId>(appearance.appAppearance ?? 'dark')
   const [terminalTheme, setTerminalTheme] = useState<TerminalThemeId>(appearance.terminalTheme)
   const savedFontSize = appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   const [fontSize, setFontSize] = useState<number>(savedFontSize)
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => setAppAppearance(appearance.appAppearance ?? 'dark'), [appearance.appAppearance])
   useEffect(() => setTerminalTheme(appearance.terminalTheme), [appearance.terminalTheme])
   useEffect(() => setFontSize(savedFontSize), [savedFontSize])
 
-  const dirty = terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize
+  const dirty = appAppearance !== (appearance.appAppearance ?? 'dark') || terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize
 
   async function save(): Promise<void> {
     setSaving(true)
     try {
-      await onSave({ terminalTheme, terminalFontSize: fontSize })
+      await onSave({ appAppearance, terminalTheme, terminalFontSize: fontSize })
     } finally {
       setSaving(false)
     }
@@ -34,6 +36,16 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   return (
     <div className="settings-pane-stack">
       <p className="settings-lead">AgentMux chrome stays quiet and consistent; the Terminal owns its palette. PTY and CtxMux transport bytes and never rewrite color.</p>
+      <section className="settings-group">
+        <header><span>Application appearance</span><small>Chrome</small></header>
+        <div className="terminal-theme-grid" role="radiogroup" aria-label="Application appearance">
+          {(['dark', 'light', 'system'] as const).map((mode) => (
+            <button type="button" key={mode} className={`terminal-theme-choice ${appAppearance === mode ? 'terminal-theme-choice--selected' : ''}`} role="radio" aria-checked={appAppearance === mode} onClick={() => setAppAppearance(mode)}>
+              <span className="terminal-theme-choice__copy"><strong>{mode === 'system' ? 'Follow system' : mode === 'dark' ? 'Dark' : 'Light'}</strong><small>{mode === 'system' ? 'Match your operating system' : `Use ${mode} surfaces`}</small></span>
+            </button>
+          ))}
+        </div>
+      </section>
       <section className="settings-group">
         <header><span>Terminal palette</span><small>{TERMINAL_THEME_CATALOG.length}</small></header>
         <div className="terminal-theme-grid" role="radiogroup" aria-label="Terminal palette">

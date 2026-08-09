@@ -68,6 +68,7 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // renderer. `.transform` runs after `z.number()` accepts the value, so a non-number still fails the
 // field (and the preference falls back to default) rather than being coerced.
 const appearanceSchema = z.object({
+  appAppearance: z.enum(['dark', 'light', 'system']).optional(),
   terminalTheme: z.enum(TERMINAL_THEME_IDS),
   terminalFontSize: z
     .number()
@@ -221,7 +222,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     opencode: { label: 'OpenCode', providerId: 'opencode', command: 'opencode', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
-  appearance: { terminalTheme: 'graphite' },
+  appearance: { appAppearance: 'dark', terminalTheme: 'graphite' },
   browser: {
     toolbar: {
       selectElement: true,

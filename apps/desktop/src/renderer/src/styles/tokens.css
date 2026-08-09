@@ -119,3 +119,27 @@
   background: var(--bg);
   color: var(--text);
 }
+
+
+:root[data-appearance="light"] {
+  color-scheme: light;
+  --bg: #f4f6f5;
+  --surface-0: #ffffff;
+  --surface-1: #eef1ef;
+  --surface-2: #e3e8e5;
+  --surface-3: #d7dfda;
+  --line: #c6d0c9;
+  --line-soft: #dce3de;
+  --text: #17201a;
+  --text-2: #46554b;
+  --text-3: #6b786f;
+  --green: #267a48;
+  --green-2: #2f965b;
+  --amber: #9a6500;
+  --red: #b33b37;
+  --blue: #2869a7;
+  --neutral-1: #c4cec7;
+  --neutral-2: #87958b;
+  --neutral-3: #5c6b61;
+  --focus-line: #4b8b63;
+}
