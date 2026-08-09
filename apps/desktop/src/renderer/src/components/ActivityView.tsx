@@ -32,6 +32,7 @@ import {
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { speaksAsAgent, speaksAsHuman, type ConversationAxisMark } from '../lib/conversation-axis'
+import { buildContinuationPrompt } from '../lib/session-continuation'
 import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/conversation-speaker'
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
@@ -513,7 +514,8 @@ function Turn({
   describeSpeaker,
   openWorkspaceFile,
   openHttpLink,
-  workspaceRoot
+  workspaceRoot,
+  onContinue
 }: {
   item: AgentTimelineItem
   origin: number
@@ -523,6 +525,7 @@ function Turn({
   openWorkspaceFile?: OpenWorkspaceFile
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot: string
+  onContinue?: () => void
 }) {
   // 形状由**身份**驱动，不由 kind。这是本任务的全部：`log-turn--${item.kind}` 会让「谁说的」永远
   // 只有两种可能，A2A 落地后第三个身份无处可去；而 `data-speaker-role` 上挂的是身份判定的结论。
@@ -556,6 +559,7 @@ function Turn({
       </div>
       {/* Only the TURN register renders markdown. The machine Row (log-row__prose) stays plain text: it
           carries payload, not prose someone reads for meaning. */}
+      {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
       {item.content ? (
         <AgentMarkdown
           content={item.content}
@@ -652,6 +656,7 @@ export function ActivityView({
   openWorkspaceFile,
   openHttpLink,
   workspaceRoot = '',
+  onContinue,
   describeSpeaker
 }: {
   items: AgentTimelineItem[]
@@ -664,6 +669,7 @@ export function ActivityView({
    *  destination menu and the Region origin (SessionPane), never resolved here. */
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot?: string
+  onContinue?: (prompt: string) => void
   /**
    * 把一个说话人身份解析成「叫什么、画哪个 provider 的图标」。由持有 Session 的那一层给出——
    * 本组件不读 Store，所以 `providerId` 与显示名只能从外面进来。缺省时两条对话轴不渲染：轴的
@@ -900,6 +906,7 @@ export function ActivityView({
                   {...(describeSpeaker ? { describeSpeaker } : {})}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}
+                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(items, entry.item.id)) } : {})}
                 />
               ) : (
                 <Row item={entry.item} origin={origin} count={1} showSource />
