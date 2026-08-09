@@ -14,9 +14,12 @@ export class ContinuousProgressLoopStore {
   async load(): Promise<ContinuousProgressLoop[]> {
     try {
       const raw = JSON.parse(await readFile(this.path, 'utf8')) as unknown
-      if (!Array.isArray(raw)) return []
+      if (!Array.isArray(raw)) throw new Error('Continuous progress loop store must contain an array.')
       return raw.filter((item): item is ContinuousProgressLoop => Boolean(item && typeof item === 'object' && typeof (item as any).loopId === 'string' && typeof (item as any).agentSessionId === 'string'))
-    } catch { return [] }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
   }
   async save(loops: readonly ContinuousProgressLoop[]): Promise<void> {
     await durableWriteFile(this.path, `${JSON.stringify(loops, null, 2)}\n`)
