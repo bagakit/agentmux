@@ -680,3 +680,5 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - 验证模式的启动落点只决定初始选择，不能持续覆盖用户或 probe 随后的 Workspace 切换；测试模式不得使项目切换失效。
 
 - 文件树跨 Workspace 的验证事件必须按操作和 Workspace epoch 归属；挂载重建不许复用聚合 DOM 计数推断一次 mutation。Move 提交只产生一条权威 receipt，旧 epoch 的刷新明确记为 rejected，Stop 对已消失 Run 归入幂等终态。
+
+- Tab 拖动默认表达同一 Region 内的排序；只有拖到明确的边缘/方位 drop zone 才表达拆分为新 Region。Split 按钮直接点击默认向右，hover 菜单复用统一方位组件，并按当前布局可行性置灰。
