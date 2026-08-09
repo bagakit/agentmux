@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { promoteRegionToTab } from '../src/renderer/src/lib/promote-region-to-tab'
-import { regionIds } from '../src/renderer/src/lib/workbench-view-layout'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs'
-import { createWorkspaceLayout, findGroup } from '../src/renderer/src/lib/workbench-layout'
+import { regionIds, createWorkspaceLayout, findGroup } from '@agentmux/layout'
 
 // #487「以及单独变成一个 tab」的纯布局代数。promoteRegionToTab 把一格从源 Tab 的分屏树里摘出，
 // 作为一张新 Tab 的唯一一格，落在源 Tab 紧邻其后的位置并激活。这里钉两条 tracker #487 只有散文、

@@ -1,7 +1,7 @@
 import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchSurfaces } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
-import type { WorkspaceLayout } from './workbench-layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
 import type { AttentionVisibility } from './attention-event'
 

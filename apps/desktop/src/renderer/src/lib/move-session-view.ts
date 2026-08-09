@@ -1,4 +1,4 @@
-import { addTab, activateTab, createWorkspaceLayout, type WorkspaceLayout } from './workbench-layout'
+import { addTab, activateTab, createWorkspaceLayout, type WorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   findWorkbenchRegion,

@@ -1,5 +1,5 @@
 import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/contracts'
-import { activateTab, addTab, removeTab, type WorkspaceLayout } from './workbench-layout'
+import { activateTab, addTab, removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   documentKey,

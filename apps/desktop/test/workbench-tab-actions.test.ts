@@ -16,7 +16,7 @@ import {
   tabIdsForCloseScope,
   workbenchRegionPresetMenu
 } from '../src/renderer/src/lib/workbench-tab-actions'
-import { workbenchRegionPresetSize } from '../src/renderer/src/lib/workbench-view-layout'
+import { workbenchRegionPresetSize } from '@agentmux/layout'
 
 describe('workbench tab context actions', () => {
   const tabs = ['one', 'two', 'three', 'four']

@@ -1,8 +1,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { regionIds, splitWorkbenchRegion } from '../src/renderer/src/lib/workbench-view-layout'
+import { regionIds, splitWorkbenchRegion, createWorkspaceLayout } from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   assertRegionInvariant,
@@ -12,7 +13,6 @@ import {
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs'
 import { promoteRegionToTab } from '../src/renderer/src/lib/promote-region-to-tab'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout'
 
 // #494 gap：分屏树里的 regionId 集合，必须与 tab.regions 这张表的 key 集合逐一相等。此前这条只由
 // addWorkbenchRegion / removeWorkbenchRegion 「两处一起改」的约定维持，没有任何守卫——树里多一格
@@ -143,7 +143,15 @@ describe('tab 布局树 ↔ tab.regions 集合不变量（#494 gap）', () => {
  */
 describe('每个改动 region 集合的函数都必须过那道闸（#515 接线层）', () => {
   const RENDERER = new URL('../src/renderer/src/', import.meta.url).pathname
-  const DEFINER = 'lib/workbench-view-layout.ts'
+  // 布局引擎的实现（那些 changes 导出的定义）已抽进 @agentmux/layout（旧渲染层薄壳
+  // lib/workbench-view-layout.ts 已删）。调用点扫描仍只在渲染层树上进行（workbench-tabs / control 等
+  // reducer 调 changes 助手、且必须 assertRegionInvariant——那层接线没搬走）；引擎的定义现在完全在包里、
+  // 不在渲染层扫描面内，故 callSites 无需再跳过引擎自身——曾经那句 `relative === DEFINER` 的跳过已随薄壳
+  // 删除一并删掉（实测：把它改成任何在渲染层里不存在的名字，15 条不变；这正说明它已无可跳过之物）。
+  // 别名表直接按 `@agentmux/layout` 解析（见 aliasMapFor）。DEFINER 只剩一个用处：**导出穷举**那条读
+  // 引擎真实源码时的文件标签，真实字节来自 DEFINER_SOURCE（包里）。
+  const DEFINER = 'packages/layout/src/workbench-view-layout.ts'
+  const DEFINER_SOURCE = fileURLToPath(new URL('../../../packages/layout/src/workbench-view-layout.ts', import.meta.url))
 
   /**
    * 布局引擎每个导出函数对 region-id **集合**的作用。分两档，且必须穷举（下方有断言）：
@@ -330,14 +338,14 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
    *     严**（该断言守不了任何站点）——是响亮/安全的方向，不是让坏变异漏过的洞。
    */
 
-  /** 一个 renderer 源文件里，从 DEFINER 具名 import 出来的「本地名 → 规范名」别名表（无别名则为恒等）。 */
+  /** 一个 renderer 源文件里，从布局引擎（现居 @agentmux/layout）具名 import 出来的「本地名 → 规范名」别名表（无别名则为恒等）。 */
   function aliasMapFor(file: ts.SourceFile): Map<string, string> {
     const map = new Map<string, string>()
     file.forEachChild((node) => {
       if (
         ts.isImportDeclaration(node) &&
         ts.isStringLiteral(node.moduleSpecifier) &&
-        node.moduleSpecifier.text.replace(/^\.\//, '').endsWith('workbench-view-layout') &&
+        node.moduleSpecifier.text === '@agentmux/layout' &&
         node.importClause?.namedBindings &&
         ts.isNamedImports(node.importClause.namedBindings)
       ) {
@@ -486,7 +494,6 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   function callSites(): ChangesHelperSite[] {
     const sites: ChangesHelperSite[] = []
     for (const relative of sourceFiles()) {
-      if (relative === DEFINER) continue
       const file = parse(relative)
       const alias = aliasMapFor(file)
       const walk = (node: ts.Node): void => {
@@ -511,7 +518,15 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   }
 
   it('布局引擎的每个导出都在分类表里（新增一个必须在这里回答「它动集合吗」）', () => {
-    const file = parse(DEFINER)
+    // 读的是引擎的真实源码（已抽进 @agentmux/layout），不是渲染层那层 `export *` 薄壳——薄壳里没有
+    // 任何函数声明，按它扫会恒空假绿。
+    const file = ts.createSourceFile(
+      DEFINER,
+      readFileSync(DEFINER_SOURCE, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    )
     const exported: string[] = []
     file.forEachChild((node) => {
       if (
@@ -649,7 +664,6 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     const CHANGES = Object.keys(LAYOUT_EFFECT).filter((name) => LAYOUT_EFFECT[name] === 'changes')
     const aliased: string[] = []
     for (const relative of sourceFiles()) {
-      if (relative === DEFINER) continue
       const alias = aliasMapFor(parse(relative))
       for (const [local, canonical] of alias) {
         if (local !== canonical && CHANGES.includes(canonical)) aliased.push(`${relative}: ${canonical} as ${local}`)
@@ -697,7 +711,6 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     type Occurrence = { file: string; helper: string; role: string }
     const occurrences: Occurrence[] = []
     for (const relative of sourceFiles()) {
-      if (relative === DEFINER) continue
       const file = parse(relative)
       // 本文件里「本地名 → 规范名」映射到某个 changes 助手的那些本地名。别名已被上一条禁掉，故正常树上
       // 本地名≡规范名；这里仍按本地名扫，是为了在别名（防御性）与规范名两种写法下都能对上被引用的绑定。

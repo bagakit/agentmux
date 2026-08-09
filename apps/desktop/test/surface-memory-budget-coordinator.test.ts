@@ -10,7 +10,7 @@ import {
   useSurfaceMemoryBudget
 } from '../src/renderer/src/lib/surface-memory-budget-coordinator.js'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 function fileTab(id: string) {

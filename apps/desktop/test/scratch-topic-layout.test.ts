@@ -4,13 +4,11 @@ import {
   createWorkspaceLayout,
   addTab,
   removeTab,
-  activateTab
-} from '../src/renderer/src/lib/workbench-layout.js'
-import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
-import {
+  activateTab,
   splitWorkbenchRegion,
   workbenchRegionBounds
-} from '../src/renderer/src/lib/workbench-view-layout.js'
+} from '@agentmux/layout'
+import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   activeTopicIdFromLayout,
   layoutForActiveTopic,

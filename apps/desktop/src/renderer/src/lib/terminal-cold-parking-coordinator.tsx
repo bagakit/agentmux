@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
-import type { WorkspaceLayout } from './workbench-layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import {
   nextTerminalColdParkDelayMs,
   selectColdParkedTerminalRegions,

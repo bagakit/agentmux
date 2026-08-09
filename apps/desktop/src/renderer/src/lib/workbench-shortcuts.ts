@@ -7,12 +7,17 @@
 // 跑、也发不出 DOM 事件，写进 App 的 `useEffect` 里的分支没有断言够得着。所以「这个 id 是哪个命令、
 // 落到哪张 Tab/哪一格」这些承重判定全留在这里，App 的监听器只做无分支的转发与 preventDefault。
 
-import { regionIds, workbenchRegionBounds, type WorkbenchViewLayout } from './workbench-view-layout'
-import type { SplitDirection, WorkspaceLayout } from './workbench-layout'
+import {
+  regionIds,
+  workbenchRegionBounds,
+  regionInDirection,
+  type WorkbenchViewLayout,
+  type SplitDirection,
+  type WorkspaceLayout
+} from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
-import { regionInDirection } from './split-direction'
 import type { RegionFocusCause } from './region-focus'
 
 /**

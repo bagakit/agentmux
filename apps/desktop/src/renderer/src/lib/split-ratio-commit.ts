@@ -1,4 +1,4 @@
-import { clampSplitRatio } from './split-tree'
+import { clampSplitRatio } from '@agentmux/layout'
 
 /**
  * 「和已落盘的比例差这么点就不算一次改动」的死区。

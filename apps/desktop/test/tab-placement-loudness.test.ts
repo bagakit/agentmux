@@ -13,7 +13,7 @@ import {
   addTabOrThrow,
   addTabPlacement,
   createWorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout.js'
+} from '@agentmux/layout'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store.js'
 
 // ---------------------------------------------------------------------------

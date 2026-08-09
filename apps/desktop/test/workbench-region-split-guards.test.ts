@@ -9,7 +9,7 @@ import {
   workbenchRegionBounds,
   type WorkbenchRegionLayoutNode,
   type WorkbenchViewLayout
-} from '../src/renderer/src/lib/workbench-view-layout'
+} from '@agentmux/layout'
 
 // 三格布局：one 在左半整列、two 右上、three 右下。root = [ one | (two / three) ]。
 function threeRegions(): WorkbenchViewLayout {

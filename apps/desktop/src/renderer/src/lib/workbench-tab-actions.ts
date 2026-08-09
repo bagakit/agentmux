@@ -1,11 +1,11 @@
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
-import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchSurface } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
 import {
   workbenchRegionPresetSize,
+  type SplitDirection,
   type WorkbenchRegionLayoutPreset
-} from './workbench-view-layout'
+} from '@agentmux/layout'
 
 export type TabCloseScope = 'others' | 'left' | 'right'
 

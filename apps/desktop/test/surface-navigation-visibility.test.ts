@@ -14,7 +14,7 @@ import { surfaceNavigationVisibility } from '../src/renderer/src/lib/surface-nav
 import { activeTopicIdFromLayout } from '../src/renderer/src/lib/scratch-topic-layout.js'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates.js'
 import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts.js'
 

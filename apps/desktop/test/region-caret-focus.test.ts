@@ -15,12 +15,11 @@ import {
   dispatchWorkbenchCommand,
   type WorkbenchShortcutStore
 } from '../src/renderer/src/lib/workbench-shortcuts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout, regionIds } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   initialWorkbenchRegionId
 } from '../src/renderer/src/lib/workbench-tabs.js'
-import { regionIds } from '../src/renderer/src/lib/workbench-view-layout.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 /**
