@@ -80,9 +80,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     }
   ]

@@ -14,20 +14,20 @@
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 1,
-    "round_count": 1
+    "no_progress_rounds": 2,
+    "round_count": 2
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-001",
+    "last_task_id": "T-002",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-001-r1-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-002-r2-0001.log"
   },
   "history": [
     {
@@ -41,6 +41,14 @@
     {
       "action": "task_gate",
       "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
     }
   ]
 }
