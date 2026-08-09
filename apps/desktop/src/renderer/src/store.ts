@@ -237,6 +237,8 @@ type AppState = {
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
+  /** Recovery candidates surfaced by Runtime reconciliation for launcher Resume. */
+  recoveryCandidates: AgentSessionRecoveryCandidate[]
   // The create page can render this shell directly, but it stays outside the ordinary
   // Session projection until the user claims it.
   warmTerminal: WarmTerminal | null
@@ -1621,6 +1623,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   config: null,
   providerCatalog: [],
   sessions: [],
+  recoveryCandidates: [],
   warmTerminal: null,
   unclaimedTerminalSessionIds: [],
   timelines: {},
@@ -1897,6 +1900,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         providerCatalog,
         sessions: visibleSessions,
+        recoveryCandidates: snapshot.recoveryCandidates,
         unclaimedTerminalSessionIds: [...failedCleanupIds],
         timelines: snapshot.timelines,
         runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [],
