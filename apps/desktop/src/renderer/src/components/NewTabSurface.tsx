@@ -83,6 +83,8 @@ export function NewTabSurface({
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
+  const recoveryCandidates = useAppStore((state) => state.recoveryCandidates)
+  const recoverSession = useAppStore((state) => state.recoverSession)
   const promoteWarmTerminal = useAppStore((state) => state.promoteWarmTerminal)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
@@ -400,6 +402,10 @@ export function NewTabSurface({
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}
         </button>
+        {recoveryCandidates.length > 0 ? <button type="button" className="secondary-button" disabled={busy !== null}
+          title="Resume a saved Agent Session" onClick={() => void recoverSession(recoveryCandidates[0]!.agentSessionId)}>
+          Resume {recoveryCandidates.length > 1 ? `(${recoveryCandidates.length})` : ''}
+        </button> : null}
       </div>
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
 
