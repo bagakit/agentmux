@@ -14,20 +14,20 @@
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 2,
-    "round_count": 2
+    "no_progress_rounds": 0,
+    "round_count": 3
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-002",
+    "last_task_id": "T-012",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
+        "command": "pnpm --filter @agentmux/desktop typecheck",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-002-r2-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-012-r3-0001.log"
   },
   "history": [
     {
@@ -73,6 +73,18 @@
     {
       "action": "feature_goal_set",
       "detail": "59617af4c7d0324beb3b04fb5967a6a2bf74073ae23ac10d0d6d4be6df4b5b17 -> 5186e44543399fad756c129554c217e71e5ea7cd023faaca95d8234f9997980c"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-012"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-012 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-012 => done"
     }
   ],
   "goal_contract": {
