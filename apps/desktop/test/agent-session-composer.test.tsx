@@ -185,22 +185,13 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
-  it('steers a working Agent: Enter submits mid-turn through the existing send path', () => {
-    // The whole point of the feature. The default fixture session is `working`; before this change the
-    // composer swallowed Enter and passed no onSubmit while working. Now the steer must reach store.send —
-    // the SAME channel a normal prompt uses, not a second write path.
+  it('queues a working Agent message instead of risking readiness failure', () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Actually, edit the other file' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
-      props: { onSubmit?: () => void; onQueue?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
-    }
-
-    // onSubmit is wired while working (it was undefined before), and the Enter path invokes it.
-    expect(composer.props.onSubmit).toBeTypeOf('function')
-    expect(composer.props.onQueue).toBeUndefined()
-    composer.props.onSubmit?.()
-
-    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    expect(composer.props.onQueue).toBeTypeOf('function')
+    composer.props.onQueue?.()
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
   })
 
   it('keeps Stop as the working primary action even though steer submits', () => {

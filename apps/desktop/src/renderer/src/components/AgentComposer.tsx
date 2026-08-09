@@ -75,7 +75,7 @@ export function AgentComposer({
             event.currentTarget.closest('.composer')?.querySelector<HTMLButtonElement>('.composer__suggestions button')?.focus()
             return
           }
-          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && !canSubmit && onQueue && value.trim()) {
+          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && primaryAction === 'stop' && onQueue && value.trim()) {
             event.preventDefault()
             onQueue()
             return
