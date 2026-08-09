@@ -19,7 +19,10 @@ import { formatRss, subscribeWhileOpen, usagePanelRows, type UsagePanelRow } fro
 function UsageRow({ row }: { row: UsagePanelRow }) {
   return (
     <div className="resource-usage__row">
-      <span className="resource-usage__name">{row.label}</span>
+      <span className="resource-usage__identity">
+        <strong className="resource-usage__name">{row.label}</strong>
+        <small className="resource-usage__context">{row.contextText} · {row.stateText}</small>
+      </span>
       {/* 拿不到就留空，不填 0——0 会被读成"它在跑但不吃资源"这个真值。 */}
       <span className="resource-usage__metric">{row.cpuText}</span>
       <span className="resource-usage__metric">{row.rssText}</span>
