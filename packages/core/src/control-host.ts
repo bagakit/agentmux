@@ -232,13 +232,32 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(owner ? { caller: owner } : {})
     } as AgentMuxControlRequest
   }
-  const targetSource = object(source.target, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST')
-  const target = targetSource.kind === 'tab'
-    ? { kind: targetSource.kind, tabId: identity(targetSource.tabId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
-    : targetSource.kind === 'region'
-      ? { kind: targetSource.kind, regionId: identity(targetSource.regionId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
-      : (() => { throw new AgentMuxError('Focus target is invalid.', 'INVALID_CONTROL_REQUEST') })()
-  return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'focus', target }
+  if (source.operation === 'focus') {
+    const targetSource = object(source.target, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST')
+    const target = targetSource.kind === 'tab'
+      ? { kind: targetSource.kind, tabId: identity(targetSource.tabId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
+      : targetSource.kind === 'region'
+        ? { kind: targetSource.kind, regionId: identity(targetSource.regionId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
+        : (() => { throw new AgentMuxError('Focus target is invalid.', 'INVALID_CONTROL_REQUEST') })()
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'focus', target }
+  }
+  // 穷尽出口。此前 focus 是这条 if 链**没有条件的尾巴**，于是第 14 个操作（已过 membership 闸，因为它
+  // 在联合里）会一路落到这里，被当成 focus 解析——回执里的 operation 被静默改写成 'focus'，调用方收到
+  // 一份它没请求过的操作的回执。实测过：临时加一个 `probe.fake`（类型 + 联合臂 + 预算键，不加解析臂），
+  // core tsc 只在两处**测试锚点**报 TS2741，生产代码一行不报，而
+  // `parseAgentMuxControlRequest({operation:'probe.fake', target:{kind:'tab',tabId:'tab-1'}})`
+  // 返回 `{"operation":"focus","target":{"kind":"tab","tabId":"tab-1"}}`。
+  // 换成 `never` 参数后，同样的遗漏在**生产代码**里就是 TS2345，作者当场就得处理。
+  return assertUnhandledOperation(source.operation)
+}
+
+/**
+ * 控制请求解析的穷尽出口。参数是 `never`：上面的 if 链收窄完所有操作后，能走到这里的只剩空集；
+ * 一旦联合多出一个没被处理的成员，它就不是 `never` 了，调用点 TS2345。
+ * 运行时的 throw 是兜底——今天不可达，但线上收到一份类型之外的请求时，响亮失败好过静默当成别的操作。
+ */
+function assertUnhandledOperation(operation: never): never {
+  throw new AgentMuxError(`Control operation is not handled: ${String(operation)}`, 'INVALID_CONTROL_REQUEST')
 }
 
 function normalized(value: unknown): number {
