@@ -2277,7 +2277,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         mint: { tabId: `view:${crypto.randomUUID()}` }
       })
       if (result.kind !== 'promoted') {
-        throw controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab; it is already its own Tab.')
+        // 'already-sole' 是调用方**能据以行动**的那种拒绝：这一格已经独占整张 Tab，没有可搬的东西。
+        // 其余 'unchanged'（输入过期、目标不合格）是请求本身不成立。两者都拒绝、都不谎报一次没发生
+        // 的移动，区别在于自主调用方可以据码分支，而不必去 match 文案。
+        throw result.kind === 'already-sole'
+          ? controlFailure('REGION_ALREADY_SOLE', 'Region is already the only Region of its Tab; it is already its own Tab.')
+          : controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab.')
       }
       set({
         activeWorkspaceId: result.target.workspaceId,
