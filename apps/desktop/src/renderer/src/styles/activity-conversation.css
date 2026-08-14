@@ -162,9 +162,16 @@
      forces one continuous stroke. Chosen over the alternatives: pushing the offset far enough to clear
      mono descenders would float the line off the short glyphs and detach it from the text (and #794
      already bounced on offset); `text-underline-position: under` drops the line to the em-box bottom, a
-     visibly lower, CJK-oriented position we don't want; a CJK font in the stack is irrelevant here — the
-     decorated box holds ONLY the ASCII path (the Chinese prose renders in sibling text nodes, see
-     AgentMarkdown), so there is no CJK glyph inside this line box to skip over.
+     visibly lower, CJK-oriented position we don't want.
+
+   On the reported case a CJK font in the stack would change nothing, and it is worth being exact about
+   WHY, because the scope is narrower than it looks. `.md-link` has three render sites (AgentMarkdown):
+   a path auto-detected inside prose (:84) puts only the matched ASCII substring in the box — the Chinese
+   renders in sibling text nodes — but an explicit `[标签](路径)` (:162, :191) puts its bracket LABEL in
+   the box, CJK included. So "no CJK inside the decorated box" holds for the auto-detected reference that
+   #794 reports, NOT for `.md-link` generally. Both knobs above are content-agnostic, so they are still
+   right on the shared base; but if misalignment is ever reported on a CJK-labelled link, the two-font
+   baseline question is live there and this comment must not be read as having settled it.
 
    Both knobs live here once and both link kinds inherit them — the file reference carries `.md-link` too
    — so the two affordances cannot drift apart on the values that decide where the line sits and whether
