@@ -65,6 +65,7 @@ import {
   CTXMUX_COMMIT,
   CTXMUX_VERSION,
   CtxmuxRunAdapter,
+  type CtxmuxAdapterAttachment,
   type CtxmuxAdapterDataEvent,
   type CtxmuxAdapterEvent,
   type CtxmuxAdapterRun,
@@ -832,11 +833,75 @@ export class AgentMuxClient {
     for (const run of runs) {
       this.runPids.set(run.runId, run.pid)
       const agentSession = this.registry.findByRun(runRef(run.runId))
+      // 掉线时 markConnectionLost 拆掉了每个 run 的字节泵（attachment.close + attachments.clear）；open()
+      // 只重挂了 kernel 事件订阅，没重建泵。少了这一步，重连后一屏 Agent 拿到的是「进程活着、状态又被
+      // republish 成 running、恢复横幅消失，可屏幕永远沉默」的终端——本任务的核心缺陷。这里为每个仍在跑、
+      // 且有 Agent Session 的 run 重建 attachment，从该 Session 自己的 outputCursorBytes 续上。
+      if (run.state.type === 'running' && agentSession && !this.kernel.hasAttachment(run.runId)) {
+        // 重建失败时**不再** republish 成 running。上面那条 agent-error 刚把这个 Session 标成 error，
+        // 紧跟一条 running 会把它洗回去：两条事件的 observedAt 都来自同一次 Date.now()，而渲染端
+        // reducer 的新鲜度判据是 `>=`（同刻也算新），`run-process` 又不在它的豁免来源里（只豁免
+        // native-hook / acp）。于是用户看到的是恢复横幅消失、状态正常、输入框可写，而屏幕永远沉默——
+        // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
+        // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
+        if (!await this.resumeLiveAttachment(agentSession.agentSessionId)) continue
+      }
       this.publisher.publishRunState(
         this.projectRun(run, agentSession),
         agentSession?.agentSessionId
       )
     }
+  }
+
+  /**
+   * 重连后为一个 Agent Run 重建实时字节泵，并把掉线期间的输出补齐。走的是 {@link reattachAgent} 的
+   * 同一个共享核心 {@link attachAgentRun}（身份校验、回滚、pid/输入游标记账），从 Session 自己的
+   * `outputCursorBytes` 续上。
+   *
+   * 三件不能少的事：
+   * - **补发 replay**：掉线期间 daemon 仍在缓冲，`[outputCursorBytes, latest)` 这段随 attach 快照回到
+   *   `attached.replay`。渲染端不会自己重 attach（run 没变，attach effect 不重跑），所以这段必须由我们
+   *   补发成 terminal-output 事件接上它上次看到的位置——否则就是「跳过的区段」。attach 之后的新字节由
+   *   重建出来的实时泵经 acceptKernelEvent 自动送达（那正是缺陷要修的「新字节到不了」）。
+   * - **失败隔离且可见**：一个 run 重建失败绝不连累后面的 run（否则一个坏 run 静默拖死其余全部），但也
+   *   不静默吞掉——发一条 agent-error，让「全失败」不与「全成功」同形。
+   * - **截断可见**：daemon 已把游标处的字节逐出（first_available_byte > cursor）时如实报 gap。
+   *
+   * 返回**这个 run 的实时流是否真的接上了**。调用方据此决定还要不要把它 republish 成 `running`：接不上
+   * 时那条 running 会把刚发出的 agent-error 洗回去（同刻时间戳 + `>=` 新鲜度判据），用户就看不见失败了。
+   */
+  private async resumeLiveAttachment(agentSessionId: string): Promise<boolean> {
+    let session: AgentMuxStoredAgentSession
+    let attached: CtxmuxAdapterAttachment
+    try {
+      ;({ session, attached } = await this.attachAgentRun(agentSessionId))
+    } catch (error) {
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'RECONNECT_REATTACH_FAILED',
+        message: `Live output could not be resumed for this Agent after reconnect. ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        evidence: { source: 'run-process', observedAt: Date.now() }
+      })
+      return false
+    }
+    for (const event of attached.replay) this.publisher.publishRunEvent(event, session)
+    if (attached.gap) {
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId,
+        code: 'OUTPUT_GAP',
+        message: 'CtxMux evicted output before this Attachment could resume it.',
+        evidence: {
+          source: 'terminal-output',
+          observedAt: Date.now(),
+          run: runRef(session.run.runId)
+        }
+      })
+    }
+    return true
   }
 
   /**
@@ -1625,6 +1690,33 @@ export class AgentMuxClient {
   }
 
   async reattachAgent(agentSessionId: string, afterByte?: number): Promise<AgentMuxAgentAttachment> {
+    const { session, attached } = await this.attachAgentRun(agentSessionId, afterByte)
+    this.publisher.publishRunState(this.projectRun(attached.run, session), agentSessionId)
+    return {
+      session: cloneSession(session),
+      attachment: {
+        run: this.projectRun(attached.run, session),
+        replay: attached.replay,
+        gap: attached.gap
+      }
+    }
+  }
+
+  /**
+   * 重建一个 Agent Run 的实时 attachment——**唯一**的 attach 实现，`reattachAgent`（用户显式 attach）与
+   * `republishLiveRunState`（重连后自动重建字节泵）都走这里。它承的那几件事一处都不能少，也一处都不能
+   * 在别处再抄一遍：身份校验（`assertAgentRun` + 陈旧绑定闸）、失败回滚（rollback detach）、pid 与输入
+   * 游标记账。第二份平行实现必然与这份漂移，所以两条路共用这一处。
+   *
+   * 只做重建与记账，**不**发 process-state、也**不**把 replay 交出去：两个调用方对这两件事的处置不同
+   * （reattachAgent 把 replay 回给调用者、由渲染端应用；republish 没有调用者，得把 replay 当事件补发），
+   * 所以留给调用方。默认 afterByte 是该 Session 自己的 `outputCursorBytes`——从已消费的下一个字节续上，
+   * 不重放已消费的，也不跳过掉线期间产出的（那段在返回的 replay 里）。
+   */
+  private async attachAgentRun(
+    agentSessionId: string,
+    afterByte?: number
+  ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
     const attached = await this.kernel.attach(session.run.runId, afterByte ?? session.outputCursorBytes)
@@ -1646,15 +1738,7 @@ export class AgentMuxClient {
     if (attached.run.acceptedInputBytes !== null) {
       this.agentInputCursors.set(agentSessionId, attached.run.acceptedInputBytes)
     }
-    this.publisher.publishRunState(this.projectRun(attached.run, session), agentSessionId)
-    return {
-      session: cloneSession(session),
-      attachment: {
-        run: this.projectRun(attached.run, session),
-        replay: attached.replay,
-        gap: attached.gap
-      }
-    }
+    return { session, attached }
   }
 
   // Per-Agent-Session serialization of continuity attempts. NOT what bounds new Runs to one — the
