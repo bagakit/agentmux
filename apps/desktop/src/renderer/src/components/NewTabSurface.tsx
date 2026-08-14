@@ -336,7 +336,7 @@ export function NewTabSurface({
         placeholder="Describe the outcome. You can steer the agent after launch."
         rows={4}
       />
-      <div className="composer__toolbar launch-surface__message-tools">
+      <div className="composer__toolbar">
         <AgentComposerTools
           disabled={busy !== null || !workspace}
           commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}

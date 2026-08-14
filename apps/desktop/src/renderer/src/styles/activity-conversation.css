@@ -60,6 +60,20 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* "Continue from here" 是一个开在回合体上方的小控件——不是正文，所以从 --text-3 起，hover 才升到
+   强调色。无底色无描边：它坐在 turn 自己的地上，一条底色会在密集的对话流里读成一个多余的盒子。 */
+.log-turn__continue {
+  grid-column: 2;
+  justify-self: start;
+  padding:0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+.log-turn__continue:hover { color: var(--green); }
 /* Markdown inside a turn. The turn body already sets 13px/1.6 and every element below INHERITS it —
    including headings, deliberately. Heading levels differ by weight, colour and the space above them,
    never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
@@ -177,6 +191,23 @@
 }
 /* Inside a code span the mono face and ground already come from `.md-code`. */
 .md-code .md-link--file { font-family: inherit; }
+
+/* An inline image reference. A workspace image is a button that opens IN the app, so it reads as an
+   affordance — accent text, pointer. The `--unavailable` variant is a plain <span> for an image that
+   can't be previewed (remote/non-workspace); it must read as inert, so it drops to muted text and the
+   default cursor. Without the modifier rule the two would look identical and a dead reference would
+   invite a click that goes nowhere. */
+.md-image-attachment {
+  padding:0;
+  border: 0;
+  background: none;
+  color: var(--green-2);
+  font: inherit;
+  cursor: pointer;
+}
+.md-image-attachment:hover { color: var(--green); }
+.md-image-attachment--unavailable { color: var(--text-3); cursor: default; }
+.md-image-attachment--unavailable:hover { color: var(--text-3); }
 
 /* User speech gets a quiet ground so the turn has a visible start and end; the assistant reply flows
    open on the feed as the main narrative.

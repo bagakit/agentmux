@@ -377,3 +377,15 @@
 .service-window__restore { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
 .resource-usage__identity { min-width: 0; display: grid; gap: 1px; }
 .resource-usage__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+
+/* 连续推进面板：一条状态告示 + 一排控制键，语汇沿用紧邻的 .service-window（Surface 填充 + elevation，
+   不描边——描边会与 Composer 争同一条边界）。状态用文字表达，控制键是无底色的图标键，同 .icon-button。 */
+.continuous-progress-panel { margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4); display: grid; gap:var(--sp-2); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
+.continuous-progress-panel__summary { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap:var(--sp-2) var(--sp-4); }
+.continuous-progress-panel__summary strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }
+.continuous-progress-panel__summary span { color: var(--text-2); font-size: var(--fs-meta); }
+.continuous-progress-panel__summary time { margin-left:auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.continuous-progress-panel__decision { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.continuous-progress-panel__actions { display: flex; gap:var(--sp-1); }
+.continuous-progress-panel__actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
+.continuous-progress-panel__actions button:hover { color: var(--text); background: var(--surface-3); }
