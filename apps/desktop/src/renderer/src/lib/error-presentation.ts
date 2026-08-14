@@ -69,6 +69,126 @@ const AGENTMUX_ERROR_NAME_PREFIX = /^AgentMuxError:\s*/u
 // on the message-only `invoke` path precisely because the array arrives AS the message. It is the same
 // class of move as stripping the IPC wrapper above — removing framing, never content — so `raw` still
 // carries the untouched array and the failure stays diagnosable.
+//
+// Two shapes need more than reading each issue's top-level `.message`:
+//
+//  1. A `z.union` / `z.discriminatedUnion` rejection with sub-branch failures serialises as ONE outer
+//     issue `{ code:'invalid_union', errors:[[…sub-issues…]], message:'Invalid input' }`, and a
+//     `z.record` whose KEY schema rejects serialises as `{ code:'invalid_key', issues:[…], message:
+//     'Invalid key in record' }`. Both outer messages are generic and name no field; the real reason
+//     lives in the nested sub-issues (`.errors` is an array-of-branches, each an array of sub-issues;
+//     `.issues` is a flat array). config-store's host schema is a `z.discriminatedUnion('kind', …)` and
+//     its executors are a `z.record(<regex id>, …)`, so a malformed host or executor id hits exactly
+//     this. We descend both containers (sub-issue `.path` is RELATIVE to the node) and surface the real
+//     leaves; a leaf-only issue has neither container and is read directly.
+//  2. A zod built-in message names no field ("Invalid input: expected string, received undefined").
+//     The field IS in the issue `.path`, so such a leaf is prefixed with its dotted path
+//     (`hosts.0.hostname`) — dotted, not `[0]`, so no `[` bracket re-enters the cleaned message. A
+//     `custom` issue is the exception: its message is author-written (config-store's refinements say
+//     "Workspace path must be unique on local: …" and already name the field), so it is surfaced
+//     verbatim — a machine path prefix there is redundant noise and would leak a meaningless index.
+//
+// Dedup counts rather than drops: three workspaces colliding on one location are three issues whose
+// distinct paths make three lines; genuinely identical leaves (e.g. one `unrecognized_keys` repeated
+// across union branches) collapse to `… (×N)` so the count is never hidden. Output is bounded — before
+// this the join had no cap and a rejection with hundreds of issues ran to thousands of chars; now it
+// shows the first few lines and an `and N more` tail. The char budget is spent on WHOLE lines with room
+// held back for that tail, so the count the dedup exists to show is never the part truncated away.
+
+// Our own schemas nest a union at most a couple of levels; this only stops a pathological input from
+// driving unbounded recursion. Past it, the union's own outer message ("Invalid input") is the floor.
+const MAX_UNION_DEPTH = 4
+// Distinct lines shown, and a hard char cap as backstop; the rest becomes "and N more".
+const MAX_ISSUE_LINES = 8
+const MAX_TOTAL_CHARS = 500
+
+/** A zod issue `.path` as a dotted field label. `['hosts',0,'hostname']` → `hosts.0.hostname`; `[]` → ''. */
+function formatIssuePath(path: unknown): string {
+  if (!Array.isArray(path)) return ''
+  return path.filter((segment) => typeof segment === 'string' || typeof segment === 'number').join('.')
+}
+
+/**
+ * Flatten one zod issue into its user-facing leaf line(s), appending to `out`.
+ *
+ * `basePath` is the absolute path to this issue; sub-issue paths under a container are relative, so
+ * they are appended to it. Two containers hide their real reason behind a generic outer message and are
+ * descended: `invalid_union` (`.errors`, an array-of-branches — each branch an array of sub-issues) and
+ * `invalid_key` (`.issues`, a flat array — a record whose key schema rejected). Falls back to the
+ * issue's own message when it has no sub-issues (a plain leaf, e.g. a discriminator mismatch whose
+ * message IS meaningful), when descending yields nothing usable, or at the depth ceiling.
+ */
+function collectIssueLeaves(
+  issue: Record<string, unknown>,
+  basePath: unknown[],
+  depth: number,
+  out: string[]
+): void {
+  const issuePath = Array.isArray(issue.path) ? issue.path : []
+  const path = [...basePath, ...issuePath]
+  // `invalid_union` nests one array per branch; `invalid_key` nests a flat array. Flatten to sub-issues.
+  const nested =
+    issue.code === 'invalid_union' && Array.isArray(issue.errors)
+      ? issue.errors.flat()
+      : issue.code === 'invalid_key' && Array.isArray(issue.issues)
+        ? issue.issues
+        : undefined
+  if (nested && nested.length > 0 && depth < MAX_UNION_DEPTH) {
+    const before = out.length
+    for (const sub of nested) {
+      if (typeof sub === 'object' && sub !== null) {
+        collectIssueLeaves(sub as Record<string, unknown>, path, depth + 1, out)
+      }
+    }
+    // Descending produced real leaves — done. Otherwise fall through to the outer message as the floor.
+    if (out.length > before) return
+  }
+  const message = typeof issue.message === 'string' ? issue.message : ''
+  if (message.length === 0) return
+  // A `custom` issue's message is author-written and already self-describing (config-store's
+  // refinements name the field); everything else is a zod built-in template that names no field, so we
+  // prefix its dotted path. The root (`path: []`) has no label to add regardless.
+  const label = issue.code === 'custom' ? '' : formatIssuePath(path)
+  out.push(label ? `${label}: ${message}` : message)
+}
+
+/**
+ * Order-preserving dedup that counts (never drops) collisions, then bounds the output.
+ *
+ * The budget is spent on WHOLE lines, and the `and N more` tail is reserved for FIRST — never appended
+ * and then sliced off. Otherwise a handful of long lines (real filesystem paths) would eat the budget
+ * and truncate away the very count this dedup exists to surface (finding: 6 long collisions hit the cap
+ * and lost the tail). A single line longer than the whole budget is still truncated with an ellipsis so
+ * one pathological message cannot blow the banner.
+ */
+function joinIssueLeaves(leaves: string[]): string {
+  const counts = new Map<string, number>()
+  const order: string[] = []
+  for (const leaf of leaves) {
+    if (!counts.has(leaf)) order.push(leaf)
+    counts.set(leaf, (counts.get(leaf) ?? 0) + 1)
+  }
+  const lines = order.map((leaf) => {
+    const count = counts.get(leaf) ?? 1
+    return count > 1 ? `${leaf} (×${count})` : leaf
+  })
+  const shown: string[] = []
+  for (const line of lines) {
+    if (shown.length >= MAX_ISSUE_LINES) break
+    const withLine = [...shown, line].join('; ')
+    const remaining = lines.length - shown.length - 1
+    // Reserve room for the tail this line would force, so it is never the part that gets cut.
+    const tail = remaining > 0 ? `; and ${remaining} more` : ''
+    if (shown.length > 0 && withLine.length + tail.length > MAX_TOTAL_CHARS) break
+    shown.push(line)
+  }
+  const hidden = order.length - shown.length
+  if (hidden > 0) shown.push(`and ${hidden} more`)
+  const result = shown.join('; ')
+  // Backstop: a single leaf wider than the whole budget still gets clipped.
+  return result.length > MAX_TOTAL_CHARS ? `${result.slice(0, MAX_TOTAL_CHARS - 1)}…` : result
+}
+
 function unwrapZodIssueMessages(message: string): string | undefined {
   if (message.trimStart()[0] !== '[') return undefined
   let parsed: unknown
@@ -78,17 +198,18 @@ function unwrapZodIssueMessages(message: string): string | undefined {
     return undefined
   }
   if (!Array.isArray(parsed) || parsed.length === 0) return undefined
-  const messages: string[] = []
   for (const issue of parsed) {
-    // Every element must be a zod issue carrying a string `.message`. One that is not means this array
-    // is not a zod error — a real message that merely begins with `[` — so leave it entirely untouched
-    // rather than half-rewrite something we do not understand.
+    // Every top-level element must be a zod issue carrying a non-empty string `.message`. One that is
+    // not means this array is not a zod error — a real message that merely begins with `[` — so leave
+    // it entirely untouched rather than half-rewrite something we do not understand.
     if (typeof issue !== 'object' || issue === null) return undefined
     const text = (issue as { message?: unknown }).message
     if (typeof text !== 'string' || text.length === 0) return undefined
-    messages.push(text)
   }
-  return [...new Set(messages)].join('; ')
+  const leaves: string[] = []
+  for (const issue of parsed) collectIssueLeaves(issue as Record<string, unknown>, [], 0, leaves)
+  if (leaves.length === 0) return undefined
+  return joinIssueLeaves(leaves)
 }
 
 /** The unabridged text of a caught value, before any framing is stripped. Never lossy. */
