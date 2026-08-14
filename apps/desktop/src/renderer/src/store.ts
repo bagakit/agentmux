@@ -3139,11 +3139,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         try {
           const result = await api.executors.detect(executorId, hostId)
           if (detectionRequestIds.get(hostId) !== requestId) return
-          set((state) => ({
+          // 三态探测结局 → store 的检查状态：available→ready, missing→missing, check-failed→error。
+          // check-failed（环境退化，我们没查成）落到 error 而不是 missing——这正是那次误报要防的：
+          // 「没查成」绝不能显示成「没装」。AgentSettingsPane 的 'error' 文案已是 "Check failed"。
+          const state: AsyncCheckState = result.availability === 'available'
+            ? 'ready'
+            : result.availability === 'missing'
+              ? 'missing'
+              : 'error'
+          set((current) => ({
             executorDetections: {
-              ...state.executorDetections,
+              ...current.executorDetections,
               [executorDetectionKey(hostId, executorId)]: {
-                state: result.installed ? 'ready' : 'missing',
+                state,
                 result,
                 observedAt: Date.now()
               }
