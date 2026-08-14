@@ -364,8 +364,11 @@ describe('Desktop Control owner', () => {
     expect(byId.get('e-checkfailed')?.availability).toBe('check-failed')
     expect(byId.get('e-missing')?.availability).toBe('missing')
     expect(byId.get('e-available')?.availability).toBe('available')
-    // 显式钉「四态互不相同」——防止全部塌成一个常量时上面四句仍各自恰好绿。
-    expect(new Set(result.agents.map((a) => a.availability)).size).toBe(4)
+    // 钉住投影的**基数**：上面四句各查一个 id，对「多出一个 Agent」「同一个 Executor 被投影两次」
+    // 全部失明——join/dedup 改坏时它们照样绿。这一条守的是那件另外的事。
+    // （不写 `new Set(availability).size === 4`：availability 是四成员闭合联合，上面四句已各钉一个
+    // 不同字面量，那条恒真，属于「被蕴含的断言排在最后＝永不执行」。）
+    expect(result.agents).toHaveLength(4)
     // 列出自定义 ID、名称、Provider（身份三件套）。
     expect(byId.get('e-available')).toMatchObject({ executorId: 'e-available', label: 'Ready One', providerId: 'grok' })
   })
