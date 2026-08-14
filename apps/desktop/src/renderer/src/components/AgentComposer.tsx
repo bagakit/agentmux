@@ -148,12 +148,16 @@ export function AgentComposer({
           {onSetPosture ? (
             <PosturePicker control={postureControl} disabled={disabled} onSet={onSetPosture} />
           ) : null}
-        </div>
-        <div>
-          {contextUsage}
+          {/* The queue indicator lives with the bottom-left affordance cluster, not beside the primary
+              action — it is a status of the pending work, kin to the tools, not a second send button.
+              This is the COUNT only; the concrete queued-entry list is a separately owned feature
+              (needs the store's `string[]` queue to become structured entries first). */}
           {queuedCount > 0 ? <span className="composer__queued" title={`${queuedCount} message${queuedCount === 1 ? '' : 's'} queued for delivery`} aria-label={`${queuedCount} messages queued`}>
             <MessageSquare size={12} aria-hidden="true" /> {queuedCount}
           </span> : null}
+        </div>
+        <div>
+          {contextUsage}
           {primaryAction === 'stop' ? (
             // ■ interrupts THIS turn (onInterrupt → Core semantic interrupt); it does not end the Run.
             // Terminating the whole session is a separate action that lives in the Tabbar, so the mark and
