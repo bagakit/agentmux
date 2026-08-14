@@ -15,18 +15,60 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 0
+    "round_count": 3
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-004",
+    "last_check_commands": [
+      {
+        "command": "pnpm exec vitest run packages/core/test/agentmux-cli-help.test.ts packages/core/test/control-host.test.ts apps/desktop/test/control.test.ts apps/desktop/test/promote-region-to-tab.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-24m8fphma/artifacts/gate-T-004-r3-0001.log"
   },
   "history": [
     {
       "action": "feat_created",
       "detail": "workspace_mode=current_tree; base_ref=main; root_branch=feat/168-file-tree-git-status"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
     }
   ]
 }
