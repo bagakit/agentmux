@@ -1,6 +1,7 @@
 import { dirname } from 'node:path'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
 import { isFolderWorkspace } from '../shared/contracts.js'
+import { findWorkspaceByLocation } from './workspace-location.js'
 
 /**
  * 把一个本地文件夹 Workspace 重新指向另一个目录：问用户选哪个目录，然后只换那一条记录的 path。
@@ -35,6 +36,13 @@ export async function rebindLocalFolder(
   const path = selection.filePaths[0]
   // 取消：原样交还 config，不写盘。
   if (selection.canceled || !path) return { config, workspace: null }
+  // 重绑到一个已登记的位置会让两条记录落到同一个目录上，随后 save() 的唯一性校验抛一堆 zod issue
+  // 到用户脸上。走共享的 location 规则先拦下来，给一句和 createForBranch 同口径的话。命中自己
+  // （用户选回原目录）不算冲突：那条记录的 id 与当前相同。
+  const collision = findWorkspaceByLocation(config.workspaces, current.hostId, path)
+  if (collision && collision.id !== current.id) {
+    throw new Error(`Workspace already registered: ${path}`)
+  }
   // Workspace 的 id 与用户看到的名字保持不变。Session、布局与 Provider 身份都以那个 id 为键，
   // 变的只有文件系统定位符。
   const updated: WorkspaceRecord = { ...current, path }

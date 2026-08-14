@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
@@ -1140,6 +1141,25 @@ describe('ConfigStore workspace identity', () => {
         workspace({ id: 'workspace-2', hostId: 'remote', path: '/shared/project' })
       ]
     })).resolves.toMatchObject({ workspaces: [{ hostId: 'local' }, { hostId: 'remote' }] })
+  })
+
+  // The SSOT proof. The behavioral test above shows the schema normalizes, but a normalizing rule
+  // hand-inlined into `superRefine` would pass it just as well — and then the schema's notion of "same
+  // location" could silently drift from every write path's, which is the whole bug. This pins that the
+  // refinement derives its key from the SHARED `workspaceLocationKey` and does NOT rebuild the
+  // normalizer inline. A behavioral test cannot catch a correct copy, so the criterion is the import
+  // relation: re-inline it and this reds.
+  it('derives the uniqueness key from the shared workspaceLocationKey, not an inline copy', () => {
+    const source = readFileSync(new URL('../src/main/config-store.ts', import.meta.url), 'utf8')
+    const at = source.indexOf('.superRefine(')
+    expect(at, 'self-check: superRefine block not found').toBeGreaterThan(-1)
+    const block = source.slice(at, source.indexOf('/**', at))
+    // Uses the one shared definition of "same location".
+    expect(block).toContain('workspaceLocationKey(')
+    // And does not re-spell the normalizer inline — the exact drift this task removes. Both spellings
+    // the old inline key used (`join(..., '.')` and `posix.normalize`) must be gone from the block.
+    expect(block).not.toContain("join(workspace.path, '.')")
+    expect(block).not.toContain('posix.normalize')
   })
 })
 

@@ -1,10 +1,12 @@
 import { mkdir, readFile } from 'node:fs/promises'
-import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
+import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
 import type { AppConfig, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import { workspaceLocationKey } from './workspace-location.js'
 import {
+  APP_APPEARANCE_IDS,
   CONFIG_VERSION,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -68,7 +70,7 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // renderer. `.transform` runs after `z.number()` accepts the value, so a non-number still fails the
 // field (and the preference falls back to default) rather than being coerced.
 const appearanceSchema = z.object({
-  appAppearance: z.enum(['dark', 'light', 'system']).optional(),
+  appAppearance: z.enum(APP_APPEARANCE_IDS).optional(),
   terminalTheme: z.enum(TERMINAL_THEME_IDS),
   terminalFontSize: z
     .number()
@@ -102,7 +104,6 @@ const configSchema = z
   .strict()
   .superRefine((config, context) => {
     const hostIds = new Set(config.hosts.map((host) => host.id))
-    const hostsById = new Map(config.hosts.map((host) => [host.id, host]))
     if (hostIds.size !== config.hosts.length) {
       context.addIssue({ code: 'custom', path: ['hosts'], message: 'Host ids must be unique' })
     }
@@ -137,16 +138,15 @@ const configSchema = z
         })
         continue
       }
-      const host = hostsById.get(workspace.hostId)!
-      const normalizedPath = host.kind === 'local'
-        ? normalizeLocalPath(join(workspace.path, '.'))
-        : posix.normalize(posix.join(workspace.path, '.'))
-      const location = `${workspace.hostId}\0${normalizedPath}`
+      // THE single definition of "same location" — the same function every write path checks before it
+      // appends, so the caller's dedup and this invariant can never disagree. The message's path is
+      // sliced back out of the key rather than normalized a second time.
+      const location = workspaceLocationKey(workspace.hostId, workspace.path)
       if (workspaceLocations.has(location)) {
         context.addIssue({
           code: 'custom',
           path: ['workspaces', index, 'path'],
-          message: `Workspace path must be unique on ${workspace.hostId}: ${normalizedPath}`
+          message: `Workspace path must be unique on ${workspace.hostId}: ${location.slice(workspace.hostId.length + 1)}`
         })
       }
       workspaceLocations.add(location)

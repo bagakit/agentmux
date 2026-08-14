@@ -654,6 +654,13 @@ export function FileExplorer({
       })
       if (!projectInput) return
       const current = await api.config.get()
+      // A best-effort fast path only. The authoritative "same location?" rule lives in the main process
+      // (`workspace-location.ts`, which `workspaces:add` routes through) because it needs `node:path`
+      // normalization, and the renderer is sandboxed with no node built-ins — so this raw `===` cannot
+      // see the trailing-slash / `.`-suffixed variants the schema collapses. It does not have to: on a
+      // miss it falls through to `add`, which returns the existing record for any spelling instead of
+      // duplicating it, and the refetch+select below then lands on that record. Do NOT try to import the
+      // main-side normalizer here — it would break the node-free renderer/web build.
       const existing = current.workspaces.find((item) => item.hostId === projectInput.hostId && item.path === projectInput.path)
       if (existing) {
         setConfig(current)
