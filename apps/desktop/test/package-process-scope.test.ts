@@ -22,7 +22,7 @@ const FRAMEWORK = `${HELPER_ROOT}Electron Framework.framework/Helpers`
 
 const bundle = { executable: EXECUTABLE, helperRoot: HELPER_ROOT }
 
-const line = (pid, command) => `${String(pid).padStart(5)} ${command}`
+const line = (pid: number, command: string) => `${String(pid).padStart(5)} ${command}`
 
 describe('classifyApplicationProcesses separates serving from crash-reporter', () => {
   it('excludes a detached crashpad handler from serving so a stale one cannot block install', () => {
