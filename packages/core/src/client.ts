@@ -872,7 +872,27 @@ export class AgentMuxClient {
         // native-hook / acp）。于是用户看到的是恢复横幅消失、状态正常、输入框可写，而屏幕永远沉默——
         // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
         // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
-        if (!await this.resumeLiveAttachment(agentSession.agentSessionId)) continue
+        const resumed = await this.resumeLiveAttachment(agentSession.agentSessionId)
+        if (resumed === 'dead') continue
+        // 截断这一档不能靠跳过 republish：流是活的，这个 run 确实该是 running。于是反过来排——先
+        // republish，再披露。同一条 `>=` 规则，谁最后发谁赢：披露走在后面就洗不掉了。早先它排在
+        // republish 前面，于是「daemon 把你的历史输出丢了」这句话从未到过屏幕上，用户只看到输出里
+        // 一段无法解释的断裂。与失败分支是同一个缺陷的两种形态，这里是另一种解法。
+        if (resumed === 'truncated') {
+          this.publisher.publishRunState(this.projectRun(run, agentSession), agentSession.agentSessionId)
+          this.publisher.publish({
+            type: 'agent-error',
+            agentSessionId: agentSession.agentSessionId,
+            code: 'OUTPUT_GAP',
+            message: 'CtxMux evicted output before this Attachment could resume it.',
+            evidence: {
+              source: 'terminal-output',
+              observedAt: Date.now(),
+              run: runRef(run.runId)
+            }
+          })
+          continue
+        }
       }
       this.publisher.publishRunState(
         this.projectRun(run, agentSession),
@@ -895,10 +915,15 @@ export class AgentMuxClient {
    *   不静默吞掉——发一条 agent-error，让「全失败」不与「全成功」同形。
    * - **截断可见**：daemon 已把游标处的字节逐出（first_available_byte > cursor）时如实报 gap。
    *
-   * 返回**这个 run 的实时流是否真的接上了**。调用方据此决定还要不要把它 republish 成 `running`：接不上
-   * 时那条 running 会把刚发出的 agent-error 洗回去（同刻时间戳 + `>=` 新鲜度判据），用户就看不见失败了。
+   * 返回这个 run 实时流的三种归宿，而不是一个 boolean。两种「不是干净接上」需要调用方做**相反**的事，
+   * boolean 折不住：
+   * - `'live'`：接上了，没有截断。照常 republish 成 running。
+   * - `'dead'`：没接上。**跳过** republish——那条 running 会把刚发的 agent-error 洗回去（同刻时间戳 +
+   *   `>=` 新鲜度判据），用户就看不见失败了。
+   * - `'truncated'`：接上了，但历史被逐出。既要 republish（流确实活着）**又**要披露，所以由调用方按
+   *   「先 running 后 error」的顺序发——披露走在后面才洗不掉。gap 事件因此由调用方发出，不在这里发。
    */
-  private async resumeLiveAttachment(agentSessionId: string): Promise<boolean> {
+  private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | 'truncated'> {
     let session: AgentMuxStoredAgentSession
     let attached: CtxmuxAdapterAttachment
     try {
@@ -913,23 +938,11 @@ export class AgentMuxClient {
         }`,
         evidence: { source: 'run-process', observedAt: Date.now() }
       })
-      return false
+      return 'dead'
     }
     for (const event of attached.replay) this.publisher.publishRunEvent(event, session)
-    if (attached.gap) {
-      this.publisher.publish({
-        type: 'agent-error',
-        agentSessionId,
-        code: 'OUTPUT_GAP',
-        message: 'CtxMux evicted output before this Attachment could resume it.',
-        evidence: {
-          source: 'terminal-output',
-          observedAt: Date.now(),
-          run: runRef(session.run.runId)
-        }
-      })
-    }
-    return true
+    // gap 的披露交给调用方，在它 republish 之后发——见本方法文档的 `'truncated'` 一条。
+    return attached.gap ? 'truncated' : 'live'
   }
 
   /**

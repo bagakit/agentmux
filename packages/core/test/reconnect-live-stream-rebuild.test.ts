@@ -299,8 +299,43 @@ describe('T-001 重连后重建实时字节泵', () => {
     expect(kernel.attach).toHaveBeenCalledTimes(2)
   })
 
-  it('幂等：run 已存在 attachment（用户手动 attach 在途）时，重连不再 attach 第二次、不抛', async () => {
-    const { events, state, kernel } = await fixture([storedSession()])
+  it('截断（daemon 逐出了游标处的字节）：照常 republish 成 running，但 OUTPUT_GAP 披露排在它之后', async () => {
+    // 与上面那条失败分支是同一个缺陷的孪生：那条讲「失败被洗成正常」，这条讲「截断被洗成正常」。
+    // 解法必须相反——流是活的，running 是实话，所以不能跳过 republish；要让披露活下来，只能把它
+    // 排在 running **后面**。渲染端 reducer 的新鲜度判据是 `>=`（session-state.ts:513），同刻时
+    // 后到者赢，所以顺序就是这里唯一的承重物。披露被洗掉会怎样，由
+    // `apps/desktop/test/output-gap-disclosure-survives.test.ts` 用真 reducer 钉住；本条只钉
+    // Core 发出的顺序确实是那一个。
+    const { events, state, kernel } = await fixture([storedSession({ outputCursorBytes: 100 })])
+
+    kernel.configureRuns([runningRun('run-1', { latestOutputBytes: 160 })])
+    kernel.configureAttach('run-1', {
+      run: runningRun('run-1', { latestOutputBytes: 160 }),
+      // 游标在 100，daemon 最早还留着 140——[100,140) 这段被逐出了。
+      gap: { requestedAfterByte: 100, firstAvailableByte: 140 }
+    })
+
+    await driveReconnect(state, events)
+
+    const forAgent = events.filter((event) =>
+      (event.type === 'agent-error' || event.type === 'process-state') &&
+      event.agentSessionId === 'agent-1')
+
+    // 两条都得在场：只发 running 是丢披露，只发 gap 是丢「它其实在跑」。
+    const running = forAgent.findIndex((event) =>
+      event.type === 'process-state' && event.state === 'running')
+    const gap = forAgent.findIndex((event) =>
+      event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
+    expect(running, '截断时没有 republish 成 running——流是活的，不该跳过').toBeGreaterThanOrEqual(0)
+    expect(gap, '截断没有被披露').toBeGreaterThanOrEqual(0)
+
+    // 承重的那条：披露必须是**后**发的。把 client.ts 里两条 publish 调回「先 gap 后 running」，
+    // 这条红；而上面两条「都在场」仍绿——所以红的确实是顺序，不是缺了谁。
+    expect(gap, 'OUTPUT_GAP 排在 running 之前，会被同刻的 running 洗掉，用户永远看不见')
+      .toBeGreaterThan(running)
+  })
+
+  it('幂等：run 已存在 attachment（用户手动 attach 在途）时，重连不再 attach 第二次、不抛', async () => {    const { events, state, kernel } = await fixture([storedSession()])
 
     kernel.configureRuns([runningRun('run-1')])
     kernel.preexistingAttachment('run-1') // hasAttachment → true
