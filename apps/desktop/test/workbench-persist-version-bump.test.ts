@@ -5,7 +5,7 @@ vi.hoisted(() => {
 })
 
 import { createJSONStorage } from 'zustand/middleware'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   fileTabId,
