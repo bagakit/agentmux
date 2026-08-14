@@ -48,7 +48,7 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
         popoverTarget={cardId} popoverTargetAction="toggle">
         <Gauge size={12} aria-hidden="true" /> {chip}
       </button>
-      <div id={cardId} popover="auto" className="composer__context-card" role="tooltip" aria-label="Context window">
+      <div id={cardId} popover="auto" className="composer__context-card" aria-label="Context window">
         <h3>Context window</h3>
         {known && usage ? (
           <>
