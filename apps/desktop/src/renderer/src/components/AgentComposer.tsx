@@ -26,6 +26,11 @@ export type AgentComposerProps = {
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
   primaryAction?: 'send' | 'stop'
   postureControl?: AgentPostureControl
+  // Shell-style history recall on the up/down arrows. The shell owns the keys; the semantics (line
+  // boundary + the recall reducer) live in the adapter so they stay unit-testable — this component cannot
+  // run its own handlers under this repo's node-env vitest. Returns the value to place in the box, or null
+  // to let the arrow fall through to normal caret movement. direction: 'older' = ArrowUp, 'newer' = ArrowDown.
+  onHistoryRecall?: (direction: 'older' | 'newer', draft: string, caret: number) => string | null
   onChange(value: string): void
   onSubmit?: () => void
   onQueue?: () => void
@@ -57,7 +62,8 @@ export function AgentComposer({
   onReferenceActiveFile,
   onAttach,
   onPasteImage,
-  onSetPosture
+  onSetPosture,
+  onHistoryRecall
 }: AgentComposerProps) {
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
@@ -94,6 +100,19 @@ export function AgentComposer({
           if (event.key === 'Escape' && suggestions.length) {
             event.preventDefault()
             event.currentTarget.focus()
+            return
+          }
+          // Shell-style history recall. Suggestions win the arrows (their block above returns first), so
+          // this only runs with no open list. The adapter decides everything testable — line boundary and
+          // the recall reducer — and returns the value to place, or null to let the arrow move the caret
+          // normally (the multiline resolution: bare ArrowUp only recalls when the caret is on the first
+          // line, ArrowDown only on the last line; otherwise the caret just moves). #609 IME guard applies.
+          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !suggestions.length && onHistoryRecall && !isImeCompositionKeyDown(event)) {
+            const recalled = onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, event.currentTarget.selectionStart)
+            if (recalled !== null) {
+              event.preventDefault()
+              onChange(recalled)
+            }
             return
           }
           if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && primaryAction === 'stop' && onQueue && value.trim()) {
