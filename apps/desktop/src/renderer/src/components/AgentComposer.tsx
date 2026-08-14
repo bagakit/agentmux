@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useId } from 'react'
 import { AtSign, ArrowUp, ChevronDown, MessageSquare, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
@@ -11,7 +12,10 @@ export type AgentComposerProps = {
   placeholder: string
   activeFile?: string
   contextUsage?: ReactNode
-  queuedCount?: number
+  // The queued prompts themselves, not a count. A bare number reads as a bug — you cannot tell a real
+  // pending queue from a stuck counter without seeing what is in it. Count is derived (`.length`), so
+  // the badge and the list can never disagree.
+  queued?: readonly string[]
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
   skills?: Array<{ text: string; description: string }>
@@ -39,7 +43,7 @@ export function AgentComposer({
   activeFile,
   tools,
   contextUsage,
-  queuedCount = 0,
+  queued = [],
   commands = [],
   skills = [],
   references = [],
@@ -150,11 +154,10 @@ export function AgentComposer({
           ) : null}
           {/* The queue indicator lives with the bottom-left affordance cluster, not beside the primary
               action — it is a status of the pending work, kin to the tools, not a second send button.
-              This is the COUNT only; the concrete queued-entry list is a separately owned feature
-              (needs the store's `string[]` queue to become structured entries first). */}
-          {queuedCount > 0 ? <span className="composer__queued" title={`${queuedCount} message${queuedCount === 1 ? '' : 's'} queued for delivery`} aria-label={`${queuedCount} messages queued`}>
-            <MessageSquare size={12} aria-hidden="true" /> {queuedCount}
-          </span> : null}
+              It opens: a bare count is indistinguishable from a stuck counter, so the messages
+              themselves have to be reachable. Same native `popover` as the context chip, for the same
+              reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
+          {queued.length > 0 ? <QueuedMessages queued={queued} /> : null}
         </div>
         <div>
           {contextUsage}
@@ -194,5 +197,38 @@ export function AgentComposer({
         <MessageSquare size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />
       </summary>
     </details>
+  )
+}
+
+/**
+ * The queue badge: count on the chip, the actual queued prompts in a click-opened card.
+ *
+ * The count alone was the defect — "2" beside a working Agent is indistinguishable from a counter that
+ * got stuck, so it reads as a bug even when it is correct. Seeing the text you queued is what makes it
+ * legible as pending work.
+ *
+ * Order is delivery order (the store appends), and it is labelled as such, because "which one goes
+ * next" is the actual question when you queue more than one. Each entry is clamped to a few lines by
+ * CSS rather than truncated here: the full text stays in the DOM for screen readers and for select-copy.
+ */
+function QueuedMessages({ queued }: { queued: readonly string[] }) {
+  const cardId = useId()
+  const label = `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
+  return (
+    <>
+      <button type="button" className="composer__queued" aria-label={label}
+        popoverTarget={cardId} popoverTargetAction="toggle">
+        <MessageSquare size={12} aria-hidden="true" /> {queued.length}
+      </button>
+      <div id={cardId} popover="auto" className="composer__queued-card" aria-label="Queued messages">
+        <h3>{label}</h3>
+        <ol>
+          {/* Index key: the queue is an append-and-drain list of plain strings with no identity of its
+              own, and two identical prompts are a legitimate queue state — so text is not a key. */}
+          {queued.map((prompt, index) => <li key={index}>{prompt}</li>)}
+        </ol>
+        <p>Delivered in this order when the Agent finishes its current turn.</p>
+      </div>
+    </>
   )
 }
