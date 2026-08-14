@@ -28,10 +28,13 @@ import { AGENTMUX_SELF_CONTEXT_VERB } from './agentmux-cli-help.js'
 const AMUX_FROM = 'amux'
 
 // 启动定向握手挂在这段引导里：让 Agent 第一步就去问自己的坐标与能力，而不是等到要开分屏那一刻才发现
-// 自己在 AgentMux 里。引导只点出握手动词（whoami）与"确切语法去 --skill 查"，绝不把 flag 语法抄进来
-// ——语法的唯一真相在 skill，抄进来会在语法演进时立刻过期（与《不与 skill 争夺唯一真相》同源）。
+// 自己在 AgentMux 里。引导负责的是**发现**——让 Agent 知道这些能力存在（自定义 Executor 按名可开、
+// 可把一格搬进独立 Tab、按方向查看会落到可见 Region 或相邻 Tab 这两种不同的位置），并把「拆哪格」交给
+// 它自己按可见版面判断、事后回读实际落点；确切语法一律去 --skill 查，绝不把 flag 语法抄进来——语法的
+// 唯一真相在 skill，抄进来会在语法演进时立刻过期（与《不与 skill 争夺唯一真相》同源）。也因此这里不列
+// 窄/宽格子的特例：由 Agent 从可见版面自行决定，不给一张按尺寸查的表。
 const AGENTMUX_RUNTIME_GUIDE = `AgentMux runtime guide:
-You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you. You can open a terminal, a browser, or another agent into a split beside your view — left, right, above, or below — and rearrange a tab's layout. For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
+You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you. You can open a terminal, a browser, or another agent — including an executor someone configured, found by name — into a split beside your view (left, right, above, or below), move a region out into its own tab, and rearrange a tab's layout. Asking what is in a direction answers with the visible region beside you, or the adjacent tab when nothing is split there — not the same place. Split where both the old and the new content stay readable with the least disturbance, decide that from the visible view yourself, then confirm where it landed. For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
 
 // 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
