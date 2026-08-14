@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 3
+    "round_count": 4
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-004",
+    "last_task_id": "T-002",
     "last_check_commands": [
       {
-        "command": "pnpm exec vitest run packages/core/test/agentmux-cli-help.test.ts packages/core/test/control-host.test.ts apps/desktop/test/control.test.ts apps/desktop/test/promote-region-to-tab.test.ts",
+        "command": "pnpm exec vitest run packages/core/test/control-host.test.ts apps/desktop/test/control.test.ts apps/desktop/test/runtime-controller.test.ts",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-24m8fphma/artifacts/gate-T-004-r3-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-24m8fphma/artifacts/gate-T-002-r4-0001.log"
   },
   "history": [
     {
@@ -69,6 +69,18 @@
     {
       "action": "task_finished",
       "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
     }
   ]
 }

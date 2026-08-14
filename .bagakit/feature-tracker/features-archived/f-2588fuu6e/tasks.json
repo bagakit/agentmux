@@ -1,0 +1,134 @@
+{
+  "version": 2,
+  "feat_id": "f-2588fuu6e",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md",
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md",
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "重连后按各自光标重建每个 live run 的实时字节通道",
+      "objective": "内部重连（flap-in-budget）成功后，republishLiveRunState() 在补发 running 的同时，为每个仍存活的 run 按其 outputCursorBytes 续上实时 attachment，复用既有 attach 路径，不新造第二条重建通路。",
+      "outcome": "断线→重连之后，daemon 侧新产生的字节重新到达消费端；不再出现「状态显示 running、终端永久静默」。重连后到达的字节从各 run 自己的 outputCursorBytes 续起，既不重放已消费过的区间，也不丢掉断线期间落下的区间。",
+      "acceptance": [
+        "行为判据（非源码 grep）：断线 → 重连 → daemon 侧新写入的字节必须到达消费端。",
+        "续点正确：重建后的首个字节承接该 run 的 outputCursorBytes，不重复投递已消费区间，不跳过断线期间累积的区间。",
+        "变异红绿：删掉重建那一步，上述端到端判据必须变红；仅此一处改动即可致红（单点变异，不得复合）。",
+        "不新造第二条 attach 通路：重建必须复用既有 attach 实现；若出现与 reattachAgent 并列的第二份重建逻辑即不通过。",
+        "既有契约不回归：client-connection-lost 既有断言（状态补发、restored 事件）仍全绿。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/client-connection-lost.test.ts test/reconnect-live-stream-rebuild.test.ts --maxWorkers=1",
+          "proves": "断线→重连后新字节到达消费端且续点正确；既有断线契约不回归。注意：vitest 对不存在的 filter 静默退 0，验收时必须核对打印的 Test Files / Tests 计数非零且与预期一致。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec tsc --noEmit -p tsconfig.json",
+          "proves": "重建路径与既有 attach 契约在类型层完整对齐（core 的 tsconfig 覆盖 test/，故判据自身也被类型检查）。"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/client-connection-lost.test.ts test/reconnect-live-stream-rebuild.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core exec tsc --noEmit -p tsconfig.json",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "重连后的恢复横幅不被补发的 running 洗掉",
+      "objective": "渲染端在「字节通道尚未重建完成」与「已重建、真在流」之间必须可区分：补发的 process-state running 不得在通道实际恢复之前把 disconnected 洗成正常态。",
+      "outcome": "用户在重连期间看到的状态与真实可用性一致——通道没恢复就不显示为正常运行；恢复完成后横幅按真实状态消失。",
+      "acceptance": [
+        "行为判据：在「已补发 running 但通道尚未重建」这一中间态下，渲染端不得呈现为正常运行态。",
+        "恢复完成后横幅按真实状态消失，不残留。",
+        "变异红绿：把该区分逻辑改回「见到 running 即认为正常」，判据必须变红。",
+        "判据必须驱动真实渲染路径；不得使用 renderToStaticMarkup（它不执行 effect，对删除 effect 完全失明）。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/reconnect-recovery-banner.test.tsx --maxWorkers=1",
+          "proves": "中间态不被误显示为正常运行、恢复后横幅正确消失；把区分逻辑改回单看 running 会红。核对打印计数非零。"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2588fuu6e/goal.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/reconnect-recovery-banner.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "两条 Task 改的都是 renderer 内部投影逻辑与字节通道重建，没有改动任何对外契约、CLI 动词或 wire 形状；判据与理由都写在改动点的行内注释里（session-state.ts 两条 arm、client.ts:3601 的重连窗口说明），那里就是这件事的 SSOT。没有为了过 closeout 而改文档。",
+      "refs": [
+        "apps/desktop/src/renderer/src/lib/session-state.ts"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "一条可复用教训：掉线期间 hook 服务器不停，于是「更新的 observedAt」不等于「更可信的状态」——单调时间戳闸门在存在旁路写入通道时会被绕过，正确的判据是谁拥有那个生命周期，而不是谁的时间戳更新。已并入既有的同族记忆（两个数据源一条生命周期 / 下游无条件改写让判据恒真），未新增竞争性条目。另记：T-001 先关掉了最短的端到端路径（重建字节通道），T-002 才补中间态诚实性，顺序符合先纵向闭环再扩面。",
+      "refs": [
+        "apps/desktop/test/reconnect-recovery-banner.test.tsx"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "没有产生新的仓级原则：本次两条 Task 都是在既有原则（变异测试作为 done 判据、判据必须驱动真实渲染路径而非 renderToStaticMarkup）下执行的，这些原则已有归属，重复登记只会制造竞争条目。",
+      "refs": []
+    }
+  }
+}
