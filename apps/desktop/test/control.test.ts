@@ -431,8 +431,9 @@ describe('Desktop Control owner', () => {
           Object.keys(outcomes).map((executorId) => [executorId, { ...config.executors.codex!, label: executorId }])
         )
       },
-      // fixture() 留下的 codex 记录会让下面的读取分不清「是这次写的」还是「本来就在」。清空后
-      // 每一格都必然出自这次 detectExecutors。
+      // fixture() 留下的 codex 记录落在**不被读到**的键上（本例的 executor 换成了另外三个），所以它
+      // 不会混淆下面的读取。清空是防御性卫生，不是本例成立的前提——写清楚，免得下一个人以为这一行
+      // 承重而不敢动。
       executorDetections: {}
     })
     vi.spyOn(api.executors, 'detect').mockImplementation(async (executorId, hostId) => ({
@@ -446,11 +447,82 @@ describe('Desktop Control owner', () => {
     expect(stateOf('e-available')).toBe('ready')
     expect(stateOf('e-missing')).toBe('missing')
     expect(stateOf('e-blind')).toBe('error')
-    // 三态互不相同——防止整个三元表达式塌成一个常量时上面三句里仍有某句恰好绿。
-    expect(new Set(Object.keys(outcomes).map(stateOf)).size).toBe(3)
+    // 这里刻意**不**补一条 `new Set(...).size === 3`。上面三句要的就是三个两两不同的字面量：三句全过时
+    // 集合必然是 3，三句里有一句不过时测试已经红在那一句上——那条断言没有任何变异能让它先红，是证明形状
+    // 而不是证明（同族：subsuming-assertion-placed-last-never-runs）。
     // 原始结局一并留在格子里：界面文案可以塌，诊断依据不许丢。
     expect(useAppStore.getState().executorDetections[executorDetectionKey('local', 'e-blind')]?.result)
       .toMatchObject({ availability: 'check-failed' })
+  })
+
+  // 异步落点回执：启动是异步的，从 planControlOpen 造出 plan.tabId 到 launch 完成之间，用户可能把那一格
+  // 搬到别的 Tab。此刻若照 plan.tabId 生成回执，就把**旧坐标**交回给发起方——调用方拿它去 focus/inspect
+  // 会落到错误的 Tab。589ab7bf 只补了 agent 那条路；terminal 那条是同一个判断的第二份拷贝，两道 owner
+  // 闸都只认 surface 身份，没有一道比较过 Tab id，于是照旧返回旧的。现在两条路共用 resolveSpatialCommit：
+  // 这条用例驱动的是 **terminal**（被漏掉的那半）。
+  //
+  // 触发器用**右键促升**（`promoteRegionToTab`，纯布局代数）而不是 `promote.region` 控制请求：后者要先把
+  // 这一格投影成 Control 面，而启动中的 Region 没有稳定投影，会先一步以 CONTROL_OWNER_LOST 拒掉——够不到
+  // 这里要测的竞态。用户右键那条路没有这道闸，正是现实里真能把在途的一格搬走的那条。
+  it('open.terminal reports the Region current Tab when the user moves it mid-launch', async () => {
+    const tab = fixture()
+    let release!: (value: Extract<SessionSnapshot, { kind: 'terminal' }>) => void
+    vi.spyOn(api.sessions, 'launchTerminal').mockReturnValue(
+      new Promise((resolve) => { release = resolve })
+    )
+
+    const opening = useAppStore.getState().executeControl(request({
+      operation: 'open.terminal',
+      destination: { kind: 'split', direction: 'down', region: { kind: 'region', regionId: 'region-caller' } }
+    }))
+    // launch 在途：新格已就位（launcher 相），session 还没回来。把它促升成自己的 Tab。
+    const planned = Object.values(useAppStore.getState().tabs).find((candidate) => candidate.id === tab.id)!
+    const movedRegionId = workbenchSurfaces(planned).find((surface) => surface.regionId !== 'region-caller')!.regionId
+    useAppStore.getState().promoteRegionToTab('workspace', planned.id, movedRegionId)
+    const promotedTabId = Object.values(useAppStore.getState().tabs)
+      .find((candidate) => workbenchSurfaces(candidate).some((surface) => surface.regionId === movedRegionId))!.id
+    expect(promotedTabId).not.toBe(planned.id)
+
+    release(terminal('terminal-created'))
+    const opened = await opening
+    if (opened.operation !== 'open.terminal') throw new Error('Unexpected result')
+    // 回执必须指向它**现在**所在的 Tab，不是计划里的那个。
+    expect(opened.region.tabId).toBe(promotedTabId)
+    expect(opened.region.regionId).toBe(movedRegionId)
+  })
+
+  // 同一件事的 agent 那一半。589ab7bf 修的正是这条（回执从 plan.tabId 改成实际落点），但它当时**没有
+  // 留下任何判据**——那个提交里唯一的新用例讲的是「重名 Executor 要在启动前拒掉」，与落点无关。我实测
+  // 过：把 agent 这条路改回 `plan.tabId`，在补这条用例之前 22 条全绿。修复入库、守卫留在工作树之外，
+  // 是本仓反复出现的一族（memory fix-committed-guard-left-behind）。两条路现在共用 resolveSpatialCommit，
+  // 判据也就该两条都有。
+  it('open.agent reports the Region current Tab when the user moves it mid-launch', async () => {
+    const tab = fixture()
+    let release!: (value: AgentLaunchResult) => void
+    let launchedAgentSessionId = ''
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation((input) => {
+      launchedAgentSessionId = input.agentSessionId!
+      return new Promise((resolve) => { release = resolve })
+    })
+
+    const opening = useAppStore.getState().executeControl(request({
+      operation: 'open.agent',
+      content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))
+    await vi.waitFor(() => { if (!launchedAgentSessionId) throw new Error('not launched yet') })
+    const movedRegionId = workbenchSurfaces(useAppStore.getState().tabs[tab.id]!)
+      .find((surface) => surface.regionId !== 'region-caller')!.regionId
+    useAppStore.getState().promoteRegionToTab('workspace', tab.id, movedRegionId)
+    const promotedTabId = Object.values(useAppStore.getState().tabs)
+      .find((candidate) => workbenchSurfaces(candidate).some((surface) => surface.regionId === movedRegionId))!.id
+    expect(promotedTabId).not.toBe(tab.id)
+
+    release(launch(agent(launchedAgentSessionId)))
+    const opened = await opening
+    if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
+    expect(opened.region.tabId).toBe(promotedTabId)
+    expect(opened.region.regionId).toBe(movedRegionId)
   })
 
   // T-002 不暴露环境值：list.agents 的元信息里不许出现任何环境变量的值。
