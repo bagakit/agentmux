@@ -375,6 +375,9 @@
 .service-window__step { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
 .service-window__mode { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
 .service-window__restore { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+/* 错位 Agent 告示（T-005）：服务窗 + 一枚「找回」动作键，语汇沿用服务窗，键靠右对齐。 */
+.displaced-agent-notice { display: grid; gap:var(--sp-2); }
+.displaced-agent-notice__action { justify-self: end; }
 .resource-usage__identity { min-width: 0; display: grid; gap: 1px; }
 .resource-usage__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
 
