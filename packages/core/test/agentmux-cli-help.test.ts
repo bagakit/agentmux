@@ -241,6 +241,31 @@ describe('agentmux CLI discovery', () => {
     expect(payload.error.message).not.toContain('Unknown command')
   })
 
+  // T-004 验收 #1：promote 进入既有 verb 注册/help/skill 与分发，不另起一套；失败沿用 typed 错误。
+  // 这个文件经 bin/agentmux 走 dist——删掉 src 里的 promote 分发再 build，「真被分发」那条会红
+  // （落回 Unknown command）。这正是只测 store/纯函数守不住的那一侧。
+  it('lists promote in --help and resolves promote --help through the shared registry', async () => {
+    const help = await run(['--help'])
+    expect(help).toContain('promote')
+    const promoteHelp = await run(['promote', '--help'])
+    expect(promoteHelp).toContain('agentmux promote --region')
+    // help 说清边界：促升不碰 Run（呼应「移动不调用 Runtime lifecycle」验收）。
+    expect(promoteHelp).toContain('never starts, stops, or restarts')
+  })
+
+  it('dispatches promote as a real command requiring managed identity for self, not an unknown one', async () => {
+    // 无 managed 身份时 promote --region self 必须走到 MANAGED_AGENT_CONTEXT_REQUIRED——证明它被分发到了
+    // promoteCommand（callerForSelf→managedCaller() 在那里抛），而不是落进 Unknown command 兜底。删掉 src 的
+    // 分发行、重建 dist，这条会翻成 INVALID_CLI_ARGUMENT + "Unknown command"。
+    const unmanaged = await fail(['promote', '--region', 'self'], { AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' })
+    const payload = JSON.parse(unmanaged.stderr)
+    expect(payload).toMatchObject({ error: { code: 'MANAGED_AGENT_CONTEXT_REQUIRED' } })
+    expect(payload.error.message).not.toContain('Unknown command')
+    // 缺选择器：typed INVALID_CLI_ARGUMENT，不静默、不 Unknown command。
+    const noRegion = await fail(['promote'])
+    expect(JSON.parse(noRegion.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+  })
+
   it('handoff fails closed on missing target/task and rejects self as a target', async () => {
     const managed = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'agent-self', AGENTMUX_AGENT_CAPABILITY: 'cap-x' }
     // 缺目标：typed INVALID_CLI_ARGUMENT，不静默。
