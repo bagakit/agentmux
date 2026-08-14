@@ -64,7 +64,12 @@ export function WorkspaceSidebar({
   async function chooseFolder(): Promise<void> {
     const workspace = await api.workspaces.chooseLocalFolder()
     if (!workspace || !config) return
-    setConfig({ ...config, workspaces: [...config.workspaces, workspace] })
+    // chooseLocalFolder now returns the existing record when the folder is already registered (a no-op
+    // with feedback rather than a zod-dump error), so append only when it is actually new — otherwise
+    // just focus what is already there.
+    if (!config.workspaces.some((item) => item.id === workspace.id)) {
+      setConfig({ ...config, workspaces: [...config.workspaces, workspace] })
+    }
     await selectWorkspace(workspace.id)
   }
 

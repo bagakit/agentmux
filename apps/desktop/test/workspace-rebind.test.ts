@@ -146,6 +146,23 @@ describe('重绑一个本地文件夹 Workspace', () => {
     })
     await expect(rebindLocalFolder('moved', CONFIG, p)).rejects.toThrow('disk full')
   })
+
+  it('重绑到一个已登记的位置被响亮拒绝，不静默把两条记录压到同一个目录', async () => {
+    // 变体拼法（尾斜杠）而不是精确重复：一个裸 `===` 判据能过精确重复的用例，却照旧漏掉
+    // 报告里那个尾斜杠变体——它落到 save() 才被 schema 拒，一堆 zod issue 甩到用户脸上。
+    // 这里选回 sibling 的目录（尾斜杠），必须在写盘前就被拦下。措辞与 createForBranch 同口径。
+    const p = ports({ chooseDirectory: async () => ({ canceled: false, filePaths: ['/other/repo/'] }) })
+    await expect(rebindLocalFolder('moved', CONFIG, p)).rejects.toThrow('Workspace already registered: /other/repo/')
+    expect(p.recorded.saved).toEqual([])
+  })
+
+  it('重绑回自己当前的目录不算冲突', async () => {
+    // 命中的是自己那条记录（id 相同），不该被当成「已登记」拒掉——否则用户永远没法确认原地路径。
+    const p = ports({ chooseDirectory: async () => ({ canceled: false, filePaths: ['/old/place/repo/'] }) })
+    const result = await rebindLocalFolder('moved', CONFIG, p)
+    expect(result.workspace?.id).toBe('moved')
+    expect(p.recorded.saved).toHaveLength(1)
+  })
 })
 
 describe('handler 那层壳没有可以插早退的地方', () => {

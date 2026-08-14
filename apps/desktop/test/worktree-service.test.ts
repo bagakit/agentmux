@@ -555,6 +555,51 @@ describe('WorktreeService', () => {
     expect(save).not.toHaveBeenCalled()
   }, 20000)
 
+  it('refuses a trailing-slash VARIANT of an already-registered path, before touching Git', async () => {
+    // The exact-duplicate case above passes even with a raw `item.path === path` check. This one does
+    // not: the requested path is a trailing-slash spelling of the taken one, which a raw `===` treats as
+    // a different place — it would let the caller reach `git worktree add`, create a real worktree, and
+    // only then have `save()` reject it, orphaning the directory. Routing through the shared location
+    // rule (the same normalizer the schema uses) is what makes this refuse before Git runs.
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-registered-variant-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    const takenPath = join(root, 'worktrees', 'already-there')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    expect((await executionHost.run('git', ['-C', repoPath, 'init', '-b', 'main'])).exitCode).toBe(0)
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    expect((await executionHost.run('git', ['-C', repoPath, 'add', 'README.md'])).exitCode).toBe(0)
+    expect((await executionHost.run('git', [
+      '-C', repoPath,
+      '-c', 'user.name=AgentMux Test',
+      '-c', 'user.email=agentmux@example.invalid',
+      'commit', '-m', 'fixture'
+    ])).exitCode).toBe(0)
+
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [
+        { id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' },
+        { id: 'taken', name: 'taken', hostId: 'local', path: takenPath, kind: 'worktree', repoPath, branch: 'feature/taken' }
+      ]
+    }
+    const runSpy = vi.spyOn(executionHost, 'run')
+
+    await expect(service.createForBranch({
+      workspaceId: 'repo',
+      branch: 'feature/new',
+      path: `${takenPath}/`,
+      createBranch: true
+    }, branchConfig)).rejects.toThrow('Workspace already registered')
+
+    expect(runSpy).not.toHaveBeenCalledWith('git', expect.arrayContaining(['worktree', 'add']), expect.anything())
+    expect(save).not.toHaveBeenCalled()
+  }, 20000)
+
+
   /**
    * argv 硬化的四个 `--` 里此前只有一个被守住（createForBranch 的 adopt 分支，:256 那条断言）。
    * 另外三个——create 的 `-b` 分支、remove 的两个分支——删掉 `--` 后本文件全绿。
