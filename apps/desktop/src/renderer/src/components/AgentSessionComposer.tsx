@@ -13,6 +13,9 @@ export type AgentComposerAvailability = {
   placeholder: string
 }
 
+/** One shared identity for "no queue", so the selector returns a stable reference when empty. */
+const EMPTY_QUEUE: readonly string[] = Object.freeze([])
+
 export function agentComposerAvailability(
   session: SessionSnapshot | undefined,
   forceDisabled = false
@@ -46,7 +49,10 @@ export function AgentSessionComposer({
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
-  const queuedCount = useAppStore((state) => state.agentSteerQueues?.[sessionId]?.length ?? 0)
+  // The queue itself, not a count — the badge shows the messages, and derives the count from them, so
+  // the two cannot drift. Falls back to a shared frozen empty array so an absent queue does not hand a
+  // fresh `[]` to the selector on every store update (zustand compares by reference).
+  const queued = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
@@ -138,7 +144,7 @@ export function AgentSessionComposer({
   return (
     <AgentComposer
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
-      queuedCount={queuedCount}
+      queued={queued}
       commands={composerOptions?.commands ?? []}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
       onSelectSuggestion={(item, kind) => { if (kind === 'reference' && activeFile) addFileReference() }}

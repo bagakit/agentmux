@@ -52,7 +52,7 @@ describe('AgentComposer reusable surface', () => {
       value: 'steer me',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      queuedCount: 3,
+      queued: ['first', 'second', 'third'],
       primaryAction: 'stop',
       onChange: vi.fn(),
       onSubmit: vi.fn(),
@@ -62,8 +62,50 @@ describe('AgentComposer reusable surface', () => {
     const [leftGroup, rightGroup] = toolbar.split(/<\/div><div>/s)
     expect(leftGroup, 'toolbar did not split into two groups — layout shape changed').toBeDefined()
     expect(rightGroup).toBeDefined()
-    expect(leftGroup!, 'queue badge is not in the bottom-left cluster').toContain('composer__queued')
-    expect(rightGroup!, 'queue badge drifted back next to the primary action').not.toContain('composer__queued')
+    // `composer__queued"` with the closing quote, not the bare prefix: `composer__queued-card` contains
+    // the prefix too, so matching it loosely would pass on the card alone and stop pinning the badge.
+    expect(leftGroup!, 'queue badge is not in the bottom-left cluster').toContain('composer__queued"')
+    expect(rightGroup!, 'queue badge drifted back next to the primary action').not.toContain('composer__queued"')
+  })
+
+  it('shows the queued messages themselves, not only how many there are', () => {
+    // A bare "2" beside a working Agent is indistinguishable from a stuck counter — it reads as a bug.
+    // The badge therefore opens a card carrying the actual queued prompts, in delivery order.
+    const queued = ['check the fifth level for a bug', 'move the hint clear of the mechanism']
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      queued,
+      primaryAction: 'stop',
+      onChange: vi.fn()
+    }))
+
+    // Each queued prompt is real DOM text. Deleting the <ol> reds here; keeping only the count does too.
+    for (const prompt of queued) expect(markup, `queued prompt is not shown: ${prompt}`).toContain(prompt)
+    // In delivery order — "which goes next" is the question once there is more than one.
+    expect(markup.indexOf(queued[0]!), 'queued prompts are not in delivery order')
+      .toBeLessThan(markup.indexOf(queued[1]!))
+    // Still openable: the badge is the trigger and the card is its target. A mismatch between the two
+    // makes the card permanently unreachable — which the presence of the text alone would not catch,
+    // since the card renders either way (this is exactly the gap the d4573364 audit found on the
+    // context chip). renderToStaticMarkup cannot click, so the id linkage is what is checkable here.
+    // React SSR emits the attribute camelCase (`popoverTarget`), unlike `popover`/`id`.
+    const badgeTarget = markup.match(/class="composer__queued"[^>]*?popoverTarget="([^"]+)"/)?.[1]
+    expect(badgeTarget, 'queue badge does not declare a popover target').toBeTruthy()
+    expect(markup, "the queued-message card is not the badge's popover target")
+      .toContain(`id="${badgeTarget}" popover="auto" class="composer__queued-card"`)
+  })
+
+  it('renders no queue badge at all when nothing is queued', () => {
+    // Absence hides. A zero badge would be a permanent piece of furniture that says nothing.
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn()
+    }))
+    expect(markup).not.toContain('composer__queued')
   })
 
   it('offers the active-file shortcut only when there is an active file to reference', () => {
