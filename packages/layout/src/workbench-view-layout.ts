@@ -47,7 +47,7 @@ export const regionLeafId = (leaf: SplitTreeLeaf<{ regionId: string }>): string 
 
 // region 树的所有 regionId，按读序。函数体恰好只有一句：转发到 split-tree 的 collectLeafIds，叶子
 // 取值器用本文件的 regionLeafId。此前它自己递归一份（与 workbench-layout 的 groupIds 逐字相同），
-// 现收归 SSOT——这层薄壳保留是因为它是本文件的公开面（workbench-persistence、workbench-shortcuts、
+// 现收归 SSOT——这层转发保留是因为它是本文件的公开面（workbench-persistence、workbench-shortcuts、
 // workbench-tabs、WorkspaceWorkbench 等多个 importer 从这里取），但除了转发之外不做任何事。
 export function regionIds(root: WorkbenchRegionLayoutNode): string[] {
   return collectLeafIds(root, regionLeafId)

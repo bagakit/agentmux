@@ -202,7 +202,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
   }
 
   it('split-tree 的每个导出都在分类表里（新增一个必须在这里回答「它动集合吗」）', () => {
-    // split-tree 已抽进 @agentmux/layout，读包源码（渲染层那份是 `export *` 薄壳，扫不到函数声明）。
+    // split-tree 已抽进 @agentmux/layout，读包源码——渲染层没有任何同名文件（旧的转发文件已随抽包删除）。
     const file = parse(PKG, 'split-tree.ts')
     const exported: string[] = []
     file.forEachChild((node) => {
@@ -312,7 +312,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
    */
   it('转发禁令：会动集合的原语与两棵树的叶子取值器都不得被当值转发（否则站点整体逃出扫描面）', () => {
     const occurrences: Occurrence[] = []
-    // 两棵源码树都扫：原语与取值器现居 @agentmux/layout，reducer 也在包里；渲染层还留着消费者与薄壳。
+    // 两棵源码树都扫：原语与取值器现居 @agentmux/layout，reducer 也在包里；渲染层留着消费者。
     for (const relative of sourceFiles(RENDERER)) {
       const file = parse(RENDERER, relative)
       for (const found of classifyReferencesIn(file)) occurrences.push({ file: relative, ...found })
@@ -487,7 +487,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
     // 取值器是 split-tree 泛型原语强制调用方传的东西，故一棵新树必然导出一个。按它判、而不是按文件
     // 清单判，是因为取值器是代码为了能编译就必须写对的东西。
     const CLAIMED = new Set([ACCESSOR, 'regionLeafId'])
-    // 取值器已随两棵树的定义抽进 @agentmux/layout；渲染层薄壳是 `export *`，不产出 `export const …LeafId`。
+    // 取值器已随两棵树的定义抽进 @agentmux/layout；渲染层今天一个 `export const …LeafId` 都不产出。
     // 两棵源码树都扫，故将来第三棵树无论落在包里还是渲染层都会被认领检查抓到。
     const found = [...exportedLeafAccessors(RENDERER), ...exportedLeafAccessors(PKG)].sort()
     expect(found.length, '扫不到任何导出的叶子取值器——扫描器失灵，本条失去意义').toBeGreaterThan(1)
