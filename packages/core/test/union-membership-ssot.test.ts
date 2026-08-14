@@ -75,7 +75,7 @@ import {
 //   M4 `isPermissionOptionKind` 改成恒 true → A 层 + B 层各红一条
 //   M5 从 `PROMPT_DELIVERY_DEGRADED_REASONS` 删一个成员（⊇ 方向，真正的数据丢失形状）
 //                                          → tsc 报 TS2322+TS2353，且 A/B/C 三层与 store 的既有断言共 4 条红
-//   M6 control-host :138 换成**不完整**手抄 → B 层「十二个操作全部越过 membership 闸」红
+//   M6 control-host :138 换成**不完整**手抄 → B 层「每个操作全部越过 membership 闸」红
 //   M7 control-host :138 换成**完整**手抄   → 只有 C 层红
 //   M8 `OPERATION_BUDGET` 注解放宽成 `Record<string, …>` → control-host.test.ts 的注解判据红
 //   M9 从 `OPERATION_BUDGET` 删一个键        → tsc 报 TS2741，且 A/B 层各红
@@ -275,7 +275,7 @@ describe('三条联合的成员判定只有一处声明', () => {
 
     // control 请求：只喂 schemaVersion + requestId + operation。每个合法操作都会因为**别的**字段
     // 缺失而抛（target/destination 不合法），关键是它**不会**抛「操作不合法」。于是这条恰好只钉住那道
-    // membership 闸，不连带钉住十二种请求各自的形状。
+    // membership 闸，不连带钉住十三种请求各自的形状。
     it('每个操作全部越过 membership 闸（各自因别的字段失败，不是因为操作名）', () => {
       expect(CONTROL_OPERATION_MEMBERS.length, '操作锚点是空的，下面的循环是死代码').toBe(13)
       for (const operation of CONTROL_OPERATION_MEMBERS) {

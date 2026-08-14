@@ -673,7 +673,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 有资格管这件事的那个前提**：注解一旦被放宽成 `Record<string, …>` 或 `Partial<Record<…>>`，
     // 缺键就重新变成沉默的，而所有取值断言照旧全绿。这是纯文本判据唯一买得到、tsc 自己买不到的东西。
     //
-    // 成员覆盖面在 union-membership-ssot.test.ts：那边有一份被 tsc 钉成联合全集的锚点，并让十二个操作
+    // 成员覆盖面在 union-membership-ssot.test.ts：那边有一份被 tsc 钉成联合全集的锚点，并让十三个操作
     // 逐个走真正的 parseAgentMuxControlRequest。这条只管注解不退化。
     const controlSource = readFileSync(new URL('../src/control.ts', import.meta.url), 'utf8')
     const annotation = /const OPERATION_BUDGET\s*:\s*([^=]+?)\s*=/.exec(controlSource)?.[1]
@@ -721,9 +721,12 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // `source.operation === 'send'` 派发。这里逐个抽出每一处 setTimeout 的延时位，**分站点**质询。
     //
     // 为什么必须分站点：此前这里是一张两个名字的白名单，对所有站点一视同仁，于是
-    // `AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS` 在**每一处**都合法。把 :480 与 :508 那两处按操作重排的
-    // 延时换成那个短常量，长操作全部退化成 2 秒（`amux open.agent` 起一个 Agent 必然超时），
-    // 而这一族 14/14 全绿——我实测过两次，都存活。短常量只在读到请求之前那一处才是对的。
+    // `AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS` 在**每一处**都合法。把服务端读到请求后重排的那处与
+    // 客户端发起的那处（两处都是 `agentMuxControlTimeoutMs(request.operation)`）换成那个短常量，
+    // 长操作全部退化成 2 秒（`amux open.agent` 起一个 Agent 必然超时），而这一族 14/14 全绿——
+    // 我实测过两次，都存活。短常量只在**读到请求之前**那一处才是对的。
+    // 刻意不写行号：行号会随上游漂（这段注释上一版指的 :480/:508 早已失准，:480 恰恰就是短常量
+    // 那一处，与本段论述正好相反）。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。
     const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
       .map((match) => match[1]!)
     const PER_OPERATION = 'agentMuxControlTimeoutMs(request.operation)'
