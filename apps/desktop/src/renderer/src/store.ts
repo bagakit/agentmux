@@ -233,6 +233,14 @@ export type HostCheckState = {
 type AppState = {
   runtimeOwnershipWarnings: string[]
   environmentWarning: string | null
+  /**
+   * Agent Session ids whose Region vanished mid-launch even though the Agent itself started healthy
+   * (T-005). Ephemeral (never persisted) — a launch race is a within-session fact, not layout the user
+   * asked to keep. The list is only ever appended to; it is not the source of truth for what to SHOW —
+   * {@link selectDisplacedAgentNotices} re-derives that against live sessions and the current layout, so
+   * a stale id is harmless (a re-placed or ended Agent self-heals out of the notice).
+   */
+  displacedAgentSessionIds: string[]
   restoredWorkbench: PersistedWorkbench | null
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
@@ -1689,6 +1697,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   runtimeOwnershipWarnings: [],
   environmentWarning: null,
+  displacedAgentSessionIds: [],
   error: null,
   lastError: null,
   errorDismissed: false,
@@ -2457,7 +2466,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (signal?.aborted) await cleanup(controlCancellation(signal))
         const owner = findWorkbenchRegion(get().tabs, plan.regionId)
         if (!ownsSessionLaunch(owner?.surface, 'agent', agentSessionId)) {
-          await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Agent launch.'))
+          // T-005: the Region vanished mid-launch — closed, or its id recycled by another launch —
+          // but the Agent itself started healthy. Do NOT stop it (the old `cleanup` here killed a
+          // perfectly good Run): keep it in the session list so it stays discoverable, and record the
+          // displacement so a persistent, layout-anchored notice can offer to give it a place again.
+          // The receipt still fails (there is no valid landing to hand back), but the Run keeps running.
+          // `reduceDetachedAgentLaunch` adds the Session unconditionally (its Region is gone) and clears
+          // the pending-launch bookkeeping; the outer catch's rollback/discard then no-op.
+          let timelineGapSessionId: string | undefined
+          set((current) => {
+            const detached = reduceDetachedAgentLaunch(current, committed)
+            timelineGapSessionId = detached.timelineGapSessionId
+            return {
+              ...detached.state,
+              displacedAgentSessionIds: [...current.displacedAgentSessionIds, agentSessionId]
+            }
+          })
+          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+          throw controlFailure('CONTROL_OWNER_LOST', 'Agent launched successfully but its Region disappeared during launch.')
         }
         if (!workspaceOwnsSessionPath(workspace, committed.session)) {
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))

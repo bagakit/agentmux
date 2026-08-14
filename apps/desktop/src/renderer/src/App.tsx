@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from 'react'
 import { RuntimeOwnershipNotice } from './components/RuntimeOwnershipNotice'
 import { ShellEnvironmentNotice } from './components/ShellEnvironmentNotice'
+import { DisplacedAgentNotice } from './components/DisplacedAgentNotice'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useAgentStatusDecay } from './lib/agent-status-decay'
@@ -314,6 +315,7 @@ export function App() {
         <div className="main-shell__notices">
           <ShellEnvironmentNotice />
           <RuntimeOwnershipNotice />
+          <DisplacedAgentNotice />
           <TransientErrorNotice
             error={error}
             dismissed={errorDismissed}
