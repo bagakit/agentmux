@@ -3646,7 +3646,7 @@ export class AgentMuxClient {
     // 抖动）。光标确实丢了，我们不假装它没丢：缺席保持缺席，绝不编一个 0 冒充「输出到此为止」——那会
     // 让 screenEvidence 从头扫，把上一轮的提示符误认成这一轮的，于是在 Agent 其实没就绪时放行 prompt。
     // 缺席则让下一次 agentPrompt 收到 `epoch-missing` 的响亮拒绝（prompt-submission.ts:199）。
-    const stopRun = normalized.eventName === 'Stop'
+    const stopRun = normalized.lifecycleEvent === 'turn-end'
       ? await this.kernel.status(session.run.runId).catch((error: unknown) => {
           if (error instanceof AgentMuxError && error.code === 'CTXMUX_DISCONNECTED') return null
           throw error
@@ -3799,7 +3799,7 @@ export class AgentMuxClient {
     // 的组合（抛 'Terminal prompt readiness does not match its Agent Run boundary.'），故 readyThroughByte
     // 缺席时 consumedBySubmissionId 必然缺席——那一项恒真、不可达。
     if (
-      normalized.eventName === 'Stop' &&
+      normalized.lifecycleEvent === 'turn-end' &&
       next.terminalPromptReadiness &&
       next.terminalPromptReadiness.readyThroughByte === undefined
     ) {

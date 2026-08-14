@@ -4,7 +4,7 @@ import {
   HOOK_PAYLOAD_USAGE_KEY,
   readTurnUsageFromTranscript
 } from './agent-usage-transcript.js'
-import { rawEventNamesForLifecycle, resolveHookEventName } from './agent-hook-event.js'
+import { canonicalHookLifecycleEvent, rawEventNamesForLifecycle, resolveHookEventName } from './agent-hook-event.js'
 import type { AgentUsageCapability } from './types.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
@@ -107,7 +107,10 @@ export function resolveHookProvider(env: NodeJS.ProcessEnv = process.env): strin
 export function hookResponseFor(provider: string | null, eventName: string | null): string {
   if (provider === 'antigravity') {
     if (eventName === 'PreToolUse') return '{"decision":"ask"}\n'
-    if (eventName === 'Stop') return '{"decision":""}\n'
+    // 收尾用 canonical 生命周期事件判，不比原始拼法：`Stop` 与 `StopFailure` 都归一到 `turn-end`
+    // （agent-hook-event.ts），比字面 `=== 'Stop'` 会漏掉 `StopFailure`——与本文件顶上
+    // USAGE_FINALIZATION_EVENTS 从 canonical 表派生、不再手写 `['Stop','StopFailure']` 是同一个决定。
+    if (canonicalHookLifecycleEvent(eventName ?? undefined) === 'turn-end') return '{"decision":""}\n'
   }
   return '{}\n'
 }
