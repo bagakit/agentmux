@@ -7,6 +7,7 @@ import {
   type AgentMuxControlErrorCode,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
+  type AgentMuxExecutorAvailability,
   type AgentMuxRegion
 } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
@@ -832,6 +833,27 @@ export function recoveryCandidateSession(
 
 export function executorDetectionKey(hostId: string, executorId: string): string {
   return `${hostId}\0${executorId}`
+}
+
+/**
+ * store 的五态 {@link AsyncCheckState} → Control 线上的四态可用性——**唯一一处映射。**
+ *
+ * 两套词汇本就该只在这里相遇：store 那套（idle/checking/ready/missing/error）是 UI 检查生命周期，
+ * Control 那套（unknown/check-failed/missing/available）是发现结论。逐个写死、不留 default：
+ *   - `idle`（还没开始查）与 `checking`（正在查）→ `unknown`：都是「此刻没有结论」。
+ *   - `ready` → `available`，`missing` → `missing`，`error`（catch 分支）→ `check-failed`。
+ * 若在每个 list.agents 调用点各内联一次这个 switch，就是第二处会漂移的映射（本仓库被 per-call-site
+ * 副本咬过多次）；收成一处、由 tsc 的穷尽性钉住（漏一个 AsyncCheckState 成员就编译不过）。
+ */
+export function executorAvailabilityFromCheckState(state: AsyncCheckState | undefined): AgentMuxExecutorAvailability {
+  switch (state) {
+    case 'ready': return 'available'
+    case 'missing': return 'missing'
+    case 'error': return 'check-failed'
+    case 'checking':
+    case 'idle':
+    case undefined: return 'unknown'
+  }
 }
 
 const detectionRequestIds = new Map<string, number>()
@@ -2197,15 +2219,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'list.agents') {
       const state = get()
+      // 一个 executor 可能配在多台 Host 上，而 list.agents 是一张扁平表：按「最可用」归并——
+      // available > missing > check-failed > unknown。这是旧 `.some(=== 'ready')`（「有一台 ready 就算可用」）
+      // 的诚实推广。逐台的四态区分仍完整活在 ExecutorDetection（按 (host,executor) 各带一态），
+      // 这里只是给 CLI 的汇总视图。归并与线上的映射共用同一处 {@link executorAvailabilityFromCheckState}。
+      const availabilityRank: Record<AgentMuxExecutorAvailability, number> = {
+        available: 3, missing: 2, 'check-failed': 1, unknown: 0
+      }
       return {
         operation: request.operation,
         agents: Object.entries(state.config?.executors ?? {}).map(([executorId, executor]) => ({
           executorId,
           label: executor.label,
           providerId: executor.providerId,
-          available: state.config?.workspaces.some((workspace) => (
-            state.executorDetections[executorDetectionKey(workspace.hostId, executorId)]?.state === 'ready'
-          )) ?? false
+          availability: (state.config?.workspaces ?? [])
+            .map((workspace) => executorAvailabilityFromCheckState(
+              state.executorDetections[executorDetectionKey(workspace.hostId, executorId)]?.state
+            ))
+            .reduce<AgentMuxExecutorAvailability>(
+              (best, current) => (availabilityRank[current] > availabilityRank[best] ? current : best),
+              'unknown'
+            )
         }))
       }
     }
