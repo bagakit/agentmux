@@ -17,6 +17,7 @@ import {
   isLongAgentMuxControlOperation,
   resolveAgentMuxRegion,
   type AgentMuxAgentRegion,
+  type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxRegion
 } from '../src/control.js'
@@ -603,17 +604,47 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
   })
 
   it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
-    // 判据落在**语义**上而不是抄一份清单：等进程起来、等 composer 就绪、等 Provider 重建会话、
-    // 等进程收尾——这四类要长预算；inspect/focus/arrange/list 两秒内不返回就是真出事了。
-    for (const operation of ['open.agent', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
-      expect(isLongAgentMuxControlOperation(operation), `${operation} 要等外面，必须走长预算`).toBe(true)
+    // 判据落在**语义**上：等进程起来、等 composer 就绪、等 Provider 重建会话、等进程收尾——这四类要长
+    // 预算；inspect/focus/arrange/promote/list 两秒内不返回就是真出事了。
+    //
+    // 为什么是一张 `Record<Operation, …>` 而不是两个 `as const` 数组：数组是**手抄的清单**，往联合里加
+    // 一个操作时它不在任何一个数组里，这一条照旧全绿，新操作的档位就成了没人守的自由变量。实测过：
+    // `promote.region` 落地时正是这样漏掉的——把它的档位从 short 改成 long（真回归：一个纯本地的布局
+    // 操作会占满 30 秒长预算），control-host 与 union-membership 同跑 40 条全绿。
+    //
+    // 改成穷尽 Record 之后这件事由 **tsc** 买单：缺键 TS2741、多键 TS2353，而 packages/core 的 tsconfig
+    // 覆盖 test/，所以这是真被执行的约束。下一个操作加进联合时，这里编译不过，作者必须回答「它等不等
+    // 外面」。这与下面那条守 OPERATION_BUDGET 注解不退化的用例是一对：那条守生产侧的表不许放宽，
+    // 这条守判据侧的表不许漏人。
+    const EXPECTED_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+      // 要等外面的。
+      'open.agent': 'long',
+      'open.terminal': 'long',
+      'open.browser': 'long',
+      send: 'long',
+      resume: 'long',
+      stop: 'long',
+      // 只读或只动本地状态的。
+      'inspect.tab': 'short',
+      'inspect.region': 'short',
+      focus: 'short',
+      arrange: 'short',
+      // promote 只在本地布局树上搬一片叶子，不碰 Runtime lifecycle（见 store 的 promote.region 臂：
+      // 那条路径上没有任何 api.sessions.* 调用），所以它和 arrange 同档。
+      'promote.region': 'short',
+      'list.agents': 'short',
+      // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
+      // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
+      interrupt: 'short'
     }
-    for (const operation of ['inspect.tab', 'inspect.region', 'focus', 'arrange', 'list.agents'] as const) {
-      expect(isLongAgentMuxControlOperation(operation), `${operation} 只读或只动本地状态，不该占长预算`).toBe(false)
-    }
-    // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
-    // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
-    expect(isLongAgentMuxControlOperation('interrupt'), 'interrupt 只发一次信号，不该占长预算').toBe(false)
+    const entries = Object.entries(EXPECTED_BUDGET) as [AgentMuxControlRequest['operation'], 'long' | 'short'][]
+    // 自检：表空了下面的循环就是死代码。条数由 tsc 钉住，这里只防「Object.entries 拿到空」这种失灵。
+    expect(entries.length, '档位期望表是空的，本条是死代码').toBeGreaterThan(10)
+    const drifted = entries
+      .filter(([operation, expected]) => isLongAgentMuxControlOperation(operation) !== (expected === 'long'))
+      .map(([operation, expected]) => `${operation}: 期望 ${expected}，实际 ${expected === 'long' ? 'short' : 'long'}`)
+      .sort()
+    expect(drifted, '有操作的等待预算与它的语义不符').toEqual([])
   })
 
   it('每个操作都被显式定过档——分档表必须是穷尽 Record，不许退回按形状推断', () => {
