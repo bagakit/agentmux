@@ -233,6 +233,26 @@ describe('渲染出来的 class 必须有规则', () => {
   const rendered = [...renderedClasses(), ...libClasses()]
   const renderedBem = rendered.filter((entry) => isBemToken(entry.token))
 
+  // 历史遗留（都经过三查：git 证实从未有过规则，因此不是「重构丢规则」那类回归，而是无害的
+  // 多余标记 / 语义 hook）。它们不是 offenders，被主断言的 filter 排除。它们**不是**一份
+  // 「允许无规则」的白名单——它们本就不带样式意图，只是恰好用了 BEM 记号来命名。
+  //
+  // 提到 describe 层是为了让下面那条存活性自检能读到同一份集合。豁免表若不逐条复验，就是一个
+  // 永久的洞：条目对应的 class 哪天不再被渲染、或长出了规则，这张表都不会有任何反应，而那两种
+  // 情况恰好是这道守卫本该抓的两类漂移。本仓在 core-export-reachability / lib-export-reachability
+  // 里都为豁免表配了存活性自检，这里此前是唯一的例外（实测两个变异都存活，见下面那条 it）。
+  const KNOWN_UNSTYLED_MARKERS = new Set([
+    'activity-log__segment', // 滚动锚点，位置由 ref/IntersectionObserver 用，从无规则
+    'agent-catalog__group--unavailable', // 仅语义分组名，样式全在基类 .agent-catalog__group 上
+    'agent-status-bar__label', // 纯文本 span，视觉继承自 .agent-status-bar，从无独立规则
+    'board--matrix', // 布局全在基类 .board 上，matrix 变体从无独立规则
+    'launch-terminal__fallback', // 样式全在同元素的 .launch-quick-card 上，此名从无规则
+    'scratch-workspace-row__identity', // 与已有规则的 .project-rail-row__identity 同挂一个元素
+    'workbench-tab__rename', // 见下：唯一存疑项，已在报告中单列
+    'workspace-composer__fields--project', // 布局全在基类 .workspace-composer__fields 上
+    'workspace-workbench--merged' // rootIsLeaf 分支才挂，样式全在基类 .workspace-workbench 上
+  ])
+
   it('扫描确实扫到了东西——空集上的扫描是这个仓库经典的假绿', () => {
     // 一个静默地什么都没扫到的守卫，比没有守卫更糟：它会永远绿着，掩盖住它本该守的洞。
     expect(defined.size).toBeGreaterThan(100)
@@ -269,27 +289,33 @@ describe('渲染出来的 class 必须有规则', () => {
       .map((entry) => `${entry.token}  <- ${entry.file}`)
       .sort()
 
-    // 已知的 8 处历史遗留（都经过三查：git 证实从未有过规则，因此不是「重构丢规则」那类回归，
-    // 而是无害的多余标记 / 语义 hook）。它们不是 offenders，被下面的 filter 排除。它们**不是**
-    // 一份「允许无规则」的白名单——它们本就不带样式意图，只是恰好用了 BEM 记号来命名。
-    // 每一条都在 PR 的 triage 里有独立结论；这里内联留一行是为了让新增的违规能一眼从这 8 条里跳出来。
-    const KNOWN_UNSTYLED_MARKERS = new Set([
-      'activity-log__segment', // 滚动锚点，位置由 ref/IntersectionObserver 用，从无规则
-      'agent-catalog__group--unavailable', // 仅语义分组名，样式全在基类 .agent-catalog__group 上
-      'agent-status-bar__label', // 纯文本 span，视觉继承自 .agent-status-bar，从无独立规则
-      'board--matrix', // 布局全在基类 .board 上，matrix 变体从无独立规则
-      'launch-terminal__fallback', // 样式全在同元素的 .launch-quick-card 上，此名从无规则
-      'scratch-workspace-row__identity', // 与已有规则的 .project-rail-row__identity 同挂一个元素
-      'workbench-tab__rename', // 见下：唯一存疑项，已在报告中单列
-      'workspace-composer__fields--project', // 布局全在基类 .workspace-composer__fields 上
-      'workspace-workbench--merged' // rootIsLeaf 分支才挂，样式全在基类 .workspace-workbench 上
-    ])
     const surprises = offenders.filter(
       (line) => !KNOWN_UNSTYLED_MARKERS.has(line.split('  <- ')[0]!)
     )
 
     // 主断言：任何**新出现**的「渲染了却没规则」的 BEM class 都会让这里变红，并直接点名。
     expect(surprises).toEqual([])
+  })
+
+  it('豁免表的每一条都仍然成立：仍被渲染、且仍然没有规则', () => {
+    // 豁免的前提是「这个 class 被渲染了，但它本就不带样式意图」。前提有两半，各自都会过期：
+    //   - 不再被渲染 → 这条豁免从此指向一个不存在的 class，是一个永久的死条目；
+    //   - 长出了规则 → 那条注释（「从无独立规则」）成了假话，而它是别人判断要不要动这个
+    //     class 的依据。更要紧的是：规则今天有、明天被重构删掉，这个 class 会静默回到
+    //     「渲染了却没规则」，而主断言因为豁免永远看不见它——正是这道守卫存在的理由。
+    //
+    // 一条断言同时报两种漂移，而不是拆成两条：拆开后先抛的那条会让后面成为死代码（本仓
+    // subsuming-assertion / two-throws-in-one-it 两次踩过），而这里两种漂移是独立发生的。
+    const renderedTokens = new Set(rendered.map((entry) => entry.token))
+    const drifted = [...KNOWN_UNSTYLED_MARKERS]
+      .map((token) => {
+        if (!renderedTokens.has(token)) return `${token}: 已经没有任何地方渲染它——删掉这条豁免`
+        if (defined.has(token)) return `${token}: 现在有规则了——删掉这条豁免，让它回到主断言的守备范围`
+        return null
+      })
+      .filter((line): line is string => line !== null)
+      .sort()
+    expect(drifted, '豁免表有条目的前提已不成立').toEqual([])
   })
 })
 
