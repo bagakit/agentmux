@@ -55,6 +55,42 @@
 const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*':\s*(?:[A-Za-z_$][\w$]*:\s*)?/u
 const AGENTMUX_ERROR_NAME_PREFIX = /^AgentMuxError:\s*/u
 
+// A zod schema rejection — config-store's `superRefine` (unique workspace path, host ids, known
+// Provider) and every other `z.parse` in the main process — surfaces as its `.message`, which zod
+// serialises as the JSON array of `{ code, path, message }` issues. Across `ipcRenderer.invoke` that
+// array IS the reframed message: there is no `ZodError` instance left on this side to call
+// `.flatten()` on, only the text. So a user re-picking an already-registered folder saw the literal
+// `[ { "code": "custom", "path": [ "workspaces", 32, "path" ], "message": "Workspace path must be
+// unique on local: …" } ]` — the schema's internals verbatim.
+//
+// This lifts the issues' OWN authored messages out of that envelope. It is deliberately NOT the
+// code→sentence table the header rules out, and it satisfies all three of that argument's facts: it
+// invents no copy and keys on no code (the human sentence is the one zod already wrote), and it works
+// on the message-only `invoke` path precisely because the array arrives AS the message. It is the same
+// class of move as stripping the IPC wrapper above — removing framing, never content — so `raw` still
+// carries the untouched array and the failure stays diagnosable.
+function unwrapZodIssueMessages(message: string): string | undefined {
+  if (message.trimStart()[0] !== '[') return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(message)
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return undefined
+  const messages: string[] = []
+  for (const issue of parsed) {
+    // Every element must be a zod issue carrying a string `.message`. One that is not means this array
+    // is not a zod error — a real message that merely begins with `[` — so leave it entirely untouched
+    // rather than half-rewrite something we do not understand.
+    if (typeof issue !== 'object' || issue === null) return undefined
+    const text = (issue as { message?: unknown }).message
+    if (typeof text !== 'string' || text.length === 0) return undefined
+    messages.push(text)
+  }
+  return [...new Set(messages)].join('; ')
+}
+
 /** The unabridged text of a caught value, before any framing is stripped. Never lossy. */
 function rawText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
@@ -91,7 +127,12 @@ export type PresentedError = {
  */
 export function describeError(cause: unknown): PresentedError {
   const raw = rawText(cause)
-  const message = raw.replace(IPC_INVOKE_PREFIX, '').replace(AGENTMUX_ERROR_NAME_PREFIX, '')
+  const deframed = raw.replace(IPC_INVOKE_PREFIX, '').replace(AGENTMUX_ERROR_NAME_PREFIX, '')
+  // A schema rejection arrives as the JSON issue array; surface the issues' own messages instead of the
+  // envelope. Runs after wrapper-stripping because a rejection thrown across `invoke` reaches us as
+  // `Error invoking remote method '<channel>': <the array>`, so the array is only bare once the wrapper
+  // is gone. Falls back to the de-framed text when this is not a zod issue array.
+  const message = unwrapZodIssueMessages(deframed) ?? deframed
   const code = stringField(cause, 'code')
   const detail = stringField(cause, 'detail')
   return {
