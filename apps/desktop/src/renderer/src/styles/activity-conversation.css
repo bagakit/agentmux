@@ -149,11 +149,26 @@
   white-space: pre;
 }
 /* A link is a button because an <a href> in untrusted output is a navigation escape hatch; it still has
-   to READ as a link, so it borrows the accent and underline and nothing else. The underline is
-   baseline-aware (`text-underline-offset`) so it clears the descenders of a mono path/name rather than
-   cutting through them: 2px sat inside the descender zone and read as cramped (tracker #794). The offset
-   lives here once and both link kinds inherit it — the file reference carries `.md-link` too — so the two
-   affordances cannot drift apart on the one value that decides where the line sits. */
+   to READ as a link, so it borrows the accent and underline and nothing else.
+
+   TWO independent knobs decide how the line looks, and the file reference is the stress case: its content
+   is a pure-mono path like `.bagakit/…/features.json:987`, dense with slashes and g/j descenders.
+   - WHERE it sits: `text-underline-offset: 3px` from the (mono) baseline. 2px sat inside the descender
+     zone and read as cramped (tracker #794). 3px is a compromise, NOT full clearance — mono slashes and
+     g/j still reach below it, so the line does pass through their lower ink.
+   - WHETHER it stays whole: `text-decoration-skip-ink: none`. Because the line crosses that dense
+     descender ink, the engine default (`auto`) carves a gap at every slash and descender — the underline
+     comes out ragged/dashed and reads as imprecise (the actual #794 complaint on the screenshot). `none`
+     forces one continuous stroke. Chosen over the alternatives: pushing the offset far enough to clear
+     mono descenders would float the line off the short glyphs and detach it from the text (and #794
+     already bounced on offset); `text-underline-position: under` drops the line to the em-box bottom, a
+     visibly lower, CJK-oriented position we don't want; a CJK font in the stack is irrelevant here — the
+     decorated box holds ONLY the ASCII path (the Chinese prose renders in sibling text nodes, see
+     AgentMarkdown), so there is no CJK glyph inside this line box to skip over.
+
+   Both knobs live here once and both link kinds inherit them — the file reference carries `.md-link` too
+   — so the two affordances cannot drift apart on the values that decide where the line sits and whether
+   it stays continuous. */
 .md-link {
   padding:0;
   border: 0;
@@ -163,6 +178,7 @@
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
   cursor: pointer;
 }
 .md-link:hover { color: var(--green); }
