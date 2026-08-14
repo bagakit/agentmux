@@ -18,6 +18,7 @@ import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
+import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
@@ -205,12 +206,19 @@ async function listCommand(args: readonly string[]): Promise<number> {
 }
 
 function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller } {
-  const selected = exactlyOne(flags, ['--left-of', '--right-of', '--above', '--below', '--new-tab-after', '--in-region'], 'open')
+  // 方向 flag 清单从 SPLIT_FLAG_DIRECTIONS 的键派生，不再手抄一份——「哪些 flag 是方向 flag」只有一处。
+  const splitFlags = Object.keys(SPLIT_FLAG_DIRECTIONS)
+  const selected = exactlyOne(flags, [...splitFlags, '--new-tab-after', '--in-region'], 'open')
   const value = flags.values.get(selected)!
   const owner = callerForSelf(value)
   if (selected === '--new-tab-after') return { destination: { kind: 'new-tab', after: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } }, ...(owner ? { caller: owner } : {}) }
   if (selected === '--in-region') return { destination: { kind: 'launcher', regionId: explicitSelectorId(value, 'Launcher Region id') } }
-  const direction = selected === '--left-of' ? 'left' : selected === '--right-of' ? 'right' : selected === '--above' ? 'up' : 'down'
+  // 查表取方向，取代 `? 'left' : … : 'down'` 的兜底三元——那条 `: 'down'` 会把写错/新增的 flag 静默投成
+  // down。未命中当前**不可达**：`exactlyOne` 只会返回它收到的清单里的项，而那份清单里除了上面两个已被
+  // return 的 flag，其余都是 SPLIT_FLAG_DIRECTIONS 的键。保留这道显式抛错是为了让将来往清单里加一个方向
+  // flag 却漏配映射时响亮失败（INVALID_CLI_ARGUMENT），而不是像旧三元那样悄悄落进 down。
+  const direction = (SPLIT_FLAG_DIRECTIONS as Record<string, SplitDirection>)[selected]
+  if (!direction) throw cliError(`open received an unmapped direction flag: ${selected}.`)
   return { destination: { kind: 'split', direction, region: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } }, ...(owner ? { caller: owner } : {}) }
 }
 

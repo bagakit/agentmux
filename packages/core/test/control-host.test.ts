@@ -625,7 +625,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 为什么是一张 `Record<Operation, …>` 而不是两个 `as const` 数组：数组是**手抄的清单**，往联合里加
     // 一个操作时它不在任何一个数组里，这一条照旧全绿，新操作的档位就成了没人守的自由变量。实测过：
     // `promote.region` 落地时正是这样漏掉的——把它的档位从 short 改成 long（真回归：一个纯本地的布局
-    // 操作会占满 30 秒长预算），control-host 与 union-membership 同跑 40 条全绿。
+    // 操作会占满 30 秒长预算），control-host 与 union-membership 同跑全绿——当时是 40 条，那个数只是
+    // 那次测量的快照，不是今天的总数。
     //
     // 改成穷尽 Record 之后这件事由 **tsc** 买单：缺键 TS2741、多键 TS2353，而 packages/core 的 tsconfig
     // 覆盖 test/，所以这是真被执行的约束。下一个操作加进联合时，这里编译不过，作者必须回答「它等不等
@@ -725,8 +726,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 客户端发起的那处（两处都是 `agentMuxControlTimeoutMs(request.operation)`）换成那个短常量，
     // 长操作全部退化成 2 秒（`amux open.agent` 起一个 Agent 必然超时），而这一族 14/14 全绿——
     // 我实测过两次，都存活。短常量只在**读到请求之前**那一处才是对的。
-    // 刻意不写行号：行号会随上游漂（这段注释上一版指的 :480/:508 早已失准，:480 恰恰就是短常量
-    // 那一处，与本段论述正好相反）。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。
+    // 刻意不写行号：行号会随上游漂。这段注释上一版举的那两个号码写下时就已失准，其中一个指的恰恰是
+    // 短常量那一处——与本段论述正好相反。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。
     const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
       .map((match) => match[1]!)
     const PER_OPERATION = 'agentMuxControlTimeoutMs(request.operation)'

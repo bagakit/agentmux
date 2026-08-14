@@ -33,6 +33,7 @@ import { AgentMuxError } from './errors.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
+import { isSplitDirection } from './split-direction-ssot.js'
 
 const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
@@ -110,8 +111,11 @@ function sessionSelector(value: unknown): { kind: 'self' } | { kind: 'agent-sess
 
 function openDestination(value: unknown): AgentMuxOpenDestination {
   const source = object(value, 'Open destination is invalid.', 'INVALID_CONTROL_REQUEST')
-  if (source.kind === 'split' && ['left', 'right', 'up', 'down'].includes(String(source.direction))) {
-    return { kind: source.kind, region: regionAnchor(source.region), direction: source.direction as 'left' | 'right' | 'up' | 'down' }
+  // 方向的合法性从 SPLIT_DIRECTIONS 派生（isSplitDirection），不再内联 `['left','right','up','down']`——
+  // 那份手抄删一档不报错、无红测试（审计实测删 'up' 后 1203 条全绿）。谓词一并把 direction 收窄成
+  // SplitDirection，省掉下面的 `as`。
+  if (source.kind === 'split' && typeof source.direction === 'string' && isSplitDirection(source.direction)) {
+    return { kind: source.kind, region: regionAnchor(source.region), direction: source.direction }
   }
   if (source.kind === 'new-tab') return { kind: source.kind, after: tabAnchor(source.after) }
   if (source.kind === 'launcher') return { kind: source.kind, regionId: identity(source.regionId, 'Open destination is invalid.', 'INVALID_CONTROL_REQUEST') }
