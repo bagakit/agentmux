@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
+import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import {
   applyAgentTimelineMutation,
@@ -438,18 +439,20 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   const outputCursorBytes = source.outputCursorBytes === undefined
     ? undefined
     : timestamp(source.outputCursorBytes, 'hookReceipt.outputCursorBytes')
-  // 承重的是**一个方向**：有光标 ⟹ 必须是 Stop。它防的是伪造——任何非 Stop 回执都不许携带一个
-  // 「权威输出光标」，否则 composer 就绪判定会以一个 mid-turn 的字节位置为边界，把上一轮的提示符
-  // 认成这一轮的。
+  // 承重的是**一个方向**：有光标 ⟹ 必须是 turn 收尾回执。它防的是伪造——任何非收尾回执都不许携带
+  // 一个「权威输出光标」，否则 composer 就绪判定会以一个 mid-turn 的字节位置为边界，把上一轮的提示符
+  // 认成这一轮的。收尾判据取 canonical 生命周期事件而非原始拼法：`Stop` 与 `StopFailure`（以及别家
+  // Provider 的收尾方言）都归一到 `turn-end`（agent-hook-event.ts）。比字面 `=== 'Stop'` 会漏掉
+  // `StopFailure`——client 摄入侧对它同样取光标，那条合法回执会在这里被误当成伪造而整条 hook 落盘失败。
   //
-  // 反方向（Stop ⟹ 必须有光标）**不承重，且会被 wire 抖动打破**：取光标要向内核问一次 run 状态，
+  // 反方向（收尾 ⟹ 必须有光标）**不承重，且会被 wire 抖动打破**：取光标要向内核问一次 run 状态，
   // 而断线期间那次调用抛 CTXMUX_DISCONNECTED。原先这里写成双条件，逼得 client 要么带着光标一起
-  // 失败（则整条 Stop 丢失、Agent 永久卡 working），要么编一个假光标。两条都比「Stop 落盘、光标缺席」
+  // 失败（则整条收尾丢失、Agent 永久卡 working），要么编一个假光标。两条都比「收尾落盘、光标缺席」
   // 坏。所以这里只守伪造那一侧：缺席就是缺席，下游 readiness 也一并缺席，下一次发 prompt 收到
   // `epoch-missing` 的响亮拒绝，而不是一次静默走错边界的发送。
-  if (outputCursorBytes !== undefined && eventName !== 'Stop') {
+  if (outputCursorBytes !== undefined && canonicalHookLifecycleEvent(eventName) !== 'turn-end') {
     throw new AgentMuxError(
-      'Only native Stop receipts may carry an authoritative output cursor.',
+      'Only native turn-end receipts may carry an authoritative output cursor.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
