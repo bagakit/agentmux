@@ -3704,7 +3704,25 @@ export class AgentMuxClient {
                 outputCursorBytes: stopRun.latestOutputBytes
               }
             }
-          : {}),
+          : current.terminalPromptReadiness?.consumedBySubmissionId !== undefined
+            ? {
+                // 断线拿不到光标（stopRun 为 null），但一条 turn-end 落在一个上一轮 epoch 已被永久消费的
+                // 会话上。什么都不写会把那枚 `consumedBySubmissionId` 原样留下——此后每条 prompt 永久撞
+                // AGENT_PROMPT_READINESS_CONSUMED，而 Agent 进程还活着（它刚发出这条 hook）、PTY 仍收字节。
+                // 这是把第 2 类（我们取光标那一步坏了）误写成第 1 类（Agent 死了）的红线反例 1。
+                //
+                // 重铸一枚**未消费**的 native-stop epoch 把发送面解锁。光标退回本会话最后一次权威
+                // `outputCursorBytes`——那是真实持久值，不是编造的 0（编造 0 会让 screenEvidence 从头扫、
+                // 把上一轮提示符认成这一轮，正是 client.ts:3659 拒绝的那件事）。`readyThroughByte` 缺席，
+                // 交给下面 turn-end 触发的 observeReadiness 用屏幕证据补齐；重连后新帧到达即自愈。
+                terminalPromptReadiness: {
+                  source: 'native-stop' as const,
+                  id: receipt.id,
+                  run: { ...current.run },
+                  outputCursorBytes: current.outputCursorBytes
+                }
+              }
+            : {}),
         ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {}),
         // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
         // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。
