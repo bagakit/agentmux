@@ -429,6 +429,34 @@ async function hasExecutable(executable: string): Promise<boolean> {
   return (await classifyExecutable(executable)) === 'available'
 }
 
+/**
+ * 启动闸拒绝时**为什么**拒绝——把三态里被 boolean 压掉的那一档还原成一句诚实的话。
+ *
+ * 闸门本身不变（非 available 一律不放行，见 {@link hasExecutable}），变的只是理由。`installed: false`
+ * 同时表达「查成了、确实不在」和「PATH 空到根本没候选可查」，而这两者对用户是完全不同的下一步：前者
+ * 去装，后者去修环境。压平的后果实测过——PATH 退化的用户被告知「工具没装在这台机器上」，于是去追一个
+ * 根本不存在的安装问题。
+ *
+ * 为什么理由落在 **message** 而不只是 error code：Electron 的 `ipcRenderer.invoke` 会丢掉 `.code` 和
+ * `.detail`，只把 `.message` 送到渲染端（见 error-presentation.ts 的第 3 条）。所以在这条路上，message
+ * 就是用户能看到的全部；只加一个 code 改不到任何人眼前。
+ *
+ * 收成一处投影而不是在两个闸门各写一句：createAgent 与 resume 的那两处此前是逐字相同的两份，这正是
+ * 「只改一处、另一处静默保留旧行为」的经典形状。
+ */
+async function executorUnavailableError(
+  label: string,
+  executable: string
+): Promise<AgentMuxError> {
+  return await classifyExecutable(executable) === 'check-failed'
+    ? new AgentMuxError(
+        `Could not verify whether ${label} is installed on this host: no candidate path was searchable for "${executable}". Check PATH and the shell environment this app was launched from.`,
+        'AGENT_NOT_FOUND',
+        'executor-check-failed'
+      )
+    : new AgentMuxError(`${label} is not installed on this host.`, 'AGENT_NOT_FOUND', 'executor-missing')
+}
+
 export class AgentMuxClient {
   readonly providers: AgentProviderRegistry
   private readonly kernel: CtxmuxRunAdapter
@@ -1460,7 +1488,7 @@ export class AgentMuxClient {
       const invocationCapability = issueAgentCapability()
       const capability = await this.probeAgent(input.providerId, input.commandOverride)
       if (!capability.installed) {
-        throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
+        throw await executorUnavailableError(provider.label, capability.executable)
       }
       // `post-launch-only` 的 Provider 在启动期收不到任何 prompt（它的交互 UI 没有那个入口，
       // 见对应 Provider 模块的出处），所以**不给它组装启动 prompt**——交了只会被 buildLaunch
@@ -1830,7 +1858,7 @@ export class AgentMuxClient {
       const invocationCapability = issueAgentCapability()
       const capability = knownCapability ?? await this.probeAgent(current.providerId, input.commandOverride)
       if (!capability.installed) {
-        throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
+        throw await executorUnavailableError(provider.label, capability.executable)
       }
       // Re-resolve the posture the create fixed and append it to the resume args exactly as createAgent
       // does, so the sandbox/approval/permission-mode flags survive the stop/resume boundary rather than
