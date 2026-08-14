@@ -271,23 +271,28 @@ describe('T-001 重连后重建实时字节泵', () => {
       event.type === 'agent-error' && event.agentSessionId === 'agent-a')
     expect(errorForA).toBeDefined()
 
+    // b 接上了，就该照常被 republish 成 running——修复只跳过接不上的那个 run，不是把整段 republish
+    // 关掉。这条**排在 a 的判据之前**：放在后面的话，a 那条一抛，它就成了永不执行的死代码，
+    // 于是「变异下 b 仍绿」这个说法根本无从观察（审计实测指出了这一点）。b 的独立性要能被看见，
+    // 就必须先于会抛的那条跑。
+    const runningForB = events.find((event) =>
+      event.type === 'process-state' && event.agentSessionId === 'agent-b' && event.state === 'running')
+    expect(runningForB).toBeDefined()
+
     // 而且这条 error 必须**活到最后**。上面只证了它被发出去，那还不够：紧跟一条 `running` 的
-    // process-state 就会在渲染端把它洗回「运行中」——reducer 的新鲜度判据是 `>=`（同刻也算新），
-    // 两条事件的 observedAt 又都来自同一次 Date.now()，而 `run-process` 不在它的豁免来源里
-    // （只豁免 native-hook / acp）。用户于是看到恢复横幅消失、状态正常、输入框可写，屏幕却永远
-    // 沉默——正是本文件要守的那个缺陷，换到失败分支上原样复活。判据取「a 的最后一条状态类事件」，
-    // 而不是「有没有 running」：b 的 running 是对的，不能连坐。
+    // process-state 就会在渲染端把它洗回「运行中」——reducer 的新鲜度判据是 `>=`
+    // （session-state.ts:513），而 `run-process` 不在它的豁免来源里（只豁免 native-hook / acp）。
+    // 两条事件的 observedAt 来自**两次**相邻的 Date.now()：catch 里那次在前、projectRunWith 那次在后，
+    // 所以后者恒 >= 前者——同毫秒时靠 `>=` 取胜，跨毫秒时靠 `>` 就已经取胜。也就是说这个洗白与是否
+    // 同刻无关，`>=` 只在同毫秒那一档才是**独有**的承重条件。用户于是看到恢复横幅消失、状态正常、
+    // 输入框可写，屏幕却永远沉默——正是本文件要守的那个缺陷，换到失败分支上原样复活。
+    // 判据取「a 的最后一条状态类事件」，而不是「有没有 running」：b 的 running 是对的，不能连坐。
     const lastStatefulForA = [...events]
       .filter((event) =>
         (event.type === 'agent-error' || event.type === 'process-state') &&
         event.agentSessionId === 'agent-a')
       .pop()
     expect(lastStatefulForA?.type).toBe('agent-error')
-
-    // b 接上了，就该照常被 republish 成 running——修复只跳过接不上的那个 run，不是把整段 republish 关掉。
-    const runningForB = events.find((event) =>
-      event.type === 'process-state' && event.agentSessionId === 'agent-b' && event.state === 'running')
-    expect(runningForB).toBeDefined()
 
     // orphan（无 Agent Session）不 attach——只有 a、b 两个 run 被尝试过 attach。
     expect(kernel.attachedAfterByte('run-orphan')).toBeUndefined()
