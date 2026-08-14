@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 96
+    "next_cursor": 108
   },
   "features": [
     {
@@ -19,7 +19,7 @@
     },
     {
       "feat_id": "f-2238fbdxh",
-      "title": "Orca-informed AgentMux Interaction Redesign",
+      "title": "Refproj-informed AgentMux Interaction Redesign",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
@@ -436,7 +436,7 @@
     {
       "feat_id": "f-23c8fc6z3",
       "title": "AgentMux Agent Address, Envelope and Terminal Fidelity",
-      "status": "blocked",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -446,7 +446,7 @@
     {
       "feat_id": "f-23d8fwq4z",
       "title": "Managed Agent Handoff and Conversation Entry",
-      "status": "proposal",
+      "status": "discarded",
       "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
@@ -635,8 +635,8 @@
     },
     {
       "feat_id": "f-23z8fgsw3",
-      "title": "Orca-informed Provider Parity",
-      "status": "ready",
+      "title": "Refproj-informed Provider Parity",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -816,8 +816,8 @@
     {
       "feat_id": "f-24k8ftgmm",
       "title": "文件树目录作为项目打开",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "ready",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -826,7 +826,7 @@
     {
       "feat_id": "f-24m8fphma",
       "title": "Agent 自助创建与空间操作闭环",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -946,7 +946,7 @@
     {
       "feat_id": "f-24z8fwce3",
       "title": "Composer 消息队列与紧凑状态",
-      "status": "done",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -978,6 +978,127 @@
       "title": "Message Tools 触发与菜单收敛",
       "status": "in_progress",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2558f5auz",
+      "title": "Composer 队列条目面板：摘要、状态、失败原因与删除",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2568fq29e",
+      "title": "登录 shell 探针降级时不再静默丢掉 .zshrc 的 PATH",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2578fv7m6",
+      "title": "pnpm check 在 HEAD 上遗留的 12 个确定性红",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2588fuu6e",
+      "title": "重连后实时输出流不重建",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2598fhh62",
+      "title": "Hook 安装状态按实际磁盘配置判定",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25a8fpvcp",
+      "title": "窗口之外的待办提示：Dock 徽标与系统层注意力",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25b8fsbes",
+      "title": "分屏单格独占：临时把一格放到满 Tab 再还原",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25c8fjnmp",
+      "title": "doctor 的 hookInstallation 是写死的字面量",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "replacement_feat_id": "f-2598fhh62",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25d8fh9bv",
+      "title": "完成过的 Agent 与闲着的 Agent 长得一模一样",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25e8fm2tf",
+      "title": "看不到哪个 Agent 快把上下文窗口用完了",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25f8ffrme",
+      "title": "fan-out 在用户仓库里留下一地未忽略的 .worktrees",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25g8fvh3j",
+      "title": "只能看当前分支的改动，看不了两个分支之间的差异",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
