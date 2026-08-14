@@ -21,7 +21,7 @@ import {
   workbenchRegionLayoutMenuEntries,
   type MoveSessionViewTarget
 } from '../lib/workbench-tab-actions'
-import type { SplitDirection } from '../lib/workbench-layout'
+import type { SplitDirection } from '@agentmux/layout'
 import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import {

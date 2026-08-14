@@ -26,6 +26,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentmux/layout':
+        specifier: workspace:*
+        version: link:../../packages/layout
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -154,6 +157,22 @@ importers:
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/layout:
+    dependencies:
+      '@agentmux/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

@@ -10,8 +10,7 @@ import {
   LayoutGrid,
   PanelLeft
 } from 'lucide-react'
-import type { SplitDirection } from '../lib/workbench-layout'
-import type { WorkbenchRegionLayoutPreset } from '../lib/workbench-view-layout'
+import type { SplitDirection, WorkbenchRegionLayoutPreset } from '@agentmux/layout'
 import type {
   WorkbenchRegionRearrangeMode,
   WorkbenchSplitMenuEntry

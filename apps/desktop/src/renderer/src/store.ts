@@ -78,14 +78,12 @@ import {
   removeTab as removeLayoutTab,
   setSplitRatio,
   moveTabToNewGroup as moveLayoutTabToNewGroup,
-  type SplitDirection,
-  type WorkspaceLayout
-} from './lib/workbench-layout'
-import {
   setWorkbenchRegionSplitRatio,
   workbenchRegionBounds,
+  type SplitDirection,
+  type WorkspaceLayout,
   type WorkbenchRegionLayoutPreset
-} from './lib/workbench-view-layout'
+} from '@agentmux/layout'
 import {
   describePersistedTabRepairs,
   projectPersistedWorkbench,

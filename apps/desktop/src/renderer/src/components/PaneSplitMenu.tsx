@@ -2,7 +2,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronDown, Columns2 } from 'lucide-react'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
-import type { SplitDirection } from '../lib/workbench-layout'
+import type { SplitDirection } from '@agentmux/layout'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 
 /**
