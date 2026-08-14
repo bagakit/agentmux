@@ -170,8 +170,8 @@ Usage:
 Detaches the Region from its current Tab's split tree and makes it the sole Region of a
 brand-new Tab placed immediately after the source. The Region keeps its identity — same
 Session, Run, and content — so this never starts, stops, or restarts the underlying Run.
-Promoting a Region that is already the only Region of its Tab does nothing and fails with a
-typed error rather than reporting a move that did not happen.`],
+Promoting a Region that is already the only Region of its Tab does nothing and fails with
+REGION_ALREADY_SOLE rather than reporting a move that did not happen.`],
   ['arrange', `Apply one explicit Tab layout operation
 
 Usage:
@@ -298,6 +298,30 @@ Three columns are useful for a user/Writer/Reviewer working set. Four cells suit
 paired workstreams; six or nine cells suit larger parallel batches. Presets retain
 existing Regions and create Launcher slots for later \`open --in-region\` calls. Layout
 changes are explicit: never continuously reorder based on output, titles, or recency.
+
+## Move a Region into its own Tab
+
+\`\`\`bash
+agentmux promote --region self
+agentmux promote --region <region-id>
+\`\`\`
+
+Promote moves one Region out of its shared Tab into a brand-new Tab of its own; it does
+not open a second copy, and it never starts, stops, or restarts the Run. Use it to move,
+not to duplicate. A Region that is already alone in its Tab has nowhere to move and fails
+with REGION_ALREADY_SOLE rather than reporting a move that did not happen.
+
+## Read what is in a direction
+
+Asking what is beside you answers with one of two different places, and they are not the
+same thing. When your View is split, a direction resolves to the visible Region next to you
+— that is what your eye sees adjacent. Only when nothing is split in that direction does it
+fall back to the adjacent Tab on the tab strip: navigating to another whole View, not a
+Region inside this one. Up and down never name a Tab — the tab strip is one horizontal row.
+A direction reaching neither is a real answer, not a failure. Reading a direction never
+opens or moves anything; creating a direction (\`open ... --left-of\` and its siblings) always
+splits a new Region. Decide by the visible view, keep both old and new content readable with
+the least disturbance, and after any move inspect the result to confirm where it landed.
 
 ## Send without guessing
 

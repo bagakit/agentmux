@@ -25,8 +25,9 @@ import {
 //      regions entry or vice versa.
 //   2. No Tab ever has zero Regions. Promoting the ONLY Region of a Tab is a no-op — there is nothing to
 //      promote, it already IS its own Tab. removeWorkbenchRegion returns null in exactly that case, and we
-//      surface it as { kind: 'unchanged' }. Promoting one of N>1 leaves the source with N-1 and a valid
-//      activeRegionId (removeWorkbenchRegion → closeWorkbenchRegion reassigns it to the sibling).
+//      surface it as { kind: 'already-sole' } (distinct from the stale/ineligible 'unchanged' cases so the
+//      caller can tell "already there" from "could not"). Promoting one of N>1 leaves the source with N-1
+//      and a valid activeRegionId (removeWorkbenchRegion → closeWorkbenchRegion reassigns it to the sibling).
 
 export type PromoteRegionToTabInput = {
   tabs: Readonly<Record<string, WorkbenchTab>>
@@ -44,6 +45,12 @@ export type PromoteRegionToTabInput = {
 
 export type PromoteRegionToTabResult =
   | { kind: 'unchanged' }
+  // The Region is already the ONLY Region of its Tab: it already IS its own Tab, so there is nothing to
+  // promote. Distinct from 'unchanged' (which covers stale/ineligible inputs) because a caller can act on
+  // "you are already there" — the Control layer maps this one to a typed REGION_ALREADY_SOLE so an agent
+  // driving its own placement can stop instead of retrying. removeWorkbenchRegion returns null in exactly
+  // this case (invariant #2's no-op).
+  | { kind: 'already-sole' }
   | {
       kind: 'promoted'
       tabs: Record<string, WorkbenchTab>
@@ -73,9 +80,11 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   if (!layout) return { kind: 'unchanged' }
 
   // Detach the Region from the source Tab. removeWorkbenchRegion returns null exactly when this is the
-  // Tab's only Region (invariant #2's no-op case): there is nothing to promote, so leave everything as-is.
+  // Tab's only Region (invariant #2's no-op case): there is nothing to promote — it already IS its own
+  // Tab. This is a DISTINCT outcome from the stale/ineligible 'unchanged' cases above, so the caller can
+  // branch on "already satisfied" instead of "the request could not be honored".
   const detachedTab = removeWorkbenchRegion(sourceTab, input.regionId)
-  if (!detachedTab) return { kind: 'unchanged' }
+  if (!detachedTab) return { kind: 'already-sole' }
 
   // The promoted surface becomes the sole Region of a fresh Tab, keeping its own regionId and workspace.
   // The new Tab inherits the source Tab's Topic binding: same workspace, same Topic — otherwise a Scratch
