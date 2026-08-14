@@ -32,5 +32,10 @@ tab-group 布局与 tab 内的 region 布局是同一棵树，只有叶子载荷
 
 ## 无构建步骤
 
-`exports` 直接指向 `./src/*.ts`：vite/vitest 直接转译 TS，消费者无需先 build。`tsc -p
-tsconfig.build.json` 的 `build` 脚本只为类型检查/emit 对齐，不是消费者的前置门禁。
+`exports` 直接指向 `./src/*.ts`：vite/vitest 直接转译 TS，消费者无需先 build，本包也**没有**
+`build` 脚本——类型检查由 `typecheck`（`tsc --noEmit`）负责，不 emit 任何产物。
+
+这条对消费者是有约束的：`main` 指向 `.ts`，所以只有会转译 TS 的宿主能 import 本包。今天的
+24 个生产调用点全在渲染层（vite），测试走 vitest，都满足。**主进程（纯 node，无 vite）不能
+直接 import 本包**——那会抛 `ERR_UNKNOWN_FILE_EXTENSION`。若将来主进程真要用这套代数，正确
+的动作是那时再加回 emit 并把 `exports` 指向产物，而不是现在留一份没人读的 `dist/`。
