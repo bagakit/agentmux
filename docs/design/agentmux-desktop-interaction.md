@@ -696,3 +696,16 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 
 - 输入 `/`、`$`、`@` 分别打开 command、skill、文件引用候选；选择只写入草稿，不暗中发送。三者复用同一个可访问菜单，支持上下方向键、Enter、Escape，菜单展开不改变底部工具栏的布局高度。
 - 候选菜单沿用 Message Tools 的浮层与控件语言，不另造一套高列表；当候选过多时在浮层内部滚动，输入框和底部操作保持可见。
+
+
+### Provider 与人机交互的分层收敛
+
+- AgentMux 接入多个 harness，不自行接管各 harness 的模型循环、工具执行、上下文压缩或内部任务真值。Provider 负责协议差异；Core 负责跨 Provider 的 Session、投递、交互与恢复语义；Client 负责呈现和用户手势；ctxmux 继续独占 Run/PTY/Replay 等运行时事实。
+- 观测必须区分运行时存活、Provider 执行状态、输入可消费状态、等待用户和业务任务状态。缺失、过期、互相矛盾的证据有来源与时间，不能合并为一个 busy 布尔值，也不能以进程输出或 CPU 代替语义。Provider 特有的工具/goal/workflow 事件只按已声明能力呈现。
+- 人机交互由 AgentMux 统一承接：Provider 描述原生权限/问题及可回答选项，Core 绑定精确 Session、Run 与 request 身份并维护其生命周期，Client 复用对应交互面。普通消息、排队、steer、回答权限/问题、interrupt 当前轮、stop 执行、pause loop 的意图必须区分；共享身份、投递与回执规则不等于共用一种写入语义。
+- 用户消息从草稿到已入队、Host 已接收、Provider 已消费的证据必须区分；未知回执不冒充成功，也不自动重复发送。尚未成功生效的内容应保持可取回；草稿编辑状态由 Client 持有，提交后的投递事实由 Core 持有，不能把草稿硬搬成 Runtime 真值。
+- 原生回答或其他客户端已处理的请求不得继续显示为待回答；旧 Run/request 的迟到回复不得作用于新请求。无法确认是否已处理时明确显示待核实和原生交互入口，不自动选择选项，不用普通 prompt 绕过权限问题。
+- Agent 活着但我们的握手、探测或观察失败时，保留其已有可用操作并呈现服务窗；不通过盲发、猜选项或伪装 ready 来“恢复”。完全损坏才诚实阻断，未知如实标未知。
+- 人机交互反馈分为：当前输入组件内的操作结果、Session 的待答请求/持续服务窗、跨工作区的注意力摘要。每一层消费同一个请求或结果身份；已关闭 transient 提示不因重放复活，尚未解决的持久问题仍可找到并定位原对象。
+- 重启/重装/暂时空快照后先恢复 durable Tab、Tab Group、Region、焦点和布局，再按原 Session 身份自动 reattach/resume；流程超时、旧 lease 和 Provider 探测失败不能删除投影。只有 Core 明确 retired/unknown 终局事实允许移除。交互与投递恢复不能串到替换后的 Run。
+- 此次收敛以现有状态、interaction、delivery queue、continuous-progress scheduler 与持久化接口为起点；消除重复 owner 和重复判断，不要求将所有状态改成事件溯源，不新增自演化引擎、通用 Job/Workflow/插件平台或平行兼容实现。已有 loop 复用统一观察与投递边界，任务完成真值仍归任务来源。
