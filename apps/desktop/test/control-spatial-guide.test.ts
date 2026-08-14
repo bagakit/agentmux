@@ -30,12 +30,12 @@ const cliSource = readFileSync(fileURLToPath(new URL('agentmux.ts', CORE_SRC)), 
 function intentRegistry(): Map<string, string> {
   const intents = AGENTMUX_CLI_HELP.split('Intents:')[1]?.split('Managed caller:')[0] ?? ''
   const rows = [...intents.matchAll(/^ {2}([a-z]+) {2,}(.+)$/gm)]
-  return new Map(rows.map((m) => [m[1], m[2].trim()]))
+  return new Map(rows.map((m) => [m[1]!, m[2]!.trim()]))
 }
 
 /** skill 里代码块中真正教出来的动词（行首 `agentmux <verb>`）。 */
 function taughtVerbs(): string[] {
-  return [...new Set([...AGENTMUX_CLI_SKILL.matchAll(/^agentmux ([a-z]+)/gm)].map((m) => m[1]))]
+  return [...new Set([...AGENTMUX_CLI_SKILL.matchAll(/^agentmux ([a-z]+)/gm)].map((m) => m[1]!))]
 }
 
 /** 取 skill 里一个带右界的小节，避免只取左界让邻节顶上（见记忆 section-slice-without-right-bound）。 */

@@ -325,10 +325,10 @@ describe('Desktop Control owner', () => {
       config: {
         ...config,
         hosts: [
-          { id: 'h-unknown', kind: 'local', label: 'A' },
-          { id: 'h-checkfailed', kind: 'local', label: 'B' },
-          { id: 'h-missing', kind: 'local', label: 'C' },
-          { id: 'h-available', kind: 'local', label: 'D' }
+          { id: 'h-unknown', kind: 'ssh', label: 'A', hostname: 'a' },
+          { id: 'h-checkfailed', kind: 'ssh', label: 'B', hostname: 'b' },
+          { id: 'h-missing', kind: 'ssh', label: 'C', hostname: 'c' },
+          { id: 'h-available', kind: 'ssh', label: 'D', hostname: 'd' }
         ],
         executors: {
           'e-unknown': { ...config.executors.codex!, label: 'Unknown One', providerId: 'codex' },
@@ -382,8 +382,8 @@ describe('Desktop Control owner', () => {
       config: {
         ...config,
         hosts: [
-          { id: 'h1', kind: 'local', label: 'H1' },
-          { id: 'h2', kind: 'local', label: 'H2' }
+          { id: 'h1', kind: 'ssh', label: 'H1', hostname: 'h1' },
+          { id: 'h2', kind: 'ssh', label: 'H2', hostname: 'h2' }
         ],
         executors: {
           'e-up': { ...config.executors.codex!, label: 'Up Somewhere', providerId: 'codex' },
