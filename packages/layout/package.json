@@ -11,12 +11,6 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "os": [
-    "darwin"
-  ],
-  "cpu": [
-    "arm64"
-  ],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -32,7 +26,6 @@
     "@agentmux/core": "workspace:*"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
