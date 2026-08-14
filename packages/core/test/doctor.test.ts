@@ -50,6 +50,11 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
       installed: providerId === 'codex',
       capabilities: catalog.find((entry) => entry.id === providerId)!.capabilities
     })),
+    // 诊断的探测状态由这条三态探测决定，不再由 `probeAgent().installed` 决定——后者把「查不成」
+    // 折进「没装」。默认替身与上面的 `installed` 保持一致（codex 装了，其余没装），这样既有断言
+    // 不变；「查不成」那一档由需要它的用例自己 override。
+    probeExecutorAvailability: vi.fn(async (providerId: AgentProviderId) =>
+      providerId === 'codex' ? 'available' : 'missing'),
     ...overrides
   } as unknown as AgentMuxClient
 }

@@ -6,7 +6,15 @@ import {
 } from './runtime-endpoint-reclaim.js'
 import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry } from './types.js'
 
-export type AgentMuxDoctorProbeState = 'found' | 'missing' | 'blocked'
+/**
+ * 探测结果的四态。
+ *
+ * `'unverifiable'` 与 `'missing'` 必须分开：前者是「我们没查成」（环境退化，比如相对命令名 + 空
+ * PATH——一个候选都算不出），后者是「查成了，确实没装」。折成一个 boolean 会让诊断当着用户的面
+ * 说「没装，去装一个」，而真正的病因是 shell 环境没加载全，于是用户去追一个不存在的安装问题。
+ * 这正是 37e32665 在启动闸上修掉的那次误报——诊断面是它漏掉的第三个消费者。
+ */
+export type AgentMuxDoctorProbeState = 'found' | 'missing' | 'unverifiable' | 'blocked'
 
 export type AgentMuxDoctorAgent = {
   id: AgentProviderId
@@ -93,14 +101,25 @@ async function probeAgent(
 ): Promise<AgentMuxDoctorAgent> {
   try {
     const capability = await client.probeAgent(catalog.id, commandOverride)
+    // 三态探测问的是同一个 Executor 的同一件事，但它区分「查不成」与「没装」，而 `capability.installed`
+    // 把两者折成 false。诊断恰恰是最不能折的地方：用户来这里就是为了知道病因。两次探测共用
+    // probeCapabilities 里那一份命令解析（commandOverride 优先，否则 catalog executable），所以它们
+    // 看的一定是同一条命令，不会各自解析出不同的东西。
+    const availability = await client.probeExecutorAvailability(catalog.id, commandOverride)
+    const probe = availability === 'available'
+      ? 'found'
+      : availability === 'check-failed' ? 'unverifiable' : 'missing'
     return {
       id: catalog.id,
       label: catalog.label,
       executable: capability.executable,
-      probe: capability.installed ? 'found' : 'missing',
-      action: capability.installed
+      probe,
+      action: probe === 'found'
         ? null
-        : `Install ${catalog.label} on this Host or configure an explicit executable.`,
+        : probe === 'unverifiable'
+          // 指向环境，不是指向安装。这句话与启动闸拒绝时说的是同一件事，措辞也应当同源地读起来一致。
+          ? `Could not verify ${catalog.label} on this Host: no candidate path to probe. Check PATH and your shell environment, then rerun doctor.`
+          : `Install ${catalog.label} on this Host or configure an explicit executable.`,
       capabilities: { ...capability.capabilities },
       hook: { ...catalog.hookStrategy },
       permission: catalog.capabilities.permission,
