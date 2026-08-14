@@ -156,7 +156,8 @@ describe('T-006 以方向、可读性、最小扰动决策并回读', () => {
 })
 
 describe('T-006 不列窄宽特例（负向要求要真的咬）', () => {
-  const spatialText = `${launchGuide}\n${skillSection('## Read what is in a direction', '## Send without guessing')}`
+  const directionSection = skillSection('## Read what is in a direction', '## Send without guessing')
+  const spatialText = `${launchGuide}\n${directionSection}`
 
   it('正向承重：引导把"拆哪格"委托给 Agent 对可见版面的判断，而不是按尺寸给规则', () => {
     // 这是承重的一半：把委托语删掉换成一条按尺寸的规则，这里红。
@@ -164,7 +165,11 @@ describe('T-006 不列窄宽特例（负向要求要真的咬）', () => {
   })
 
   it('负向边界：不枚举窄/宽尺寸特例、不要求面积相等', () => {
-    expect(spatialText.length).toBeGreaterThan(0) // 扫描非空，负向断言不至于空跑
+    // 两个扫描源各自非空。不能断言拼起来的 `spatialText.length > 0`——模板字面量里那个 `\n` 让它
+    // 在两侧**都空**时仍然长度为 1，于是这条挡板恒真、下面的负向断言可以空跑而无人察觉（审计实测：
+    // 把两个插值都换成 '' 后 11 条全绿）。挡板要量被扫的那两段本身。
+    expect(launchGuide.length).toBeGreaterThan(0)
+    expect(directionSection.length).toBeGreaterThan(0)
     // ponytail: 字面形状黑名单，只挡设计明确点名的那种回归（窄/宽/等面积）；换个措辞（"for thin panes"）
     // 仍可能漏——真正承重的是上一条的正向委托断言。upgrade: 若出现同义词绕过再补一条正向"决策依据恰是
     // 方向/可读性/最小扰动"的白名单断言。
