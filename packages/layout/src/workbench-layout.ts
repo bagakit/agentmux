@@ -188,7 +188,7 @@ export function createWorkspaceLayout(groupId: string, tabs: string[] = []): Wor
 
 // tab-group 树的所有 groupId，按读序。函数体恰好只有一句：转发到 split-tree 的 collectLeafIds，
 // 叶子取值器用本文件的 groupLeafId。此前它自己递归一份（与 workbench-view-layout 的 regionIds 逐字
-// 相同），现收归 SSOT——这层薄壳保留是因为它是本文件的公开面（WorkspaceWorkbench、workbench-persistence
+// 相同），现收归 SSOT——这层转发保留是因为它是本文件的公开面（WorkspaceWorkbench、workbench-persistence
 // 等多个 importer 从这里取），但除了转发之外不做任何事。
 export function groupIds(root: TabGroupLayoutNode): string[] {
   return collectLeafIds(root, groupLeafId)

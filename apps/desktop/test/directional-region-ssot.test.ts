@@ -499,8 +499,8 @@ function packageOfFile(file: string): OriginPackage | 'lib' {
   if (/[\\/]node_modules[\\/]typescript[\\/]/.test(file)) return 'lib'
   if (/[\\/]packages[\\/]core[\\/]|[\\/]@agentmux[\\/]core[\\/]/.test(file)) return 'core'
   // 布局代数已抽进 @agentmux/layout：SplitDirection 与 WorkbenchRegionBounds 的定义现居此包。渲染层
-  // 那道跨包证明经薄壳 import 它们，追出处会落到这里——单独归 `layout` 桶，故两半从「core↔renderer」
-  // 变成「core↔layout」，跨包性质不变（仍是两个不同的包）。
+  // 那道跨包证明直接从 `@agentmux/layout` import 它们（旧的同名转发文件已删），追出处会落到这里——
+  // 单独归 `layout` 桶，故两半从「core↔renderer」变成「core↔layout」，跨包性质不变（仍是两个不同的包）。
   if (/[\\/]packages[\\/]layout[\\/]|[\\/]@agentmux[\\/]layout[\\/]/.test(file)) return 'layout'
   if (file.startsWith(RENDERER_DIR)) return 'renderer'
   return 'unresolved'
@@ -708,7 +708,7 @@ describe('方向的跨包证明必须真的跨包（否则它是恒真的死代�
 
   it('自证：出处判据在本文件的两个真实类型引用上给出不同的包（判据不是常量）', () => {
     // `AgentMuxRegionNeighbor` 来自 @agentmux/core/control，`WorkbenchRegionBounds` 来自 @agentmux/layout
-    // 的 workbench-view-layout（经渲染层薄壳 import）。若判据坏成恒 'core' 或恒某一侧（或恒 unresolved），这里先红。
+    // 的 workbench-view-layout（渲染层直接从包 import）。若判据坏成恒 'core' 或恒某一侧（或恒 unresolved），这里先红。
     expect(probe.coreWitness).toBe('core')
     expect(probe.rendererWitness).toBe('layout')
   })
