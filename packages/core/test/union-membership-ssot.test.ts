@@ -75,8 +75,12 @@ import {
 //   M4 `isPermissionOptionKind` 改成恒 true → A 层 + B 层各红一条
 //   M5 从 `PROMPT_DELIVERY_DEGRADED_REASONS` 删一个成员（⊇ 方向，真正的数据丢失形状）
 //                                          → tsc 报 TS2322+TS2353，且 A/B/C 三层与 store 的既有断言共 4 条红
-//   M6 control-host :138 换成**不完整**手抄 → B 层「每个操作全部越过 membership 闸」红
-//   M7 control-host :138 换成**完整**手抄   → 只有 C 层红
+//   M6 control-host 的 membership 闸换成**不完整**手抄 → B 层「每个操作全部越过 membership 闸」红
+//   M7 同一道闸换成**完整**手抄            → 只有 C 层红
+//        ※ 「那道闸」= `parseAgentMuxControlRequest` 里的
+//          `if (!isAgentMuxControlOperation(source.operation)) throw …`。刻意不写行号：这两条原本写的
+//          `control-host :138` 在它落笔时就已经指错（:138 是 arrange 的抛错），此后又漂了 5 行。
+//          按「哪个函数、哪个调用」指认，grep 得到，也不会过期。
 //   M8 `OPERATION_BUDGET` 注解放宽成 `Record<string, …>` → control-host.test.ts 的注解判据红
 //   M9 从 `OPERATION_BUDGET` 删一个键        → tsc 报 TS2741，且 A/B 层各红
 // 结论：C 抓「完整的手抄」（今天行为正确、下一次加成员时炸），A/B 抓「不完整的手抄 / 整段闸被删 /
