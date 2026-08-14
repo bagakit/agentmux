@@ -12,6 +12,7 @@ import type {
   WorktreeRetention
 } from '../shared/contracts.js'
 import { isWorktreeWorkspace } from '../shared/contracts.js'
+import { findWorkspaceByLocation } from './workspace-location.js'
 
 type ConfigWriter = {
   save(value: AppConfig): Promise<AppConfig>
@@ -136,8 +137,12 @@ export class WorktreeService {
     for (const item of worktrees) if (item.branch) branchNames.add(item.branch)
     const branches = [...branchNames].map((name) => {
       const worktreePath = worktreeByBranch.get(name)?.path ?? null
+      // Same location rule the schema enforces, so "which record is this worktree?" and "is this path
+      // already taken?" (openBranch/createForBranch below) can never disagree about a trailing-slash or
+      // '.'-suffixed spelling — a disagreement that would let a caller create a real git worktree the
+      // save() then rejects, orphaning the directory.
       const registered = worktreePath
-        ? config.workspaces.find((item) => item.hostId === workspace.hostId && item.path === worktreePath)
+        ? findWorkspaceByLocation(config.workspaces, workspace.hostId, worktreePath)
         : undefined
       return {
         name,
@@ -162,9 +167,7 @@ export class WorktreeService {
     this.assertRepository(snapshot)
     const branch = snapshot.branches.find((item) => item.name === branchName)
     if (!branch?.worktreePath) throw new Error(`Branch has no worktree: ${branchName}`)
-    const existing = config.workspaces.find(
-      (item) => item.hostId === snapshot.hostId && item.path === branch.worktreePath
-    )
+    const existing = findWorkspaceByLocation(config.workspaces, snapshot.hostId, branch.worktreePath)
     if (existing) return { config, workspace: existing }
     return await this.register(config, {
       id: randomUUID(),
@@ -196,7 +199,7 @@ export class WorktreeService {
       if (!branch) throw new Error(`Unknown branch: ${branchName}`)
       if (branch.worktreePath) throw new Error(`Branch already has a worktree: ${branchName}`)
     }
-    if (config.workspaces.some((item) => item.hostId === snapshot.hostId && item.path === path)) {
+    if (findWorkspaceByLocation(config.workspaces, snapshot.hostId, path)) {
       throw new Error(`Workspace already registered: ${path}`)
     }
     const host = this.hostFor(snapshot.hostId)
