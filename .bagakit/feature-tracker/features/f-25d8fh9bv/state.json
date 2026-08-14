@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-25d8fh9bv",
+  "title": "完成过的 Agent 与闲着的 Agent 长得一模一样",
+  "slug": "agent-seen-unseen-state",
+  "goal": "跑完的 Agent 在每个界面上都和闲着的 Agent 像素级相同。rowAttention 有意把 done 排除在注意力之外（row-attention.ts:37,51），而全仓没有任何 ackAt / unseen / viewedAt / seenAt 概念（2026-09-13 实测：packages/core/src + apps/desktop/src 全树零命中）。完成时那一发一次性的通知飘走之后，'跑完了但还没人看过'与'闲着'就再也分不开。fan-out 已经交付，所以这不是假想：几十个 Agent 扇出时，你无法知道哪些完成结果已经被自己看过了。修法是加一个 per-session 的 ackAt，看过即清，再派生一个 unseen 判据供 rail 与 roster 消费——status.observedAt 已经是这条管线的一半。注意这不是把 done 放回 rowAttention：那样 rail 会永久亮着；unseen 是一个会被清掉的新状态，与 done 正交。判据必须端到端并且经得起变异：把投影那一行删掉要让测试变红。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}

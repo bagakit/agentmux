@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-25e8fm2tf",
+  "title": "看不到哪个 Agent 快把上下文窗口用完了",
+  "slug": "agent-context-window-headroom",
+  "goal": "每轮的 token 用量已经有了并且在 roster 里显示（AgentTurnUsage，types.ts:334；agent-usage.ts → AgentRoster.tsx），但没有任何'窗口还剩多少'的信号。于是你只能在 Agent 开始截断上下文之后才知道它满了——事后，没有预警。监督一群 Agent 时这是个真缺口。'Provider 不上报窗口大小'这个理由已经过期：可以用 modelId → 窗口容量的查表（基线 200k，带 [1m] 的变体与旗舰 1M），若运行时之后真的上报了 contextWindow 就用真值覆盖，两者都拿不到时退化成只显示已用量而不编分母。展示形态是 roster 行里一个已用/上限的环，70% 转琥珀、90% 转红。硬约束：分母不确定时绝不编一个百分比出来——本仓对 tokens/s 的分母已经有同样的诚实纪律（types.ts 的注释），别在这里破例。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}
