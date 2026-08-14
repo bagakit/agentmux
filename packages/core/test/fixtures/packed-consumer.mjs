@@ -588,7 +588,7 @@ const controlServer = new AgentMuxControlServer({
       }
     }
     if (request.operation === 'list.agents') {
-      return { operation: request.operation, agents: [{ executorId: 'codex', label: 'Codex', providerId: 'codex', available: true }] }
+      return { operation: request.operation, agents: [{ executorId: 'codex', label: 'Codex', providerId: 'codex', availability: 'available' }] }
     }
     const targetId = request.target.kind === 'self'
       ? request.caller.agentSessionId
