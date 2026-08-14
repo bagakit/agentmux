@@ -143,11 +143,11 @@ describe('tab 布局树 ↔ tab.regions 集合不变量（#494 gap）', () => {
  */
 describe('每个改动 region 集合的函数都必须过那道闸（#515 接线层）', () => {
   const RENDERER = new URL('../src/renderer/src/', import.meta.url).pathname
-  // 布局引擎的实现（那些 changes 导出的定义）已抽进 @agentmux/layout（旧渲染层薄壳
+  // 布局引擎的实现（那些 changes 导出的定义）已抽进 @agentmux/layout（渲染层旧的同名转发文件
   // lib/workbench-view-layout.ts 已删）。调用点扫描仍只在渲染层树上进行（workbench-tabs / control 等
   // reducer 调 changes 助手、且必须 assertRegionInvariant——那层接线没搬走）；引擎的定义现在完全在包里、
-  // 不在渲染层扫描面内，故 callSites 无需再跳过引擎自身——曾经那句 `relative === DEFINER` 的跳过已随薄壳
-  // 删除一并删掉（实测：把它改成任何在渲染层里不存在的名字，15 条不变；这正说明它已无可跳过之物）。
+  // 不在渲染层扫描面内，故 callSites 无需再跳过引擎自身——曾经那句 `relative === DEFINER` 的跳过已随那个
+  // 文件的删除一并删掉（实测：把它改成任何在渲染层里不存在的名字，15 条不变；这正说明它已无可跳过之物）。
   // 别名表直接按 `@agentmux/layout` 解析（见 aliasMapFor）。DEFINER 只剩一个用处：**导出穷举**那条读
   // 引擎真实源码时的文件标签，真实字节来自 DEFINER_SOURCE（包里）。
   const DEFINER = 'packages/layout/src/workbench-view-layout.ts'
@@ -518,8 +518,8 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   }
 
   it('布局引擎的每个导出都在分类表里（新增一个必须在这里回答「它动集合吗」）', () => {
-    // 读的是引擎的真实源码（已抽进 @agentmux/layout），不是渲染层那层 `export *` 薄壳——薄壳里没有
-    // 任何函数声明，按它扫会恒空假绿。
+    // 读的是引擎的真实源码（已抽进 @agentmux/layout）。渲染层今天没有任何同名文件可读——早先那份
+    // `export *` 转发文件已删，而它里面本就没有函数声明，按它扫会恒空假绿。
     const file = ts.createSourceFile(
       DEFINER,
       readFileSync(DEFINER_SOURCE, 'utf8'),
