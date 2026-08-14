@@ -26,6 +26,7 @@ import type {
   AgentMuxControlErrorCode,
   AgentMuxControlRequest,
   AgentMuxControlResult,
+  AgentMuxExecutorProbeOutcome,
   AgentTimelineItem,
   AgentTimelineSnapshot
 } from '@agentmux/core'
@@ -943,7 +944,10 @@ export type ExecutorDetection = {
   executorId: AgentExecutorId
   providerId: AgentProviderId
   hostId: string
-  installed: boolean
+  // 三态探测结局：available / missing / check-failed。boolean `installed` 会把「查不成」折进「没装」，
+  // 而发现列表必须区分二者（环境退化那次误报的教训）。第四态 `unknown`（还没查）不在这里——它是
+  // 「detect 还没返回」，由 store 侧的 checking 状态承载，不是一次探测能得出的结论。
+  availability: AgentMuxExecutorProbeOutcome
 }
 
 export type DesktopControlResponse =

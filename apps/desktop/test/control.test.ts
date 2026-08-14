@@ -8,6 +8,7 @@ import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlRequest
 } from '@agentmux/core'
+import { BUILT_IN_AGENT_LABELS, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -93,7 +94,7 @@ function fixture(extraSessions: SessionSnapshot[] = []): WorkbenchTab {
     executorDetections: {
       [executorDetectionKey('local', 'codex')]: {
         state: 'ready',
-        result: { executorId: 'codex', providerId: 'codex', hostId: 'local', installed: true }
+        result: { executorId: 'codex', providerId: 'codex', hostId: 'local', availability: 'available' }
       }
     },
     error: null
@@ -101,7 +102,10 @@ function fixture(extraSessions: SessionSnapshot[] = []): WorkbenchTab {
   return tab
 }
 
-function request<T extends AgentMuxControlRequest>(value: Omit<T, 'schemaVersion' | 'requestId'>): T {
+// Omit<Union, K> 只保留联合的**公共**键，会把每个成员各自的 target/content/url 折叠掉——这正是本文件
+// 一批「属性不存在于 Omit<...>」错误的根。用分配式 Omit 逐成员剥掉那两个字段，各成员的专有键得以保留。
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 'schemaVersion' | 'requestId'>): T {
   return {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId: `request-${value.operation}`,
@@ -232,6 +236,47 @@ describe('Desktop Control owner', () => {
     })
   })
 
+  // T-002 身份关联 + 环境安全：新开的 Agent Region 与它的 Session（agentSessionId）、Run（runId）、
+  // Workspace（workspaceId）靠共享标识连起来，且发现面上不出现任何环境变量的值。能力从 providerId
+  // 经 registry 派生，不内联在 Region 上（保持一处 SSOT）。
+  it('joins a new agent Region to its Run, Workspace, and session by shared identity without leaking env', async () => {
+    fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: { codex: { ...config.executors.codex!, env: { CODEX_TOKEN: 'sk-region-secret' } } }
+    } })
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+
+    const opened = await useAppStore.getState().executeControl(request({
+      operation: 'open.agent',
+      content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))
+    if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
+
+    // Region 带着连接键：agentSessionId 连到 Session，workspaceId 连到 destination 的 Workspace。
+    const sessionId = opened.region.agentSessionId
+    const session = useAppStore.getState().sessions.find((s) => s.id === sessionId)
+    expect(session?.kind).toBe('agent')
+    expect(opened.region.workspaceId).toBe('workspace')
+    // Run 身份经同一个 agentSessionId 连到 Session 的 control.run。
+    expect(session?.control.run.runId).toBe(`run-${sessionId}`)
+
+    // inspect.region 用 Region 自己交出的 regionId 回读，拿到同一格——闭环。
+    const inspected = await useAppStore.getState().executeControl(request({
+      operation: 'inspect.region', target: { kind: 'region', regionId: opened.region.regionId }
+    }))
+    if (inspected.operation !== 'inspect.region') throw new Error('Unexpected result')
+    expect(inspected.region.kind === 'agent' && inspected.region.agentSessionId).toBe(sessionId)
+
+    // 两个发现面（open 回执、inspect 回读）都不含环境变量的值。
+    expect(JSON.stringify(opened.region)).not.toContain('sk-region-secret')
+    expect(JSON.stringify(inspected.region)).not.toContain('sk-region-secret')
+    // Region 不内联 capabilities——能力经 providerId 派生，Region 上只有 providerId 这个连接键。
+    expect(opened.region).not.toHaveProperty('capabilities')
+    expect(opened.region.providerId).toBe('codex')
+  })
+
   it('opens Agent, Terminal, and Browser through their owners with exact creation payloads', async () => {
     fixture()
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
@@ -269,6 +314,118 @@ describe('Desktop Control owner', () => {
     expect(openedTerminal.operation).toBe('open.terminal')
   })
 
+  // T-002 发现四态：list.agents 按目标 Host 的检查状态区分 unknown / check-failed / missing / available，
+  // 并列出每个 executor 的自定义 ID、名称、Provider。四态是四件事，任何两态折成一态都是缺陷——
+  // 尤其 check-failed（没查成）绝不能与 missing（确实没装）同形。
+  it('list.agents distinguishes all four availability states and lists id/name/provider', async () => {
+    fixture()
+    // 四台 Host，各把同一个 executor 检查成不同状态；executor 配在各自 Host 上。
+    useAppStore.setState({
+      config: {
+        ...config,
+        hosts: [
+          { id: 'h-unknown', kind: 'local', label: 'A' },
+          { id: 'h-checkfailed', kind: 'local', label: 'B' },
+          { id: 'h-missing', kind: 'local', label: 'C' },
+          { id: 'h-available', kind: 'local', label: 'D' }
+        ],
+        executors: {
+          'e-unknown': { ...config.executors.codex!, label: 'Unknown One', providerId: 'codex' },
+          'e-checkfailed': { ...config.executors.codex!, label: 'Degraded One', providerId: 'claude' },
+          'e-missing': { ...config.executors.codex!, label: 'Absent One', providerId: 'gemini' },
+          'e-available': { ...config.executors.codex!, label: 'Ready One', providerId: 'grok' }
+        },
+        workspaces: [
+          { id: 'w1', name: 'P1', hostId: 'h-unknown', path: '/r1', kind: 'folder' },
+          { id: 'w2', name: 'P2', hostId: 'h-checkfailed', path: '/r2', kind: 'folder' },
+          { id: 'w3', name: 'P3', hostId: 'h-missing', path: '/r3', kind: 'folder' },
+          { id: 'w4', name: 'P4', hostId: 'h-available', path: '/r4', kind: 'folder' }
+        ]
+      },
+      executorDetections: {
+        // h-unknown: 正在查（checking）→ unknown。用 checking 而不是「键缺席」，以钉住
+        // 「正在查」也必须归 unknown、绝不提前显示成 available/missing。
+        [executorDetectionKey('h-unknown', 'e-unknown')]: { state: 'checking' },
+        [executorDetectionKey('h-checkfailed', 'e-checkfailed')]: { state: 'error', detail: 'PATH degraded' },
+        [executorDetectionKey('h-missing', 'e-missing')]: { state: 'missing' },
+        [executorDetectionKey('h-available', 'e-available')]: {
+          state: 'ready',
+          result: { executorId: 'e-available', providerId: 'grok', hostId: 'h-available', availability: 'available' }
+        }
+      }
+    })
+
+    const result = await useAppStore.getState().executeControl(request({ operation: 'list.agents' }))
+    if (result.operation !== 'list.agents') throw new Error('Unexpected result')
+    const byId = new Map(result.agents.map((a) => [a.executorId, a]))
+    // 四态各归各位——把映射里任意两态折成一处（如 error→missing、checking→available）都会打破某一行。
+    expect(byId.get('e-unknown')?.availability).toBe('unknown')
+    expect(byId.get('e-checkfailed')?.availability).toBe('check-failed')
+    expect(byId.get('e-missing')?.availability).toBe('missing')
+    expect(byId.get('e-available')?.availability).toBe('available')
+    // 显式钉「四态互不相同」——防止全部塌成一个常量时上面四句仍各自恰好绿。
+    expect(new Set(result.agents.map((a) => a.availability)).size).toBe(4)
+    // 列出自定义 ID、名称、Provider（身份三件套）。
+    expect(byId.get('e-available')).toMatchObject({ executorId: 'e-available', label: 'Ready One', providerId: 'grok' })
+  })
+
+  // T-002 多 Host 归并：同一个 executor 配在多台 Host 上、各查成不同状态时，list.agents 的扁平表按
+  // 「最可用/最有信息量」归并（available > missing > check-failed > unknown）。钉住 reduce 的排序方向——
+  // 把 rank 反过来（如让 check-failed 压过 available）必打红此用例。
+  it('list.agents merges a multi-host executor to its most-available state', async () => {
+    fixture()
+    useAppStore.setState({
+      config: {
+        ...config,
+        hosts: [
+          { id: 'h1', kind: 'local', label: 'H1' },
+          { id: 'h2', kind: 'local', label: 'H2' }
+        ],
+        executors: {
+          'e-up': { ...config.executors.codex!, label: 'Up Somewhere', providerId: 'codex' },
+          'e-blind': { ...config.executors.codex!, label: 'Blind Somewhere', providerId: 'gemini' }
+        },
+        workspaces: [
+          { id: 'w1', name: 'P1', hostId: 'h1', path: '/r1', kind: 'folder' },
+          { id: 'w2', name: 'P2', hostId: 'h2', path: '/r2', kind: 'folder' }
+        ]
+      },
+      executorDetections: {
+        // e-up：h1 缺失、h2 就绪 → 归并到 available（有一台装了就算可用）。
+        [executorDetectionKey('h1', 'e-up')]: { state: 'missing' },
+        [executorDetectionKey('h2', 'e-up')]: {
+          state: 'ready',
+          result: { executorId: 'e-up', providerId: 'codex', hostId: 'h2', availability: 'available' }
+        },
+        // e-blind：h1 没查成（error）、h2 正在查（checking）→ 都不是「确定没装」，归并到最有信息量的
+        // check-failed，绝不能塌成 missing。
+        [executorDetectionKey('h1', 'e-blind')]: { state: 'error', detail: 'PATH degraded' },
+        [executorDetectionKey('h2', 'e-blind')]: { state: 'checking' }
+      }
+    })
+
+    const result = await useAppStore.getState().executeControl(request({ operation: 'list.agents' }))
+    if (result.operation !== 'list.agents') throw new Error('Unexpected result')
+    const byId = new Map(result.agents.map((a) => [a.executorId, a]))
+    expect(byId.get('e-up')?.availability).toBe('available')
+    expect(byId.get('e-blind')?.availability).toBe('check-failed')
+  })
+
+  // T-002 不暴露环境值：list.agents 的元信息里不许出现任何环境变量的值。
+  it('list.agents never leaks an environment variable value', async () => {
+    fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: {
+        codex: { ...config.executors.codex!, env: { CODEX_TOKEN: 'sk-list-secret' } }
+      }
+    } })
+    const result = await useAppStore.getState().executeControl(request({ operation: 'list.agents' }))
+    // 判据落在实际序列化的那份结果上，不是「对象里没有 env 键」——后者会在 env 被塞进内部对象再
+    // spread 出来时假绿。
+    expect(JSON.stringify(result)).not.toContain('sk-list-secret')
+  })
+
   it('rejects ambiguous custom Executor labels before launching or changing layout', async () => {
     const tab = fixture()
     useAppStore.setState({ config: {
@@ -283,6 +440,84 @@ describe('Desktop Control owner', () => {
       operation: 'open.agent', content: { kind: 'new-agent', executorId: 'Custom' },
       destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
     }))).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(launchAgent).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
+  })
+
+  // T-001 (a) 稳定 ID：executorId 恰好是 config.executors 的键，直接按键启动那一个。
+  // 关键在**优先级**：让 requested 同时是 executor A 的键、又是 executor B 的唯一名称——精确键必须赢，
+  // 否则会解析成 B。这样破坏「精确键优先于名称」时本条才会红（否则 return requested 与键匹配同解，测不出）。
+  it('launches a custom Executor by its stable id, and the id wins over a colliding name', async () => {
+    fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: {
+        // A：键是 'reviewer-1'，名字无关。
+        'reviewer-1': { ...config.executors.codex!, label: 'Code Reviewer' },
+        // B：名字恰好等于 A 的键。若解析退化成先按名字，requested 'reviewer-1' 会命中 B。
+        'other': { ...config.executors.codex!, label: 'reviewer-1' }
+      }
+    } })
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+      .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+
+    await useAppStore.getState().executeControl(request({
+      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'reviewer-1' },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))
+    // 单断言：启动的是键 A，不是同名的 B。破坏精确键优先级 → 解析成 'other'，本条红。
+    expect(launchAgent).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'reviewer-1' }))
+  })
+
+  // T-001 (a) 唯一名称：executorId 是一个 label（不等于任何键）且全局唯一 → 解析成它的键再启动。
+  it('launches a custom Executor by a unique name that is not its id', async () => {
+    fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: {
+        'exec-7': { ...config.executors.codex!, label: 'Code Reviewer' }
+      }
+    } })
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+      .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+
+    await useAppStore.getState().executeControl(request({
+      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'Code Reviewer' },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))
+    // 单断言：名称被解析成键 'exec-7' 后启动。破坏 resolveExecutorId 的 label 分支（原样返回 requested），
+    // 下游 config.executors['Code Reviewer'] 缺失 → 抛 AGENT_EXECUTOR_NOT_CONFIGURED，本条红。
+    expect(launchAgent).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'exec-7' }))
+  })
+
+  // T-001 (c) 不替换默认 Provider：请求指名一个**内置 providerId 字符串**（它不是任何 executor 键、
+  // 也匹配不到任何 executor 的名称）→ 必须拒绝启动，即使有 executor 恰好 backing 着这个内置 Provider。
+  // 解析只按「键」或「名称」，绝不按 providerId 猜。Provider id/label 从 SSOT 取，不手写字面量：
+  // 某家被改名/删除时这条守卫不会 asserting 陈旧的名字。
+  it('never lets a bare built-in Provider id shadow a configured Executor', async () => {
+    const requestedProviderId = BUILT_IN_AGENT_PROVIDER_IDS[0]
+    // executor 的 label 用**另一家**内置 Provider 的展示名：证明 label 撞上内置名也不构成替换，
+    // 且它与 requestedProviderId 不同，排除「碰巧唯一名称命中」这条合法路径的干扰。
+    const decoyLabel = BUILT_IN_AGENT_LABELS[BUILT_IN_AGENT_PROVIDER_IDS[1]]
+    const tab = fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: {
+        // 这个 executor 恰好 backing 着被请求的那个内置 Provider（providerId 相同），却仍不能被
+        // 一个裸 providerId 请求命中——命中要靠键或名称，不靠 providerId。
+        'my-exec': { ...config.executors.codex!, providerId: requestedProviderId, label: decoyLabel }
+      }
+    } })
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+
+    // 请求 providerId 本身（非 executor 键，也非任何 label）：既非稳定 ID、也匹配不到唯一名称，
+    // resolveExecutorId 原样回传，随后 config.executors[providerId] 缺失 → 拒绝。
+    await expect(useAppStore.getState().executeControl(request({
+      operation: 'open.agent', content: { kind: 'new-agent', executorId: requestedProviderId },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))).rejects.toMatchObject({ code: 'AGENT_EXECUTOR_NOT_CONFIGURED' })
+    // 一个 Provider 字符串匹配不能凭空启动，布局也不能动。破坏点：若 resolveExecutorId 退化成把
+    // requested 当 providerId 猜一个 executor，或 open.agent 少了 configured-guard，这里会启动/改布局。
     expect(launchAgent).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
   })

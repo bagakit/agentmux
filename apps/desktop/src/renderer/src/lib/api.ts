@@ -610,7 +610,7 @@ const mockApi: AgentMuxDesktopApi = {
       executorId,
       providerId: mockConfig.executors[executorId]?.providerId ?? 'codex',
       hostId,
-      installed: !(hostId === 'studio' && ['hermes', 'pi'].includes(executorId))
+      availability: hostId === 'studio' && ['hermes', 'pi'].includes(executorId) ? 'missing' : 'available'
     })
   },
   control: {

@@ -457,7 +457,7 @@ export class RuntimeController {
       executorId,
       providerId: executor.providerId,
       hostId,
-      installed: (await client.probeAgent(executor.providerId, executor.command)).installed
+      availability: await client.probeExecutorAvailability(executor.providerId, executor.command)
     }
   }
 
