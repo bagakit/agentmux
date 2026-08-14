@@ -224,6 +224,12 @@ const UNIONS = [
     ssot: null
   }
 ] as const
+// 第四条闭合联合 `AGENTMUX_CONTROL_ERROR_CODES` **刻意不在这张表里**，不是漏了：它没有运行时成员谓词
+// （四个消费者全都直接从元组派生——control-host 的 `controlErrorCode`、agentmux.ts 的 `CLI_ERROR_CODES`、
+// store 与 control-api 各自 `new Set(AGENTMUX_CONTROL_ERROR_CODES)`），所以 A/B/C 三层没有可钉的东西。
+// 它真正需要守的是**新码有没有被分类**，那道判据在 `apps/desktop/test/agent-address.test.ts`：那里对码表
+// 逐个要求落进 WITH_RECOVERY 或 DELIBERATELY_SILENT，并双向核对（新码没分类会红，臆造码也会红）。
+// 注意那条在 desktop 侧，经 dist 读 core——只改 core 的 src 它不会红，要重建 dist 才看得见。
 
 describe('三条联合的成员判定只有一处声明', () => {
   describe('A 层（行为·谓词）：谓词接受每个成员、拒绝非成员', () => {
