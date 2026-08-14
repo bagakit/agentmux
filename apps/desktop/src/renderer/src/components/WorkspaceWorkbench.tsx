@@ -49,16 +49,17 @@ import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
-import { groupIds } from '../lib/workbench-layout'
-import type {
-  SplitDirection,
-  TabGroup,
-  TabGroupLayoutNode,
-  WorkspaceLayout
-} from '../lib/workbench-layout'
-import { regionIds } from '../lib/workbench-view-layout'
-import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
-import { clampSplitRatio, MIN_SPLIT_PERCENT } from '../lib/split-tree'
+import {
+  groupIds,
+  regionIds,
+  clampSplitRatio,
+  MIN_SPLIT_PERCENT,
+  type SplitDirection,
+  type TabGroup,
+  type TabGroupLayoutNode,
+  type WorkspaceLayout,
+  type WorkbenchRegionLayoutNode
+} from '@agentmux/layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {

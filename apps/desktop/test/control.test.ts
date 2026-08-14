@@ -10,7 +10,7 @@ import {
 } from '@agentmux/core'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,
