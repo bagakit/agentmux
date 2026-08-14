@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-25k8f8m9k",
+  "title": "Provider 与人机交互分层收敛",
+  "slug": "provider-human-interaction-convergence",
+  "goal": "在不实现特定 harness、不引入自演化平台的前提下，统一既有 Provider 观测、输入投递、typed 人机交互及 Session 恢复边界；删除重复 owner 与判断，使多客户端操作一致、健康 Agent 不被流程故障阻断，且重启工作面与会话可恢复。",
+  "status": "ready",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    }
+  ]
+}

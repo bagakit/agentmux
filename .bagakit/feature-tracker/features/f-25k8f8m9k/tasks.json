@@ -1,0 +1,331 @@
+{
+  "version": 2,
+  "feat_id": "f-25k8f8m9k",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/provider-human-interaction-refactor-2026-09-13.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/provider-human-interaction-refactor-2026-09-13.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "统一 Provider 观察并接入真实状态消费者",
+      "objective": "在既有 hook/status/freshness/readiness 模块上收敛观察合同；Codex/Claude 经公开 Core API 到 Activity 或 CLI 完成最小竖切，枚举 registry 验证其他 Provider；不新建平行状态缓存。",
+      "outcome": "同一 Session 在 Core 与消费者看到一致的状态轴、来源、时间与未知原因。",
+      "acceptance": [
+        "分别验证进程 alive + semantic idle + readiness pending，不折叠成一个 busy。",
+        "迟到/过期/缺失事件不能覆盖当前 Run；无能力的 Provider 保持 unknown/unsupported。",
+        "删除替代的消费者推断；Core 无 Electron/React 依赖。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f packages/core/test/provider-observation-contract.test.ts && pnpm --filter @agentmux/core exec vitest run test/provider-observation-contract.test.ts --maxWorkers=1",
+          "proves": "同一 Session 在 Core 与消费者看到一致的状态轴、来源、时间与未知原因。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/provider-observation-consumer.test.tsx && pnpm --filter @agentmux/desktop exec vitest run test/provider-observation-consumer.test.tsx --maxWorkers=1",
+          "proves": "同一 Session 在 Core 与消费者看到一致的状态轴、来源、时间与未知原因。；新测试必须存在并有行为断言。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "收敛普通输入、排队和投递回执",
+      "objective": "复用 prompt-submission、Core Client 与现有 renderer steer queue 的职责，统一 typed 投递边界；MessageTool 与 CLI 接线。队列消费 ack 与 Provider 消费事实分别保留；不新增队列面板。",
+      "outcome": "并发输入有一个投递 owner，忙时可排队，失败/未知保留内容且不双发。",
+      "acceptance": [
+        "普通发送、queue、可用的 steer 意图明确；工作中有待答请求时不把 prompt 当作回答。",
+        "两客户端并发、投递前状态变化和未知回执不双发、不清空更新后的草稿。",
+        "Host accepted 与 Provider consumed/unknown 分开；移除 renderer 和 host 的重复投递状态机。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f packages/core/test/provider-ingress-contract.test.ts && pnpm --filter @agentmux/core exec vitest run test/provider-ingress-contract.test.ts --maxWorkers=1",
+          "proves": "并发输入有一个投递 owner，忙时可排队，失败/未知保留内容且不双发。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/provider-ingress-consumers.test.tsx && pnpm --filter @agentmux/desktop exec vitest run test/provider-ingress-consumers.test.tsx --maxWorkers=1",
+          "proves": "并发输入有一个投递 owner，忙时可排队，失败/未知保留内容且不双发。；新测试必须存在并有行为断言。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "收敛权限与用户问题的 typed 生命周期",
+      "objective": "以 agent-interaction、Provider planInteractionResponse 和 Core 现有请求状态为起点统一 request 身份与响应规则，不让客户端生成厂商按键。",
+      "outcome": "权限/问题只回答当前精确请求，原生与多客户端交互都能准确收口。",
+      "acceptance": [
+        "回答绑定 Session/Run/request，旧 Run 回答、重复回答和已替换请求不影响新请求。",
+        "Provider 声明的选择/自由文本能力和响应计划对应；缺失能力显示原生入口与原因。",
+        "原生回答、客户端回答、cancel、supersede、unknown 各有行为测试；不会自动批准或扩大权限。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f packages/core/test/provider-human-request-contract.test.ts && pnpm --filter @agentmux/core exec vitest run test/provider-human-request-contract.test.ts --maxWorkers=1",
+          "proves": "权限/问题只回答当前精确请求，原生与多客户端交互都能准确收口。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-interaction.test.ts test/agent-provider-protocol.test.ts --maxWorkers=1",
+          "proves": "既有受影响行为回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-002",
+        "T-003"
+      ],
+      "title": "统一局部反馈、Session 服务窗与注意力投影",
+      "objective": "复用现有 MessageTool、interaction card、服务窗和 notification presentation，统一结果/请求身份与定位；不引入新 OS 通知功能或重做所有视觉。",
+      "outcome": "同一交互跨层一致且可定位，失败反馈不遮住仍可用的工作面。",
+      "acceptance": [
+        "MessageTool 失败保留正文/附件并可重试；可用终端不被流程错误遮罩禁用。",
+        "服务窗准确显示失败步骤、当前状态和恢复动作；全局摘要定位相同请求。",
+        "关闭 transient 后重放不复活；未解决持久问题仍可找到；多视图已回答请求不继续显示 Needs You。",
+        "保留 keyboard/IME/a11y 行为，客户端不重新解码 Provider 协议。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/layered-human-interaction.test.tsx && pnpm --filter @agentmux/desktop exec vitest run test/layered-human-interaction.test.tsx --maxWorkers=1",
+          "proves": "同一交互跨层一致且可定位，失败反馈不遮住仍可用的工作面。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-interaction-card.test.tsx test/prompt-delivery-service-window.test.tsx --maxWorkers=1",
+          "proves": "既有受影响行为回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "统一身份绑定与重启恢复的 durable 边界",
+      "objective": "在 agent-session-continuity、registry/store、runtime-controller 和 durable workbench 恢复路径收敛 Session/Run/native handle 的 owner；复用现有格式，不全量改造成 event store。",
+      "outcome": "空快照与流程故障不清工作面，新进程按原 Session 身份恢复而不误投递。",
+      "acceptance": [
+        "隔离进程重启后原 Tab/Group/Region/焦点/分割仍可见并自动 reattach/resume。",
+        "空快照、握手 timeout、Provider 探测失败和 lease 延迟均保留投影并报告；只有权威 retired/unknown 允许移除。",
+        "替换 Run 后旧请求/回执不作用于新 Run；恢复投递不重复发送；业务任务状态不复制成可编辑真值。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/provider-identity-restart.integration.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/provider-identity-restart.integration.test.ts --maxWorkers=1",
+          "proves": "空快照与流程故障不清工作面，新进程按原 Session 身份恢复而不误投递。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-session-continuity.test.ts --maxWorkers=1",
+          "proves": "既有受影响行为回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-002",
+        "T-003",
+        "T-005"
+      ],
+      "title": "既有持续推进复用统一观察与投递",
+      "objective": "将已有 ContinuousProgressScheduler/LoopManager 的重复 Agent 判定改为消费统一合同；保留时钟、投递、任务来源各自 owner，不新增 Schedule/Goal 平台。",
+      "outcome": "手动消息与 loop 使用一致身份/回执规则，忙或待答时准确跳过。",
+      "acceptance": [
+        "到期遇忙不堆积、权限/用户问题不自动回答、用户停止暂停 loop。",
+        "手动输入与 tick 并发、重复 tick、未知回执不双发；重启不补发所有漏周期。",
+        "Tracker tasks done 但未 closeout 不当作整个 Feature 终态。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/continuous-progress-unified-ingress.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-unified-ingress.test.ts --maxWorkers=1",
+          "proves": "手动消息与 loop 使用一致身份/回执规则，忙或待答时准确跳过。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/continuous-progress.test.ts test/continuous-progress-scheduler.test.ts test/continuous-progress-delivery.test.ts --maxWorkers=1",
+          "proves": "既有受影响行为回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.5,
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "depends_on": [
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "title": "整合候选熵减审计与跨 Provider 回归",
+      "objective": "对精确整合候选核对删掉了哪些重复 owner/判定、公共 API 消费者、Provider 差异和重启证据；按项目规模运行必要 typecheck/build/consumer gate。",
+      "outcome": "重构没有制造第二套 harness，既有功能与恢复不变量在真实入口成立。",
+      "acceptance": [
+        "每个提取有真实消费者；被替代路径已删除，无 compatibility/fallback 层；新增包必须证明独立复用价值。",
+        "收集 T-001 至 T-006 的逐项 mutation/调用者和重启证据，不以源码在场扫描替代行为。",
+        "运行前检查资源和独立 Runtime；结束确认自己启动的子进程全部退出，不影响用户 Agent。",
+        "按已支持能力核对 Codex/Claude 与 registry 其他 Provider，不从一家的测试推断全量支持。",
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/provider-refactor-closure.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/provider-refactor-closure.test.ts --maxWorkers=1",
+          "proves": "重构没有制造第二套 harness，既有功能与恢复不变量在真实入口成立。；新测试必须存在并有行为断言。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm typecheck",
+          "proves": "既有受影响行为回归。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts --maxWorkers=1",
+          "proves": "既有受影响行为回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}
