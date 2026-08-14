@@ -55,6 +55,7 @@ import {
   type HandoffResult
 } from './agent-handoff.js'
 import { advanceDelivery, type AgentThread } from './agent-message.js'
+import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { MAX_AGENT_PROMPT_BYTES } from './agent-terminal-screen.js'
 import { cloneSession, sameRun } from './agent-session-identity.js'
@@ -396,17 +397,35 @@ function projectRunWith(
   }
 }
 
-async function hasExecutable(executable: string): Promise<boolean> {
+/**
+ * 一次探测的三态结局——唯一一处把「查不成 / 没装 / 装了」分开的地方。
+ *
+ * `hasExecutable` 此前用一个 boolean 同时表达「文件不在」和「PATH 空到根本没候选可查」，于是环境退化
+ * （PATH 被清空、命令又是相对名）被当成「没装」——那正是实战里那次误报。分档判据：
+ *   - 相对命令 + 空 PATH → 零候选 → 我们**没查成**（check-failed），不是断言它不在。
+ *   - 有候选但没有一个可执行（或绝对路径不存在）→ 查成了，确实**不在**（missing）。
+ *   - 任一候选可执行 → available。
+ *
+ * 启动闸（{@link hasExecutable}）保持 boolean：`=== 'available'` 才放行，于是 check-failed 也拒绝启动，
+ * 与原先「非 available 一律不启动」的行为完全一致，无回归。
+ */
+async function classifyExecutable(executable: string): Promise<AgentMuxExecutorProbeOutcome> {
   const candidates = isAbsolute(executable) || executable.includes('/')
     ? [executable]
     : (process.env.PATH ?? '').split(delimiter).filter(Boolean).map((directory) => join(directory, executable))
+  // 相对命令却一个候选都没有：PATH 是空的——环境不完整，我们查不了，不能替它断言「没装」。
+  if (candidates.length === 0) return 'check-failed'
   for (const candidate of candidates) {
     try {
       await access(candidate, fsConstants.X_OK)
-      return true
+      return 'available'
     } catch {}
   }
-  return false
+  return 'missing'
+}
+
+async function hasExecutable(executable: string): Promise<boolean> {
+  return (await classifyExecutable(executable)) === 'available'
 }
 
 export class AgentMuxClient {
@@ -1024,6 +1043,27 @@ export class AgentMuxClient {
       { hasExecutable },
       commandOverride
     )
+  }
+
+  /**
+   * 三态探测：这个 Executor 在本 Host 上是 available / missing / check-failed（环境退化）。
+   *
+   * 复用 Provider 自己的命令解析（commandOverride 优先，否则 catalog executable——那段逻辑住在
+   * agent-provider 的 probeCapabilities 里，是唯一出处），只把它解析出的那条命令交给 classifyExecutable
+   * 三态归类：`probeAgent` 里的 boolean `installed` 会把「查不成」折进「没装」，而发现列表必须区分二者
+   * （那正是那次误报要防的）。启动路径仍走 `probeAgent().installed`（=== 'available'），行为不变。
+   */
+  async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string): Promise<AgentMuxExecutorProbeOutcome> {
+    this.requireConnected()
+    // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
+    // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。
+    let resolvedCommand: string | null = null
+    await this.providers.get(providerId).probeCapabilities(
+      { async hasExecutable(command) { resolvedCommand = command; return false } },
+      commandOverride
+    )
+    if (resolvedCommand === null) throw new AgentMuxError('Executor availability probe did not resolve a command.', 'AGENT_NOT_FOUND')
+    return await classifyExecutable(resolvedCommand)
   }
 
   async listRuns(): Promise<AgentMuxRun[]> {
