@@ -356,6 +356,26 @@ describe('conversation link underline contract (#794)', () => {
     expect(px).toBeLessThanOrEqual(2)
   })
 
+  it('keeps the underline continuous through the mono path descenders', () => {
+    // FRAGMENTATION FIX (the actual #794 screenshot complaint). The file reference is a pure-mono path
+    // (`.bagakit/…/features.json:987`) whose slashes and g/j descenders reach below the 3px offset, so the
+    // engine default `text-decoration-skip-ink: auto` carves a gap at every one of them — the line comes
+    // out ragged/dashed and reads as imprecise. `none` forces a single continuous stroke.
+    //
+    // This is invisible to the offset/thickness assertions above: skip-ink could be `auto` (the defect)
+    // and all of them stay green, because it governs whether the line is CONTINUOUS, not where it sits.
+    // Pinned on the shared `.md-link` base so both link kinds inherit one unbroken line, exactly as they
+    // inherit the offset. (Still a static-CSS guard — it proves the property is declared `none`, not that
+    // the rendered stroke is visually whole; that needs the render harness this suite disclaims above.)
+    const skipInk = declValue(ruleFor('.md-link').body, 'text-decoration-skip-ink')
+    expect(skipInk, 'text-decoration-skip-ink must be declared on .md-link').toBeDefined()
+    expect(
+      skipInk,
+      `text-decoration-skip-ink 是 \`${skipInk}\`。必须是 none：默认的 auto 会在每个斜杠和 g/j 降部处` +
+        '断开下划线，等宽路径于是显示成一条虚线——那正是 #794 截图里"下划线不精确"的真身。'
+    ).toBe('none')
+  })
+
   it('keeps the file reference underline hidden at rest and revealed on hover', () => {
     // REVEAL SEMANTICS. The line is always laid out (so hover cannot shift the text), but invisible
     // until hover paints its colour. If the rest colour stops being transparent the underline shows

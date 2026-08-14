@@ -1068,7 +1068,7 @@ export function TerminalView({
                   <span className="terminal-link-preview__url" title={linkPreview.label}>
                     {linkPreview.label}
                   </span>
-                  <kbd className="terminal-link-preview__hint">click to open</kbd>
+                  <span className="terminal-link-preview__hint">click to open</span>
                 </>
               )}
             </div>
