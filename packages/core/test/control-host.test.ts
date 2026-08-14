@@ -200,6 +200,50 @@ describe('Control protocol', () => {
     })).toMatchObject({ operation: 'arrange', mode: { kind: 'preset', preset: 'grid-6' } })
   })
 
+  // T-004: promote.region 是一个带 Region 选择器的合法操作，且它的回执携带新 Tab 的坐标
+  // （tabId/regionId/workspaceId）——Agent 促升自己后要靠这三件套 focus/inspect 回去。self 选择器
+  // 与 inspect.region 同规则：需要 managed caller。
+  it('parses promote.region with a self or explicit Region selector and round-trips its receipt', () => {
+    // self 需要 managed caller，与 inspect.region 一致。
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-self',
+      operation: 'promote.region',
+      target: { kind: 'self' },
+      caller: { agentSessionId: 'semantic-1' }
+    })).toMatchObject({ operation: 'promote.region', target: { kind: 'self' } })
+    // 缺 caller 的 self 被拒——证明这条与 inspect.region 共用同一道 managed-caller 闸。
+    expect(() => parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-self-no-caller',
+      operation: 'promote.region',
+      target: { kind: 'self' }
+    })).toThrow('managed caller')
+    // 显式 Region 选择器。
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-region',
+      operation: 'promote.region',
+      target: { kind: 'region', regionId: 'agent-left' }
+    })).toMatchObject({ operation: 'promote.region', target: { kind: 'region', regionId: 'agent-left' } })
+    // 回执带出新 Tab 的三件套坐标，逐字段被 identity 校验（空串 / 控制字符会被拒）。
+    expect(parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-region',
+      ok: true,
+      operation: 'promote.region',
+      result: { tabId: 'view:new', regionId: 'agent-left', workspaceId: 'workspace' }
+    })).toMatchObject({ operation: 'promote.region', result: { tabId: 'view:new', regionId: 'agent-left', workspaceId: 'workspace' } })
+    // 回执里的 regionId 是保留选择器 self 时必须拒——那是 identity() 而非 id() 的职责。
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-region',
+      ok: true,
+      operation: 'promote.region',
+      result: { tabId: 'view:new', regionId: 'self', workspaceId: 'workspace' }
+    })).toThrow('invalid')
+  })
+
   it('preserves typed ambiguous message candidates through receipts', () => {
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -238,8 +282,28 @@ describe('Control protocol', () => {
     })).toThrow('candidates are invalid')
   })
 
-  it('requires exactly one result or error and rejects reserved result identities', () => {
-    const success = {
+  // T-002 发现四态过线：list.agents 的 executor 元信息带 availability 四态之一，逐一透传；
+  // 非四态成员（旧的 boolean、拼错的串）一律拒。availability 从 AGENTMUX_EXECUTOR_AVAILABILITIES
+  // 派生校验，不另写第二份手抄。
+  it('carries the four availability states through list.agents receipts and rejects non-members', () => {
+    const listAgents = (availability: unknown) => ({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'list',
+      ok: true,
+      operation: 'list.agents',
+      result: { agents: [{ executorId: 'e1', label: 'One', providerId: 'codex', availability }] }
+    })
+    for (const availability of ['unknown', 'check-failed', 'missing', 'available'] as const) {
+      expect(parseAgentMuxControlReceipt(listAgents(availability)))
+        .toMatchObject({ operation: 'list.agents', result: { agents: [{ executorId: 'e1', availability }] } })
+    }
+    // 旧的 boolean 契约必须被拒——把 enum 折回 boolean 时这条红。
+    expect(() => parseAgentMuxControlReceipt(listAgents(true))).toThrow('Executor is invalid')
+    // 不在四态里的串也拒——校验必须锚在成员集合上，不是「随便一个 string」。
+    expect(() => parseAgentMuxControlReceipt(listAgents('installed'))).toThrow('Executor is invalid')
+  })
+
+  it('requires exactly one result or error and rejects reserved result identities', () => {    const success = {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'hybrid',
       ok: true,
@@ -396,7 +460,7 @@ describe('external Control control', () => {
             }
           }
         }
-        if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', available: true }] }
+        if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', availability: 'available' }] }
         if (request.operation === 'open.agent') return { operation: request.operation, region: agentRegion }
         if (request.operation === 'open.terminal') return { operation: request.operation, region: terminalRegion }
         if (request.operation === 'open.browser') return { operation: request.operation, region: browserRegion }

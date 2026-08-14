@@ -391,6 +391,23 @@ async function focusCommand(args: readonly string[]): Promise<number> {
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
+/**
+ * 促升：把一个 Region 单独变成它自己的一张 Tab（#487）。只带 `--region <id|self>`——促升没有
+ * destination（它总是新建一张 Tab），`self` 是主用例（Agent 把自己所在的那格搬成一张新 Tab）。
+ * 回执带出新 Tab 的坐标，可直接喂回 focus / inspect。
+ */
+async function promoteCommand(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, { '--region': 'value' })
+  const value = identifier(flags.values.get('--region'), 'Region id')
+  const owner = callerForSelf(value)
+  const receipt = await requestAgentMuxControl({
+    ...requestBase(), operation: 'promote.region',
+    target: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: explicitSelectorId(value, 'Region id') },
+    ...(owner ? { caller: owner } : {})
+  })
+  printSuccess(receipt.operation, receipt.result); return 0
+}
+
 function afterByte(value: string | undefined): number {
   if (value === undefined) return 0
   const parsed = Number(value)
@@ -525,6 +542,7 @@ async function main(): Promise<number> {
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
   if (args[0] === 'handoff') return await handoffCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))
+  if (args[0] === 'promote') return await promoteCommand(args.slice(1))
   if (args[0] === 'arrange') return await arrangeCommand(args.slice(1))
   if (args[0] === 'output') return await outputCommand(args.slice(1))
   if (args[0] === 'interrupt') return await sessionMutation('interrupt', args.slice(1))

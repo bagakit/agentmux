@@ -19,6 +19,7 @@ Intents:
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
   handoff     Hand a task and its ownership to another Agent Session in one atomic act.
   focus       Focus one exact Tab or Region.
+  promote     Promote one Region into its own new Tab.
   arrange     Apply one explicit layout operation to a Tab.
   output      Read or follow one Agent Session's ordered output.
   interrupt   Interrupt one Agent Session through the Desktop Control Host.
@@ -161,6 +162,16 @@ Usage:
   agentmux focus --region <region-id>
 
 Focus never opens content or mutates a Run.`],
+  ['promote', `Promote one Region into its own new Tab
+
+Usage:
+  agentmux promote --region <region-id|self>
+
+Detaches the Region from its current Tab's split tree and makes it the sole Region of a
+brand-new Tab placed immediately after the source. The Region keeps its identity — same
+Session, Run, and content — so this never starts, stops, or restarts the underlying Run.
+Promoting a Region that is already the only Region of its Tab does nothing and fails with a
+typed error rather than reporting a move that did not happen.`],
   ['arrange', `Apply one explicit Tab layout operation
 
 Usage:

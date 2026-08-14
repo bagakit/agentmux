@@ -7,6 +7,7 @@ import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   agentMuxControlTimeoutMs,
   isAgentMuxControlOperation,
+  isAgentMuxExecutorAvailability,
   type AgentMuxAgentRegion,
   type AgentMuxArrangeMode,
   type AgentMuxBrowserRegion,
@@ -143,6 +144,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, ...(owner ? { caller: owner } : {}) }
   }
   if (source.operation === 'inspect.region') {
+    const target = regionAnchor(source.target)
+    const owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'promote.region') {
     const target = regionAnchor(source.target)
     const owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -321,8 +328,8 @@ function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
   if (!Array.isArray(value) || value.length > MAX_EXECUTORS) throw new AgentMuxError('Control Executors are invalid.', 'CONTROL_PROTOCOL_ERROR')
   const result = value.map((item) => {
     const source = object(item, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    if (typeof source.label !== 'string' || !source.label.trim() || typeof source.available !== 'boolean') throw new AgentMuxError('Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { executorId: id(source.executorId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), label: source.label, providerId: id(source.providerId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), available: source.available }
+    if (typeof source.label !== 'string' || !source.label.trim() || !isAgentMuxExecutorAvailability(source.availability)) throw new AgentMuxError('Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { executorId: id(source.executorId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), label: source.label, providerId: id(source.providerId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), availability: source.availability }
   })
   if (new Set(result.map(({ executorId }) => executorId)).size !== result.length) throw new AgentMuxError('Control Executor identity is ambiguous.', 'CONTROL_PROTOCOL_ERROR')
   return result
@@ -347,6 +354,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (source.operation === 'send') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (source.operation === 'focus') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tabId: identity(result.tabId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.regionId === undefined ? {} : { regionId: identity(result.regionId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR') }) } }
   if (source.operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tab: parseTab(result.tab) } }
+  if (source.operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (source.operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agents: parseExecutors(result.agents) } }
   if (source.operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (source.operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }

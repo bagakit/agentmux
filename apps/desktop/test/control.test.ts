@@ -350,4 +350,82 @@ describe('Desktop Control owner', () => {
     if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
     expect(useAppStore.getState().layouts.workspace?.groups[0]?.tabOrder.slice(0, 2)).toEqual([tab.id, opened.region.tabId])
   })
+
+  // T-004 验收：搬动保持 Region/Session/Run 身份，源删除、目标唯一，且**不调用任何 Runtime lifecycle**。
+  // 树代数复用既有的 promoteRegionToTab reducer（promote-region-to-tab.test.ts 钉纯函数那侧），这里钉的是
+  // executeControl 这一层真的接了它、身份端到端保住、且这条路上一个 lifecycle 方法都没调。
+  it('promotes a Region into its own new Tab, preserves identity, and calls no Runtime lifecycle', async () => {
+    let tab = fixture([agent('other')])
+    tab = addWorkbenchRegion(tab, 'region-caller', 'right', {
+      regionId: 'region-second', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'other'
+    })
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+
+    // 「移动不调用 Runtime lifecycle」是断言出来的，不是读源码读出来的：搬一格不许起/停/重启底层 Run。
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+    const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal')
+    const submitPrompt = vi.spyOn(api.sessions, 'submitPrompt')
+    const resume = vi.spyOn(api.sessions, 'resume')
+    const interrupt = vi.spyOn(api.sessions, 'interrupt')
+    const stop = vi.spyOn(api.sessions, 'stop')
+
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'promote.region', target: { kind: 'region', regionId: 'region-second' }
+    }))
+    expect(result.operation).toBe('promote.region')
+    if (result.operation !== 'promote.region') throw new Error('Unexpected result')
+
+    // 身份保住：regionId 原样带去新 Tab（不新铸）。破坏 reducer 让它铸新 id，这条红。
+    expect(result.regionId).toBe('region-second')
+    expect(result.workspaceId).toBe('workspace')
+    // 目标唯一且是**新** Tab（不是源 Tab）。
+    expect(result.tabId).not.toBe('tab-caller')
+
+    const state = useAppStore.getState()
+    // 源删除：源 Tab 不再含被促升的那格。破坏 reducer 让它把 leaf 留在源树，这条红。
+    expect(state.tabs['tab-caller']!.regions['region-second']).toBeUndefined()
+    // 目标唯一：新 Tab 恰含且仅含被促升的那格。
+    const newTab = state.tabs[result.tabId]!
+    expect(Object.keys(newTab.regions)).toEqual(['region-second'])
+
+    // 身份端到端：inspect 回读新坐标，拿到同一个 Agent Session（Run 经同一 agentSessionId 连回）。
+    const inspected = await useAppStore.getState().executeControl(request({
+      operation: 'inspect.region', target: { kind: 'region', regionId: 'region-second' }
+    }))
+    if (inspected.operation !== 'inspect.region') throw new Error('Unexpected result')
+    expect(inspected.region.kind === 'agent' && inspected.region.agentSessionId).toBe('other')
+    expect(inspected.region.tabId).toBe(result.tabId)
+
+    // 一个 Runtime lifecycle 方法都没被调——促升只搬布局投影。
+    for (const spy of [launchAgent, launchTerminal, submitPrompt, resume, interrupt, stop]) {
+      expect(spy).not.toHaveBeenCalled()
+    }
+  })
+
+  it('promote.region resolves self to the caller\'s own Region', async () => {
+    let tab = fixture()
+    tab = addWorkbenchRegion(tab, 'region-caller', 'right', {
+      regionId: 'region-second', kind: 'launcher', workspaceId: 'workspace'
+    })
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'promote.region', target: { kind: 'self' }, caller: { agentSessionId: 'caller' }
+    }))
+    if (result.operation !== 'promote.region') throw new Error('Unexpected result')
+    // self 解析到 caller 自己那格（region-caller），把它促升成新 Tab。
+    expect(result.regionId).toBe('region-caller')
+    expect(result.tabId).not.toBe('tab-caller')
+  })
+
+  it('refuses to promote the only Region of a Tab with a typed error, not a fake success', async () => {
+    const tab = fixture()
+    // 单格 Tab：促升是 no-op（它已经就是一张 Tab）。绝不把「什么都没做」报成一次成功的移动——
+    // 抛 typed CONTROL_FAILED。破坏 reducer 让它对单格也造新 Tab，这条红（本该 reject 却 resolve）。
+    await expect(useAppStore.getState().executeControl(request({
+      operation: 'promote.region', target: { kind: 'region', regionId: 'region-caller' }
+    }))).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
+    // 没有凭空多出一张 Tab：输入不动。
+    expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
+  })
 })

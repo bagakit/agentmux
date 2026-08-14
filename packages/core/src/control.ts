@@ -89,7 +89,33 @@ export type AgentMuxControlExecutor = {
   executorId: AgentExecutorId
   label: string
   providerId: AgentProviderId
-  available: boolean
+  availability: AgentMuxExecutorAvailability
+}
+
+/**
+ * 发现某个 Executor 在一台目标 Host 上的可用性——**四态，唯一一处拼写。**
+ *
+ * 这四态是四件不同的事，任何两态折成一态都是缺陷：
+ *   - `unknown`：还没查（或正在查）。不是「没有」，只是此刻没有结论。
+ *   - `check-failed`：查了但没查成——环境不完整（PATH 被清空而命令是相对名，探测拿不到任何候选路径）。
+ *     这正是那次实战误报的形态：环境退化被当成了「没装」。
+ *   - `missing`：查成了，确实不在——候选路径都在场，没有一个可执行；或绝对路径指向的文件不存在。
+ *   - `available`：查成了，可执行文件在场。
+ *
+ * 为什么是元组而不是纯 union：与 {@link AGENTMUX_CONTROL_ERROR_CODES} 同源——线上校验（control-host
+ * parseExecutors）需要一个能**在运行时拿在手里**的成员集合来判合法性，纯 union 在运行时无迹可寻。
+ * 成员判定 {@link isAgentMuxExecutorAvailability} 派生自这一个元组，不另写第二份手抄。元组本身不导出
+ * （没有任何外部消费者需要这份运行时值——线上校验只需那个谓词），只导出派生的类型与谓词。
+ */
+const AGENTMUX_EXECUTOR_AVAILABILITIES = ['unknown', 'check-failed', 'missing', 'available'] as const
+export type AgentMuxExecutorAvailability = typeof AGENTMUX_EXECUTOR_AVAILABILITIES[number]
+
+/** 探测（真去查一次）只可能得出后三态之一——`unknown` 是「还没查」，探不出来。 */
+export type AgentMuxExecutorProbeOutcome = Exclude<AgentMuxExecutorAvailability, 'unknown'>
+
+/** 入站的这个值是不是一个合法可用性档位。成员集合派生自 {@link AGENTMUX_EXECUTOR_AVAILABILITIES}。 */
+export function isAgentMuxExecutorAvailability(value: unknown): value is AgentMuxExecutorAvailability {
+  return (AGENTMUX_EXECUTOR_AVAILABILITIES as readonly unknown[]).includes(value)
 }
 
 export type AgentMuxSelfAnchor = { kind: 'self' }
@@ -137,6 +163,17 @@ export type AgentMuxControlFocusRequest = RequestBase & {
 export type AgentMuxControlArrangeRequest = RequestBase & {
   operation: 'arrange'; target: AgentMuxTabAnchor; mode: AgentMuxArrangeMode; caller?: AgentMuxControlCaller
 }
+/**
+ * 把一个 Region 促升成它自己的一张 Tab（#487「单独变成一个 tab」）。
+ *
+ * 只带一个 Region 选择器，没有 destination——促升**永远**新建一张 Tab（不像 open.* 那样落在某个既有
+ * 目标上），所以它不是「move 到任意目的地」，而是「这一格变成它自己的 Tab」。故命名 `promote.region`
+ * 而非 `move.region`：与 `inspect.region` 同形（对 Region 的一个动作），且不承诺一个 reducer 并不具备的
+ * destination 参数。`self` 复用既有的 caller 解析：Agent 把自己促升成一张新 Tab 是主用例。
+ */
+export type AgentMuxControlPromoteRegionRequest = RequestBase & {
+  operation: 'promote.region'; target: AgentMuxRegionAnchor; caller?: AgentMuxControlCaller
+}
 export type AgentMuxControlListAgentsRequest = RequestBase & { operation: 'list.agents' }
 export type AgentMuxSessionSelector = AgentMuxSelfAnchor | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxControlInterruptRequest = RequestBase & {
@@ -157,6 +194,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSendRequest
   | AgentMuxControlFocusRequest
   | AgentMuxControlArrangeRequest
+  | AgentMuxControlPromoteRegionRequest
   | AgentMuxControlListAgentsRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
@@ -171,6 +209,10 @@ export type AgentMuxControlResult =
   | { operation: 'send'; agentSessionId: string }
   | { operation: 'focus'; tabId: string; regionId?: string }
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
+  // Where the promoted Region now lives: a brand-new Tab, same regionId (kept, not minted) and workspace.
+  // The caller feeds this straight back into focus / inspect.region. A no-op (the Region was already its
+  // own Tab, or the request was stale) is NOT reported here — it raises a typed CONTROL_FAILED instead.
+  | { operation: 'promote.region'; tabId: string; regionId: string; workspaceId: string }
   | { operation: 'list.agents'; agents: AgentMuxControlExecutor[] }
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
@@ -260,6 +302,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   send: 'long',
   focus: 'short',
   arrange: 'short',
+  // 促升只动本地布局状态（摘一格、新建一张 Tab），不等本进程之外的任何东西——和 arrange 同档。
+  'promote.region': 'short',
   'list.agents': 'short',
   interrupt: 'short',
   resume: 'long',
