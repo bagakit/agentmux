@@ -22,6 +22,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
+import { classifyApplicationProcesses } from './package-process-scope.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -459,20 +460,20 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
-async function processIdsForApplication(appPath) {
+async function scopedProcesses(appPath) {
   const canonicalAppPath = await realpath(appPath)
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const helperRoot = join(canonicalAppPath, 'Contents', 'Frameworks') + sep
   const result = await run('ps', ['-axo', 'pid=,command='], { capture: true })
-  return result.stdout.split('\n').flatMap((line) => {
-    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-    if (!match || (
-      match[2] !== executable &&
-      !match[2].startsWith(`${executable} `) &&
-      !match[2].startsWith(helperRoot)
-    )) return []
-    return [Number(match[1])]
-  })
+  return classifyApplicationProcesses(result.stdout, { executable, helperRoot })
+}
+
+// The bundle's *serving* processes: main + renderer/GPU/utility helpers. A
+// detached crash-reporter helper is excluded — it serves no UI and keeps no
+// old code alive — so a stale one no longer blocks quit/relaunch/survivor. See
+// package-process-scope.mjs for why only the crash reporter is carved out.
+async function processIdsForApplication(appPath) {
+  return (await scopedProcesses(appPath)).serving
 }
 
 async function waitForProcessExit(findProcessIds, timeoutMs) {
@@ -847,9 +848,17 @@ async function verifyDmg(dmgPath, temporaryRoot, source) {
  * `osascript` 失败**不是**错误：app 没在跑、没注册到 LaunchServices、AppleScript 被策略拦，都会让它
  * 非零退出，而这些情况下"让它退出"这个目标本来就已经达成或无从达成。判据是**进程还在不在**，不是
  * 那条命令的退出码。
+ *
+ * 只对**服务着这份包**的进程（主进程 + renderer/GPU/utility helper）设判据。脱钩的 crash-reporter
+ * helper（app 退出后被 launchd 收养，PPID 1，不 flush 任何状态、也无法服务 UI）会被跳过——但会打印
+ * 出来，因为一个残留的它曾经让每一次后续安装都卡住（2026-09-13 实测 pid 1033）。跳过而不是杀掉：安装
+ * 路径不发信号是这里的既定承诺（见 package-install-restart.test.ts），交给 OS 回收更安全。
  */
 async function quitInstalledApplication(appPath) {
-  const running = await processIdsForApplication(appPath)
+  const { serving: running, crashReporter } = await scopedProcesses(appPath)
+  if (crashReporter.length > 0) {
+    process.stdout.write(`ignored_detached_crash_reporter=${crashReporter.join(',')} (orphaned Electron crash handler; serves no bundle, left for the OS to reap)\n`)
+  }
   if (running.length === 0) return { wasRunning: false, pids: [] }
   await run('osascript', ['-e', `quit app id "${BUNDLE_ID}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
