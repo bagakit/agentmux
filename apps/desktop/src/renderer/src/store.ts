@@ -162,6 +162,7 @@ import {
   type WorkbenchTab
 } from './lib/workbench-tabs'
 import { isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
+import { resolveSpatialCommit } from './lib/control-spatial-commit'
 import {
   applyWorkbenchViewCloseTopology,
   hasAttachedSessionOutsideClosingViews,
@@ -2462,8 +2463,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))
         }
         set((current) => reduceAgentSessionLaunchAttached(current, plan.regionId, committed).state)
-        const committedOwner = findWorkbenchRegion(get().tabs, plan.regionId)
-        if (!committedOwner || committedOwner.surface.kind !== 'agent' || committedOwner.surface.sessionId !== agentSessionId) {
+        const landing = resolveSpatialCommit(get().tabs, plan.regionId, { kind: 'agent', sessionId: agentSessionId })
+        if (landing.kind !== 'landed') {
           // The Agent is healthy; only the Desktop projection moved while launch was in flight.
           // Keep the Session available and report the layout race without stopping its Run.
           get().reportError(new Error('Agent launched successfully, but its Region moved before the layout receipt was read.'))
@@ -2472,7 +2473,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return {
           operation: request.operation,
           region: {
-            tabId: committedOwner.tab.id, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
+            tabId: landing.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
             agentSessionId, providerId: committed.session.providerId, executorId: committed.session.executorId
           }
         }
@@ -2536,10 +2537,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           return reduceSessionLaunchAttached({ ...current, tabs }, plan.regionId, committed)
         })
+        // 与 agent 那条路共用同一处落点解析。此前这里返回 `plan.tabId`——上面的两道 owner 闸都只认
+        // surface 身份，没有一道比较过 Tab id，于是启动期间这一格被 promote 走时，回执交回的是旧 Tab。
+        const landing = resolveSpatialCommit(get().tabs, plan.regionId, { kind: 'terminal', sessionId: committed.id })
+        if (landing.kind !== 'landed') {
+          throw controlFailure('CONTROL_OWNER_LOST', 'Terminal launched successfully but its Region owner moved during launch.')
+        }
         return {
           operation: request.operation,
           region: {
-            tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'terminal',
+            tabId: landing.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'terminal',
             runId: session.control.run.runId
           }
         }
