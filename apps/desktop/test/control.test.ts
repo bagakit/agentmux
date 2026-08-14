@@ -6,7 +6,8 @@ vi.hoisted(() => {
 
 import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
-  type AgentMuxControlRequest
+  type AgentMuxControlRequest,
+  type AgentMuxExecutorProbeOutcome
 } from '@agentmux/core'
 import { BUILT_IN_AGENT_LABELS, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
@@ -409,6 +410,47 @@ describe('Desktop Control owner', () => {
     const byId = new Map(result.agents.map((a) => [a.executorId, a]))
     expect(byId.get('e-up')?.availability).toBe('available')
     expect(byId.get('e-blind')?.availability).toBe('check-failed')
+  })
+
+  // 探测结局 → store 检查状态的**正向**映射。上面两条钉的是反向（store 状态 → list.agents 的四态），
+  // 它们不经过 detectExecutors，所以把这一格改坏它们全绿：审计把 check-failed 这一格从 'error' 折成
+  // 'missing'，control.test.ts 20/20 仍全绿——而这一格恰恰就是三态探测存在的全部理由。
+  // 「没查成」和「确实没装」在界面上是两句话（"Check failed" / "Not installed"），也是两种下一步动作，
+  // 任何把二者折成一处的改动必须在这里红。
+  it('detectExecutors maps each probe outcome to its own check state, keeping check-failed off missing', async () => {
+    fixture()
+    const outcomes: Record<string, AgentMuxExecutorProbeOutcome> = {
+      'e-available': 'available',
+      'e-missing': 'missing',
+      'e-blind': 'check-failed'
+    }
+    useAppStore.setState({
+      config: {
+        ...config,
+        executors: Object.fromEntries(
+          Object.keys(outcomes).map((executorId) => [executorId, { ...config.executors.codex!, label: executorId }])
+        )
+      },
+      // fixture() 留下的 codex 记录会让下面的读取分不清「是这次写的」还是「本来就在」。清空后
+      // 每一格都必然出自这次 detectExecutors。
+      executorDetections: {}
+    })
+    vi.spyOn(api.executors, 'detect').mockImplementation(async (executorId, hostId) => ({
+      executorId, providerId: 'codex', hostId, availability: outcomes[executorId]!
+    }))
+
+    await useAppStore.getState().detectExecutors('local')
+
+    const stateOf = (executorId: string): string | undefined =>
+      useAppStore.getState().executorDetections[executorDetectionKey('local', executorId)]?.state
+    expect(stateOf('e-available')).toBe('ready')
+    expect(stateOf('e-missing')).toBe('missing')
+    expect(stateOf('e-blind')).toBe('error')
+    // 三态互不相同——防止整个三元表达式塌成一个常量时上面三句里仍有某句恰好绿。
+    expect(new Set(Object.keys(outcomes).map(stateOf)).size).toBe(3)
+    // 原始结局一并留在格子里：界面文案可以塌，诊断依据不许丢。
+    expect(useAppStore.getState().executorDetections[executorDetectionKey('local', 'e-blind')]?.result)
+      .toMatchObject({ availability: 'check-failed' })
   })
 
   // T-002 不暴露环境值：list.agents 的元信息里不许出现任何环境变量的值。
