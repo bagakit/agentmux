@@ -5,6 +5,15 @@ import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
+import {
+  caretAtFirstLine,
+  caretAtLastLine,
+  emptyHistory,
+  navigateHistory,
+  recordHistory,
+  type HistoryState
+} from '../lib/composer-history'
+import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
 import { useAppStore } from '../store'
 import { AgentComposer } from './AgentComposer'
 
@@ -15,6 +24,18 @@ export type AgentComposerAvailability = {
 
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly string[] = Object.freeze([])
+
+// Per-session composer state that must NOT live in React: several tests call AgentSessionComposer() as a
+// plain function and read its props, which throws on any hook. It also should not live in the Store — that
+// file is owned elsewhere right now, and this is renderer-only convenience state (like the queue itself),
+// not something Core or persistence needs. Keyed by sessionId so history and the resubmit guard survive a
+// composer remount and a switch away-and-back, which is exactly per-session shell-history semantics.
+// ponytail: in-memory only — history is lost on app restart, and a dead session leaves a small stale entry
+// (same shape the persisted agentNames map already accepts). Cross-restart persistence would need a
+// store.ts change; see the report. Upgrade path: move both maps behind a store slice + partialize entry.
+const historyBySession = new Map<string, HistoryState>()
+const lastSubmitBySession = new Map<string, LastSubmit>()
+
 
 export function agentComposerAvailability(
   session: SessionSnapshot | undefined,
@@ -83,14 +104,53 @@ export function AgentSessionComposer({
   async function submit(): Promise<void> {
     if (!submitMode.canSubmit || !text.trim()) return
     const value = text
+    // 防抖 = identical-submit suppression. Mashing Send with the same text within a short window is an
+    // accidental double-tap; drop the second silently. This checks the last SUCCEEDED submit only, and we
+    // record below only after send() does NOT throw — so a real "readiness epoch already consumed" failure
+    // is never recorded and its retry is never suppressed. Coalescing distinct sends / rate-limiting the
+    // agent were rejected: both would swallow messages the user meant to send.
+    if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
     try {
       await send(sessionId, value)
       clearAgentComposerDraftIfUnchanged(sessionId, value)
+      // Only reached when send() resolved: record for history recall and the resubmit guard.
+      lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
+      historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
     } catch {
       // The Store owns error presentation; keep the draft available for retry. A codex mid-turn steer that
       // Core refuses (fail-closed readiness) lands here too — the draft staying put is the honest "not
-      // sent" signal, and no user turn is recorded because Core throws before it appends one.
+      // sent" signal, and no user turn is recorded because Core throws before it appends one. Nothing is
+      // recorded, so the retry the user is about to make is not mistaken for an accidental duplicate.
     }
+  }
+
+  // Queue a steer for a working Agent. Unlike send() this cannot fail (it appends to the local queue), so
+  // the observability fix lives here: CLEAR THE DRAFT. That is the missing "it entered the queue" signal —
+  // the user's words leaving the box, plus the badge count ticking up, is what turns a silent number into
+  // an observed event. Same resubmit guard (a double-tap Enter would otherwise queue two identical steers)
+  // and the same history recording as the send path.
+  function queue(): void {
+    const value = text
+    if (!value.trim()) return
+    if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
+    enqueueAgentSteer(sessionId, value)
+    setAgentComposerDraft(sessionId, '')
+    lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
+    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
+  }
+
+  // Shell-style up/down history recall. The multiline resolution: recall only fires at the line boundary
+  // (ArrowUp on the first line, ArrowDown on the last line), so a bare arrow inside a multi-line draft
+  // still moves the caret. The reducer preserves the half-typed draft: arrowing up stashes it, arrowing
+  // back down to the live position restores it verbatim. Returns the value to place, or null to fall
+  // through to caret movement. Everything decidable lives in the two pure lib modules.
+  function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {
+    if (direction === 'older' && !caretAtFirstLine(draft, caret)) return null
+    if (direction === 'newer' && !caretAtLastLine(draft, caret)) return null
+    const result = navigateHistory(historyBySession.get(sessionId) ?? emptyHistory, direction, draft)
+    if (!result) return null
+    historyBySession.set(sessionId, result.state)
+    return result.value
   }
 
 
@@ -158,6 +218,7 @@ export function AgentSessionComposer({
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
+      onHistoryRecall={historyRecall}
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
@@ -170,7 +231,7 @@ export function AgentSessionComposer({
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
-        onQueue: () => enqueueAgentSteer(sessionId, text)
+        onQueue: () => queue()
       } : {})}
     />
   )
