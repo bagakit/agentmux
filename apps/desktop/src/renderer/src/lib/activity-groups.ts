@@ -1,6 +1,7 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, type ScratchTopicSnapshot } from '../../../shared/scratch-topics'
 import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
+import { workingAgentCount } from './project-board'
 
 export type ActivityContextKind = 'topic' | 'branch' | 'worktree' | 'unassigned'
 
@@ -120,8 +121,8 @@ export function buildActivityGroups(
   return groups.sort((left, right) => {
     const leftAttention = groupAttention(left.sessions)
     const rightAttention = groupAttention(right.sessions)
-    const leftRank = leftAttention ? attentionSortRank(leftAttention) : left.sessions.some((session) => session.status.state === 'working') ? attentionSortRank('working') : attentionSortRank('idle')
-    const rightRank = rightAttention ? attentionSortRank(rightAttention) : right.sessions.some((session) => session.status.state === 'working') ? attentionSortRank('working') : attentionSortRank('idle')
+    const leftRank = leftAttention ? attentionSortRank(leftAttention) : workingAgentCount(left.sessions) > 0 ? attentionSortRank('working') : attentionSortRank('idle')
+    const rightRank = rightAttention ? attentionSortRank(rightAttention) : workingAgentCount(right.sessions) > 0 ? attentionSortRank('working') : attentionSortRank('idle')
     return leftRank - rightRank || (right.sessions[0]?.updatedAt ?? 0) - (left.sessions[0]?.updatedAt ?? 0) || left.label.localeCompare(right.label)
   })
 }
