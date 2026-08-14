@@ -534,9 +534,19 @@ export function projectRuntimeEvent(
   if (core.type === 'agent-status') {
     return { state: {
       ...state,
+      // `disconnected` 不许被一条 agent-status 洗掉。掉线时 Agent 的子进程还活着、hook HTTP 服务器
+      // 也没停（只在 open() 失败与 dispose() 才 stop），于是它照旧经 loopback POST 生命周期 hook，而
+      // acceptHookEvent 没有连接闸门、hook 的 observedAt 是 hook-normalizer 里的 `Date.now()`
+      // （经 publishHook 原样转成证据，故严格新于掉线那一刻的 observedAt）——
+      // 一条迟到的 hook 会把 disconnected 翻成 working，恢复横幅消失、composer 重新可写，用户往一条
+      // 字节泵已被拆掉的通道里打字。字节通道的真相只由 process-state 给（见下面那条 arm）：唯一合法的
+      // 「解掉线」是 republishLiveRunState 在重建完泵之后补发的 running，它先把 disconnected 清掉，此后
+      // hook 才照常流动。所以 hook 永远不该是清 disconnected 的那一手。unrecoverable 那格尤其致命：
+      // give-up 之后没有重连循环，而「使用 Resume」这个唯一出路只挂在 disconnected 的 detail 上。
       sessions: state.sessions.map((item) => item.id === core.agentSessionId &&
         acceptsAgentEvidence(item, core.evidence) &&
-        core.evidence.observedAt >= item.status.observedAt
+        core.evidence.observedAt >= item.status.observedAt &&
+        item.status.state !== 'disconnected'
         ? {
             ...item,
             updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
@@ -588,8 +598,12 @@ export function projectRuntimeEvent(
               // running（衰减刻意保留 observedAt）的状态会被这类陈旧重发按原 observedAt 又贴回 working，
               // 闪一帧再被重新衰减；一条滞后的旧快照也会盖掉更新的状态。要求严格新于当前观测才套用：
               // 真正的新证据 observedAt 一定更大、照常点亮，同 observedAt 的重发一律跳过。
+              // 同样不许洗掉 `disconnected`（见上面 agent-status arm 的完整论证）：掉线不改 processState，
+              // 所以 running 这个条件挡不住它——一条随会话快照重发的 semanticStatus 会把 disconnected 洗成
+              // 正常态。`disconnected` 只由 process-state 清，语义状态不是它的解除手。
               ...(core.session.semanticStatus &&
                 item.processState === 'running' &&
+                item.status.state !== 'disconnected' &&
                 core.session.semanticStatus.observedAt > item.status.observedAt
                 ? { status: structuredClone(core.session.semanticStatus) }
                 : {}),
