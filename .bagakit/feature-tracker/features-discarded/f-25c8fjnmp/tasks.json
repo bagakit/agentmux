@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "feat_id": "f-25c8fjnmp",
+  "plan_status": "draft",
+  "plan_revision": 0,
+  "supersedes_revision": null,
+  "review_ref": "",
+  "source_refs": [],
+  "plan_history": [],
+  "tasks": [],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "证据已并入 f-2598fhh62 的 goal.md（三处常量、被吞掉的安装失败、endpointReclaim 的反差先例）",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-2598fhh62/goal.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "教训：把评审发现转成需求前先按关键词搜一遍需求池；池里已有 19 条，重名不显眼",
+      "refs": [
+        ".bagakit/feature-tracker/features/f-2598fhh62/goal.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "重复建单的收口，无需提升为通用原则",
+      "refs": []
+    }
+  }
+}

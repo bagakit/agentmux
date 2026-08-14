@@ -4,7 +4,7 @@
   "title": "doctor 的 hookInstallation 是写死的字面量",
   "slug": "doctor-hook-installation-probe",
   "goal": "agentmux doctor 的 integration.hookInstallation 在三条代码路径上都返回同一个写死的字符串 'explicit-managed'，没有任何磁盘探测。而托管 hook 安装失败是被吞掉的（ensureManagedHooks catch 后只发一条 transient agent-error），于是 hook 写盘失败的用户跑 doctor 会看到「explicit-managed」并认为集成正常，实际 agent 全程没有状态 hook（永远卡在 working、没有完成通知）。邻座的 endpointReclaim 字段就是按「失败是静默的，这里是它唯一能被看见的地方」设计的自检，hookInstallation 有完全相同的静默失败性质却只报常量。两种收法：(a) 改名/改文档让它明确只报策略不报状态；(b) 照 endpointReclaim 的先例，按 provider 探测目标文件并报 installed|missing|drifted，复用 installer 已有的 hash 校验。doctor 自我定位是事前诊断，(b) 才对得上它的职责。",
-  "status": "proposal",
+  "status": "discarded",
   "workspace_mode": "proposal_only",
   "base_ref": "main",
   "branch": "",
@@ -27,6 +27,13 @@
     {
       "action": "feat_created",
       "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "feat_discarded",
+      "detail": "reason=superseded; replacement=f-2598fhh62"
     }
-  ]
+  ],
+  "closed_from_status": "proposal",
+  "discard_reason": "superseded",
+  "replacement_feat_id": "f-2598fhh62"
 }
