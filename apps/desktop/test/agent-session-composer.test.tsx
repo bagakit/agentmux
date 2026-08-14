@@ -395,6 +395,6 @@ describe('AgentSessionComposer adapter', () => {
 it('shows the context observation owned by this session in the Composer toolbar', () => {
   fixture.state.sessions = [agentSession({ turnUsage: { inputTokens: 240, outputTokens: 10, totalTokens: 250, observedAt: 1000, context: { usedTokens: 250, capacityTokens: 1000 } } })]
   const html = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
-  expect(html).toContain('Context remaining 75%')
-  expect(html).toContain('Last native observation:')
+  expect(html).toContain('25% used')
+  expect(html).toContain('75% remaining')
 })

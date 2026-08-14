@@ -43,6 +43,29 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('Send')
   })
 
+  it('places the queue indicator in the bottom-left affordance cluster, not beside the primary action', () => {
+    // The user asked for the queue badge to sit WITH the left icon cluster (Files/tools/posture), not
+    // floating over by Send. The toolbar is two groups: `<div>` left, `<div>` right (context + Send).
+    // The badge must fall in the FIRST group. Asserting it merely "renders" would not catch a regression
+    // that moves it back to the right, so this pins which group it lands in.
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: 'steer me',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      queuedCount: 3,
+      primaryAction: 'stop',
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      onInterrupt: vi.fn()
+    }))
+    const toolbar = markup.match(/composer__toolbar[^>]*>(.*)<\/div><\/div>/s)?.[1] ?? ''
+    const [leftGroup, rightGroup] = toolbar.split(/<\/div><div>/s)
+    expect(leftGroup, 'toolbar did not split into two groups — layout shape changed').toBeDefined()
+    expect(rightGroup).toBeDefined()
+    expect(leftGroup!, 'queue badge is not in the bottom-left cluster').toContain('composer__queued')
+    expect(rightGroup!, 'queue badge drifted back next to the primary action').not.toContain('composer__queued')
+  })
+
   it('offers the active-file shortcut only when there is an active file to reference', () => {
     // The shortcut names the open file, so with nothing open it has nothing to say. It hides rather
     // than sitting greyed out next to Attach, which is what made the toolbar read as broken.
