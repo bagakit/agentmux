@@ -111,6 +111,7 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   send: true,
   focus: true,
   arrange: true,
+  'promote.region': true,
   'list.agents': true,
   interrupt: true,
   resume: true,
@@ -275,8 +276,8 @@ describe('三条联合的成员判定只有一处声明', () => {
     // control 请求：只喂 schemaVersion + requestId + operation。每个合法操作都会因为**别的**字段
     // 缺失而抛（target/destination 不合法），关键是它**不会**抛「操作不合法」。于是这条恰好只钉住那道
     // membership 闸，不连带钉住十二种请求各自的形状。
-    it('十二个操作全部越过 membership 闸（各自因别的字段失败，不是因为操作名）', () => {
-      expect(CONTROL_OPERATION_MEMBERS.length, '操作锚点是空的，下面的循环是死代码').toBe(12)
+    it('每个操作全部越过 membership 闸（各自因别的字段失败，不是因为操作名）', () => {
+      expect(CONTROL_OPERATION_MEMBERS.length, '操作锚点是空的，下面的循环是死代码').toBe(13)
       for (const operation of CONTROL_OPERATION_MEMBERS) {
         expect(
           messageOf(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'request-1', operation })),

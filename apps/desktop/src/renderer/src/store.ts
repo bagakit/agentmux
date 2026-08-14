@@ -2227,6 +2227,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({ tabs: { ...state.tabs, [tab.id]: arranged } })
       return { operation: request.operation, tab: inspectWorkbenchControlTab(input(), arranged) }
     }
+    if (request.operation === 'promote.region') {
+      // 促升一格成它自己的一张 Tab（#487）。树代数全在纯 reducer reducePromoteRegionToTab 里，这里
+      // 不重实现——只做三件 Control 面的事：把 self/显式选择器解析成一格（复用 resolveWorkbenchControlRegion，
+      // 顺带证明它真的开着）、把 reducer 的 'unchanged' 翻成 typed 失败（绝不把「什么都没做」报成一次成功
+      // 的移动）、把新 Tab 坐标交回调用方。促升只搬布局投影，不碰 Runtime lifecycle：这里没有任何
+      // api.sessions.* 调用，Session/Run 身份原样跟着 regionId 走。
+      const region = resolveWorkbenchControlRegion(input(), request.target, request.caller)
+      const result = reducePromoteRegionToTab({
+        tabs: get().tabs,
+        layouts: get().layouts,
+        workspaceId: region.workspaceId,
+        tabId: region.tabId,
+        regionId: region.regionId,
+        mint: { tabId: `view:${crypto.randomUUID()}` }
+      })
+      if (result.kind !== 'promoted') {
+        throw controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab; it is already its own Tab.')
+      }
+      set({
+        activeWorkspaceId: result.target.workspaceId,
+        mainSurface: 'workbench',
+        tabs: result.tabs,
+        layouts: result.layouts
+      })
+      return {
+        operation: request.operation,
+        tabId: result.target.tabId,
+        regionId: result.target.regionId,
+        workspaceId: result.target.workspaceId
+      }
+    }
     if (request.operation === 'send') {
       let session: Extract<SessionSnapshot, { kind: 'agent' }>
       if (request.target.kind === 'self' || request.target.kind === 'agent-session') {
