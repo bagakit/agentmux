@@ -194,6 +194,74 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
   })
 
+  it('clears the draft when a message enters the queue, so entering is observable', () => {
+    // The observability gap: onQueue used to leave the text in the box while only a number ticked up —
+    // "a message silently becomes a number". Clearing the box IS the signal that it moved to the queue;
+    // the badge count going up is the other half. Without this the user cannot tell a queue happened.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'queue me and clear the box' }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    composer.props.onQueue?.()
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
+    expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', '')
+  })
+
+  it('suppresses an accidental identical re-queue but records the first', () => {
+    // 防抖 = identical-submit suppression. A double-tap that queues the same steer twice is the annoyance;
+    // the second call inside the window is dropped. The first still enqueues — suppression must not eat it.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'stop double-queueing me' }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    composer.props.onQueue?.()
+    composer.props.onQueue?.()
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledOnce()
+  })
+
+  it('offers history recall wired to the shared composer', async () => {
+    // The recall callback is the shell up/down affordance. It only fires at a line boundary (checked in the
+    // pure lib) and returns the value to place or null to fall through. Here: after one recorded submit,
+    // arrowing up from an empty first-line draft recalls it; arrowing back down restores the (empty) draft.
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'first prompt' }
+    // Record one submit through the real path so history has an entry (recorded after send() resolves).
+    const first = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
+    first.props.onSubmit?.()
+    fixture.state.agentComposerDrafts = { 'agent-1': '' }
+    const recall = () => (AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onHistoryRecall?: (d: 'older' | 'newer', draft: string, caret: number) => string | null }
+    }).props.onHistoryRecall
+    // Poll until the async record lands: arrowing up from an empty first-line draft recalls the entry.
+    await vi.waitFor(() => expect(recall()?.('older', '', 0)).toBe('first prompt'))
+    // Back down to the live position restores the stashed (empty) draft, not the recalled entry.
+    expect(recall()?.('newer', 'first prompt', 'first prompt'.length)).toBe('')
+    // A bare ArrowUp with the caret NOT on the first line falls through (null) so the caret can move.
+    expect(recall()?.('older', 'line one\nline two', 'line one\nline two'.length)).toBeNull()
+  })
+
+  it('lets the user retry immediately after a failed send — the guard must not swallow it', async () => {
+    // 承重的那条安全性质，也是这次 P0 的直接教训：防重提交**绝不能**把一次真实失败后的重试当成
+    // 误触吞掉。`AGENT_PROMPT_READINESS_CONSUMED` 那场事故里，发送会失败、用户必然重按——若失败
+    // 也被记进 lastSubmit，重试就会被静默丢弃，用户看到的是「按了没反应」，而真正的病因被防御盖住。
+    //
+    // 判据是**调用序**：只有 send() 兑现后才记录。把 recordSubmit 挪到 try 之前（一个很自然的
+    // 「先记录再发」重构）这条立刻红——同样文本、同一个窗口内的第二次提交会被判成重复而不再发出。
+    // 纯 lib 的用例证不到这一点：它测的是判别函数本身，而缺陷在于**外壳何时调用它**。
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'retry me' }
+    fixture.state.send.mockRejectedValueOnce(new Error('The prompt was not sent.'))
+
+    const submit = () => (AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit?: () => void }
+    }).props.onSubmit
+    submit()?.()
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledTimes(1))
+
+    // 同一段文字、紧接着重试（远在防重窗口之内）：必须真的再发一次。
+    submit()?.()
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledTimes(2))
+    expect(fixture.state.send.mock.calls[1]?.[1]).toBe('retry me')
+  })
+
   it('keeps Stop as the working primary action even though steer submits', () => {
     // Steer must not move or replace the Stop button — a user mid-turn must not mis-click. Both an Enter
     // submit path AND a Stop interrupt path exist at once; they are different questions.
