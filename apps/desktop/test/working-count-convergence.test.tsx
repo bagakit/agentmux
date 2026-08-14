@@ -325,7 +325,15 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 各有自己的条目，不在本次收敛范围内——但它们出现在这里，所以不会被静默遗忘。
   '/components/AgentRoster.tsx': '单行状态点（另见 #500：该函数在 DOM 层从未被执行）',
   '/components/FanOutStrip.tsx': '单 lane 状态点（另见 #572）',
-  '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank'
+  '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank',
+  // 单个 Session 的显示标签，不是计数：working 显示 "active now"，其余显示 idle 时长。这里若折进
+  // sessionBoardColumn，starting/running 也会画成 "active now"——那会改变用户看到的文本，是另一个问题。
+  '/components/ProjectActivity.tsx':
+    '单行标签 "active now" vs idle 时长，问的是"这一个 Session 在 working 吗"而不是"有几个在干活"',
+  // 单个 Session 的排序类，喂给 attentionSortRank（与已登记的 agent-roster.ts 同形）。它把一个 Session
+  // 映射到 working/idle 排序档，不数总量；折进 sessionBoardColumn 会让 starting/running 也排成 working。
+  '/lib/activity-groups.ts':
+    '单 Session 排序类，喂给 attentionSortRank，问的是"这一个排哪档"而不是"有几个在干活"'
   // `/lib/fanout-group.ts` 曾在这里，理由写的是「作用域是那一组而非整窗」。那不是理由：作用域只
   // 影响分母，不改变"谁算在干活"这个判据。它的 `groupProgress().working` 已改成走
   // `sessionBoardColumn`，所以从这张表里删掉——下面 `gone` 那条断言会盯着这件事。
@@ -515,8 +523,20 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
   '/lib/agent-roster.ts': { count: 2, why: '行排序 rank，喂给 attentionSortRank（另见 #572）' },
   '/components/AgentRoster.tsx': { count: 3, why: '单行状态点（另见 #500：该函数在 DOM 层从未被执行）' },
   '/components/FanOutStrip.tsx': { count: 3, why: '单 lane 状态点（另见 #572）' },
+  '/components/ProjectActivity.tsx': {
+    count: 2,
+    why: '单行标签：switch 的 "working" case（"Working · no recent summary"）与逐行 "active now" 判定，都问"这一个 Session 在 working 吗"，计数走同文件已 import 的 workingAgentCount'
+  },
+  '/lib/activity-groups.ts': {
+    count: 6,
+    why: '两处单 Session 排序类（每处 `=== working ? working : idle` 各两个字面量）+ 组排序的 working 档实参两处；组是否在跑走 workingAgentCount(...) > 0，不自己数'
+  },
+  '/lib/resource-usage-panel.ts': {
+    count: 1,
+    why: '单行资源用量的 idle 标签：working 显示空、其余显示 idle 时长，问的是"这一个在跑吗"而不是"有几个在干活"'
+  },
   '/components/AgentStatusBar.tsx': {
-    count: 4,
+    count: 5,
     why: 'StatusCount 的状态词与 label：读 rollup 算好的数，自己不判'
   }
 }
@@ -672,20 +692,24 @@ describe('「有几个在干活」的裁决只有一处', () => {
     }
     const known = new Map(Object.entries(WORKING_LITERAL_SITES).map(([path, site]) => [path, site.count]))
 
-    expect(
-      [...found.keys()].filter((path) => !known.has(path)).sort(),
-      '这些文件新写了 `working` 字面量。若它数的是"有几个在干活"，改成调 sessionBoardColumn；' +
-        '否则把它连同"你回答哪个问题"加进 WORKING_LITERAL_SITES。'
-    ).toEqual([])
-    expect(
-      [...known.keys()].filter((path) => !found.has(path)).sort(),
-      '这些文件已经不写 `working` 了——从 WORKING_LITERAL_SITES 删掉，别留陈旧豁免。'
-    ).toEqual([])
-    // 次数：已列出的文件里再抄一份，上面两条都不会红。
+    // 一条断言，不是三条。整张表的相等判断**已经蕴含**「没有新文件」与「没有过期条目」——
+    // 键集不同时 toEqual 就红，并把两边的表都打印出来，定位信息不比分开写少。
+    //
+    // 曾经写成三条 expect 依次排列（新增集 → 过期集 → 计数表），实测那是一个**互相掩盖**的结构：
+    // 同一个 it 里前一条抛出后，后面两条是死代码。于是 AgentStatusBar.tsx 的计数从 4 漂到 5 一直
+    // 没被发现——每次有人新增文件，第一条先红，计数那条根本没跑；等新增集被补齐了，计数那条才
+    // 第一次执行，而那时它报的是一个「早就漂了」的旧账，看起来像本次改动引入的。
+    //
+    // 收成一条之后，三种放宽（新增文件 / 删掉条目 / 在已列出的文件里再抄一份）都由同一条断言接住，
+    // 谁也挡不住谁。（memory: two-throws-in-one-it-mask-each-other 的同族——那条讲两个 toThrow，
+    // 这里是两个 toEqual，机制一样：先抛的那个让后面的永不执行。）
     expect(
       Object.fromEntries([...found].sort()),
-      '某个文件里 `working` 的出现次数变了。多出来的那一处是不是又抄了一份判据？' +
-        '确认它回答的是别的问题之后，更新 WORKING_LITERAL_SITES 里的 count。'
+      '全仓 `working` 字面量的分布与 WORKING_LITERAL_SITES 不一致。三种情况：' +
+        '(1) 某个文件新写了 `working`——若它数的是"有几个在干活"，改成调 sessionBoardColumn；' +
+        '否则把它连同"你回答哪个问题"加进表里。' +
+        '(2) 某个文件已经不写了——从表里删掉，别留陈旧豁免。' +
+        '(3) 已列出的文件里出现次数变了——多出来的那一处是不是又抄了一份判据？'
     ).toEqual(Object.fromEntries([...known].sort()))
   })
 })
