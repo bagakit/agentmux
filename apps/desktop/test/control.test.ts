@@ -656,10 +656,12 @@ describe('Desktop Control owner', () => {
   it('refuses to promote the only Region of a Tab with a typed error, not a fake success', async () => {
     const tab = fixture()
     // 单格 Tab：促升是 no-op（它已经就是一张 Tab）。绝不把「什么都没做」报成一次成功的移动——
-    // 抛 typed CONTROL_FAILED。破坏 reducer 让它对单格也造新 Tab，这条红（本该 reject 却 resolve）。
+    // 抛 typed REGION_ALREADY_SOLE，而不是笼统的 CONTROL_FAILED：调用方要能把「已经到位」和
+    // 「请求不成立」分开，不必去 match 文案。破坏 reducer 让它对单格也造新 Tab，这条红（本该
+    // reject 却 resolve）；把这个码退回 CONTROL_FAILED，这条也红。
     await expect(useAppStore.getState().executeControl(request({
       operation: 'promote.region', target: { kind: 'region', regionId: 'region-caller' }
-    }))).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
+    }))).rejects.toMatchObject({ code: 'REGION_ALREADY_SOLE' })
     // 没有凭空多出一张 Tab：输入不动。
     expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
   })

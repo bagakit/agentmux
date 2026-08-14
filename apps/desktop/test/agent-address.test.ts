@@ -281,6 +281,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'LAUNCH_RESULT_MISMATCH',
       'LAUNCH_CLEANUP_FAILED',
       'LAYOUT_CAPACITY_EXCEEDED',
+      'REGION_ALREADY_SOLE',
       'LAUNCHER_REGION_REQUIRED',
       'AGENT_NOT_FOUND',
       'INVALID_AGENT_PROMPT',

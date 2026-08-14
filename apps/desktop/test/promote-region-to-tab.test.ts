@@ -62,8 +62,9 @@ describe('promoteRegionToTab（#487「单独变成一个 tab」）', () => {
       mint: { tabId: 'new-tab' }
     })
 
-    // discriminated union 的 kind 干净地区分「提前返回不变」与「跑完产出一个相等的值」。
-    expect(result.kind).toBe('unchanged')
+    // 只剩一格：它已经就是一张 Tab。这条结局与「stale/不合格输入」的 'unchanged' 不同——是
+    // 'already-sole'，让 Control 层能把它映射成 typed REGION_ALREADY_SOLE，调用方据此停手而非重试。
+    expect(result.kind).toBe('already-sole')
     // 输入没被动过：没有凭空多出一张 Tab。
     expect(Object.keys(tabs)).toEqual(['source'])
     expect(Object.keys(tabs)).not.toContain('new-tab')

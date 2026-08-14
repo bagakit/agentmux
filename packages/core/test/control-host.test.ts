@@ -245,6 +245,21 @@ describe('Control protocol', () => {
     })).toThrow('invalid')
   })
 
+  // promote.region 的 no-op（那格已经就是一张 Tab）抛 REGION_ALREADY_SOLE，而不是笼统的
+  // CONTROL_FAILED——调用方据此分辨「已经在那了，别重试」与「真的失败了」。这条钉的是那个码是
+  // 联合的真成员、能原样过线：把它从 AGENTMUX_CONTROL_ERROR_CODES 删掉，controlErrorCode 会把它
+  // 折成 CONTROL_FAILED，随后 `code === 'CONTROL_FAILED' && error.code !== 'CONTROL_FAILED'` 那道闸
+  // 抛 'Control error receipt is invalid.'，这条 toMatchObject 转红。
+  it('carries REGION_ALREADY_SOLE through an error receipt as a distinct code, not CONTROL_FAILED', () => {
+    expect(parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'promote-sole',
+      ok: false,
+      operation: 'promote.region',
+      error: { code: 'REGION_ALREADY_SOLE', message: 'Region is already the only Region of its Tab.' }
+    })).toMatchObject({ ok: false, error: { code: 'REGION_ALREADY_SOLE' } })
+  })
+
   it('preserves typed ambiguous message candidates through receipts', () => {
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
