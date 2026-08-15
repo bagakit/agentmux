@@ -124,6 +124,13 @@ const WORKTREE_EXCLUDE_LINE = '/.worktrees/'
  * The path and the line are passed as `sh` ARGUMENTS, never interpolated into the script text, so a
  * repository path containing a quote or a space cannot become shell syntax. `grep -qxF` makes it
  * idempotent — verified by running it twice against a scratch repo and confirming one line.
+ *
+ * The `[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ]` guard is load-bearing, not defensive: a plain
+ * `>>` onto a file whose last line has no newline GLUES the two together. An `info/exclude` ending
+ * in `notes.txt` becomes `notes.txt/.worktrees/` — one nonsense pattern where there were two rules,
+ * so the user's own ignore silently stops working too. Git reports no error; the directories simply
+ * reappear in `git status`. Hand-written files without a trailing newline are common, and this file
+ * is hand-written by definition.
  */
 async function excludeWorktreeRootFromStatus(host: ExecutionHost, repoPath: string): Promise<void> {
   try {
@@ -138,7 +145,9 @@ async function excludeWorktreeRootFromStatus(host: ExecutionHost, repoPath: stri
       'sh',
       [
         '-c',
-        'mkdir -p "$(dirname "$1")" && { grep -qxF "$2" "$1" 2>/dev/null || printf "%s\\n" "$2" >> "$1"; }',
+        'mkdir -p "$(dirname "$1")" && { grep -qxF "$2" "$1" 2>/dev/null || { ' +
+          '[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && printf "\\n" >> "$1"; ' +
+          'printf "%s\\n" "$2" >> "$1"; }; }',
         'sh',
         `${common}/info/exclude`,
         WORKTREE_EXCLUDE_LINE
