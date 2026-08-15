@@ -400,7 +400,12 @@ describe('T-002 输出通道断了的可持久告知', () => {
     await driveReconnect(state, events)
     expect(client.agentSession('agent-1').terminalOutputChannel).toBeDefined()
 
-    // 用户点 Resume（走 reattachAgent → attachAgentRun 这条共享核心）：这次 attach 成功。
+    // 一次视图重挂（runtime-controller 在没有既有 attachment owner 时走 reattachAgent →
+    // attachAgentRun 这条共享核心）：这次 attach 成功。
+    //
+    // 刻意**不写**「用户点 Resume」：Resume 走 ensureAgentContinuity，对一个 running 的 Run 判出
+    // `reattachable` 就直接返回投影，attach 一次都不会调，这条降级事实原样留着。这条降级只在进程
+    // 还在跑时产生，所以 Resume 在这个状态下从来不是它的恢复路径。
     kernel.configureAttach('run-1', { run: runningRun('run-1') })
     await client.reattachAgent('agent-1')
 
