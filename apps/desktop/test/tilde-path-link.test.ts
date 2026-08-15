@@ -117,7 +117,9 @@ describe('tilde path recognition (#793) — one shared decision across both surf
 
   it('the conversation body leaves an out-of-workspace ~/ path as plain text', () => {
     const segments = splitMarkdownFileReferences('see ~/.ssh/config for details', ROOT, HOME)
-    expect(segments.every((segment) => segment.kind === 'text')).toBe(true)
+    // 钉整份切分结果而不是「每一段都是 text」：后者对空数组恒成立，于是切分器什么都不返回
+    // （整句话在界面上消失）时这条照样绿，而那比「多认了一个链接」严重得多。
+    expect(segments).toEqual([{ kind: 'text', text: 'see ~/.ssh/config for details' }])
   })
 
   it('a markdown [label](~/…) href inside the workspace routes to the file seam', () => {

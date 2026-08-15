@@ -168,6 +168,9 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     // `balanceNode` 对叶子原样返回、`placeActiveWorkbenchRegionFirst` 首格已是活动格时原样返回，
     // 于是单格 Tab 里两者都是 no-op。以缺席表达，而不是画一个禁用的假按钮。
     const single = workbenchSplitMenuEntries({ regionCount: 1, split: () => {}, arrange: () => {} })
+    // 前提自检：单格 Tab 的清单不是空的（分屏那一组照常在），否则下面那条「没有 rearrange」
+    // 是 `some(...)===false` 对空数组恒成立——整个菜单消失时它会静静放行。
+    expect(single.some((entry) => entry.kind === 'split'), '前提自检：单格 Tab 仍有分屏项').toBe(true)
     expect(single.some((entry) => entry.kind === 'rearrange')).toBe(false)
 
     // 而它们的在场条件是「有得排」，不是容量：一张 99 分屏的 Tab 摆不成任何预设，却恰恰最需要
@@ -356,8 +359,11 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     const firstSplitAt = withSplit.findIndex((entry) => entry.kind === 'split')
     expect(firstSplitAt).toBeGreaterThan(0)
     expect(withSplit[firstSplitAt - 1]?.kind, '分屏一节前面缺一道分隔线').toBe('separator')
+    const tail = withSplit.slice(firstSplitAt)
+    // 切出来的这段非空：下面那条是「这段里没有 action」，对空段恒成立。
+    expect(tail.length, '从分屏起切出来的是空段，下面那条就成了空话').toBeGreaterThan(0)
     expect(
-      withSplit.slice(firstSplitAt).some((entry) => entry.kind === 'action'),
+      tail.some((entry) => entry.kind === 'action'),
       '地址项跑到分屏后面去了'
     ).toBe(false)
 
@@ -367,6 +373,9 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
       agentSessionId: null,
       writeClipboardText: async () => {}
     }).entries
+    // 前提自检：地址项这一组照常在。下面两条都是「没有 X」，对空 entries 恒成立——菜单整个
+    // 画不出来时它们会静静放行，而那比多一节分屏严重得多。
+    expect(withoutSplit.some((entry) => entry.kind === 'action'), '前提自检：地址项仍在').toBe(true)
     expect(withoutSplit.some((entry) => entry.kind === 'split')).toBe(false)
     expect(withoutSplit.some((entry) => entry.kind === 'separator')).toBe(false)
   })

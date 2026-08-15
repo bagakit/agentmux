@@ -57,7 +57,9 @@ describe('markdown file references', () => {
       // Delegated to the shared resolver on purpose — this asserts the delegation holds, so a second
       // copy of "what counts as a path" cannot appear here without turning this red.
       for (const prose of ['e.g. this', 'version 1.2.3', 'see README', 'at ~/notes.md', '../outside.ts']) {
-        expect(splitMarkdownFileReferences(prose, ROOT).every((s) => s.kind === 'text')).toBe(true)
+        // 钉整份切分结果：`every(...)===true` 对空数组恒成立，切分器什么都不返回（这段文字在
+        // 界面上整个消失）时它照样绿，而那比「多认了一个引用」严重得多。
+        expect(splitMarkdownFileReferences(prose, ROOT)).toEqual([{ kind: 'text', text: prose }])
       }
     })
 
@@ -67,7 +69,10 @@ describe('markdown file references', () => {
         expect.objectContaining({ kind: 'file', reference: expect.objectContaining({ path: 'src/a.ts' }) })
       )
 
-      expect(splitMarkdownFileReferences('/etc/passwd', ROOT).every((s) => s.kind === 'text')).toBe(true)
+      // 同上：钉整份结果，不是「每段都是 text」——后者对空数组恒成立。
+      expect(splitMarkdownFileReferences('/etc/passwd', ROOT)).toEqual([
+        { kind: 'text', text: '/etc/passwd' }
+      ])
     })
   })
 

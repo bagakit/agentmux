@@ -698,7 +698,9 @@ describe('WorktreeService', () => {
     expect(list.stdout).not.toContain(worktreePath)
     // The saved config is the authoritative record set, and the removed lane must not survive in it.
     expect(save).toHaveBeenCalledOnce()
-    expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // 钉住整份存活清单，而不是「lane 不在里面」：后者是 `some(...)===false`，对空集合恒成立，
+    // 所以「把记录集整个清空」——一个严重得多的缺陷——会从那条断言底下静静走过去。
+    expect(removal.config.workspaces.map((item) => item.id)).toEqual(['repo'])
     // `--` 终止选项解析，所以一条以短横线开头的 worktree 路径不会被 git 读成开关。这里只能钉 argv：
     // 不像 create（相对路径按 `-C` 的仓库解析），移除前那次 `-C workspace.path` 的 status 探针会把
     // 相对路径按进程 cwd 解析，用真短横线路径就测不成同一件事了。孪生的 create 侧由真 git 守。
@@ -828,7 +830,8 @@ describe('WorktreeService', () => {
     const removal = await service.removeWorktree({ workspaceId: 'lane' }, phantom)
 
     expect(removal.removedPath).toBe(phantomPath)
-    expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // 整份存活清单，不是「lane 不在」——见上：`some(...)===false` 空集合恒成立，清空也会绿。
+    expect(removal.config.workspaces.map((item) => item.id)).toEqual(['repo'])
   }, 20000)
 
   it('记录没撤下之后重试能真的撤下来：那一档不是死路', async () => {
@@ -862,7 +865,8 @@ describe('WorktreeService', () => {
 
     expect(second.removedPath).toBe(worktreePath)
     // 记录真的撤下来了。只断言「没抛」是不够的：不撤记录而静静返回，那一行照旧留在界面上。
-    expect(second.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // 钉整份清单而不是「lane 不在」：后者对空集合恒成立，把记录集清空同样会绿。
+    expect(second.config.workspaces.map((item) => item.id)).toEqual(['repo'])
   }, 20000)
 
   it('目录还在时脏树保护照旧拦住：跳过探针只针对「路径不存在」', async () => {
@@ -921,7 +925,8 @@ describe('WorktreeService', () => {
     expect(removal.removedPath).toBe(worktreePath)
     await expect(stat(worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(save).toHaveBeenCalledOnce()
-    expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // 整份存活清单，不是「lane 不在」——见上：清空记录集也能从 `some(...)===false` 底下走过去。
+    expect(removal.config.workspaces.map((item) => item.id)).toEqual(['repo'])
     // 这是第四个 `--`，与上面那条是**两个分支**：`--force` 那一支自己也要终止选项解析。少了它，
     // 一条短横线开头的路径会被 git 读成开关，于是「丢弃改动并移除」这条路对该分支永久失败。
     expect(runSpy).toHaveBeenCalledWith(
@@ -1119,6 +1124,9 @@ describe('WorktreeService', () => {
     expect(result.config.workspaces.some((item) => item.id === winner!.id)).toBe(true)
     expect(result.keptWorkspaceId).toBe(winner!.id)
     // Both losers are gone from disk and from the record set.
+    // 先钉住「两条败者各有一条结局」：`every(...)===true` 对空集合恒成立，所以一条结局都不报——
+    // 调用方据此显示「删了什么」，一条不报等于什么都没交代——会从这条断言底下静静走过去。
+    expect(result.outcomes).toHaveLength(2)
     expect(result.outcomes.every((outcome) => outcome.status === 'removed')).toBe(true)
     await expect(stat(loserA!.path)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(loserB!.path)).rejects.toMatchObject({ code: 'ENOENT' })

@@ -796,6 +796,7 @@ describe('who decides needs-you is confined to the attention vocabulary SSOT', (
     ).toEqual(['renderer/src/lib/agent-attention.ts', 'renderer/src/lib/attention-event.ts'])
     // Enrolled files with zero state literals produce no scope at all, which is the clean state — so
     // this may legitimately be empty and is NOT asserted non-empty.
+    // vacuous-ok: 空集合是这里的合法终局（一个状态字面量都没有＝干净），要求非空证明等于逼人写假话。
     expect([...enrolledFiles].every((file) => allEnrolled.has(file))).toBe(true)
 
     expect(

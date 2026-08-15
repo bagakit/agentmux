@@ -914,10 +914,12 @@ describe('Region 焦点必须看得出来（#339）', () => {
     ).toEqual([])
 
     // token 展开器自身的在场自检：展不开就等于判据对藏在 token 后的透明色失明（上面那条靠它）。
-    expect(resolvedValues('var(--green-2)', TOKENS), '--green-2 展不开，边色判据只在字面量上有效').not.toContain(
-      'var(--green-2)'
-    )
-    expect(resolvedValues('var(--green-2)', TOKENS).every((value) => !isInvisibleColor(value, TOKENS))).toBe(true)
+    const greenValues = resolvedValues('var(--green-2)', TOKENS)
+    // 展开结果非空：下面两条（`not.toContain` 与 `every(...)===true`）对空数组都恒成立，
+    // 展开器返回空时它们会一起静静放行，而那正是「判据对 token 后的颜色失明」本身。
+    expect(greenValues.length, '--green-2 展开成空，下面两条自检都成了空话').toBeGreaterThan(0)
+    expect(greenValues, '--green-2 展不开，边色判据只在字面量上有效').not.toContain('var(--green-2)')
+    expect(greenValues.every((value) => !isInvisibleColor(value, TOKENS))).toBe(true)
     expect(isInvisibleColor('var(--probe-clear)', probeTokens), '展开器认不出藏在 token 后的 transparent').toBe(true)
   })
 

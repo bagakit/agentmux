@@ -517,16 +517,18 @@ describe('Source Control 的写操作面接线（#206）', () => {
       ).toBe(true)
     }
     // 自检：取值器认得出该拒的拼法，也认得出正确的那种。否则「没找到违规」与「认不出违规」同形。
+    // 钉整份取值结果，不是「没有一处经过判定」/「每一处都经过判定」——那两句对**空结果**恒成立，
+    // 而取值器一个读都找不到（它认不出当前写法了）比它认错形状严重得多，却正好会被它们盖住。
     const rejected = 'const armed = armedDiscard === change.path'
     expect(
-      readsOf('armedDiscard', rejected).some((read) => /^discardIntent\(/.test(read)),
+      readsOf('armedDiscard', rejected),
       '取值器把一次手抄的比较也当成经过判定了——那正是它要挡的形状'
-    ).toBe(false)
+    ).toEqual(['armedDiscard === change.path'])
     const accepted = "const armed = discardIntent(armedDiscard, change.path) === 'discard'"
     expect(
-      readsOf('armedDiscard', accepted).every((read) => /^discardIntent\(/.test(read)),
+      readsOf('armedDiscard', accepted),
       '取值器认不出正确的写法——它挡的不是坏形状而是所有形状'
-    ).toBe(true)
+    ).toEqual(['discardIntent(armedDiscard, change.path)'])
   })
 
   /**
