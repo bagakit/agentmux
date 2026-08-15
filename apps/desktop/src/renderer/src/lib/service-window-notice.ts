@@ -1,3 +1,4 @@
+import type { AgentMuxRunState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from './session-state'
 
@@ -17,6 +18,27 @@ import { CONNECTION_UNRECOVERABLE_DETAIL } from './session-state'
  * 由类型强制它不能被 `default` 悄悄折进「完全好的」。
  */
 type AgentViability = 'alive' | 'dead' | 'unknown'
+
+/**
+ * 从进程事实映出 Agent 的存活判定——**唯一一处**，四个渲染点共用。
+ *
+ * 判据是「进程还在跑吗」，不是「我们的连接/步骤过了吗」：`running` 是活着（第 2 类，放行 + 提醒），
+ * `exited` 是死了（第 1 类，交给恢复横幅），`interrupted`（连接断了、进程既非明确在跑也非明确退出）
+ * 是分不清——`unknown` 是一等状态，绝不折进 alive 或 dead。
+ *
+ * 用 `Record<AgentMuxRunState, …>` 总映射而不是 switch/ternary，是因为这**就是验收判据**：给
+ * `AgentMuxRunState` 加一个成员，这张表少一格会让 tsc 变红，而不是安静落进某个 `default`/末尾三元
+ * 分支被当成 `unknown`。此前这段映射在四处手抄，任何一处写错都无编译器、无测试拦得住。
+ */
+const AGENT_VIABILITY_BY_PROCESS_STATE: Record<AgentMuxRunState, AgentViability> = {
+  running: 'alive',
+  exited: 'dead',
+  interrupted: 'unknown'
+}
+
+export function agentViabilityFromProcessState(processState: AgentMuxRunState): AgentViability {
+  return AGENT_VIABILITY_BY_PROCESS_STATE[processState]
+}
 
 /**
  * 我们的一个中间步骤。三段文案就是服务窗要说清的三件事：哪一步没走通、现在按什么状态在跑、
@@ -133,13 +155,7 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
       degradedMode: 'The Agent is still usable; terminal capability is unknown and prompts remain available',
       restore: 'Resume this session to retry the capability check'
     }
-    if (session.processState === 'running') {
-      return { completed: false, step, agentViability: 'alive' }
-    }
-    if (session.processState === 'exited') {
-      return { completed: false, step, agentViability: 'dead' }
-    }
-    return { completed: false, step, agentViability: 'unknown' }
+    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }
 
   if (session.status.state !== 'disconnected') return { completed: true }
@@ -165,14 +181,9 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
         degradedMode: 'The Agent process is still running; only this window’s link to it dropped',
         restore: 'Resume the session to reattach'
       }
-  if (session.processState === 'running') {
-    return { completed: false, step, agentViability: 'alive' }
-  }
-  if (session.processState === 'exited') {
-    return { completed: false, step, agentViability: 'dead' }
-  }
-  // interrupted：连接断了，进程既非明确在跑也非明确退出——分不清，如实说，不猜。
-  return { completed: false, step, agentViability: 'unknown' }
+  // 看进程，不看我们的连接：进程在跑是第 2 类（连接断了、Agent 没坏），退了是第 1 类，
+  // interrupted（既非明确在跑也非明确退出）是分不清——如实说，不猜。
+  return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
 }
 
 /** Core owns delivery evidence; this notice survives view switches and snapshot refreshes. */
@@ -190,7 +201,6 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
       degradedMode: 'Prompt delivery continued without full screen confirmation',
       restore: 'Check the Agent’s response; the next fully verified prompt clears this notice'
     },
-    agentViability: session.processState === 'running' ? 'alive'
-      : session.processState === 'exited' ? 'dead' : 'unknown'
+    agentViability: agentViabilityFromProcessState(session.processState)
   }
 }
