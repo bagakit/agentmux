@@ -56,6 +56,10 @@
       "types": "./dist/agent-run-status.d.ts",
       "import": "./dist/agent-run-status.js"
     },
+    "./agent-prompt-budget": {
+      "types": "./dist/agent-prompt-budget.d.ts",
+      "import": "./dist/agent-prompt-budget.js"
+    },
     "./workbench-layout-preset": {
       "types": "./dist/workbench-layout-preset.d.ts",
       "import": "./dist/workbench-layout-preset.js"
