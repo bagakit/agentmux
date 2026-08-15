@@ -53,7 +53,16 @@ export async function runFanOutRequest(
   const plan = planFanOut({
     count: input.count,
     baseName: input.baseName,
-    worktreeRoot: join(workspace.path, '.worktrees'),
+    // 仓库根，不是 `workspace.path`。两者在多数 workspace 上是同一个字符串，所以取错不会当场出事——
+    // 但文件树的「Open as Project」会把仓库里的一个子目录注册成 workspace（open-directory-as-project
+    // 用 joinWorkspacePath 往下拼），此时两者分岔：lane 会落到 `<repo>/sub/.worktrees/`，而
+    // worktree-service 写进 `info/exclude` 的 `/.worktrees/` 是**锚定**在仓根的，盖不住深一层的那个
+    // 目录（真 git 验过：仓根的 `git status --porcelain` 照旧吐 `?? sub/.worktrees/`）。于是「扇出不
+    // 再弄脏用户的 git status」这件事，恰恰对最需要它的那类 workspace 静默失效。
+    //
+    // 反过来把锚定那一侧放宽成通配不行：不锚定的规则会连用户自己在任意深度建的同名目录一起吞掉，
+    // 那是把用户的东西弄丢，比留点噪音严重得多。所以是目录去就规则，不是规则去就目录。
+    worktreeRoot: join(branches.repoPath, '.worktrees'),
     executorIds: input.executorIds,
     existingBranches: branches.branches.map((branch) => branch.name),
     existingWorktreePaths: branches.branches.flatMap((branch) =>
