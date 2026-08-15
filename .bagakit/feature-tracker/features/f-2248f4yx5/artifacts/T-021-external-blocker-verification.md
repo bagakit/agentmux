@@ -21,16 +21,41 @@
 经 `pnpm-workspace.yaml:10` 以 file: 协议链入），其公开 d.ts 面为：
 
 ```
-attachment  client  control  index  integration  stop-operation  validation  wire
+activation  attachment  client  control  index  integration  stop-operation  validation  wire
 ```
 
-对全部 d.ts grep `ssh` / `Remote` / `remote` / `RemoteConnector` / `remoteHost`：
-**零命中**。没有 Remote connector，没有 Host/Build/Capability 身份，
-没有部署/升级或 partition recovery 的公开类型。
+对全部 d.ts grep `ssh` / `RemoteConnector` / `remoteHost`：**零命中**。
+没有 Remote connector 类型，没有 Host 身份，没有部署/升级或 partition recovery 的公开类型。
 
 与之一致的是 AgentMux 自己的现状：`packages/core/src/execution-host.ts:62` 的
 ssh host 在 `:86`、`:93` 直接返回 typed `REMOTE_UNSUPPORTED`——
 这是**有意的诚实占位**，不是遗漏。
+
+## 2026-09-13 复核：结论不变，但上面两处已经过期
+
+重新解包同一个 tarball（`6b0bc0a9` 起未再变更）核对，发现原记录有两处不准，已在上面就地改正：
+
+1. **d.ts 是 9 个不是 8 个**，漏掉了 `activation.d.ts`——`activateRuntime` / `connectOrActivate`、
+   `RuntimeActivationOptions`、`CtxmuxActivationConflictError` 等一整套**本地** Runtime 激活合同。
+   它不改变 T-021 的结论（那是 Local 那一半，T-020 已 done），但"公开面只有这 8 个"这句话本身是错的。
+
+2. **"对 Remote 零命中"不精确。** `REMOTE_ENDPOINT_CONTRACT_VERSION: 1` 这个常量在
+   `dist/generated/constants.d.ts:17`，并由 `dist/index.d.ts:9` 导出；上游 `package.json` 的
+   `test:e2e` 脚本里还挂着 `test/remote-endpoint.test.ts`。
+
+第 2 点值得记住，因为它改变了"在等什么"的性质：**不是上游还没有这个概念，而是版本常量已经落地、
+connector 类型尚未导出。** 等的是类型面的发布，不是设计本身。原记录那句"零命中"会让人以为
+上游连方向都还没定。
+
+结论仍然成立：没有 Remote connector 类型可用，AgentMux 不得自建 proxy wire，T-021 继续 blocked。
+
+**判据（下次复核照这个跑，别再凭印象）**：
+```
+tar xzf packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz -C <tmp>
+ls <tmp>/package/dist/*.d.ts
+find <tmp>/package/dist -name '*.d.ts' -exec grep -Hni 'remote\|ssh' {} +
+```
+解锁条件：上述 grep 出现 **connector/host 的类型声明**（而不仅是版本常量）。
 
 ## 因此
 
