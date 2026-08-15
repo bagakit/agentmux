@@ -327,38 +327,45 @@ describe('agentmux browser 顶层动词', () => {
     expect(sub, 'help 没讲授权开关在哪').toContain('Settings › Browser')
   })
 
-  it('缺 --browser 与空程序都 typed 失败，而合法调用不再是参数错误', async () => {
-    // 缺 --browser：typed INVALID_CLI_ARGUMENT，且不是 Unknown command——这一对区分证明它被分发到了
-    // browserCommand。删掉 main() 里那行分发、重建 dist，这条会翻成含 "Unknown command" 的同码错误。
-    const noBrowser = await runWithStdin(['browser', 'run'], 'return 1')
-    const noBrowserError = JSON.parse(noBrowser.stderr)
-    expect(noBrowserError, `stderr=${noBrowser.stderr}`).toMatchObject({
-      error: { code: 'INVALID_CLI_ARGUMENT' }, operation: 'browser.run'
-    })
-    expect(noBrowserError.error.message, '落进了 Unknown command 兜底——分发没接上').not.toContain(
-      'Unknown command'
-    )
-
-    // 空程序（最常见成因：忘了接管道）必须被拒。放过去的话，回执是一份"跑完了，什么都没发生"的成功，
-    // 与真的跑完一段空程序在回执上无法区分。
-    const empty = await runWithStdin(['browser', 'run', '--browser', 'browser-1'], '   \n')
-    const emptyError = JSON.parse(empty.stderr)
-    expect(emptyError, `stderr=${empty.stderr}`).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
-    expect(emptyError.error.message, '拒绝空程序时没告诉人怎么喂程序').toContain('Pipe it in')
-
-    // 反向的那一半：给了 --browser 和一段真程序，就**不再**是参数错误。没有这一条，一个"browser run
-    // 永远报参数错误"的实现也能让上面两条全绿。指向一个空运行时目录，避免连上本机真在跑的 AgentMux.app
-    // （那会等到 long 预算的 60s 超时，见 cli-help-timeout-flake-is-the-live-app）。
+  it('缺 --browser、self 与空程序都 typed 失败，而合法调用不再是参数错误', async () => {
+    // 全程指向一个空运行时目录：本机常跑着真的 AgentMux.app，一旦某条断言下的实现变成"去连"，
+    // 它会等满 long 预算的 60s 才红（见 cli-help-timeout-flake-is-the-live-app）。空目录让它立刻
+    // CONTROL_UNAVAILABLE——变异该红的时候快速地红，而不是看起来像卡住。
     const offline = await mkdtemp(join(tmpdir(), 'agentmux-browser-run-offline-'))
+    const env = { AGENTMUX_RUNTIME_DIRECTORY: offline }
     try {
+      // 缺 --browser：typed INVALID_CLI_ARGUMENT，且不是 Unknown command——这一对区分证明它被分发到了
+      // browserCommand。删掉 main() 里那行分发、重建 dist，这条会翻成含 "Unknown command" 的同码错误。
+      const noBrowser = await runWithStdin(['browser', 'run'], 'return 1', env)
+      const noBrowserError = JSON.parse(noBrowser.stderr)
+      expect(noBrowserError, `stderr=${noBrowser.stderr}`).toMatchObject({
+        error: { code: 'INVALID_CLI_ARGUMENT' }, operation: 'browser.run'
+      })
+      expect(noBrowserError.error.message, '落进了 Unknown command 兜底——分发没接上').not.toContain(
+        'Unknown command'
+      )
+
+      // self 是保留选择器，指的是调用方自己这个 Agent Session；没有哪个 Browser 叫 self。放过去的话
+      // 它会被当成一个字面 id 发给 Host，错法变成"找不到这个 browser"，把参数错误伪装成环境问题。
+      const selfTarget = await runWithStdin(['browser', 'run', '--browser', 'self'], 'return 1', env)
+      expect(JSON.parse(selfTarget.stderr), `stderr=${selfTarget.stderr}`).toMatchObject({
+        error: { code: 'INVALID_CLI_ARGUMENT' }
+      })
+
+      // 空程序（最常见成因：忘了接管道）必须被拒。放过去的话，回执是一份"跑完了，什么都没发生"的成功，
+      // 与真的跑完一段空程序在回执上无法区分。空白不算内容，所以判的是 trim 后。
+      const empty = await runWithStdin(['browser', 'run', '--browser', 'browser-1'], '   \n', env)
+      const emptyError = JSON.parse(empty.stderr)
+      expect(emptyError, `stderr=${empty.stderr}`).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+      expect(emptyError.error.message, '拒绝空程序时没告诉人怎么喂程序').toContain('Pipe it in')
+
+      // 反向的那一半：给了 --browser 和一段真程序，就**不再**是参数错误。没有这一条，一个"browser run
+      // 永远报参数错误"的实现，或者一个根本不读 stdin 的实现，都能让上面三条全绿。
       const real = await runWithStdin(
-        ['browser', 'run', '--browser', 'browser-1'],
-        'return await snapshot()',
-        { AGENTMUX_RUNTIME_DIRECTORY: offline }
+        ['browser', 'run', '--browser', 'browser-1'], 'return await snapshot()', env
       )
       expect(real.code, '带着合法参数却挂住了——stdin 没读到底').not.toBeNull()
-      const realError = JSON.parse(real.stderr)
-      expect(realError, `合法请求仍被判成参数错误：${real.stderr}`).toMatchObject({
+      expect(JSON.parse(real.stderr), `合法请求仍被判成参数错误：${real.stderr}`).toMatchObject({
         operation: 'browser.run', error: { code: 'CONTROL_UNAVAILABLE' }
       })
     } finally {
