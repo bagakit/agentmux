@@ -4,7 +4,7 @@
   "title": "Refproj-informed Provider Parity",
   "slug": "provider-parity",
   "goal": "把 AgentMux 内建 Provider 与真实 CLI 能力和 Refproj 对照到诚实的生命周期合同：补齐现有 Provider 的 Hook、status、permission、native resume 与部署闭环，按证据选择性纳入高价值新 Provider，并明确记录不纳入的 launch-only 或宿主专属 Agent；所有 Provider 逻辑留在 packages/core，ctxmux 继续只拥有 Run/PTY/Replay 等运行时事实。",
-  "status": "blocked",
+  "status": "replanning",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -13,18 +13,18 @@
   "runtime_role": "standalone",
   "runtime_relations": [],
   "counters": {
-    "gate_fail_streak": 5,
+    "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 20
+    "round_count": 24
   },
   "gate": {
-    "last_result": "fail",
+    "last_result": "pass",
     "last_task_id": "T-018",
     "last_check_commands": [
       {
         "command": "pnpm check",
-        "exit_code": 1,
-        "status": "fail"
+        "exit_code": 0,
+        "status": "pass"
       },
       {
         "command": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts",
@@ -32,7 +32,7 @@
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-23z8fgsw3/artifacts/gate-T-018-r20-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-23z8fgsw3/artifacts/gate-T-018-r24-0001.log"
   },
   "history": [
     {
@@ -382,6 +382,30 @@
     {
       "action": "task_blocker_set",
       "detail": "T-018 => external_blocker"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-018"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-018 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-018 => done"
     }
   ],
   "goal_contract": {

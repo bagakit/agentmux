@@ -854,13 +854,13 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "blocked",
-      "gate_result": "fail",
+      "status": "done",
+      "gate_result": "pass",
       "last_gate_commands": [
         {
           "command": "pnpm check",
-          "exit_code": 1,
-          "status": "fail"
+          "exit_code": 0,
+          "status": "pass"
         },
         {
           "command": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts",
