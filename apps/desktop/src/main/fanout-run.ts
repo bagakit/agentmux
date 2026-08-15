@@ -26,8 +26,6 @@ export type FanOutLaneResult = FanOutLaneOutcome
 
 export type FanOutResult = {
   lanes: FanOutLaneResult[]
-  /** The config after every successful lane registered its worktree. */
-  config: AppConfig
 }
 
 export type FanOutPorts = {
@@ -67,23 +65,43 @@ function message(error: unknown): string {
  * launched, which is where the actual parallelism the user wants lives.
  *
  * One lane's failure never stops the others: the point of a bake-off is the lanes that DID work.
+ *
+ * ## Why each lane re-reads the config instead of threading one copy through
+ *
+ * A fan-out is a LONG operation: every lane runs `git worktree add` and then starts an agent, so the
+ * whole request spans seconds to tens of seconds. The main process keeps serving other IPC the entire
+ * time — removing a worktree, opening a project, changing a setting — and each of those does its own
+ * read-modify-write on the single mutable `config` in `registerIpc`.
+ *
+ * This used to take one snapshot at the start and hand the accumulated result back at the end, where the
+ * caller assigned it wholesale. Everything written by anyone else in between was silently overwritten:
+ * the record came back while the directory was already gone. Reproduced, not theorised — see
+ * `fanout-config-lost-update.test.ts`, which interleaves one write after the first lane and was red
+ * before this change.
+ *
+ * `readConfig()` is the same live accessor the handler exposes, so each lane starts from what is
+ * actually current. The remaining window is one lane's own create-then-save, which is the same shape
+ * every other handler already has; closing it completely needs a single-writer config with a version
+ * check, which is a separate change and not one to smuggle in here.
  */
 export async function runFanOut(input: {
   workspaceId: string
   prompt: string
   lanes: readonly FanOutBranch[]
-  config: AppConfig
+  /** The live config accessor — called once per lane, never cached across an await. */
+  readConfig: () => AppConfig
+  /** Publish one lane's registration immediately, so the next reader sees it. */
+  commitConfig: (config: AppConfig) => void
   ports: FanOutPorts
 }): Promise<FanOutResult> {
   const results: FanOutLaneResult[] = []
-  let config = input.config
 
   for (const lane of input.lanes) {
     let created: { config: AppConfig; workspace: { id: string; path: string } }
     try {
       created = await input.ports.createWorktree(
         { workspaceId: input.workspaceId, branch: lane.branch, path: lane.path, createBranch: true },
-        config
+        input.readConfig()
       )
     } catch (error) {
       // Nothing was created, so nothing is stranded. Record and move to the next lane.
@@ -95,12 +113,15 @@ export async function runFanOut(input: {
       })
       continue
     }
-    config = created.config
+    // Published per lane rather than accumulated: a later lane that throws must not take the earlier
+    // lanes' registrations down with it, and any other handler that runs between two lanes has to see
+    // the worktrees that already exist on disk.
+    input.commitConfig(created.config)
 
     try {
       const launched = await input.ports.launchAgent(
         { executorId: lane.executorId, workspacePath: created.workspace.path, prompt: input.prompt },
-        config
+        input.readConfig()
       )
       results.push({
         status: 'launched',
@@ -129,9 +150,9 @@ export async function runFanOut(input: {
         try {
           const cleaned = await input.ports.removeWorktree(
             { workspaceId: created.workspace.id },
-            config
+            input.readConfig()
           )
-          config = cleaned.config
+          input.commitConfig(cleaned.config)
           cleanup = null
         } catch (cleanupError) {
           cleanup = classifyRetention(cleanupError)
@@ -147,7 +168,7 @@ export async function runFanOut(input: {
     }
   }
 
-  return { lanes: results, config }
+  return { lanes: results }
 }
 
 /**
