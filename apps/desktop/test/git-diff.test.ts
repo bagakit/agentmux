@@ -355,7 +355,23 @@ describe('assertInWorktree (pure guard)', () => {
   })
 })
 
-describe('GitService.diff / discard (real git, temporary repository)', () => {
+/**
+ * 同 `git-service.test.ts`：用例在临时目录里建真仓库、跑真 git 子进程，超时按子进程的量级给，
+ * 而不是 vitest 那个面向纯内存断言的 5000ms 默认值。取 20_000ms 不是随手调大，而是对齐
+ * `git-service.ts:252` `GIT_RUN_OPTIONS.timeoutMs` —— 生产代码给单次本地 git 调用的预算本来就是
+ * 20 秒，这里的辅助函数 `makeRepo` 也逐字用了同一个数；用例级上限比它守的子进程上限还短，才是那个
+ * 不对称。
+ *
+ * 为什么这条必须修而不是判为 flake：孤立单跑时最慢的用例只要 2400ms，看着余量充足，但在全仓
+ * `pnpm check` 并发下实测红了两个（`:396` / `:407`），且红的都是 `Test timed out in 5000ms` 而非任何
+ * 断言——负载把同一段工作放大了两倍以上，5000ms 这条线就落在放大后的区间里。所以判据不能取孤立单跑的
+ * 余量，要取负载下的实测。
+ *
+ * 没有一并改 `git-remote-error.test.ts`：它同样跑真 git，但实测最慢的用例是 1308ms，余量接近四倍，
+ * 且至今没有观察到它因超时变红。按同样的「要实测证据」标准，那里今天还不构成缺陷；真红了再对齐即可，
+ * 改法与这里逐字相同。
+ */
+describe('GitService.diff / discard (real git, temporary repository)', { timeout: 20_000 }, () => {
   async function makeRepo(): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-gitdiff-'))
     temporaryRoots.push(root)
