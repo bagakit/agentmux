@@ -310,6 +310,37 @@ describe('批量收尾的分档告知', () => {
     ).not.toContain('uncommitted')
   })
 
+  it('git-failed 那句不许带删除动词——这一档的另一个生产者是「建」', () => {
+    // 这一档现在有两个来源，做的是相反的动作：
+    // - 删：git 拒绝移除（worktree-service 的 removeWorktree 路）
+    // - 建：扇出时 git **建**成了 worktree、记录没落上（register 抛 git-failed，02acc703）
+    // 两者都真实到达这句话：扇出的 launch-failed lane 带着 cleanup.retention 进 store 的
+    // retentionReport。所以横幅里任何删除动词，套到建的那一侧都是假话。
+    const created =
+      'The worktree at /repo/.worktrees/lane-a was created, but recording it failed, so it is not registered: ENOSPC'
+    const banner = retentionReport([{ retention: 'git-failed', id: 'lane-a', reason: created }])!
+
+    // 旧措辞是 `Git refused to remove N worktree(s)`，于是整句读作「拒绝删除…: 这个 worktree 已经
+    // 建好了」。这条断言就是钉死那个自相矛盾。
+    expect(
+      banner.toLowerCase(),
+      '建成功那一侧被说成「删除被拒」：同一句话里既说没删掉又说已建好，用户无法判断盘上到底有没有东西'
+    ).not.toMatch(/\bremove\b|\bremoval\b|\brefused\b/)
+    // 反向：这一档真正成立的事必须还在，否则上面那条靠删字就能满足。
+    expect(banner, '「什么都没被丢弃」是这一档唯一的承诺，不能连它一起删掉').toMatch(
+      /nothing was discarded/i
+    )
+    // git 的原话原样带着——用户判断盘上有没有东西，全靠它。
+    expect(banner).toContain(created)
+
+    // 对照：删的那一侧读起来仍然通顺，措辞没有为了迁就建那侧而变得谁都不认。
+    const removalBanner = retentionReport([
+      { retention: 'git-failed', id: 'lane-b', reason: 'fatal: could not lock config file' }
+    ])!
+    expect(removalBanner).toContain('fatal: could not lock config file')
+    expect(removalBanner).toMatch(/nothing was discarded/i)
+  })
+
   it('三句话两两之间实词无交集：不是同一句话换个说法', () => {
     // `not.toBe` 在「kept because they hold work」对「kept because Git said no」上照旧通过，而那两句
     // 读起来是同一件事。判据落在实词集合上。

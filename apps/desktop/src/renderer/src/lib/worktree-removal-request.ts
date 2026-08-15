@@ -176,7 +176,20 @@ const RETENTION_HEADLINE: Record<WorktreeRetention, (count: number) => string> =
   'uncommitted-changes': (count) => `${count} worktree(s) kept because they hold uncommitted work`,
   // 不说「有未提交的改动」：git 挂掉时根本没走到那一步，说了就是把用户送去 review 一份不存在的产出。
   // 唯一对这一档成立的事是「什么都没被丢掉」。
-  'git-failed': (count) => `Git refused to remove ${count} worktree(s); nothing was discarded`,
+  //
+  // 也**不说动词**——不说「拒绝删除」，尽管这一档最早只有删除那一个来源。`git-failed` 现在有两个
+  // 生产者，而它们做的是**相反的动作**：删那边是 git 拒绝了移除，建那边（扇出时 worktree 建好了、
+  // 记录没落上）是 git **建**成了。原先那句 `Git refused to remove N worktree(s)` 套到建的那一侧，
+  // 用户读到的是「拒绝删除…: 这个 worktree 已经建好了，只是没记上」——一句自相矛盾的话。
+  //
+  // 这一档的定义从来不是某个动词，而是**世界状态**：目录还在、什么都没被丢弃、没有可撤销的 git 动作。
+  // 所以措辞只说这个状态，让 git 的原话去讲到底发生了什么（它本来就带着「created」或「remove」）。
+  // 教训的第二层：复用枚举档位时核对了世界状态和过滤逻辑还不够，**消费方的措辞**也得逐个核——
+  // 措辞里藏着一个没人声明过的前提。
+  //
+  // 另外不带否定词（"could not" 之类）：`record-not-withdrawn` 那句里有 "was not updated"，而三句话
+  // **实词不许有交集**（同文件那条判据）。一个 "not" 就会让两句话开始像同一件事。
+  'git-failed': (count) => `Git step incomplete for ${count} worktree(s); nothing was discarded`,
   // 唯一一句不许说「kept」「remain」的：那两个词都在暗示目录还在，而它已经被删了。
   'record-not-withdrawn': (count) =>
     `${count} worktree(s) were deleted, but the workspace list was not updated`
