@@ -17,7 +17,9 @@ const fixture = vi.hoisted(() => ({
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     enqueueAgentSteer: vi.fn(),
-    send: vi.fn(async () => {}),
+    // Typed to the real store signature (`send(sessionId, text)`, store.ts:627) so `mock.calls[n][1]`
+    // is the text argument rather than an index into an inferred empty tuple.
+    send: vi.fn(async (_sessionId: string, _text: string) => {}),
     interrupt: vi.fn(async () => {}),
     setPosture: vi.fn(async () => {}),
     reportError: vi.fn()
@@ -378,7 +380,13 @@ describe('AgentSessionComposer adapter', () => {
     // codex declares no addressable posture control — its catalog entry carries no postureControl, so the
     // composer draws nothing rather than a disabled affordance.
     fixture.state.sessions = [agentSession({ status: { state: 'running', source: 'run-process', observedAt: 2 } })]
-    fixture.state.providerCatalog = [{ ...postureCatalogEntry(), id: 'codex', postureControl: undefined }]
+    // `postureControl` is optional and `exactOptionalPropertyTypes` is on, so `postureControl: undefined`
+    // is a type error while ABSENCE is what this case is actually about. The base fixture declares one
+    // (postureCatalogEntry, :127), so the key must be deleted — omitting it from the spread would keep
+    // the inherited control and quietly make this test assert nothing.
+    const codexEntry: AgentCatalogEntry = { ...postureCatalogEntry(), id: 'codex' }
+    delete codexEntry.postureControl
+    fixture.state.providerCatalog = [codexEntry]
 
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
