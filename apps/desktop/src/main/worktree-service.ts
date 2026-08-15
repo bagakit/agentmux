@@ -12,6 +12,18 @@ import type {
   WorktreeRetention
 } from '../shared/contracts.js'
 import { isWorktreeWorkspace } from '../shared/contracts.js'
+import {
+  FALLBACK_BASE_REF,
+  orphanCountableRef,
+  parseRemoteHead,
+  remoteHeadArgs,
+  type BaseRef
+} from '../shared/base-ref.js'
+import {
+  branchRetentionNote,
+  orphanCommitCountArgs,
+  parseOrphanCommitCount
+} from '../shared/lane-orphan-commits.js'
 import { findWorkspaceByLocation } from './workspace-location.js'
 
 type ConfigWriter = {
@@ -459,6 +471,62 @@ export class WorktreeService {
       }
     }
     return { config: current, keptWorkspaceId: kept.id, outcomes }
+  }
+
+  /**
+   * Before removing this worktree: does its branch hold commits that exist nowhere else?
+   *
+   * Why this runs in the service rather than in the panel: only main can spawn git (the renderer is
+   * sandboxed — `main/window-security.ts:44`), and only *before* the dialog opens is the answer worth
+   * anything. A notice that arrives after the confirm button is reachable protects nobody.
+   *
+   * Every failure lands on the same answer: "could not be checked". That is the honest degradation and
+   * the one the note already models — `branchRetentionNote(branch, null)` says so in words. What it must
+   * never do is fall through to a count, because a count of 0 reads as "checked, safe to remove", and
+   * the whole reason `orphanCountableRef` exists is that a guessed base produces exactly that 0 about
+   * commits that live only in local refs (see the measured table in `base-ref.ts`).
+   *
+   * It also never throws. A removal must not be blocked because we could not answer a question about it;
+   * the protection here is informational, and the dirty-tree refusal is the one that stops things.
+   */
+  async orphanCommitNote(workspaceId: string, config: AppConfig): Promise<string> {
+    const workspace = this.workspace(config, workspaceId)
+    const branch = isWorktreeWorkspace(workspace) ? workspace.branch : null
+    // No branch means there is no branch-shaped promise to make. Fall back to the unchecked wording with
+    // the workspace name so the sentence still names something the user recognizes.
+    if (!branch) return branchRetentionNote(workspace.name, null)
+    const repoPath = workspace.repoPath
+    if (!repoPath) return branchRetentionNote(branch, null)
+
+    const host = this.hostFor(workspace.hostId)
+    const base = await this.baseRef(host, repoPath)
+    // The gate, and the only place in the app that mints a countable ref. A guessed base is not
+    // downgraded to a worse count — it is downgraded to no count at all.
+    const countable = orphanCountableRef(base)
+    if (countable === null) return branchRetentionNote(branch, null)
+
+    let count: number | null
+    try {
+      const result = await host.run(
+        'git',
+        orphanCommitCountArgs({ repoPath, branch, baseRef: countable }),
+        GIT_DISCOVERY_OPTIONS
+      )
+      count = parseOrphanCommitCount(result.stdout, result.exitCode)
+    } catch {
+      count = null
+    }
+    return branchRetentionNote(branch, count)
+  }
+
+  /** Ask the remote for the branch it declares as default. A throw is the same answer as a refusal. */
+  private async baseRef(host: ExecutionHost, repoPath: string): Promise<BaseRef> {
+    try {
+      const result = await host.run('git', remoteHeadArgs(repoPath), GIT_DISCOVERY_OPTIONS)
+      return parseRemoteHead(result.stdout, result.exitCode)
+    } catch {
+      return { ref: FALLBACK_BASE_REF, source: 'fallback' }
+    }
   }
 
   private workspace(config: AppConfig, id: string): WorkspaceRecord {

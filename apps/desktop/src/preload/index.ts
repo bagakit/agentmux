@@ -64,6 +64,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:createWorktreeForBranch', input),
     removeWorktree: (input: RemoveWorktreeInput) =>
       ipcRenderer.invoke('workspaces:removeWorktree', input),
+    worktreeRemovalNotice: (workspaceId: string) =>
+      ipcRenderer.invoke('workspaces:worktreeRemovalNotice', workspaceId),
     runFanOut: (input: RunFanOutInput) => ipcRenderer.invoke('workspaces:runFanOut', input),
     keepOneOfFanOut: (input: KeepOneOfFanOutInput) =>
       ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)

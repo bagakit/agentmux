@@ -245,12 +245,33 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           // 用缺席表达，不画一个按了会报错的菜单项（该项已按 hasWorktree 挡住，这里是第二道）。
           if (worktree === null || branch.workspaceId === null) return
           setActionError(null)
+          const workspaceId = branch.workspaceId
           setRemoval({
-            workspaceId: branch.workspaceId,
+            workspaceId,
             branch: branch.name,
             path: worktree,
             stage: { kind: 'confirm' }
           })
+          // 「这条分支会留下什么」是问 main 才知道的（要跑 git），所以先把框开出来、再补那句话。
+          //
+          // 反过来做——等查完再开框——会让右键菜单在慢仓上静默卡住几百毫秒，用户以为没点中。而这一问
+          // 的作用是让用户**改主意**，只要它在用户读完、按下之前到达就有效。
+          //
+          // 不 catch 掉就完事：main 侧那个通道承诺永不抛（查不出来会回一句「没查出来」的正常文案）。
+          // 真抛了说明是别的毛病，那就让它进错误条，而不是在这里咽掉变成一句沉默。
+          void api.workspaces
+            .worktreeRemovalNotice(workspaceId)
+            .then((notice) => {
+              // 只补给还停在**同一个 workspace 的确认屏**上的那个请求。用户如果已经关掉、或者换了一行、
+              // 或者已经被推进到「丢弃产出？」那一屏，这句迟到的话就不该再贴上去——贴上去会让第二屏的
+              // 措辞混进第一屏的内容，而那两屏刻意不共用实词。
+              setRemoval((current) =>
+                current && current.workspaceId === workspaceId && current.stage.kind === 'confirm'
+                  ? { ...current, note: notice.note }
+                  : current
+              )
+            })
+            .catch((cause) => setActionError(message(cause)))
         }}
       >
         <button

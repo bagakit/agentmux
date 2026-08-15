@@ -841,4 +841,37 @@ describe('面板接线', () => {
       '这一项的可见性不看 hasWorktree'
     ).toContain('hasWorktree')
   })
+  /**
+   * 「这条分支会留下什么」那句话必须在**确认屏**上，而且不能挡着对话框弹出来。
+   *
+   * 为什么判在 AST 上：这是一段 effect（右键 → 发 IPC → 回来补文案），而 desktop 的测试用
+   * `renderToStaticMarkup`——它不跑 effect，也点不了右键菜单。所以没有任何行为测试会执行这段接线，
+   * 和 #399 那次是同一个结构性盲区。
+   */
+  it('删之前那句话在确认屏上问，且不挡着对话框弹出', () => {
+    const source = parse(PANEL)
+    const calls = callsTo(source, 'worktreeRemovalNotice')
+    expect(calls.length, '面板压根没问「这条分支会留下什么」——那句话到不了用户眼前').toBe(1)
+
+    const handler = source.getFullText()
+    const at = handler.indexOf('worktreeRemovalNotice')
+    const before = handler.slice(0, at)
+    // setRemoval 必须在这次询问**之前**就已经发生：先开框、后补话。倒过来写会让右键菜单在慢仓上
+    // 静默卡住几百毫秒，用户以为没点中。
+    expect(
+      before.includes('stage: { kind: \'confirm\' }'),
+      '先查完再开框：慢仓上右键会像没反应。应当先 setRemoval 开出确认框，再异步补那句话'
+    ).toBe(true)
+
+    // 那句话必须落到 note 字段上，而不是被塞进别的地方（比如错误条——它不是错误）。
+    expect(handler, '查到的那句话没有写进 note').toMatch(/note:\s*notice\.note/)
+
+    // 迟到的回填必须认屏：只补还停在同一个 workspace 的 confirm 屏上的那个请求。不认屏会把这句话
+    // 贴到「丢弃未提交产出？」那一屏上，而那两屏刻意不共用实词。
+    const guardWindow = handler.slice(at, at + 900)
+    expect(guardWindow, '回填不检查还在不在确认屏：迟到的话会贴到「丢弃产出？」那一屏上')
+      .toContain("stage.kind === 'confirm'")
+    expect(guardWindow, '回填不检查是不是同一个 workspace：换一行之后会贴上别人的那句话')
+      .toContain('workspaceId === workspaceId')
+  })
 })

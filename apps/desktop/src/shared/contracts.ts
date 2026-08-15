@@ -470,6 +470,20 @@ export type RemoveWorktreeInput = {
 }
 
 /**
+ * The sentence shown in the removal confirm dialog about what the branch keeps.
+ *
+ * A plain string rather than a count, deliberately. The count has three outcomes that are NOT on one
+ * scale — a number, zero, and "could not be checked" — and the last one is not a number at all. Handing
+ * the renderer `number | null` would make every consumer re-derive the wording, and the wording is the
+ * whole point: 0 means "checked, nothing unique, safe", null means "we do not know". A consumer that
+ * treats null as 0 tells the user a reassuring lie. The one place that decision is made is
+ * `branchRetentionNote`, on the main side, where the count is produced.
+ */
+export type WorktreeRemovalNotice = {
+  note: string
+}
+
+/**
  * How far a removal got before it stopped. Three genuinely different states of the world, and the reason
  * this is a field rather than something each consumer infers from the message text.
  *
@@ -1186,6 +1200,14 @@ export type AgentMuxDesktopApi = {
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
     removeWorktree(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>
+    /**
+     * What this worktree's branch would keep if the checkout went away. Asked BEFORE the confirm dialog
+     * opens — a warning that arrives after the button is reachable protects nobody.
+     *
+     * Never rejects: failing to answer a question about a removal must not block the removal. The
+     * unanswerable case is a real answer here, and it says so in words.
+     */
+    worktreeRemovalNotice(workspaceId: string): Promise<WorktreeRemovalNotice>
     runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
     keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
