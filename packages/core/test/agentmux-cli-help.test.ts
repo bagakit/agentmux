@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,6 +19,29 @@ async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
   }
   throw new Error('CLI unexpectedly succeeded.')
+}
+
+/**
+ * 带 stdin 跑一次 CLI。`browser run` 的程序整份从 stdin 读，而上面两个 helper 用的 execFile 不接管道：
+ * 子进程的 stdin 一直开着且永不来数据，`for await (const chunk of process.stdin)` 就一路挂到 timeout。
+ * 那种红看起来像"命令坏了"，其实是测试没给输入——所以这里必须是 spawn + 显式 `stdin.end()`。
+ */
+async function runWithStdin(
+  args: readonly string[],
+  stdin: string,
+  env: NodeJS.ProcessEnv = {}
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const child = spawn(cli, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.setEncoding('utf8'); child.stdout.on('data', (chunk: string) => { stdout += chunk })
+  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk: string) => { stderr += chunk })
+  child.stdin.end(stdin)
+  const code = await new Promise<number | null>((resolve) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(null) }, 15_000)
+    child.once('close', (value) => { clearTimeout(timer); resolve(value) })
+  })
+  return { stdout, stderr, code }
 }
 
 describe('agentmux CLI discovery', () => {
@@ -277,5 +300,95 @@ describe('agentmux CLI discovery', () => {
     // 交给"自己"没有意义——self 是保留选择器，目标必须是显式 id。
     const selfTarget = await fail(['handoff', '--to-session', 'self', '--task', 't-1'], managed)
     expect(JSON.parse(selfTarget.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+  })
+})
+
+// T-009：`browser` 是与 `open` 同级的顶层动词。`open browser` 开一个浏览器，`browser run` 驱动一个
+// 已经开着的——两件事两个命令，互不取代。下面每条都能区分"真的分发到了 browserCommand"与"落进了
+// Unknown command 兜底"，所以不会因为本机没跑 Desktop Host 而假绿。
+describe('agentmux browser 顶层动词', () => {
+  it('browser 在主帮助里列得出来，且说清它不是 open browser', async () => {
+    const help = await run(['--help'])
+    expect(help, 'browser 不在主帮助里，Agent 不会知道它存在').toMatch(
+      /browser\s+Drive an already-open Browser/
+    )
+    const verb = await run(['browser', '--help'])
+    expect(verb, 'browser --help 没讲它和 open browser 的分工').toContain('neither replaces the other')
+  })
+
+  // operationPath 此前只对 `open` 做两级拼接。没有这条，把 browser 那一枝删掉后
+  // `browser run --help` 会静默落到 'browser' 那条上——拿到一份讲别的命令的帮助，而不是报错。
+  it('browser run --help 解析到自己那条，不是退回 browser 那条', async () => {
+    const sub = await run(['browser', 'run', '--help'])
+    expect(sub, 'browser run --help 落到了 browser 那条').toContain('Run a program in an open Browser')
+    expect(sub, 'help 没说程序从 stdin 整份读，Agent 会去找 --code').toContain('read from stdin')
+    // 四类结局里 indeterminate 最要紧：它意味着"别盲目重试"。help 里不写，等于没有这一类。
+    expect(sub, 'help 没讲 indeterminate，Agent 会把它当普通失败重试').toContain('indeterminate')
+    expect(sub, 'help 没讲授权开关在哪').toContain('Settings › Browser')
+  })
+
+  it('缺 --browser 与空程序都 typed 失败，而合法调用不再是参数错误', async () => {
+    // 缺 --browser：typed INVALID_CLI_ARGUMENT，且不是 Unknown command——这一对区分证明它被分发到了
+    // browserCommand。删掉 main() 里那行分发、重建 dist，这条会翻成含 "Unknown command" 的同码错误。
+    const noBrowser = await runWithStdin(['browser', 'run'], 'return 1')
+    const noBrowserError = JSON.parse(noBrowser.stderr)
+    expect(noBrowserError, `stderr=${noBrowser.stderr}`).toMatchObject({
+      error: { code: 'INVALID_CLI_ARGUMENT' }, operation: 'browser.run'
+    })
+    expect(noBrowserError.error.message, '落进了 Unknown command 兜底——分发没接上').not.toContain(
+      'Unknown command'
+    )
+
+    // 空程序（最常见成因：忘了接管道）必须被拒。放过去的话，回执是一份"跑完了，什么都没发生"的成功，
+    // 与真的跑完一段空程序在回执上无法区分。
+    const empty = await runWithStdin(['browser', 'run', '--browser', 'browser-1'], '   \n')
+    const emptyError = JSON.parse(empty.stderr)
+    expect(emptyError, `stderr=${empty.stderr}`).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+    expect(emptyError.error.message, '拒绝空程序时没告诉人怎么喂程序').toContain('Pipe it in')
+
+    // 反向的那一半：给了 --browser 和一段真程序，就**不再**是参数错误。没有这一条，一个"browser run
+    // 永远报参数错误"的实现也能让上面两条全绿。指向一个空运行时目录，避免连上本机真在跑的 AgentMux.app
+    // （那会等到 long 预算的 60s 超时，见 cli-help-timeout-flake-is-the-live-app）。
+    const offline = await mkdtemp(join(tmpdir(), 'agentmux-browser-run-offline-'))
+    try {
+      const real = await runWithStdin(
+        ['browser', 'run', '--browser', 'browser-1'],
+        'return await snapshot()',
+        { AGENTMUX_RUNTIME_DIRECTORY: offline }
+      )
+      expect(real.code, '带着合法参数却挂住了——stdin 没读到底').not.toBeNull()
+      const realError = JSON.parse(real.stderr)
+      expect(realError, `合法请求仍被判成参数错误：${real.stderr}`).toMatchObject({
+        operation: 'browser.run', error: { code: 'CONTROL_UNAVAILABLE' }
+      })
+    } finally {
+      await rm(offline, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  // `open browser` 不迁移、不加过时标记：AGENTMUX.md 原则 1 的反面用法是"给旧命令挂个 deprecated
+  // 说改用新的"——这里两个命令做的根本不是同一件事，不存在谁取代谁。
+  it('open browser 原样还在，没有被标成过时', async () => {
+    const openHelp = await run(['open', 'browser', '--help'])
+    expect(openHelp).toContain('agentmux open browser --url <url>')
+    expect(openHelp, 'open browser 被标成了过时——它不该被 browser run 取代').not.toMatch(
+      /deprecated|use .browser run/i
+    )
+  })
+
+  // skill 是 Agent 的唯一用法真相。这里钉三件它不知道就用不起来的事：命令本身、按 ref 不按坐标、
+  // 以及那句禁令的边界——禁的是"用键鼠模拟投递 payload"，不是"驱动页面"。措辞含糊的话，Agent 会读成
+  // "browser run 也在禁令内"，于是有这个动词也不用。
+  it('skill 教 browser run，且投递禁令没有把驱动页面一起禁掉', async () => {
+    const skill = await run(['--skill'])
+    expect(skill, 'skill 没教 browser run，Agent 不会用它').toContain(
+      'agentmux browser run --browser <browser-id> < program.js'
+    )
+    expect(skill, 'skill 没讲"按 ref 不按坐标"——这是整个方案的核心约束').toContain('Never coordinates')
+    expect(skill, 'skill 没说授权开关，Agent 撞到拒绝时不知道怎么办').toContain('Settings › Browser')
+    expect(skill, 'skill 没讲 indeterminate 要先看页面再动').toMatch(/indeterminate[\s\S]*do not blind-retry/)
+    expect(skill, '投递禁令仍然笼统，会把 browser run 一起吓退').toContain(
+      'This is about how the payload is delivered, not about driving the page afterwards'
+    )
   })
 })
