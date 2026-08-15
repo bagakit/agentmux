@@ -165,8 +165,11 @@ describe('确认框里那句关于分支的话', () => {
   })
 
   it('有风险时说清数量和分支名——数量让人能判断，分支名是事后唯一的抓手', () => {
-    expect(branchRetentionNote('lane-x', 1)).toContain('1 commit that')
-    expect(branchRetentionNote('lane-x', 4)).toContain('4 commits that')
+    // 断言**连着动词**一起截。上一版写的是 `toContain('1 commit that')`，在动词前一个词就停住了，
+    // 于是 "1 commit that exist nowhere else" 这个主谓不一致从绿灯底下走了过去——一条恰好绕开了
+    // 自己要抓的那个 bug 的断言。
+    expect(branchRetentionNote('lane-x', 1)).toContain('1 commit that exists nowhere else')
+    expect(branchRetentionNote('lane-x', 4)).toContain('4 commits that exist nowhere else')
     expect(branchRetentionNote('lane-x', 4)).toContain('lane-x')
   })
 })
