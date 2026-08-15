@@ -37,6 +37,17 @@
  * 注意这**不适用于开 PR 那一侧**：那边把猜测显示给用户、让他改了再提交（`PrLaunchSurface.tsx:109`
  * 原话就是「so {baseRef} is a guess. Check it before...」），人看着改，是另一种正确的处理。同一个
  * 事实两种用法，所以这里只负责如实分级，由各自的消费方决定拿它干什么。
+ *
+ * ## 同一个事实，两个拼法——这是本模块第二次栽在这上面
+ *
+ * 「两种用法」还不止于分级：两个消费方要的**字符串本身**就不同。`gh pr create --base` 收分支名
+ * （`main`），而 `rev-list --not <base>` 要一个**本地解析得开**的 revision（`origin/main`）。
+ * `origin/HEAD` 的原话是 `origin/main`，两者都在里头；早先只留了剥过的那半，于是数独有提交那条路
+ * 拿 `main` 去解析，在本地没有同名分支的仓里 fatal（实测 128），警告静默消失。
+ *
+ * {@link plainBranchName} 上面记的那个 bug 是同一个形状的第一次（`ls-remote` 剥了、`gh` 没剥）。
+ * 结论写在这里免得有第三次：**判身份的 ref 和真正拿去用的 ref 必须是同一个**；一份事实要服务两种
+ * 拼法时，两个拼法都得留在结构里，而不是留一个、让消费方各自去还原。
  */
 
 /** base 这个答案是从哪来的。`remote-head` 是远端自己说的，`fallback` 是我们猜的。 */
@@ -57,7 +68,34 @@ declare const countableBrand: unique symbol
 export type CountableBaseRef = string & { readonly [countableBrand]: true }
 
 export type BaseRef = {
+  /**
+   * 人读的分支名，`origin/` 已剥掉（`main`）。开 PR 用它——`gh pr create --base` 收的是分支名。
+   */
   ref: string
+  /**
+   * **本地够得着的那个 ref**（`origin/main`），只有权威档才有。
+   *
+   * 为什么两个字段而不是一个：`origin/HEAD` 的原话是 `origin/main`，而两个消费方要的拼法不同——
+   * 开 PR 要分支名，数独有提交要一个**本地解析得开**的 revision。它们不是同一个字符串，早先只留
+   * 剥过的那半，于是数数那条路拿 `main` 去解析。
+   *
+   * 这个区分有实测代价（一次性 repo，真 git）：`git clone --branch feature-x` 之后 `origin/HEAD`
+   * 在（走权威档），本地却**没有** `main`——
+   *
+   * | 拿去数的 ref | `git rev-list --count lane --not <ref> --remotes --` |
+   * | --- | --- |
+   * | `main`（剥过的） | `fatal: bad revision 'main'`，退出码 128 |
+   * | `origin/main`（这里这个） | `1` |
+   *
+   * 128 会被 `parseOrphanCommitCount` 老实读成 null，所以不会说出「删得放心」这种错话——但那句
+   * 警告就此**静默消失**，而失效的场景恰恰是 fan-out：签出一条 feature 分支再在上面开 lane，是这
+   * 个产品的主线玩法，不是边角。
+   *
+   * 猜测档没有这个字段（`null`）：`origin/` 前缀是从远端那句原话里**读**出来的，不是拼出来的。
+   * 远端叫别的名字（`upstream`）时拼 `origin/main` 会指向另一条分支或不存在的 ref——而本模块的全部
+   * 主张就是不拿猜的东西去数。
+   */
+  remoteRef: string | null
   source: BaseRefSource
 }
 
@@ -94,12 +132,17 @@ export function plainBranchName(ref: string): string {
 /**
  * 把 `symbolic-ref` 的输出变成 base 答案。
  *
- * 输出形如 `origin/main`，要的是后面那半。取不到就是 `fallback`——**带着标签**，绝不假装是查到的。
+ * 输出形如 `origin/main`。**两个拼法都留着**：剥过的 `main` 给开 PR，原样的 `origin/main` 给数独有
+ * 提交（见 {@link BaseRef.remoteRef} 上那张实测表——只留剥过的那半，数数会在本地没有同名分支时
+ * fatal，警告静默失效）。取不到就是 `fallback`——**带着标签**，绝不假装是查到的。
  */
 export function parseRemoteHead(stdout: string, exitCode: number): BaseRef {
-  if (exitCode !== 0) return { ref: FALLBACK_BASE_REF, source: 'fallback' }
-  const ref = plainBranchName(stdout.trim())
-  return ref ? { ref, source: 'remote-head' } : { ref: FALLBACK_BASE_REF, source: 'fallback' }
+  const guess = { ref: FALLBACK_BASE_REF, remoteRef: null, source: 'fallback' } as const
+  if (exitCode !== 0) return guess
+  const remoteRef = stdout.trim()
+  const ref = plainBranchName(remoteRef)
+  // 空输出是「没查到」，不是「查到了一个空名字」。
+  return ref ? { ref, remoteRef, source: 'remote-head' } : guess
 }
 
 /**
@@ -126,7 +169,20 @@ export function parseRemoteHead(stdout: string, exitCode: number): BaseRef {
  * 签字。审计这个模块时，`as CountableBaseRef` 就是唯一要看的那个字符串。
  *
  * 把判定和取值合成一次，也顺带消掉了「判的那次和用的那次之间 base 变了」这类两次解析的漂移。
+ *
+ * ## 给出来的是 `remoteRef`（`origin/main`），不是 `ref`（`main`）
+ *
+ * 这里曾经给的是 `ref`。它是给**开 PR** 用的那个拼法（`gh pr create --base main`），拿去 `rev-list`
+ * 就成了「本地有没有一条叫 main 的分支」——而 `git clone --branch feature-x` 出来的仓里没有，git
+ * fatal（实测退出码 128，见 {@link BaseRef.remoteRef} 的表）。降级是安全的（128 读成 null，说
+ * 「没查出来」而不是「删得放心」），但那句警告在 fan-out 这个主线场景里**静默不再出现**。
+ *
+ * 判身份的 ref 必须和真正拿去用的 ref 是同一个——这条教训 {@link plainBranchName} 上面已经写过一次
+ * （`ls-remote` 剥了前缀、`gh pr create` 没剥），这里是它的第二次现形：同一个 `BaseRef` 服务两个
+ * 消费方，而两个消费方要的拼法本就不同。所以现在两个拼法都在，各取各的。
  */
 export function orphanCountableRef(base: BaseRef): CountableBaseRef | null {
-  return base.source === 'remote-head' ? (base.ref as CountableBaseRef) : null
+  if (base.source !== 'remote-head') return null
+  // 权威档必有 remoteRef（同一次解析里一起产出），这里的 `?? null` 只是不靠"必有"这句话吃饭。
+  return (base.remoteRef as CountableBaseRef | null) ?? null
 }
