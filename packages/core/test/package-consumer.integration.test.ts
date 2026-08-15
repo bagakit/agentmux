@@ -30,60 +30,6 @@ const stopRecoveryFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-recove
 const ctxmuxRuntimeId = createHash('sha256').update(CTXMUX_MANIFEST_SHA256).digest('hex').slice(0, 24)
 const roots: string[] = []
 
-/**
- * 钉住「dist 是当前源码的产物」这个前提。
- *
- * 这个测试打包时用 `npm pack --ignore-scripts`，于是不再有 prepack 顺手替它重建 dist（那次重建正是
- * dist 竞态的来源）。前提因此从隐式变成显式：`pnpm test` 本来就是 `pnpm build && vitest run`，但顺序
- * 一旦被绕过（单跑 vitest、build 中途失败），没有这道断言就会静默打出一个陈旧的包，而后面所有清单和
- * 行为断言都照旧通过——那种绿最贵。
- *
- * 判据取 src 里**最新**的 mtime 与 dist 里**最旧**的 mtime 比：任何一个源文件比任何一个产物新，就说明
- * 这份 dist 不完整地对应当前源码。只比目录 mtime 是不够的（改文件内容不动目录 mtime）。
- */
-async function expectDistBuiltFromCurrentSource(): Promise<void> {
-  const packageDirectory = resolve(repositoryRoot, 'packages/core')
-
-  async function newestModification(directory: string): Promise<{ path: string; at: number } | undefined> {
-    let newest: { path: string; at: number } | undefined
-    for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue
-      const path = join(entry.parentPath, entry.name)
-      const at = (await stat(path)).mtimeMs
-      if (!newest || at > newest.at) newest = { path, at }
-    }
-    return newest
-  }
-
-  async function oldestModification(directory: string): Promise<{ path: string; at: number } | undefined> {
-    let oldest: { path: string; at: number } | undefined
-    for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue
-      const path = join(entry.parentPath, entry.name)
-      const at = (await stat(path)).mtimeMs
-      if (!oldest || at < oldest.at) oldest = { path, at }
-    }
-    return oldest
-  }
-
-  // 入口文件缺失是最常见的形态（build 没跑，或跑到一半失败）。先单独报它，错因比"目录空"清楚得多。
-  const entryPoint = join(packageDirectory, 'dist', 'agentmux.js')
-  await expect(
-    stat(entryPoint),
-    `dist/agentmux.js 不存在：这个测试不再自己重建 dist，请先跑 \`pnpm --filter @agentmux/core build\``
-  ).resolves.toBeDefined()
-
-  const newestSource = await newestModification(join(packageDirectory, 'src'))
-  const oldestArtifact = await oldestModification(join(packageDirectory, 'dist'))
-  expect(newestSource, 'packages/core/src 下一个文件都没有，扫描根写错了').toBeDefined()
-  expect(oldestArtifact, 'packages/core/dist 下一个文件都没有，build 没跑成').toBeDefined()
-  expect(
-    oldestArtifact!.at,
-    `dist 比 src 旧，打出来的包不对应当前源码：${oldestArtifact!.path} 早于 ${newestSource!.path}。` +
-      '请先跑 `pnpm --filter @agentmux/core build`。'
-  ).toBeGreaterThan(newestSource!.at)
-}
-
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
@@ -414,9 +360,11 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       // 开关（`--ignore-scripts` 被它当未知选项拒绝），所以只能走 npm 的 pack。
       //
       // 代价是一个此前隐式、现在必须显式的前提：dist 得是当前源码的产物。测试脚本本来就是
-      // `pnpm build && vitest run`，但那个顺序过去由 prepack 兜底，现在不再有。下面的 freshness 断言
-      // 把它钉住——dist 缺失或比 src 旧时立刻明确报错，而不是静默打出一个陈旧的包。
-      await expectDistBuiltFromCurrentSource()
+      // `pnpm build && vitest run`，但那个顺序过去由 prepack 兜底，现在不再有。这个前提由
+      // `vitest.dist-freshness.ts` 的 globalSetup 钉住，对**每一次** vitest 运行生效（含只点名单个
+      // 文件的那种），所以这里不再自己断言一遍。此前这道判据是本文件的一个私有函数，被三重关住
+      // ——只在 `runIf(darwin && arm64)` 里调、文件被 test:fast 排掉、唯一会跑它的 test:native 又
+      // 自己前置了 build——也就是永远不可能红。搬到 globalSetup 才让它真的守到东西。
       // 下面这些 `execFileAsync` 都没有挂钟预算，判据同 `waitForDaemonReady` 那段（见 :92 起）：
       // npm 的 pack/install、tsc、以及本测试自己起的那几个 worker fixture，都是**本机对固定输入的
       // 确定性步骤**——它们一定会答，被压满时只是慢。期限由外层 `it(…, 95_000)` 持有；再插一个更短的

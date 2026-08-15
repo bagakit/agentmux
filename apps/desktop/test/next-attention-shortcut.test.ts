@@ -75,10 +75,17 @@ describe('nextAttentionSessionId：要你处理的那条队', () => {
   })
 
   it('Terminal Session 不进队——它没有「在等你回话」这回事', () => {
-    // Terminal 的 status.state 是 'running'，本来就不进队；但 `isAgent` 那道筛子删掉后，
-    // 一个恰好是 waiting 的 Terminal（比如将来 Terminal 也带上状态）就会混进这条 Agent 队。
-    // 这里用一个纯 Terminal 的世界断言「一个都没有」，删掉 kind 筛子时若 Terminal 带上了档位就会红。
-    expect(nextAttentionSessionId([terminal('t1'), terminal('t2')], null)).toBeNull()
+    // 两个 Terminal 都**显式带上急迫档**（waiting / error），于是这条用例问的是纯粹的
+    // 「kind 是不是 Agent」：`isUrgentAttention` 那道筛子放它们过，唯一拦下它们的是 `isAgent`。
+    //
+    // 此前这里写的是 `terminal('t1')`、`terminal('t2')`——不传 state，于是 `status.state` 是
+    // undefined，两个 Terminal 本来就不急迫，`isAgent` 删掉照样全绿（实测）。fixture 的签名要求
+    // 这个参数，但 desktop 的 tsc `include` 只有 `src/**`，看不见 test/，所以漏参数没人报。
+    // 这正是本仓记过的那个形状：判据构造成两个世界给同一个答案，断言于是恒真。
+    expect(nextAttentionSessionId(
+      [terminal('t1', 'waiting'), terminal('t2', 'error')],
+      null
+    )).toBeNull()
   })
 
   it('急迫档在前：error 等得再久也排在 needs-you 之后', () => {
