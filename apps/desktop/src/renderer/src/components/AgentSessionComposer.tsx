@@ -207,6 +207,12 @@ export function AgentSessionComposer({
     <AgentComposer
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       queued={queuedEntries.map((entry) => entry.text)}
+      // Read the same fact the store's flush guard reads. `flushAgentSteerQueue` returns early unless
+      // `processState === 'running'`, and nothing re-runs it for a dead run, so a non-running session's
+      // queue is stranded rather than pending. Deliberately keyed on processState alone and not on
+      // `submitMode.canSubmit`: a pending interaction also blocks the flush, but `respondInteraction`
+      // flushes again as soon as the card is answered, so those entries genuinely are still coming.
+      queueDeliverable={session?.kind === 'agent' && session.processState === 'running'}
       commands={composerOptions?.commands ?? []}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
       onSelectSuggestion={(item, kind) => { if (kind === 'reference' && activeFile) addFileReference() }}
