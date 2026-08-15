@@ -1,4 +1,4 @@
-import { FileCode2, Globe2, Sparkles, SquareTerminal } from 'lucide-react'
+import { Bot, FileCode2, Globe2, Sparkles, SquareTerminal } from 'lucide-react'
 import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
 import { AgentProviderIcon } from './AgentProviderIcon'
 import { StatusDot } from './StatusDot'
@@ -50,7 +50,11 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
     case 'file':
       return <FileCode2 size={12} />
     case 'browser':
-      return <Globe2 size={12} />
+      // 被 Agent 驱动的那一格画 Bot，不是地球——它与旁边闲着的 Browser 必须一眼分得开，这正是
+      // 这个标记存在的全部理由（页面内角标只在人看着那一页时成立）。`title` 让悬停也说得出来。
+      return mark.driving
+        ? <Bot size={12} className="workbench-tab__driving-mark"><title>Agent driving</title></Bot>
+        : <Globe2 size={12} />
     case 'launcher':
       return <Sparkles size={12} />
     default: {

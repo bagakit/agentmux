@@ -138,17 +138,49 @@ function fakeWindow(): any {
 async function managerWithBrowser(): Promise<{
   manager: BrowserViewManager
   contents: any
+  /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
+  sentEvents: () => any[]
 }> {
   dispatchCalls.length = 0
   createDispatch.mockClear()
   fakeElectron.FakeWebContentsView.instances.length = 0
   // ref 账本给临时路径：本文件 mock 掉了派发层，账本根本不会被读，但真路径会往 userData 里写文件。
-  const manager = new BrowserViewManager(fakeWindow(), profiles, new BrowserRefLedgerStore(
+  const window = fakeWindow()
+  const manager = new BrowserViewManager(window, profiles, new BrowserRefLedgerStore(
     join(mkdtempSync(join(tmpdir(), 'agentmux-wiring-')), 'ref-ledger.json')
   ))
   await manager.create('b1', 'https://example.invalid/')
   const view = fakeElectron.FakeWebContentsView.instances[0]!
-  return { manager, contents: view.webContents }
+  // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
+  return {
+    manager,
+    contents: view.webContents,
+    sentEvents: () => window.webContents.send.mock.calls.map((call: unknown[]) => call[1])
+  }
+}
+
+/**
+ * 让派发层在**第一次**被调用时顺手模拟一次真人输入，并记下每次调用的名字。
+ *
+ * 接管信号必须从主进程这一侧发出，因为程序跑在它自己的子进程里，够不到 webContents。挂在
+ * 第一次调用上是为了拿到确定的时序：「第一次动作发生过、之后的一个都没有」正是这套设计
+ * 承诺的那句话。
+ *
+ * 放在模块级而不是某个 describe 里：驱动位那一族也要用它——「被掐断的运行有没有把驱动位还原」
+ * 和「掐断之后动作停不停」是同一次接管的两个侧面，两处各写一份会漂。
+ */
+function takeoverOnFirstCall(contents: any, type = 'mouseDown'): string[] {
+  const seen: string[] = []
+  let fired = false
+  createDispatch.mockImplementationOnce(() => async (name: string) => {
+    seen.push(name)
+    if (!fired) {
+      fired = true
+      contents.emit('input-event', { type })
+    }
+    return `dispatched:${name}`
+  })
+  return seen
 }
 
 describe('runScript 把页面调用交给派发层', () => {
@@ -230,27 +262,6 @@ describe('runScript 把页面调用交给派发层', () => {
  * 合成事件，证不了那件事，也不打算证。
  */
 describe('runScript：人接管之后，动作停、观察放行', () => {
-  /**
-   * 让派发层在**第一次**被调用时顺手模拟一次真人输入，并记下每次调用的名字。
-   *
-   * 接管信号必须从主进程这一侧发出，因为程序跑在它自己的子进程里，够不到 webContents。挂在
-   * 第一次调用上是为了拿到确定的时序：「第一次动作发生过、之后的一个都没有」正是这套设计
-   * 承诺的那句话。
-   */
-  function takeoverOnFirstCall(contents: any, type = 'mouseDown'): string[] {
-    const seen: string[] = []
-    let fired = false
-    createDispatch.mockImplementationOnce(() => async (name: string) => {
-      seen.push(name)
-      if (!fired) {
-        fired = true
-        contents.emit('input-event', { type })
-      }
-      return `dispatched:${name}`
-    })
-    return seen
-  }
-
   it('人点了一下之后 click 被拒，而这之前的 click 正常执行', async () => {
     const { manager, contents } = await managerWithBrowser()
     const seen = takeoverOnFirstCall(contents)
@@ -374,5 +385,65 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
     expect(second.outcome.kind, '上一次的接管漏到了下一次运行——监听器没摘干净').toBe('completed')
     expect(contents.listeners.get('input-event') ?? [], 'input-event 的监听没摘掉——每轮泄漏一个')
       .toHaveLength(0)
+  }, 30_000)
+})
+
+/**
+ * 驱动这件事要推给渲染进程——页面内角标之外的另一半覆盖面。
+ *
+ * 角标（T-012）只在人**看着那一页**时成立，而人恰恰常在别处干活。标签上要认得出是哪一格，
+ * 渲染进程就必须知道；这里判的是「主进程有没有把它送出去」，标签怎么画由
+ * `workbench-tab-marks.test.ts` 判。两条缺一不可：只判后者的话，一个从不 emit 的实现照样全绿
+ * ——纯函数收到什么就画什么，而真实世界里它永远收不到 true。
+ */
+describe('runScript：驱动状态推到渲染进程', () => {
+  /** 推给渲染的每一个 `updated` 事件里的 driving 位，按时间序。 */
+  function drivingSequence(events: any[]): boolean[] {
+    return events
+      .filter((event) => event?.type === 'updated')
+      .map((event) => event.browser.driving)
+  }
+
+  it('运行期间推一次 true，结束后推一次 false', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const before = drivingSequence(sentEvents()).length
+
+    await manager.runScript('b1', 'return await snapshot()')
+
+    // 只判最后两个：create 与导航自己也会推事件，它们的 driving 都是 false，数进来会让断言
+    // 依赖那些事件的个数——那是别的代码的实现细节。
+    expect(drivingSequence(sentEvents()).slice(before), '驱动的开始或结束没有推出去').toEqual([
+      true,
+      false
+    ])
+  }, 30_000)
+
+  it('人接管把运行掐断之后，收尾那次 false 照样推出去', async () => {
+    // 这条是 finally 那一句的判据。漏掉它，标签会永远停在"正在被驱动"——而那一段程序早就停了，
+    // 比不画更糟：它让人以为 Agent 还在动，从而不敢去碰那个页面。
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    const before = drivingSequence(sentEvents()).length
+    takeoverOnFirstCall(contents)
+
+    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+
+    expect(report.outcome.kind, '这条没走到接管那条路上，判据在对空气生效').toBe('stopped')
+    expect(drivingSequence(sentEvents()).slice(before), '被掐断的运行没把驱动位还原').toEqual([
+      true,
+      false
+    ])
+  }, 30_000)
+
+  it('程序抛出来的那次也把驱动位还原——finally 不是只管顺利跑完的那条路', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const before = drivingSequence(sentEvents()).length
+
+    const report = await manager.runScript('b1', 'throw new Error("my bug")')
+
+    expect(report.outcome.kind).toBe('script-failed')
+    expect(drivingSequence(sentEvents()).slice(before), '程序抛了就把标签卡在驱动态了').toEqual([
+      true,
+      false
+    ])
   }, 30_000)
 })

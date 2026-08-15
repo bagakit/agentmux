@@ -150,9 +150,10 @@ and the refusal says so rather than failing quietly.
 A person can take the page back at any time: a real click, keypress or scroll on that Browser
 hands ownership to them mid-run. Actions (click, fillInput, gotoUrl, js, cdp, …) are refused
 from that moment on; observation (snapshot, pageInfo, waitFor…) keeps working so the program
-can see where it left things. The page carries a badge while a program is driving it, so the
-takeover is a deliberate act, not a surprise. Nothing sticks: the next \`browser run\` starts
-with the page free again.
+can see where it left things. The page carries a badge while a program is driving it, and the
+Tab it sits in is marked too, so the takeover is a deliberate act, not a surprise — they can
+see which Browser you are in without switching to it. Nothing sticks: the next \`browser run\`
+starts with the page free again.
 
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:
@@ -378,7 +379,8 @@ which severs the debugging session — or because a ref from an earlier run was 
 appearance. Look at the page before running anything again; do not blind-retry.
 
 You are sharing the page with a person, and they outrank you on it. While your program runs,
-that Browser wears a badge saying so; the moment they click, type or scroll in it, the page is
+that Browser wears a badge saying so and its Tab is marked — they can see you are in there
+without switching to it. The moment they click, type or scroll in it, the page is
 theirs. Your actions are refused from then on and the run comes back \`stopped\` — not
 \`script-failed\`, because nothing is wrong with your program. Observation still works, so take
 a \`snapshot()\` to see where you actually left things, say so, and run the program again when

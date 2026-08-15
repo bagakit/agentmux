@@ -47,7 +47,13 @@ type BrowserEntry = {
   visible: boolean
   viewport: BrowserViewport
   error: string | null
-  /** 这一刻有没有一段 Agent 程序在驱动它。只给导航后重注角标用。 */
+  /**
+   * 这一刻有没有一段 Agent 程序在驱动它。导航后重注角标要读它，`snapshot()` 也要——渲染进程据此
+   * 在标签上认出是哪一格（见 `BrowserSnapshot.driving` 的说明）。
+   *
+   * 一个布尔够用，不必是计数：两次 run 不可能在同一个页面上重叠——`BrowserCdpSession.attach` 对
+   * 已 attach 的 page 第二次会抛，`runScript` 第一件事就是它。
+   */
   driving: boolean
 }
 
@@ -506,6 +512,9 @@ export class BrowserViewManager {
     }
     contents.on('input-event', onInput)
     entry.driving = true
+    // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
+    // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
+    this.emit(entry)
     void this.showDriveBadge(entry, entry.view)
     try {
       const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session, notes, takeover) })
@@ -568,6 +577,7 @@ export class BrowserViewManager {
       // 用这个浏览器就一直在写 `takeover`，下一次 run 一启动就以为自己被接管了。
       contents.removeListener('input-event', onInput)
       entry.driving = false
+      this.emit(entry)
       void this.hideDriveBadge(entry.view)
       session.detach()
     }
@@ -1021,7 +1031,8 @@ export class BrowserViewManager {
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
       viewport: entry.viewport,
-      error: entry.error
+      error: entry.error,
+      driving: entry.driving
     }
   }
 

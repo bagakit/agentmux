@@ -999,6 +999,18 @@ export type BrowserSnapshot = {
   canGoForward: boolean
   viewport: BrowserViewport
   error: string | null
+  /**
+   * 这一刻有没有一段 Agent 程序在驱动这个页面。
+   *
+   * 为什么要出现在快照里、而不是只留在 Main：页面内角标（`buildBrowserDriveBadgeScript`）只在人
+   * **看着那一页**时成立，而人恰恰常在别处干活。应用 chrome 上要认得出是哪一格，渲染进程就必须
+   * 知道这件事。走这个既有快照而不是新开一条事件通路：驱动的开始与结束本来就各有一次 `emit`，
+   * 新增一条通路只会让两份驱动真相有机会不一致。
+   *
+   * **瞬时事实，不进持久化**。`persistedSurfaceSurvives` 对 browser 面整面剥离，这一位不为自己开
+   * 口子：冷启动复活一个「正在被驱动」的死标记，比不画更糟——它指的那段程序早就不在了。
+   */
+  driving: boolean
 }
 
 export type BrowserProfileImportedSource = {
