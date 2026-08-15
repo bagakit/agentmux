@@ -14,7 +14,7 @@ const fixture = vi.hoisted(() => ({
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
-    agentSteerQueues: {} as Record<string, Array<{ operationId: string; text: string }>>,
+    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     enqueueAgentSteer: vi.fn(),
@@ -490,7 +490,7 @@ it('shows the context observation owned by this session in the Composer toolbar'
 describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
   function deliverable(session: Extract<SessionSnapshot, { kind: 'agent' }>): unknown {
     fixture.state.sessions = [session]
-    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', text: 'steer me' }] }
+    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me' }] }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { queueDeliverable?: boolean }
     }
@@ -523,5 +523,18 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
       evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
     }
     expect(deliverable(agentSession({ processState: 'running', pendingInteraction }))).toBe(true)
+  })
+
+  it('run 活着但队列里是上一个 run 的条目——仍然不承诺投递', () => {
+    // Resume 换 run 之后的那一刻：processState 回到 running，但队列里躺着对着已死 run 排的话。
+    // flush 会按 runId 跳过它们，所以角标不能说「在路上」。只看 processState 的实现在这里红。
+    fixture.state.sessions = [agentSession({ processState: 'running' })]
+    fixture.state.agentSteerQueues = {
+      'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run' }]
+    }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { queueDeliverable?: boolean }
+    }
+    expect(composer.props.queueDeliverable).toBe(false)
   })
 })

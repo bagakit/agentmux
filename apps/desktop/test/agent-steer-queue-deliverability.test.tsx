@@ -20,13 +20,14 @@ import { AgentComposer } from '../src/renderer/src/components/AgentComposer.js'
 describe('AgentComposer 队列徽标的可投递性', () => {
   const queued = ['steer one', 'steer two']
 
-  function render(deliverable: boolean): string {
+  function render(deliverable: boolean, onCopyQueued?: (text: string) => void): string {
     return renderToStaticMarkup(createElement(AgentComposer, {
       value: '',
       disabled: false,
       placeholder: '',
       queued,
       queueDeliverable: deliverable,
+      ...(onCopyQueued ? { onCopyQueued } : {}),
       onChange: () => {}
     }))
   }
@@ -37,7 +38,7 @@ describe('AgentComposer 队列徽标的可投递性', () => {
     expect(markup).toContain('2 messages queued for delivery')
     expect(markup).toContain('Delivered in this order when the Agent finishes its current turn.')
     // 反面必须缺席：否则把两档合并成一句「都说不确定」也能过上面两条。
-    expect(markup).not.toContain('never delivered')
+    expect(markup).not.toContain('not sent')
   })
 
   it('run 已经退出时，不再承诺投递，并说清这些字还在哪', () => {
@@ -45,9 +46,48 @@ describe('AgentComposer 队列徽标的可投递性', () => {
 
     // 「不承诺」本身要可判：光改 <p> 不改徽标，读屏用户听到的仍是 delivery。
     expect(markup).not.toContain('queued for delivery')
-    expect(markup).toContain('2 messages never delivered')
-    // 不是报错，是交代去向——文字还在，可复制。这句是这一档存在的理由，删了就只剩一个坏消息。
-    expect(markup).toContain('they are kept here, not sent')
+    expect(markup).toContain('2 messages not sent')
+    // 不是报错，是交代去向——文字还在。这句是这一档存在的理由，删了就只剩一个坏消息。
+    expect(markup).toContain('They are kept here')
+  })
+
+  /**
+   * 文案点名的动作必须当场做得到。
+   *
+   * 这一档的正文原本写着「copy them」，而卡片是个 `popover="auto"`——点卡片外任何地方它就关掉，
+   * 用户只有拖选这一条路。那与徽标原来那句假承诺是同一个毛病：文案描述了一个界面并不提供的
+   * 操作。所以按钮在场时才说「可以复制」，不在场时只说字还在。
+   */
+  it('能复制时才把复制说成办法，并且真给出按钮', () => {
+    const markup = render(false, () => {})
+
+    expect(markup).toContain('so you can copy them')
+    expect(markup).toContain('Copy all')
+  })
+
+  it('没有复制出口时不提复制——不描述做不到的事', () => {
+    // 剪贴板出口强制要一个报错口（lib/clipboard-copy），拿不到报错口的壳不该提供可能静默失败的
+    // 动作。变异：让文案无条件说 "copy them"，这条红。
+    const markup = render(false)
+
+    expect(markup).not.toContain('copy them')
+    expect(markup).not.toContain('Copy all')
+  })
+
+  it('单数时按钮说 message 而不是 all', () => {
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '', disabled: false, placeholder: '',
+      queued: ['only one'], queueDeliverable: false, onCopyQueued: () => {}, onChange: () => {}
+    }))
+
+    expect(markup).toContain('Copy message')
+    expect(markup).toContain('1 message not sent')
+  })
+
+  it('可投递那一档不给复制按钮——它不是这一档要解决的问题', () => {
+    const markup = render(true, () => {})
+
+    expect(markup).not.toContain('Copy all')
   })
 
   it('两档都把用户原话原样留在卡片里——这才是「还在」的证据', () => {

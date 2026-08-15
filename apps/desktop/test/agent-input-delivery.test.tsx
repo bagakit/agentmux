@@ -25,7 +25,7 @@ describe('queued steer delivery', () => {
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     useAppStore.getState().enqueueAgentSteer('s', 'retry me')
     await useAppStore.getState().respondInteraction('s', { requestId: 'q', response: { kind: 'permission', decision: 'allow' } } as never)
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: expect.any(String), text: 'retry me' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: expect.any(String), runId: 'r', text: 'retry me' }])
   })
 })
 

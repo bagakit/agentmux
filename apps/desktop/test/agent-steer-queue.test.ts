@@ -34,7 +34,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
     await useAppStore.getState().flushAgentSteerQueue('s')
     // Retained after the failure — same entry, same id still on it.
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: ids[0], text: 'steer me' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: ids[0], runId: 'r', text: 'steer me' }])
 
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
