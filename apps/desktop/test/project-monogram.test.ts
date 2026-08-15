@@ -37,7 +37,37 @@ describe('projectMonogram：牌面上的那个字', () => {
     expect(projectMonogram('　project')).toBe('P')
   })
 
-  it('串中间的 ZWJ 是承重的——剥零宽只剥前导，不许拆散家族 emoji', () => {
+  it('不可见字符远不止零宽那五个——判据是 Unicode 属性，不是手抄的码点清单', () => {
+    // 此前这里剥的是枚举出来的五个码点（U+200B-200D、U+2060、U+FEFF）。禁止清单必漏：下面每一个
+    // 在那一版里都原样进了牌面，画出一枚看不见的牌子——正是上一条要消灭的那个结果，只是换了个码点。
+    // 换成 Default_Ignorable_Code_Point 后全部归位；上一条那五个码点是它的严格子集（逐个验过），
+    // 所以那条不会因为这次替换而退化。
+    //
+    // 这里写 \u 转义而不是字面量：每个都配一个写明码点的标签，否则这张表在编辑器里就是一列空白，
+    // 下一个人没法确认自己读到的是哪个字符——而「看不见」正是本条要测的东西。
+    const invisible: ReadonlyArray<readonly [string, string]> = [
+      ['U+00AD 软连字符', '­'],
+      ['U+034F 组合字素连接符', '͏'],
+      ['U+061C 阿拉伯字母标记', '؜'],
+      ['U+180E 蒙古文元音分隔符', '᠎'],
+      ['U+2061 函数应用', '⁡'],
+      ['U+3164 韩文填充符', 'ㅤ'],
+      ['U+115F 初声填充符', 'ᅟ'],
+      ['U+E0001 语言标签', '\u{E0001}']
+    ]
+    for (const [label, prefix] of invisible) {
+      expect(projectMonogram(`${prefix}project`), `${label} 开头的名字画出了一枚看不见的牌子`).toBe('P')
+    }
+  })
+
+  it('前导标点仍然是牌面——剥掉看不见的东西不许顺手改「取哪个」', () => {
+    // 允许清单（只收第一个 \p{L}/\p{N}/\p{Emoji} 簇）也能把上面那张表清零，但会把这两个变成
+    // G 和 F。跳过前导标点是另一个决定，有它自己的取舍，不该搭这趟车。这条钉住两者的边界。
+    expect(projectMonogram('.gitignore')).toBe('.')
+    expect(projectMonogram('-flag')).toBe('-')
+  })
+
+  it('串中间的 ZWJ 是承重的——只剥前导，不许拆散家族 emoji', () => {
     // 若上面那条改成全串替换，这条立刻红：👨‍👩‍👧 靠 U+200D 连成一个簇，剥掉就只剩 👨。
     expect(projectMonogram('​👨‍👩‍👧 family')).toBe('👨‍👩‍👧')
   })
