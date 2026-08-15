@@ -1253,6 +1253,45 @@ describe('WorktreeService', () => {
     expect(exclude.split('\n').filter((line) => line.includes('.worktrees'))).toHaveLength(1)
   }, 30000)
 
+  it('已有的 exclude 末尾没有换行时，追加的那行不会粘到上一行上', async () => {
+    // `printf ... >> file` 在文件末尾无换行时会把新行**粘**在最后一行后面：`notes.txt` + `/.worktrees/`
+    // 变成一条 `notes.txt/.worktrees/`，于是**两条规则同时失效**——用户原有的忽略项也被吃掉了。
+    // git 不会报错，只是安静地不再忽略；实测 `git status` 里 `notes.txt` 与 `.worktrees/` 双双冒出来。
+    //
+    // 末尾无换行的 `info/exclude` 不是假想：它是人手写的文件，编辑器不给补尾换行的多得是。
+    // 判据落在 `git status` 上而不是文件内容上：要守的是「两条规则都还生效」，不是「文件长什么样」。
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-exclude-newline-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    expect((await executionHost.run('git', ['-C', repoPath, 'init', '-b', 'main'])).exitCode).toBe(0)
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    expect((await executionHost.run('git', ['-C', repoPath, 'add', 'README.md'])).exitCode).toBe(0)
+    expect((await executionHost.run('git', [
+      '-C', repoPath,
+      '-c', 'user.name=AgentMux Test',
+      '-c', 'user.email=agentmux@example.invalid',
+      'commit', '-m', 'fixture'
+    ])).exitCode).toBe(0)
+
+    // 用户已有的一条忽略规则，**末尾故意不带换行**。
+    await writeFile(join(repoPath, '.git', 'info', 'exclude'), 'notes.txt')
+
+    await new WorktreeService(() => executionHost, { save: vi.fn(async (value: AppConfig) => value) })
+      .createForBranch(
+        { workspaceId: 'repo', branch: 'lane-a', path: join(repoPath, '.worktrees', 'lane'), createBranch: true },
+        { ...config, workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }] }
+      )
+
+    await writeFile(join(repoPath, 'notes.txt'), 'my notes\n')
+    const status = (await executionHost.run('git', ['-C', repoPath, 'status', '--porcelain'])).stdout.trim()
+    expect(
+      status,
+      '追加粘行了：用户原有的 notes.txt 规则和我们加的 .worktrees 规则会双双失效'
+    ).toBe('')
+  }, 30000)
+
   // 写 exclude 是锦上添花，绝不能反过来把用户要的东西弄没。原则 11 class 2：我方这一步降级了，
   // 但"创建 worktree"这个能力本身好好的——因为一次便利写入失败就让创建失败，是把用户真正要的
   // 那件事拿走。
