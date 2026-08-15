@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, Cpu } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import type { UsageSnapshot } from '../../../shared/contracts'
 import { formatRss, subscribeWhileOpen, usagePanelRows, type UsagePanelRow } from '../lib/resource-usage-panel'
+import { workspaceForSession } from '../lib/workbench-tabs'
 
 // 状态栏上的资源面板。
 //
@@ -22,6 +23,9 @@ function UsageRow({ row }: { row: UsagePanelRow }) {
       <span className="resource-usage__identity">
         <strong className="resource-usage__name">{row.label}</strong>
         <small className="resource-usage__context">{row.contextText} · {row.stateText}</small>
+        {/* 「最近在改什么」：只在比裸状态更具体时才由 usagePanelRows 填上，缺席就不占行——
+            自成一行而非续接到 context 后面，是因为三段挤一行在面板宽度下必然折行、读不成句。 */}
+        {row.activity ? <small className="resource-usage__activity">{row.activity}</small> : null}
       </span>
       {/* 拿不到就留空，不填 0——0 会被读成"它在跑但不吃资源"这个真值。 */}
       <span className="resource-usage__metric">{row.cpuText}</span>
@@ -34,13 +38,27 @@ export function ResourceUsagePanel() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null)
   const [open, setOpen] = useState(false)
   const sessions = useAppStore((state) => state.sessions)
+  // 时间轴是 store 里那份实时数据：启动时拉全、之后由事件流持续补齐（store.ts 的 onEvent →
+  // agent-timeline）。所以打开面板**不需要**触发一轮重拉——数据本就在手，读它即可。
+  const timelines = useAppStore((state) => state.timelines)
+  // 每个 Session 的仓根，用来把「最近在改什么」里的绝对路径缩成相对路径。必须逐个解：这张面板一次
+  // 列出所有 Run，它们分属不同仓库，没有「当前那个根」可用。走 workspaceForSession 这个共用谓词。
+  const config = useAppStore((state) => state.config)
+  const workspaceRoots = useMemo(() => {
+    const roots: Record<string, string> = {}
+    for (const session of sessions) {
+      const path = workspaceForSession(config ?? null, session)?.path
+      if (path) roots[session.id] = path
+    }
+    return roots
+  }, [config, sessions])
 
   useEffect(
     () => subscribeWhileOpen(open, api.resourceUsage.subscribe, setSnapshot),
     [open]
   )
 
-  const rows = usagePanelRows(snapshot, sessions)
+  const rows = usagePanelRows(snapshot, sessions, timelines, undefined, workspaceRoots)
   return (
     <DropdownMenu.Root open={open} onOpenChange={setOpen}>
       <DropdownMenu.Trigger asChild>
