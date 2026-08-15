@@ -1,5 +1,11 @@
 /**
- * 「这个 Agent 最近在干什么」——四个界面（Project 活动菜单、roster 明细行等）都要的一行人话。
+ * 「这个 Agent 最近在干什么」——两个界面都要的一行人话。
+ *
+ * 消费面是**两个**（Project 活动菜单、资源面板），共三个调用点：`ProjectActivity.tsx` 的组标题行、
+ * `project-activity-row.ts` 的菜单明细行、`resource-usage-panel.ts` 的资源行。此处原先写的是
+ * 「四个界面（……、roster 明细行等）」——数错了，而且点名的 roster 明细行根本不消费它
+ * （`AgentRoster.tsx` 里没有任何 `sessionRecentActivity`）。留着那句会让下一个人去找一个不存在的
+ * 消费者，或者以为改这里要顾及四处。数目要么数一遍，要么别写。
  *
  * 此前有两份各答一半、互不共享、且会打架的派生：`projectSessionReason` 只走 pendingInteraction →
  * status.detail → 状态句；`stepTitle` 只把**一次**工具调用翻成 `Bash npm test`。都答不出用户真正问的
@@ -48,8 +54,13 @@ function latestToolCall(timeline: readonly AgentTimelineItem[]): AgentTimelineIt
  * 面板上文件名可读率 **0%**：每一行都停在 `…renderer/src/lib/sess…` 这种位置，而这条摘要存在的唯一理由
  * 就是「不展开也认得出是哪个」。先无损缩短再交出去，可读率 0% → 24%（264px 上）。
  *
- * 换句话说：这个形参补的不是排版，是这行字的**全部识别力**。本文件第 57 行那段注释早就写明了这个道理
- * （「再截一刀……恰好吃掉刚保住的文件名」），只是当时说的是 oneLine，没料到 CSS 在做同一件事。
+ * 换句话说：这个形参补的不是排版，是这行字的**全部识别力**。
+ *
+ * 三个调用点今天都传了根。`ProjectActivity.tsx` 的组标题行曾经漏传——它落在
+ * `.project-activity-group__identity small` 里，同样带 ellipsis，所以漏的那一处正是本段说的病。
+ * 顺带更正一处出处：b3645c56 的提交信息把菜单行的 ellipsis 记成 `overlays.css:395,398`，那两行其实
+ * 是 `.resource-usage__context` / `.resource-usage__activity`，都属资源面板；菜单行的省略号在
+ * `chrome.css` 的 `.project-activity-menu__reason`。提交信息改不动了，更正记在这里。
  */
 export function sessionRecentActivity(
   session: SessionSnapshot,
