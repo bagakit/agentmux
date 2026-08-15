@@ -538,8 +538,8 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: '主按钮 Stop/Send：问"有在途回合吗"。idle-running 没有可打断的回合，故严格判 working 是对的'
   },
   '/lib/attention-event.ts': {
-    count: 5,
-    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值：这个文件是"一个状态归哪一档"的裁决点，画点与排序两问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle'
+    count: 6,
+    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值 + categoryFor 的 case：这个文件是"一个状态归哪一档"的裁决点，画点、排序、注意力三问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle。categoryFor 那一处是把 if 链改成穷举 switch 时新增的：它此前以 return null 收尾，是四个状态映射里唯一对第十个状态静默的一个'
   },
   '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
   '/lib/api.ts': { count: 1, why: 'browser preview 的 mock 数据，不是生产状态写入路径' },
