@@ -143,11 +143,39 @@ describe('一次扇出请求真的跑到底', () => {
     ])
   })
 
-  it('worktree 根目录来自 workspace 自己的 path，不是别处拼的', async () => {
+  it('worktree 根目录来自仓库根，不是 workspace 自己的 path', async () => {
     const p = ports()
     await runFanOutRequest(REQUEST, p)
     for (const created of p.recorded.created) {
       expect(created.path.startsWith(join('/repo', '.worktrees'))).toBe(true)
+    }
+  })
+
+  /**
+   * 子目录 workspace：`workspace.path` 与 `repoPath` 头一回不是同一个字符串。
+   *
+   * 上面那条用的夹具里两者都是 `/repo`，于是它对「根到底取的哪一个」完全失明——取错了照样全绿。
+   * 这条是唯一能分辨的那个形状，而它不是假想：文件树的「Open as Project」正是把仓库里的一个子目录
+   * 注册成 workspace（open-directory-as-project.ts 用 `joinWorkspacePath` 往下拼）。
+   *
+   * 判据落在**根**上而不是落在「路径里有没有 .worktrees」上：后者对 `/repo/sub/.worktrees` 同样成立，
+   * 而那恰恰是错的那一个。
+   */
+  it('workspace 是仓库的子目录时，lane 仍落在仓库根下——否则 exclude 那条锚定的规则盖不住它', async () => {
+    const p = ports({
+      config: () => ({
+        ...CONFIG,
+        workspaces: [{ id: 'repo', name: 'Sub', hostId: 'local', path: '/repo/sub', kind: 'folder' }]
+      })
+    })
+    await runFanOutRequest(REQUEST, p)
+
+    expect(p.recorded.created).toHaveLength(3)
+    for (const created of p.recorded.created) {
+      expect(created.path.startsWith(join('/repo', '.worktrees'))).toBe(true)
+      // 取 workspace.path 的那颗变异体落在这里：`/repo/sub/.worktrees/bake-1` 同样「含 .worktrees」，
+      // 但仓根的 `/.worktrees/` 是锚定的，盖不住 `sub/` 下面那一层（真 git 验过：`?? sub/.worktrees/`）。
+      expect(created.path.startsWith(join('/repo', 'sub'))).toBe(false)
     }
   })
 

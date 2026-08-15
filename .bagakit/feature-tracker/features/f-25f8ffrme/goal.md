@@ -41,8 +41,15 @@ Tests 40 passed**。
    - 被别的模式覆盖：判据不查文件内容，直接跑 `git status --porcelain` 问 git 自己。
 
 3. **「手工建单个 worktree 的路径由用户在 BranchesPanel 自己填，别让两边各长一套规则」——
-   两边共用同一条路。** 排除写在 `createForBranch` 里，fan-out 和手工创建都经过它；
-   遮蔽的是**顶层的那个 `.worktrees/` 根**，与用户填什么路径无关。
+   排除只写一处，但根一度**没有**统一，2026-09-14 补齐。**
+   排除写在 `createForBranch` 里，fan-out 和手工创建都经过它，这一半从一开始就是对的。
+   但**根**当时是两处各拼各的：手工侧 `defaultWorktreePath(repoPath, …)` 拼在仓根，
+   fan-out 侧 `fanout-request.ts` 拼的是 `workspace.path`。两者在多数 workspace 上是同一个字符串，
+   所以分岔不可见——直到文件树的「Open as Project」把仓库的一个**子目录**注册成 workspace：
+   lane 落到 `<repo>/sub/.worktrees/`，而锚定在仓根的 `/.worktrees/` 盖不住它，仓根
+   `git status --porcelain` 照旧吐 `?? sub/.worktrees/`。**本 Feature 对最需要它的那类 workspace
+   恰好静默失效。** 现在 fan-out 也从 `branches.repoPath` 取根，两侧同落仓根。
+   判据：`git grep -n "join(branches.repoPath, '.worktrees')" HEAD -- apps/desktop/src`。
 
 ## 既定决策
 
@@ -50,6 +57,7 @@ Tests 40 passed**。
   "status 干净"这条断言变绿，却会把用户在任意深度自己建的同名文件一并吞掉——**那是把用户的
   东西弄丢，比留点噪音严重得多**。测试里专门建了一个 `docs/.worktrees` 来钉住这一点
   （变异体活过了第一版测试，加了这个用例才被杀掉）。
+  这条锚定也决定了子目录那一档的修法方向：**目录去就规则，不是规则去就目录**（见上面第 3 条）。
 - **写失败绝不让创建失败。** 用户要的是 worktree，他拿到了；因为一次便利写入没成功就把它判成
   失败，是把用户真正要的那件事拿走（原则 11 class 2：我方这一步降级了，能力本身好好的）。
   只读的 `.git`、写不进去的 host，结果只是"噪音照旧"，不是"建不出来"。
