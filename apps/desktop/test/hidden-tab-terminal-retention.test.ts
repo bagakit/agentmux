@@ -141,7 +141,11 @@ describe('实例的存活边界等于 Region 的存活边界', () => {
   it('长期隐藏时只释放 TerminalView，不删除 Region/Session/Composer 真相', () => {
     expect(sessionPane).toContain('parked?: boolean')
     expect(sessionPane).toContain('Terminal parked')
-    expect(sessionPane).toContain('<AgentSessionComposer sessionId={session.id} />')
+    // 断到 `sessionId={session.id}` 为止，**不含**后面的 `/>`：这一处 JSX 会长出别的 prop
+    // （`e1dd8a79` 加了 `regionName`），而那与"Composer 在非 parked 支里仍然渲染"这条约束无关。
+    // 判到自闭合标签等于把「这行一个字都不许改」也钉进来，红的时候读到的是"Composer 被删了"，
+    // 真相却是隔壁加了个属性。仍然唯一——另一处是 `sessionId={sessionId}` 的 disabled 占位。
+    expect(sessionPane).toContain('<AgentSessionComposer sessionId={session.id}')
     expect(parkingCoordinator).toContain('TerminalParkingProvider')
     expect(parkingCoordinator).toContain('collectTerminalColdParkCandidates')
     expect(parkingCoordinator).toContain('nextTerminalColdParkDelayMs')
