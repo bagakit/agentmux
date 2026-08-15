@@ -36,6 +36,25 @@ describe('样式表的组织', () => {
     ])
   })
 
+  it('设计文档里的那张清单点名的就是真的这些文件——文档里的清单一样会腐烂', () => {
+    // 这条守的不是代码，是**关于代码的那段话**。上面那条断言让 index.css 的 @import 列表无法
+    // 悄悄改动；但 docs/design/agentmux-surface-density.md 里逐个文件抄了一份同样的清单，
+    // 而没有任何东西读它。实测它已经落后四处：漏掉 board.css / composer.css /
+    // source-control.css / conversation-avatar.css / conversation-axis.css，并且把 Board、
+    // Composer、Roster、Branches 记在了它们已经搬走的那个文件名下。
+    //
+    // 代码里的注释之所以没烂成这样，正是因为结构守卫钉着它们。这里把同一件事做给文档：
+    // 清单不比对**描述**（那是人写给人看的判断，不该被测试锁死），只比对**文件名集合**。
+    // 拆一刀而忘了改文档，这条当场红。
+    const manifest = readFileSync(new URL('../../../docs/design/agentmux-surface-density.md', import.meta.url), 'utf8')
+    const block = manifest.match(/```\nstyles\/\n([\s\S]*?)```/)
+    expect(block, '文档里那段 `styles/` 清单不见了——它要么被删了，要么换了形状，这条守卫要跟着改').toBeDefined()
+    const documented = [...block![1]!.matchAll(/^\s{2}([\w-]+\.css)/gm)].map((match) => match[1]!)
+    // 自证：正则必须真的抓到东西，否则下面的比对是两个空集相等。
+    expect(documented.length, '自证：清单里一个文件名都没抓到，正则与文档的形状对不上了').toBeGreaterThan(5)
+    expect(documented.sort()).toEqual([...styleFiles().map((file) => file.name), 'index.css'].sort())
+  })
+
   it(':root 只有一处，在 tokens.css', () => {
     // 第二个 :root 会让"尺度系统有唯一来源"这句话失效，且两处定义谁赢取决于 @import 顺序——
     // 一个没人会去读的规则决定了全表的颜色。
