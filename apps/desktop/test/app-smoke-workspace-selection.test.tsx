@@ -7,6 +7,7 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView:
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceWorkbench: () => null }))
 vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
 import { App } from '../src/renderer/src/App.js'
+import type { AppConfig } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 it('smoke startup allows real Project Rail selection in both directions', async () => {
@@ -20,7 +21,7 @@ it('smoke startup allows real Project Rail selection in both directions', async 
   const alternate = 'workspace-file-editing-alternate-e2e'
   try {
     window.history.replaceState(null, '', '?agentmux-file-editing-report=1')
-    const config = {
+    const config: AppConfig = {
       version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {},
       workspaces: [], appearance: { terminalTheme: 'graphite' },
       browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }

@@ -8,55 +8,17 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.new-tab-surface {
-  width: min(650px, calc(100% - 40px));
-  margin:auto;
-  position: relative;
-  top: 50%;
-  transform: translateY(-50%);
-  padding:var(--sp-7);
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(145deg, var(--scrim-3), var(--overlay-surface));
-  box-shadow: 0 25px 70px var(--scrim-2);
-}
-.new-tab-surface h2 { margin:var(--sp-2) 0 var(--sp-2); font-size: var(--fs-display); letter-spacing: -.03em; }
-.new-tab-surface header p { margin:0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.new-tab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:var(--sp-4); margin-top:var(--sp-6); }
-.new-tab-grid > button {
-  min-width: 0;
-  min-height: 112px;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  align-content: start;
-  align-items: start;
-  gap:var(--sp-4);
-  padding:var(--sp-5);
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--text-2);
-  background: var(--surface-1);
-  box-shadow: var(--elev-1), var(--hl);
-  text-align: left;
-  cursor: pointer;
-  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease, transform 130ms ease;
-}
-.new-tab-grid > button:hover:not(:disabled), .new-tab-grid > button:focus-visible { color: var(--text); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl-strong); transform: translateY(-1px); }
-.new-tab-grid > button:disabled { opacity: .55; cursor: default; }
-.new-tab-card__icon { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); transition: background 130ms ease, color 130ms ease; }
-.new-tab-grid > button:hover:not(:disabled) .new-tab-card__icon, .new-tab-grid > button:focus-visible .new-tab-card__icon { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
-.new-tab-grid > button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-2); }
-.new-tab-grid strong { font-size: var(--fs-meta); }
-.new-tab-grid small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
-.new-tab-surface footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); margin-top:var(--sp-6); padding-top:var(--sp-5); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
-.new-tab-surface footer > span:first-child { margin-right:auto; display: inline-flex; align-items: center; gap:var(--sp-2); }
-.new-tab-surface kbd { min-width: 18px; padding:var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: 4px; color: var(--text-2); background: var(--bg); font: 10px "SFMono-Regular", monospace; text-align: center; }
+/* `.new-tab-error` 是这一族里唯一还活着的：NewTabSurface 与 SurfaceToolDock 各有一处 role="alert"。
+   它上面那整块（`.new-tab-surface` 卡片、`.new-tab-grid` 九宫格、`.new-tab-card__icon`、以及
+   `footer` / `kbd` 两条后代规则）随 launcher 改版后无人渲染，已删——本仓不留"以后可能用得上"。 */
 .new-tab-error { margin-top:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
 
 .launch-surface { height: 100%; overflow: auto; display: flex; flex-direction: column; justify-content: safe center; gap:0; padding:36px clamp(var(--sp-6), 6vw, 60px) 44px; background: radial-gradient(100% 50% at 50% 0%, rgba(84, 188, 123, 0.04) 0%, rgba(0, 0, 0, 0) 100%), var(--surface-0); }
 .launch-surface > * { flex: 0 0 auto; width: min(640px, 100%); margin-inline:auto; }
-.launch-surface__heading { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: flex-start; gap:var(--sp-5); }
-.launch-surface__icon { width: 32px; height: 32px; padding:0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--green-2); background: rgba(84, 188, 123, 0.08); margin-top:1px; }
+/* 两列：内容 + 刷新按钮。此前第一列是一枚品牌绿的 32px `Sparkles` 装饰格——正是控件语言里
+   「装饰性强调图标格不是卡片元素」退役掉的那个形状（Settings 的 hero 格是它的同胞），
+   绿只留给状态与页面唯一主操作（这一屏是 Launch agent）。已随那条规则一起删。 */
+.launch-surface__heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: flex-start; gap:var(--sp-5); }
 .launch-surface__heading-content { min-width: 0; }
 .launch-surface h2 { margin:var(--sp-1) 0 var(--sp-1); font-size: var(--fs-display); font-weight: 650; letter-spacing: -.03em; color: var(--text); }
 .launch-surface p { margin:0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.4; }
@@ -106,8 +68,12 @@
 .launch-option__segment--selected, .launch-option__segment--selected:hover { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
 .launch-option__segment--selected[data-tier="caution"] { color: var(--amber); }
 .launch-option__segment--selected[data-tier="danger"] { color: var(--red); }
-.launch-surface__footer { display: flex; align-items: center; justify-content: space-between; margin-top:var(--sp-4); }
-.launch-surface__footer > span { display: flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+/* `flex-end` + 首个子元素 `margin-right:auto`，而不是 `space-between`：后者是一份「有几簇」的
+   契约（布局是子元素个数的纯函数），而这里的子元素数量是变的——Resume 只在有可恢复会话时出现，
+   那一刻 `space-between` 会把 Launch 按钮甩到正中间。见密度合同里那条同名规则，以及
+   `.settings-pane-actions` / `.workspace-composer > footer` 两处在仓内的同一写法。 */
+.launch-surface__footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-4); }
+.launch-surface__footer > span { margin-right:auto; display: flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .launch-host-health { padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; }
 .launch-host-health--ready { color: var(--green); background: var(--green-bg); }
 .launch-host-health--error { color: var(--red-text); background: var(--red-bg); }

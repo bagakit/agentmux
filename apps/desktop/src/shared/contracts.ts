@@ -274,6 +274,12 @@ export type BrowserToolbarConfig = {
 }
 
 export type BrowserConfig = {
+  /**
+   * Agent 驱动浏览器页面的总开关。可选是因为字段是后加的——`ConfigStore.get` 会把缺席补成具体的
+   * `false` 并落盘一次（同 scratch/notifications 的补齐），所以缺席从不意味着"开"。
+   * 这是一个总开关，不是权限分级：开了就是全套页面能力可用。
+   */
+  agentAutomation?: boolean
   toolbar: BrowserToolbarConfig
 }
 
@@ -1063,6 +1069,53 @@ export type BrowserAnnotationMarker = {
   isFixed: boolean
 }
 
+/**
+ * 页面语义快照里的一个节点。
+ *
+ * `ref` 是本次快照发给 Agent 的**指名句柄**——Agent 后续要操作哪个元素，只说 ref，不说坐标。
+ * 这是「结构化 ref 寻址 ≠ 键鼠模拟」那条线在类型上的落点：ref 由我方快照发出，解不开就是解不开，
+ * 不存在"点空了但返回成功"这种结局。
+ *
+ * `backendNodeId` 是 ref 的身份键，把 ref 解回真实 DOM 节点全靠它。**没有它的节点不进快照**：
+ * 一个解不开的 ref 发给 Agent，等于让它拿着一个永远失败的把手。
+ */
+export type BrowserPageNode = {
+  /** 本次快照内唯一的指名句柄，形如 `@e1`。跨快照不保证稳定——导航或重建后要重新取快照。 */
+  ref: string
+  /** 可读角色名。交互元素做了展示归一（如 textbox → text input）。 */
+  role: string
+  /** 可访问名称。交互节点没有名称时为 `(unlabeled)`，不是空串——空串会让 Agent 以为字段缺失。 */
+  name: string
+  /** 解析用的身份键，来自 CDP。 */
+  backendNodeId: number
+  /** 结构缩进层级，仅用于把树渲染成文本给 Agent 看。 */
+  depth: number
+  /** 该节点所属 frame 的 CDP session；主 frame 为 undefined。派发动作时命令要发到这个 session。 */
+  sessionId?: string
+}
+
+/**
+ * 一次页面快照的完整结局。
+ *
+ * `missingFrames` 是这个类型存在的主要理由：跨域 iframe 取不到时**不静默跳过**。取不到就在这里
+ * 列出来——缺了哪个 frame、为什么缺。快照本身照常返回（不阻断），但 Agent 能看见自己拿到的是
+ * 一张有洞的地图，而不是误以为页面上就只有这些元素。
+ */
+export type BrowserPageSnapshot = {
+  url: string
+  title: string
+  /** 取快照时的导航身份。与之不符的 ref 一律作废——页面已经换了。 */
+  navigationId: string
+  nodes: BrowserPageNode[]
+  missingFrames: BrowserPageFrameFailure[]
+}
+
+/** 一个没能取到的 frame。`reason` 是原始错误文本，不做归类——归类会把没见过的原因吃掉。 */
+export type BrowserPageFrameFailure = {
+  frameId: string
+  reason: string
+}
+
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
   | { type: 'closed'; id: string }
@@ -1193,7 +1246,11 @@ export type AgentMuxDesktopApi = {
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: AgentMuxRunInputData): Promise<void>
-    submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
+    // `operationId` is the caller's correlation key for ONE submission attempt. A retry of the same
+    // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
+    // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
+    // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId?: string): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse

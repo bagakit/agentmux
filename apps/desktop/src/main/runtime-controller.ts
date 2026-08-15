@@ -784,7 +784,13 @@ export class RuntimeController {
 
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }>,
-    prompt: string
+    prompt: string,
+    // The correlation key for this ONE attempt. A retry of the same prompt passes the SAME id so Core
+    // recognizes the idempotent replay (prompt-submission.ts:186) instead of gating it BUSY; a new prompt
+    // passes a fresh id. The `?? randomUUID()` is a per-call fallback for callers that do not correlate
+    // (only test callers) — it is never a STABLE default, so a caller that omits it can never make two
+    // distinct attempts collide on one id.
+    operationId?: string
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -798,7 +804,7 @@ export class RuntimeController {
       try {
         await client.submitAgentPrompt({
           agentSessionId: control.agentSessionId,
-          operationId: randomUUID(),
+          operationId: operationId ?? randomUUID(),
           prompt
         })
       } catch (error) {

@@ -34,9 +34,19 @@ const COMPONENTS_DIR = fileURLToPath(new URL('../src/renderer/src', import.meta.
  * 用 BEM 记号一刀切开，把「必须有规则」和「本就无规则」这两类干净地分开——于是**不需要**一份
  * 手工维护的例外清单，而手工清单只是熵：它会漂移，且只能挡住写它时已经存在的东西。
  * 这正是 log-fold__chevron 的形状（`__` 元素），也是 modifier 丢规则（`--`）的形状。
+ *
+ * `-button` 结尾的扁平名同样按定义是样式名，所以一并收进来。它们不带 BEM 记号，此前整族在
+ * 扫描面之外——不是漏登记，是**结构性缺席**：判据只认 `__`/`--`，扁平名连被登记的机会都没有。
+ * 实证代价：`.secondary-button`（密度合同里 Secondary 那一档的档位名，真正的落地类名是
+ * `.small-button`）在启动页渲染了一次、全仓零规则，而 base.css 的全局 `button` 只重置
+ * `font`/`color` **不重置 `background`**，于是它落到 macOS 原生按钮样式——深色主题里一颗浅灰
+ * 实心药丸，比紧邻的品牌绿主操作还重。整族守卫全绿。
+ *
+ * 选 `-button` 而不是"所有扁平名"：控件档位的名字按定义必须有规则（它就是那一档的视觉），
+ * 而 `project-rail` 那类语义标记按定义不必有。这条判据仍然从名字形状推出，不维护清单。
  */
 function isBemToken(token: string): boolean {
-  return token.includes('__') || token.includes('--')
+  return token.includes('__') || token.includes('--') || token.endsWith('-button')
 }
 
 // 一个像样的 class token：小写字母开头，段与段之间用 - 或 _ 连接。模板字面量里 `${expr}` 的碎片
@@ -259,6 +269,21 @@ describe('渲染出来的 class 必须有规则', () => {
     expect(rendered.length).toBeGreaterThan(100)
     // BEM class 是这条测试真正判定的对象，单独钉一个现实下界。
     expect(new Set(renderedBem.map((entry) => entry.token)).size).toBeGreaterThan(100)
+  })
+
+  it('`-button` 那一支确实有产出——判据放宽了却扫到空，等于没放宽', () => {
+    // isBemToken 多收了 `-button` 结尾的扁平名。这条钉住那一支真的在扫描面里有东西：
+    // 若哪天 className 的写法变了（比如档位名全搬进 lib 的常量、或改成模板拼接），这一支会
+    // 静默退化成空集，而主断言依旧全绿——正是它本该守住的那个洞的形状。
+    //
+    // 同时钉住"扁平"这一半：只数带 `__`/`--` 的 `-button` 名字不算数，那些名字原判据就收得到，
+    // 放宽与否都一样。必须有**只有放宽之后才看得见**的 token，这条才有区分力。
+    const flatButtons = new Set(
+      renderedBem
+        .map((entry) => entry.token)
+        .filter((token) => token.endsWith('-button') && !token.includes('__') && !token.includes('--'))
+    )
+    expect(flatButtons.size, '没有任何扁平 `-button` 类名被扫到，放宽判据失去了区分力').toBeGreaterThan(0)
   })
 
   it('取值层（.ts）也在扫描面里——否则把 class 搬进 lib 就能绕过整道守卫', () => {

@@ -47,12 +47,12 @@ it('renders one explicit work-line row and lets its primary action open the most
     status: { state: 'waiting', source: 'native-hook', observedAt: 4 },
     pendingInteraction: { kind: 'question', id: 'question', agentSessionId: 'waiting', questions: [{ id: 'choice', prompt: 'Choose a release lane', options: [] }], evidence: { source: 'native-hook', observedAt: 4 } }
   }
+  const { pendingInteraction: _waitingPending, ...waitingBase } = waiting
   const working: SessionSnapshot = {
-    ...waiting,
+    ...waitingBase,
     id: 'working', label: 'Builder',
     control: { kind: 'agent', hostId: 'local', agentSessionId: 'working', run: { runId: 'run-working' } },
-    status: { state: 'working', source: 'native-hook', observedAt: 3 },
-    pendingInteraction: undefined
+    status: { state: 'working', source: 'native-hook', observedAt: 3 }
   }
   try {
     await act(async () => root.render(<ProjectActivity

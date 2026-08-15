@@ -198,6 +198,49 @@ describe('ConfigStore workspace identity', () => {
     expect(loaded.notifications).not.toEqual(DEFAULT_CONFIG.notifications)
   })
 
+  it('defaults Agent browser automation to off and back-fills it as a concrete false on disk', async () => {
+    // 授权位的缺省必须落成**具体的 false**，不是留一个 undefined 让每个读点自己兜底。
+    // 留 undefined 的代价是判据有两种形状：任何一个新读点写成 `!== false` 或 `?? true` 就静默放行了。
+    //
+    // fixture 必须先把 scratch 与 notifications 两个上游 back-fill 都喂饱：它们各自也会置 persist，
+    // 于是「落盘」这半边会搭它们的便车——把 `if (browserAutomation.added) persist = true` 整行删掉，
+    // 文件照样被写，断言照样绿。喂饱之后，这次 get() 会写盘就只剩我这一个理由。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      workspaces: [{
+        id: SCRATCH_WORKSPACE_ID,
+        name: SCRATCH_WORKSPACE_NAME,
+        hostId: 'local',
+        path: join(tmpdir(), '.agentmux', 'scratch'),
+        kind: 'folder'
+      }],
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID }
+    }))
+
+    const loaded = await store.get()
+    expect(loaded.browser.agentAutomation, 'Agent 页面驱动默认必须是关的').toBe(false)
+
+    // 补齐要真的写回磁盘——只在内存里补，下一个进程读到的还是 undefined。
+    const onDisk = JSON.parse(await readFile(path, 'utf8')) as typeof baseConfig & {
+      browser: { agentAutomation?: boolean }
+    }
+    expect(onDisk.browser.agentAutomation, '补齐没落盘，下次冷启动又是 undefined').toBe(false)
+  })
+
+  it('keeps an authored Agent browser automation opt-in instead of resetting it to the default', async () => {
+    // 反向那一半：上面那条只证明「缺席补成 false」。若补齐逻辑写成无条件覆盖，
+    // 上面那条照样绿，而用户开过的开关每次读都被按回去。两条合起来才夹住。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      browser: { ...baseConfig.browser, agentAutomation: true }
+    }))
+
+    const loaded = await store.get()
+    expect(loaded.browser.agentAutomation, '用户开过的授权被复位了').toBe(true)
+  })
+
   it('salvages each preference on its own, so a damaged toolbar does not cost the theme', async () => {
     // 与 workspaces 同一条规矩：逐条判定，不整份判定。整份判定会让下一次「browser 形状变了」
     // 的 bump 顺手清掉主题。
@@ -907,7 +950,9 @@ describe('ConfigStore workspace identity', () => {
         }
       ],
       // get() back-fills the notification default for a config saved before the field existed.
-      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID }
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+      // 同理：授权位也是后加的字段，get() 会把它补成具体的 false 再交出去。
+      browser: { ...saved.browser, agentAutomation: false }
     })
   })
 
@@ -977,7 +1022,8 @@ describe('ConfigStore workspace identity', () => {
       viewport: true,
       more: false
     })
-    expect((await store.get()).browser).toEqual(saved.browser)
+    // save() 存的是作者写的形状，get() 交出的是补齐过的形状——这里点名差的就是授权位那一个字段。
+    expect((await store.get()).browser).toEqual({ ...saved.browser, agentAutomation: false })
     expect(await readFile(path, 'utf8')).not.toContain('openExternal')
   })
 

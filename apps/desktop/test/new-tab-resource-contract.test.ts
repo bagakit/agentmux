@@ -7,6 +7,12 @@ import {
   DESKTOP_SESSION_ATTRIBUTE
 } from '../src/shared/desktop-actions.js'
 
+// NewTabSurface 经 lib/api 在模块加载时判断宿主。先立起这个全局，否则下面对组件模块的静态 import
+// 会撞未定义的 __AGENTMUX_WEB_PREVIEW__（仅由 vite define 注入，root vitest.config.ts 不注入）。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
+
 const fixture = vi.hoisted(() => {
   const session = {
     id: 'warm-run',
@@ -47,6 +53,11 @@ const fixture = vi.hoisted(() => {
       executorDetections: {},
       detectExecutors: vi.fn(async () => {}),
       launchAgent: vi.fn(async () => {}),
+      // Resume 快捷方式（6c36a3d7）新读的三格。真实 store 恒把 recoveryCandidates 初始化成 []，
+      // 组件对它取 `.length`；这份手搭的最小 mock 建在那之前，缺了就在渲染期炸空指针。
+      recoveryCandidates: [],
+      recoverSession: vi.fn(async () => {}),
+      createNote: vi.fn(async () => {}),
       promoteWarmTerminal: vi.fn(async () => {}),
       prewarmTerminal: vi.fn(),
       // 归属键：这个 fixture 挂的是 `{ tabGroupId: 'group' }`（没有 regionId，即空分组占位那条路径），

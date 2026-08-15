@@ -163,7 +163,7 @@
 | 层级 | 视觉语言 | 用途 |
 | --- | --- | --- |
 | Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
-| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认 |
+| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认。**落地类名只有 `.small-button` 一个**，见下「一档控件只有一个类名」 |
 | Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
 | Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
 | Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
@@ -171,6 +171,8 @@
 补充规则：
 
 - 同一语义在不同容器中使用同一控件层级。
+- **一档控件只有一个类名。** 上表五档各自只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。**不得按表里的档位名另造一个类名**——那个名字读起来像"就该存在"，于是没人会去查它有没有规则。实证：`.secondary-button` 被这样写出来过一次（启动页 Resume），全仓零规则，而 `base.css` 的全局 `button` 只重置 `font`/`color`、**不重置 `background`**，于是它落到 macOS 原生按钮样式——一颗浅灰实心药丸，在深色主题里比紧邻的品牌绿主操作还重，恰好推翻上表"Primary＝页面唯一主操作"。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住：它的扫描面除 BEM 记号外**还收 `-button` 结尾的扁平类名**，渲染了却没有规则即红。扁平名此前整族在扫描面之外（判据只认 `__`/`--`），这不是漏登记而是结构性缺席，所以修的是判据形状而不是加一条豁免。
+- **`justify-content: space-between` 是一份「有几簇」的契约，不是"把东西摊开"的通用手法。** 它把自由空间**摊在子元素之间**，所以结果是子元素**个数**的纯函数：两簇时各抱一端（这才是它的用途），三个以上松散子元素则被甩向两极、中间留出大洞。这份"应该有几簇"的期待写在 CSS 里，而供给子元素的是另一个文件里的 JSX，两边没有任何东西对齐它们——**供错形状不报错，只是默默排错**，而本仓测试跑在 happy-dom 下不算布局，没有任何 gate 会红。因此：**space-between 只用于子元素集合固定且已知的容器**；凡是"一个留在左缘、其余聚到右缘"的工具栏与页脚，一律用 `justify-content: flex-end` 配首元素 `margin-right:auto`——它对 2、3、4 个子元素都成立，**契约本身被删掉了**，而不是被记在文档里等人遵守。这套写法本仓已有多处（`surfaces.css` 的 `.settings-pane-actions`、`dock.css` 的 `.workspace-composer > footer`、`board.css` 的 `.discussion-canvas__footer`）。实证：`.composer__toolbar` 与 `.settings-pane-toolbar` 都配了 `> div` 的两簇写法，各自有一个调用方老实给两簇、另一个调用方给四个松散子元素，于是同一条规则在两个界面上同时排错。
 - **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
 - **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（Topic 行的 Topic 图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（状态、Provider 身份）或干脆留白。
 - Project Rail 的选中与活动分开：选中用中性 Surface 填充，活动用独立控件。项目图标、分组和目录的区分见文末“Projects”约束；分组文字仍比项目名轻，区别靠角色与结构。
@@ -242,7 +244,7 @@
 | Activity 对话轴 | 两条各 16px 高，之间 `--sp-1`；标记头像 16px，命中区 `--sp-7`(24px) 圆形；与 ruler track 共处一个 `stack` 列 | 两条轴的**需求真相在交互合同**（见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md) 的说话人轴/自我 Agent 轴），本行只管密度与几何。<br><br>**共用一个坐标盒是这两条轴的存在理由。**标记的 `left: N%` 与 tick 的 `left: N%` 必须对同一个宽度解析，否则两行只在分数上一致、在像素上不一致——ruler 行的 track 是 `flex: 1`，左侧被行内缩、右侧被跨度读数与 note 各占掉几十像素，一条横跨整个 feed 的轴会越靠后越右偏，最后一枚头像浮在它该指的 tick 一个时间戳宽度之外。所以轴不是 ruler 的兄弟，它与 track 同处 `.activity-ruler__stack` 这一列。<br><br>**轴高必须等于它所座的头像尺寸**（今天 16px）：标记全是绝对定位，轴自己没有内容可撑高，短了裁掉头像、高了在 ruler 上方留死白。两者是同一个数，不是"碰巧都是 16"。<br><br>**命中区大于头像，且不靠布局买。**头像保持 16px，`min-width/height` 取 24px——触摸目标比鼠标目标大得多，这是移动端可移植性在源头就兑现而不是留给以后。命中区长大不推动邻座，因为标记绝对定位且靠 `translate(-50%,-50%)` 以**自身中心**对位。24px 是"还称得上目标"的下限；桌面窄侧（~320px 时 track 只剩约 190px）两个相近的标记会有十几像素重叠，靠 hover/focus 抬 `z-index` 并放大**头像**（不是按钮——按钮的 transform 正是它的对位手段）把当前那枚提到可完整看见，邻座不动。<br><br>**选中与 tick 同一套配方**：长大几何 + 一圈 `--surface-0` 让位，不额外上色、不加描边（选中是单一几何信号）。选中的缩放必须压过 hover 的，否则指上去会让当前选中看起来"更不选中"。 |
 | Tool Dock Header | 30–34px；10px 左缩进；24px 图标按钮 | 各工具坞标题共享同一左缘。分屏时上下堆叠的标题必须对齐，近似对齐比不对齐更伤观感 |
 | Agent Attention Bar | 24px 高；横跨整宽；12px 横向 Padding；12px 段间距；11px tabular-nums | 窗口底部唯一的跨会话注意力汇总。`surface-1` 填充 + 顶部高光 + 一条 hairline 顶边界定它，不使用描边。复用共享状态点语汇，计数为零保持中性灰；栏存在时把折叠的 Rail 角标抬高让位，纯 CSS `:has()`，不耦合 JS |
-| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher |
+| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher。**「不扩大」是容器自己的约束，不是"卡片少所以碰巧没长"**：容器必须带有界高度与独立 `overflow`，Agent 装多少都不得把下方的 prompt 推下去。这条由 `apps/desktop/test/surface-scale-contract.test.ts` 守住——它判 `.agent-catalog` 的规则体里 `max-height` 与 `overflow` 同时在场（先断言确实扫到了这条规则）。守的是"有界"这件事而不是 268 这个数：把数字抄进测试等于同一个值住两处，改一处就漂 |
 | Settings Pane | 两层容器，不是一层：**可操作/主内容**卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；**信息/次级**块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片/区块标题走 `--fs-title`(14)，说明降到 `--fs-meta`/`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 此前一条规则把合成器、只读说明、执行器分组、工作区列表压成同一个平面，于是整屏一样重、读不出主次——两层的"抬起 vs 平铺"对比**就是**这次重做。**装饰性 hero 说明卡已退役**（见控件语言"装饰性强调图标格"）：绿只留给状态与唯一主操作。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，**不画整圈描边**——侧栏本身是 `--surface-1`，往选中态填 `--surface-1` 等于没填，会让 hover 反而比选中更"实"。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`/`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随——那类破坏工具身份 |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
 | Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |

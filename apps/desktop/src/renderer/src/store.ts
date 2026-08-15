@@ -230,6 +230,16 @@ export type HostCheckState = {
   observedAt?: number
 }
 
+/**
+ * One queued steer, carrying the correlation key for its ONE submission attempt. The id is born when the
+ * entry is enqueued and dies when the entry drains — it lives ONLY on the entry, never in a persisted
+ * field. A failed flush retains the entry (store.ts flushAgentSteerQueue), so the next flush replays it
+ * with the SAME `operationId`; Core then recognizes the idempotent replay instead of gating it BUSY. Two
+ * distinct prompts are two distinct entries with two distinct ids. Never added to `partialize` — a
+ * correlation key for an in-flight attempt is not layout the user meant to keep across a restart.
+ */
+export type AgentSteerQueueEntry = { operationId: string; text: string }
+
 type AppState = {
   runtimeOwnershipWarnings: string[]
   environmentWarning: string | null
@@ -295,7 +305,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
-  agentSteerQueues: Record<string, string[]>
+  agentSteerQueues: Record<string, AgentSteerQueueEntry[]>
   /**
    * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
    * 归属、同一生命周期。这里不是"手改名"那一档：手改名按 session id 存在 {@link agentNames}，而这两个
@@ -1577,7 +1587,7 @@ const workbenchWriteFence = createWriteFencedStorage({
 })
 const guardedWorkbenchStorage: StateStorage = workbenchWriteFence.storage
 
-/** 放行持久化写入。启动路径上的三个开启点都只走这一处。 */
+/** 放行持久化写入。启动路径上的两个开启点都只走这一处。 */
 function openPersistWrites(): void {
   workbenchWriteFence.openWrites()
 }
@@ -2324,7 +2334,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         session = agentSession({ kind: 'agent-session', agentSessionId: candidates[0]!.agentSessionId })
       }
       requireActive()
-      await api.sessions.submitPrompt(session.control, request.text)
+      // One-shot manual submit: the id is born and dies with this single call. There is no store-held
+      // retry here (unlike the steer queue), so a fresh id per invocation is the correct lifetime.
+      await api.sessions.submitPrompt(session.control, request.text, crypto.randomUUID())
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
@@ -4393,19 +4405,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   enqueueAgentSteer(sessionId, text) {
     if (!text.trim()) return
-    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), text] } }))
+    // Mint the operationId here, at the entry's birth — one id per queued prompt. It rides the entry
+    // through every retry so a re-flushed entry replays with the same id; a second call for a genuinely
+    // different prompt makes a second entry with its own id.
+    const entry: AgentSteerQueueEntry = { operationId: crypto.randomUUID(), text }
+    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   },
   async flushAgentSteerQueue(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
     const queued = get().agentSteerQueues[sessionId] ?? []
     if (queued.length === 0 || session.pendingInteraction || session.processState !== 'running') return
-    for (const prompt of queued) {
+    for (const entry of queued) {
       try {
-        await api.sessions.submitPrompt(session.control, prompt)
+        await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
         set((state) => {
           const current = state.agentSteerQueues[sessionId] ?? []
-          const next = current[0] === prompt ? current.slice(1) : current.filter((item) => item !== prompt)
+          const next = current[0] === entry ? current.slice(1) : current.filter((item) => item !== entry)
           const agentSteerQueues = { ...state.agentSteerQueues }
           if (next.length) agentSteerQueues[sessionId] = next
           else delete agentSteerQueues[sessionId]
@@ -4425,12 +4441,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // queued. A successful send removes one occurrence while the pre-existing duplicate remains; only
     // an increase proves this invocation was retained for retry.
     const queuedBefore = get().agentSteerQueues?.[sessionId] ?? []
-    const sameBefore = queuedBefore.filter((prompt) => prompt === text).length
+    const sameBefore = queuedBefore.filter((entry) => entry.text === text).length
     get().enqueueAgentSteer(sessionId, text)
     await get().flushAgentSteerQueue(sessionId)
     // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface that outcome to the
     // Composer so it must keep the user's draft instead of treating a retained queue item as success.
-    const sameAfter = (get().agentSteerQueues?.[sessionId] ?? []).filter((prompt) => prompt === text).length
+    const sameAfter = (get().agentSteerQueues?.[sessionId] ?? []).filter((entry) => entry.text === text).length
     if (sameAfter > sameBefore) {
       throw new Error('Prompt was retained for retry because the Agent did not accept it yet.')
     }

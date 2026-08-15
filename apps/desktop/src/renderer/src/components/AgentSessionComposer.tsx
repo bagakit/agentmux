@@ -14,7 +14,7 @@ import {
   type HistoryState
 } from '../lib/composer-history'
 import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
-import { useAppStore } from '../store'
+import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { AgentComposer } from './AgentComposer'
 
 export type AgentComposerAvailability = {
@@ -23,7 +23,7 @@ export type AgentComposerAvailability = {
 }
 
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
-const EMPTY_QUEUE: readonly string[] = Object.freeze([])
+const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
 // Per-session composer state that must NOT live in React: several tests call AgentSessionComposer() as a
 // plain function and read its props, which throws on any hook. It also should not live in the Store — that
@@ -70,10 +70,12 @@ export function AgentSessionComposer({
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
-  // The queue itself, not a count — the badge shows the messages, and derives the count from them, so
-  // the two cannot drift. Falls back to a shared frozen empty array so an absent queue does not hand a
-  // fresh `[]` to the selector on every store update (zustand compares by reference).
-  const queued = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
+  // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
+  // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
+  // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
+  // selector on every store update (zustand compares by reference) — the `.map` to text happens once per
+  // real render below, not inside the selector, so it does not defeat that reference check.
+  const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
@@ -204,7 +206,7 @@ export function AgentSessionComposer({
   return (
     <AgentComposer
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
-      queued={queued}
+      queued={queuedEntries.map((entry) => entry.text)}
       commands={composerOptions?.commands ?? []}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
       onSelectSuggestion={(item, kind) => { if (kind === 'reference' && activeFile) addFileReference() }}

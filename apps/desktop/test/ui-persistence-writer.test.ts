@@ -248,8 +248,8 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
 
     // 开闸只能有一个入口。散着直接改标志的写法会绕过这一处，让「谁放行了写入」重新变成 N 处判断。
     const openCalls = source.match(/openPersistWrites\(\)/g) ?? []
-    // 一处定义 + 启动路径上三个开启点（读成功、兜底外壳装好、启动整体失败）。
-    expect(openCalls.length).toBe(4)
+    // 一处定义 + 启动路径上两个开启点（兜底外壳装好、启动整体失败）。读成功那次已折进投影路径，不再单独开闸。
+    expect(openCalls.length).toBe(3)
     expect(source).not.toMatch(/workbenchWriteFence\.openWrites\(\)[\s\S]{0,40}workbenchWriteFence\.openWrites\(\)/)
   })
 })

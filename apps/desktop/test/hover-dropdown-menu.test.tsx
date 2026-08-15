@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { PaneSplitMenu } from '../src/renderer/src/components/PaneSplitMenu'
 import * as Menu from '../src/renderer/src/components/HoverDropdownMenu'
 
@@ -93,7 +93,8 @@ it('switching hover menus closes the previous owner and unmount releases the act
   expect(second).toHaveBeenLastCalledWith(false)
 })
 it('all existing dropdown consumers import the shared hover adapter, with nonempty discovery', () => {
-  const dir = resolve('../../apps/desktop/src/renderer/src/components')
+  // 用测试文件所在目录派生组件目录，避免依赖 process.cwd()（全量跑时 cwd 是仓根，resolve 会爬出仓库）
+  const dir = join(import.meta.dirname, '../src/renderer/src/components')
   const consumers = readdirSync(dir).filter((f) => f.endsWith('.tsx')).filter((f) => readFileSync(join(dir, f), 'utf8').includes('<DropdownMenu.Root'))
   expect(consumers.length).toBeGreaterThan(0)
   for (const file of consumers) expect(readFileSync(join(dir, file), 'utf8'), file).toContain("import * as DropdownMenu from './HoverDropdownMenu'")
