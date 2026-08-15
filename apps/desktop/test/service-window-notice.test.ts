@@ -137,7 +137,32 @@ describe('把一个 Agent Session 映成步骤结局：看进程，不看我们�
     expect(classifyServiceNotice(outcome).kind).toBe('process-degraded')
     expect(rendered?.notice.step).toContain('terminal capabilities')
     expect(rendered?.notice.mode).toContain('prompts remain available')
-    expect(rendered?.notice.restore).toContain('retry')
+  })
+
+  it('握手超时的 restore 不许点名 Resume 或任何「重试」——这个 Run 里重试不存在', () => {
+    // 与上面 reattach-failed 那条同族，但更严：那边至少还有一个真能走通的动作（重挂 pane），
+    // 这边**一个都没有**。三条实测：
+    //   1. 这条 marker 只在 Run 还在跑时落得下——client 的 requireRunningTerminalHandshakeRun
+    //      对非 running 一律抛错，所以「进程已退」不是这条告示的局面。
+    //   2. Resume 对 running 的 Run 在 ensureAgentContinuity 判出 `reattachable` 直接返回，
+    //      不进 attach；即使走到 resumeAgentRun 也撞 'Cannot resume while the original Run is
+    //      still running.'。
+    //   3. ensureTerminalHandshake 见到「有 marker 且未 acknowledged」就早退（注释写明刻意如此，
+    //      不在每次重连/提交上再武装一个十秒观察者），而清除 marker 的 clearTerminalCapability
+    //      只在那个早退的下游被调用——本 Run 内无法重新触发。重挂 pane 也不行：那条路清的是
+    //      terminalOutputChannel，碰不到 terminalCapability。
+    //
+    // 上一版这里断言的是 `toContain('retry')`，正好把那句不可达的 'Resume this session to retry
+    // the capability check' 钉死——改对反而变红。这是本仓 copy-must-name-an-action-reachable
+    // 那一族的第二例：**断言守住了「这句话在场」，而该守的是「它点名的动作从当前状态走得通」**。
+    const restore = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(handshakeDegraded))
+    )!.notice.restore
+    expect(restore).not.toContain('Resume')
+    expect(restore).not.toContain('resume')
+    expect(restore).not.toContain('retry')
+    // 并且必须如实说清「这个 Run 里就是未知」，而不是留一句空话——沉默地降级同样被禁。
+    expect(restore).toContain('next one probes again')
   })
 
   it('非 Agent Session 没有服务窗', () => {

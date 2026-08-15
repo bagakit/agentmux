@@ -92,6 +92,24 @@ describe('Run 投影报告 owner-confirmed current_size，而不是 spec.size', 
     await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
   })
 
+  it('current_size 显式为 null 时，连自己刚记下的 applied size 都不许顶上', async () => {
+    // 上一条用的是**全新 adapter**，`confirmedSizes` 是空的——于是 `=== undefined` 与 `!snapshot`
+    // 两种判据给出同一个 null，那条断言对这个分支是空转的（实测：把 `snapshot === undefined` 改成
+    // `!snapshot`，5/5 全绿）。判别力只在「缓存里**有**东西」时才出现，所以这里先真做一次 resize
+    // 把 applied size 记进 confirmedSizes，再让 owner 报 null。
+    //
+    // 契约是两件不同的事必须分开：字段**缺席**（老快照没这个字段）可以回退到我们记下的 applied
+    // size；字段**显式为 null**是 owner 在说「我现在也不知道」——那就得如实是 unknown。拿一个陈旧的
+    // 缓存值去冒充「当前尺寸」，比承认不知道更糟：它看起来是权威事实，而屏幕证据会按这个错尺寸重建。
+    const adapter = adapterWith({ currentSize: { cols: 80, rows: 24 }, appliedSize: { cols: 200, rows: 87 } })
+    await adapter.resize('resize-run', 200, 90)
+    await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: 200, rows: 87 })
+
+    ;(adapter as unknown as { client: { status: () => Promise<unknown> } }).client.status =
+      async () => runInfo(null)
+    await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
+  })
+
   it('没有 current_size 字段时，也不用 spec.size 冒充当前尺寸', async () => {
     const adapter = new CtxmuxRunAdapter()
     const snapshot = {
