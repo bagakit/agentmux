@@ -241,6 +241,71 @@ describe('按字素簇切，不吐半个字符', () => {
   })
 })
 
+// 截断是有损的，缩短不是——所以先缩短。本仓 400 条真实源文件路径实测：原样尾切后**零条**能完整
+// 显示，剥掉仓根之后 31% 完整显示，平均 97 → 53 个码元。省掉的正好是零识别力的那一段。
+describe('路径先缩短再截断', () => {
+  const ROOT = '/Users/somebody/proj/priv/bagakit/agentmux'
+
+  it('仓内路径剥成相对路径，于是根本不用截', () => {
+    const abs = `${ROOT}/apps/desktop/src/main/agent-notifier.ts`
+    expect(abs.length, '这条判据要求原路径确实超界，否则截不截都一样').toBeGreaterThan(MAX_STEP_SUMMARY_LENGTH)
+    const out = stepSummary('Edit', JSON.stringify({ file_path: abs }), MAX_STEP_SUMMARY_LENGTH, ROOT)
+    // 完整、无省略号——而不是 `…gentmux/apps/desktop/src/main/agent-notifier.ts`。
+    expect(out).toBe('apps/desktop/src/main/agent-notifier.ts')
+  })
+
+  it('仓外路径折叠家目录', () => {
+    const out = stepSummary(
+      'Read',
+      JSON.stringify({ file_path: '/Users/somebody/proj/priv/bagakit/agentmux/package.json' }),
+      MAX_STEP_SUMMARY_LENGTH,
+      '/Users/somebody/other-repo'
+    )
+    expect(out).toBe('~/proj/priv/bagakit/agentmux/package.json')
+  })
+
+  it('仓根必须整段匹配到 `/`——`/repo-backup` 不是 `/repo` 的子路径', () => {
+    // 裸 startsWith(root) 会把它剥成 `-backup/src/a.ts`，一条不存在的路径。
+    const out = stepSummary('Edit', JSON.stringify({ file_path: '/w/repo-backup/src/a.ts' }), MAX_STEP_SUMMARY_LENGTH, '/w/repo')
+    expect(out).toBe('/w/repo-backup/src/a.ts')
+  })
+
+  it('没有 workspaceRoot 时行为不变——缩短不了就原样，不猜', () => {
+    const abs = `${ROOT}/apps/desktop/src/main/agent-notifier.ts`
+    // 与改动之前逐字相同：仍是保尾截断的绝对路径。
+    expect(stepSummary('Edit', JSON.stringify({ file_path: abs }))).toBe('…gentmux/apps/desktop/src/main/agent-notifier.ts')
+  })
+
+  it('家目录折叠只在**折叠后能塞下**时才看得出效果', () => {
+    // 上一条是同一个输入没有 root 的样子：`~` 折叠确实发生了，但路径折叠后仍有 68 个码元，
+    // 尾切留最后 47 个，于是折不折叠尾巴一模一样。这不是 bug，是 `~` 的受益窗口只有 15 格宽——
+    // 只有长度落在 49..63 的路径才会因它从「被截」变成「完整」。写这条是为了让下一个人别把
+    // 「上面那条没出现 `~`」读成折叠没生效。
+    expect(stepSummary('Read', JSON.stringify({ file_path: '/Users/somebody/proj/priv/one/two/module.ts' })))
+      .toBe('~/proj/priv/one/two/module.ts')
+  })
+
+  it('只缩短路径字段——命令是要执行的字面文本，一个字都不许改写', () => {
+    // 判据必须让命令**自己就以仓根/家目录开头**，否则 shortenPath 本来就匹配不上，
+    // 「只缩短路径字段」这条就成了恒真的——我第一版写的 `ls /Users/...` 正是如此：把实现改成
+    // 对所有字段都缩短，它照样绿。这一版直接跑一个绝对路径的可执行文件，那是真实命令的形状。
+    const cmd = '/Users/somebody/bin/deploy.sh --now'
+    expect(cmd.length, '要求命令塞得下，否则看到的是截断而不是「原样」').toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+    expect(stepSummary('Bash', JSON.stringify({ command: cmd }), MAX_STEP_SUMMARY_LENGTH, ROOT)).toBe(cmd)
+    // 仓根那一侧同样要守：命令以仓根开头时也不许被剥成相对路径。
+    const inRepo = `${ROOT}/s.sh`
+    expect(stepSummary('Bash', JSON.stringify({ command: inRepo }), MAX_STEP_SUMMARY_LENGTH, ROOT)).toBe(inRepo)
+  })
+
+  it('缩短发生在截断之前——反过来就白做了', () => {
+    // 先截后缩：尾切已经把前缀切掉，`…`开头的串不再以仓根起始，缩短匹配不上，识别位补不回来。
+    const abs = `${ROOT}/apps/desktop/electron.vite.config.ts`
+    const out = stepTitle('Edit', 'Edit', JSON.stringify({ file_path: abs }), ROOT)
+    expect(out).toBe('Edit apps/desktop/electron.vite.config.ts')
+    expect(out.startsWith('Edit …'), '前缀没被剥掉，说明缩短没在截断之前发生').toBe(false)
+  })
+})
+
 describe('折叠行标题', () => {
   it('取得到就带上参数', () => {
     expect(stepTitle('Bash', 'Bash', JSON.stringify({ command: 'pnpm test' }))).toBe('Bash pnpm test')
