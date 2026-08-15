@@ -186,11 +186,25 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
   // Core's durable marker is stronger than an inferred disconnected status: it says exactly which
   // workflow step timed out while this Run remained usable. Project it directly so a healthy Agent is
   // never painted as failed and the notice survives reconnect/restart snapshots.
+  //
+  // restore 这句**不给动作**，因为这个状态下一个动作都没有——这不是偷懒，是实测的结论：
+  //   · 这条 marker 只在 Run **还在跑**时才落得下（client.ts 的 requireRunningTerminalHandshakeRun
+  //     对非 running 一律抛错），所以「等它退出再 Resume」不是这条告示要回答的局面；
+  //   · Resume 对 running 的 Run 在 ensureAgentContinuity 就判出 `reattachable` 直接返回投影，
+  //     不进 attach；就算走到 resumeAgentRun 也会撞 'Cannot resume while the original Run is
+  //     still running.'；
+  //   · 而 ensureTerminalHandshake 见到「有 marker 且握手未 acknowledged」就早退（client.ts:3012），
+  //     注释写明是刻意的——不在每次重连/提交上再武装一个十秒观察者。清除 marker 的
+  //     clearTerminalCapability 只在那个早退的下游被调用，因此本 Run 内无法重新触发。
+  //   · 重挂这块 pane 也没用：那条路清的是 terminalOutputChannel（attachAgentRun → clearOutputChannel），
+  //     碰不到 terminalCapability。
+  // 也就是说：这项能力在这个 Run 的余生里就是未知。如实说「下个 Run 会重新探测」，而不是点名一个
+  // 按下去什么都不会发生的 Resume——点名一个空动作比不点名更糟（原则 11 / RED-LINES）。
   if (session.terminalCapability?.reason === 'handshake-timeout') {
     const step: ProcessStep = {
       label: 'Checking terminal capabilities',
       degradedMode: 'The Agent is still usable; terminal capability is unknown and prompts remain available',
-      restore: 'Resume this session to retry the capability check'
+      restore: 'Nothing to do here — this Run keeps running, and the next one probes again'
     }
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }
