@@ -1,7 +1,7 @@
 import { useId } from 'react'
 import { Gauge } from 'lucide-react'
 import type { AgentTurnUsage } from '@agentmux/core'
-import { formatTokenCount } from '../lib/agent-usage'
+import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 
 /**
  * The composer's context-usage indicator: an always-visible chip carrying the one scannable number,
@@ -30,11 +30,12 @@ import { formatTokenCount } from '../lib/agent-usage'
 export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefined }) {
   const cardId = useId()
   const context = usage?.context
-  const known = context && Number.isFinite(context.capacityTokens) && context.capacityTokens > 0 &&
-    Number.isFinite(context.usedTokens) && context.usedTokens >= 0
-  // One rounded percentage is the source of truth; the other is its complement, so the two always sum
-  // to 100 (independent floors of used and remaining could sum to 99).
-  const used = known ? Math.min(100, Math.max(0, Math.round(context.usedTokens / context.capacityTokens * 100))) : null
+  // 「这个数知不知道」由 agent-usage 的 contextUsedPercent 独判——全窗口唯一一处。此处曾自己写那 6 行，
+  // 项目活动行也照抄过一份；三份同源判定漂移，同一个 Agent 会在输入框、项目行、名册上给出三种说法。
+  const used = contextUsedPercent(context)
+  const known = context !== undefined && used !== null
+  // used% 与 remaining% 由同一个取整数派生（remaining = 100 - used），两者永远加起来是 100
+  // （各自独立取整会出现 99）。
   const remaining = used === null ? null : 100 - used
 
   const chip = known ? `${used}%` : '—'

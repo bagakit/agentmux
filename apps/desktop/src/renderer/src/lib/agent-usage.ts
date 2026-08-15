@@ -1,3 +1,4 @@
+import type { AgentTurnUsage } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 // 一个 Agent 的 token 用量在名册里怎么显示。
@@ -18,6 +19,29 @@ export type AgentUsageDisplay =
 
 /** 拿不到数时的中性记号，沿用资源面板同一个符号，全窗口"不知道"长一个样。 */
 const UNKNOWN = '—'
+
+/**
+ * 上下文窗口用掉了百分之几；答不上来就是 `null`，**绝不塌成 0**。
+ *
+ * 这是全窗口唯一一处这个判定。此前它长在两个地方——`AgentContextUsage.tsx` 的 `known`/`used`，和
+ * `project-activity-row.ts` 的 `contextPercent`（后者注释里写着「照抄 6 行」，并留了 `ponytail:`
+ * 说「若第三处也要它，再抽到 agent-usage.ts」）。名册就是那第三处，所以搬到这里，而不是抄第三份。
+ *
+ * 为什么这 6 行值得抽：它判的不是「怎么算百分比」，而是**「这个数到底知不知道」**。三个条件
+ * （容量有限且为正、已用有限且非负、context 在场）任一不成立都必须读作「这个 Provider 此刻没报」。
+ * 抄三份的代价不是重复，是**漂移**：哪天有人在其中一处加上 `capacityTokens >= usedTokens` 的校验，
+ * 另外两处就会对同一个 Session 给出不同的「知不知道」，而这三处分别画在输入框、项目行和名册上——
+ * 同一个 Agent 在三个地方显示三种状态，谁都不知道信哪个。
+ *
+ * 返回 `null` 而不是 0：0 的意思是「查过了，一点没用」，`null` 是「没报」。把没报显示成 0%，
+ * 用户会以为这个 Agent 刚开始跑，而它可能正要被压缩。
+ */
+export function contextUsedPercent(context: AgentTurnUsage['context'] | undefined): number | null {
+  if (!context) return null
+  if (!Number.isFinite(context.capacityTokens) || context.capacityTokens <= 0) return null
+  if (!Number.isFinite(context.usedTokens) || context.usedTokens < 0) return null
+  return Math.min(100, Math.max(0, Math.round((context.usedTokens / context.capacityTokens) * 100)))
+}
 
 /**
  * 把 token 数压成紧凑可读串：987 → "987"，12432 → "12.4k"，1_200_000 → "1.2M"。

@@ -22,6 +22,7 @@
 
 import type { AgentTimelineItem, SessionSnapshot } from '../../../shared/contracts'
 import { attentionAccentFor, type AttentionCategory } from './attention-event'
+import { contextUsedPercent } from './agent-usage'
 import { sessionBoardColumn } from './project-board'
 import { sessionRecentActivity } from './session-recency'
 
@@ -46,17 +47,13 @@ function elapsedShort(ms: number): string {
 /**
  * 上下文占用百分比，算不出就返回 null——绝不塌成 0（验收：absent turnUsage 显示「无」而非「0」）。
  *
- * 判定与 AgentContextUsage 的 `known`/`used` 同源（那份在组件里，import 会拖进 React，故这 6 行照抄）：
- * 容量与已用都必须有限且合理，任一缺失即读作「这个 Provider 此刻没报」，返回 null。
- * ponytail: 与 AgentContextUsage 的 known 判定重复；若第三处也要它，再抽到 agent-usage.ts。
+ * 判定本身在 `agent-usage.ts` 的 {@link contextUsedPercent}：这里曾经照抄那 6 行，并留了 `ponytail:`
+ * 说「若第三处也要它，再抽到 agent-usage.ts」。名册成了第三处，所以已经抽走了。这里只剩「先确认这是
+ * 个 agent Session」这一句本地判断。
  */
 function contextPercent(session: SessionSnapshot): number | null {
   if (session.kind !== 'agent') return null
-  const context = session.turnUsage?.context
-  if (!context) return null
-  if (!Number.isFinite(context.capacityTokens) || context.capacityTokens <= 0) return null
-  if (!Number.isFinite(context.usedTokens) || context.usedTokens < 0) return null
-  return Math.min(100, Math.max(0, Math.round((context.usedTokens / context.capacityTokens) * 100)))
+  return contextUsedPercent(session.turnUsage?.context)
 }
 
 /**
