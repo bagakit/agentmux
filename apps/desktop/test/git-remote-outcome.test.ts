@@ -6,7 +6,7 @@ import {
   type GitRemoteFailureKind,
   type GitRemoteVerb
 } from '../src/renderer/src/lib/git-remote-outcome.js'
-import type { GitRemoteResult } from '../src/shared/contracts.js'
+import type { GitRemoteResult } from '../src/shared/git-contracts.js'
 
 /**
  * 守的缺陷（#206）：preload 的 git 面有 10 个方法，其中 5 个（unstage / discard / push / pull /

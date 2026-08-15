@@ -1,4 +1,4 @@
-import type { GitRemoteResult } from '../../../shared/contracts'
+import type { GitRemoteResult } from '../../../shared/git-contracts'
 
 /**
  * 远端 git 动作（push / pull / fetch）的结果说给用户听的那一句，以及破坏性操作的「先武装再执行」判定。

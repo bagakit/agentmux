@@ -5,13 +5,15 @@ import { join } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
   AppConfig,
+  WorkspaceRecord
+} from '../shared/contracts.js'
+import type {
   CreatePullRequestInput,
   CreatePullRequestResult,
   GhAuthProbe,
   PrBaseSource,
-  PrReadiness,
-  WorkspaceRecord
-} from '../shared/contracts.js'
+  PrReadiness
+} from '../shared/git-contracts.js'
 import { gitFailureMessage, scrubGitCredentials, type GitService } from './git-service.js'
 import { FALLBACK_BASE_REF, parseRemoteHead, plainBranchName, remoteHeadArgs } from '../shared/base-ref.js'
 

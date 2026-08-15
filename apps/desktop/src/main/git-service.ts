@@ -3,6 +3,9 @@ import { resolve, sep } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
   AppConfig,
+  WorkspaceRecord
+} from '../shared/contracts.js'
+import type {
   GitAheadBehind,
   GitDiffSide,
   GitFileChange,
@@ -11,9 +14,8 @@ import type {
   GitPushOptions,
   GitRemoteOptions,
   GitRemoteResult,
-  GitStatusResult,
-  WorkspaceRecord
-} from '../shared/contracts.js'
+  GitStatusResult
+} from '../shared/git-contracts.js'
 
 /**
  * The one place git's own error text is trusted enough to show a person. Git can echo a remote URL

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { PrReadiness } from '../../../shared/contracts'
+import type { PrReadiness } from '../../../shared/git-contracts'
 import { ghBridge } from '../lib/git-bridge'
 
 export type PrReadinessState = {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GitAheadBehind } from '../../../shared/contracts'
+import type { GitAheadBehind } from '../../../shared/git-contracts'
 import { gitBridge } from '../lib/git-bridge'
 
 export type GitAheadBehindRequestState = {
