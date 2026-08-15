@@ -292,7 +292,11 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'STALE_AGENT_SESSION_BINDING',
       'CTXMUX_DISCONNECTED',
       'CTXMUX_INPUT_CURSOR_MISSING',
-      'SIGNAL_UNSUPPORTED'
+      'SIGNAL_UNSUPPORTED',
+      // 不是寻址失败，而且它的原始 message 已经点名了唯一那条下一步（"Turn it on in
+      // Settings › Browser."，可达性由 browser-automation-setting-reachable.test.ts 单独证明）。
+      // 再叠一句 addressingRecovery 的"换个地址试试"只会盖掉那句真能走的。
+      'BROWSER_AUTOMATION_DISABLED'
     ]
 
     for (const code of AGENTMUX_CONTROL_ERROR_CODES) {

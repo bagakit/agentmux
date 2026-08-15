@@ -59,7 +59,7 @@ import type {
   WorkspaceFileWriteInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
-import type { AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
@@ -628,7 +628,14 @@ export async function registerIpc(args: {
   handleWithEvent('browser:runScript', async (event, id: string, code: string) => {
     requireTrustedSender('browser:runScript', event)
     if (config.browser.agentAutomation !== true) {
-      throw new Error('Agent browser automation is off. Turn it on in Settings › Browser.')
+      // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
+      // 取不到就折成 `CONTROL_FAILED`——于是 `BROWSER_AUTOMATION_DISABLED` 进了码表、进了收据解析
+      // 的测试，却在生产路径上一次都发不出来（零调用者）。差别对 Agent 是实的：`CONTROL_FAILED`
+      // 读作"这次失败了，重试吧"，而这件事重试一万次也不通，要人去改设置。
+      throw Object.assign(
+        new Error('Agent browser automation is off. Turn it on in Settings › Browser.'),
+        { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
+      )
     }
     return await browsers.runScript(id, code)
   })

@@ -1,5 +1,4 @@
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,6 +8,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
+import { allStyles } from './helpers/styles.js'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import { buildAgentRoster } from '../src/renderer/src/lib/agent-roster.js'
@@ -225,9 +225,11 @@ describe('上下文压力标记出现在名册行上', () => {
   // 而这枚标记的**全部意义**就是颜色差异：两档若解析成同一个颜色，上面四条照样全绿，界面上
   // caution 和 danger 长得一模一样。所以直接读样式表，判两档各自解析到不同的色相 token。
   it('两档在样式表里解析到不同的颜色，不是同一个 token', () => {
-    const css = readFileSync(
-      new URL('../src/renderer/src/styles/overlays.css', import.meta.url), 'utf8'
-    )
+    // 读**整张表**（按 @import 顺序拼接），不硬编码某一个文件——房规见
+    // docs/design/agentmux-surface-density.md《样式表的组织》。这条原本写死 overlays.css，
+    // 于是这几条规则按表面拆进 agent-panels.css 的那一刻它就红了，而红的话还算走运：
+    // 同一个形状若是拆走之后**不再被断言覆盖**，它会安安静静地全绿（记忆「扫到空内容的白绿」）。
+    const css = allStyles()
     const ruleFor = (tier: string): string => {
       const at = css.indexOf(`.agent-roster__pressure[data-pressure='${tier}']`)
       expect(at, `样式表里没有 ${tier} 这一档的规则`).toBeGreaterThan(-1)

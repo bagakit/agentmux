@@ -87,4 +87,31 @@ describe('Agent 浏览器自动化开关：拒绝点名的位置真的到得了'
     // 而且它保存时走的必须是 config.browser 那一支，不是把别的字段写回去。
     expect(shell, '保存没写到 config.browser').toMatch(/api\.config\.save\(\{ \.\.\.current, browser \}\)/u)
   })
+
+  /**
+   * 第四层：那句拒绝必须带着**自己的码**离开主进程。
+   *
+   * 上面三条守的是「人照着这句话走得到开关」。这条守的是**另一个读者**——Agent。它读的不是散文，
+   * 是 `error.code`；而 `control-host.ts` 是从 `error.code` 上取的，取不到就折成 `CONTROL_FAILED`
+   * ——读作"这次失败了，重试吧"。于是 Agent 会一直重试一件重试一万次也不通的事。
+   *
+   * 实测这正是发生过的：`BROWSER_AUTOMATION_DISABLED` 进了 Core 码表、进了收据解析的测试
+   * （control-host.test.ts），生产路径上却一次都发不出来——零调用者，而两边都不红。所以判据
+   * 必须落在**抛出点**，不是码表里有没有这个字符串。
+   */
+  it('拒绝带着 BROWSER_AUTOMATION_DISABLED 这个码离开主进程，而不是折成 CONTROL_FAILED', () => {
+    const ipc = read('../src/main/ipc.ts')
+    // 先切到那句拒绝所在的一小段，再在段内判——全文件判的话，文件里别处提一句这个码就能满足，
+    // 而抛出点上光秃秃的 `new Error(...)` 照样绿。
+    const at = ipc.indexOf('Agent browser automation is off.')
+    expect(at, '授权闸上的拒绝文案不见了——这条判据失去靶子').toBeGreaterThan(-1)
+    const throwSite = ipc.slice(Math.max(0, at - 400), at + 400)
+
+    expect(throwSite, '拒绝没有挂码——control-host 取不到 error.code，会折成 CONTROL_FAILED')
+      .toContain('BROWSER_AUTOMATION_DISABLED')
+    // 码要真的挂在被 throw 的那个 error 上。只在附近注释里出现这个词不算。
+    expect(throwSite, '码不在 throw 出去的 error 身上').toMatch(
+      /throw Object\.assign\([\s\S]*BROWSER_AUTOMATION_DISABLED/u
+    )
+  })
 })

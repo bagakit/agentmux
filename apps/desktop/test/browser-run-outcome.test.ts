@@ -95,6 +95,10 @@ describe('Agent 驱动页面的授权闸', () => {
     )
     expect(body, '拒绝没有指明去哪开，Agent 和用户都卡住').toMatch(/Settings/)
     // 必须是抛，不是返回一个空结果。静默降级正是 AGENTS.md:32-52 的唯一硬规则所禁止的。
-    expect(body, '关着的时候没有抛，而是静默返回了什么东西').toContain('throw new Error')
+    // 判 `throw` 与「抛的是个 Error」，不钉死 `throw new Error` 这个拼法：拒绝后来挂上了
+    // `BROWSER_AUTOMATION_DISABLED` 这个码（`throw Object.assign(new Error(…), { code })`），
+    // 而那是把这条拒绝变得**更**诚实，不该由这条判据挡着。
+    expect(body, '关着的时候没有抛，而是静默返回了什么东西').toMatch(/throw\s/)
+    expect(body, '抛的不是 Error——下游按 message 取原因会拿到 "[object Object]"').toContain('new Error(')
   })
 })

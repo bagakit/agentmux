@@ -307,6 +307,7 @@ styles/
   activity.css    Activity 时间线、机器步骤与标尺
   activity-conversation.css  Activity 对话回合与 Markdown 内容
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
+  agent-panels.css  Agent 的 Portal 面板（花名册、计数树、资源用量）——紧跟 overlays
 ```
 
 约束：
@@ -315,7 +316,8 @@ styles/
 - 分文件是**按表面切**而不是按属性切（不设 `typography.css`/`colors.css`）——改一个表面时想看到的是
   它的全部规则，而不是在三个文件间来回跳。
 - 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
-- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。
+- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。**拆出去的那一半要紧跟原文件 `@import`**——
+  层叠顺序即文件顺序，排到别处就不是搬家而是在改层叠。守护就是上面那条文件顺序断言。
 - **没有孤儿文件**：每个 `.css` 都要在 `index.css` 里 `@import`。一个没进入口的样式文件是死文件——
   规则永不生效，而契约测试会照常扫描它并放行。
 - 契约测试读的是**整张表**（`test/helpers/styles.ts` 按 `@import` 顺序拼接），不硬编码单个文件路径；
