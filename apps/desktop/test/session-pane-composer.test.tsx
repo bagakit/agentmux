@@ -15,6 +15,7 @@ const captured = vi.hoisted(() => ({
   onMenuSelect: null as ((destination: OpenDestination) => void) | null,
   menuCanSplit: null as boolean | null,
   menuRequest: null as { id: number; url: string; x: number; y: number } | null,
+  workspaceRoot: null as string | null,
   openHttpLink: vi.fn(async (_origin: OpenHttpLinkOrigin, _url: string, _dest: OpenDestination) => {})
 }))
 
@@ -47,11 +48,14 @@ vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
   // displayState 透传出来断言：判定再对，Pane 不把它交出去，整个「在进行」指示就是死的，
   // 而且所有只测判定的用例仍会绿。这条把那个静默失效变成可见的红。
   // openHttpLink 也俘获出来：这是对话链接点击的唯一出口，SessionPane 不交出去就等于没接线。
-  ActivityView: ({ displayState, openHttpLink }: {
+  // workspaceRoot 同理：它决定路径按哪个仓根缩短，取错了会渲染出一条「根在别的仓」的相对路径。
+  ActivityView: ({ displayState, openHttpLink, workspaceRoot }: {
     displayState?: string
     openHttpLink?: (url: string, event: LinkClickModifiers) => void
+    workspaceRoot?: string
   }) => {
     captured.onProseLinkClick = openHttpLink ?? null
+    captured.workspaceRoot = workspaceRoot ?? null
     return <div data-test-view="activity" data-display-state={displayState ?? 'absent'} />
   }
 }))
@@ -141,11 +145,54 @@ function render(
 afterEach(() => {
   fixture.state.sessions = []
   fixture.state.viewModes = {}
+  fixture.state.config = { appearance: { terminalTheme: 'graphite' }, workspaces: [] }
+  fixture.state.activeWorkspaceId = undefined
   captured.onProseLinkClick = null
   captured.onMenuSelect = null
   captured.menuCanSplit = null
   captured.menuRequest = null
+  captured.workspaceRoot = null
   captured.openHttpLink.mockClear()
+})
+
+describe('这一格按哪个仓根缩短路径', () => {
+  // Move to Workspace 只搬显示身份，session.workspacePath 从不被改写（move-session-view.ts）。
+  // 于是「当前激活的 workspace」与「这个 session 真正所在的仓」会分岔。取错的那个不只是缩不短：
+  // 当它是 session 路径的**祖先**时，shortenPath 的边界守卫会匹配成功并剥掉，渲染出一条根在别的仓
+  // 的相对路径——看起来完全像个真答案。长路径只是难读，错路径是谎。
+  const twoWorkspaces = {
+    appearance: { terminalTheme: 'graphite' },
+    workspaces: [
+      { id: 'ws-parent', name: 'parent', hostId: 'local', path: '/repo-parent', kind: 'folder', branch: 'main' },
+      { id: 'ws-repo', name: 'repo', hostId: 'local', path: '/repo', kind: 'folder', branch: 'main' }
+    ]
+  }
+
+  it('取 session 自己所属的 workspace，哪怕激活的是另一个', () => {
+    fixture.state.sessions = [session('agent')] // workspacePath: '/repo'
+    fixture.state.viewModes = { 'agent-1': 'activity' }
+    fixture.state.config = twoWorkspaces as typeof fixture.state.config
+    // 视图被搬到了 parent：激活的是它，但 session 还在 /repo 里跑。
+    fixture.state.activeWorkspaceId = 'ws-parent'
+    render('agent-1', 'agent')
+    expect(
+      captured.workspaceRoot,
+      '按 activeWorkspaceId 取根会拿到 /repo-parent，那是另一个仓'
+    ).toBe('/repo')
+  })
+
+  it('认不出归属就交空串——宁可不缩短，也不拿一个凑合的根去剥前缀', () => {
+    fixture.state.sessions = [session('agent')]
+    fixture.state.viewModes = { 'agent-1': 'activity' }
+    // 配置里没有任何 workspace 拥有 /repo。
+    fixture.state.activeWorkspaceId = 'ws-parent'
+    fixture.state.config = {
+      appearance: { terminalTheme: 'graphite' },
+      workspaces: [{ id: 'ws-parent', name: 'parent', hostId: 'local', path: '/repo-parent', kind: 'folder', branch: 'main' }]
+    } as typeof fixture.state.config
+    render('agent-1', 'agent')
+    expect(captured.workspaceRoot).toBe('')
+  })
 })
 
 describe('SessionPane Agent Composer ownership', () => {
