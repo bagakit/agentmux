@@ -209,6 +209,28 @@ describe('按字素簇切，不吐半个字符', () => {
     }
   })
 
+  it('切口落在空格上时两头都不漏空白——`…␠file` 看起来像少了一截', () => {
+    // 尾切此前只有 `…${slice}`，没有对称的 trimStart，于是切点落在空格上就吐出 `… zzz.md`。
+    // 走的是产品真实路径：file_path 是保尾字段，flatten 保留单个内部空格，而 macOS 上带空格的
+    // 目录（`My Notes`、`Application Support`）很常见。
+    const withSpace = `/Users/me/proj/My Notes ${'z'.repeat(43)}.md`
+    const tail = stepSummary('Edit', JSON.stringify({ file_path: withSpace }))!
+    expect(tail.startsWith('… '), `省略号后漏了空格：${JSON.stringify(tail)}`).toBe(false)
+    expect(tail).toContain('.md')
+
+    // 头切的对称面：`trimEnd()` 此前没有判据，删掉它全绿。
+    const head = clampStep(`${'a'.repeat(46)} ${'b'.repeat(50)}`, 'head')
+    expect(head.endsWith(' …'), `省略号前漏了空格：${JSON.stringify(head)}`).toBe(false)
+  })
+
+  it('单个簇就超预算时有界退化成一个省略号，而不是原样吐回整串', () => {
+    // 两处 `?? value.length` 兜底是承重的，不是防御性写法：换成 `?? 0`，尾切会返回整串 65 个码元，
+    // 超上界 17 格。基字母加 60 个组合重音是一个字素簇，比预算宽——这条既钉住下界，也钉住兜底。
+    const oneHugeCluster = `xxxe${'́'.repeat(60)}`
+    expect(oneHugeCluster.length).toBeGreaterThan(MAX_STEP_SUMMARY_LENGTH)
+    expect(clampStep(oneHugeCluster, 'tail')).toBe('…')
+  })
+
   it('经由 stepSummary 的真实路径也不吐半个字符', () => {
     // 判据要落在产品真正走的那条路上，而不只是直接调 clampStep。同样要让 🚀 骑在刀口上：
     // 尾切留 47 个码元，🚀 占 2 个，于是它后面须正好 46 个码元（37 个 x 加 `rocket.ts`）。
