@@ -17,7 +17,9 @@ const fixture = vi.hoisted(() => ({
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
-    enqueueAgentSteer: vi.fn(),
+    // Returns true = "the queue took it". The composer clears the draft only on true, so a mock that
+    // returned undefined would silently exercise the refusal path in every test that queues.
+    enqueueAgentSteer: vi.fn(() => true),
     // Typed to the real store signature (`send(sessionId, text)`, store.ts:627) so `mock.calls[n][1]`
     // is the text argument rather than an index into an inferred empty tuple.
     send: vi.fn(async (_sessionId: string, _text: string) => {}),
@@ -208,6 +210,19 @@ describe('AgentSessionComposer adapter', () => {
     composer.props.onQueue?.()
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
     expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', '')
+  })
+
+  it('keeps the draft when the queue refuses the message', () => {
+    // The mirror of the test above. Clearing the box is the "it entered the queue" signal, so it must
+    // not fire when the queue REFUSED — an oversized prompt whose draft was cleared would leave the
+    // user's words nowhere they can reach: not in the box, not in the queue, only in a banner.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'too large to queue' }
+    fixture.state.enqueueAgentSteer.mockReturnValueOnce(false)
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    composer.props.onQueue?.()
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue')
+    expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
   it('suppresses an accidental identical re-queue but records the first', () => {
