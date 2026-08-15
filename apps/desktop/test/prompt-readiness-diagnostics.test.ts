@@ -165,13 +165,23 @@ describe('CONSUMED 分不清两个世界时如实说，不笃定 wait', () => {
     expect(result.message, 'CONSUMED 默认文案回退成了笃定 wait：没承认续期可能永不到达').toContain(
       'no new epoch is coming'
     )
-    // 且必须给一个用户真能执行的带内恢复，不能只说 wait。
-    // 恢复动作只能是「先 stop 再 resume」：这个世界里 Run 还在 running，而 resumeAgentRun 对
-    // running 的 Run 直接抛 AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），恢复横幅也只在
-    // disconnected/missing/exited 时才渲染（SessionPane.tsx:253）——光说 "resume" 在这一侧是句
-    // 做不到的话。stop 之后 Run 退出，resume 才会 delete 掉旧 readiness 并铸一枚新 epoch。
-    expect(result.message, 'CONSUMED 的恢复动作退回成了对 running Run 无效的裸 resume').toMatch(
-      /stop the Agent and then resume/i
+    // 且不得点名任何**在这个状态下走不通**的恢复链。这条守卫被同一个缺陷打中过两次：
+    //   第一次文案说 'resume' —— resumeAgentRun 对 running 的 Run 直接抛
+    //     AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），Resume 按钮也只在
+    //     disconnected/missing/exited 时渲染（SessionPane.tsx:254）。
+    //   第二次改成 'stop the Agent and then resume' —— 更隐蔽，因为读源码像是通的。实际
+    //     stopAgent 走 commitLifecycle(reservation, null)，store 侧是 sessions.delete
+    //     （agent-session-store.ts:1475）并记 retirement；ensureAgentContinuity 随后判成
+    //     'retired'（agent-session-continuity.ts:139），resumeAgentRun 永不被调用，renderer
+    //     直接摘掉这一格（store.ts:4491）。**stop 之后没有 resume 这个东西。**
+    // 所以判据是否定式的：两条措辞都不许回来。正面那半由上一条断言（承认「永不来」）守着，
+    // 这半只负责挡住「许诺一条死掉的恢复链」。把文案改回任一版本都会打红这里。
+    expect(result.message, 'CONSUMED 的恢复动作退回成了对 running Run 无效的裸 resume').not.toMatch(
+      /\bresume it\b|\bstop the Agent and then resume\b/i
+    )
+    // 而 stop 的真实代价必须说出来，否则用户会自己发明那条死掉的恢复链。
+    expect(result.message, '没说清 stop 会 retire 掉会话：用户会以为 stop 完还能 resume 回来').toMatch(
+      /retires the session/i
     )
   })
 
