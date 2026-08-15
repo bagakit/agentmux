@@ -283,9 +283,24 @@ function read(relative: string): string {
 // The modules that answer "does this Agent need a person". Every one of them must ask the table.
 const CONSUMER_MODULES = [
   '../src/renderer/src/lib/attention-event.ts',
-  '../src/renderer/src/lib/agent-attention.ts',
-  '../src/renderer/src/lib/quick-switch.ts'
+  '../src/renderer/src/lib/agent-attention.ts'
 ]
+
+/**
+ * Modules that must not hand-copy the vocabulary, but are no longer required to ask the table THEMSELVES.
+ *
+ * The two halves of this guard protect different things, and conflating them costs correctness. "Must not
+ * name 'waiting' in code" forbids the hand copy — it applies to every module downstream of the decision,
+ * forever. "Must import isNeedsYouState" pins HOW the verdict is reached — and it is satisfied just as
+ * well, in fact more strongly, by delegating to a module that is itself on the list above.
+ *
+ * quick-switch.ts moved here when its ranking collapsed into `attentionSortClass` (attention-event.ts).
+ * It no longer asks the predicate at all; it asks a function that does. Keeping the import requirement
+ * would have forced a vestigial `import { isNeedsYouState }` that nothing calls — an unused binding this
+ * repo's tsconfig does not flag (no `noUnusedLocals`), sitting in the file as evidence of a check that is
+ * no longer true. A guard that has to be appeased with dead code has stopped describing the codebase.
+ */
+const NO_HAND_COPY_MODULES = [...CONSUMER_MODULES, '../src/renderer/src/lib/quick-switch.ts']
 
 // Every string literal that is CODE, via TypeScript's own parser. Comments and JSDoc are not visited,
 // so prose may name a state (the modules' own docstrings do, and must be able to) while code may not.
@@ -678,6 +693,12 @@ describe('each attention call site is wired to the shared vocabulary', () => {
       expect(source, relative).toMatch(
         /import \{[^}]*\bisNeedsYouState\b[^}]*\} from '\.\/attention-vocabulary'/
       )
+    }
+
+    // 手抄禁令的适用面比上面宽：既包括自己问表的模块，也包括把判定委托出去的模块。委托不是豁免——
+    // 一个不再 import 谓词的模块，照样可以在自己文件里写一行 `state === 'waiting'`，那正是本断言要挡的。
+    for (const relative of NO_HAND_COPY_MODULES) {
+      const source = read(relative)
       const literals = codeStringLiterals(source, relative)
       // Self-check: an extractor returning nothing would make every consumer vacuously compliant.
       // Each of these files does contain code literals (module specifiers at minimum).

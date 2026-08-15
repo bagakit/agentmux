@@ -4,7 +4,13 @@ import type { AgentCatalogEntry, LaunchOptionSelection } from '@agentmux/core'
 // process/filesystem runtime into the render process (the root barrel `@agentmux/core` would).
 import { RISK_TIERS, type RiskTier } from '@agentmux/core/risk-tier'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { attentionSortRank, categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
+import {
+  attentionSortClass,
+  attentionSortRank,
+  categoryFor,
+  isUrgentAttention,
+  type AttentionCategory
+} from './attention-event'
 import {
   agentUsageDisplay,
   contextPressure,
@@ -72,11 +78,12 @@ export type RosterRow = {
 }
 
 // needs-you first, then error, then working, then everything idle — the ONE ordering the quick switcher
-// also sorts by (see attentionSortRank in attention-event.ts), so the two can never disagree about who
-// is most urgent. `done` and idle share a rank there deliberately, pending #199's unread/seen axis.
+// also sorts by (see attentionSortClass/attentionSortRank in attention-event.ts), so the two can never
+// disagree about who is most urgent. `done` and idle share a rank there deliberately, pending #199's
+// unread/seen axis.
 function rank(row: RosterRow): number {
   if (row.attention) return attentionSortRank(row.attention)
-  return attentionSortRank(row.state === 'working' ? 'working' : 'idle')
+  return attentionSortRank(attentionSortClass(row.state))
 }
 
 /**
