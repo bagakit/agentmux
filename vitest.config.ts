@@ -22,6 +22,10 @@ import { defaultExclude, defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     exclude: [...defaultExclude, '.claude/worktrees/**'],
+    // 见 vitest.dist-freshness.ts：desktop 经 dist 消费 @agentmux/core，dist 陈旧时整个 desktop
+    // 测试面会为上一次构建的 Core 背书。放 globalSetup 而不是测试文件，是因为路径过滤在收集阶段
+    // 就把没点名的测试文件挡掉了——那里的守卫只在不需要它的那些次运行里生效。
+    globalSetup: ['./vitest.dist-freshness.ts'],
     // 见 vitest.setup.ts：把测试夹具跑的 git 与开发者本人的 gitconfig 隔开。
     setupFiles: ['./vitest.setup.ts']
   }
