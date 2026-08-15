@@ -1,4 +1,4 @@
-import type { GitFileChange } from '../../../shared/contracts'
+import type { GitFileChange } from '../../../shared/git-contracts'
 import { workspaceRelativeGitPath } from './git-path-coordinates'
 import { gitChangeClass, type GitChangeClass } from './git-porcelain-status'
 

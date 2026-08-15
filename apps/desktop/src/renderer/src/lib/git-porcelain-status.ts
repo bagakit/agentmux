@@ -1,4 +1,4 @@
-import type { GitFileChange } from '../../../shared/contracts'
+import type { GitFileChange } from '../../../shared/git-contracts'
 
 /**
  * The one place the app reads git's two porcelain status columns and says what they mean.

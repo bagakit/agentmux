@@ -127,7 +127,17 @@ import { describe, expect, it } from 'vitest'
 const DESKTOP_DIR = fileURLToPath(new URL('..', import.meta.url))
 const SRC_DIR = path.join(DESKTOP_DIR, 'src')
 const RENDERER_SRC = path.join(SRC_DIR, 'renderer/src')
-const CONTRACTS_FILE = path.join(SRC_DIR, 'shared/contracts.ts')
+/**
+ * Where a cross-process contract is allowed to live — the directory, not one file inside it.
+ *
+ * The property this guard needs is "`GitFileChange` is declared once, in the shared contract surface both
+ * processes read" — never "it is declared in contracts.ts". Pinning the filename made a pure move red
+ * (measured: splitting the git contracts into shared/git-contracts.ts failed this check while every
+ * behavioural assertion stayed green), and the cheapest repair for that red is to relax the assertion,
+ * which reopens the hole. What must stay nailed down is that the declaration is not in a renderer file,
+ * a main-process file, or a test fixture — any of those would mean one side owns the other's vocabulary.
+ */
+const SHARED_DIR = path.join(SRC_DIR, 'shared')
 /** The one module allowed to read the raw columns — the SSOT the #746 fix created. */
 const SSOT_FILE = path.join(RENDERER_SRC, 'lib/git-porcelain-status.ts')
 
@@ -433,20 +443,27 @@ describe('git change classification is owned by git-porcelain-status.ts', () => 
       .map((declaration) => (ts.isPropertySignature(declaration) ? declaration.name.getText() : '?'))
       .sort()
     expect(names).toEqual(['index', 'worktree'])
-    // The declarations must belong to GitFileChange specifically, in contracts.ts.
-    const changeDecl = program
-      .getSourceFile(CONTRACTS_FILE)!
-      .statements.find(
-        (statement): statement is ts.TypeAliasDeclaration | ts.InterfaceDeclaration =>
-          (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) &&
-          statement.name.text === 'GitFileChange'
+    // The declarations must belong to GitFileChange specifically, declared in the shared contract surface.
+    const changeDecls = program
+      .getSourceFiles()
+      .filter((source) => source.fileName.startsWith(SHARED_DIR + path.sep))
+      .flatMap((source) =>
+        source.statements.filter(
+          (statement): statement is ts.TypeAliasDeclaration | ts.InterfaceDeclaration =>
+            (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) &&
+            statement.name.text === 'GitFileChange'
+        )
       )
-    expect(changeDecl, 'GitFileChange is not declared in contracts.ts — scan root or contract moved').toBeDefined()
+    expect(
+      changeDecls.length,
+      'GitFileChange is not declared exactly once under src/shared — scan root moved, or the contract ' +
+        'was duplicated so the two processes can drift'
+    ).toBe(1)
     for (const declaration of targets.declarations) {
       expect(
         declaration.getSourceFile().fileName,
-        'a raw-column declaration came from somewhere other than contracts.ts'
-      ).toBe(CONTRACTS_FILE)
+        'a raw-column declaration came from outside the shared contract surface'
+      ).toBe(changeDecls[0].getSourceFile().fileName)
     }
   })
 

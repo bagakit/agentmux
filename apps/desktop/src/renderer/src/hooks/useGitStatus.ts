@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GitStatusResult } from '../../../shared/contracts'
+import type { GitStatusResult } from '../../../shared/git-contracts'
 import { gitBridge } from '../lib/git-bridge'
 
 export type GitStatusRequestState = {

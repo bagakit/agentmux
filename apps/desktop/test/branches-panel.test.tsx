@@ -9,11 +9,11 @@ vi.hoisted(() => {
 })
 
 import type {
-  GitAheadBehind,
   WorkspaceBranchRecord,
   WorkspaceBranchesSnapshot,
   WorkspaceRecord
 } from '../src/shared/contracts.js'
+import type { GitAheadBehind } from '../src/shared/git-contracts.js'
 import { allStyles } from './helpers/styles.js'
 
 const fixture = vi.hoisted(() => ({

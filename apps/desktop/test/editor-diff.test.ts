@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { GitFileDiff } from '../src/shared/contracts.js'
+import type { GitFileDiff } from '../src/shared/git-contracts.js'
 import { diffEditorSides, wordWrapOption } from '../src/renderer/src/lib/editor-diff.js'
 
 // This is the one place a single-file diff's directionality is decided, and getting it wrong is worse

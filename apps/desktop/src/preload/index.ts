@@ -22,15 +22,11 @@ import type {
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
-  CreatePullRequestInput,
   RunFanOutInput,
   KeepOneOfFanOutInput,
   CreateWorkspaceInput,
   DesktopControlCancellation,
   DesktopControlResponse,
-  GitPullStrategy,
-  GitPushOptions,
-  GitRemoteOptions,
   HostConfig,
   MoveWorkspacePathInput,
   NotificationModeId,
@@ -43,6 +39,12 @@ import type {
   WorkspaceFileWriteInput,
   WindowResizeEvent
 } from '../shared/contracts.js'
+import type {
+  CreatePullRequestInput,
+  GitPullStrategy,
+  GitPushOptions,
+  GitRemoteOptions
+} from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
   config: {

@@ -1,4 +1,7 @@
-import type { GitDiffSide, GitFileDiff } from '../../../shared/contracts'
+import type {
+  GitDiffSide,
+  GitFileDiff
+} from '../../../shared/git-contracts'
 
 /**
  * The two text sides a Monaco DiffEditor renders, derived from a structured {@link GitFileDiff}.
