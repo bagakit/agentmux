@@ -42,6 +42,14 @@
  * 猜错成"不存在的名字"会让 git 直接 fatal。仓里已经有一个会回答这件事、并且**如实标注答案来不来自
  * 权威**的地方（`gh-service.ts` 的 `resolveBaseRef`：`origin/HEAD` 才是真答案，缺席是常态，退路必须
  * 被标成猜测）。同一个概念不在这里长第二套判定。
+ *
+ * ## 为什么在 `shared/` 而不在 `renderer/src/lib/`
+ *
+ * 这件事有两个落点，分属两侧：**跑 git** 只能在 main（renderer 是沙箱，没有 node 内置模块，也没有
+ * 进程），而**那句话给谁看**在 renderer。所以它既不属于任何一侧，只能是共享的纯函数——`shared/` 里
+ * 的 `fanout-naming.ts` / `fanout-limits.ts` 是同一个形状。本仓 main **从不** import
+ * `renderer/src/lib/`（`grep -rl "renderer/src/lib/" apps/desktop/src/main/` 为空），所以放在那边
+ * 等于让接线时被迫再抄一份判据出来——那正是这个模块要避免的事。
  */
 
 /** 构造那条 rev-list 的实参。调用方自己跑 git——本模块不碰进程，好让它能被纯函数地测。 */

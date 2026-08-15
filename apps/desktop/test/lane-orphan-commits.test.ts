@@ -7,7 +7,7 @@ import {
   branchRetentionNote,
   orphanCommitCountArgs,
   parseOrphanCommitCount
-} from '../src/renderer/src/lib/lane-orphan-commits.js'
+} from '../src/shared/lane-orphan-commits.js'
 
 // ---------------------------------------------------------------------------
 // 判据本身用**真 git** 验，不用假 host。
