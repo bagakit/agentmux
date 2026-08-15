@@ -1,8 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey } from '../src/renderer/src/lib/workspace-projects.js'
@@ -265,10 +265,7 @@ describe('Project Rail selection and running signals', () => {
     const markup = renderRail()
     expect(rowFor(markup, 'Alpha')).not.toContain('Unscoped workspace')
     expect(markup).not.toContain('Unscoped workspace')
-    const identity = readFileSync(
-      new URL('../src/renderer/src/styles/chrome.css', import.meta.url),
-      'utf8'
-    ).match(/\.project-rail-row__identity\s*\{([^}]*)\}/)?.[1] ?? ''
+    const identity = allStyles().match(/\.project-rail-row__identity\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(identity.length).toBeGreaterThan(0)
     expect(identity).not.toContain('flex-direction: column')
   })
@@ -298,10 +295,7 @@ describe('Project Rail selection and running signals', () => {
 })
 
 describe('Project Rail style contract', () => {
-  const source = readFileSync(
-    new URL('../src/renderer/src/styles/chrome.css', import.meta.url),
-    'utf8'
-  )
+  const source = allStyles()
 
   it('scans the Project Rail rules and keeps the section label below row-title emphasis', () => {
     const heading = source.match(/\.sidebar__section-heading\s*\{([^}]*)\}/)?.[1] ?? ''
@@ -321,10 +315,7 @@ describe('Project Rail style contract', () => {
 })
 
 describe('Project Rail 的分组与嵌套', () => {
-  const chrome = readFileSync(
-    new URL('../src/renderer/src/styles/chrome.css', import.meta.url),
-    'utf8'
-  )
+  const chrome = allStyles()
 
   /** 分组头的标签，按出现顺序。 */
   function groupLabels(markup: string): string[] {
