@@ -216,6 +216,41 @@ export function attentionSortRank(sortClass: AttentionSortClass): number {
 }
 
 /**
+ * 一个状态属于哪个排序类——排序的**上半段**，与 `attentionSortRank` 的下半段合起来才是完整判定。
+ *
+ * 为什么必须只有一份：这里问的是「这个状态有多急」，而排名表回答「这个急迫档排第几」。后者一直是
+ * SSOT（`ATTENTION_SORT_RANK`，由 attention-ordering.test.ts 守着），前者此前在三个地方各写一份，
+ * 其中两份是有损的三元式 `state === 'working' ? 'working' : 'idle'`。今天九个状态下三份答案一致，
+ * 所以任何行为断言都是绿的——**分歧要等到加第十个状态那天才发生**，而那正是没人会回头检查这里的时刻。
+ *
+ * 穷举而不是 `default`，是为了让那一天**响亮**：`isNeedsYouState` 的类型谓词先收窄掉 needs-you 两支，
+ * `error` / `working` / `done` 三个 case 各收窄一支，残差恰好是 `starting / running / disconnected /
+ * exited` 四支。少列一支，返回类型就含 `undefined`，TS2366「缺少结尾 return」当场编译不过——新状态的
+ * 作者被迫在这里做一次决定，而不是默默拿到 idle。有损三元式给的是相反的待遇：它永远编译得过。
+ *
+ * 本函数从 quick-switch.ts 的 `attentionRank` 提上来，行为逐一等价（`done` 仍单独成类，它与 idle 只是
+ * **目前**在排名表里同级，pending #199 的未读/已读轴）。这是本仓第三次遇到同一个形状：dc77127c 修掉了
+ * 状态点那份，quick-switch 修掉了排序那份，剩下的两份在这里收口。
+ */
+export function attentionSortClass(state: AgentDisplayState | null): AttentionSortClass {
+  if (state === null) return 'idle'
+  if (isNeedsYouState(state)) return 'needs-you'
+  switch (state) {
+    case 'error':
+      return 'error'
+    case 'working':
+      return 'working'
+    case 'done':
+      return 'done'
+    case 'starting':
+    case 'running':
+    case 'disconnected':
+    case 'exited':
+      return 'idle'
+  }
+}
+
+/**
  * Fold a batch of Sessions against the previously known states, returning every event worth raising.
  *
  * Callers own the previous-state map because they own the lifetime of the projection; keeping it out

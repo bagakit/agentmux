@@ -771,8 +771,17 @@ describe('who decides needs-you is confined to the attention vocabulary SSOT', (
     const { scopes } = collectDecidingScopes(program, checker, vocabulary, scanOptions)
 
     // The scan must have found the enrolled files, or this tier polices an empty set. Derived from the
-    // import graph: these three import `isNeedsYouState`, and a fourth enrolling widens the tier
+    // import graph: these two import `isNeedsYouState`, and a third enrolling widens the tier
     // automatically.
+    //
+    // The set also SHRINKS legitimately, and that is the interesting direction — a file leaves when it
+    // stops asking the predicate at all. quick-switch.ts left when its ranking collapsed into
+    // `attentionSortClass` (attention-event.ts, itself enrolled): it now delegates the whole decision
+    // one hop upstream instead of asking the table directly. Leaving this tier is NOT leaving the
+    // regime — tier B below scans every scope regardless of enrollment, and
+    // attention-vocabulary.test.ts keeps quick-switch.ts in its hand-copy ban list. What would be wrong
+    // is padding this list back to three with a vestigial `import { isNeedsYouState }` that nothing
+    // calls, to keep a snapshot green.
     const enrolledFiles = new Set(scopes.filter((scope) => scope.enrolled).map((scope) => scope.file))
     const allEnrolled = new Set(
       program
@@ -784,11 +793,7 @@ describe('who decides needs-you is confined to the attention vocabulary SSOT', (
     expect(
       [...allEnrolled].sort(),
       'the SSOT importer set is what scopes this tier; an empty set would police nothing'
-    ).toEqual([
-      'renderer/src/lib/agent-attention.ts',
-      'renderer/src/lib/attention-event.ts',
-      'renderer/src/lib/quick-switch.ts'
-    ])
+    ).toEqual(['renderer/src/lib/agent-attention.ts', 'renderer/src/lib/attention-event.ts'])
     // Enrolled files with zero state literals produce no scope at all, which is the clean state — so
     // this may legitimately be empty and is NOT asserted non-empty.
     expect([...enrolledFiles].every((file) => allEnrolled.has(file))).toBe(true)

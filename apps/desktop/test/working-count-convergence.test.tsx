@@ -328,13 +328,9 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 现已合并成 `attention-event.ts` 的 statusDotTier 一处，running 走它自己那一档（.status--running
   // 在 chrome.css 里一直就有：绿、不脉冲）。两个组件的条目因此删掉——它们不再自己判。
   '/lib/attention-event.ts':
-    '单行状态点 statusDotTier：问"这一行画哪一档"而不是"有几个在干活"。working 与 running 各一档，'
-    + '因为脉冲的含义是"此刻有 turn 在途"，而 running 是活着但不在途中',
-  '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank',
-  // 单个 Session 的排序类，喂给 attentionSortRank（与已登记的 agent-roster.ts 同形）。它把一个 Session
-  // 映射到 working/idle 排序档，不数总量；折进 sessionBoardColumn 会让 starting/running 也排成 working。
-  '/lib/activity-groups.ts':
-    '单 Session 排序类，喂给 attentionSortRank，问的是"这一个排哪档"而不是"有几个在干活"',
+    '两处，都问"这一个状态归哪一档"而不是"有几个在干活"。(1) statusDotTier：这一行的点画哪一档，'
+    + 'working 与 running 各一档，因为脉冲的含义是"此刻有 turn 在途"，而 running 是活着但不在途中。'
+    + '(2) attentionSortClass：这一个状态排哪个序类，穷举 switch，喂给 attentionSortRank',
   // 下面两条是把检测器从「`x.state` 比 working」放宽到「也认裸名 `state`」之后**当场浮出来**的——
   // 它们一直就在生产代码里，只是先把状态存进了一个叫 state 的局部变量/形参，于是整张表对它们失明。
   // 记在这里而不是回退检测器：两处都不是计数，各自回答别的问题，但「这一处到底问什么」必须写下来，
@@ -343,6 +339,12 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
     'StatusCount 的图标三元：问"这一档配哪个图标"。数字由 rollup 算好后传进来，这里不参与计数',
   '/lib/resource-usage-panel.ts':
     '资源面板每行的尾巴："在干活"就不显示闲置时长，否则显示闲了多久。问的是"这一行要不要报 idle"'
+  // `/lib/agent-roster.ts` 与 `/lib/activity-groups.ts` 曾各占一条，理由都写着「单 Session 排序类，
+  // 喂给 attentionSortRank」。两处写的都是有损的 `state === 'working' ? 'working' : 'idle'`——对今天
+  // 九个状态答案正确，但第十个状态会**静默**落进 idle，而同一个判定在 quick-switch.ts 是穷举 switch，
+  // 加状态时那里编译不过、这两处照样过。判定已提成 attention-event.ts 的 `attentionSortClass`（穷举、
+  // 无 default），三处一起委派给它，所以这两条从表里删掉——它们不再自己判。
+  //
   // `/components/ProjectActivity.tsx` 曾在这里，理由是「单行标签 active now vs idle 时长」。那一处
   // 已搬进 `/lib/project-activity-row.ts`，并且搬的时候改成了 `sessionBoardColumn(...) === 'working'`
   // ——即不再自己拿 state 比字面量，而是委派给唯一裁决点。所以它从这张表里删掉：留着就成了一条
@@ -536,18 +538,13 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: '主按钮 Stop/Send：问"有在途回合吗"。idle-running 没有可打断的回合，故严格判 working 是对的'
   },
   '/lib/attention-event.ts': {
-    count: 3,
-    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）：问"这一行的点画哪一档"。它是名册行与 fan-out lane 共用的那一处——两个组件此前各手写一份，双双把 running 塌成 null，于是计数说 working、点画静止灰'
+    count: 5,
+    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值：这个文件是"一个状态归哪一档"的裁决点，画点与排序两问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle'
   },
   '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
-  '/lib/quick-switch.ts': {
-    count: 2,
-    why: 'attentionRank 的 switch：把状态映射到排序类，case 与 attentionSortRank 的实参各一次'
-  },
   '/lib/api.ts': { count: 1, why: 'browser preview 的 mock 数据，不是生产状态写入路径' },
 
   // ---- 单行/单 lane 的状态点：不是计数，但各有已记录的分岔 ----
-  '/lib/agent-roster.ts': { count: 2, why: '行排序 rank，喂给 attentionSortRank（另见 #572）' },
   // `/components/AgentRoster.tsx` 与 `/components/FanOutStrip.tsx` 曾各占一条（各 3 次，理由都写着
   // 「单行/单 lane 状态点」）。两处的四行判定已合并进 `attention-event.ts` 的 statusDotTier，组件里
   // 一个 working 字面量都不剩，所以条目删掉——留着就是守着空地的豁免（本文件对 ProjectActivity
@@ -565,8 +562,8 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: 'ACTIVE_STATES 里的成员名：判一条**已完成**的 tool_call 算不算「最近」，问的是"这一个 Session 还活着吗"而不是"有几个在干活"'
   },
   '/lib/activity-groups.ts': {
-    count: 6,
-    why: '两处单 Session 排序类（每处 `=== working ? working : idle` 各两个字面量）+ 组排序的 working 档实参两处；组是否在跑走 workingAgentCount(...) > 0，不自己数'
+    count: 2,
+    why: '组排序的 working 档实参两处；组是否在跑走 workingAgentCount(...) > 0，不自己数。单 Session 那两处曾各写一份 `=== working ? working : idle`（共 4 个字面量），已委派给 attentionSortClass'
   },
   '/lib/resource-usage-panel.ts': {
     count: 1,
