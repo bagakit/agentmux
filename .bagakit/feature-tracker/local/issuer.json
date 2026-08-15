@@ -1,6 +1,0 @@
-{
-  "version": 1,
-  "scheme": "feature-tracker-id-v1-c3n2g4",
-  "namespace": "8f",
-  "guard_key_source": "git-config:bagakit.feature-tracker.guard-key"
-}
