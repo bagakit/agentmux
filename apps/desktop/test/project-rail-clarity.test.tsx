@@ -3,7 +3,16 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
-const state = vi.hoisted(() => ({ selectSession: vi.fn(), providerCatalog: [] }))
+// 这个替身要**覆盖组件读的每一个 slice**，缺一个就是 `undefined`：`b3645c56` 给 ProjectActivity
+// 加了 `state.timelines` 与 `state.config` 两处读，替身没跟上，于是 `timelines[session.id]` 当场抛
+// TypeError——两条判据一条都没跑到，红得像组件坏了。真 store 的初值就是 `{}` 与 `null`（store.ts:1571），
+// 这里照抄的是那个初值，不是为了让测试过而编的形状。
+const state = vi.hoisted(() => ({
+  selectSession: vi.fn(),
+  providerCatalog: [],
+  timelines: {},
+  config: null
+}))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (value: typeof state) => unknown) => select(state) }))
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
 
