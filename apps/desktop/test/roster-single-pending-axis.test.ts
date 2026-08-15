@@ -55,17 +55,26 @@ import ts from 'typescript'
  * 同一个 {@link offendersIn}**：自检若直连 `underivedProperties`，验的就是一个生产侧不再使用的
  * 入口，`transitiveNames` 坏掉时它一概不知（[[cover-key-cannot-be-in-two-families]]）。
  *
- * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做**算术/字符串求值**、常量折叠或跨变量数据流——
+ * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做**算术/字符串求值**、常量折叠或跨变量常量求值——
  * `session.id ? 'a' + 'b' : 'ab'`（要把 `'a'+'b'` 化简成 `'ab'` 才知两支相等）、
  * `session.a ? (session, 'x') : 'x'`（逗号运算丢弃 session、要求值顺序分析）、以及把常量藏进一个
- * 提到 session 的 helper 调用（`f(session)` 而内部丢弃入参）都仍被算派生。局部绑定只穿透**一层**：
- * `const a = f(session); const b = a` 里的 `b` 认不出，会报假阳性并逼人在这里显式加一层——那是刻意
- * 选的方向（宁可误伤也不放行）。还有一处是**换来的**而非漏掉的：被显式声明为 source 的名字
- * （今天只有 `catalog`）不进 forbidden，所以经由它再从入参取一次值不会被抓——A 条保证了入参无可选
- * 成员，而事故形状是从**可选**成员上按行取值，故这个口子够不到事故本身；这是为消除 `scopes` 的假阳性
- * 明知换来的，记在这里而不是假装不存在。**嵌套常量三元**与**单层局部绑定**曾在这张单子上，已分别由
- * {@link canonicalConstant} 的结构折叠与 {@link transitiveNames} 收掉。抓剩下这些要 TypeChecker 的
- * 常量求值与过程间分析，本文件是 createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
+ * 提到 session 的 helper 调用（`f(session)` 而内部丢弃入参）都仍被算派生。这三种是**静默**的漏抓
+ * （假阴性方向：一列其实是源无关常量，却读作干净放行）——抓它们要 TypeChecker 的常量求值与过程间
+ * 分析，本文件是 createSourceFile 词法/语法走查够不到，这是有意接受的边界。
+ *
+ * 本轮从这张单子上**收掉**的（连同旧文对它的错误归类）：**局部绑定的层数限制**。旧文把它记成单一的
+ * source 侧**假阳性**（合法的二级派生被误报没接数据，吵但安全），漏了同一个限制在 forbidden 侧还是一个
+ * **假阴性**（静默且危险）——事故原样多隔一层局部绑定就被洗白：`const mid = input.x; const laundered =
+ * mid?.[session.id] ?? 0` 里 `laundered` 依赖 `mid` 而非直接依赖 `input`，一趟穿透扫不到，`unreadCount:
+ * laundered` 于是读作干净（实测存活）。两个失败面同源，已由 {@link transitiveNames} 迭代到**不动点**一并
+ * 收掉；而且这纯是**语法**层的重复扫描、**不需要 TypeChecker**——旧文把它一并归进「要 TypeChecker」是不实的
+ * （[[banned-word-guard-misses-the-mirror]] 的同族：只记了镜像的一面）。**嵌套常量三元**同样已由
+ * {@link canonicalConstant} 的结构折叠收掉。
+ *
+ * 还有一处盲点是**换来的**而非漏掉的，且是**静默**的：被显式声明为 source 的名字（今天只有 `catalog`）
+ * 不进 forbidden，所以经由它再从入参取一次值不会被抓——A 条保证了入参无可选成员，而事故形状是从
+ * **可选**成员上按行取值，故这个口子够不到事故本身；这是为消除 `scopes` 的假阳性明知换来的，记在这里
+ * 而不是假装不存在。
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -251,8 +260,13 @@ function constBindings(fn: ts.FunctionDeclaration): { name: string; initializer:
  * `const n = input.unread?.[session.id] ?? 0` 然后 `unreadCount: n`，事故原样就复活了。所以两侧
  * 同一次穿透：派生自 source 的局部名进 `sources`，碰了入参的局部名进 `forbidden`。
  *
- * 传递性只做一层（`const a = f(session); const b = a`：`b` 认不出）。这是刻意的边界，不是遗漏——
- * 真要写成链式转手，判据会报假阳性并逼人在这里显式加一层，而不是悄悄放行。
+ * 传递性做到**不动点**（本轮修的）：反复扫 const 绑定直到两个集合都不再增长，`const a = f(session);
+ * const b = a` 里的 `b` 因此也认得出。此前只穿一层，于是**多隔一个绑定**就绕过——两侧各有一个失败面：
+ * source 侧是**假阳性**（合法的二级派生被报没接数据，吵但安全），forbidden 侧是**假阴性**（事故原样多
+ * 隔一层就洗白，静默且危险）：`const mid = input.unacknowledgedThreads; const laundered = mid?.[session.id]
+ * ?? 0` 里 `mid` 一趟被染上、`laundered` 依赖 `mid` 而非直接依赖 `input`，一趟扫不到，于是 `unreadCount:
+ * laundered` 读作干净（实测这条 bypass 存活）。收敛到不动点后任意层都穿得透，纯语法重复扫描，不碰
+ * TypeChecker。
  *
  * **声明的 source 优先于传递来的 forbidden**：`catalog` 本身就是 `const catalog = new Map(input.providerCatalog…)`
  * ——它确实派生自入参，若不排除就会被扫进 forbidden，把 `scopes: resolveRosterScopes(…, catalog.get(…))`
@@ -266,18 +280,37 @@ function transitiveNames(
   forbidden: readonly string[]
 ): { sources: string[]; forbidden: string[] } {
   const bindings = constBindings(fn)
-  return {
-    // 只收初始化器真的派生自 source 的那些：`const zero = 0` 不会因为出现在这个函数里就变成 source。
-    sources: [...sources, ...bindings.filter((b) => valueDependsOnSource(b.initializer, sources)).map((b) => b.name)],
-    // 入参侧用 `referencesAny`：碰了入参在哪都算，和 `touchesInput` 同一把尺子。被显式声明为 source
-    // 的名字不进 forbidden——见上文，`catalog` 就是这一种。
-    forbidden: [
-      ...forbidden,
-      ...bindings
-        .filter((b) => !sources.includes(b.name) && referencesAny(b.initializer, forbidden))
-        .map((b) => b.name)
-    ]
+  const grownSources = [...sources]
+  const grownForbidden = [...forbidden]
+  // 迭代到**不动点**：反复扫 const 绑定，把「初始化器（依当前 source 集）派生自 source」的局部名收进
+  // source、把「（依当前 forbidden 集）碰了入参」的局部名收进 forbidden，直到两个集合都不再增长。
+  // 单趟只穿一层（`const mid = input.x; const laundered = mid?.[session.id] ?? 0` 里，laundered 只隔着
+  // mid 碰入参，一趟扫不到），跑到收敛就穿任意层——纯语法的重复扫描，不碰 TypeChecker。
+  for (;;) {
+    let grew = false
+    for (const b of bindings) {
+      // 只收初始化器真的派生自 source 的那些：`const zero = 0` 不会因为出现在这个函数里就变成 source。
+      if (!grownSources.includes(b.name) && valueDependsOnSource(b.initializer, grownSources)) {
+        grownSources.push(b.name)
+        grew = true
+      }
+      // 入参侧用 `referencesAny`：碰了入参在哪都算，和 `touchesInput` 同一把尺子。carve-out 钉死在
+      // **原始声明的** `sources` 上（每轮不变，只豁免声明的那几个、只豁免一次），而**不是**逐轮长大的
+      // `grownSources`：传递派生出来的 source 名（如 `laundered`，其 `mid` 又取自 input）绝不能享受豁免，
+      // 否则它进了 grownSources 就被挡在 forbidden 外，镜像 bypass 原样复活。`catalog` 是唯一需要豁免的
+      // 声明 source（`const catalog = new Map(input…)`，见 agent-roster.ts:122）。
+      if (
+        !grownForbidden.includes(b.name) &&
+        !sources.includes(b.name) &&
+        referencesAny(b.initializer, grownForbidden)
+      ) {
+        grownForbidden.push(b.name)
+        grew = true
+      }
+    }
+    if (!grew) break
   }
+  return { sources: grownSources, forbidden: grownForbidden }
 }
 
 /**
@@ -441,8 +474,8 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     // 一模一样的洞——同一个「先存进局部常量」的动作，正着用是合法派生，反着用就把事故原样洗干净了
     // （[[banned-word-guard-misses-the-mirror]]：只禁一个方向，同一个谎翻个面就存活）。
     // `laundered` 的初始化器里既提到 input 也提到 session，于是它同时进 sources 和 forbidden——
-    // `touchesInput` 一票否决，仍报不合格。变异判别器：把 transitiveNames 的 forbidden 那一行删掉，
-    // 上一条仍绿、**本条**立刻转红。
+    // `touchesInput` 一票否决，仍报不合格。变异判别器：把 transitiveNames 里往 grownForbidden 收名字
+    // 的那个 if 整段删掉，上一条仍绿、**本条**立刻转红。
     const mirrored = syntheticFn(
       `function f(input: I) {
          const laundered = input.unacknowledgedThreads?.[session.id] ?? 0
@@ -450,6 +483,38 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
        }`
     )
     expect(offendersIn(mirrored)).toEqual(['unreadCount'])
+  })
+
+  it('前提自检：源二级派生（隔两层局部绑定）不许被误报（不动点的 source 侧）', () => {
+    // 由来（本轮）：传递性此前只穿**一层**，于是隔两层局部绑定的合法派生被报没接数据——**假阳性**。
+    // `mid` 直接派生自 session，`percent` 依赖 `mid` 而非直接依赖 session：单趟只染上 `mid`，`percent`
+    // 认不出，`contextPercent: percent` 被误报。收敛到不动点后第二趟把 `percent` 也染上，不再误伤。
+    // 变异判别器：把 transitiveNames 的 `for(;;)` 不动点循环改成只跑一趟（单 pass），**本条**转红
+    // （`contextPercent` 冒进 offenders），而下面那条 forbidden 二级的自检仍绿——两个方向各红各的。
+    const twoHopSource = syntheticFn(
+      `function f() {
+         const mid = session.turnUsage?.context
+         const percent = contextUsedPercent(mid)
+         return [{ sessionId: session.id, contextPercent: percent }]
+       }`
+    )
+    expect(offendersIn(twoHopSource)).toEqual([])
+  })
+
+  it('前提自检：把入参隔两层局部绑定再洗出来，仍算"没人喂数"（不动点的 forbidden 侧）', () => {
+    // 实测存活的 bypass（本轮修的核心）：单趟穿透在 forbidden 侧是**假阴性**（静默且危险，和上一条
+    // source 侧的假阳性同源）。`mid` 直接取自 input，一趟被染进 forbidden；`laundered` 依赖 `mid` 而非
+    // 直接依赖 input，一趟扫不到，于是 `unreadCount: laundered` 读作干净——事故原样多隔一层就洗白。
+    // 收敛到不动点后第二趟把 `laundered` 也收进 forbidden，`touchesInput` 一票否决，报不合格。
+    // 变异判别器：把不动点循环改成单 pass，**本条**转红（offenders 变空），而上一条 source 二级仍绿。
+    const twoHopForbidden = syntheticFn(
+      `function f(input: I) {
+         const mid = input.unacknowledgedThreads
+         const laundered = mid?.[session.id] ?? 0
+         return [{ sessionId: session.id, unreadCount: laundered }]
+       }`
+    )
+    expect(offendersIn(twoHopForbidden)).toEqual(['unreadCount'])
   })
 
   it('前提自检：三元两支运行期恒等、只是拼法不同也算"没人喂数"', () => {
