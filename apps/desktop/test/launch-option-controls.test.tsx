@@ -205,10 +205,15 @@ describe('claude model/effort reach the launcher through the sealed catalog proj
   })
 
   it('grows no model or effort control for codex or cursor — absence hides, it never disables', () => {
-    for (const declarations of [CODEX_LAUNCH_OPTIONS, CURSOR_LAUNCH_OPTIONS]) {
+    // 钉整份 id 列表，不是 `some(model|effort)===false`——后者对空数组恒成立，而投影一个选项都没
+    // 交出来（这两个 Provider 的面板整个空掉）比多长出一个 Model 组严重得多，却会被它盖住。
+    for (const [declarations, ids] of [
+      [CODEX_LAUNCH_OPTIONS, ['sandbox', 'approval']],
+      [CURSOR_LAUNCH_OPTIONS, ['mode', 'sandbox', 'approvals']]
+    ] as const) {
       const options = launcherOptionsFor(declarations)
       // Neither provider declares a model or effort option, so the launcher hands LaunchRefine none.
-      expect(options.some((option) => option.id === 'model' || option.id === 'effort')).toBe(false)
+      expect(options.map((option) => option.id)).toEqual(ids)
       const markup = renderToStaticMarkup(createElement(LaunchRefine, {
         options,
         selection: {},

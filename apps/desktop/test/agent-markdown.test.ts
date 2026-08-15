@@ -66,6 +66,9 @@ describe('agent markdown parser', () => {
 
     expect(serialised).not.toContain('<')
     expect(serialised).not.toContain('&lt;')
+    // 先钉住「真的解析出了块」：上面两条 `not.toContain` 与下面这条 `every(...)===true` 对空
+    // 数组全都恒成立，于是解析器什么都不返回时整条判据静静放行——而这是那条承重的安全性质。
+    expect(blocks.length, '一个块都没解析出来，下面三条判据都成了空话').toBeGreaterThan(0)
     expect(blocks.every((block) => typeof block === 'object' && 'kind' in block)).toBe(true)
   })
 

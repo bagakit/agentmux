@@ -318,7 +318,43 @@ describe('ProcessResourceSampler', () => {
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.unavailable).toContain('ps timed out')
-      // 0 会被读成"它在跑但不吃资源"这个真值，比没有这个数字更糟。
+      // 第一次采样就失败时 `runs` 保留的是"上一次"，而上一次不存在，所以它是空的
+      // （`process-resource-sampler.ts:138` 的 `this.latest?.runs ?? []`）。这是正确行为：
+      // 没有过任何数字，就一个都不报，而不是报一排 0。
+      expect(latest()?.runs).toEqual([])
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('采样失败后保留上一次的数字并标记过期——不是把它们改写成 0', async () => {
+    // 上一条测的是"从来没成功过"那一支（runs 空）。这一条才是注释里那句「0 会被读成'它在跑但
+    // 不吃资源'这个真值，比没有这个数字更糟」真正说的情形：**先有过数字，然后采样挂了**。
+    // 这一支此前没有任何判据——上一条那句 `runs.every(cpuPercent !== 0)` 遍历的是空数组，恒真。
+    vi.useFakeTimers()
+    try {
+      let fail = false
+      const { sampler, watch, latest } = harness({
+        table: async () => {
+          if (fail) throw new Error('ps timed out')
+          return TABLE_TEXT
+        }
+      })
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      // 前提自检：先真的采到了一条带数字的样本，否则下面全是空话。
+      expect(latest()?.unavailable).toBeNull()
+      expect(latest()?.runs.map((run) => run.runId)).toEqual(['run-a'])
+
+      fail = true
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+
+      expect(latest()?.unavailable).toContain('ps timed out')
+      // 那条 run 还在，数字还是上一次那批——没有被改写成 0。
+      expect(latest()?.runs.map((run) => run.runId)).toEqual(['run-a'])
       expect(latest()?.runs.every((run) => run.cpuPercent !== 0)).toBe(true)
       stop()
       sampler.dispose()

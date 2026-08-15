@@ -155,6 +155,9 @@ describe('OpenDestinationBar', () => {
 
   it('opens every direction once a precise pane exists', () => {
     const buttons = renderBarButtons(true)
+    // 先钉住「按钮真的画出来了」：下面两条都是「没有一个是 X」的形状，对空数组恒成立，
+    // 于是整条栏子一个按钮都不画时它们照样绿——而那是个严重得多的缺陷。
+    expect(buttons).toHaveLength(OPEN_DESTINATIONS.length)
     expect(buttons.some((button) => button.disabled)).toBe(false)
     expect(buttons.every((button) => button['data-disabled-reason'] === undefined)).toBe(true)
   })

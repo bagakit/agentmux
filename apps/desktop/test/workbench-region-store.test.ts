@@ -479,7 +479,9 @@ describe('promoteRegionToTab', () => {
 
     const state = useAppStore.getState()
     expect(state.tabs[sourceTabId], '跨项目却改了源 Tab').toBe(beforeTabs[sourceTabId])
-    expect(Object.keys(state.tabs).some((id) => !beforeKeys.has(id)), '跨项目却造了新 Tab').toBe(false)
+    // 比整份键集合，而不是「没有新键」：后者是 `some(...)===false`，对空集合恒成立，于是
+    // promoteRegionToTab 万一把 tabs 清空了，这条照样绿——而那比「多造一个 Tab」严重得多。
+    expect(Object.keys(state.tabs).sort(), '跨项目却动了 Tab 集合').toEqual([...beforeKeys].sort())
   })
 
   it('View 正在关闭时拒绝促升——不能把一格从正在拆除的 View 里半途搬走', () => {
@@ -505,6 +507,7 @@ describe('promoteRegionToTab', () => {
 
     const state = useAppStore.getState()
     expect(state.tabs[sourceTabId], '关闭中的 View 却被促升改动了源 Tab').toBe(beforeTabs[sourceTabId])
-    expect(Object.keys(state.tabs).some((id) => !beforeKeys.has(id)), '关闭中的 View 却造了新 Tab').toBe(false)
+    // 同上：比整份键集合。`some(...)===false` 对空集合恒成立，清空 tabs 也会是绿的。
+    expect(Object.keys(state.tabs).sort(), '关闭中的 View 却动了 Tab 集合').toEqual([...beforeKeys].sort())
   })
 })
