@@ -143,3 +143,39 @@ describe('semantic turn state keeps readiness wording honest', () => {
     expect(result.message).not.toContain('still running')
   })
 })
+
+// ---------------------------------------------------------------------------
+// CONSUMED 的默认文案（无 runState / 无 semanticState）是 P0 走的那条**无从分辨**的路：
+// 线上 codex turn 因 server_overloaded 中止、不发 Stop，run 仍 running，续期永不到达。
+// 此时 submitPrompt 的重读拿不到任何能区分「续期在途」与「续期永不来」的证据（见
+// runtime-controller.ts:812-822 两条 branch 都不触发），所以文案必须**同时点名两个世界**并给出
+// 用户真能做的恢复动作（resume/restart），而不是笃定地叫人 wait 一个不会来的 epoch。
+//
+// 判据落在**只属于「永不来」那一侧**的短语 'no new epoch is coming'：waiting/done/ended 三条
+// 改写分支都不含它（它们各自把「still running」整句换掉）。所以这条短语正好把
+// 「分不清的默认」与「续期确实在来的 waiting」分开——一个 toContain('resume') 会在两侧都命中
+// （waiting 改写里没有，但 blocked/ended 里有），故意不用它。
+// ---------------------------------------------------------------------------
+describe('CONSUMED 分不清两个世界时如实说，不笃定 wait', () => {
+  it('默认（无证据）文案点名「续期可能永不到达」并给出 resume/restart 恢复', () => {
+    const result = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_READINESS_CONSUMED')
+    ) as AgentMuxError
+    // 「永不来」的世界必须被承认，否则又变回那条永不可达的 wait 建议。
+    expect(result.message, 'CONSUMED 默认文案回退成了笃定 wait：没承认续期可能永不到达').toContain(
+      'no new epoch is coming'
+    )
+    // 且必须给一个用户真能执行的带内恢复，不能只说 wait。
+    expect(result.message).toMatch(/resume or restart/i)
+  })
+
+  it('续期确实在来的 waiting 世界不含「永不来」的措辞——判据真的把两侧分开了', () => {
+    const result = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_READINESS_CONSUMED'),
+      { semanticState: 'waiting' }
+    ) as AgentMuxError
+    expect(result.message, '把「永不来」的话也说给了续期在来的世界：判据没分开两侧').not.toContain(
+      'no new epoch is coming'
+    )
+  })
+})
