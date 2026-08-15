@@ -71,8 +71,11 @@ describe('通往 sessionRecentActivity 的每条路都带上仓根', () => {
    */
   const forwarderNames = (source: string): string[] =>
     [...source.matchAll(/function\s+(\w+)\s*\(([^)]*)\)/gs)]
-      .filter(([, , parameters]) => /workspaceRoot\??\s*:/.test(parameters))
-      .map(([, name]) => name)
+      // 按下标取而不是解构：`noUncheckedIndexedAccess` 下解构出来的捕获组是 `string | undefined`，
+      // 于是 filter 的入参和 map 的产物都带上 undefined，整条链的类型就不是 string[] 了。
+      // 捕获组 1、2 在这个正则里必然存在（不是可选组），所以 `!` 说的是实话。
+      .filter((match) => /workspaceRoot\??\s*:/.test(match[2]!))
+      .map((match) => match[1]!)
       .filter((name) => name !== 'sessionRecentActivity')
 
   it('自检 1：扫描面找得到那三个直接调用点——否则下面的断言会恒真', () => {

@@ -61,7 +61,16 @@ const fakeElectron = vi.hoisted(() => {
       return this
     }
     once(event: string, listener: (...args: unknown[]) => void): this { return this.on(event, listener) }
-    removeListener(): this { return this }
+    // 真的摘掉，不是 no-op：`input-event` 的判据之一就是「run 结束后监听器不再留着」，
+    // 而一个 no-op 的假件会让那条判据永远为假、看起来像实现的错。
+    removeListener(event: string, listener: (...args: unknown[]) => void): this {
+      this.listeners.set(event, (this.listeners.get(event) ?? []).filter((item) => item !== listener))
+      return this
+    }
+    /** 模拟真人在这个 view 上的一次原生输入。 */
+    emit(event: string, ...args: unknown[]): void {
+      for (const listener of [...(this.listeners.get(event) ?? [])]) listener({}, ...args)
+    }
     setWindowOpenHandler(): void {}
     setZoomFactor(): void {}
     getZoomFactor(): number { return 1 }
@@ -208,5 +217,162 @@ describe('runScript 把页面调用交给派发层', () => {
       expect(contents.debugger.listeners.get(event) ?? [], `${event} 的监听没摘掉——每轮泄漏一对`)
         .toHaveLength(0)
     }
+  }, 30_000)
+})
+
+/**
+ * T-012：人伸手把方向盘抢回去之后，Agent 明确停下。
+ *
+ * 判在这一层而不是派发层，因为要判的正是 manager 那三件事：**拦在 onPageCall 这道必经之路上**、
+ * **结局压成 `stopped`**、**监听器跟着这一次运行走**。派发层对「有没有人碰过这个 view」一无所知。
+ *
+ * 「Agent 的动作不产生 input-event」那条地基在 browser-ownership.test.ts 上真机判——这里喂的是
+ * 合成事件，证不了那件事，也不打算证。
+ */
+describe('runScript：人接管之后，动作停、观察放行', () => {
+  /**
+   * 让派发层在**第一次**被调用时顺手模拟一次真人输入，并记下每次调用的名字。
+   *
+   * 接管信号必须从主进程这一侧发出，因为程序跑在它自己的子进程里，够不到 webContents。挂在
+   * 第一次调用上是为了拿到确定的时序：「第一次动作发生过、之后的一个都没有」正是这套设计
+   * 承诺的那句话。
+   */
+  function takeoverOnFirstCall(contents: any, type = 'mouseDown'): string[] {
+    const seen: string[] = []
+    let fired = false
+    createDispatch.mockImplementationOnce(() => async (name: string) => {
+      seen.push(name)
+      if (!fired) {
+        fired = true
+        contents.emit('input-event', { type })
+      }
+      return `dispatched:${name}`
+    })
+    return seen
+  }
+
+  it('人点了一下之后 click 被拒，而这之前的 click 正常执行', async () => {
+    const { manager, contents } = await managerWithBrowser()
+    const seen = takeoverOnFirstCall(contents)
+
+    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+
+    // 正向：接管**之前**那次真的做了。少了这一半，一个「永远拒绝」的实现也会绿——而那等于
+    // Agent 从此再也驱动不了任何页面。
+    expect(seen, '接管之前那次 click 没落到派发层上').toEqual(['click'])
+    // 反向：之后那次没落下去。只判结局的话，一个「照点不误、最后才把结局改个名」的实现也会绿。
+    expect(seen, '接管之后那次 click 照样点下去了').toHaveLength(1)
+    expect(report.outcome.kind, '接管之后的运行没被降级').toBe('stopped')
+  }, 30_000)
+
+  it('接管之后 snapshot 照样放行，js 和 cdp 被拒', async () => {
+    // 放行观察是设计的一半：程序被打断之后最该做的事就是看一眼页面再报告。把 snapshot 也拦掉，
+    // 它只能瞎猜着退出。两个逃生口按动作算——它们能做任何事，漏掉任何一个等于没拦。
+    const { manager, contents } = await managerWithBrowser()
+    const seen = takeoverOnFirstCall(contents)
+
+    const report = await manager.runScript('b1', `
+      await click("@e1")
+      const outcomes = []
+      for (const [label, run] of [
+        ['snapshot', () => snapshot()],
+        ['pageInfo', () => pageInfo()],
+        ['js', () => js('1')],
+        ['cdp', () => cdp('Runtime.evaluate', {})]
+      ]) {
+        try { await run(); outcomes.push(label + ':allowed') }
+        catch (error) { outcomes.push(label + ':refused') }
+      }
+      return outcomes
+    `)
+
+    // 程序把拒绝吞了照常 return，所以 result 拿得到——而结局仍然被压成 stopped（下一条判）。
+    expect(report.result, `程序没跑到底：${JSON.stringify(report.outcome)}`).toEqual([
+      'snapshot:allowed',
+      'pageInfo:allowed',
+      'js:refused',
+      'cdp:refused'
+    ])
+    // 放行的两个真的落到派发层上了，不是被上层伪造成一次成功。
+    expect(seen, '放行的观察没真的执行').toEqual(['click', 'snapshot', 'pageInfo'])
+  }, 30_000)
+
+  it('程序把拒绝 try/catch 吞了照常 return，结局仍然是 stopped', async () => {
+    // 这条是承重的，与 `endedReason` 那段注释里的是同一个陷阱：判在脚本层会被这个 catch 吃掉。
+    const { manager, contents } = await managerWithBrowser()
+    takeoverOnFirstCall(contents)
+
+    const report = await manager.runScript(
+      'b1',
+      'await click("@e1"); try { await click("@e2") } catch (error) { } return "done"'
+    )
+
+    expect(report.outcome.kind, '被接管却报成功——Agent 会以为它的程序跑完了').toBe('stopped')
+    const message = report.outcome.kind === 'stopped' ? report.outcome.message : ''
+    // 文案点名的恢复动作必须是「再跑一次」：它真能走通，而"去改设置"不成比例（人从没要求
+    // 禁用自动化），照 browser-automation-setting-reachable.test.ts 的房规。
+    expect(message, '没说清是人接管了').toMatch(/took control/i)
+    expect(message, '没告诉 Agent 下一步能干什么').toMatch(/run the program again/i)
+    expect(message, '没提先看一眼页面').toMatch(/snapshot\(\)/)
+  }, 30_000)
+
+  it('被接管不报 indeterminate，也不报 script-failed', async () => {
+    // 三支各有各的下一步，折并任意两支都会让 Agent 走错方向：
+    // - indeterminate 说的是"做到哪一步不知道"，而这里知道——拦在必经之路上，之后一个都没跑。
+    // - script-failed 是在把人的动作记到 Agent 程序头上，还叫它去改一段本来没错的代码。
+    //   这一支只有在覆写被放进 `if (run.completed)` 里面时才会冒出来：程序**没吞**拒绝的时候，
+    //   错是抛着出来的，落进 browserRunOutcomeFromFailure。两条路必须汇到同一个结局。
+    const { manager, contents } = await managerWithBrowser()
+
+    takeoverOnFirstCall(contents)
+    const swallowed = await manager.runScript(
+      'b1',
+      'await click("@e1"); try { await click("@e2") } catch (error) { } return "done"'
+    )
+    takeoverOnFirstCall(contents)
+    const thrown = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+
+    for (const [label, report] of [['吞了的', swallowed], ['没吞的', thrown]] as const) {
+      expect(report.outcome.kind, `${label}那次报成了 ${report.outcome.kind}`).toBe('stopped')
+    }
+    // 结局一样，`result` 不一样：吞了的那次程序真的 return 了东西（观察放行就是为了让它能这么做），
+    // 没吞的那次根本没跑到 return。两边都填一个值，或者两边都丢掉，都是在说谎。
+    expect(swallowed.result, '程序吞掉拒绝后 return 的东西被丢了——等于逼它再跑一遍').toBe('done')
+    expect(thrown.result, '程序没跑到 return 却报出了返回值').toBeUndefined()
+  }, 30_000)
+
+  it('鼠标飘过不算接管——只有有意的输入才算', async () => {
+    // 少了这条，一个「什么 input-event 都算」的实现会让上面几条全绿，而那等于人把指针挪过屏幕
+    // Agent 就停。这是一个会让整个功能变成噪音的假阳性，而且没人会当它是 bug。
+    const { manager, contents } = await managerWithBrowser()
+    const seen: string[] = []
+    createDispatch.mockImplementationOnce(() => async (name: string) => {
+      seen.push(name)
+      for (const type of ['mouseMove', 'mouseEnter', 'pointerMove', 'pointerRawUpdate', 'mouseLeave']) {
+        contents.emit('input-event', { type })
+      }
+      return `dispatched:${name}`
+    })
+
+    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+
+    expect(seen, '指针飘过之后的动作被拦了').toEqual(['click', 'click'])
+    expect(report.outcome.kind, '指针飘过就被判成接管了——这功能会吵到没法用').toBe('completed')
+  }, 30_000)
+
+  it('监听器跟着这一次运行走，不跟着 entry 走', async () => {
+    // 挂在整个 entry 生命周期上的话，人平时正常用浏览器就一直在写这个字段，下一次 run 一启动
+    // 就以为自己被接管了。这条连跑两次来判：第一次的输入不许影响第二次。
+    const { manager, contents } = await managerWithBrowser()
+
+    takeoverOnFirstCall(contents)
+    const first = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+    expect(first.outcome.kind, '第一次没被判接管——这条判据在对空气生效').toBe('stopped')
+
+    const second = await manager.runScript('b1', 'await click("@e1"); return "done"')
+
+    expect(second.outcome.kind, '上一次的接管漏到了下一次运行——监听器没摘干净').toBe('completed')
+    expect(contents.listeners.get('input-event') ?? [], 'input-event 的监听没摘掉——每轮泄漏一个')
+      .toHaveLength(0)
   }, 30_000)
 })

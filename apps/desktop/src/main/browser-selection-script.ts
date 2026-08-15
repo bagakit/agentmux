@@ -9,6 +9,8 @@ const SELECTION_STATE_KEY = '__agentMuxBrowserSelection'
 const SELECTION_HOST_ATTRIBUTE = 'data-agentmux-browser-selection-overlay'
 const ANNOTATION_STATE_KEY = '__agentMuxBrowserAnnotations'
 const ANNOTATION_HOST_ATTRIBUTE = 'data-agentmux-browser-annotation-overlay'
+const DRIVE_STATE_KEY = '__agentMuxBrowserDriveBadge'
+export const BROWSER_DRIVE_BADGE_ATTRIBUTE = 'data-agentmux-browser-drive-badge'
 
 export function buildBrowserElementSelectionScript(revision: number): string {
   return `(() => {
@@ -267,6 +269,55 @@ export function buildCancelBrowserAnnotationMarkerScript(revision: number): stri
   const stateKey = ${JSON.stringify(ANNOTATION_STATE_KEY)};
   const state = globalThis[stateKey];
   if (state && state.revision === ${revision} && typeof state.cleanup === 'function') state.cleanup();
+  return true;
+})()`
+}
+
+/**
+ * 「这个 Browser 正在被 Agent 驱动」的角标。
+ *
+ * 注在**页面里**而不是渲染进程的应用 chrome 上，原因是覆盖面：应用侧只能给当下可见的那一格加
+ * 提示，而页面内角标在后台的、非焦点的、甚至没显示的 Browser 上照样在——「人切回去一看，它正
+ * 在被驱动」恰恰是这个提示要覆盖的场景。代价是导航会把它冲掉，所以 `did-finish-load` 要重注。
+ *
+ * **宿主必须 `pointer-events:none`**，这一条是承重的，不是审美：角标盖在页面上方，能吃点击的话
+ * 它会吃掉人伸手的第一次点击——而那一次点击**正是**接管信号。那样这个提示就在阻止它自己所提示
+ * 的那件事被察觉到。用 closed shadow 而不是裸 DOM，是为了不让页面的 CSS 把它改样子或藏起来
+ * （与上面两个 overlay 同一套做法）。
+ */
+export function buildBrowserDriveBadgeScript(): string {
+  return `(() => {
+  'use strict';
+  const stateKey = ${JSON.stringify(DRIVE_STATE_KEY)};
+  const hostAttribute = ${JSON.stringify(BROWSER_DRIVE_BADGE_ATTRIBUTE)};
+  if (globalThis[stateKey]) return true;
+  const root = document.body || document.documentElement;
+  if (!root) return false;
+  const host = document.createElement('div');
+  host.setAttribute(hostAttribute, '');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText = 'position:fixed;inset:auto 12px 12px auto;z-index:2147483645;pointer-events:none;contain:layout style paint;';
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = '.badge{display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid rgba(255,255,255,.2);border-radius:999px;color:#f5f7f5;background:rgba(13,17,23,.92);font:600 11px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 22px rgba(0,0,0,.35);pointer-events:none;user-select:none}.dot{width:7px;height:7px;border-radius:999px;background:#78dda0}';
+  const badge = document.createElement('div');
+  badge.className = 'badge';
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  const label = document.createElement('span');
+  label.textContent = 'Agent is driving · click to take over';
+  badge.append(dot, label);
+  shadow.append(style, badge);
+  root.appendChild(host);
+  globalThis[stateKey] = { cleanup: () => { host.remove(); delete globalThis[stateKey]; } };
+  return true;
+})()`
+}
+
+export function buildCancelBrowserDriveBadgeScript(): string {
+  return `(() => {
+  const state = globalThis[${JSON.stringify(DRIVE_STATE_KEY)}];
+  if (state && typeof state.cleanup === 'function') state.cleanup();
   return true;
 })()`
 }

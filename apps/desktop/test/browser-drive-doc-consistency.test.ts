@@ -202,4 +202,33 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
         .toContain(name)
     }
   })
+
+  // ── 四、被人接管之后那句话点名的下一步，skill 里真教过（T-012）─────────────────────
+  //
+  // 房规见 browser-automation-setting-reachable.test.ts：拒绝点名的东西要被单独证明够得着。
+  // 那一条点的是 Settings 里的一个位置，这一条点的是**一个结局和一个动作**——「这次报 stopped，
+  // 下一步是等页面空出来再跑一次」。Agent 照着做的前提是它读过这套说法；skill 里没有的话，
+  // 它拿到一个 `stopped` 只会按「跑太久被截断」去理解，于是把程序改小再跑一遍——而页面还是
+  // 人家的，它会再撞一次。
+  //
+  // 判据两半：文案确实点了名（从源码取，不手抄），以及 skill 与 CLI help 都教了这件事。
+  it('接管拒绝点名的「重跑」在 CLI 与 skill 里都教过', () => {
+    const manager = read('apps/desktop/src/main/browser-view-manager.ts')
+    // 前提自检：那句话还在。整句被改写时下面按它取词会得到空，而空在"没点名"与"判据坏了"
+    // 之间不可区分——先把在场判掉。
+    expect(manager, '接管拒绝文案不见了——这条判据失去靶子').toMatch(/took control of this Browser/)
+    expect(manager, '拒绝没点名下一步能干什么').toMatch(/run the program again/)
+
+    const help = read('packages/core/src/agentmux-cli-help.ts')
+    for (const [where, start] of [['CLI browser.run', "['browser.run'"], ['skill', '## Drive an open Browser']] as const) {
+      const from = help.indexOf(start)
+      expect(from, `${where} 这一节不在——判据的范围落空`).toBeGreaterThan(-1)
+      const end = help.indexOf(where === 'skill' ? '\n## ' : "],\n  ['", from + 1)
+      const section = help.slice(from, end < 0 ? undefined : end)
+      expect(section.length, `${where} 切出来是空的`).toBeGreaterThan(200)
+      expect(section, `${where} 没说人可以把页面抢回去——Agent 读到 stopped 会当成"跑太久被截断"`)
+        .toMatch(/took? (?:the )?(?:page|control)|takes? (?:the )?page|take the page back|theirs/i)
+      expect(section, `${where} 没教被接管之后该干什么`).toMatch(/run (?:it|the program) again/i)
+    }
+  })
 })
