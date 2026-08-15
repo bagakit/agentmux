@@ -8,18 +8,28 @@ Feature: `f-2688fn733`
 用户报的四件事，共同的病是「界面上有身份和近况，但没地方看」。四处各缺一块，但缺的是同一样
 东西：一个共享的「session → 最近在做什么」派生，以及把它端到用户眼前的那个位置。
 
-## 状态：四件事都已落地（2026-09-14 逐条核对）
+## 状态：四件事都已写完；(1)(3) 的模块**尚未入库**（2026-09-14 逐条核对）
 
 **这份 goal 原来的描述已经过期**，下面每条都给了判别命令。它此前停在 `proposal`、`tasks: []`，
 而四件事已经写完并挂进生产——照着原文再做一遍，等于重建四个已存在的模块。本文档的作用就是
 挡住那次重建。
 
-| 用户的诉求 | 落在哪 | 判别命令 |
-| --- | --- | --- |
-| (1) region 的名字没地方看，建议做成 Message Tools 水印 | `lib/region-display-name.ts` → `AgentComposer.tsx:174` 的 `composer__region` | `grep -n composer__region apps/desktop/src/renderer/src/components/AgentComposer.tsx` |
-| (2) CPU · Memory 要看得出每个 agent 最近在改什么 | `lib/resource-usage-panel.ts` 的 `activity` 字段 → `resource-usage__activity` | `grep -n resource-usage__activity apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx` |
-| (3) 左下角每一档都能点开，展示该状态下的项目-Agent 树 | `lib/agent-tree.ts` → `AgentRoster.tsx` 的 `AgentTreePanel` → `AgentStatusBar.tsx` 三档 | `grep -n AgentTreePanel apps/desktop/src/renderer/src/components/AgentStatusBar.tsx` |
-| (4) 项目树 hover 菜单里每个 Agent 要体现最近在做什么 | `lib/project-activity-row.ts` → `ProjectActivity.tsx:136` | `grep -n projectActivityRow apps/desktop/src/renderer/src/components/ProjectActivity.tsx` |
+**但「写完」与「入库」是两回事，这张表此前把两者混为一谈。** 下面每行的判别命令都改成问
+`git` 而不是问工作区：`grep` 在本机恒绿——文件就在磁盘上——于是它对「这东西 clone 下来还在不在」
+完全失明。本仓已经因此吃过一次亏：`SessionPane.tsx` committed 了一条 `import
+'../lib/region-display-name'`，而目标文件从未 `git add`，`main` 在任何新 clone 上编译不过
+（由 `tracked-imports-resolve-in-index` 抓出，已在后续提交里补上）。
+一份声称「已落地、别重做」的文档，如果它的判据在别人机器上给出相反答案，比没有这份文档更坏。
+
+| 用户的诉求 | 落在哪 | 判别命令（问 git，不问工作区） | 入库 |
+| --- | --- | --- | --- |
+| (1) region 的名字没地方看，建议做成 Message Tools 水印 | `lib/region-display-name.ts` → `AgentComposer.tsx` 的 `composer__region` | `git grep -n composer__region HEAD -- apps/desktop/src` | 派生模块已入库；**水印挂载点（`AgentComposer.tsx` / `composer.css`）仍未提交** |
+| (2) CPU · Memory 要看得出每个 agent 最近在改什么 | `lib/resource-usage-panel.ts` 的 `activity` 字段 → `resource-usage__activity` | `git grep -n resource-usage__activity HEAD -- apps/desktop/src` | 已入库 |
+| (3) 左下角每一档都能点开，展示该状态下的项目-Agent 树 | `lib/agent-tree.ts` → `AgentRoster.tsx` 的 `AgentTreePanel` → `AgentStatusBar.tsx` 三档 | `git grep -n AgentTreePanel HEAD -- apps/desktop/src` | **整条链都未提交**（`agent-tree.ts` 仍是 untracked） |
+| (4) 项目树 hover 菜单里每个 Agent 要体现最近在做什么 | `lib/project-activity-row.ts` → `ProjectActivity.tsx` | `git grep -n projectActivityRow HEAD -- apps/desktop/src` | 已入库 |
+
+命令里不写行号：行号会漂。上一版这张表写了 `ProjectActivity.tsx:136`，而它在写下的那一刻就已经
+是 138，如今是 141——恰好是同一条提交信息里声称「记命令而不是记行号」要避免的那种失效。
 
 ## 原文里已经不成立的五条前提（**不要据此重新调研**）
 
