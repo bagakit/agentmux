@@ -36,11 +36,16 @@ import { describe, expect, it } from 'vitest'
  */
 describe('切出来的扫描面不是空的', () => {
   const TEST_DIR = new URL('../test/', import.meta.url)
-  const RENDERER_SRC = new URL('../src/renderer/src/', import.meta.url)
 
-  /** `const <name> = readFileSync(\n? new URL('../src/renderer/src/<path>'` —— 允许换行与空白。 */
+  /**
+   * `const <name> = readFileSync(\n? new URL('../src/<path>'` —— 允许换行与空白。
+   *
+   * 覆盖 `src/` **整棵树**而不只是 `renderer/src/`：`main/` 那一侧才是 `ipc.ts`、
+   * `browser-view-manager.ts` 这些靠切片判据守着的文件所在的地方，把它排除在外等于在守卫自己身上
+   * 留一块盲区（实测：全仓 104 处绑定里 14 处在 renderer 之外，12 处在 `main/`）。
+   */
   const SOURCE_BINDING_RE =
-    /const\s+(\w+)\s*=\s*readFileSync\(\s*new URL\(\s*'\.\.\/src\/renderer\/src\/([^']+)'/g
+    /const\s+(\w+)\s*=\s*readFileSync\(\s*new URL\(\s*'(\.\.\/src\/[^']+)'/g
   /** `<var>.indexOf('<literal>'` —— 只认单引号字面量。 */
   const INDEX_OF_RE = /(\w+)\.indexOf\(\s*'((?:[^'\\]|\\.)*)'/g
 
@@ -73,7 +78,9 @@ describe('切出来的扫描面不是空的', () => {
     const readSource = (relative: string): string | null => {
       if (!sourceCache.has(relative)) {
         try {
-          sourceCache.set(relative, readFileSync(new URL(relative, RENDERER_SRC), 'utf8'))
+          // 捕获到的是 `../src/…`（相对 test 目录），所以基址就是 TEST_DIR——与测试文件里那句
+          // `new URL('../src/…', import.meta.url)` 解析成同一个绝对路径。
+          sourceCache.set(relative, readFileSync(new URL(relative, TEST_DIR), 'utf8'))
         } catch {
           // 源文件本身没了是另一条判据的事（那种情况 readFileSync 会在真测试里直接抛），这里跳过。
           sourceCache.set(relative, null)
