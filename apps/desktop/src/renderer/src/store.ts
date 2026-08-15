@@ -47,6 +47,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
 import { presentError } from './lib/error-presentation'
+import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
@@ -237,8 +238,15 @@ export type HostCheckState = {
  * with the SAME `operationId`; Core then recognizes the idempotent replay instead of gating it BUSY. Two
  * distinct prompts are two distinct entries with two distinct ids. Never added to `partialize` — a
  * correlation key for an in-flight attempt is not layout the user meant to keep across a restart.
+ *
+ * `runId` is the run this steer was typed AT, and it is what makes "stale" a decidable fact rather than
+ * a cleanup someone has to remember. The queue is keyed by agentSessionId, which SURVIVES a resume —
+ * only the runId changes (api.ts recover swaps `control.run.runId` in place). Without this field a steer
+ * queued against a dead run is silently replayed into whatever run next takes that agentSessionId, which
+ * is exactly the "silently replaying a stale steer into a fresh session" the composer refuses to offer
+ * as a button. See lib/agent-steer-queue-drain.ts for why the check lives at the consumer.
  */
-export type AgentSteerQueueEntry = { operationId: string; text: string }
+export type AgentSteerQueueEntry = { operationId: string; runId: string; text: string }
 
 type AppState = {
   runtimeOwnershipWarnings: string[]
@@ -4405,18 +4413,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   enqueueAgentSteer(sessionId, text) {
     if (!text.trim()) return
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
     // Mint the operationId here, at the entry's birth — one id per queued prompt. It rides the entry
     // through every retry so a re-flushed entry replays with the same id; a second call for a genuinely
     // different prompt makes a second entry with its own id.
-    const entry: AgentSteerQueueEntry = { operationId: crypto.randomUUID(), text }
+    //
+    // The runId is stamped here for the same reason and at the same moment: this is the only point where
+    // "which run was the user talking to" is knowable without guessing. By flush time the session may
+    // already be on a different run under the same agentSessionId.
+    const entry: AgentSteerQueueEntry = {
+      operationId: crypto.randomUUID(),
+      runId: session.control.run.runId,
+      text
+    }
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   },
   async flushAgentSteerQueue(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
     const queued = get().agentSteerQueues[sessionId] ?? []
-    if (queued.length === 0 || session.pendingInteraction || session.processState !== 'running') return
+    if (queued.length === 0 || !steerQueueCanDrainNow(session)) return
+    const runId = session.control.run.runId
     for (const entry of queued) {
+      // A steer typed at a run that is gone is NOT sent to whatever run inherited the agentSessionId.
+      // Skipping rather than deleting: the badge still shows the user their words (the composer labels
+      // them undeliverable), and deciding to discard user-authored text is not this loop's call.
+      if (!steerEntryTargetsRun(entry, runId)) continue
       try {
         await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
         set((state) => {

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useId } from 'react'
-import { AtSign, ArrowUp, ChevronDown, MessageSquare, Paperclip, Square } from 'lucide-react'
+import { AtSign, ArrowUp, ChevronDown, Copy, MessageSquare, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
@@ -24,6 +24,11 @@ export type AgentComposerProps = {
   // "will this ever drain" and it does not line up with `canSubmit` — hence its own prop rather than
   // reusing the submit axis.
   queueDeliverable?: boolean
+  // Copy the undeliverable queue out. Absence hides the button rather than rendering a dead one: the
+  // clipboard exit (lib/clipboard-copy) requires an error reporter by design, and a shell that has no
+  // reporter to give must not offer an action that could fail silently. The card only names copying as
+  // the remedy when this is wired.
+  onCopyQueued?: (text: string) => void
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
   skills?: Array<{ text: string; description: string }>
@@ -58,6 +63,7 @@ export function AgentComposer({
   contextUsage,
   queued = [],
   queueDeliverable = true,
+  onCopyQueued,
   commands = [],
   skills = [],
   references = [],
@@ -185,7 +191,10 @@ export function AgentComposer({
               It opens: a bare count is indistinguishable from a stuck counter, so the messages
               themselves have to be reachable. Same native `popover` as the context chip, for the same
               reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
-          {queued.length > 0 ? <QueuedMessages queued={queued} deliverable={queueDeliverable} /> : null}
+          {queued.length > 0 ? (
+            <QueuedMessages queued={queued} deliverable={queueDeliverable}
+              {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
+          ) : null}
         </div>
         <div>
           {contextUsage}
@@ -248,11 +257,15 @@ export function AgentComposer({
  * the run is gone. We do not offer to resend: this component cannot know whether a next run is the same
  * Agent, and silently replaying a stale steer into a fresh session is worse than saying nothing.
  */
-function QueuedMessages({ queued, deliverable }: { queued: readonly string[]; deliverable: boolean }) {
+function QueuedMessages({ queued, deliverable, onCopy }: {
+  queued: readonly string[]
+  deliverable: boolean
+  onCopy?: (text: string) => void
+}) {
   const cardId = useId()
   const label = deliverable
     ? `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
-    : `${queued.length} message${queued.length === 1 ? '' : 's'} never delivered`
+    : `${queued.length} message${queued.length === 1 ? '' : 's'} not sent`
   return (
     <>
       <button type="button" className="composer__queued" aria-label={label}
@@ -266,11 +279,27 @@ function QueuedMessages({ queued, deliverable }: { queued: readonly string[]; de
               own, and two identical prompts are a legitimate queue state — so text is not a key. */}
           {queued.map((prompt, index) => <li key={index}>{prompt}</li>)}
         </ol>
-        <p>
-          {deliverable
-            ? 'Delivered in this order when the Agent finishes its current turn.'
-            : 'The Agent run ended before these were sent. Copy anything you still need — they are kept here, not sent.'}
-        </p>
+        {deliverable ? (
+          <p>Delivered in this order when the Agent finishes its current turn.</p>
+        ) : (
+          <>
+            {/* The sentence only names copying as the remedy when the button is actually here. Naming
+                an action and leaving the user to select-drag inside a `popover="auto"` (which closes on
+                any outside click) is the same defect as the badge's old promise: copy that describes an
+                affordance the surface does not provide. Blank-line separated so pasting a multi-entry
+                queue back into the composer keeps the entries apart. */}
+            <p>
+              {onCopy
+                ? 'That Agent run ended before these were sent. They are kept here so you can copy them.'
+                : 'That Agent run ended before these were sent. They are kept here, not sent.'}
+            </p>
+            {onCopy ? (
+              <button type="button" className="composer-tool" onClick={() => onCopy(queued.join('\n\n'))}>
+                <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
     </>
   )
