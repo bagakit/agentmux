@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 135
+    "next_cursor": 137
   },
   "features": [
     {
@@ -1368,6 +1368,26 @@
     {
       "feat_id": "f-26c8fekf8",
       "title": "状态进入时刻：这个 Agent 已经这样多久了，今天只能靠巧合回答",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26d8fvepu",
+      "title": "应用链接打不开：内置浏览器把 lark:// 一类地址当非法挡掉，且多数时候静默",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26e8f6h4z",
+      "title": "书签文件：把当前页存成 .webloc，以及打开一个存着链接的文件",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
