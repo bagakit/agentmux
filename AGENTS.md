@@ -89,3 +89,10 @@
 所以这类测试必须自己断言扫描有收获（`expect(found.size).toBeGreaterThan(0)`），并且
 从来源反推而不是维护一份手写清单——手写清单会和来源一起漂移，漂移时它自己不会响。
 破例要按选择器点名，不按值点名（放行 `30px` 这个值，等于全表哪里都能写 `30px`）。
+
+扫到空内容最隐蔽的一支是 **`indexOf` 取锚点取空了**：`s.slice(s.indexOf('<Foo'), …)` 里起锚点
+一旦在源码里不存在，`indexOf` 返回 `-1`，`slice` 把它换算到末尾之后，切出来是**空串**——
+之后每一条 `not.toContain` 都恒真。类名换掉、JSX 挪走都会造成这个，而 `tsc` 干净、测试全绿、
+review 看不出（锚点长得像还在的样子）。守护：`apps/desktop/test/sliced-scan-surface-not-empty.test.ts`
+逐个核对锚点是否真的出现在它所读的源文件里。自己写这种断言时，把两端都判一次
+（`expect(start).toBeGreaterThan(-1)`），并再判一句「切出来的这段确实是那一段」。
