@@ -321,19 +321,20 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 主按钮是 Stop 还是 Send。idle-running 的 Agent 没有在途回合可打断，故此处严格判 working 是对的。
   '/lib/composer-submit-mode.ts':
     '决定 Stop/Send，问的是"有在途回合吗"而不是"在 working 列吗"',
-  // 单行/单 lane 的状态点，不是计数。它们与计数分岔属于另一族（roster 行 #500、lane 措辞 #572），
+  // 单行/单 lane 的状态点，不是计数。它们与计数分岔属于另一族（roster 行、lane 措辞 #572），
   // 各有自己的条目，不在本次收敛范围内——但它们出现在这里，所以不会被静默遗忘。
-  '/components/AgentRoster.tsx': '单行状态点（另见 #500：该函数在 DOM 层从未被执行）',
+  '/components/AgentRoster.tsx': '单行状态点：RosterRowView.stateFor（现由状态栏计数树在生产中渲染）',
   '/components/FanOutStrip.tsx': '单 lane 状态点（另见 #572）',
   '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank',
-  // 单个 Session 的显示标签，不是计数：working 显示 "active now"，其余显示 idle 时长。这里若折进
-  // sessionBoardColumn，starting/running 也会画成 "active now"——那会改变用户看到的文本，是另一个问题。
-  '/components/ProjectActivity.tsx':
-    '单行标签 "active now" vs idle 时长，问的是"这一个 Session 在 working 吗"而不是"有几个在干活"',
   // 单个 Session 的排序类，喂给 attentionSortRank（与已登记的 agent-roster.ts 同形）。它把一个 Session
   // 映射到 working/idle 排序档，不数总量；折进 sessionBoardColumn 会让 starting/running 也排成 working。
   '/lib/activity-groups.ts':
     '单 Session 排序类，喂给 attentionSortRank，问的是"这一个排哪档"而不是"有几个在干活"'
+  // `/components/ProjectActivity.tsx` 曾在这里，理由是「单行标签 active now vs idle 时长」。那一处
+  // 已搬进 `/lib/project-activity-row.ts`，并且搬的时候改成了 `sessionBoardColumn(...) === 'working'`
+  // ——即不再自己拿 state 比字面量，而是委派给唯一裁决点。所以它从这张表里删掉：留着就成了一条
+  // 守着空地的豁免。它在 WORKING_LITERAL_SITES 里仍有一条（switch 的 case），那是另一个问题。
+  //
   // `/lib/fanout-group.ts` 曾在这里，理由写的是「作用域是那一组而非整窗」。那不是理由：作用域只
   // 影响分母，不改变"谁算在干活"这个判据。它的 `groupProgress().working` 已改成走
   // `sessionBoardColumn`，所以从这张表里删掉——下面 `gone` 那条断言会盯着这件事。
@@ -504,6 +505,10 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: '裁决点本身：列名常量、switch 的 case 与返回值、workingAgentCount 读它的返回值'
   },
   '/lib/agent-attention.ts': { count: 2, why: '整窗 rollup 与逐 Provider 汇总，两处都读裁决点的返回值' },
+  '/lib/agent-tree.ts': {
+    count: 2,
+    why: 'AgentTreeFilter union 的 "working" 成员 + working 那一支委派给 sessionBoardColumn(...) === "working"；状态栏计数树按此收窄，不自己判"在跑吗"'
+  },
   '/lib/fanout-group.ts': { count: 1, why: 'groupProgress 读裁决点的返回值（曾是严格判据，见文件内注释）' },
 
   // ---- 与"有几个在干活"无关的问题 ----
@@ -521,11 +526,19 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
 
   // ---- 单行/单 lane 的状态点：不是计数，但各有已记录的分岔 ----
   '/lib/agent-roster.ts': { count: 2, why: '行排序 rank，喂给 attentionSortRank（另见 #572）' },
-  '/components/AgentRoster.tsx': { count: 3, why: '单行状态点（另见 #500：该函数在 DOM 层从未被执行）' },
+  '/components/AgentRoster.tsx': { count: 3, why: '单行状态点：RosterRowView.stateFor（现由状态栏计数树 AgentTreePanel 在生产中渲染）' },
   '/components/FanOutStrip.tsx': { count: 3, why: '单 lane 状态点（另见 #572）' },
   '/components/ProjectActivity.tsx': {
-    count: 2,
-    why: '单行标签：switch 的 "working" case（"Working · no recent summary"）与逐行 "active now" 判定，都问"这一个 Session 在 working 吗"，计数走同文件已 import 的 workingAgentCount'
+    count: 1,
+    why: 'switch 的 "working" case（"Working · no recent summary"）：问"这一个 Session 在 working 吗"。逐行 "active now" 那处已搬到 project-activity-row.ts，计数走同文件已 import 的 workingAgentCount'
+  },
+  '/lib/project-activity-row.ts': {
+    count: 1,
+    why: '单行尾随事实：working 的行尾随 ctx N%／active now，其余尾随 idle 时长。委派给 sessionBoardColumn(...) === "working"，不自己判"在跑吗"'
+  },
+  '/lib/session-recency.ts': {
+    count: 1,
+    why: 'ACTIVE_STATES 里的成员名：判一条**已完成**的 tool_call 算不算「最近」，问的是"这一个 Session 还活着吗"而不是"有几个在干活"'
   },
   '/lib/activity-groups.ts': {
     count: 6,
@@ -536,8 +549,8 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: '单行资源用量的 idle 标签：working 显示空、其余显示 idle 时长，问的是"这一个在跑吗"而不是"有几个在干活"'
   },
   '/components/AgentStatusBar.tsx': {
-    count: 5,
-    why: 'StatusCount 的状态词与 label：读 rollup 算好的数，自己不判'
+    count: 6,
+    why: 'StatusCount 的状态词与 label（读 rollup 算好的数，自己不判）+ working 段那个 AgentTreePanel 的 filter="working" 实参'
   }
 }
 
