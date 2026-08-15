@@ -10,11 +10,14 @@ import {
   type BrowserElementSelection,
   type BrowserEvent,
   type BrowserScreenshotCapture,
+  type BrowserScriptRunReport,
   type BrowserSnapshot,
   type BrowserViewport
 } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserPngFromNativeImage } from './browser-image.js'
+import { browserRunOutcomeFromFailure } from './browser-run-outcome.js'
+import { runBrowserScript } from './browser-script-runner.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -389,6 +392,59 @@ export class BrowserViewManager {
       browserId: id,
       navigationId,
       image: browserPngFromNativeImage(image)
+    }
+  }
+
+  /**
+   * 在这个 Browser 上跑一段 Agent 写的程序。
+   *
+   * 这里只做**三件事**：确认 Browser 还在、把页面函数的调用接到这个 view 上、把结局翻译成契约形状。
+   * 程序本身在独立子进程里跑（`runBrowserScript`），页面能力由 `browserPageCallHandler` 派发——
+   * 那一层持有 CDP session 与快照，是 T-010 的主体。
+   *
+   * 翻译成四类结局是承重的：执行器的失败联合有四支，任何两支折成一支都会让 Agent 走错方向。
+   * 特别是 `crashed` → `indeterminate`——进程死了意味着**做到哪一步不知道**，页面上可能已经点过
+   * 一次了。把它报成普通失败，调用方就会重试，而那正是"下单被点两次"的来源。
+   */
+  async runScript(id: string, code: string): Promise<BrowserScriptRunReport> {
+    const entry = this.require(id)
+    const dispatch = this.pageCallHandler(entry)
+    const run = await runBrowserScript({ code, onPageCall: dispatch })
+    if (run.completed) {
+      return { result: run.value, logs: run.logs, outcome: { kind: 'completed' } }
+    }
+    return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
+  }
+
+  /**
+   * 页面函数真正干活的那一头。
+   *
+   * 现在只接了 T-007 那批名字里**不需要 CDP session 生命周期**的部分；需要 attach/detach 与快照
+   * 缓存的那些（snapshot / 按 ref 的动作 / cdp 逃生口）是 T-010 的主体，在此之前它们必须**响亮地
+   * 说"还没接"**，而不是返回 null 或空快照——返回空快照会让 Agent 的程序在一张不存在的页面上
+   * 继续往下跑，然后在某个毫不相干的地方失败（AGENTS.md:32-52：分不清的不许当成好的）。
+   */
+  private pageCallHandler(entry: BrowserEntry): (name: string, args: unknown[]) => Promise<unknown> {
+    return async (name, args) => {
+      const view = entry.view
+      if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
+        throw new Error(`Browser ${entry.id} went away while the script was running`)
+      }
+      if (name === 'pageInfo') {
+        return {
+          url: view.webContents.getURL(),
+          title: view.webContents.getTitle(),
+          navigationId: entry.navigationId
+        }
+      }
+      if (name === 'gotoUrl') {
+        await this.navigate(entry.id, String(args[0]))
+        return null
+      }
+      if (name === 'captureScreenshot') return await this.captureScreenshot(entry.id)
+      throw new Error(
+        `Page function "${name}" is not wired to a live page yet (needs the CDP session lifecycle).`
+      )
     }
   }
 

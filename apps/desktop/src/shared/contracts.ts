@@ -25,6 +25,7 @@ import type {
   AgentTurnUsage,
   AgentMuxControlError,
   AgentMuxControlErrorCode,
+  AgentMuxControlBrowserRunOutcome,
   AgentMuxControlRequest,
   AgentMuxControlResult,
   AgentMuxExecutorProbeOutcome,
@@ -1036,6 +1037,21 @@ export type BrowserScreenshotCapture = {
   image: BrowserPng
 }
 
+/**
+ * 一段 Agent 程序跑完之后，Main 交回 Renderer 的东西。
+ *
+ * 形状**刻意与 Control 回执（core 的 browser.run result）一致**：Renderer 那一层不做翻译，只是把它
+ * 原样交出去。两侧各定义一次自己的形状、中间做一次映射的话，映射漏一个字段是静默的——四类结局里
+ * 少接住一类，会表现为"某些失败被报成了成功"。
+ */
+export type BrowserScriptRunReport = {
+  /** 程序 return 的值。它 return 什么就是什么，我们不规定形状。 */
+  result: unknown
+  /** 程序 console 出来的每一行，**失败时照样有**——炸掉之前打的那几行往往正是要看的。 */
+  logs: string[]
+  outcome: AgentMuxControlBrowserRunOutcome
+}
+
 export type BrowserElementRect = {
   x: number
   y: number
@@ -1298,6 +1314,16 @@ export type AgentMuxDesktopApi = {
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
+    /**
+     * 在这个 Browser 上跑一段 Agent 写的程序，返回它的结局。
+     *
+     * 程序在**独立子进程**里跑（browser-script-runner.ts），不在 Main、也不在页面里：它是 Agent 现写的
+     * 代码，可以 throw、死循环、把堆吃光，这三件事都不许波及 AgentMux 主进程。
+     *
+     * 这是 Main 侧唯一对外暴露的驱动入口——页面能力（snapshot/click/...）是注入给那段程序的内部函数库，
+     * 不在这个契约上，所以改它们不动这里。
+     */
+    runScript(id: string, code: string): Promise<BrowserScriptRunReport>
     selectElement(id: string): Promise<BrowserElementSelection | null>
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>

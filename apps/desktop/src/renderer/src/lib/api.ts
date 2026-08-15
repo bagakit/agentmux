@@ -973,6 +973,9 @@ const mockApi: AgentMuxDesktopApi = {
         byteLength: 70
       }
     }),
+    // Web 预览里没有真页面也没有子进程。**不能返回一个假的"跑完了"**——那会让 Agent 以为它的程序
+    // 执行过了。与上面 captureScreenshot 抛"requires the desktop app"同一条理由。
+    runScript: async () => { throw new Error('Driving a Browser requires the desktop app.') },
     selectElement: async () => null,
     cancelElementSelection: async () => {},
     setAnnotationMarkers: async () => {},

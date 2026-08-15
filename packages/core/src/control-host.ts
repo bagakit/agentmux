@@ -11,6 +11,7 @@ import {
   type AgentMuxAgentRegion,
   type AgentMuxArrangeMode,
   type AgentMuxBrowserRegion,
+  type AgentMuxControlBrowserRunOutcome,
   type AgentMuxControlHost,
   type AgentMuxControlErrorReceipt,
   type AgentMuxControlErrorCode,
@@ -241,6 +242,21 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         : (() => { throw new AgentMuxError('Focus target is invalid.', 'INVALID_CONTROL_REQUEST') })()
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'focus', target }
   }
+  if (source.operation === 'browser.run') {
+    // caller 是可选的：CLI 直接发一条也合法（那时没有 managed caller）。没有 self 语义，所以不像别的
+    // 操作那样需要"self 必须配 caller"那道闸——browserId 永远是显式的。
+    const owner = optionalCaller(source.caller)
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      browserId: identity(source.browserId, 'Browser target is invalid.', 'INVALID_CONTROL_REQUEST'),
+      // 走 text 而不是 id：程序是多行的，`id` 会因为换行直接拒掉。上限同样是 MAX_MESSAGE_BYTES——
+      // 一段 256KB 的调试程序已经远超任何合理规模，再大应该写成文件。
+      code: text(source.code, 'Browser script'),
+      ...(owner ? { caller: owner } : {})
+    }
+  }
   // 穷尽出口。此前 focus 是这条 if 链**没有条件的尾巴**，于是第 14 个操作（已过 membership 闸，因为它
   // 在联合里）会一路落到这里，被当成 focus 解析——回执里的 operation 被静默改写成 'focus'，调用方收到
   // 一份它没请求过的操作的回执。实测过：临时加一个 `probe.fake`（类型 + 联合臂 + 预算键，不加解析臂），
@@ -367,22 +383,73 @@ function successReceipt(request: AgentMuxControlRequest, result: AgentMuxControl
 function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSuccessReceipt {
   const requestId = id(source.requestId, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const result = object(source.result, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  if (source.operation === 'inspect.tab') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tab: parseTab(result.tab) } }
+  if (!isAgentMuxControlOperation(source.operation)) {
+    throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
-  if (source.operation === 'inspect.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseRegion(result.region, true) } }
-  if (source.operation === 'open.agent') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseAgentRegion(result.region) } }
-  if (source.operation === 'open.terminal') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseTerminalRegion(result.region) } }
-  if (source.operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseBrowserRegion(result.region) } }
-  if (source.operation === 'send') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (source.operation === 'focus') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tabId: identity(result.tabId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.regionId === undefined ? {} : { regionId: identity(result.regionId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR') }) } }
-  if (source.operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tab: parseTab(result.tab) } }
-  if (source.operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (source.operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agents: parseExecutors(result.agents) } }
-  if (source.operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (source.operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (source.operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'inspect.tab') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
+  }
+  if (operation === 'inspect.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseRegion(result.region, true) } }
+  if (operation === 'open.agent') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseAgentRegion(result.region) } }
+  if (operation === 'open.terminal') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseTerminalRegion(result.region) } }
+  if (operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseBrowserRegion(result.region) } }
+  if (operation === 'send') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'focus') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.regionId === undefined ? {} : { regionId: identity(result.regionId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR') }) } }
+  if (operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
+  if (operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseExecutors(result.agents) } }
+  if (operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'browser.run') {
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      ok: true,
+      operation,
+      // result 是程序的返回值，**故意不校验形状**——它是 Agent 自己那段程序 return 的东西，我们没有
+      // 立场说它该长什么样。缺席（程序什么都没 return）是合法的，收成 undefined。
+      result: { result: result.result, logs: scriptLogs(result.logs), outcome: browserRunOutcome(result.outcome) }
+    }
+  }
+  return assertUnhandledReceipt(operation)
+}
+
+const MAX_SCRIPT_LOG_LINES = 10_000
+
+function scriptLogs(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_SCRIPT_LOG_LINES) throw new AgentMuxError('Control browser run logs are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value.map((line) => text(line, 'Browser script log', 'CONTROL_PROTOCOL_ERROR'))
+}
+
+/**
+ * 四分类结局的线上解析。
+ *
+ * 这里**不给任何缺省值**：`kind` 认不出来就抛，不折成 `indeterminate`，也不折成 `completed`。
+ * 折成 `completed` 显然是在撒谎；折成 `indeterminate` 看起来"保守"，其实是把一个协议缺陷
+ * （两侧版本不一致）伪装成一次正常的不确定结局，于是没有人会去修它。
+ */
+function browserRunOutcome(value: unknown): AgentMuxControlBrowserRunOutcome {
+  const source = object(value, 'Control browser run outcome is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.kind === 'completed') return { kind: source.kind }
+  if (source.kind === 'script-failed' || source.kind === 'stopped' || source.kind === 'indeterminate') {
+    return { kind: source.kind, message: text(source.message, 'Browser run outcome message', 'CONTROL_PROTOCOL_ERROR') }
+  }
+  throw new AgentMuxError('Control browser run outcome is invalid.', 'CONTROL_PROTOCOL_ERROR')
+}
+
+/**
+ * 回执解析的穷尽出口。与上面 {@link assertUnhandledOperation} 同形，理由也是同一条：这条 if 链此前
+ * 在 `source.operation: unknown` 上比较，永远收窄不到 `never`，尾巴只是一句运行时 throw——往联合里
+ * 加一个操作而忘了在这里加解析臂，tsc 全程沉默，要到线上收到那份回执时才炸成 `CONTROL_PROTOCOL_ERROR`，
+ * 而且错误信息说的是"回执非法"，不是"我们没实现这一臂"。
+ *
+ * 修法是先过一次成员判定把 `unknown` 收成联合，后面的比较才真正收窄，遗漏当场就是 TS2345。
+ * `browser.run` 是第 14 个操作，正是这条修补想拦住的那类遗漏。
+ */
+function assertUnhandledReceipt(operation: never): never {
+  throw new AgentMuxError(`Control receipt operation is not handled: ${String(operation)}`, 'CONTROL_PROTOCOL_ERROR')
 }
 
 function candidates(value: unknown): Array<{ agentSessionId: string; regionIds: string[] }> | undefined {
