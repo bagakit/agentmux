@@ -5,7 +5,13 @@ import type { AgentCatalogEntry, LaunchOptionSelection } from '@agentmux/core'
 import { RISK_TIERS, type RiskTier } from '@agentmux/core/risk-tier'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { attentionSortRank, categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
-import { agentUsageDisplay, type AgentUsageDisplay } from './agent-usage'
+import {
+  agentUsageDisplay,
+  contextPressure,
+  contextUsedPercent,
+  type AgentUsageDisplay,
+  type ContextPressure
+} from './agent-usage'
 
 // An enumerable, window-wide roster of Agents.
 //
@@ -56,6 +62,13 @@ export type RosterRow = {
   // 这个 Agent 最近一 turn 的真实 token 用量，或"此 Provider 不报用量"/"还没有一 turn"。三态都由
   // SessionSnapshot 自描述算出，绝不塌成 0（见 agent-usage.ts）。
   usage: AgentUsageDisplay
+  // 上下文窗口用了百分之几，答不上来就是 null（不报用量的 Provider、还没有一 turn、容量不合理）。
+  // 与 `usage` 并列而不是塞进它：usage 回答"这一 turn 花了多少"（一个流量），这里回答"窗口还剩多少"
+  // （一个存量）。两个问题，两个答案——把存量挤进流量的显示串里，就没法单独给它上色或排序了。
+  contextPercent: number | null
+  // 该不该为这一行的上下文压力打标记，以及多严重。null = 不打（数不知道，或知道但还早）。
+  // 判定在 agent-usage.ts 的 contextPressure，与门槛同源。
+  contextPressure: ContextPressure | null
 }
 
 // needs-you first, then error, then working, then everything idle — the ONE ordering the quick switcher
@@ -110,6 +123,7 @@ export function buildAgentRoster(input: {
   const rows: RosterRow[] = []
   for (const session of input.sessions ?? []) {
     if (session.kind !== 'agent') continue
+    const percent = contextUsedPercent(session.turnUsage?.context)
     rows.push({
       sessionId: session.id,
       label: session.label,
@@ -120,7 +134,9 @@ export function buildAgentRoster(input: {
       observedAt: session.status.observedAt,
       awaitingReply: session.pendingInteraction !== undefined,
       scopes: resolveRosterScopes(session.launchOptions, catalog.get(session.providerId)),
-      usage: agentUsageDisplay(session)
+      usage: agentUsageDisplay(session),
+      contextPercent: percent,
+      contextPressure: contextPressure(percent)
     })
   }
   rows.sort((left, right) => {

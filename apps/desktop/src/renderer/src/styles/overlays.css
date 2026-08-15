@@ -194,3 +194,232 @@
   font-size: var(--fs-micro);
   line-height: 1.35;
 }
+
+/* Agent 表面的两个 Portal 浮层——花名册与资源面板。从 agent.css 按表面拆到这里：它们是 Radix Portal
+   挂到 body 下的浮层，与本文件的 context-menu/quick-switch 同属浮层层，共用同一套「点开就压住一切」的
+   z-index 120 与 elev-2 + hl-strong + menu-in 配方。拆分对最终样式零差异——两个 class 在别处无同名规则。 */
+
+/* The roster: the enumerable half of the attention bar's total. Surface fill + elevation + a top
+   highlight carry the layer, no stroke — the same base the context menus use. Collapsed it costs
+   nothing: the trigger IS the count segment that was already on the bar. */
+.agent-roster__trigger { gap:var(--sp-2); }
+.agent-roster__trigger > svg { color: var(--text-3); }
+.agent-roster {
+  min-width: 268px;
+  max-width: 420px;
+  /* 菜单层。Radix 的 Portal 把内容挂到 `document.body` 下，那个容器自己没有 z-index，所以
+     这一层只由**本条规则**决定；不写就是 `auto`，只按文档顺序排，输给任何定位过的邻居。
+     实测（截图取色，非 elementFromPoint——终端链接预览带 `pointer-events:none`，命中测试会
+     跳过它而看起来一切正常）：无 z-index 时 z-index 36 的终端服务窗整块盖在面板上（#468）。
+     与 `.tab-context-menu` 同为 120：它们是同一档「点开就该压住一切」的浮层。 */
+  z-index: 120;
+  max-height: 340px;
+  padding:var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap:var(--sp-1);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, var(--overlay-line) 0, transparent 52%),
+    var(--overlay-surface);
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px var(--scrim-2);
+  overflow: hidden;
+  transform-origin: var(--radix-popper-transform-origin, 50% 100%);
+}
+/* Scoped to the open state deliberately — an unscoped entry animation makes Radix Presence wait for an
+   animationend that a close never fires, and the node never unmounts. See presence-exit-animation.test.ts. */
+.agent-roster[data-state='open'] { animation: menu-in var(--dur-enter) var(--ease-enter); }
+.agent-roster__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap:var(--sp-4);
+  padding:var(--sp-1) var(--sp-4) var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.agent-roster__heading-count { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.agent-roster__list { min-height: 0; display: flex; flex-direction: column; gap:var(--sp-1); overflow-y: auto; }
+.agent-roster__row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap:var(--sp-4);
+  padding:var(--sp-2) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  outline: 0;
+}
+.agent-roster__row[data-highlighted], .agent-roster__row:hover { color: var(--text); background: var(--surface-2); }
+.agent-roster__identity { min-width: 0; display: flex; flex-direction: column; gap:1px; }
+.agent-roster__identity strong {
+  overflow: hidden;
+  font-size: var(--fs-meta);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What this Agent was authorized to do at spawn. Muted by default; the tier only colours the text when
+   the Provider declared one, so an undeclared risk stays visually undeclared too. */
+.agent-roster__scope {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-1);
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-roster__scope[data-tier='caution'] { color: var(--amber); }
+.agent-roster__scope[data-tier='danger'] { color: var(--red-text); }
+.agent-roster__pending {
+  padding:1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--surface-0);
+  background: var(--amber);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+/* token 用量。真实数用常规次级色；"不报"/"还没有"是缺席，压到最静默的一档，绝不抢眼、更不冒充数据。 */
+.agent-roster__usage {
+  flex: none;
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.agent-roster__usage[data-usage='awaiting'],
+.agent-roster__usage[data-usage='unsupported'] { color: var(--text-3); }
+/* 上下文压力。只有够得上门槛的行才有这个元素，所以这里不需要"正常"那一档的规则——不画，就是正常。
+
+   与旁边的 .agent-roster__usage 刻意长得不一样：用量是一个流量（这一 turn 花了多少），压力是一个
+   存量（窗口还剩多少），两个数字并排且都是 tabular-nums，若再同色同重就会被读成一对。所以压力这枚
+   带浅底 + 同色内描边（与 .small-button--warning 那对 amber 同构），用量保持裸文字。
+
+   档位用 data-pressure 而不是各写一个 class：严重度是一个**轴**，写成 [data-pressure='danger'] 让
+   「同一个属性的不同取值」在 CSS 里也长成一族，与这份文件里 [data-tier] 的写法一致。 */
+.agent-roster__pressure {
+  flex: none;
+  padding:1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.agent-roster__pressure[data-pressure='caution'] {
+  color: var(--amber-text);
+  background: var(--amber-bg);
+  box-shadow: inset 0 0 0 1px var(--amber-line);
+}
+.agent-roster__pressure[data-pressure='danger'] {
+  color: var(--red-text);
+  background: var(--red-bg);
+  box-shadow: inset 0 0 0 1px var(--red-line);
+}
+
+/* 状态栏计数树（.agent-tree*）：每个计数段旁边那个 chevron 点开的项目→Agent 面板。它复用花名册的
+   外壳（.agent-roster——同一档浮层、同一套 Surface/圆角/elevation），只在内容上多一层「按 Project
+   分组」。所以这里不重写外壳，只加分组标题与那个 chevron 触发键的规则。 */
+.agent-tree__disclose {
+  display: inline-flex;
+  align-items: center;
+  padding:0 2px;
+  color: var(--text-3);
+}
+.agent-tree__disclose:hover { color: var(--text-2); }
+/* 分组之间留一档间距；组内的行沿用 .agent-roster__list。 */
+.agent-tree__project + .agent-tree__project { margin-top:var(--sp-2); }
+.agent-tree__project-name {
+  display: flex;
+  align-items: baseline;
+  gap:var(--sp-2);
+  padding:var(--sp-1) var(--sp-4);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+/* 远程 Host 名压低成次要事实：项目名才是分组的身份，Host 只在非 local 时才出现。 */
+.agent-tree__project-name small { color: var(--text-3); font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+/* 资源面板与花名册是同一档的浮层，因此共用同一套 Surface、圆角与 elevation——
+   两个都挂在状态栏上的面板长得不一样，会让人以为它们是两种东西。 */
+.resource-usage {
+  min-width: 236px;
+  max-width: 340px;
+  /* 菜单层，与 `.agent-roster`、`.tab-context-menu` 同为 120——理由见 `.agent-roster`。 */
+  z-index: 120;
+  max-height: 320px;
+  padding:var(--sp-2);
+  /* 面板经 Radix Portal 挂到 `document.body`，落在 `.app-shell` 之外；全站没有一处基准 font-size
+     （tokens 那层只设 font-family），所以不写这一行，name/metric/空态/app 行会继承 UA 默认的 16px，
+     把 Agent 名和读数撑到比自己那行 10px 的标签大出一号——与花名册（identity 11px）当场不齐。
+     在容器上给一档基准，与 `.agent-roster__identity strong` 同为 fs-meta；更小的 context 各自另标。 */
+  font-size: var(--fs-meta);
+  display: flex;
+  flex-direction: column;
+  gap:var(--sp-1);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, var(--overlay-line) 0, transparent 52%),
+    var(--overlay-surface);
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px var(--scrim-2);
+  overflow: hidden;
+  transform-origin: var(--radix-popper-transform-origin, 50% 100%);
+}
+/* 与花名册同理：动画必须限定在 open，否则 Radix Presence 会等一个永不到来的 animationend。 */
+.resource-usage[data-state='open'] { animation: menu-in var(--dur-enter) var(--ease-enter); }
+.resource-usage__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap:var(--sp-4);
+  padding:var(--sp-1) var(--sp-4) var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+/* 采样失败是一个状态，不是装饰：用 STATUS 色而不是加一道边。 */
+.resource-usage__unavailable { color: var(--amber-text); letter-spacing: 0; text-transform: none; }
+.resource-usage__list { min-height: 0; display: flex; flex-direction: column; gap:var(--sp-1); overflow-y: auto; }
+.resource-usage__row,
+.resource-usage__app {
+  display: grid;
+  /* 名字可挤，两个数字各占固定一列——数字列宽固定，读数变化时不会让整行左右跳。 */
+  grid-template-columns: minmax(0, 1fr) 56px 68px;
+  align-items: baseline;
+  gap:var(--sp-4);
+  padding:var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-sm);
+}
+.resource-usage__app {
+  margin-top:var(--sp-1);
+  padding-top:var(--sp-2);
+  border-top: 1px solid var(--scrim-2);
+  color: var(--text-3);
+}
+.resource-usage__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resource-usage__metric { text-align: right; font-variant-numeric: tabular-nums; }
+.resource-usage__empty { padding:var(--sp-2) var(--sp-4); color: var(--text-3); }
+.resource-usage__identity { min-width: 0; display: grid; gap: 1px; }
+.resource-usage__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+/* 「最近在改什么」那一行：比 context 略亮（它是用户点开面板真正想读的内容，不是元信息），
+   仍单行截断——面板窄，宁可省略号也不折行破坏行网格。 */
+.resource-usage__activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-micro); }
