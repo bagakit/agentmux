@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allStyles } from './helpers/styles.js'
+import { allStyles, allStyleRules } from './helpers/styles.js'
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import {
@@ -333,11 +333,21 @@ describe('statusDotTier：一行的状态点画哪一档', () => {
     for (const tier of tiers) expect(css, `chrome.css 没有 .status--${tier}`).toContain(`.status--${tier}`)
 
     // running 是绿的、但**不脉冲**：脉冲的含义是「此刻有一个 turn 在途」，一个等你说话的 Agent
-    // 活着但不在途中。把这条钉住，免得有人顺手把它并进 working 的动画规则。
-    const pulseRule = css.slice(css.indexOf('animation: pulse'), css.indexOf('animation: pulse') + 4)
-    expect(pulseRule, '自证：样式表里得真有 pulse 动画，否则下一条恒真').toBe('anim')
-    const pulseLine = css.split('\n').find((line) => line.includes('animation: pulse') && line.includes('status'))
-    expect(pulseLine, '找不到状态点的 pulse 规则行').toBeDefined()
-    expect(pulseLine, 'running 不该脉冲——脉冲留给「此刻有 turn 在途」').not.toContain('status--running')
+    // 活着但不在途中。这条规则要压在**每一条**带 pulse 动画的规则上，而不是某一行——有人给 running
+    // 单开一条新规则（不是并进 working 那行）时，只 `.find()` 第一行会指着没动过的 working 行照样绿。
+    // 所以按选择器级扫：allStyleRules() 已剥注释（免得注释里的散文假命中，见 stripCssComments），
+    // 再把样式表拆成「选择器 { 声明 }」的规则，挑出声明里跑 pulse 动画的，逐条断言它的选择器不碰
+    // running。`animation:\s*pulse\b` 只认把 pulse 关键帧当主动画的那种（activity-working-pulse 等是
+    // 别的动画，跑在别的组件上，不算「turn 在途」的呼吸）。
+    const pulseSelectors = [...allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, , body]) => /animation:\s*pulse\b/.test(body!))
+      .map(([, selector]) => selector!.trim())
+    // 自证：样式表里得真有 pulse 动画，否则下面的循环空转、这条守卫恒真（哪天动画被改名就靠这句报红）。
+    expect(pulseSelectors.length, '自证：样式表里得真有 pulse 动画，否则下一条恒真').toBeGreaterThan(0)
+    for (const selector of pulseSelectors) {
+      expect(selector, `running 不该脉冲——脉冲留给「此刻有 turn 在途」：${selector}`).not.toContain(
+        'status--running'
+      )
+    }
   })
 })
