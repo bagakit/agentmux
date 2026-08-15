@@ -8,7 +8,7 @@ import type {
 import { runInterruptionFact } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
-import { agentDisplayState } from '@agentmux/core/agent-status'
+import { agentDisplayState, isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
@@ -521,7 +521,7 @@ export function projectRuntimeEvent(
                 ...(
                   item.kind === 'agent' &&
                   core.state === 'running' &&
-                  (item.status.source === 'native-hook' || item.status.source === 'acp')
+                  isAgentActivityStatusSource(item.status.source)
                     ? {}
                     : { status: processStatus }
                 )
