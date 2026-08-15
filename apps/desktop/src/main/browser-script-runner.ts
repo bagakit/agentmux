@@ -20,6 +20,49 @@ import { spawn } from 'node:child_process'
 
 const READY = 'AGENTMUX_BROWSER_SCRIPT_READY'
 
+/**
+ * 注入脚本执行上下文的页面函数名。
+ *
+ * 这是**内部 API，不是对外协议**——这一条是整个方案相对「N 个 typed 动词」方案的分野所在。
+ * 改名、改签名、加参数都不用动版本化的 Control 契约（`control.ts` 的 `AgentMuxControlRequest`
+ * 联合、`OPERATION_BUDGET`、CLI 帮助文档都不收这些名字）。兼容负担从协议层挪到了库层，
+ * 而库可以随便改：Agent 每一轮拿到的都是当前这一版。
+ *
+ * 动作类一律经 ref 派发，**不接受屏幕坐标**。参考实现提供 `page.mouse.click(x, y)` 和
+ * selector 定位，这里两样都不要——「结构化 ref 寻址 ≠ 键鼠模拟」。ref 由我方快照发出，
+ * 是闭环内自洽的把手；坐标和 selector 都会引入"Agent 以为的目标 vs 实际命中的元素"这条裂缝。
+ *
+ * `js` 与 `cdp` 是**必须项不是可选项**：库里没有的能力，Agent 自己就能补，不用等我们加函数。
+ * 少了这两个逃生口，这个方案就退化成「动词清单更长的 N 动词方案」。
+ */
+export const BROWSER_PAGE_FUNCTION_NAMES = [
+  // 观察
+  'snapshot',
+  'snapshotText',
+  'pageInfo',
+  'captureScreenshot',
+  // 动作（全部按 ref）
+  'click',
+  'fillInput',
+  'typeText',
+  'pressKey',
+  'hover',
+  'scroll',
+  // 等待
+  'waitForElement',
+  'waitForLoad',
+  'waitForNetworkIdle',
+  'wait',
+  // 导航
+  'gotoUrl',
+  'openOrReuseTab',
+  'switchTab',
+  'listTabs',
+  // 逃生口
+  'js',
+  'cdp'
+] as const
+
 /** 脚本没能跑完的三种结局。分开是因为它们对 Agent 意味着完全不同的下一步。 */
 export type BrowserScriptFailure =
   /** 脚本自己抛了（也包括语法错误）。Agent 要改的是脚本。 */
@@ -48,6 +91,17 @@ export type BrowserScriptRunInput = {
    * 留成参数是因为测试要用很小的值把 OOM 在一秒内逼出来。
    */
   heapMb?: number
+  /**
+   * 脚本调页面函数时，真正干活的那一头。页面归主进程持有（`browser-view-manager.ts` 的
+   * `WebContentsView`），子进程手里没有，所以每一次 `click()` 都是一次进程间往返。
+   *
+   * 这笔开销是明知故犯：`ego` 没有它（Node 与内核同进程，CDP 是进程内调用）。但比"每个动作起一个
+   * 新进程"的方案小两个数量级——那是进程启动，这只是一次 IPC 往返。换来的是脚本崩了不带塌主进程。
+   *
+   * 不传表示这一轮不给页面能力（纯计算脚本），此时脚本调页面函数会拿到一条明确的拒绝，
+   * 而不是一个看起来像页面没响应的挂起。
+   */
+  onPageCall?: (name: string, args: unknown[]) => Promise<unknown>
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -60,12 +114,63 @@ const MAX_CAPTURED_BYTES = 1_000_000
 /**
  * 子进程里跑的程序。
  *
- * stdout 是**帧通道**：一行一条 JSON 记录，不是给人看的自由文本。脚本的 console 因此必须被接管，
- * 否则它随手一个 `console.log('{')` 就会污染帧。T-007 要加的「请求回主进程」也走这里加一种 kind，
- * 不用另开管道。
+ * 两条通道，分工是刻意的：
+ * - **stdout 是帧通道**（一行一条 JSON）：脚本的日志和最终结果。脚本的 console 因此必须被接管，
+ *   否则它随手一个 `console.log('{')` 就会污染帧。
+ * - **IPC 通道**（`process.send`/`message`）：脚本调页面函数时的请求与应答。用 Node 原生的
+ *   IPC 而不是在 stdout 上再糊一层协议，是因为它自带分帧与结构化序列化。仓内已有
+ *   `stdio: [..., 'ipc']` 的先例（`workspace-files.ts:554`）。
+ *
+ * **这条通道对脚本是藏不住的，别假装能藏。** 试过三种摘法：`delete process.channel` 和
+ * `defineProperty(process,'channel',{value:undefined})` 都会让 Node 收不到 inbound 消息
+ * （它每次投递都要读这个属性）；只摘 `process.send` 则脚本仍能拿到 `process.channel.fd`，
+ * 实测可以直接 `fs.writeSync(3, ...)` 写出裸消息。所以安全不建立在"脚本够不着"上，
+ * 而建立在**父进程不把子进程的消息当权威**：每次调用的 callId 由父进程发号，父进程只认自己
+ * 欠着的那个 id；伪造的应答落不到任何一次真实调用上（见下面 `pending` 的用法）。
+ * 摘 `process.send` 仍然做——它挡住的是"不小心"，不是"故意"。
  */
 const RUNNER_SOURCE = String.raw`
 import { inspect } from 'node:util'
+
+// 先把 IPC 句柄抢到闭包里，再从 process 上摘掉 send。
+// 注意 channel 不能动——Node 每次投递 inbound 消息都要读 process.channel。
+const hostChannel = process.send ? process.send.bind(process) : null
+// 这一轮有没有页面能力，由父进程说了算：通道永远在（要靠它回结果），但没接浏览器时
+// 调页面函数必须立刻被拒，而不是发一条没人应答的请求然后挂到超时。
+const pageEnabled = process.argv[2] === 'page'
+const sendToHost = pageEnabled ? hostChannel : null
+const pending = new Map()
+let nextCallId = 0
+
+if (sendToHost) {
+  process.on('message', (message) => {
+    if (!message || message.kind !== 'page-call-result') return
+    const slot = pending.get(message.callId)
+    if (!slot) return
+    pending.delete(message.callId)
+    // 主进程报的失败要在脚本里长成一个真的异常——脚本作者用 try/catch 接它，
+    // 而不是去检查一个 { ok: false } 对象（那种约定没人会记得遵守）。
+    if (message.failed) slot.reject(new Error(message.message))
+    else slot.resolve(message.value)
+  })
+}
+
+// 摘掉 send：挡住的是"不小心"，不是"故意"（channel.fd 仍在，脚本真想写谁也拦不住）。
+// 真正的防线在父进程：它只认自己欠着的 callId。channel 本身不能动——Node 投递 inbound 要读它。
+process.send = undefined
+
+function callHost(name, args) {
+  if (!sendToHost) {
+    return Promise.reject(
+      new Error('This run has no page access: ' + name + '() is unavailable (no browser was attached).')
+    )
+  }
+  const callId = ++nextCallId
+  return new Promise((resolve, reject) => {
+    pending.set(callId, { resolve, reject })
+    sendToHost({ kind: 'page-call', callId, name, args })
+  })
+}
 
 function emit(record) {
   process.stdout.write(JSON.stringify(record) + '\n')
@@ -93,19 +198,22 @@ function fail(message, stack) {
   process.exit(1)
 }
 
+// 注入给脚本的页面函数。每一个都只是"把名字和参数送回主进程"——真正的实现在主进程那边，
+// 因为只有它持有 WebContentsView。名单在主进程侧定义并随握手传进来，这样加一个函数不用改两处。
+const PAGE_FUNCTION_NAMES = JSON.parse(process.argv[1] ?? '[]')
+const pageFunctions = PAGE_FUNCTION_NAMES.map((name) => (...args) => callHost(name, args))
+
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 let fn
 try {
-  // T-007 会在这里带上注入的函数库：new AsyncFunction(...names, body)。现在没有可注入的东西，
-  // 空数组的 spread 是死代码，所以不写。
-  fn = new AsyncFunction('"use strict";\n' + code)
+  fn = new AsyncFunction(...PAGE_FUNCTION_NAMES, '"use strict";\n' + code)
 } catch (error) {
   fail('Script failed to parse: ' + (error?.message ?? String(error)))
 }
 
 let value
 try {
-  value = await fn()
+  value = await fn(...pageFunctions)
 } catch (error) {
   fail(error?.message ?? String(error), error?.stack)
 }
@@ -140,9 +248,60 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
 
   const child = spawn(
     process.execPath,
-    [`--max-old-space-size=${heapMb}`, '--input-type=module', '--eval', RUNNER_SOURCE],
-    { env: environment, stdio: ['pipe', 'pipe', 'pipe'] }
+    [
+      `--max-old-space-size=${heapMb}`,
+      '--input-type=module',
+      '--eval',
+      RUNNER_SOURCE,
+      // 名字始终注入，有没有页面能力由 runner 里的 sendToHost 决定。只在有能力时才注入的话，
+      // 没能力时脚本会报 "click is not defined"——那看起来像 Agent 把名字写错了。
+      JSON.stringify(BROWSER_PAGE_FUNCTION_NAMES),
+      input.onPageCall ? 'page' : 'no-page'
+    ],
+    // 第四条 'ipc' 就是页面调用的通道，与 stdout 分开走。
+    { env: environment, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }
   )
+  // Node 的类型只给三元组 stdio 配了"三条流都在"的精确重载；四元组会把每条流推成
+  // 可能为 null。这里三条管道是我们自己在上面写死的，必然存在——与其在每处访问上加断言，
+  // 不如在这一处把事实说清楚。
+  const childStdout = child.stdout as NodeJS.ReadableStream
+  const childStderr = child.stderr as NodeJS.ReadableStream
+  const childStdin = child.stdin as NodeJS.WritableStream
+
+  const onPageCall = input.onPageCall
+  if (onPageCall) {
+    // 父进程记着自己欠哪些 callId。脚本能往 IPC 里写任意消息（channel.fd 摘不掉），
+    // 所以这里做两件事：同一个 callId 只服务一次（重放的第二条被丢掉），
+    // 应答只由父进程自己发出——子进程发来的"应答"根本没有接收端，落不到任何一次调用上。
+    const served = new Set<number>()
+    child.on('message', (message: unknown) => {
+      const call = message as { kind?: string; callId?: number; name?: string; args?: unknown[] }
+      if (call?.kind !== 'page-call' || typeof call.callId !== 'number') return
+      const callId = call.callId
+      if (served.has(callId)) return
+      served.add(callId)
+      // 主进程侧不 await 这个 promise：一次调用挂住了不能把整条消息循环卡死。
+      // 挂住的那次由脚本整体超时兜底（子进程被杀，pending 跟着没）。
+      void Promise.resolve()
+        .then(() => onPageCall(String(call.name), call.args ?? []))
+        .then(
+          (value) => {
+            // 子进程可能已经没了（超时被杀 / 自己退了）。往死掉的 channel 写会抛，
+            // 而那不是错误——只是答案没人要了。
+            if (child.connected) child.send({ kind: 'page-call-result', callId, value })
+          },
+          (error: unknown) => {
+            if (!child.connected) return
+            child.send({
+              kind: 'page-call-result',
+              callId,
+              failed: true,
+              message: error instanceof Error ? error.message : String(error)
+            })
+          }
+        )
+    })
+  }
 
   const logs: string[] = []
   let result: { value: unknown } | undefined
@@ -173,8 +332,8 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
     }
   }
 
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', (chunk: string) => {
+  childStdout.setEncoding('utf8')
+  childStdout.on('data', (chunk: string) => {
     captured += chunk.length
     if (captured > MAX_CAPTURED_BYTES) {
       if (!truncated) {
@@ -192,13 +351,13 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
 
   let stderr = ''
   let inputSent = false
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (chunk: string) => {
+  childStderr.setEncoding('utf8')
+  childStderr.on('data', (chunk: string) => {
     stderr += chunk
     // 握手：等子进程说自己准备好了再喂代码，和 workspace-files.ts:393-399 同形。
     if (!inputSent && stderr.split('\n').includes(READY)) {
       inputSent = true
-      child.stdin.end(input.code)
+      childStdin.end(input.code)
     }
   })
 
