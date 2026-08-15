@@ -10,7 +10,10 @@ import {
 } from '../lib/open-destination'
 import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
+import { regionDisplayName, regionSurfaceLabel } from '../lib/region-display-name'
+import { regionIds } from '@agentmux/layout'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
+import { workspaceForSession } from '../lib/workbench-tabs'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -74,6 +77,22 @@ export function SessionPane({
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  // 这一格叫什么——喂给 composer 右上角的水印。名字取决于兄弟格（"Terminal" 只有在另一格也叫
+  // "Terminal" 时才成 "Terminal 2"），所以这里按 WorkspaceWorkbench 喂换位子菜单的同一形状装配：
+  // regionIds(layout.root) 给视觉顺序（左→右/上→下）、regionSurfaceLabel 给每格短名，再交给
+  // regionDisplayName 做唯一那份去重编号。两个消费者（水印、换位菜单）由此共用同一次派生，不会分家。
+  // linkOrigin 缺 tabId/regionId（无 Region 上下文的宿主）时返回 undefined，水印随之整段缺席——这与
+  // canSplit 读的是同一对真相。选择器返回原始字符串，zustand 默认 Object.is 比较即可，无引用抖动。
+  const regionName = useAppStore((state) => {
+    if (!linkOrigin.tabId || !linkOrigin.regionId) return undefined
+    const tab = state.tabs?.[linkOrigin.tabId]
+    if (!tab) return undefined
+    const regions = regionIds(tab.layout.root).flatMap((regionId) => {
+      const region = tab.regions[regionId]
+      return region ? [{ regionId, label: regionSurfaceLabel(region, state.sessions) }] : []
+    })
+    return regionDisplayName(regions, linkOrigin.regionId)
+  })
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
@@ -104,10 +123,21 @@ export function SessionPane({
   // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
   // from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch sessions still relativize
   // absolute paths against the base main actually resolves against.
+  //
+  // Keyed on THIS pane's own session, not on activeWorkspaceId. The two diverge after "Move to
+  // Workspace": that reducer relocates the display identity and deliberately never touches
+  // session.workspacePath (see move-session-view.ts), so a moved pane's session still lives under its
+  // original root while the active workspace is the target. Reading the active root there is not merely
+  // "unshortened" — when the wrong root is an ANCESTOR of the session path, the boundary guard in
+  // shortenPath matches and strips it, producing a relative path rooted at the wrong repo. Measured:
+  // session /Users/me/proj/repo/src/auth.ts under a wrong root of /Users/me/proj renders `repo/src/auth.ts`,
+  // which reads as a real answer. A wrong path that looks right is worse than a long one.
+  // workspaceForSession is the existing predicate for this question (it already handles scratch subdirs);
+  // this is its fourth caller, not a fourth spelling.
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
   const activeWorkspaceRoot = useAppStore((state) =>
-    state.config?.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId)?.path ?? ''
+    (session ? workspaceForSession(state.config ?? null, session)?.path : undefined) ?? ''
   )
   // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
   // surfaces through reportError — "click opened nothing" is never silent.
@@ -202,7 +232,7 @@ export function SessionPane({
           <strong>Connecting to this session…</strong>
           <span>Waiting for the Core client to publish this Runtime View.</span>
         </div>
-        {surfaceKind === 'agent' ? <AgentSessionComposer sessionId={sessionId} disabled /> : null}
+        {surfaceKind === 'agent' ? <AgentSessionComposer sessionId={sessionId} disabled {...(regionName ? { regionName } : {})} /> : null}
       </section>
     )
   }
@@ -357,7 +387,7 @@ export function SessionPane({
               onRespond={async (response) => await respondInteraction(session.id, response)}
             />
           ) : null}
-          <AgentSessionComposer sessionId={session.id} />
+          <AgentSessionComposer sessionId={session.id} {...(regionName ? { regionName } : {})} />
         </div>
       ) : null}
     </section>
