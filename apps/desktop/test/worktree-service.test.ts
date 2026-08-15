@@ -1285,6 +1285,12 @@ describe('WorktreeService', () => {
       )
 
     await writeFile(join(repoPath, 'notes.txt'), 'my notes\n')
+
+    // 先证靶子在场。下面那条 `status === ''` 单独看是**恒真**的：把 createForBranch 整个换成空操作，
+    // 仓里就只有一个被 `notes.txt` 规则挡住的文件，status 照样是空——测试全绿，而什么都没发生。
+    // 真正要守的是「worktree 建出来了，并且它没有弄脏 status」，两件事都得断言。
+    expect((await stat(join(repoPath, '.worktrees', 'lane'))).isDirectory()).toBe(true)
+
     const status = (await executionHost.run('git', ['-C', repoPath, 'status', '--porcelain'])).stdout.trim()
     expect(
       status,
