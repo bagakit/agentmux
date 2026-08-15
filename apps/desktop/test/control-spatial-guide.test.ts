@@ -105,6 +105,24 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(AGENTMUX_CLI_SKILL).toMatch(/custom Agent[\s\S]{0,220}agentmux list agents/i)
   })
 
+  it('驱动已开的 Browser 可发现：启动提示点出这件事，skill 教确切用法', () => {
+    // 与上面「移动动词」同形的两面咬合。这个能力特别需要发现面：它挂在一个**顶层动词**上
+    // （`agentmux browser run`），不像 open 的子命令那样会被顺带提到。Agent 不知道它存在，
+    // 就只会退回去让用户自己看页面——或者更糟，去猜坐标点击。
+    //
+    // 发现面（启动提示）：说得出"已经开着的 Browser 可以被驱动"，且点出"按读到的元素动"。
+    expect(launchGuide, '启动提示没提驱动已开的 Browser——Agent 不会知道有这回事，也就永远不会去 --skill 查')
+      .toMatch(/Browser that is already open[\s\S]{0,200}driven/i)
+    expect(launchGuide, '启动提示没说清是"读页面→按读到的元素动"，Agent 可能仍以为要靠坐标')
+      .toMatch(/reads the page[\s\S]{0,120}elements/i)
+    // 但发现面不许抄语法——确切用法的唯一真相在 skill，抄进来会在语法演进时立刻过期。
+    expect(launchGuide, '启动提示抄了命令行语法，与 skill 争夺唯一真相').not.toContain('browser run --browser')
+
+    // 用法面（skill）：教出确切命令与授权前提。
+    expect(AGENTMUX_CLI_SKILL, 'skill 没教 browser run 的确切用法').toContain('agentmux browser run --browser')
+    expect(AGENTMUX_CLI_SKILL, 'skill 没说授权开关在哪，Agent 撞到拒绝时无路可走').toContain('Settings › Browser')
+  })
+
   it('两个 SSOT 常量都有真实生产消费者（排除定义文件后扫描非空）', () => {
     // 启动引导：client.ts 的 createAgent 经 composeAgentLaunchPrompt 注入，由 injectAgentMuxGuide 控制。
     const guideConsumers = [...clientSource.matchAll(/composeAgentLaunchPrompt\(/g)]
