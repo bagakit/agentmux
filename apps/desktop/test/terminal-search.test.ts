@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { allStyles } from './helpers/styles.js'
 import {
   DEFAULT_TERMINAL_SEARCH_TOGGLES,
   runTerminalSearch,
@@ -397,10 +398,7 @@ describe('搜索面板把三个开关露出来', () => {
 
   it('开启态是实心填充，不是描边', () => {
     // 控件语言：选中只用一个几何信号（docs/design/agentmux-surface-density.md）。
-    const css = readFileSync(
-      new URL('../src/renderer/src/styles/terminal.css', import.meta.url),
-      'utf8'
-    )
+    const css = allStyles()
     const active = css.slice(css.indexOf('.terminal-search__toggle[data-active]'))
     const rule = active.slice(0, active.indexOf('}'))
     expect(rule).toContain('background: var(--green)')
