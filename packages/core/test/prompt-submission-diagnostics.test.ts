@@ -60,6 +60,10 @@ async function coordinatorFixture(stored = session()) {
   const currentRun = run()
   const kernel = {
     identity: () => ({ daemonInstanceId: 'daemon-1', protocolVersion: 1, buildIdentity: 'test' }),
+    // 降级路径（confirmRenderOrDegrade）先向 daemon 要权威 Run 状态确认 Agent 还活着。缺了它，任何
+    // 走到降级的变异都会炸成 `kernel.status is not a function`——那是**红在 fixture 缺口**，不是红在
+    // 断言上，于是变异「被杀」的结论是假的。给它一条 running 的真回答，降级路径才真的跑起来。
+    status: vi.fn(async () => run()),
     input: vi.fn(async (_runId: string, operation: { expectedByte: number; data: string }) => ({
       run: run(operation.expectedByte + Buffer.byteLength(operation.data)),
       appliedByteRange: {
@@ -496,5 +500,66 @@ describe('prompt readiness observation', () => {
       '等空 composer 横跨 Agent 冷启动，必须严格宽于「字已送进去、屏幕该回显了」那条；' +
       '两者相等通常意味着有人把渲染那个常量拿过来复用了'
     ).toBeGreaterThan(renderOptions.timeoutMs!)
+  })
+})
+
+/**
+ * 几何在渲染确认的**途中**变了，不许把这次已经受据的 payload 判死。
+ *
+ * 走到 `waitForRender` 时，payload 的 CtxMux 受据已经确认——那串字**已经躺在 composer 里**了。此刻
+ * 屏幕证据因为 resize 失效（`TERMINAL_GEOMETRY_CHANGED`）说明的只是「我们这块表重置了」，不是
+ * 「Agent 不行了」：新几何下重建一块屏幕再看一眼就是了，预算还剩多少就看多久。这正是原则 11 第 2 类
+ * ——我们自己的证据链断了，不能因此收走用户还握着的能力。
+ *
+ * 反例（生产上真会发生）：desktop 在 Agent 面板布局时就 resize，所以「resize 落在渲染确认窗口里」是
+ * 常态而非边角。若这里直接抛，submitInputPlan 会把 TERMINAL_GEOMETRY_CHANGED 交给
+ * `confirmRenderOrDegrade`——那条路虽然也不阻断 `\r`，但会把一次**本可以完整确认**的提交记成
+ * `unverified` 降级并广播服务窗：用户看到一条「这次没验成」的告示，而真相只是窗口被拖动了一下。
+ *
+ * 为什么要专门写这条：实测把那个 catch 改成无条件 `throw error`，**整个 core 确定性套件 110 文件
+ * 1269 条测试全绿**——这个重试循环此前一条判据都没有。既有的 resize 测试守的是另一处
+ * （`observeReadiness` 的 `.catch` 重挂，client-agent-resize-readiness.test.ts），两者位置不同、
+ * 各自能被不同变异杀掉，互相不覆盖。
+ */
+describe('渲染确认途中几何变了：重建屏幕再看，而不是把这次提交判成未验证', () => {
+  it('第一次 wait 抛 TERMINAL_GEOMETRY_CHANGED 后重试，不降级、不把错误抛给调用方', async () => {
+    const fixture = await coordinatorFixture()
+    const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
+    // 降级会广播一条带 terminalPromptDelivery 的 agent-session 事件。订阅它而不是查结束态，理由见下方断言。
+    const degradeEvents: unknown[] = []
+    fixture.publisher.onEvent((event) => {
+      if (event.type === 'agent-session' && event.session.terminalPromptDelivery) degradeEvents.push(event)
+    })
+    let waits = 0
+    fixture.screenEvidence.wait.mockImplementation(async () => {
+      waits += 1
+      // 只有**第一次**几何变化；第二次是重建后的那块屏幕，正常确认。写成「永远抛」证不出重试，
+      // 只会证出超时——那是另一条出口。
+      if (waits === 1) {
+        throw new AgentMuxError(
+          'Terminal screen geometry changed; rebuild from the owner-confirmed size.',
+          'TERMINAL_GEOMETRY_CHANGED'
+        )
+      }
+      return 1
+    })
+
+    await expect(fixture.coordinator.submitInputPlan(
+      fixture.registry.get('agent-1') as AgentMuxAgentSession,
+      fixture.currentRun,
+      'submission-geometry-retry',
+      'hello',
+      plan
+    )).resolves.toBeUndefined()
+
+    expect(waits, '几何变化之后没有重建屏幕再看一眼——这次提交被白白记成未验证').toBe(2)
+    // 降级必须**压根没发生过**，而不是「最后没留下痕迹」：`confirmRenderOrDegrade` 成功那一支会调
+    // `clearDelivery` 把告示撤下，所以只看结束态的 `terminalPromptDelivery` 是**恒真**的——实测过：
+    // 让 catch 里多写一次 publishDeliveryDegrade（重试照旧、waits 仍是 2），结束态断言 12/12 全绿。
+    // 判据因此改成「有没有广播过那条降级 session 事件」，它在时间线上留痕，事后清除抹不掉。
+    expect(
+      degradeEvents,
+      '几何变化被当成了证据链失败：一次本可完整确认的提交被记成 unverified 降级并广播了服务窗'
+    ).toEqual([])
   })
 })
