@@ -140,7 +140,7 @@ export function WorkspaceSidebar({
           })
         }}
       >
-        <ProjectIcon workspaceId={project.preferredWorkspaceId} />
+        <ProjectIcon workspaceId={project.preferredWorkspaceId} name={project.name} />
         <span className="project-rail-row__identity">
           <strong>{project.name}</strong>
           {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a

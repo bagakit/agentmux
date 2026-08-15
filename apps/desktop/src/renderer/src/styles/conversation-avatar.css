@@ -55,3 +55,17 @@
   color: hsl(var(--speaker-hue) 62% 72%);
   background: hsl(var(--speaker-hue) 45% 68% / 0.18);
 }
+
+
+/* 项目图标的字母牌：同一套身份色派生的第二个消费方（见 project-monogram.ts）。
+   放这里而不是 chrome.css，与本文件自己的来由同理——chrome.css 已到表面尺寸上限，而这条规则依赖的
+   正是本文件顶上那段色彩系统说明（固定 S/L、只动色相）。两个消费方共用一条排除规则，靠
+   stylesheet-organisation 的漂移断言逐个属性钉住。 */
+/* 没有图标的项目：按 workspaceId 派生色相的字母牌，而不是每行一样的灰字形（同 host 那条「本机不
+   占位」的规矩——区分不了任何东西的一列只是在占宽度）。默认值在此**声明**而非藏进 var() 兜底，与
+   `--speaker-hue` 同理（全表守卫读的是声明）；288 是最宽那段让开语义色的弧的中心，与派生函数共用
+   排除规则，由 stylesheet-organisation 的漂移断言钉住。overflow：emoji 比字母大，会撑破格子。 */
+.project-rail-row__icon[data-monogram] {
+  --project-hue: 288; overflow: hidden; font-size: var(--fs-micro); font-weight: 640; line-height: 1;
+  color: hsl(var(--project-hue) 62% 72%); background: hsl(var(--project-hue) 45% 68% / 0.18);
+}
