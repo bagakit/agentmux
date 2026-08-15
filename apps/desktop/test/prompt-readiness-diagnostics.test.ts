@@ -165,21 +165,9 @@ describe('CONSUMED 分不清两个世界时如实说，不笃定 wait', () => {
     expect(result.message, 'CONSUMED 默认文案回退成了笃定 wait：没承认续期可能永不到达').toContain(
       'no new epoch is coming'
     )
-    // 且不得点名任何**在这个状态下走不通**的恢复链。这条守卫被同一个缺陷打中过两次：
-    //   第一次文案说 'resume' —— resumeAgentRun 对 running 的 Run 直接抛
-    //     AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），Resume 按钮也只在
-    //     disconnected/missing/exited 时渲染（SessionPane.tsx:254）。
-    //   第二次改成 'stop the Agent and then resume' —— 更隐蔽，因为读源码像是通的。实际
-    //     stopAgent 走 commitLifecycle(reservation, null)，store 侧是 sessions.delete
-    //     （agent-session-store.ts:1475）并记 retirement；ensureAgentContinuity 随后判成
-    //     'retired'（agent-session-continuity.ts:139），resumeAgentRun 永不被调用，renderer
-    //     直接摘掉这一格（store.ts:4491）。**stop 之后没有 resume 这个东西。**
-    // 所以判据是否定式的：两条措辞都不许回来。正面那半由上一条断言（承认「永不来」）守着，
-    // 这半只负责挡住「许诺一条死掉的恢复链」。把文案改回任一版本都会打红这里。
-    expect(result.message, 'CONSUMED 的恢复动作退回成了对 running Run 无效的裸 resume').not.toMatch(
-      /\bresume it\b|\bstop the Agent and then resume\b/i
-    )
-    // 而 stop 的真实代价必须说出来，否则用户会自己发明那条死掉的恢复链。
+    // 且不得点名任何**在这个状态下走不通**的恢复链——这半判据现在由下面那条**遍历式不变量**
+    // 统一守着（它同时覆盖 blocked/error 两条改写分支，而这里的禁止清单曾把它们整整放过）。
+    // 这里只留正面那半：stop 的真实代价必须说出来，否则用户会自己发明那条死掉的恢复链。
     expect(result.message, '没说清 stop 会 retire 掉会话：用户会以为 stop 完还能 resume 回来').toMatch(
       /retires the session/i
     )
@@ -192,6 +180,82 @@ describe('CONSUMED 分不清两个世界时如实说，不笃定 wait', () => {
     ) as AgentMuxError
     expect(result.message, '把「永不来」的话也说给了续期在来的世界：判据没分开两侧').not.toContain(
       'no new epoch is coming'
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 「文案点名了从这个状态走不通的动作」这个缺陷在本文件上连中五次，前三次都落在 CONSUMED 那一句，
+// 第四、五次落在 blocked / error 两条改写分支（各带一个 "or resume it"）——而当时守 CONSUMED 的
+// 那条**禁止清单式**断言只喂了「无 options」这一个输入，对隔壁两行整整失明。
+//
+// 所以判据换形状：不再盯某一句的措辞，而是**遍历这个函数的整个输入空间**，钉住一条对每个输出
+// 都成立的不变量。它之所以可判定，是因为每条改写分支都由 run 状态定义（runtime-controller.ts:815-819：
+// `runState='ended'` 与 `semanticState` 互斥，后者只在 run 仍 running 的 else 里赋值），而
+// 「resume / restart 可不可行」恰好只由这一个变量决定（client.ts:1866-1868 对 running 直接抛）。
+//
+//   run 仍 running（默认 + 四个 semanticState）⟹ 输出不得点名 resume / restart
+//   run 已 ended                              ⟹ 输出**必须**点名它（那是此时真能走的路）
+//
+// 正反两侧都要：只有否定侧时，把整套改写机制删掉会让它恒绿（默认文案本来也不含 resume）。
+// ---------------------------------------------------------------------------
+describe('running 的 Run 上不许点名 resume/restart——遍历整个输入空间', () => {
+  const CODES = [
+    'AGENT_PROMPT_NOT_READY',
+    'AGENT_PROMPT_READINESS_CONSUMED',
+    'AGENT_PROMPT_SUBMISSION_BUSY',
+    'AGENT_PROMPT_READINESS_CONFLICT'
+  ] as const
+  const SEMANTIC_STATES = ['waiting', 'blocked', 'done', 'error'] as const
+  const DEAD_ACTION = /\bresume\b|\brestart\b/i
+
+  it('run 仍 running 时，四个码 × 五种证据（含无证据）一律不点名 resume/restart', () => {
+    for (const code of CODES) {
+      const bare = humanizePromptDeliveryError(
+        new AgentMuxError('core message', code)
+      ) as AgentMuxError
+      expect(bare.message, `${code} 的默认文案点名了对 running Run 无效的 resume/restart`).not.toMatch(
+        DEAD_ACTION
+      )
+      for (const semanticState of SEMANTIC_STATES) {
+        const result = humanizePromptDeliveryError(
+          new AgentMuxError('core message', code),
+          { semanticState }
+        ) as AgentMuxError
+        expect(
+          result.message,
+          `${code} + ${semanticState}：run 还 running 却叫用户 resume/restart（resumeAgentRun 会抛 AGENT_SESSION_STILL_RUNNING，按钮也不渲染）`
+        ).not.toMatch(DEAD_ACTION)
+      }
+    }
+  })
+
+  it('run 已 ended 时反过来必须点名 resume/restart——否则上一条只是「改写机制被删光」的假绿', () => {
+    for (const code of CODES) {
+      const result = humanizePromptDeliveryError(
+        new AgentMuxError('core message', code),
+        { runState: 'ended' }
+      ) as AgentMuxError
+      expect(result.message, `${code} 的 ended 改写没落地：唯一真能走的恢复动作没被说出来`).toMatch(
+        DEAD_ACTION
+      )
+    }
+  })
+
+  it('blocked / error 各自被改写成本状态下真能做的事，而不是塞同一句套话', () => {
+    // 对照面：没有这条，把两个分支都改成一句「什么都不点名」的空话也能让上面全绿。
+    const blocked = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_NOT_READY'),
+      { semanticState: 'blocked' }
+    ) as AgentMuxError
+    expect(blocked.message).toContain('blocked')
+    const errored = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_NOT_READY'),
+      { semanticState: 'error' }
+    ) as AgentMuxError
+    expect(errored.message).toContain('still alive')
+    expect(errored.message, 'blocked 与 error 收敛成了同一句：两个状态要做的事并不一样').not.toBe(
+      blocked.message
     )
   })
 })
