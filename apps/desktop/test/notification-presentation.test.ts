@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTimelineItem } from '@agentmux/core'
 import {
   DEFAULT_NOTIFICATION_MODE_ID,
+  DEFAULT_NOTIFICATION_SOUND,
   NOTIFICATION_TIERS,
   composeAttentionBody,
   presentationForMode,
   resolveNotificationMode,
-  resolveNotificationModeId
+  resolveNotificationModeId,
+  resolveNotificationSound
 } from '../src/shared/notification-presentation.js'
 
 // ── The tier table is the single source of truth ────────────────────────────────────────────────────
@@ -52,6 +54,40 @@ describe('resolveNotificationModeId (config default)', () => {
     expect(resolveNotificationModeId({ notifications: { mode: 'off' } })).toBe('off')
     expect(resolveNotificationModeId({ notifications: { mode: 'until-acknowledged' } }))
       .toBe('until-acknowledged')
+  })
+})
+
+// ── Sound: the second dimension, and its default ────────────────────────────────────────────────────
+describe('resolveNotificationSound', () => {
+  it('defaults to silent for a config that never chose, on every shape of absence', () => {
+    // 声音的默认与停留时长的默认**方向相反**，这不是疏忽：dwell 默认不取 `off`，因为一个什么都不显示
+    // 的通知功能看起来像坏了；而一个不出声的通知没有坏，它只是安静的那一版。这个字段落地之前，所有
+    // 安装都是静音的（agent-notifier 里那句 `silent: request.silent ?? true`），所以默认打开等于替
+    // 用户改了一个他们做过的选择。
+    expect(resolveNotificationSound({})).toBe(DEFAULT_NOTIFICATION_SOUND)
+    expect(resolveNotificationSound(null)).toBe(DEFAULT_NOTIFICATION_SOUND)
+    expect(resolveNotificationSound({ notifications: undefined })).toBe(DEFAULT_NOTIFICATION_SOUND)
+    expect(resolveNotificationSound({ notifications: { mode: 'standard' } }))
+      .toBe(DEFAULT_NOTIFICATION_SOUND)
+    // 自证：默认值必须真的是「不出声」，否则上面四条在说的是另一件事。
+    expect(DEFAULT_NOTIFICATION_SOUND).toBe(false)
+  })
+
+  it('honours a stored choice in both directions', () => {
+    // 两个方向都钉：只钉 true 的话，实现写成 `?? true` 也能绿；只钉 false，写成恒 false 也能绿。
+    expect(resolveNotificationSound({ notifications: { mode: 'standard', sound: true } })).toBe(true)
+    expect(resolveNotificationSound({ notifications: { mode: 'standard', sound: false } })).toBe(false)
+  })
+
+  it('是与 mode 正交的一维：任一档位上都能各自取两个值', () => {
+    // 声音没有被折进 dwell 表，这条把「正交」写成断言而不是注释：每个档位上两种声音都成立，所以
+    // 谁也不是谁的函数。哪天有人把 sound 塞进 NOTIFICATION_TIERS 变成第六个停靠点，这条会红。
+    for (const tier of NOTIFICATION_TIERS) {
+      for (const sound of [true, false]) {
+        expect(resolveNotificationSound({ notifications: { mode: tier.id, sound } })).toBe(sound)
+      }
+    }
+    expect(NOTIFICATION_TIERS.length).toBeGreaterThan(1)
   })
 })
 
@@ -180,7 +216,7 @@ describe('createAgentNotifier delivery result', () => {
 
   it('reports shown+as-requested and asks the OS to pin it open where the platform allows', () => {
     const notifier = createAgentNotifier({ window: fakeWindow(), onActivate: () => {}, platform: 'linux' })
-    const result = notifier.notify({ sessionId: 'a', title: 'Agent finished', body: 'b', mode: 'until-acknowledged' })
+    const result = notifier.notify({ sessionId: 'a', title: 'Agent finished', body: 'b', mode: 'until-acknowledged', sound: false })
 
     expect(result).toEqual({ status: 'shown', presentation: 'as-requested' })
     expect(shown).toEqual(['Agent finished'])
@@ -190,7 +226,7 @@ describe('createAgentNotifier delivery result', () => {
 
   it('reports shown+downgraded on a platform that cannot pin it, and does NOT ask for never', () => {
     const notifier = createAgentNotifier({ window: fakeWindow(), onActivate: () => {}, platform: 'darwin' })
-    const result = notifier.notify({ sessionId: 'a', title: 'Agent finished', body: 'b', mode: 'until-acknowledged' })
+    const result = notifier.notify({ sessionId: 'a', title: 'Agent finished', body: 'b', mode: 'until-acknowledged', sound: false })
 
     // The banner still showed — this is not "unsupported" — but it did not stay, and we say so.
     expect(result).toEqual({ status: 'shown', presentation: 'downgraded' })
@@ -198,10 +234,25 @@ describe('createAgentNotifier delivery result', () => {
     expect(constructed[0]!.timeoutType).toBe('default')
   })
 
+  it('翻译 sound → Electron 的 silent，两个方向各一次', () => {
+    // 这是整条链上**唯一**一次取反：上面每一层都说「放不放声音」，只有这里说「静不静音」。一个在
+    // IPC 一侧与自己名字含义相反的布尔，是最终会装反的那种形状，所以两个方向都钉——只钉一个方向的
+    // 话，把实现写成恒 true 或恒 false 都能绿。
+    //
+    // 判据取 Electron 构造参数本身，而不是 notify 的返回值：返回值只说「显示了」，对静音与否完全
+    // 沉默。前身 `silent?: boolean` 正是这样活了很久——投递侧认真读它，而没有任何调用方传过它。
+    const notifier = createAgentNotifier({ window: fakeWindow(), onActivate: () => {}, platform: 'darwin' })
+    notifier.notify({ sessionId: 'a', title: 't', body: 'b', mode: 'standard', sound: true })
+    expect(constructed[0]!.silent, '用户要了声音，传给系统的必须是 silent:false').toBe(false)
+
+    notifier.notify({ sessionId: 'a', title: 't', body: 'b', mode: 'standard', sound: false })
+    expect(constructed[1]!.silent, '用户没要声音，传给系统的必须是 silent:true').toBe(true)
+  })
+
   it('reports unsupported when the platform cannot notify at all', () => {
     FakeNotification.isSupported.mockReturnValue(false)
     const notifier = createAgentNotifier({ window: fakeWindow(), onActivate: () => {}, platform: 'darwin' })
-    const result = notifier.notify({ sessionId: 'a', title: 't', body: 'b', mode: 'standard' })
+    const result = notifier.notify({ sessionId: 'a', title: 't', body: 'b', mode: 'standard', sound: false })
 
     expect(result.status).toBe('unsupported')
     expect(shown).toEqual([])

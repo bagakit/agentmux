@@ -70,6 +70,28 @@ describe('attention 路径的在屏判定只有一处来源', () => {
     ).toBe(false)
   })
 
+  it('hook 的每一个用户选择都取自 config 解析器，而不是写死一个常量', () => {
+    // 同一条规则的另一个字段。这个 hook 是「把配置里的选择翻译成一次投递」的那一层，它有两个这样的
+    // 选择：停留档位与声音。两者都必须经解析器从 config 取——把任意一个写成字面量，界面上的开关就
+    // 变成装饰品，而 tsc 完全沉默（`sound: false` 类型正确）、所有行为测试照旧全绿（实测：把
+    // `resolveNotificationSound(state.config)` 换成 `false`，三个相关文件 15 条一条不红）。
+    //
+    // 声音这一维尤其需要这条：它的前身是 main 请求类型上一个可选的 `silent`，投递侧认真读它，而**没有
+    // 任何调用方传过它**——一个声明了、被兑现了、却谁也够不着的能力。那种缺陷正是靠「没有人检查这根
+    // 线接上没有」活下来的。
+    const hook = read(HOOK)
+    for (const resolver of ['resolveNotificationModeId', 'resolveNotificationSound']) {
+      expect(
+        hook,
+        `attention hook 不再 import ${resolver}——用户的这个选择没有来源了`
+      ).toMatch(new RegExp(`import \\{[^}]*\\b${resolver}\\b[^}]*\\} from '[^']*notification-presentation'`))
+      expect(
+        hook.match(new RegExp(`\\b${resolver}\\(state\\.config\\)`, 'g')) ?? [],
+        `attention hook 没有用 ${resolver} 读 config——这个选择要么写死了，要么读的是别处`
+      ).toHaveLength(1)
+    }
+  })
+
   it('session-visibility 的在屏判定取自那处唯一实现 surfaceNavigationVisibility', () => {
     const sv = read(SESSION_VISIBILITY)
 

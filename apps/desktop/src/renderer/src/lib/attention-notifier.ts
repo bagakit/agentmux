@@ -1,5 +1,10 @@
 import type { AgentDisplayState, AgentTimelineSnapshot } from '@agentmux/core'
-import type { NotificationDelivery, NotificationModeId, SessionSnapshot } from '../../../shared/contracts'
+import type {
+  AgentAttentionNotifyInput,
+  NotificationDelivery,
+  NotificationModeId,
+  SessionSnapshot
+} from '../../../shared/contracts'
 import { composeAttentionBody } from '../../../shared/notification-presentation'
 import { attentionEvents, nextAttentionStates, type AttentionEvent } from './attention-event'
 
@@ -11,12 +16,7 @@ import { attentionEvents, nextAttentionStates, type AttentionEvent } from './att
 // double-notify or go silent — is testable without a window.
 
 export type AttentionNotifierPorts = {
-  notify(input: {
-    sessionId: string
-    title: string
-    body: string
-    mode: NotificationModeId
-  }): Promise<NotificationDelivery>
+  notify(input: AgentAttentionNotifyInput): Promise<NotificationDelivery>
   // Reported once, the first time the platform refuses. Without this the user is told nothing at all and
   // silently loses a feature they enabled.
   onUnsupported?: (reason: string) => void
@@ -32,6 +32,10 @@ export type AttentionReconcileInput = {
   visibleSessionIds: ReadonlySet<string>
   // The dwell tier the user chose. `off` means raise nothing at all (baseline still advances below).
   mode: NotificationModeId
+  // Whether the user asked for a sound. Resolved from config by the caller — the notifier is handed the
+  // answer rather than the config, for the same reason it is handed `mode`: this object sequences a
+  // decision, it does not make one.
+  sound: boolean
   // Activity timelines by Session id, read to compose the body. Absent entries simply yield a body with
   // no conversation summary — no second message store is kept for notifications.
   timelines: Readonly<Record<string, AgentTimelineSnapshot>>
@@ -100,7 +104,8 @@ export function createAttentionNotifier(ports: AttentionNotifierPorts): Attentio
             state: stateFor(event, input.sessions),
             items: input.timelines[event.sessionId]?.items
           }),
-          mode: input.mode
+          mode: input.mode,
+          sound: input.sound
         })
         if (delivery.status === 'unsupported') {
           if (!unsupportedReported) {
