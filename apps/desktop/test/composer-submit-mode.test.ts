@@ -109,6 +109,43 @@ describe('composerSubmitMode', () => {
     expect(mode.canSubmit).toBe(false)
   })
 
+  it('keeps a running Agent usable when its live OUTPUT channel errors — degrade-and-allow, never grey-out', () => {
+    // RED-LINES.md 判定流程: greying a `running` Agent takes away an ability the daemon still honours —
+    // writeAgentInput / recoverableInput reach the process regardless of the output attachment. "绕过我这段
+    // 代码，这条路还能不能通？ → 能" ⇒ blocking here is the red line (原则 11 第 2 类 written as 第 1 类).
+    //
+    // Both faults land here as the SAME snapshot { state:'error', source:'run-process', running } — the
+    // reducer drops the error code, so this function cannot and must not tell them apart:
+    //   (a) a LIVE-but-discontinuous channel: CTXMUX_EVENT_INVALID from an observation_discontinuity / tmux
+    //       advisory; the pump keeps running, output keeps flowing. Locking it was the reported bug.
+    //   (b) a genuinely DEAD channel: RECONNECT_REATTACH_FAILED. Input still reaches the Agent; the honest
+    //       signal is a service window ("output may not be showing — Resume"), not a locked composer.
+    // Re-introducing `if (status.state==='error' && status.source==='run-process') canType:false` reds this.
+    const mode = composerSubmitMode(
+      agentSession({ processState: 'running', status: { state: 'error', source: 'run-process', observedAt: 3 } })
+    )
+
+    expect(mode.canType).toBe(true)
+    expect(mode.canSubmit).toBe(true)
+    expect(mode.placeholder).toBe('Ask, steer, or paste a command…')
+  })
+
+  it('never lets an output-channel error gate a running composer, on ANY evidence source', () => {
+    // The reducer flips status.state to 'error' for EVERY scoped agent-error and stamps a source. None of
+    // these means the Agent stopped accepting bytes while processState is 'running', so none may gate the
+    // surface: hook-install / launch-prompt / timeline-persist (source 'user'), prompt-readiness / OUTPUT_GAP
+    // (source 'terminal-output'), and live-output faults (source 'run-process') all stay open.
+    for (const source of ['user', 'terminal-output', 'run-process'] as const) {
+      const mode = composerSubmitMode(
+        agentSession({ processState: 'running', status: { state: 'error', source, observedAt: 3 } })
+      )
+
+      expect(mode.canType).toBe(true)
+      expect(mode.canSubmit).toBe(true)
+      expect(mode.placeholder).toBe('Ask, steer, or paste a command…')
+    }
+  })
+
   // canType must never disagree with the sealed availability contract for the cases that gate typing at
   // all. This calls the REAL agentComposerAvailability so a drift in either function fails the suite.
   it('agrees item-for-item with agentComposerAvailability on every gate that disables the surface', () => {
@@ -125,9 +162,11 @@ describe('composerSubmitMode', () => {
     for (const { session, forceDisabled } of cases) {
       const availability = agentComposerAvailability(session, forceDisabled)
       const mode = composerSubmitMode(session, forceDisabled)
+      // pendingInteraction 只落在 agent 变体上，先窄化再读——terminal 快照没有这个字段。
+      const pending = session?.kind === 'agent' ? session.pendingInteraction : undefined
       // canType is the inverse of availability.disabled, and the placeholder text is identical.
-      expect(mode.canType).toBe(session?.pendingInteraction ? true : !availability.disabled)
-      expect(mode.placeholder).toBe(session?.pendingInteraction ? 'Answer the Agent request above… Draft a steer…' : availability.placeholder)
+      expect(mode.canType).toBe(pending ? true : !availability.disabled)
+      expect(mode.placeholder).toBe(pending ? 'Answer the Agent request above… Draft a steer…' : availability.placeholder)
     }
   })
 })
