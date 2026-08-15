@@ -70,6 +70,7 @@ import {
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { ConfigStore } from './config-store.js'
@@ -130,7 +131,7 @@ export async function registerIpc(args: {
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
-  const browsers = new BrowserViewManager(args.window, browserProfiles)
+  const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore())
   const notifier = createAgentNotifier({
     window: args.window,
     onActivate: (sessionId) => {

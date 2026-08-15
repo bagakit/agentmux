@@ -96,13 +96,13 @@ describe('被踢掉之后不许再假装在工作', () => {
     await settle()
 
     // 正常时发得出去。先证这一点，否则下面的红可能只是因为 send 从来就不通。
-    await expect(session.send('Runtime.evaluate')).resolves.toBeDefined()
+    await expect(session.sendCommand('Runtime.evaluate')).resolves.toBeDefined()
 
     contents.debugger.emit('detach', 'devtools opened')
 
     // 不判的话，Agent 收到的是一句 "Debugger is not attached"——既没说是谁踢的，也没说怎么办，
     // 于是它只会重试，而页面上可能已经点过一次了。
-    await expect(session.send('Runtime.evaluate')).rejects.toThrow(/DevTools/)
+    await expect(session.sendCommand('Runtime.evaluate')).rejects.toThrow(/DevTools/)
     expect(session.endedReason, '没记下被踢的原因').toBe('devtools opened')
   })
 
@@ -112,7 +112,7 @@ describe('被踢掉之后不许再假装在工作', () => {
     await settle()
     contents.destroyed = true
 
-    await expect(session.send('Runtime.evaluate')).rejects.toThrow(/closed/i)
+    await expect(session.sendCommand('Runtime.evaluate')).rejects.toThrow(/closed/i)
   })
 })
 

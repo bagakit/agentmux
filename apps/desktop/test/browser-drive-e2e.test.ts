@@ -88,7 +88,10 @@ app.whenReady().then(async () => {
     session = BrowserCdpSession.attach(view.webContents)
     report.attached = true
 
-    const dispatch = createBrowserPageDispatch({
+    // ref 账本。探针把它放在内存里而不是磁盘上：这里要判的是「换一次运行还认不认得出」，
+    // 而那取决于账本的内容，不取决于它存在哪。落盘那一半由 browser-ref-ledger.test.ts 判。
+    let ledger = null
+    const contextFor = () => ({
       session,
       pageInfo: () => ({
         url: view.webContents.getURL(),
@@ -96,8 +99,12 @@ app.whenReady().then(async () => {
         navigationId
       }),
       gotoUrl: async () => { throw new Error('the probe does not navigate') },
-      captureScreenshot: async () => ({ stub: true })
+      captureScreenshot: async () => ({ stub: true }),
+      readLedger: async () => ledger,
+      writeLedger: async (next) => { ledger = next },
+      note: (text) => { report.healNotes = [...(report.healNotes || []), text] }
     })
+    const dispatch = createBrowserPageDispatch(contextFor())
 
     // ── 第一步：snapshot ────────────────────────────────────────────────
     const first = await dispatch('snapshot', [])
@@ -131,6 +138,24 @@ app.whenReady().then(async () => {
       await dispatch('fillInput', [field.ref, 'typed-by-agent'])
       const readBack = await dispatch('js', ['document.getElementById("probe-input").value'])
       report.filledValue = readBack
+    }
+
+    // ── 跨运行：换一个派发器，拿上一轮的 ref 说话 ─────────────────────────
+    // 先在页面**最前面**插一个元素，把所有 @eN 整体推后一位。这一步是这条判据的全部分量所在：
+    // 不推的话，一个完全没实现账本、只是按编号在新快照里撞的实现也会绿。推了之后，按编号解会
+    // 落到隔壁那个元素上，只有按内容认才还能找回原来那个。
+    if (field) {
+      await dispatch('js', ["(() => { const b = document.createElement('button'); b.id = 'pushed'; b.textContent = 'Pushed In Front'; document.body.prepend(b); return true })()"])
+      // 全新的派发器 = 全新的一次 browser run：它对上面那些快照一无所知，只剩账本。
+      const nextRun = createBrowserPageDispatch(contextFor())
+      try {
+        await nextRun('fillInput', [field.ref, 'across-runs'])
+        report.crossRunValue = await nextRun('js', ['document.getElementById("probe-input").value'])
+      } catch (error) {
+        report.crossRunError = String(error && error.message || error)
+      }
+      // 自愈是有损的，所以它必须留痕。没留痕的成功与一次干净的成功长得一模一样。
+      report.crossRunNoted = (report.healNotes || []).length > 0
     }
 
     // ── 反向判据：三类失败各自被认出来，且互不折并 ───────────────────────
@@ -221,6 +246,12 @@ type ProbeReport = {
   filledValue?: unknown
   unknownRefMessage?: string
   staleSnapshotMessage?: string
+  /** 换一次运行之后，拿上一轮的 ref 填进去的那个值；认错了元素就读不回它。 */
+  crossRunValue?: unknown
+  crossRunError?: string
+  /** 自愈留痕了没有。认回来是按外观匹配的，不留痕等于把有损的当成干净的。 */
+  crossRunNoted?: boolean
+  healNotes?: string[]
   detachedCleanly?: boolean
   detachError?: string
 }
@@ -320,6 +351,17 @@ describe('T-010 真机竖切：snapshot → click(ref) → re-snapshot', () => {
     expect(result.staleSnapshotMessage, '没说清页面已经导航过了').toMatch(/navigat/i)
     // 折并成一句话，Agent 就分不清"该重取快照"与"我把手拼错了"。
     expect(result.staleSnapshotMessage, '两类失败被折并成同一句话').not.toBe(result.unknownRefMessage)
+  }, 180_000)
+
+  it('换一次运行、页面重排之后，上一轮的 ref 仍然落在同一个元素上（T-011）', async () => {
+    const result = await probe()
+    // 这条在真页面上判 T-011 的实质。探针在页面最前面插了一个元素，于是所有 @eN 整体推后一位：
+    // 按编号解会落到隔壁，只有按内容认才还能找回原来那个输入框。
+    expect(result.crossRunError, `跨运行的 ref 没认回来：${result.crossRunError}`).toBeUndefined()
+    expect(result.crossRunValue, '换一次运行之后，同一个 ref 落到了别的元素上——或者根本没落到任何元素上')
+      .toBe('across-runs')
+    // 认回来是按外观匹配的，可能命中一个长得一样的邻居。留痕是这件事唯一的补救。
+    expect(result.crossRunNoted, '自愈了却一声不响——Agent 会把一次按外观的匹配当成干净的成功').toBe(true)
   }, 180_000)
 
   it('用完把 debugger 摘干净', async () => {

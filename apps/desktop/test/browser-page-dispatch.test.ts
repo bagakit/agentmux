@@ -25,7 +25,7 @@ function fakeSession(overrides: Partial<{
     }
   ]
   return {
-    send: async (method: string) => {
+    sendCommand: async (method: string) => {
       if (method === 'Accessibility.getFullAXTree') return { nodes }
       if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
       if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-1' } }
@@ -40,12 +40,39 @@ function fakeSession(overrides: Partial<{
   } as unknown as BrowserCdpSession
 }
 
+/**
+ * 建一个只关心页面语义的派发器。
+ *
+ * ref 账本那一侧在这里给成「没有账本、写了也不留」：本文件判的是**本轮之内**的分派与失败分类，
+ * 跨轮认领由 browser-ref-ledger.test.ts 单独判。给一个真账本会让这里的失败断言变成"自愈没成功"，
+ * 而那是另一条判据。
+ */
 function dispatchOn(session: BrowserCdpSession, navigationId = 'nav-1'): ReturnType<typeof createBrowserPageDispatch> {
   return createBrowserPageDispatch({
     session,
     pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
     gotoUrl: async () => {},
-    captureScreenshot: async () => ({})
+    captureScreenshot: async () => ({}),
+    readLedger: async () => null,
+    writeLedger: async () => {},
+    note: () => {}
+  })
+}
+
+/** 同上，但 `pageInfo` 由调用方给——导航相关的几条要在中途换身份。 */
+function dispatchWith(
+  session: BrowserCdpSession,
+  pageInfo: () => { url: string; title: string; navigationId: string },
+  gotoUrl: () => Promise<void> = async () => {}
+): ReturnType<typeof createBrowserPageDispatch> {
+  return createBrowserPageDispatch({
+    session,
+    pageInfo,
+    gotoUrl,
+    captureScreenshot: async () => ({}),
+    readLedger: async () => null,
+    writeLedger: async () => {},
+    note: () => {}
   })
 }
 
@@ -92,12 +119,7 @@ describe('三类 ref 失败各自说到下一步为止', () => {
     // 节点，而收到的是"成功"。
     let navigationId = 'nav-1'
     const session = fakeSession()
-    const dispatch = createBrowserPageDispatch({
-      session,
-      pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
-      gotoUrl: async () => {},
-      captureScreenshot: async () => ({})
-    })
+    const dispatch = dispatchWith(session, () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }))
     const snapshot = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
     const ref = snapshot.nodes.find((node) => node.ref !== '')!.ref
 
@@ -112,12 +134,7 @@ describe('三类 ref 失败各自说到下一步为止', () => {
     // 折并成一句，Agent 就分不清"该重取快照"与"我把手拼错了"——而这两件事的下一步完全不同。
     let navigationId = 'nav-1'
     const session = fakeSession()
-    const dispatch = createBrowserPageDispatch({
-      session,
-      pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
-      gotoUrl: async () => {},
-      captureScreenshot: async () => ({})
-    })
+    const dispatch = dispatchWith(session, () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }))
     const snapshot = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
     const ref = snapshot.nodes.find((node) => node.ref !== '')!.ref
 
@@ -137,7 +154,7 @@ describe('页面自己抛了，不许读成成功', () => {
     // 一次抛在页面里的错会变成 `undefined` 的成功值，而 Agent 会接着往下走。
     // （这条是变异测出来的：把那个判断改成恒假，此前 14 条测试照样绿，真机那条也绿。）
     const session = {
-      send: async (method: string) => {
+      sendCommand: async (method: string) => {
         if (method === 'Accessibility.getFullAXTree') {
           return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Submit' }, childIds: [] }] }
         }
@@ -166,7 +183,7 @@ describe('页面自己抛了，不许读成成功', () => {
     // 与上面那条是**两个出口**，各有各的判断。只守一侧的话，另一侧照样把异常读成值
     // （MEMORY「守卫按出口数不按条件数」）。
     const session = {
-      send: async (method: string) => {
+      sendCommand: async (method: string) => {
         if (method === 'Runtime.evaluate') {
           return { result: { value: undefined }, exceptionDetails: { text: 'ReferenceError: nope is not defined' } }
         }
@@ -191,7 +208,7 @@ describe('导航之后旧快照必须被丢掉', () => {
     let navigationId = 'nav-1'
     let axCalls = 0
     const session = {
-      send: async (method: string) => {
+      sendCommand: async (method: string) => {
         if (method === 'Accessibility.getFullAXTree') {
           axCalls += 1
           return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Submit' }, childIds: [] }] }
@@ -208,12 +225,11 @@ describe('导航之后旧快照必须被丢掉', () => {
       detach: () => {}
     } as unknown as BrowserCdpSession
 
-    const dispatch = createBrowserPageDispatch({
+    const dispatch = dispatchWith(
       session,
-      pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
-      gotoUrl: async () => { navigationId = 'nav-2' },
-      captureScreenshot: async () => ({})
-    })
+      () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
+      async () => { navigationId = 'nav-2' }
+    )
 
     const first = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
     const ref = first.nodes.find((node) => node.ref !== '')!.ref
@@ -223,5 +239,14 @@ describe('导航之后旧快照必须被丢掉', () => {
     // 缓存丢了，所以这次 click 会先自己取一张新快照。取了就说明旧地图没被复用。
     await dispatch('click', [ref]).catch(() => {})
     expect(axCalls, 'gotoUrl 之后没有重新走查——旧快照被拿去解新页面了').toBe(2)
+
+    // **第二次**才是真正危险的那次，而且只判第一次是抓不到的：上面那次失败的路径内部会取一张
+    // 新快照并把它存回缓存。缓存这就非空了，若"本轮发出过哪些 ref"没跟着一起作废，这个旧编号
+    // 会命中快路径，在**新页面**的快照里按数字解开——解得开，点得下去，点的是另一个元素。
+    // 整条路上没有一处报错，而这正是本模块存在的理由。
+    await expect(
+      dispatch('click', [ref]),
+      'gotoUrl 之后第二个旧 ref 在新页面上被按数字解开了——静默点中了别的元素'
+    ).rejects.toThrow()
   })
 })
