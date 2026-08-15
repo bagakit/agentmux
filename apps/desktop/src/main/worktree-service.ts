@@ -525,7 +525,7 @@ export class WorktreeService {
       const result = await host.run('git', remoteHeadArgs(repoPath), GIT_DISCOVERY_OPTIONS)
       return parseRemoteHead(result.stdout, result.exitCode)
     } catch {
-      return { ref: FALLBACK_BASE_REF, source: 'fallback' }
+      return { ref: FALLBACK_BASE_REF, remoteRef: null, source: 'fallback' }
     }
   }
 

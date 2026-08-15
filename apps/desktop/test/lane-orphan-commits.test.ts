@@ -50,9 +50,13 @@ async function repository(): Promise<{ repoPath: string; base: string }> {
  * base 走的是**生产的那道门**：`orphanCountableRef` 是全仓唯一铸得出可数 ref 的地方，测试里也不例外。
  * 写成 `as CountableBaseRef` 当然更短，但那会让用例走一条生产走不到的路——真正要证的性质（想数就
  * 必须先分级）在类型转换之下恰好消失。
+ *
+ * 传进 `remoteRef` 而不是 `ref`：可数的那一半就是这一半（`base-ref.ts` 里记着为什么——分支名那半在
+ * 本地没有同名分支的仓里解析不开）。本组用例的仓都是本地建库，`main` 既是本地分支也是要数的东西，
+ * 所以这里直接把要数的那个字符串放在 remoteRef 位上，数的就是它。
  */
 function countable(ref: string): CountableBaseRef {
-  const minted = orphanCountableRef({ ref, source: 'remote-head' })
+  const minted = orphanCountableRef({ ref, remoteRef: ref, source: 'remote-head' })
   if (minted === null) throw new Error(`权威来源竟然铸不出可数 ref: ${ref}`)
   return minted
 }
