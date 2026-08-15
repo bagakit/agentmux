@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunEvent } from '@ctxmux/sdk'
+import { PROTOCOL_VERSION, type RunEvent } from '@ctxmux/sdk'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
@@ -217,3 +217,21 @@ describe('Resized 是几何事件，不是进程退出', () => {
   })
 })
 
+/**
+ * 上面那些 `resized` / `current_size` 用例喂的都是**合成**事件与快照。它们证明 handler 写对了，
+ * 证明不了 daemon 发得出来——而今天它发不出来：vendored artifact 是 ctxmux `c13ab114`、protocol 14，
+ * 其 SDK 既没有 `RunInfo.current_size` 也没有 `resized` 变体。所以真正在跑的只有 resize receipt 的
+ * `applied_size` 那条路，跨客户端的 resize 收不到。
+ *
+ * 这一条把那个事实钉在**产物**上而不是注释里：重新 vendor 到带这两个字段的版本时它会变红，提示去
+ * 掉 adapter 里的 cast、把 `docs/architecture/terminal-runtime.md` 那行 caveat 删掉，并确认跨客户端
+ * resize 真的通了。红的时候不是缺陷，是"前提变了，来收尾"。
+ */
+describe('vendored ctxmux 的协议现状', () => {
+  it('仍是 protocol 14：current_size 与 resized 尚未存在，cast 与 caveat 都还需要', () => {
+    // 用 SDK 导出的常量，而不是 grep 生成物的 .d.ts：常量是 SDK 的公开契约，随 tarball 一起被
+    // pnpm-lock 的 integrity 钉住；grep 要写死一条 node_modules/.pnpm 路径，路径一变就**静默**
+    // 变成读不到文件或恒真断言——那正是这条用例要防的东西。
+    expect(PROTOCOL_VERSION).toBe(14)
+  })
+})

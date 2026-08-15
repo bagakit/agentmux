@@ -576,6 +576,18 @@ type OwnerConfirmedSize = { cols: number; rows: number }
  * `RunInfo.current_size` is the snapshot authority. `undefined` means this snapshot
  * predates the field (vendored types/daemon have not carried it yet); `null` is the
  * protocol's explicit unknown and must not be replaced by `RunSpec.size`.
+ *
+ * TODAY THIS ALWAYS RETURNS `undefined`, and {@link liveResizedSize} always returns
+ * `null`: the vendored artifact is ctxmux `c13ab114`, protocol 14, whose SDK declares
+ * neither `RunInfo.current_size` nor a `resized` Run event — the strings do not appear
+ * in the vendored `ctxmuxd` binary either. That is why both read through casts rather
+ * than typed fields. So the live size actually in use is the one recorded from each
+ * resize receipt's `applied_size` (see {@link CtxmuxRunAdapter.confirmedSizes}), which
+ * covers resizes WE issue but not one issued by another client.
+ *
+ * These two paths are written ahead of the runtime on purpose: re-vendoring to
+ * protocol 16 activates them with no code change. Until then, do not read a green
+ * test over a synthetic `resized` event as evidence that the daemon emits one.
  */
 function snapshotCurrentSize(run: RunInfo): OwnerConfirmedSize | null | undefined {
   if (!('current_size' in run)) return undefined
@@ -618,6 +630,40 @@ export class CtxmuxRunAdapter {
    * and `RunEvent::Resized`. Used only when a snapshot omits `current_size`.
    * An explicit `current_size: null` stays unknown and does not fall back here
    * or to `RunSpec.size`.
+   *
+   * NOTHING EVER REMOVES AN ENTRY — not `disconnect()`, not `markConnectionLost()`.
+   * That is deliberate, and it is correct only because no second writer of this
+   * Run's geometry exists. Three facts make that true, and each is an AgentMux
+   * DEPLOYMENT fact, not a ctxmux guarantee — ctxmux's interface is the socket,
+   * and its CLI is a client like any other:
+   *
+   *   1. One app instance. `apps/desktop/src/main/index.ts` takes Electron's
+   *      single-instance lock before constructing any runtime owner; the second
+   *      instance quits. Pinned by `main-window-setup.test.ts`.
+   *   2. We never launch the vendored CLI. {@link verifyArtifacts} checksums it
+   *      and then drops it: `cli` flows into `verifyArtifact` and nowhere else,
+   *      and only `daemon.path` is joined into a path that outlives that call.
+   *      Pinned by `ctxmux-second-writer-premise.test.ts` — note the precise
+   *      property is "the CLI path never escapes the checksummer", not "it is
+   *      never built"; the checksummer necessarily builds one to stat and hash.
+   *   3. Protocol 14 has no inbound geometry channel at all: `ClientFrame` carries
+   *      an outbound `resize`, but no `ServerFrame` or `RunEvent` variant reports
+   *      someone else's. Pinned by `PROTOCOL_VERSION` in
+   *      `ctxmux-run-current-size.test.ts`.
+   *
+   * WHAT VOIDS THIS: anyone attaching a second client to the same socket — most
+   * plausibly a human running the vendored `ctxmux` CLI by hand to debug a stuck
+   * Run, then resizing their window. Fact 3 keeps us from being *told*, so we
+   * would project a stale size with no signal. Facts 1 and 2 are guarded; this
+   * one is not guardable from inside the process.
+   *
+   * WHAT NOT TO DO ABOUT IT: do not add "re-send geometry on reconnect". Today it
+   * is a no-op (the size never changed, and `requestResize` short-circuits the
+   * same grid key); once a second client is real it becomes a BAD policy, turning
+   * every network flap into a last-writer-wins stomp of somebody else's view —
+   * worse than staleness. The fix when the premise dies is protocol 16's
+   * `RunEvent::Resized`, which {@link CtxmuxRunAdapter.translateLiveEvent} already
+   * consumes; it arrives with no new code here.
    */
   private readonly confirmedSizes = new Map<string, OwnerConfirmedSize>()
 
