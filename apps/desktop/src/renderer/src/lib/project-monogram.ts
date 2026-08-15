@@ -40,10 +40,19 @@ function firstGrapheme(value: string): string {
  * 而事实是这个名字没给我们任何可显示的东西。空串让调用方退回原本的图形字形，如实表示
  * 「这里没有可用的字母」。
  *
- * 大写只对有大小写概念的书写系统生效；中日韩与 emoji 经 `toLocaleUpperCase` 原样通过。
+ * 大写钉死 `'en-US'`，**不跟随宿主 locale**。这看起来很小，但它正是这个函数的立身之本：牌子要
+ * 表达「身份」，而身份不能因为谁的机器语言设置不同就变样。实测无参 `toLocaleUpperCase()` 在
+ * 土耳其语环境下把 `istanbul` 变成 `İSTANBUL`（带点的 I），英语环境下是 `ISTANBUL`——同一个项目
+ * 在两台机器上两个字。渲染层没有统一 locale（`LC_ALL=C` 只钉在 main 进程的 git 子进程上），所以
+ * 这不是假想。与色相取 `workspaceId` 而不是项目名是同一条道理：同一个身份，到哪儿都得长一样。
+ *
+ * 大写后再取一次首簇，因为大写可能**把一个字变成两个**：`ß` → `SS`、`ﬁ` → `FI`。牌面只有一格，
+ * 与其让 `overflow:hidden` 裁掉半个字母，不如如实只画第一个。
+ *
+ * 中日韩与 emoji 经 `toLocaleUpperCase` 原样通过——它们没有大小写概念。
  */
 export function projectMonogram(name: string): string {
-  return firstGrapheme(name).toLocaleUpperCase()
+  return firstGrapheme(firstGrapheme(name).toLocaleUpperCase('en-US'))
 }
 
 /**
