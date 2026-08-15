@@ -199,11 +199,23 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
   // 这一个 Run 的实时输出泵没能重建（client.ts 的 `resumed === 'dead'`）。输入照常送达 Agent，但它的
   // 输出永远到不了这块屏——不告知的话用户对着一块永不回显的屏幕打字。直接投影这条事实（进程在跑就是
   // 第 2 类，放行 + 提醒），它挺过视图切换与快照刷新，直到一次成功的 reattach 撤下它。
+  //
+  // restore 这句刻意**不说 Resume**，尽管清除这条事实的 Core 侧函数确实叫 reattach、而 Resume 的注释
+  // 也声称走那条路。实测不是：这条降级只在进程**还在跑**时产生，而 Resume 走
+  // `ensureAgentContinuity`，对一个 running 的 Run 判出 `reattachable` 就直接返回投影——
+  // 全程 attach 调用数为 0，标记原样留着（对 client 实跑验证过：verdict=reattachable、attach 0 次、
+  // 标记仍在）。也就是说上一版这句话点名的动作，在这个状态下按了等于没按。
+  //
+  // 真正能撤下它的是让这块屏**重新挂载**：卸载时 TerminalView 会 detach（runtime-controller 随之
+  // 丢掉 attachment owner），重新挂载时 `existing` 缺席，于是走 `reattachAgent` → `attachAgentRun`
+  // → `clearOutputChannel`。切到别的 tab 再切回来就是用户手上唯一能走通这条路的动作——tab 冷却会
+  // 卸载 TerminalView，切回来重挂。切换 Activity/Terminal 视图同理，但那要求用户此刻正在终端视图，
+  // 而这条告示两个视图都会出现，所以文案取那个不预设当前视图的。
   if (session.terminalOutputChannel?.reason === 'reattach-failed') {
     const step: ProcessStep = {
       label: 'Reattaching this window’s output',
       degradedMode: 'Output may not be showing here, but your input still reaches the Agent',
-      restore: 'Resume this session to reattach its output'
+      restore: 'Switch to another tab and back to reattach its output'
     }
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }

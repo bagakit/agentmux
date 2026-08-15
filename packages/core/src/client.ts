@@ -992,8 +992,15 @@ export class AgentMuxClient {
   }
 
   /**
-   * 撤下「输出通道断了」的降级事实——恢复路径。一次成功的 reattach（自动重连或用户点 Resume 都走
-   * {@link attachAgentRun}）证明实时通道又通了，就地清除，让服务窗消失。缺席即无事，幂等。
+   * 撤下「输出通道断了」的降级事实——恢复路径。一次成功的 reattach 就地清除，让服务窗消失。
+   * 缺席即无事，幂等。
+   *
+   * 谁会走到这里：自动重连（`resumeLiveAttachment`）、以及渲染端**重新建立 attachment** 时
+   * （runtime-controller 在没有既有 owner 时调 `reattachAgent`，即一次视图重挂）。
+   *
+   * 谁**不会**：用户点 Resume。这条降级只在进程还在跑时产生，而 Resume 走 `ensureAgentContinuity`，
+   * 对 running 的 Run 判出 `reattachable` 就直接返回投影，不碰 attach——实跑验证过 attach 调用数为 0、
+   * 标记原样留着。渲染端的服务窗文案据此点名「切走再切回」而不是 Resume（见 service-window-notice.ts）。
    */
   private async clearOutputChannel(session: AgentMuxStoredAgentSession): Promise<void> {
     if (!session.terminalOutputChannel) return
