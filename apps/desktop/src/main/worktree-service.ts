@@ -532,11 +532,44 @@ export class WorktreeService {
     if (result.exitCode !== 0) throw gitFailureError(result, fallback)
   }
 
+  /**
+   * Write the workspace record for a worktree git has **already created**.
+   *
+   * The failure here is not "the create failed". Git has run; the directory and the branch are on disk.
+   * Only the record write is left, and if it throws, what the user has is a real worktree nothing knows
+   * about — the exact mirror of `record-not-withdrawn` on the removal path, where git deleted and the
+   * record write failed. That case has a name, a notice, and a place in the three-state enum. This one
+   * had nothing, so it surfaced through `runFanOut`'s create-side catch as `worktree-failed`, whose
+   * comment reads "Nothing was created, so nothing is stranded" — false in precisely this case. The lane
+   * is reported as never started, so nobody cleans up the directory, and the next fan-out with the same
+   * base name collides with it.
+   *
+   * Throwing the classified error instead of a bare one costs nothing and reuses the vocabulary that
+   * already exists rather than inventing a second one.
+   *
+   * The member is `git-failed`, NOT `record-not-withdrawn`, and the near-miss is worth spelling out
+   * because the names read backwards here. `record-not-withdrawn` is defined by **the directory is
+   * gone** and the record survives — that is the removal path's shape, where git deletes first. Our
+   * shape is its mirror in world-state, not in wording: the directory EXISTS and the record does not.
+   * Reusing that member would print a notice telling the user to stop looking for work that is deleted,
+   * about a checkout sitting on their disk. `git-failed` promises exactly what is true here — nothing
+   * was discarded, the directory stands, and there is no discard button because there is nothing of
+   * git's to undo.
+   */
   private async register(config: AppConfig, workspace: WorkspaceRecord): Promise<WorkspaceSelectionResult> {
-    const nextConfig = await this.configWriter.save({
-      ...config,
-      workspaces: [...config.workspaces, workspace]
-    })
+    let nextConfig: AppConfig
+    try {
+      nextConfig = await this.configWriter.save({
+        ...config,
+        workspaces: [...config.workspaces, workspace]
+      })
+    } catch (error) {
+      throw new WorktreeRetainedError(
+        'git-failed',
+        `The worktree at ${workspace.path} was created, but recording it failed, so it is not registered: ` +
+          (error instanceof Error ? error.message : String(error))
+      )
+    }
     return { config: nextConfig, workspace }
   }
 }
