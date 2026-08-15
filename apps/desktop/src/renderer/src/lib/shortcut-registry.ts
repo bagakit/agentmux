@@ -213,6 +213,22 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     label: 'Show keyboard shortcuts',
     ...symbolChords('/', '?')
   },
+  {
+    // 跳到下一个要你处理的 Agent——needs-you 与 error 两档，按等待时长排成一条队，每按一次走一个。
+    //
+    // 与 quick-switch 的分工：切换器是「我知道要去哪，帮我找到它」，这个键是「我不知道下一个是谁，
+    // 带我去」。此前后者只有鼠标路径——状态栏那两个计数按钮，而且它们各自只跳本档等得最久的**那一个**，
+    // 处理完之前一直把你送回同一行；键盘这条是游标推进，所以能把队列一个个过完。
+    //
+    // 和 quick-switch / help 一样**不设 not-in-editable 门**：这三条都是全局导航。正在 composer 里
+    // 打字时按它，意思恰恰是「先放下这段，去看那个卡住的」——一个只在没聚焦输入框时才生效的导航键，
+    // 在这个产品里几乎等于没有（多数时间焦点都在某个 composer 或终端里）。
+    id: 'attention.next',
+    scope: 'window',
+    keyClass: 'letter',
+    label: 'Jump to the next Agent that needs you',
+    ...letterChords('j')
+  },
   // --- window: workbench actions (suppressed inside non-terminal editable inputs) ---
   ...SELECT_TAB_BINDINGS,
   {

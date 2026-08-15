@@ -110,4 +110,37 @@ describe('Activity work-line grouping', () => {
       '组里有一个跑完的 Agent，就把整组排到在干活的组后面了——done 被当成了一个请求'
     ).toEqual(['mixed', 'busy'])
   })
+
+  it('有人在等你的组排在只是在干活的组前面——组间的第一判据是急迫档，不是谁最近动过', () => {
+    // 上面那条守的是「done 算不算紧急」，它构造的是一个**并列**（两组都该是 rank 2），于是
+    // `leftRank - rightRank` 恒为 0，整条排序实际只由 `updatedAt` 倒序决出——把那一段主判据整个删掉，
+    // 上面那条、以及 buildActivityGroups 的全部测试面都照旧全绿（实测）。换句话说组间排序的**第一
+    // 判据从来没有被观察过**，它今天正确只是因为没人改过它。
+    //
+    // 这一条把两段分开：waiting 那组（rank 0）的 `updatedAt` 刻意**更旧**（10 < 40），所以
+    //   · 有 rank 段：needs-you 赢 → ['waiting-group', 'busy-group']
+    //   · 无 rank 段：updatedAt 倒序赢 → ['busy-group', 'waiting-group']
+    // 两个世界给出相反的顺序，删掉主判据这条必红。label 的字典序（busy < waiting）与「无 rank 段」
+    // 同向，所以连尾部的 localeCompare 也帮不了那个坏世界蒙混过关。
+    const contexts = activityContextsForWorkspaces([
+      workspace('w-waiting', 'repo-waiting', 'waiting-group'),
+      workspace('w-busy', 'repo-busy', 'busy-group')
+    ])
+    const groups = buildActivityGroups(
+      [
+        agent('asking', 'repo-waiting', {
+          updatedAt: 10,
+          status: { state: 'waiting', source: 'native-hook', observedAt: 10 }
+        } as never),
+        agent('busy', 'repo-busy', { updatedAt: 40 } as never)
+      ],
+      contexts
+    )
+
+    expect([...groups.map((group) => group.label)].sort()).toEqual(['busy-group', 'waiting-group'])
+    expect(
+      groups.map((group) => group.label),
+      '在等你的那组被排到了在干活的那组后面——组间排序丢了急迫档这一段，只剩「谁最近动过」'
+    ).toEqual(['waiting-group', 'busy-group'])
+  })
 })

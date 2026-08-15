@@ -37,6 +37,7 @@ describe('binding id set', () => {
   it('is exactly this frozen set of ids (stability contract — changing it is a deliberate act)', () => {
     // Anchored literal, NOT derived from SHORTCUT_BINDINGS. A dropped/renamed/added binding turns this red.
     expect([...SHORTCUT_BINDINGS.map((b) => b.id)].sort()).toEqual([
+      'attention.next',
       'editor.save',
       'editor.show-commands',
       'editor.toggle-word-wrap',
@@ -452,6 +453,18 @@ describe('editable-target gate (both directions)', () => {
   it('the quick switcher is un-gated: fires even inside an editable target', () => {
     // A global navigation gesture must reach the user mid-typing; if someone adds the gate to it, red.
     expect(matchShortcut(event({ key: 'p', metaKey: true }), true, { scope: 'window', editableTarget: true })).toBe('quick-switch.toggle')
+  })
+
+  it('「跳到下一个要你处理的 Agent」同样不设门——正在打字时按它恰恰是最常见的时刻', () => {
+    // 这个键的用途是「先放下手里这段，去看那个卡住的」，而多数时间焦点都在某个 composer 或终端里。
+    // 给它加上 not-in-editable 门，它在这个产品里就几乎等于没绑——而那种失效是静默的：注册表里
+    // 看得见这条绑定，cheat-sheet 里也列着它，只有按下去没反应。
+    expect(
+      matchShortcut(event({ key: 'j', metaKey: true }), true, { scope: 'window', editableTarget: true }),
+      'Cmd+J 在输入框里被门挡住了——这条是全局导航，不该带 not-in-editable'
+    ).toBe('attention.next')
+    // 反向：不在输入框里当然也认，否则上一条可能是靠「两边都不认」蒙过去的。
+    expect(matchShortcut(event({ key: 'j', metaKey: true }), true, { scope: 'window', editableTarget: false })).toBe('attention.next')
   })
 })
 
