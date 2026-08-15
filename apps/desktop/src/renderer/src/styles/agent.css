@@ -247,7 +247,11 @@
 .agent-interaction__tier--safe { background: var(--green); }
 .agent-interaction__tier--caution { background: var(--amber); }
 .agent-interaction__tier--danger { background: var(--red); }
-.agent-catalog { margin:var(--sp-6) auto var(--sp-5); }
+/* 有界 + 独立滚动是**容器自己的约束**，不是「卡片少所以碰巧没长」：密度合同要求 Agent 装多少
+   都不得把下方的 prompt 推下去（见 agentmux-surface-density.md 的 Agent Provider Catalog 一行）。
+   此前这里只有 margin，11 个 Agent 就摊成三行、把 prompt 顶下屏——正是那一行禁的事。
+   `overflow-y:auto` 配 `overscroll-behavior:contain`，滚到底不把滚动继续传给整个 launcher。 */
+.agent-catalog { margin:var(--sp-6) auto var(--sp-5); max-height: 268px; overflow-y: auto; overscroll-behavior: contain; }
 .agent-catalog__group + .agent-catalog__group { margin-top:var(--sp-3); padding-top:var(--sp-4); border-top: 1px solid var(--line-soft); }
 .agent-catalog__label { height: 22px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-2) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
 .agent-catalog__label > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -256,8 +260,8 @@
 .agent-catalog__more-btn { display: inline-flex; align-items: center; gap:var(--sp-1); padding:var(--sp-1) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); font-weight: 500; cursor: pointer; transition: color 120ms ease, background 120ms ease; }
 .agent-catalog__more-btn:hover, .agent-catalog__more-btn--active { color: var(--text); background: var(--surface-2); }
 .agent-catalog__ready-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--green-2); box-shadow: 0 0 0 2px var(--overlay-line); }
-.agent-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:var(--sp-3); }
-.agent-pick { position: relative; min-width: 0; min-height: 46px; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); text-align: left; cursor: pointer; transition: background 140ms ease, color 140ms ease; }
+.agent-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap:var(--sp-3); }
+.agent-pick { position: relative; min-width: 0; min-height: 44px; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); text-align: left; cursor: pointer; transition: background 140ms ease, color 140ms ease; }
 .agent-pick:hover { color: var(--text); background: var(--surface-2); }
 .agent-pick__icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); transition: background 140ms ease, color 140ms ease; }
 .agent-pick__copy { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }

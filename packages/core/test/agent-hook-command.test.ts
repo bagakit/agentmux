@@ -266,14 +266,16 @@ describe('agent hook command usage relay', () => {
    * 下面三条各让一项为假、另两项为真，于是每一项都成为那个现场里唯一还站着的守卫。
    */
   it('三项闸各自都能拦下 POST：缺 url / 缺 token / 事件名读不出来', async () => {
+    // 把「缺」的那一项显式置空串（falsy）而非靠缺席：本进程跑在 AgentMux.app 里，宿主注入了真实的
+    // AGENTMUX_HOOK_URL / AGENTMUX_HOOK_TOKEN，靠缺席会让被测项从环境里恒真、闸门大开。
     const cases = [
       {
         name: '缺 url',
-        env: { AGENTMUX_HOOK_TOKEN: 'test-token', AGENTMUX_HOOK_EVENT: 'Stop' } as Record<string, string>
+        env: { AGENTMUX_HOOK_URL: '', AGENTMUX_HOOK_TOKEN: 'test-token', AGENTMUX_HOOK_EVENT: 'Stop' } as Record<string, string>
       },
       {
         name: '缺 token',
-        env: { AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook', AGENTMUX_HOOK_EVENT: 'Stop' }
+        env: { AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook', AGENTMUX_HOOK_TOKEN: '', AGENTMUX_HOOK_EVENT: 'Stop' }
       },
       {
         // url 与 token 都齐，只有事件名读不出来：旗标没给、环境变量是空串（读作「没设」）、

@@ -252,8 +252,8 @@
  *    `position: relative`）带着满铺不透明的主题背景（TerminalView.tsx:920 内联），于是 terminal 与
  *    agent 两种区的焦点框一个像素都画不出来——而这是终端优先产品里最常见的两种区。
  *    Editor 只剩顶部 `.editor-header` 那条带（Monaco 主体也是定位不透明面），Browser 只剩 38px
- *    工具条。唯一看得见的旧证据来自 launcher（`.new-tab-surface` 是居中卡片、不满铺），恰好掩盖了
- *    另外三种面的彻底失效——**两次**。
+ *    工具条。唯一看得见的旧证据来自 launcher（当时的 `.new-tab-surface` 是居中卡片、不满铺；
+ *    那个类名已随 launcher 改版删除），恰好掩盖了另外三种面的彻底失效——**两次**。
  *
  * 所以只能用定位覆盖层，靠 z-index 真正排到内容之上。取 37：压过 Region 内所有常驻面
  * （最高是 terminal.css:141 的 `.terminal-service-window` 36），但仍在 `position: fixed` 的临时浮层

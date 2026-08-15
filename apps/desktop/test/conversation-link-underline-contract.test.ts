@@ -63,23 +63,32 @@ function declValue(body: string, prop: string): string | undefined {
 }
 
 /**
- * The single definition of a custom property, e.g. `--dur-fast`. Asserts there is EXACTLY one:
- * a regex search over the concatenated sheet silently binds to the FIRST definition, so a second
- * one (a theme override, a media block) would make every value read here a coin flip on file order.
+ * The single definition of a custom property, e.g. `--dur-fast`, resolved WITHIN ONE CASCADE SCOPE —
+ * the base `:root`, the default (dark) theme this whole contract reasons about. Asserts there is
+ * EXACTLY one definition IN THAT SCOPE: a regex search would otherwise silently bind to the FIRST of
+ * several, making the value read here a coin flip on file order.
  *
- * READS THE COMMENT-STRIPPED TABLE (`rules`), not the raw sheet. Measured: an unrelated comment that
- * merely NAMES a token above the real declaration (e.g. a `--scrim-1` mention in prose) was counted as
- * a second "definition" and turned this loud one-definition guard into a FALSE RED. Comments are prose,
- * not declarations — the same #409 lesson the rest of this suite already obeys by reading `rules`.
+ * WHY SCOPE-RESTRICTED, NOT SHEET-WIDE (measured false-red): a token legitimately re-declared by the
+ * light-theme override `:root[data-appearance="light"]` (e.g. `--green`, cea4f456) has two definitions
+ * across the sheet — one per theme — and counting both turned this loud one-definition guard red for a
+ * valid cascade override. The contract is about the default theme, so we read the base `:root` block
+ * alone. The guard stays just as strict: a genuine SECOND definition in the same base scope still fails.
+ *
+ * READS THE COMMENT-STRIPPED TABLE (`rules`) via parseRules, not the raw sheet. Measured: an unrelated
+ * comment that merely NAMES a token (e.g. a `--scrim-1` mention in prose) was counted as a second
+ * "definition" and false-red'd this guard. Comments are prose, not declarations — the same #409 lesson.
  */
 function tokenValue(token: string): string {
-  const definitions = [...rules.matchAll(new RegExp(`${token}\\s*:\\s*([^;}]+)`, 'g'))].map((m) =>
-    m[1]!.trim()
-  )
+  // The base :root is the default theme; the [data-appearance] override is a different cascade scope.
+  const baseRoots = parseRules(rules).filter((rule) => rule.selector === ':root')
+  expect(baseRoots.length, '基础 :root 块必须恰好有一个（默认主题的作用域）').toBe(1)
+  const definitions = [
+    ...baseRoots[0]!.body.matchAll(new RegExp(`${token}\\s*:\\s*([^;}]+)`, 'g'))
+  ].map((m) => m[1]!.trim())
   expect(
     definitions.length,
-    `\`${token}\` 在整张表里有 ${definitions.length} 处定义。正则取值只会绑到第一处，` +
-      '于是下面读到的值取决于文件拼接顺序而不是级联——这道判据会静默读错那一份。'
+    `\`${token}\` 在基础 :root 作用域里有 ${definitions.length} 处定义。正则取值只会绑到第一处，` +
+      '于是下面读到的值取决于书写顺序而不是级联——这道判据会静默读错那一份。'
   ).toBe(1)
   return definitions[0]!
 }

@@ -33,6 +33,10 @@ it.each(['success', 'unavailable', 'failure'] as const)('reports the actual %s o
 it('TerminalView returns the real viewport outcome to the visible notice', () => {
   const source = readFileSync('apps/desktop/src/renderer/src/components/TerminalView.tsx', 'utf8')
   expect(source.length).toBeGreaterThan(0)
-  expect(source).toContain('return await viewport.requestContentRedraw()')
+  // 重构把单行拆成了绑定 + return。只截取 redrawCurrentScreen 的函数体来守：真返回值
+  // 必须来自真调用，而非硬编码 true——缺了真调用或改成 `return true` 都会红。
+  const redraw = source.slice(source.indexOf('async function redrawCurrentScreen'))
+  expect(redraw).toContain('const redrawn = await viewport.requestContentRedraw()')
+  expect(redraw).toMatch(/return redrawn\b/)
   expect(source).toContain('onRedraw={redrawCurrentScreen}')
 })

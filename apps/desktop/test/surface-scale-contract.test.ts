@@ -70,7 +70,8 @@ const LAYOUT_GEOMETRY = new Map<string, string>([
   ['.board-search input', '右 28px 给清除按钮让位'],
   ['.launch-surface', 'clamp 上界 60px 是大屏阅读宽度；底部 44px 给 composer 让位'],
   ['.browser-selection-result', 'clamp 上界 44px 是大屏阅读宽度'],
-  ['.activity-feed__empty', '70px 让空态在视觉中心而非几何中心']
+  ['.activity-feed__empty', '70px 让空态在视觉中心而非几何中心'],
+  ['.composer[open] .composer__toolbar', '展开时 disclosure 绝对定位在工具条左下角，42px 给它的图标+箭头让位']
 ])
 
 
@@ -252,6 +253,16 @@ describe('surface scale contract', () => {
         /content:\s*['"][^'"]+['"]/u
       )
     }
+  })
+
+  it('keeps the agent catalog inside its own box instead of growing the launcher', () => {
+    // 密度合同（Agent Provider Catalog 一行）要求这个容器**自己**有界、自己滚。此前它只有 margin：
+    // 11 个 Agent 摊成三行，把下方的 prompt 输入框顶出视口——启动页第一眼看不到输入框。
+    // 判据是"有没有这两个属性"而不是"268 是不是 268"：把数抄进测试，数就活在两个地方，改一处就漂。
+    const body = new Map(rules().map((rule) => [rule.selector, rule.body])).get('.agent-catalog')
+    expect(body, '.agent-catalog 这条规则不在样式表里，下面两条断言等于没跑').toBeDefined()
+    expect(body, '.agent-catalog 没有高度上界，Agent 一多就把 prompt 顶下屏').toMatch(/max-height:/)
+    expect(body, '.agent-catalog 不自己滚，溢出会转嫁给整个 launcher').toMatch(/overflow(-y)?:/)
   })
 
   it('lets a layout exception excuse only the large values, never the scale itself', () => {

@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -10,10 +10,12 @@ import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
+import { formatRelativeAge } from '../lib/relative-age'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from './ComposerTextarea'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
@@ -229,7 +231,6 @@ export function NewTabSurface({
   return (
     <section className="launch-surface">
       <div className="launch-surface__heading">
-        <span className="launch-surface__icon" aria-hidden="true"><Sparkles size={20} /></span>
         <div className="launch-surface__heading-content">
           <div className="eyebrow">New session</div>
           <h2>Start in {workspace?.name ?? 'this workspace'}</h2>
@@ -336,21 +337,30 @@ export function NewTabSurface({
         placeholder="Describe the outcome. You can steer the agent after launch."
         rows={4}
       />
+      {/*
+        工具条的直接子元素必须是**一簇**（这里全是左侧工具，没有右侧发送键）。`.composer__toolbar`
+        的 `space-between` 是一份「有几簇」的契约，而 AgentComposerTools 渲染的是 fragment：
+        Capture 只在本机出现、Commands 只在 Provider 声明了命令时出现，于是散着放时直接子元素在
+        2~4 个之间浮动，同一条 CSS 会把它们摊成两端对齐、三等分或四等分——布局随 Provider 而变。
+        包成一个 div 让簇数恒为 1，与 AgentComposer.tsx:144 那处（左右两簇）同一写法。
+      */}
       <div className="composer__toolbar">
-        <AgentComposerTools
-          disabled={busy !== null || !workspace}
-          commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}
-          loadSkills={() => workspace && selectedProviderId
-            ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId)
-            : Promise.resolve([])}
-          onChooseSkill={(skill) => appendReference(skill.path)}
-          onCommand={(command) => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
-          {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
-          reportError={(error) => setError(presentError(error))}
-        />
-        <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => void chooseComposerFiles()} title="Reference files for the Agent">
-          Files
-        </button>
+        <div>
+          <AgentComposerTools
+            disabled={busy !== null || !workspace}
+            commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}
+            loadSkills={() => workspace && selectedProviderId
+              ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId)
+              : Promise.resolve([])}
+            onChooseSkill={(skill) => appendReference(skill.path)}
+            onCommand={(command) => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
+            {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
+            reportError={(error) => setError(presentError(error))}
+          />
+          <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => void chooseComposerFiles()} title="Reference files for the Agent">
+            Files
+          </button>
+        </div>
       </div>
 
       <div className="launch-names">
@@ -402,10 +412,35 @@ export function NewTabSurface({
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}
         </button>
-        {recoveryCandidates.length > 0 ? <button type="button" className="secondary-button" disabled={busy !== null}
-          title="Resume a saved Agent Session" onClick={() => void recoverSession(recoveryCandidates[0]!.agentSessionId)}>
-          Resume {recoveryCandidates.length > 1 ? `(${recoveryCandidates.length})` : ''}
-        </button> : null}
+        {/*
+          读数与动作必须指向同一个对象（见 agentmux-desktop-interaction.md「控件报出几个候选，
+          就得让用户挑哪一个」）。此前这里写的是 `Resume (17)` 而 onClick 恒定恢复
+          `recoveryCandidates[0]`：按钮报出 17 个，动作只碰得到 1 个，另外 16 个没有任何入口——
+          而程序认为自己成功了，所以既不报错也没人会发现。
+          于是**恰好一个**候选时才是直接动作（且绝不带计数——没有可选的东西就没有数要报）；
+          多于一个时它是一份清单，用户挑哪一个就恢复哪一个。
+        */}
+        {recoveryCandidates.length === 1 ? <button type="button" className="small-button" disabled={busy !== null}
+          title={`Resume ${recoveryCandidates[0]!.label}`} onClick={() => void recoverSession(recoveryCandidates[0]!.agentSessionId)}>
+          Resume
+        </button> : recoveryCandidates.length > 1 ? <DropdownMenu.Root>
+          <DropdownMenu.Trigger className="small-button" disabled={busy !== null}
+            title="Choose a saved Agent Session to resume">
+            Resume ({recoveryCandidates.length})
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
+            <DropdownMenu.Label className="composer-menu__hint">Choose a saved Agent Session to resume</DropdownMenu.Label>
+            {recoveryCandidates.map((candidate) => <DropdownMenu.Item key={candidate.agentSessionId}
+              className="tab-context-menu__item composer-menu__item"
+              title={`${candidate.label}\n${candidate.workspacePath}`}
+              onSelect={() => void recoverSession(candidate.agentSessionId)}>
+              <AgentProviderIcon providerId={candidate.providerId} size={13} />
+              {/* label 是「执行器 · Workspace」，两个候选同源时它们完全相同——最后活跃时间是那时
+                  唯一能把它们分开的东西，所以它和身份一起列，而不是一个可选的装饰。 */}
+              <span>{candidate.label}<small>{candidate.workspacePath} · {formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</small></span>
+            </DropdownMenu.Item>)}
+          </DropdownMenu.Content></DropdownMenu.Portal>
+        </DropdownMenu.Root> : null}
       </div>
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
 

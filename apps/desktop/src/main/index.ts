@@ -80,7 +80,9 @@ function startPrimaryInstance(): void {
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     async (loop) => {
       const observation = await runtime.observeContinuousProgress(loop, 'delivery', Date.now())
-      await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId, hostId: observation.session.hostId, run: observation.session.run }, loop.prompt)
+      // Each tick is a NEW prompt, not a retry of the last one, so it must mint a fresh operationId here.
+      // A stable id would make every tick look to Core like an idempotent replay of the first delivery.
+      await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId, hostId: observation.session.hostId, run: observation.session.run }, loop.prompt, randomUUID())
       return 'sent'
     },
     undefined,

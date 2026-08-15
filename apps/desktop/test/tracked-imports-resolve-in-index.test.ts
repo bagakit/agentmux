@@ -161,7 +161,12 @@ function candidatesFor(importer: string, spec: string): string[] {
   if (stripped !== base) {
     candidates.push(`${stripped}.ts`, `${stripped}.tsx`, `${stripped}.mts`, `${stripped}.cts`)
   }
-  if (!/\.[a-z]+$/i.test(base)) candidates.push(`${base}.ts`, `${base}.tsx`, `${base}.js`)
+  // 只有 base 已带**代码**扩展名时才跳过补扩展名（那种已被 base / strip 两支覆盖）。
+  // 末段带点却不是代码扩展名的写法（`./probe-process.test`、`./x.png`）仍要按省略扩展名解析，
+  // 补上 `.ts/.tsx/.js`——否则 `.test` 会被当成扩展名，漏掉真身 `probe-process.test.ts`。
+  if (!/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(base)) {
+    candidates.push(`${base}.ts`, `${base}.tsx`, `${base}.js`)
+  }
   candidates.push(`${base}/index.ts`, `${base}/index.tsx`, `${base}/index.js`)
   return candidates
 }

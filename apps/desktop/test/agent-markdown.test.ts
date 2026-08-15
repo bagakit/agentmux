@@ -185,6 +185,8 @@ describe('agent markdown parser', () => {
     const flatten = (nodes: ReturnType<typeof parseInline>): string =>
       nodes.map((node) => {
         if (node.kind === 'text' || node.kind === 'code') return node.text
+        // image 变体没有 children，它露给读者的文本是 alt——同样算「内容」，不能凭空丢掉。
+        if (node.kind === 'image') return node.alt
         return flatten(node.children)
       }).join('')
     const out = blocks.map((block) => {
