@@ -29,6 +29,7 @@ import {
   type AgentMuxRunInputData
 } from '@agentmux/core'
 import type {
+  AgentAttentionNotifyInput,
   AgentLaunchInput,
   AgentSessionControl,
   AppConfig,
@@ -44,7 +45,6 @@ import type {
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
   MoveWorkspacePathInput,
-  NotificationModeId,
   RemoveWorktreeInput,
   RemoveWorktreeOutcome,
   WorktreeRemovalNotice,
@@ -511,15 +511,10 @@ export async function registerIpc(args: {
     await writeFile(path, bytes, { mode: 0o600 })
     return path
   })
-  handleWithEvent('ui:notifyAgentAttention', async (event, input: {
-    sessionId: string
-    title: string
-    body: string
-    mode: NotificationModeId
-  }) => {
+  handleWithEvent('ui:notifyAgentAttention', async (event, input: AgentAttentionNotifyInput) => {
     requireTrustedSender('ui:notifyAgentAttention', event)
-    // The renderer decided this deserves attention and which dwell mode to use; main only delivers, and
-    // says so honestly when it cannot present in that mode.
+    // The renderer decided this deserves attention, which dwell mode to use, and whether the user asked
+    // for a sound; main only delivers, and says so honestly when it cannot present in that mode.
     return notifier.notify(input)
   })
   handle('providers:list', () => args.runtime.providerCatalog())

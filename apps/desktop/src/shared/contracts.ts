@@ -63,6 +63,34 @@ export type { ScratchTopicSnapshot } from './scratch-topics'
 // the notification vocabulary is imported straight from ./notification-presentation where it is used.
 export type { NotificationDelivery, NotificationModeId } from './notification-presentation'
 
+/**
+ * The attention-notification payload, as it crosses renderer → preload → main.
+ *
+ * ONE declaration, because there were four: this contract, `preload/index.ts`'s parameter, `ipc.ts`'s
+ * inline handler type, and `AttentionNotifierPorts.notify` in the renderer. Every one of them spelled
+ * the same four fields by hand, so adding a fifth meant editing four places — and the failure mode of
+ * missing one is silent in the worst way: the extra field is simply dropped at whichever hop still has
+ * the old shape, and the feature quietly does not work while every layer type-checks.
+ *
+ * That is not hypothetical. `sound` is exactly such a field (see below), and the reason it is being
+ * added at all is that its predecessor — an optional `silent` on main's request type — existed, was
+ * honoured by delivery, and had no caller anywhere in the app.
+ *
+ * Main's own `NotificationRequest` stays separate on purpose: it is main's internal shape, and it
+ * carries nothing the renderer sends. This is the wire, not the implementation.
+ */
+export type AgentAttentionNotifyInput = {
+  sessionId: string
+  title: string
+  body: string
+  mode: NotificationModeId
+  /**
+   * Whether the user asked for a sound. Resolved from config by the renderer (the side that owns the
+   * config projection) and sent as an ANSWER, so main never re-derives a default that could disagree.
+   */
+  sound: boolean
+}
+
 // Not exported: the only consumer is the `HostConfig` union below. Its sibling `SshHostConfig` IS
 // exported because five call sites narrow on it by name; this one has none, and an export nobody
 // imports reads as a promise that the shape is part of the wire surface.
@@ -1098,12 +1126,7 @@ export type AgentMuxDesktopApi = {
      * `shown` from `unsupported`, and within `shown` reports whether the requested mode was honoured
      * or the platform downgraded it — so a caller never assumes a persistent banner it did not get.
      */
-    notifyAgentAttention(input: {
-      sessionId: string
-      title: string
-      body: string
-      mode: NotificationModeId
-    }): Promise<NotificationDelivery>
+    notifyAgentAttention(input: AgentAttentionNotifyInput): Promise<NotificationDelivery>
     /**
      * Fires when the user clicks one of those notifications, carrying the Session id it was about.
      * Main focuses the window; WHERE to go inside it stays with the renderer, which owns View/Region.

@@ -19,9 +19,22 @@ export type NotificationRequest = {
   body: string
   // The dwell tier the user chose. `off` never reaches here — the renderer drops it before the IPC.
   mode: NotificationModeId
-  // Attention notifications are informational, not alarms — no sound. The user asked for a heads-up,
-  // not an interruption they have to silence.
-  silent?: boolean
+  /**
+   * Whether to ask the OS to play its notification sound.
+   *
+   * Spelled positively even though Electron's option is the negative `silent`, and the inversion is
+   * done once, at the `new Notification` call below. A boolean that means the opposite of its name on
+   * one side of an IPC is the shape that eventually ships backwards; naming it for what the user asked
+   * for ("play a sound") keeps every layer above this one reading the same direction.
+   *
+   * Required, not optional. Its predecessor was an OPTIONAL negative field with a default of "stay
+   * silent" applied right here — and in the whole codebase NOTHING ever passed it. A capability
+   * declared on a request type, honoured by delivery, and reachable by no caller is a promise with no
+   * way to keep it. Making this one required means the compiler asks the question at every call site
+   * instead of letting one silently inherit a default nobody chose.
+   * (notification-sound-reachable.test.ts bans the old optional spelling from coming back.)
+   */
+  sound: boolean
 }
 
 export type { NotificationDelivery }
@@ -69,7 +82,9 @@ export function createAgentNotifier(input: {
       const notification = new Notification({
         title: request.title,
         body: request.body,
-        silent: request.silent ?? true,
+        // The one place the positive `sound` becomes Electron's negative `silent`. Everything above
+        // this line — settings, config, IPC — says "play a sound"; only the platform call says not.
+        silent: !request.sound,
         // Ask the platform to pin it open only when the mode wants persistence AND the platform can
         // honour it; otherwise a default (self-dismissing) banner. macOS ignores this entirely, which
         // is exactly why `presentation` above reports the downgrade rather than pretending it stuck.

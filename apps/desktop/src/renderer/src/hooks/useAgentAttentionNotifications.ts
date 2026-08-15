@@ -1,5 +1,8 @@
 import { useEffect } from 'react'
-import { resolveNotificationModeId } from '../../../shared/notification-presentation'
+import {
+  resolveNotificationModeId,
+  resolveNotificationSound
+} from '../../../shared/notification-presentation'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
 import { visibleSessionIdsForState } from '../lib/session-visibility'
@@ -53,6 +56,10 @@ export function useAgentAttentionNotifications(): void {
           // The chosen dwell tier, defaulting when unset. `off` makes reconcile raise nothing while
           // still advancing its baseline.
           mode: resolveNotificationModeId(state.config),
+          // Resolved here, next to the mode, from the same config projection: both are answers the
+          // renderer owns, and sending the answer (not the config) keeps main from holding a second
+          // default that could disagree with this one.
+          sound: resolveNotificationSound(state.config),
           // The body's conversation summary comes from the Activity timelines already in the Store — no
           // second message record is kept for notifications.
           timelines: state.timelines
