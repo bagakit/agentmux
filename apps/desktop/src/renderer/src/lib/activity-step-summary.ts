@@ -156,6 +156,11 @@ function stepSummaryWithin(
  * 原样（见 hook-normalizer 的 `append(kind, toolName, …)`），而 MCP 工具名形如
  * `mcp__<server>__<tool>`，轻易过 48。放它裸奔出去，承诺就成了「通常成立」，下游读注释的人只能
  * 自己补一刀——那一刀正是本函数要消灭的东西。
+ *
+ * 承诺只有长度这一条，**不含压平空白**：`title` 原样透传协议里的 `tool_name`，本函数不 flatten 它。
+ * 实测 `stepTitle('Web  Search', undefined, undefined)` 返回 `'Web  Search'`（两个空格原样留着）。
+ * 今天不成问题，因为工具名是标识符（`Bash`、`mcp__srv__do`）；但那是**假设**而不是证明，所以只写
+ * 长度这一条能被测试钉死的。调用方若需要单行保证，自己压平——别把「今天恰好成立」读成契约。
  */
 export function stepTitle(title: string, toolName: string | undefined, rawInput: string | undefined): string {
   const prefix = `${title} `
