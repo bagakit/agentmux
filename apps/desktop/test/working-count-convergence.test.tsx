@@ -321,15 +321,28 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 主按钮是 Stop 还是 Send。idle-running 的 Agent 没有在途回合可打断，故此处严格判 working 是对的。
   '/lib/composer-submit-mode.ts':
     '决定 Stop/Send，问的是"有在途回合吗"而不是"在 working 列吗"',
-  // 单行/单 lane 的状态点，不是计数。它们与计数分岔属于另一族（roster 行、lane 措辞 #572），
-  // 各有自己的条目，不在本次收敛范围内——但它们出现在这里，所以不会被静默遗忘。
-  '/components/AgentRoster.tsx': '单行状态点：RosterRowView.stateFor（现由状态栏计数树在生产中渲染）',
-  '/components/FanOutStrip.tsx': '单 lane 状态点（另见 #572）',
+  // 单行/单 lane 的状态点，不是计数——问的是「这一行画哪一档」。曾是 `/components/AgentRoster.tsx`
+  // 与 `/components/FanOutStrip.tsx` 两条，各自手写四行判定；#572 记的那个分岔就出在这里，而且
+  // **是真的画错了**：两份都以 `state === 'working' ? 'working' : null` 收尾，于是 running 与「没有
+  // 状态」同答案，点画成静止的中性灰，而计数树的标题按 sessionBoardColumn 把它算作 working。
+  // 现已合并成 `attention-event.ts` 的 statusDotTier 一处，running 走它自己那一档（.status--running
+  // 在 chrome.css 里一直就有：绿、不脉冲）。两个组件的条目因此删掉——它们不再自己判。
+  '/lib/attention-event.ts':
+    '单行状态点 statusDotTier：问"这一行画哪一档"而不是"有几个在干活"。working 与 running 各一档，'
+    + '因为脉冲的含义是"此刻有 turn 在途"，而 running 是活着但不在途中',
   '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank',
   // 单个 Session 的排序类，喂给 attentionSortRank（与已登记的 agent-roster.ts 同形）。它把一个 Session
   // 映射到 working/idle 排序档，不数总量；折进 sessionBoardColumn 会让 starting/running 也排成 working。
   '/lib/activity-groups.ts':
-    '单 Session 排序类，喂给 attentionSortRank，问的是"这一个排哪档"而不是"有几个在干活"'
+    '单 Session 排序类，喂给 attentionSortRank，问的是"这一个排哪档"而不是"有几个在干活"',
+  // 下面两条是把检测器从「`x.state` 比 working」放宽到「也认裸名 `state`」之后**当场浮出来**的——
+  // 它们一直就在生产代码里，只是先把状态存进了一个叫 state 的局部变量/形参，于是整张表对它们失明。
+  // 记在这里而不是回退检测器：两处都不是计数，各自回答别的问题，但「这一处到底问什么」必须写下来，
+  // 否则下一个人看到它们仍会以为这里没人判过 working。
+  '/components/AgentStatusBar.tsx':
+    'StatusCount 的图标三元：问"这一档配哪个图标"。数字由 rollup 算好后传进来，这里不参与计数',
+  '/lib/resource-usage-panel.ts':
+    '资源面板每行的尾巴："在干活"就不显示闲置时长，否则显示闲了多久。问的是"这一行要不要报 idle"'
   // `/components/ProjectActivity.tsx` 曾在这里，理由是「单行标签 active now vs idle 时长」。那一处
   // 已搬进 `/lib/project-activity-row.ts`，并且搬的时候改成了 `sessionBoardColumn(...) === 'working'`
   // ——即不再自己拿 state 比字面量，而是委派给唯一裁决点。所以它从这张表里删掉：留着就成了一条
@@ -361,11 +374,17 @@ function tsFilesUnder(root: string): string[] {
  */
 function stateEqualsWorkingSites(sourceFile: ts.SourceFile): number[] {
   const lines: number[] = []
-  const readsStateMember = (node: ts.Expression): boolean =>
+  // 三种拼法都算「拿 state 比 working」：`x.state`、`x['state']`，以及一个就叫 `state` 的裸名字。
+  // 第三种是后补的，补的时候它已经在生产代码里了（statusDotTier 的形参）——而在补之前，
+  // `const state = row.state` 再比一次，整个检测器对它**完全失明**：只要先把它存进一个局部变量，
+  // 这张表守着的每一条旁路都重新打开。名字定得死（必须叫 `state`）是刻意的：这不是类型推断，
+  // 是拼法判据，放宽到「任意标识符」会把 `column === 'working'` 之类真正该在别处判的东西卷进来。
+  const readsState = (node: ts.Expression): boolean =>
     (ts.isPropertyAccessExpression(node) && node.name.text === 'state') ||
     (ts.isElementAccessExpression(node) &&
       ts.isStringLiteral(node.argumentExpression) &&
-      node.argumentExpression.text === 'state')
+      node.argumentExpression.text === 'state') ||
+    (ts.isIdentifier(node) && node.text === 'state')
   const isWorkingLiteral = (node: ts.Expression): boolean =>
     (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === 'working'
 
@@ -379,8 +398,8 @@ function stateEqualsWorkingSites(sourceFile: ts.SourceFile): number[] {
         kind === ts.SyntaxKind.ExclamationEqualsToken
       if (
         isComparison &&
-        ((readsStateMember(node.left) && isWorkingLiteral(node.right)) ||
-          (readsStateMember(node.right) && isWorkingLiteral(node.left)))
+        ((readsState(node.left) && isWorkingLiteral(node.right)) ||
+          (readsState(node.right) && isWorkingLiteral(node.left)))
       ) {
         lines.push(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)
       }
@@ -516,7 +535,10 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     count: 1,
     why: '主按钮 Stop/Send：问"有在途回合吗"。idle-running 没有可打断的回合，故严格判 working 是对的'
   },
-  '/lib/attention-event.ts': { count: 1, why: 'AttentionSortClass union 的成员名，是排序类而非状态' },
+  '/lib/attention-event.ts': {
+    count: 3,
+    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）：问"这一行的点画哪一档"。它是名册行与 fan-out lane 共用的那一处——两个组件此前各手写一份，双双把 running 塌成 null，于是计数说 working、点画静止灰'
+  },
   '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
   '/lib/quick-switch.ts': {
     count: 2,
@@ -526,8 +548,10 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
 
   // ---- 单行/单 lane 的状态点：不是计数，但各有已记录的分岔 ----
   '/lib/agent-roster.ts': { count: 2, why: '行排序 rank，喂给 attentionSortRank（另见 #572）' },
-  '/components/AgentRoster.tsx': { count: 3, why: '单行状态点：RosterRowView.stateFor（现由状态栏计数树 AgentTreePanel 在生产中渲染）' },
-  '/components/FanOutStrip.tsx': { count: 3, why: '单 lane 状态点（另见 #572）' },
+  // `/components/AgentRoster.tsx` 与 `/components/FanOutStrip.tsx` 曾各占一条（各 3 次，理由都写着
+  // 「单行/单 lane 状态点」）。两处的四行判定已合并进 `attention-event.ts` 的 statusDotTier，组件里
+  // 一个 working 字面量都不剩，所以条目删掉——留着就是守着空地的豁免（本文件对 ProjectActivity
+  // 与 fanout-group 做过同样的清理，理由见上面那两段注释）。
   '/components/ProjectActivity.tsx': {
     count: 1,
     why: 'switch 的 "working" case（"Working · no recent summary"）：问"这一个 Session 在 working 吗"。逐行 "active now" 那处已搬到 project-activity-row.ts，计数走同文件已 import 的 workingAgentCount'
@@ -587,33 +611,43 @@ describe('「有几个在干活」的裁决只有一处', () => {
     ).toEqual([1, 2, 3])
   })
 
-  it('自检：这个检测器看不见的四种拼法，逐个钉住（它的视野是它自称的那么窄）', () => {
+  it('自检：这个检测器看不见的三种拼法，逐个钉住（它的视野是它自称的那么窄）', () => {
     // 上一条只列了它**认得**的三种和它**该放过**的三种。它真正看不见的那些，此前只写在
     // 提交 message 的「后续」段里——那正是本仓反复吃过的形状（memory:
     // comment-promises-more-than-assertion）：一条读起来像已查证的散文，没人回头核对。
     //
-    // 所以把盲点做成断言，落在失败现场。其中第四种（switch/case）**必须**看不见：
+    // 所以把盲点做成断言，落在失败现场。其中最后一种（switch/case）**必须**看不见：
     // `project-board.ts:95` 那个 switch 正是**正确**的裁决点，下面 `toEqual([])` 那条断言的前提
     // 就是它对本检测器不命中。把这个检测器加宽到认 case，会当场对正确代码打红。
-    // 换句话说：这四个盲点不是待修的缺口，而是这个检测器的定义域——补位的是下面
+    // 换句话说：这几个盲点不是待修的缺口，而是这个检测器的定义域——补位的是下面
     // `workingLiteralLines`（问"有没有第二份判据"，与拼法无关）与 `boardColumnDelegationLines`
     // （问"那次委派还在不在"，正向）两个检测器。
+    //
+    // **曾经是四种**。第二种（解构成 `const { state }` 再比）已经被补上了：检测器现在也认裸名
+    // `state`，所以那条从盲点列表移进了上一条的「认得」里。补它不是顺手加宽——它是这张表所有
+    // 豁免的共同旁路：把状态先存进一个叫 state 的变量，全表当场失明。补上之后立刻浮出两处一直
+    // 存在却从未被登记的比较（AgentStatusBar.tsx、resource-usage-panel.ts），这两处就是它此前
+    // 真的在漏东西的证据，而不是理论风险。
     const bypass = (line: string): number[] =>
       stateEqualsWorkingSites(
         ts.createSourceFile('bypass.ts', line, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
       )
 
-    // 1. 先落到中间变量：比较的左侧不再是 `.state` 成员表达式。
+    // 1. 落到一个**别的**名字：比较的左侧既不是 `.state` 成员表达式，名字也不叫 state。
     expect(bypass("const s = session.status.state\nconst hit = s === 'working'")).toEqual([])
-    // 2. 解构出来：同上，且连 `.state` 这个词都不在比较那一行。
-    expect(bypass("const { state } = session.status\nconst hit = state === 'working'")).toEqual([])
-    // 3. 换成集合成员判定：根本不是二元比较。
+    // 2. 换成集合成员判定：根本不是二元比较。
     expect(bypass("const hit = ['working'].includes(session.status.state)")).toEqual([])
-    // 4. 写成 switch：`case` 不是二元表达式。这一条的"看不见"是承重的，见上面说明。
+    // 3. 写成 switch：`case` 不是二元表达式。这一条的"看不见"是承重的，见上面说明。
     expect(
       bypass("switch (session.status.state) { case 'working': return 1 }"),
       '若这条开始命中，project-board.ts 的正确 switch 会被判成违规——先读上面的说明'
     ).toEqual([])
+
+    // 反向：补进来的那一种必须真的被看见，否则上面那段「已经补上了」的叙述是句空话。
+    expect(
+      bypass("const { state } = session.status\nconst hit = state === 'working'"),
+      '裸名 state 的比较又看不见了——这张表的每一条豁免都随之失效'
+    ).toEqual([2])
   })
 
   it('两个计数投影自己都不判「在跑吗」，只调那一个开关', () => {

@@ -5,6 +5,7 @@ import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
 import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
+import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 // The roster behind the attention bar's total.
@@ -23,10 +24,13 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 // read — so it painted nothing while looking handled. Deleted rather than given a rule: `waiting` and
 // `error` already resolve `--status-ink` to amber and red, and amber's dot carries a `?` pip, so the
 // signal is on screen and colour-blind-safe without a second competing mark.
-function stateFor(row: RosterRow): 'working' | 'waiting' | 'error' | null {
-  if (row.attention === 'needs-you') return 'waiting'
-  if (row.attention === 'error') return 'error'
-  return row.state === 'working' ? 'working' : null
+//
+// The tier itself is decided in `attention-event.ts` — the same call the fan-out lane makes. It used to
+// be four lines here and four more there, and both ended in `state === 'working' ? 'working' : null`,
+// which painted a live `running` Agent with the resting grey dot while this very panel's heading
+// counted it as working.
+function stateFor(row: RosterRow): ReturnType<typeof statusDotTier> {
+  return statusDotTier(row.state)
 }
 
 /**
