@@ -36,7 +36,6 @@ export const DESKTOP_TEST_TYPE_ERROR_BASELINE: Readonly<Record<string, number>> 
   "test/agent-address.test.ts": 4,
   "test/agent-composer.test.tsx": 3,
   "test/agent-markdown.test.ts": 4,
-  "test/agent-session-composer.test.tsx": 1,
   "test/agent-usage-display.test.ts": 2,
   "test/attention-notifier.test.ts": 8,
   "test/branch-agent-presence.test.ts": 2,
