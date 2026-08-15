@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
  *
  * 为什么这件事非守不可：`@agentmux/core` 的 `package.json` 把 `types`/`import` 指向 `./dist/*`
  * （不是 `src`，`packages/layout` 才是指向 src 的那种）。于是 **desktop 的每一条测试都在加载 dist**
- * （实测 `apps/desktop/test` 下 65 个文件 import 了 `@agentmux/core`），desktop 的 `tsc` 也只读
+ * （实测 `apps/desktop/test` 下 64 个文件 import 了 `@agentmux/core`），desktop 的 `tsc` 也只读
  * `dist/*.d.ts`。dist 陈旧时，两者都照旧全绿——绿的是上一次构建的 Core，不是树里这份。
  *
  * 仓库的规范脚本本来就挡住了这一面：`pnpm typecheck` / `test:fast` / `test:native` 每条都前置
@@ -45,7 +45,15 @@ const repositoryRoot = import.meta.dirname
 const packageDirectory = resolve(repositoryRoot, 'packages/core')
 const rebuild = 'pnpm --filter @agentmux/core build'
 
-async function extremeModification(
+/**
+ * 目录里 mtime 的极值那一个。`wins` 决定取最新还是最旧。
+ *
+ * 导出是为了让 `dist-freshness-guard.test.ts` 够得着——这个函数是本守卫唯一有分支的地方，而守卫
+ * 自己不在任何测试的收集面里（globalSetup 不是测试文件）。实测过的坏世界：把 `wins(...)` 改成
+ * 恒 false，于是永远停在第一个文件上，比较的是两个任意文件，陈旧的 dist **不再报红**——整道守卫
+ * 静默失效，而没有任何东西会发现。所以它需要一条自己的用例。
+ */
+export async function extremeModification(
   directory: string,
   wins: (candidate: number, incumbent: number) => boolean
 ): Promise<{ path: string; at: number } | undefined> {
@@ -57,6 +65,15 @@ async function extremeModification(
     if (!held || wins(at, held.at)) held = { path, at }
   }
   return held
+}
+
+/** 新鲜吗——判据本身，与「去哪个目录问」分开，好让测试喂两个临时目录进来。 */
+export function distIsStale(
+  newestSource: { path: string; at: number },
+  oldestArtifact: { path: string; at: number }
+): boolean {
+  // `<=` 而不是 `<`：同一毫秒落地的源码与产物说明不了「产物晚于源码」，按陈旧处理是安全的那一侧。
+  return oldestArtifact.at <= newestSource.at
 }
 
 export default async function assertCoreDistBuiltFromCurrentSource(): Promise<void> {
@@ -78,7 +95,7 @@ export default async function assertCoreDistBuiltFromCurrentSource(): Promise<vo
   if (!newestSource) throw new Error('packages/core/src 下一个文件都没有——扫描根写错了。')
   if (!oldestArtifact) throw new Error(`packages/core/dist 是空的：先跑 \`${rebuild}\`。`)
 
-  if (oldestArtifact.at <= newestSource.at) {
+  if (distIsStale(newestSource, oldestArtifact)) {
     throw new Error(
       `先跑 \`${rebuild}\`：packages/core/dist 比 src 旧，这次运行加载的是上一次构建的 Core。\n` +
         `  最旧产物 ${oldestArtifact.path}\n` +
