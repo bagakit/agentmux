@@ -122,15 +122,48 @@ export function categoryFor(state: AgentDisplayState): AttentionCategory | null 
  * site is "is this urgent", and answering it by listing exclusions inverts on the next category added.
  *
  * The row accent reads this in production (via {@link attentionAccentFor}), so "which categories earn
- * ink" is decided in exactly one place. `rosterBadgeCount` also reads it, but that count feeds no
- * collapsed roster badge — no such badge is built, and nothing in production calls it (see its
- * docstring). So do not read this as "the badge and the ink are one number": today it is only the ink.
+ * ink" is decided in exactly one place. Three rollups read it too — the Project Rail row, the activity
+ * group, and the fan-out group's "which lane needs you" — each of which used to spell the same rule as
+ * `!category || category === 'done'`. Those three copies were the inversion this docstring warns about,
+ * standing in the code: a fourth category would have begun counting as urgent at all three sites with
+ * nothing going red. `rosterBadgeCount` also reads it, but that count feeds no collapsed roster badge —
+ * no such badge is built, and nothing in production calls it (see its docstring). So do not read this
+ * as "the badge and the ink are one number": today it is the ink and those three rollups.
  * The accent was a hand-written `needs-you || error` copy before this.
+ *
+ * 清单由 {@link ATTENTION_URGENCY} 派生，而不是自己写一份字面量。差别在加第四个 category 那天：一份
+ * `['needs-you', 'error']` 的字面量对新成员**静默**——它默认不紧急，于是行不上墨、三处滚动归并把它
+ * 当完成跳过、`rowAttentionLabel` 还会把它写成「in error」，一条都不红。`satisfies Record` 则逼着新
+ * 成员的作者在下面那张表里做一次决定，少一个键就是 TS2741。这与 `categoryFor` 用穷举 switch 而不是
+ * `default` 是同一条理由，只是那边守的是状态联合，这边守的是 category 联合。
  */
-export const URGENT_ATTENTION_CATEGORIES = ['needs-you', 'error'] as const
+const ATTENTION_URGENCY = {
+  'needs-you': true,
+  error: true,
+  // done 不吃墨、不进滚动归并：完成值一条通知，不值一个持续占着注意力的彩点（理由见上）。
+  done: false
+} satisfies Record<AttentionCategory, boolean>
 
-export function isUrgentAttention(category: AttentionCategory | null): boolean {
-  return category !== null && (URGENT_ATTENTION_CATEGORIES as readonly string[]).includes(category)
+export const URGENT_ATTENTION_CATEGORIES = Object.entries(ATTENTION_URGENCY)
+  .filter(([, urgent]) => urgent)
+  .map(([category]) => category) as readonly UrgentAttentionCategory[]
+
+/** The categories that earn ink — the members of {@link ATTENTION_URGENCY} marked urgent. */
+export type UrgentAttentionCategory = {
+  [K in AttentionCategory]: (typeof ATTENTION_URGENCY)[K] extends true ? K : never
+}[AttentionCategory]
+
+/**
+ * Whether this category is one a person should be interrupted for.
+ *
+ * A type guard, not a plain boolean, because every caller immediately uses the narrowed value — the
+ * rollups rank it, the accent returns it. A boolean would send each of them back to a redundant null
+ * check, which is exactly the hand-spelled exclusion this predicate exists to remove.
+ */
+export function isUrgentAttention(
+  category: AttentionCategory | null
+): category is UrgentAttentionCategory {
+  return category !== null && ATTENTION_URGENCY[category]
 }
 
 /** The accent for one state: its urgent category, or null when it should carry none. */
@@ -184,16 +217,30 @@ export function attentionAccentFor(state: AgentDisplayState): AttentionCategory 
  * 类完全相同的琥珀色与 `?` 角标，画面一模一样，但判定层不必替样式表做一次多余的归并。
  * needs-you 那一档经 {@link isNeedsYouState} 取得，而不是在这里把状态名再抄一遍——抄一遍今天正确，
  * 只在联合新增成员那天出错，而那天没人会看这个文件（attention-vocabulary.test.ts 守这条）。
+ *
+ * 穷举 switch、无 default，和 `categoryFor` / `attentionSortClass` / `sessionBoardColumn` / `statusLabel`
+ * 同一个形状。这一段此前是一条 if 链、以 `return null` 收尾，于是这一族里**只剩它**对第十个状态静默：
+ * 四个兄弟一起报 TS2366 的那一刻，它安静地把新状态判成中性灰。严重度本来就不高（作者被兄弟们逼进
+ * 同一个文件，多半顺手就看见了），但代价是零——`state === null` 先收窄掉空值，`isNeedsYouState` 再
+ * 收窄掉 needs-you 两支，残差恰好是剩下七支，少列一支就是「缺少结尾 return」。
  */
 export function statusDotTier(
   state: AgentDisplayState | null
 ): NeedsYouState | 'working' | 'running' | 'error' | 'exited' | 'disconnected' | null {
   if (state === null) return null
   if (isNeedsYouState(state)) return state
-  if (state === 'error') return state
-  if (state === 'working' || state === 'running') return state
-  if (state === 'exited' || state === 'disconnected') return state
-  return null
+  switch (state) {
+    case 'error':
+    case 'working':
+    case 'running':
+    case 'exited':
+    case 'disconnected':
+      return state
+    // done 与 starting 刻意不画，各自的理由见上：前者是「完成了」不值一个常驻彩点，后者是瞬态。
+    case 'done':
+    case 'starting':
+      return null
+  }
 }
 
 /**

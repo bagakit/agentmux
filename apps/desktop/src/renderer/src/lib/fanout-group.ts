@@ -1,6 +1,11 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { isWorktreeWorkspace } from '../../../shared/contracts'
-import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
+import {
+  attentionSortRank,
+  categoryFor,
+  isUrgentAttention,
+  type AttentionCategory
+} from './attention-event'
 import { sessionBoardColumn } from './project-board'
 
 // Reading a bake-off.
@@ -119,7 +124,9 @@ export function groupLaneNeedingYou(group: FanOutGroup): FanOutLane | null {
   let winnerRank = Number.POSITIVE_INFINITY
   for (const lane of group.lanes) {
     // `done` is not a request for attention; a finished lane is a result to read, not an interruption.
-    if (!lane.attention || lane.attention === 'done') continue
+    // Which categories ARE a request is `URGENT_ATTENTION_CATEGORIES`, asked here rather than restated:
+    // a fourth category would otherwise silently start counting as "needs you" at this one site.
+    if (!isUrgentAttention(lane.attention)) continue
     const laneRank = attentionSortRank(lane.attention)
     if (laneRank < winnerRank) {
       winner = lane

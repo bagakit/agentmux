@@ -52,17 +52,31 @@ describe('通知声音开关：用户找得到、按得动、按下去真的到�
     // 判据落在 **checkbox 自己那个元素**上，不是整份文件：这一面里还有停留滑轨，它也带 onChange，
     // 于是「文件里有 onChange」在把 checkbox 的 onChange 删掉时恒真（实测：删掉声音这一格的
     // onChange，整份文件照旧含 onChange，这条一动不动地绿——而那个开关已经永久点不动了）。
-    // 从 `type="checkbox"` **往回**切到最近的 `<input`，再往后切到最近的 `/>`。两次都往里收，
-    // 是因为这一面里另有一个滑轨 input，而且文件顶部的注释里还写着 `<input type="range">` 这几个
-    // 字——从 `<input` 正着非贪婪找 checkbox，会从那句注释起头，把整份文件一口吞下去，于是后面
-    // 每条断言都在整份文件上求值，等于没收窄（实测：那样写时，删掉 checkbox 的 onChange 依然全绿）。
-    const anchor = pane.indexOf('type="checkbox"')
-    const start = anchor < 0 ? -1 : pane.lastIndexOf('<input', anchor)
-    const end = start < 0 ? -1 : pane.indexOf('/>', anchor)
-    const checkbox = start >= 0 && end > start ? pane.slice(start, end + 2) : undefined
+    //
+    // 锚点是**声音开关自己的类名**，不是「第一个 checkbox」。这一条是审计打出来的：先前从
+    // `pane.indexOf('type="checkbox"')` 起切，今天只有一个 checkbox 所以切对了，但判据认的是位置而
+    // 不是身份——哪天在 Sound 之上再加一个开关（免打扰、闪 Dock 之类），这段会去验那个**新**开关，
+    // 而声音开关的 onChange 被删掉照样全绿（实测：造出第二个 checkbox 并同时删掉声音那个的
+    // onChange，四条断言一条不红）。类名唯一，且它在 surfaces.css 里有规则，改名会在别处报红。
+    //
+    // 从类名往后切到最近的 `/>`：中间隔着 `<label>` 与 `<input`，都在同一个元素块内。不从 `<input`
+    // 正着非贪婪找 checkbox，是因为文件顶部的注释里逐字写着 `<input type="range">`，那样会从注释
+    // 起头把整份文件一口吞下去，后面每条断言都在整份文件上求值等于没收窄（实测过）。
+    const anchor = pane.indexOf('className="notification-sound-toggle"')
+    // 自证：类名必须唯一，否则「往后切到最近的 />」切的是哪一个就说不准了。
+    expect(
+      pane.split('className="notification-sound-toggle"').length - 1,
+      '声音开关的类名不唯一——按它定位就不再指向同一个元素'
+    ).toBe(1)
+    const end = anchor < 0 ? -1 : pane.indexOf('/>', anchor)
+    const checkbox = anchor >= 0 && end > anchor ? pane.slice(anchor, end + 2) : undefined
     // 自证：切出来的必须是**一个元素**而不是半份文件，否则下面三条是在整份文件上恒真。
+    // 400 这个上限的来历：今天切出来 250 上下，而整份文件是它的十几倍——这个数只需要把「一个元素」
+    // 和「吞掉了后面几节」分开，不需要贴着当前长度，否则加个 aria-label 就得改判据。
     expect(checkbox?.length ?? Infinity, '切出来的不是一个 input 元素——判据没有收窄').toBeLessThan(400)
     expect(checkbox, '面里没有 checkbox，没法开').toBeDefined()
+    expect(checkbox, '声音开关那一格里没有 checkbox——类名底下挂的不是这个控件')
+      .toMatch(/type="checkbox"/u)
     expect(checkbox, 'checkbox 没有 onChange——受控输入会永久只读，看得见点不动')
       .toMatch(/onChange=\{/u)
     expect(checkbox, 'checkbox 不是受控的——没有 checked，它显示的不是已保存的选择')
