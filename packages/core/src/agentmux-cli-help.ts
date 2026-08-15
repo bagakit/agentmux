@@ -327,9 +327,9 @@ agentmux browser run --browser <browser-id> < program.js
 The program is read whole from stdin and runs in an isolated subprocess with page functions
 injected: \`snapshot\` / \`snapshotText\` / \`pageInfo\` / \`captureScreenshot\` to observe,
 \`click\` / \`fillInput\` / \`typeText\` / \`pressKey\` / \`hover\` / \`scroll\` to act,
-\`waitForElement\` / \`waitForLoad\` / \`waitForNetworkIdle\` / \`wait\` to wait,
-\`gotoUrl\` / \`openOrReuseTab\` / \`switchTab\` / \`listTabs\` to navigate, and \`js\` / \`cdp\`
-as escape hatches. Write one program that does the whole loop — that is the point of the verb:
+\`waitForElement\` / \`waitForLoad\` / \`waitForNetworkIdle\` / \`wait\` to wait, \`gotoUrl\` to
+navigate, and \`js\` / \`cdp\` as escape hatches. Write one program that does the whole loop —
+that is the point of the verb:
 
 \`\`\`js
 const page = await snapshot()
@@ -341,9 +341,14 @@ return await snapshot()
 Act on the refs a snapshot gives you (\`@e1\`, \`@e2\`, …). Never coordinates: they go stale the
 moment anything reflows, and a stale coordinate clicks whatever moved into that spot.
 
+One Browser is one page, so there are no tab functions — use \`gotoUrl\` to go elsewhere in it,
+and \`agentmux open browser\` when you want a second page. A snapshot's \`missingFrames\` lists
+what it could not read; an empty list is the only claim that the map is complete.
+
 This needs Agent browser automation enabled in Settings › Browser — off by default. Read the
 receipt's \`outcome\`: \`indeterminate\` means the run died partway and you do NOT know what
-already happened. Look at the page before running anything again; do not blind-retry.
+already happened — that also covers the page's DevTools being opened mid-run, which severs the
+debugging session. Look at the page before running anything again; do not blind-retry.
 
 ## Apply a deliberate layout
 

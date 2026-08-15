@@ -47,13 +47,20 @@ describe('页面函数库', () => {
       观察: ['snapshot', 'snapshotText', 'pageInfo', 'captureScreenshot'],
       动作: ['click', 'fillInput', 'typeText', 'pressKey', 'hover', 'scroll'],
       等待: ['waitForElement', 'waitForLoad', 'waitForNetworkIdle', 'wait'],
-      导航: ['gotoUrl', 'openOrReuseTab', 'switchTab', 'listTabs'],
+      导航: ['gotoUrl'],
       逃生口: ['js', 'cdp']
     }
     for (const [group, names] of Object.entries(groups)) {
       for (const name of names) {
         expect(BROWSER_PAGE_FUNCTION_NAMES, `${group}组少了 ${name}`).toContain(name)
       }
+    }
+
+    // 反向的一半：注入一个派发层服务不了的名字，比不注入更糟——Agent 会把它当成可用能力去规划，
+    // 然后在半途撞上拒绝，而此时前面的动作已经做过了。一个 Browser 就是一个页面，没有标签页。
+    for (const name of ['openOrReuseTab', 'switchTab', 'listTabs']) {
+      expect(BROWSER_PAGE_FUNCTION_NAMES, `注入了 ${name}，但一个 Browser 只有一个页面，它必定失败`)
+        .not.toContain(name)
     }
   })
 
