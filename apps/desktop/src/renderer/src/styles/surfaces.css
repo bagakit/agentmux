@@ -157,14 +157,25 @@
    与其下的说明（--fs-meta / --text-3）拉开一档，读者一眼知道哪句是导语、哪句是脚注。 */
 .settings-lead { margin:0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-prose); line-height: 1.5; }
 
-/* Browser 这一节的总开关。整行可点（label 包住 input），与 Agents 那节的 `.agent-guide-toggle`
-   同形——两处都是"一个开关 + 标题 + 一段说明"，长得不一样会让人以为是两种不同的控件。
-   绿只落在 accent-color 上（＝状态语汇），其余取 token。 */
-.browser-automation-toggle { display: flex; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-5); cursor: pointer; }
-.browser-automation-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:var(--sp-1) 0 0; accent-color: var(--green); }
-.browser-automation-toggle > span { display: grid; gap:var(--sp-2); }
-.browser-automation-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
-.browser-automation-toggle small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+/* 设置页里「一个开关 + 标题 + 一段说明」这一种控件。整行可点（label 包住 input）。
+   与 Agents 那节的 `.agent-guide-toggle` 同形——长得不一样会让人以为是两种不同的控件。
+   绿只落在 accent-color 上（＝状态语汇），其余取 token。
+
+   选择器列而不是每节各抄一份：Browser 的总开关与 Notifications 的声音开关是同一个控件在两屏，
+   第三处出现时也加进这张列表。抄一份的代价不是重复几行，而是两份会各自漂——改了 padding 的人
+   只会改自己那屏看到的那一份，于是同一种控件在两屏之间悄悄长得不一样。 */
+.browser-automation-toggle,
+.notification-sound-toggle { display: flex; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-5); cursor: pointer; }
+.browser-automation-toggle input,
+.notification-sound-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:var(--sp-1) 0 0; accent-color: var(--green); }
+.browser-automation-toggle > span,
+.notification-sound-toggle > span { display: grid; gap:var(--sp-2); }
+.browser-automation-toggle strong,
+.notification-sound-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+.browser-automation-toggle small,
+.notification-sound-toggle small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+/* 一个失效的开关必须看起来失效——通知整体关掉时，声音这一格没有可应用的对象。 */
+.notification-sound-toggle:has(input:disabled) { cursor: default; opacity: .55; }
 .browser-automation-toggle code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
 
 /* 通知预览——本屏的"手艺时刻"，对标终端主题预览那格 mini 终端。

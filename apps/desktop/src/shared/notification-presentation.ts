@@ -56,7 +56,32 @@ export const DEFAULT_NOTIFICATION_MODE_ID: NotificationModeId = 'standard'
 
 export type NotificationSettings = {
   mode: NotificationModeId
+  /**
+   * Whether delivery asks the OS to play its notification sound.
+   *
+   * A SECOND dimension, deliberately beside {@link NotificationModeId} rather than inside it. The tier
+   * table above is documented as exactly one dimension (off → dwell → until-acknowledged) and the
+   * settings control renders it as one slider; giving each tier its own sound flag would make that
+   * slider two-dimensional and force a fifth answer out of a control that asks one question. They are
+   * genuinely independent: a brief banner you can hear and a persistent one you cannot are both
+   * coherent choices.
+   *
+   * Optional for the same reason `notifications` itself is: a config written before this field existed
+   * still parses, and every read goes through {@link resolveNotificationSound}, which defaults.
+   */
+  sound?: boolean
 }
+
+/**
+ * The default when the user has never chosen: NO sound.
+ *
+ * Unlike the dwell default — which is `standard` rather than `off` because a notification feature that
+ * shows nothing looks broken — a silent notification is not broken, it is the quieter version of a
+ * working feature. Every existing install has been silent since the notifier was written, and the
+ * comment in `agent-notifier.ts` recorded that as a decision ("informational, not alarms"), so turning
+ * sound on for everyone would be changing a choice on their behalf rather than offering them one.
+ */
+export const DEFAULT_NOTIFICATION_SOUND = false
 
 export type NotificationPresentation = 'as-requested' | 'downgraded'
 
@@ -83,6 +108,20 @@ export function resolveNotificationModeId(
 /** The delivery descriptor for a mode id, defaulting on an unknown id. */
 export function resolveNotificationMode(id: NotificationModeId | undefined): NotificationMode {
   return tierFor(id).mode
+}
+
+/**
+ * Whether to ask for a sound, for a config. Absent means {@link DEFAULT_NOTIFICATION_SOUND}.
+ *
+ * A function rather than a bare field read, for the same reason {@link resolveNotificationModeId} is
+ * one: both sides of the IPC ask this question, and the default must be decided in one place. The
+ * renderer resolves it and puts the ANSWER on the wire — main never re-derives it, so there is no
+ * second default that could disagree with this one.
+ */
+export function resolveNotificationSound(
+  config: { notifications?: NotificationSettings | undefined } | null | undefined
+): boolean {
+  return config?.notifications?.sound ?? DEFAULT_NOTIFICATION_SOUND
 }
 
 /**

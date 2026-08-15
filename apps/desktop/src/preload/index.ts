@@ -12,6 +12,7 @@ import {
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
 import type {
+  AgentAttentionNotifyInput,
   AgentLaunchInput,
   AgentMuxPreloadApi,
   AgentSessionControl,
@@ -29,7 +30,6 @@ import type {
   DesktopControlResponse,
   HostConfig,
   MoveWorkspacePathInput,
-  NotificationModeId,
   RemoveWorktreeInput,
   RuntimeEvent,
   SessionControl,
@@ -132,7 +132,7 @@ const api: AgentMuxPreloadApi = {
     chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
-    notifyAgentAttention: (input: { sessionId: string; title: string; body: string; mode: NotificationModeId }) =>
+    notifyAgentAttention: (input: AgentAttentionNotifyInput) =>
       ipcRenderer.invoke('ui:notifyAgentAttention', input),
     onAgentAttentionActivate(listener: (sessionId: string) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string): void => listener(sessionId)

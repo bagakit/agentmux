@@ -98,7 +98,11 @@ const browserSchema = z.object({
     more: z.boolean()
   }).strict()
 }).strict()
-const notificationsSchema = z.object({ mode: z.enum(notificationModeIds) }).strict()
+// `sound` is optional for the same reason `notifications` itself is: a config written before the field
+// existed must still parse. It is NOT back-filled the way `mode` is — see withNotificationDefault.
+const notificationsSchema = z
+  .object({ mode: z.enum(notificationModeIds), sound: z.boolean().optional() })
+  .strict()
 
 const configSchema = z
   .object({
@@ -310,6 +314,14 @@ function withBrowserAutomationDefault(config: AppConfig): { config: AppConfig; a
  * scratch-workspace back-fill: fill an absent optional in `get()` and persist once, so every later read
  * sees a concrete default rather than `undefined` reaching the notifier. Present but unknown ids are
  * left for the schema to reject.
+ *
+ * `sound` is deliberately NOT back-filled alongside `mode`, and the difference is not an oversight.
+ * `mode` has to be concrete on disk because its absence and its `off` stop are different facts that
+ * must not be confused — filling it is how "never chose" stops looking like "chose off". `sound` has
+ * only two values and its absence resolves to exactly one of them (`DEFAULT_NOTIFICATION_SOUND`), so
+ * writing it would record a decision the user never made while changing nothing any reader sees. The
+ * first save from the settings pane writes it explicitly; until then, absent and `false` are the same
+ * answer.
  */
 function withNotificationDefault(config: AppConfig): { config: AppConfig; added: boolean } {
   if (config.notifications) return { config, added: false }

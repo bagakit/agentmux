@@ -52,6 +52,9 @@ const away = {
   windowFocused: false,
   visibleSessionIds: new Set<string>(),
   mode: 'standard' as const,
+  // The shipped default (see DEFAULT_NOTIFICATION_SOUND): a banner you see, not hear. A test that is
+  // about sound overrides it explicitly.
+  sound: false,
   timelines: {} as Record<string, AgentTimelineSnapshot>
 }
 
@@ -77,6 +80,22 @@ describe('attention notifier', () => {
       expect.objectContaining({ sessionId: 'a', title: 'Agent finished', mode: 'standard' })
     )
     expect(io.notify.mock.calls[0]![0]!.body).toBe('Agent a — Finished')
+  })
+
+  it('carries the sound choice through to delivery, both ways', async () => {
+    // 这条测的是一条**曾经不存在的线**：`silent` 此前是 main 的请求类型上的一个可选字段，投递侧认真
+    // 读它，而整个应用没有任何一处传过它——一个声明了、被兑现了、却谁也够不着的能力。所以判据不是
+    // 「类型上有这个字段」，而是「用户选的那个值真的走到了投递的入参里」，两个方向各钉一次：只钉 true
+    // 的话，把实现写成恒 true 也能绿。
+    for (const sound of [true, false]) {
+      const io = ports()
+      const notifier = createAttentionNotifier(io)
+      notifier.seed([agent('a', 'working')])
+
+      await notifier.reconcile({ sessions: [agent('a', 'done')], ...away, sound })
+
+      expect(io.notify).toHaveBeenCalledWith(expect.objectContaining({ sound }))
+    }
   })
 
   it('does not notify twice for the same state', async () => {

@@ -41,7 +41,7 @@ const SECTIONS = [
   { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Local and SSH machines', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
   { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Executors and Providers', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
   { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
-  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts and how long they stay', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss' },
+  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts, how long they stay, and whether you hear them', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
   { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Whether Agents may drive an open page', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
   { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
