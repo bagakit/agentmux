@@ -96,3 +96,16 @@
 review 看不出（锚点长得像还在的样子）。守护：`apps/desktop/test/sliced-scan-surface-not-empty.test.ts`
 逐个核对锚点是否真的出现在它所读的源文件里。自己写这种断言时，把两端都判一次
 （`expect(start).toBeGreaterThan(-1)`），并再判一句「切出来的这段确实是那一段」。
+
+同一件事在**运行期集合**上的那一支：**谓词遍历了一个空集合**。`[].every(p)` 是 `true`，
+`[].some(p)` 是 `false`——于是 `expect(xs.every(p)).toBe(true)` 与 `expect(xs.some(p)).toBe(false)`
+在生产代码开始「什么都不返回」时照样绿，而「什么都不返回」通常比被测的那个缺陷严重得多。
+反过来 `every→false` / `some→true` 对空集合当场红，不需要守。守护：
+`apps/desktop/test/vacuous-on-empty-predicate.test.ts`，要求同一个 `it()` 里有一句非空证明；
+最省事的写法是**把整个集合钉死**（`toEqual([...])`）而不是写 `every`。豁免走紧贴上一行的
+`// vacuous-ok:` 注释，不设集中清单——清单会和代码漂开，而且它一存在，下一个人遇到误报的
+第一反应就是往里加一行，守卫从此开始溶解。
+
+这一族的变异必须是**块级**的：只在 `.every()` 那个调用点喂空集合什么都证明不了（`.every([])`
+按定义就恒真）。正确的做法是把那个 `it()` 里对该集合的每一次读取都改成空，模拟「生产代码返回了
+空」，再看它红不红。
