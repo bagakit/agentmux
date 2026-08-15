@@ -114,6 +114,7 @@ import type {
   AgentMuxRuntimeIdentity,
   AgentNativeSessionHandle,
   AgentTerminalCapabilityState,
+  AgentTerminalOutputChannelState,
   AgentTimelineItem,
   AgentTimelineMutation,
   AgentTimelineSnapshot,
@@ -873,7 +874,14 @@ export class AgentMuxClient {
         // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
         // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
         const resumed = await this.resumeLiveAttachment(agentSession.agentSessionId)
-        if (resumed === 'dead') continue
+        if (resumed === 'dead') {
+          // 放行是对的（进程还活着，输入照常送达 Agent——第 2 类），但放行必须配告知：上面那条 agent-error
+          // 会被后续会话快照的 `>=` 洗白，且它只在 Activity 视图里短暂存在。落一条**可持久**的降级事实，
+          // 说清「输出通道没了、进程没死」，渲染端据此长出一条「输出可能没在显示，Resume 可重新附着」的
+          // 服务窗——它挺过视图切换与快照刷新，直到一次成功的 reattach 就地撤下它（见 attachAgentRun）。
+          await this.publishOutputChannelSevered(agentSession)
+          continue
+        }
         // 截断这一档不能靠跳过 republish：流是活的，这个 run 确实该是 running。于是反过来排——先
         // republish，再披露。同一条 `>=` 规则，谁最后发谁赢：披露走在后面就洗不掉了。早先它排在
         // republish 前面，于是「daemon 把你的历史输出丢了」这句话从未到过屏幕上，用户只看到输出里
@@ -943,6 +951,63 @@ export class AgentMuxClient {
     for (const event of attached.replay) this.publisher.publishRunEvent(event, session)
     // gap 的披露交给调用方，在它 republish 之后发——见本方法文档的 `'truncated'` 一条。
     return attached.gap ? 'truncated' : 'live'
+  }
+
+  /**
+   * 落一条可持久的「输出通道断了、进程没死」降级事实，并把它投影给渲染端（原则 11 第 2 类）。
+   *
+   * 与 `publishDeliveryDegrade` 同一手法：Store 是观测面、不是输入通道——事实写不进去绝不许反过来
+   * 挡住一个 CtxMux 刚证明还在跑的 Run（那就把第 2 类降级又变回了阻断）。持久化失败时退回一条只对
+   * 本次调用有效的内存标记，照常投影。
+   */
+  private async publishOutputChannelSevered(session: AgentMuxStoredAgentSession): Promise<void> {
+    const degraded: AgentTerminalOutputChannelState = {
+      state: 'severed',
+      mode: 'degraded',
+      reason: 'reattach-failed',
+      run: { ...session.run },
+      observedAt: Date.now()
+    }
+    let next: AgentMuxStoredAgentSession
+    try {
+      next = await this.updateExactAgentSession(
+        session.agentSessionId,
+        session.run,
+        (current) => ({
+          ...current,
+          terminalOutputChannel: structuredClone(degraded),
+          updatedAt: Math.max(current.updatedAt, degraded.observedAt)
+        })
+      )
+    } catch (persistError) {
+      const canonical = this.requireAgentSession(session.agentSessionId)
+      if (!sameRun(canonical.run, session.run)) throw persistError
+      next = {
+        ...structuredClone(canonical),
+        terminalOutputChannel: structuredClone(degraded),
+        updatedAt: Math.max(canonical.updatedAt, degraded.observedAt)
+      }
+    }
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+  }
+
+  /**
+   * 撤下「输出通道断了」的降级事实——恢复路径。一次成功的 reattach（自动重连或用户点 Resume 都走
+   * {@link attachAgentRun}）证明实时通道又通了，就地清除，让服务窗消失。缺席即无事，幂等。
+   */
+  private async clearOutputChannel(session: AgentMuxStoredAgentSession): Promise<void> {
+    if (!session.terminalOutputChannel) return
+    const next = await this.updateExactAgentSession(
+      session.agentSessionId,
+      session.run,
+      (current) => {
+        if (!current.terminalOutputChannel) return current
+        const cleared = { ...current }
+        delete cleared.terminalOutputChannel
+        return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }
+      }
+    )
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
   }
 
   /**
@@ -1779,6 +1844,10 @@ export class AgentMuxClient {
     if (attached.run.acceptedInputBytes !== null) {
       this.agentInputCursors.set(agentSessionId, attached.run.acceptedInputBytes)
     }
+    // 恢复路径：实时通道又通了，撤下「输出通道断了」的降级事实。放在这处共享核心而非两个调用方各自
+    // 抄一遍——它对两条路（自动重连 / 用户 Resume）的处置相同，不像 process-state/replay 那样分叉。
+    // 缺席即 no-op（clearOutputChannel 早退），所以对没进过降级的正常 attach 零成本。
+    await this.clearOutputChannel(session)
     return { session, attached }
   }
 
@@ -1951,6 +2020,7 @@ export class AgentMuxClient {
       delete next.terminalPromptReadiness
       delete next.terminalPromptSubmission
       delete next.terminalPromptDelivery
+      delete next.terminalOutputChannel
       delete next.semanticStatus
       delete next.pendingInteraction
       if (

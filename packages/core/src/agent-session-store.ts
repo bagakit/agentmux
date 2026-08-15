@@ -28,6 +28,7 @@ import type {
   AgentStatus,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
+  AgentTerminalOutputChannelState,
   AgentTerminalPromptReadinessSource,
   AgentTimelineCommit,
   AgentTimelineItem,
@@ -866,6 +867,32 @@ function terminalPromptDelivery(
   }
 }
 
+function terminalOutputChannel(
+  value: unknown,
+  currentRun: AgentMuxRunRef
+): AgentTerminalOutputChannelState {
+  const source = record(value, 'terminalOutputChannel')
+  const run = runRef(source.run)
+  if (
+    source.state !== 'severed' ||
+    source.mode !== 'degraded' ||
+    source.reason !== 'reattach-failed' ||
+    run.runId !== currentRun.runId
+  ) {
+    throw new AgentMuxError(
+      'Terminal output channel state does not match its Agent Run.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  return {
+    state: 'severed',
+    mode: 'degraded',
+    reason: 'reattach-failed',
+    run,
+    observedAt: timestamp(source.observedAt, 'terminalOutputChannel.observedAt')
+  }
+}
+
 function terminalInputPhase(
   value: unknown,
   name: string
@@ -986,6 +1013,9 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.terminalPromptDelivery === undefined
       ? {}
       : { terminalPromptDelivery: terminalPromptDelivery(source.terminalPromptDelivery, currentRun) }),
+    ...(source.terminalOutputChannel === undefined
+      ? {}
+      : { terminalOutputChannel: terminalOutputChannel(source.terminalOutputChannel, currentRun) }),
     ...(source.semanticStatus === undefined ? {} : { semanticStatus: semanticStatus(source.semanticStatus) }),
     ...(source.pendingInteraction === undefined
       ? {}
@@ -1019,6 +1049,12 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   if (session.terminalPromptDelivery && session.terminalPromptDelivery.observedAt > session.updatedAt) {
     throw new AgentMuxError(
       'Terminal prompt delivery state is newer than its Agent Session.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  if (session.terminalOutputChannel && session.terminalOutputChannel.observedAt > session.updatedAt) {
+    throw new AgentMuxError(
+      'Terminal output channel state is newer than its Agent Session.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }

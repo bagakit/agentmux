@@ -136,12 +136,44 @@ export function serviceNoticeToRender(classification: ServiceNoticeClass): Rende
 }
 
 /**
+ * 每一类通报的音量。**档位是分类的派生值**——不由调用点各自挑，也不另起第二个枚举：kind 已 1:1 承载
+ * 存活判定（`process-degraded`⟸alive、`indeterminate`⟸unknown、`agent-broken`⟸dead），按 kind 映射
+ * 就是「由 agentViability 推导」。用 `Record` 总映射的理由同 `AGENT_VIABILITY_BY_PROCESS_STATE`（见上）：
+ * 新增一类会让 tsc 变红。`assertive` 只给 dead，alive/unknown 都 `polite`——降级轻声说，不喊狼来了。
+ *
+ * 诚实一句：`serviceNoticeToRender` 对 `agent-broken` 与 `healthy` 都返回 null，所以服务窗只会渲染
+ * `process-degraded`/`indeterminate`（都 polite），`assertive` 这一档**在本渲染面没有消费方**——它只被
+ * 单元测试钉住。它不是无用的占位：真正一律 assertive 的告警面是 `TransientErrorNotice`（`reportError` 的
+ * 唯一出口，72 处调用全走它），alarm-fatigue 缺陷在那儿。这张表是那次收敛的落点——TransientErrorNotice
+ * 若要分档，应汇到这条 kind→音量的轴上，而不是各长一套。届时 dead 那档才有可见消费方。
+ *
+ * f-25n8fzxzw 的处置：它的诊断（重连失败后字进沉默终端）成立，但它开的方子（status==='error' 时
+ * canSubmit=false）是 RED-LINES.md 的红线，已由 8a62269b 反向钉死。它的真实残值是「把降级如实告知」
+ * 那一半（T-002），并入本 feature，不单独立项，也不在此重演那个被否决的置灰。
+ */
+type ServiceNoticeAriaLive = 'polite' | 'assertive'
+
+const SERVICE_NOTICE_ARIA_LIVE: Record<ServiceNoticeClass['kind'], ServiceNoticeAriaLive> = {
+  healthy: 'polite',
+  'process-degraded': 'polite',
+  indeterminate: 'polite',
+  'agent-broken': 'assertive'
+}
+
+/** 通报音量：由 kind（承载存活判定）派生，组件消费而非自行重算。 */
+export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): ServiceNoticeAriaLive {
+  return SERVICE_NOTICE_ARIA_LIVE[kind]
+}
+
+/**
  * 一个真实渲染点用到的映射：把 Agent Session 的诚实事实映成一个步骤结局。
  *
- * 这里只读会真实发生、且不属于两个尚未接线的消费者（启动握手超时、重启后会话恢复）的信号：
- * Agent 报 `disconnected`——我们与它的连接断了。它自己还活着吗？**看进程，不看我们的连接**：
- * 进程在跑就是第 2 类（连接断了、Agent 没坏），进程退了才是第 1 类，既非在跑也非退出（interrupted）
- * 就是分不清。非 Agent、或没报 disconnected 的，都是走通了——不打扰。
+ * 先读 Core 落下的 durable marker（下面的 handshake-timeout、reattach-failed 分支——它们比推断出的
+ * status 更权威，且挺过快照刷新），再退到 status：Agent 报 `disconnected`——我们与它的连接断了。它自己
+ * 还活着吗？**看进程，不看我们的连接**：进程在跑就是第 2 类（连接断了、Agent 没坏），进程退了才是第 1 类，
+ * 既非在跑也非退出（interrupted）就是分不清。非 Agent、或没有任何失败信号的，都是走通了——不打扰。
+ *
+ * 「重启后会话恢复」是唯一还没接线的消费者：它落地后会在这里多加一个自己的 marker 分支，共用同一存活判定。
  */
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
@@ -154,6 +186,19 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
       label: 'Checking terminal capabilities',
       degradedMode: 'The Agent is still usable; terminal capability is unknown and prompts remain available',
       restore: 'Resume this session to retry the capability check'
+    }
+    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
+  }
+
+  // Core 落下的「输出通道断了、进程没死」事实，比推断出的 disconnected 更权威：重连本身成功了，是
+  // 这一个 Run 的实时输出泵没能重建（client.ts 的 `resumed === 'dead'`）。输入照常送达 Agent，但它的
+  // 输出永远到不了这块屏——不告知的话用户对着一块永不回显的屏幕打字。直接投影这条事实（进程在跑就是
+  // 第 2 类，放行 + 提醒），它挺过视图切换与快照刷新，直到一次成功的 reattach 撤下它。
+  if (session.terminalOutputChannel?.reason === 'reattach-failed') {
+    const step: ProcessStep = {
+      label: 'Reattaching this window’s output',
+      degradedMode: 'Output may not be showing here, but your input still reaches the Agent',
+      restore: 'Resume this session to reattach its output'
     }
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }
