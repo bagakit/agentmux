@@ -76,6 +76,53 @@ describe('参数摘要', () => {
   })
 })
 
+// 补齐高频工具的行：表原本只覆盖 12 个工具，于是 8.4% 的真实调用折叠成裸工具名。补完之后，
+// 在本机 ~/.claude/projects 全部 transcript（7.76 万次 tool_use，2026-09-14）上实测
+// 覆盖率 91.6% → 99.2%；剩下的 612 次里 335 次是 AskUserQuestion——它的 `questions` 是嵌套数组，
+// 没有顶层字符串字段，扁平的表够不着，故有意留白（见下方「故意不收」）。
+// 每条都刻意塞一个"陷阱字段"——更长、或更靠前、或是内部枚举/agent id——把这一行改成取陷阱字段、
+// 或把整张表换成任何通用规则（取第一个短串 / 取最长串 / 一张通用优先表），这些断言就会红。
+// 这正是"表胜过任何谓词"的肯定证据：同一个字段名的角色是逐工具的，不通用。
+describe('新增工具行：取声明的那个字段，而不是通用规则蒙出来的', () => {
+  const cases: Array<[string, Record<string, unknown>, string]> = [
+    // 高价值：既有简洁的识别字段，通用规则又恰好在这里取错。
+    ['Agent', { description: 'Digest crawler snapshot', prompt: 'Y'.repeat(200) }, 'Digest crawler snapshot'], // 不是 645c prompt
+    ['TaskCreate', { subject: '写纯函数与测试', description: 'X'.repeat(200), activeForm: 'a' }, '写纯函数与测试'], // 不是详情 blob
+    ['SendMessage', { to: 'ad10e88e542eac233', summary: '交付完成', message: 'M'.repeat(200) }, '交付完成'], // 不是 agent id / 1KB
+    ['Workflow', { description: 'Diagnose launcher', script: 'export const meta'.repeat(50) }, 'Diagnose launcher'], // 不是 6.7KB 源码
+    ['Monitor', { command: 'while true; do sleep 1; done', description: 'packaging done' }, 'packaging done'], // 不是原始 shell
+    ['Skill', { skill: 'bagakit-supervisor', args: 'x' }, 'bagakit-supervisor'],
+    ['PushNotification', { message: '磁盘告急', status: 'proactive' }, '磁盘告急'], // 不是枚举 'proactive'
+    ['ScheduleWakeup', { reason: '兜底心跳', prompt: 'P'.repeat(200) }, '兜底心跳'], // 不是 1KB prompt
+    ['SendFeedback', { type: 'bug', title: 'AskUserQuestion bug', details: 'D'.repeat(200) }, 'AskUserQuestion bug'], // 不是枚举/1KB
+    // 低价值但诚实：id/动词就是区分两行同名调用的东西。
+    ['CronCreate', { cron: '0 9 * * *', prompt: 'P'.repeat(200) }, '0 9 * * *'], // 不是 1KB prompt
+    ['CronDelete', { id: 'job-123' }, 'job-123'],
+    ['TaskGet', { taskId: '17' }, '17'],
+    ['TaskStop', { task_id: 'a-xyz' }, 'a-xyz'],
+    ['TaskOutput', { task_id: 'a-xyz', block: true }, 'a-xyz']
+  ]
+  it.each(cases)('%s 取声明字段而非陷阱字段', (tool, input, expected) => {
+    expect(stepSummary(tool, JSON.stringify(input))).toBe(expected)
+  })
+
+  it('Artifact：title 优先，缺席退回 description', () => {
+    // 两候选：实测真实调用里 title 常缺席、只有 description，所以 description 是有效兜底而非空取。
+    expect(stepSummary('Artifact', JSON.stringify({ title: 'Ship gate', description: 'X'.repeat(200), favicon: '🚦' }))).toBe('Ship gate')
+    expect(stepSummary('Artifact', JSON.stringify({ description: 'progress', favicon: '🚦' }))).toBe('progress')
+  })
+
+  it('TaskUpdate：有 status 取状态动词，无 status 退回 subject 标题', () => {
+    // taskId 单独无意义；状态变更的识别位是 status。实测 1876 次里 208 次没有 status——
+    // 其中带 subject 的取那个真标题，比裸名强（把行改成只 ['status'] 时第二条会红）。
+    // 两者都在时 status 优先（实测 48 次 status+subject 并存）——把顺序反成 ['subject','status'] 第一条会红。
+    // 计数语料：本机 ~/.claude/projects 全部 transcript，2026-09-14 当日；会随使用增长，
+    // 断言钉的是取哪个字段，不是这些数。
+    expect(stepSummary('TaskUpdate', JSON.stringify({ status: 'in_progress', subject: '建 feature', taskId: '1' }))).toBe('in_progress')
+    expect(stepSummary('TaskUpdate', JSON.stringify({ subject: '建 feature 并写 review', description: 'X'.repeat(200), taskId: '2' }))).toBe('建 feature 并写 review')
+  })
+})
+
 // 截断方向不是风格问题，是这条摘要有没有识别力的问题。绝对路径在同一个仓库里**前缀全同**
 // （工具收到的就是绝对路径），保留头部会把 48 格全花在机器名和仓库路径上，两个不同的文件截出来
 // 一模一样——而摘要存在的唯一理由就是「不展开也认得出是哪个」。
