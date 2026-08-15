@@ -13,6 +13,7 @@ import type {
   WorkspaceRecord
 } from '../shared/contracts.js'
 import { gitFailureMessage, scrubGitCredentials, type GitService } from './git-service.js'
+import { FALLBACK_BASE_REF, parseRemoteHead, plainBranchName, remoteHeadArgs } from '../shared/base-ref.js'
 
 /**
  * The base branch proposed when `origin/HEAD` cannot answer. Deliberately a single constant rather than
@@ -20,7 +21,6 @@ import { gitFailureMessage, scrubGitCredentials, type GitService } from './git-s
  * look like a finding. One labelled guess the user can see and override is honest; a search that lands
  * on something is a guess wearing evidence's clothes.
  */
-const PR_FALLBACK_BASE = 'main'
 
 /**
  * Non-interactive environment for every `gh` invocation. This runs in the unattended Desktop main
@@ -78,21 +78,6 @@ function isMissingBinaryError(error: unknown): boolean {
   )
 }
 
-/**
- * `origin/main` → `main`: the plain branch name, with a remote-tracking prefix removed.
- *
- * There is exactly one of these because normalizing twice is how the ref you *verified* stops being the
- * ref you *use*. That is not hypothetical — it was the shape of a real bug here: the `ls-remote`
- * preflight stripped the prefix while the `gh pr create` argv did not, so a base of `origin/main` was
- * confirmed to exist as `main` and then handed to gh as `origin/main`.
- *
- * Only the leading `origin/` goes, and only once: a branch legitimately named `origin/thing` under a
- * differently-named remote must not lose a segment. The anchor is what makes that true, so it is not
- * decoration — `/origin\//` would eat the middle of `feature/origin/rework`.
- */
-function plainBranchName(ref: string): string {
-  return ref.replace(/^origin\//u, '')
-}
 
 /**
  * GitHub CLI capability probing, beside `GitService` in Desktop main and, like it, never spawning a
@@ -259,18 +244,14 @@ export class GhService {
   ): Promise<{ ref: string; source: PrBaseSource }> {
     let result
     try {
-      result = await host.run(
-        'git',
-        ['-C', repoPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
-        GH_RUN_OPTIONS
-      )
+      result = await host.run('git', remoteHeadArgs(repoPath), GH_RUN_OPTIONS)
     } catch {
-      return { ref: PR_FALLBACK_BASE, source: 'fallback' }
+      return { ref: FALLBACK_BASE_REF, source: 'fallback' }
     }
-    // `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<branch>`; the shared
-    // normalizer turns that into the plain name.
-    const ref = result.exitCode === 0 ? plainBranchName(result.stdout.trim()) : ''
-    return ref ? { ref, source: 'remote-head' } : { ref: PR_FALLBACK_BASE, source: 'fallback' }
+    // The parse, the `origin/` strip, and the guessed-vs-authoritative labelling all live in
+    // `shared/base-ref.ts` now, because removing a worktree asks this same question and a second
+    // copy would be a second answer. This method keeps only the part that must be here: running git.
+    return parseRemoteHead(result.stdout, result.exitCode)
   }
 
   /**
