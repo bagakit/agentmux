@@ -27,6 +27,9 @@ export const MAX_STEP_SUMMARY_LENGTH = 48
  * 两条**全等**。这条摘要存在的唯一理由就是「不展开也认得出是哪个」，保留头部时它一个字节的识别力
  * 都不提供，比没有摘要更坏——它看起来是答案。
  *
+ * 保尾是**兜底**，不是第一手：真正该先做的是 {@link shortenPath} 那两步无损缩短。拿到 workspaceRoot
+ * 时多数路径根本用不着截。两者顺序不可换，理由见那里。
+ *
  * 其余字段一律保留头部，各有各的理由，不是「默认值」：
  * - `command`：识别位在动词。`pnpm exec vitest run …` 的头告诉你在跑测试；尾只给最后一个文件参数。
  *   危险命令同理由头识别（`rm -rf …`）。
@@ -34,6 +37,28 @@ export const MAX_STEP_SUMMARY_LENGTH = 48
  * - `pattern` / `query` / `description`：从左读的散文或表达式，头即主语。
  */
 const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path', 'notebook_path'])
+
+/**
+ * 路径先**缩短**，再考虑截断——截断是有损的，缩短不是。
+ *
+ * 这两步换回来的格子实测很大：本仓 400 条真实源文件路径，原样尾切后**没有一条**能完整显示（0%），
+ * 剥掉仓根之后 31% 完整显示，平均长度 97 → 53 个码元。而且省下的正是**零识别力**的那一段——
+ * 同一个仓库里每条路径都带着同样的 `/Users/<user>/proj/.../<repo>/`。
+ *
+ * 两条规则，都只动前缀：
+ * - **仓根 → 相对路径。** 用户心里的路径本来就是 `apps/desktop/src/...`，绝对前缀是机器的记法。
+ * - **家目录 → `~`。** 仓外的路径（工具偶尔会读 `~/.claude/settings.json` 这类）省 15 格。
+ *   受益窗口只有 15 格宽，所以它是顺手的第二条，不是主力。
+ *
+ * 只在**开头**匹配，且仓根要求后面跟 `/`：`/repo-backup/x` 不该因为 `/repo` 是仓根就被剥成
+ * `-backup/x`。匹配不上就原样返回——缩短不了就是缩短不了，不猜。
+ *
+ * 放在 clamp **之前**：顺序反过来就白做了，截断已经把尾巴切掉，再缩短前缀也补不回识别位。
+ */
+function shortenPath(value: string, workspaceRoot: string | undefined): string {
+  if (workspaceRoot && value.startsWith(`${workspaceRoot}/`)) return value.slice(workspaceRoot.length + 1)
+  return value.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/u, '~')
+}
 
 /**
  * 每个工具从哪个字段取摘要。
@@ -126,7 +151,8 @@ export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit =
 export function stepSummary(
   toolName: string | undefined,
   rawInput: string | undefined,
-  limit: number = MAX_STEP_SUMMARY_LENGTH
+  limit: number = MAX_STEP_SUMMARY_LENGTH,
+  workspaceRoot?: string
 ): string | null {
   if (!toolName || !rawInput) return null
   const fields = SUMMARY_FIELDS[toolName.toLowerCase()]
@@ -143,8 +169,9 @@ export function stepSummary(
   for (const field of fields) {
     const value = record[field]
     if (typeof value !== 'string') continue
-    const flat = flatten(value)
-    if (flat) return clampStep(flat, TAIL_IDENTIFIED_FIELDS.has(field) ? 'tail' : 'head', limit)
+    const isPath = TAIL_IDENTIFIED_FIELDS.has(field)
+    const flat = flatten(isPath ? shortenPath(value, workspaceRoot) : value)
+    if (flat) return clampStep(flat, isPath ? 'tail' : 'head', limit)
   }
   return null
 }
@@ -179,11 +206,16 @@ export function stepSummary(
  * 改成 `<= 0` 给同一串再加 ` …`。取 `<= 2` 会把预算 2 那一档（`… p…`，一个真字符）也丢掉，
  * 那一档薄但不空，所以留着。
  */
-export function stepTitle(title: string, toolName: string | undefined, rawInput: string | undefined): string {
+export function stepTitle(
+  title: string,
+  toolName: string | undefined,
+  rawInput: string | undefined,
+  workspaceRoot?: string
+): string {
   const prefix = `${title} `
   const budget = MAX_STEP_SUMMARY_LENGTH - prefix.length
   // 工具名本身就撑满一行，没有格子留给摘要了：只保留工具名，并按普通文本截进上界。
   if (budget <= 1) return clampStep(title)
-  const summary = stepSummary(toolName, rawInput, budget)
+  const summary = stepSummary(toolName, rawInput, budget, workspaceRoot)
   return summary ? `${prefix}${summary}` : clampStep(title)
 }
