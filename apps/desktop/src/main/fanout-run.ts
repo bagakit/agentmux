@@ -1,6 +1,6 @@
 import type { AppConfig, FanOutLaneOutcome, WorktreeRetention } from '../shared/contracts'
 import type { FanOutBranch } from './fanout-plan'
-import { classifyRetention } from './worktree-service.js'
+import { classifyRetention, WorktreeRetainedError } from './worktree-service.js'
 
 // Running one prompt down N lanes.
 //
@@ -104,7 +104,34 @@ export async function runFanOut(input: {
         input.readConfig()
       )
     } catch (error) {
-      // Nothing was created, so nothing is stranded. Record and move to the next lane.
+      // Two different worlds arrive here, and calling both "nothing was created" is a lie in one of them.
+      //
+      // Usually git itself refused (the name is taken, the path exists, the repository is busy) and
+      // nothing is on disk. But `createForBranch` runs git FIRST and writes the record second, so a
+      // failure of that second step means the worktree and its branch are real and unregistered. This
+      // arm used to report both as `worktree-failed`, under the comment "Nothing was created, so nothing
+      // is stranded" — after which nobody cleans the directory up, and the next fan-out on the same base
+      // name collides with it.
+      //
+      // `WorktreeRetainedError` is how the create path says which world it stopped in, the same way the
+      // teardown path already did. A lane that got that far HAS a checkout with no agent in it, which is
+      // exactly what `launch-failed` means to every consumer — `strandedLanes` lists it, and the renderer
+      // offers the retry-or-discard decision only a person can make.
+      //
+      // It reaches `strandedLanes` because the create path classifies as `git-failed`, which that filter
+      // keeps; `record-not-withdrawn` is filtered OUT there, correctly, because on the teardown path it
+      // means the directory is already gone. Same words, opposite world — see `register`.
+      if (error instanceof WorktreeRetainedError) {
+        results.push({
+          status: 'launch-failed',
+          branch: lane.branch,
+          path: lane.path,
+          error: message(error),
+          cleanup: classifyRetention(error)
+        })
+        continue
+      }
+      // Git refused, so nothing is on disk. Record and move to the next lane.
       results.push({
         status: 'worktree-failed',
         branch: lane.branch,
