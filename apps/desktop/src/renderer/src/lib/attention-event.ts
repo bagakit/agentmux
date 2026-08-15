@@ -1,6 +1,6 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { isNeedsYouState } from './attention-vocabulary'
+import { isNeedsYouState, type NeedsYouState } from './attention-vocabulary'
 
 // Which state change is worth interrupting a person over.
 //
@@ -121,6 +121,48 @@ export function isUrgentAttention(category: AttentionCategory | null): boolean {
 export function attentionAccentFor(state: AgentDisplayState): AttentionCategory | null {
   const category = categoryFor(state)
   return isUrgentAttention(category) ? category : null
+}
+
+/**
+ * The `status--<tier>` a single row's dot renders, or null for the neutral resting dot.
+ *
+ * ONE definition, because there were two and they had already gone wrong in the same way. The roster
+ * row (`AgentRoster.tsx`) and the fan-out lane (`FanOutStrip.tsx`) each carried their own four lines,
+ * both ending in `state === 'working' ? 'working' : null`. That final clause is the bug: it collapses
+ * `running` — an Agent that is alive and between turns — into the same answer as "no state at all",
+ * so the dot painted `--neutral-3`, the resting grey.
+ *
+ * That was visible, not theoretical. The status-bar counts and the project→Agent tree both bucket with
+ * `sessionBoardColumn`, which counts `starting`/`running`/`working` as working. So the tree's heading
+ * said "working agents" while rows inside it rendered idle grey dots. `chrome.css` has had
+ * `.status--running` — green, and deliberately NOT pulsing — since the vocabulary was written; both
+ * copies simply never emitted it.
+ *
+ * Why `running` is green-but-still rather than folded into `working`: the pulse means "a turn is in
+ * flight right now". An Agent waiting for your next message is alive, not mid-turn, and pulsing it
+ * would spend the one moving thing on screen on a row that needs nothing. `starting` stays null on
+ * purpose too — it is transient, and flashing a tier for a few hundred milliseconds during launch is
+ * noise, not information.
+ *
+ * 只收一个 state，不再并收一个 attention。两个调用点传的 attention 都恰好是 `categoryFor(state)`
+ * （agent-roster.ts、fanout-group.ts 各一处），所以第二个入参不是第二个事实，只是同一个事实的另一条
+ * 到达路径——而两条路径就是有一天答得不一样的前提。少了那个入参，「等你」和「在跑」也就不可能同时
+ * 成立：一个状态只落一档，档位的优先级由这里的顺序一次定死。
+ *
+ * 返回值就是**状态名本身**，因为 CSS 的类名就是按状态命名的（`.status--<state>`，chrome.css 的
+ * 状态词汇表一节）。所以 `blocked` 得到 `.status--blocked` 而不是被折进 `waiting`：样式表给这两个
+ * 类完全相同的琥珀色与 `?` 角标，画面一模一样，但判定层不必替样式表做一次多余的归并。
+ * needs-you 那一档经 {@link isNeedsYouState} 取得，而不是在这里把状态名再抄一遍——抄一遍今天正确，
+ * 只在联合新增成员那天出错，而那天没人会看这个文件（attention-vocabulary.test.ts 守这条）。
+ */
+export function statusDotTier(
+  state: AgentDisplayState | null
+): NeedsYouState | 'working' | 'running' | 'error' | null {
+  if (state === null) return null
+  if (isNeedsYouState(state)) return state
+  if (state === 'error') return state
+  if (state === 'working' || state === 'running') return state
+  return null
 }
 
 /**
