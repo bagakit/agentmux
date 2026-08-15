@@ -151,6 +151,32 @@ ctxmux owner 同时确认了两条**语义**（来自协议源码文档，不是
 **因此本 Feature 第 2 条的正确状态是「阻塞在上游 artifact」，不是「已完成」，也不是「我们没做」。**
 上游侧跟踪在 ctxmux 自己的 tracker（其 Task 1 仍 in_progress）；本仓这侧零新代码，理由见上一节。
 
+## 前提已从本文档搬进代码（2026-09-14，e2783e92）
+
+上面「不清缓存是对的」那套论证**曾经只写在这个文件里**，而本文件是一个未来的改动者**不需要路过**
+的地方。ctxmux owner 指出了这一点：三条前提全是 AgentMux 的**部署事实**，不是 ctxmux 的保证——
+ctxmux 的接口就是那个 socket，它自带的 CLI 和我们一样只是个客户端。于是把它们搬到
+`confirmedSizes` 的声明旁，连同「什么会让前提失效」和「失效时**不要**做什么」。
+
+三条前提各自的判别器（本文档不再是它们的唯一存放处）：
+
+| 前提 | 判别器 |
+| --- | --- |
+| 只有一个 app 实例 | `apps/desktop/test/main-window-setup.test.ts`（单实例锁在构造任何运行时 owner 之前） |
+| 我们从不启动 vendored CLI | `packages/core/test/ctxmux-second-writer-premise.test.ts`（**新增**） |
+| protocol 14 无入站几何通道 | `ctxmux-run-current-size.test.ts` 的 `expect(PROTOCOL_VERSION).toBe(14)` |
+
+**写判据的过程纠正了论断本身。** 第一版写的是「CLI 的路径从未被拼出来过」，判据当场变红：
+`verifyArtifact` 为了 stat+sha 必然要把传给它的任何描述符拼成路径，CLI 也不例外。真正成立的性质更窄
+——**那条路径从不逃出校验函数**。所以判据钉的是 `cli` 这个绑定**流向谁**（恰好一处：verifyArtifact），
+而不是某一种路径拼法的拼写；后者换个写法就绕过去了。这一条若照着原话写进注释，会是一句永远没人
+质疑的错话。
+
+`PROTOCOL_VERSION` 用的是 SDK 导出的**类型化字面量**（`constants.d.ts` 写死 `: 14`），不是 grep
+生成物路径：路径一变，grep 静默退化成读不到文件或恒真断言。另外握手是**精确相等**不是下限
+（daemon 侧 `hello.protocol == PROTOCOL_VERSION`，否则 VersionMismatch 断连），所以 `>= 16` 不是
+有效的运行时特性检测——升上去之后要么对面就是 16，要么根本连不上，**没有静默给错答案的窗口**。
+
 ## 边界
 
 不要重复实现 ctxmux 的尺寸能力。缺的是我们这侧的重建与诚实降级，不是再造一份尺寸真相。
