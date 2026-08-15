@@ -80,9 +80,13 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
 
   it('CLI help 的键鼠自动化禁令确实在文档新引的那两行上', () => {
     const help = read('packages/core/src/agentmux-cli-help.ts').split('\n')
+    // 禁令有两种拼法，两种都要认：T-009 把投递那条从「Do not simulate either payload with keyboard
+    // or UI automation.」改写成了「no keystroke synthesis into a terminal」——改写是对的（它把禁令
+    // 收窄到"投递 payload"，不再误伤 browser run 驱动页面），但只认 `UI automation` 的判据会看不见
+    // 改写后的那一条，于是「笔记引的行号对不对」这件事在那一行上无人可核。
     const prohibitionLines = help
       .map((line, index) => ({ line, number: index + 1 }))
-      .filter((entry) => /UI automation/.test(entry.line))
+      .filter((entry) => /UI automation|keystroke\s*$|keystroke synthesis/.test(entry.line))
       .map((entry) => entry.number)
 
     // 扫到有收获：禁令句一条都找不到时，下面的比对会拿两个空集相等，恒真。
@@ -166,6 +170,36 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
     for (const mention of stanceMentions) {
       expect(mention, `这句仍把它当作无条件的「有意不做」，与表里那行矛盾：${mention.slice(0, 30)}`)
         .toMatch(/坐标模拟/)
+    }
+  })
+
+  // ── 四、skill 里那份页面函数清单不许落后于真正注入的那份 ──────────────────────
+  //
+  // skill 是 Agent 的唯一用法真相，它列出 Agent 能调哪些页面函数。而真正注入子进程的那份清单是
+  // `BROWSER_PAGE_FUNCTION_NAMES`（browser-script-runner.ts），两者**分属两个包**、不在同一条
+  // 构建图上，skill 那份只能手抄。手抄的清单会漂：新增一个页面函数而忘了改 skill，Agent 就永远
+  // 不知道它存在；而两边都不会红（MEMORY「构建图之外的手抄常量」「多处手抄的常量只有 tsc 守」，
+  // 而这里连 tsc 都守不到——skill 是字符串）。
+  //
+  // 判据从 SSOT 反推：解析出真清单，逐个要求 skill 提到。不维护第二份「应该有哪些」的名单。
+  it('skill 教出的页面函数清单与真正注入的那份一致', () => {
+    const runner = read('apps/desktop/src/main/browser-script-runner.ts')
+    const block = runner.split('BROWSER_PAGE_FUNCTION_NAMES = [')[1]?.split('] as const')[0] ?? ''
+    const names = [...block.matchAll(/'([a-zA-Z]+)'/g)].map((match) => match[1]!)
+    // 扫描面非空自检：解析失败会让下面的循环一条不跑、整条静默通过。
+    expect(names.length, '页面函数清单解析成空——判据失效，这条什么都不检查').toBeGreaterThan(10)
+
+    const help = read('packages/core/src/agentmux-cli-help.ts')
+    const start = help.indexOf('## Drive an open Browser')
+    expect(start, 'skill 里没有「Drive an open Browser」这一节——判据的范围落空').toBeGreaterThan(-1)
+    // 取带右界的一节，避免只取左界让邻节顶上（MEMORY「只取左界的 section 判据」）。
+    const end = help.indexOf('\n## ', start + 1)
+    const section = help.slice(start, end < 0 ? undefined : end)
+    expect(section.length, 'skill 的这一节切出来是空的').toBeGreaterThan(200)
+
+    for (const name of names) {
+      expect(section, `skill 没教 \`${name}\`——它注入进了子进程，但 Agent 无从知道它存在`)
+        .toContain(name)
     }
   })
 })

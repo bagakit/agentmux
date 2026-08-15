@@ -1,17 +1,18 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import { Bell, Bot, Boxes, FolderGit2, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import { Bell, Bot, Boxes, FolderGit2, Globe, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import type { AgentExecutorConfig, AppConfig, AppearanceConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { AgentSettingsPane } from './settings/AgentSettingsPane'
 import { AppearanceSettingsPane } from './settings/AppearanceSettingsPane'
+import { BrowserSettingsPane } from './settings/BrowserSettingsPane'
 import { GeneralSettingsPane } from './settings/GeneralSettingsPane'
 import { HostSettingsPane } from './settings/HostSettingsPane'
 import { NotificationSettingsPane } from './settings/NotificationSettingsPane'
 import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
 
-export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces'
+export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser'
 type SettingsGroupId = 'setup' | 'preferences'
 
 // Grouped navigation, using `group`-tagged sections at this app's small scale
@@ -41,6 +42,7 @@ const SECTIONS = [
   { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Executors and Providers', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
   { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
   { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts and how long they stay', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss' },
+  { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Whether Agents may drive an open page', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
   { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
 
@@ -137,6 +139,12 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
     setConfig(await api.config.save({ ...current, hosts, workspaces }))
   }
 
+  async function saveBrowser(browser: BrowserConfig): Promise<void> {
+    const current = useAppStore.getState().config
+    if (!current) return
+    setConfig(await api.config.save({ ...current, browser }))
+  }
+
   return (
     <div className="settings-page">
       <div className="window-drag-region" />
@@ -163,6 +171,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
           {active === 'general' ? <GeneralSettingsPane /> : null}
           {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {active === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
+          {active === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
           {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} /> : null}
           {active === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
           {active === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}

@@ -157,6 +157,16 @@
    与其下的说明（--fs-meta / --text-3）拉开一档，读者一眼知道哪句是导语、哪句是脚注。 */
 .settings-lead { margin:0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-prose); line-height: 1.5; }
 
+/* Browser 这一节的总开关。整行可点（label 包住 input），与 Agents 那节的 `.agent-guide-toggle`
+   同形——两处都是"一个开关 + 标题 + 一段说明"，长得不一样会让人以为是两种不同的控件。
+   绿只落在 accent-color 上（＝状态语汇），其余取 token。 */
+.browser-automation-toggle { display: flex; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-5); cursor: pointer; }
+.browser-automation-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:2px 0 0; accent-color: var(--green); }
+.browser-automation-toggle > span { display: grid; gap:var(--sp-2); }
+.browser-automation-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+.browser-automation-toggle small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.browser-automation-toggle code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
+
 /* 通知预览——本屏的"手艺时刻"，对标终端主题预览那格 mini 终端。
    它不是装饰：把系统通知长什么样如实画出来（状态点 + "Agent — 状态"标题行 + 回看行 + 停留计量条），
    让用户在拨动停留时长时看到自己在配置什么。所有取色来自 token，绿只落在状态点与停留计量上（＝状态语汇）。 */
