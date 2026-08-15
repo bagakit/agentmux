@@ -16,6 +16,7 @@ import type { AgentDisplayState, AgentSemanticState, AgentStatus } from '../src/
 import {
   DECAYED_SEMANTIC_STATE,
   agentDisplayState,
+  agentEvidenceStale,
   msUntilSemanticStatusStale,
   semanticStatusStale
 } from '../src/agent-status-freshness.js'
@@ -284,5 +285,40 @@ describe('msUntilSemanticStatusStale 给定时器算延时', () => {
   it('不可衰减的状态一律返回 0', () => {
     expect(msUntilSemanticStatusStale(status('waiting', 0), 0)).toBe(0)
     expect(msUntilSemanticStatusStale(status('done', 0), 0)).toBe(0)
+  })
+})
+
+describe('agentEvidenceStale：支撑一行的最后一次观察是否已过新鲜度窗口', () => {
+  // 阈值从两个已导出入口反推，而不是抄 15*60_000：msUntilSemanticStatusStale 对刚落地的 working
+  // 返回满额 TTL，正是那个窗口。这样阈值只有一处定义，测试的期望跟着它走，不会与被测常量一起漂
+  // （memory: expected-value-must-not-derive-from-mutation-target 的反面——这里的锚点是**另一个**
+  // 导出函数的可观察行为，不是被测函数自己）。
+  const WINDOW = msUntilSemanticStatusStale(status('working', 0), 0)
+
+  it('这个锚点确实是 15 分钟量级、且与 semanticStatusStale 同一个阈值（否则下面全是自证）', () => {
+    expect(WINDOW).toBeGreaterThan(60_000)
+    // 同阈值：semanticStatusStale 在 now-observedAt 恰好等于 WINDOW 时翻真。
+    expect(semanticStatusStale(status('working', 0), WINDOW)).toBe(true)
+    expect(semanticStatusStale(status('working', 0), WINDOW - 1)).toBe(false)
+  })
+
+  it('到点即陈旧、差 1ms 不算——与衰减同口径的 >=', () => {
+    expect(agentEvidenceStale({ observedAt: 0 }, WINDOW)).toBe(true)
+    expect(agentEvidenceStale({ observedAt: 0 }, WINDOW - 1)).toBe(false)
+  })
+
+  it('看得见衰减产物 running——这正是 semanticStatusStale 看不见、而显示层需要的那半', () => {
+    // 衰减把静默超阈值的 working 落成显示态 running、observedAt 原样保留。此刻：
+    //   - semanticStatusStale 因为 state 不再是 working 而返回 false（它只管"该不该衰减"）
+    //   - agentEvidenceStale 只看 observedAt，如实说"证据过期了"
+    // 两者在同一条陈旧的 running 上给出相反答案，正是本函数存在的理由。
+    const decayedRunning = { state: agentDisplayState(DECAYED_SEMANTIC_STATE), observedAt: 0 }
+    expect(decayedRunning.state).toBe('running')
+    expect(semanticStatusStale(decayedRunning, WINDOW + 1)).toBe(false)
+    expect(agentEvidenceStale(decayedRunning, WINDOW + 1)).toBe(true)
+  })
+
+  it('窗口内的新鲜证据不判陈旧，无论什么状态', () => {
+    expect(agentEvidenceStale({ observedAt: WINDOW }, WINDOW + (WINDOW - 1))).toBe(false)
   })
 })

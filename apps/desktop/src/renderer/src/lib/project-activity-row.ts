@@ -12,15 +12,18 @@
  * 类别决定尾随事实**：
  *   - needs-you（等你批准/回答）：尾随「等了多久」——此刻唯一还有用的次要事实是它已经等了你多久。
  *   - error：尾随「多久以前坏的」。
- *   - working（starting/running/working）：尾随上下文压力 `ctx N%`（只有报用量的 Provider、且这一 turn
- *     真采到了才有），否则退回 `active now`。对一个正在跑的 Agent，第二个问题是「它是不是快压缩了」，
- *     不是它跑了多久。
+ *   - working（starting/running/working）：证据还新鲜时尾随上下文压力 `ctx N%`（只有报用量的 Provider、
+ *     且这一 turn 真采到了才有），报不出就退回 `active now`。对一个正在跑的 Agent，第二个问题是
+ *     「它是不是快压缩了」，不是它跑了多久。但若支撑「在忙」的最后一次观察已超过新鲜度窗口（core 的
+ *     衰减把这种 `working` 落成 `running`、仍在 working 列），就不再谎称 `active now`，改尾随
+ *     「上次活动在多久以前」。
  *   - 其余（idle/done/disconnected）：尾随「空闲多久」。
  *
  * 主句（reason）不在这里重造：直接复用 session-recency 的那份唯一派生。这个文件只负责**分级**与**尾随**。
  */
 
 import type { AgentTimelineItem, SessionSnapshot } from '../../../shared/contracts'
+import { agentEvidenceStale } from '@agentmux/core/agent-status'
 import { attentionAccentFor, type AttentionCategory } from './attention-event'
 import { contextUsedPercent } from './agent-usage'
 import { sessionBoardColumn } from './project-board'
@@ -76,7 +79,14 @@ export function projectActivityRow(
   if (attention === 'error') return { reason, attention, meta: `${elapsed} ago` }
 
   // working：正在跑。尾随上下文压力（「是不是快压缩了」），报不出就退回 active now——绝不显示 0%。
+  // 但先问一句：支撑「此刻在忙」这句声明的证据还新不新。一个 15 分钟没人听到的 `working` 会被
+  // core 的衰减落成显示态 `running`（仍在 working 列，observedAt 原样保留），此时说 "active now" 是
+  // 谎话——它恰恰是「不知道现在怎么样」。所以证据过期时改说「上次活动在多久以前」（同 needs-you/error
+  // 两臂已经在用的 elapsed），把一个诚实的相对时刻交还给用户，而不是一个安抚性的猜测。
+  // 只改这一行的**文案**，不改它归哪一列：计数走 sessionBoardColumn 那一个开关（含衰减产物 running），
+  // 显示层不另判一次「在跑吗」，故 working-count-convergence 的收敛不变（见该测试的第三判据）。
   if (sessionBoardColumn(session) === 'working') {
+    if (agentEvidenceStale(session.status, now)) return { reason, attention, meta: `last active ${elapsed}` }
     const percent = contextPercent(session)
     return { reason, attention, meta: percent === null ? 'active now' : `ctx ${percent}%` }
   }
