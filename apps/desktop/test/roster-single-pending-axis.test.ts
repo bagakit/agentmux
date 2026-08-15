@@ -42,16 +42,30 @@ import ts from 'typescript'
  *      **递归**归一三元、并穿透括号——它是纯**结构折叠**、不做算术求值，所以照旧不会误伤 `'a' : 'b'`
  *      这类真派生。注意这不需要 TypeChecker：两支各自折到同一常量身份，是语法层就看得穿的事。
  *
+ *      第四层（本轮）：判据此前只认「值里**直接**出现 `session`」，于是把派生值先存进局部常量再用——
+ *      `const percent = contextUsedPercent(session.turnUsage?.context)` 然后 `contextPercent: percent`
+ *      ——被报成「没人喂数」。那是**假阳性**，而假阳性的危险在它的修法：下一个人看到安全写法打红，
+ *      最省事的改法是把判据放宽回 `referencesAny`，上面三层堵的 bypass 全回来。所以改成
+ *      {@link transitiveNames} 穿透一层 `const` 绑定。**关键是两侧同时穿透**：只放宽 source 一侧会
+ *      开一个镜像的洞——同一个动作反着用就把事故原样（`input.unread?.[session.id] ?? 0`）洗成一个
+ *      干净的局部名（[[banned-word-guard-misses-the-mirror]]）。两条自检成对钉住这两个方向。
+ *
  * 两条都走 TS parser 而不是正则，且各自带在场自检：谓词永远为假、或扫描落空时，是自检先红，
- * 而不是「一个违规都没找到」静默通过（[[false-green-gate-patterns]]）。
+ * 而不是「一个违规都没找到」静默通过（[[false-green-gate-patterns]]）。**所有自检与生产判据都走
+ * 同一个 {@link offendersIn}**：自检若直连 `underivedProperties`，验的就是一个生产侧不再使用的
+ * 入口，`transitiveNames` 坏掉时它一概不知（[[cover-key-cannot-be-in-two-families]]）。
  *
  * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做**算术/字符串求值**、常量折叠或跨变量数据流——
- * `const blank = ''; workspacePath: session.id ? blank : blank2` 若 `blank !== blank2` 逐字不同会被
- * 当成派生（哪怕两个变量运行期相等）；`session.id ? 'a' + 'b' : 'ab'`（要把 `'a'+'b'` 化简成 `'ab'` 才知两支
- * 相等）、`session.a ? (session, 'x') : 'x'`（逗号运算丢弃 session、要求值顺序分析）、以及把常量藏进一个
- * 提到 session 的 helper 调用（`f(session)` 而内部丢弃入参）都仍被算派生。**嵌套常量三元**曾在此列，
- * 本轮已由 {@link canonicalConstant} 的结构折叠收掉，不再是盲点。抓剩下这些要 TypeChecker 的常量求值
- * 与过程间分析，本文件是 createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
+ * `session.id ? 'a' + 'b' : 'ab'`（要把 `'a'+'b'` 化简成 `'ab'` 才知两支相等）、
+ * `session.a ? (session, 'x') : 'x'`（逗号运算丢弃 session、要求值顺序分析）、以及把常量藏进一个
+ * 提到 session 的 helper 调用（`f(session)` 而内部丢弃入参）都仍被算派生。局部绑定只穿透**一层**：
+ * `const a = f(session); const b = a` 里的 `b` 认不出，会报假阳性并逼人在这里显式加一层——那是刻意
+ * 选的方向（宁可误伤也不放行）。还有一处是**换来的**而非漏掉的：被显式声明为 source 的名字
+ * （今天只有 `catalog`）不进 forbidden，所以经由它再从入参取一次值不会被抓——A 条保证了入参无可选
+ * 成员，而事故形状是从**可选**成员上按行取值，故这个口子够不到事故本身；这是为消除 `scopes` 的假阳性
+ * 明知换来的，记在这里而不是假装不存在。**嵌套常量三元**与**单层局部绑定**曾在这张单子上，已分别由
+ * {@link canonicalConstant} 的结构折叠与 {@link transitiveNames} 收掉。抓剩下这些要 TypeChecker 的
+ * 常量求值与过程间分析，本文件是 createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -199,6 +213,74 @@ function valueDependsOnSource(node: ts.Node, sources: readonly string[]): boolea
 }
 
 /**
+ * 函数体里的 `const 名字 = 初始化器` 全表——两条「透过一层绑定看」的判据共用的原料。
+ *
+ * 只收 `const`：`let` 可以在声明之后被重新赋成别的东西，「它派生自 session」这个结论就不再成立。
+ */
+function constBindings(fn: ts.FunctionDeclaration): { name: string; initializer: ts.Expression }[] {
+  const bindings: { name: string; initializer: ts.Expression }[] = []
+  const walk = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer !== undefined &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      bindings.push({ name: node.name.text, initializer: node.initializer })
+    }
+    ts.forEachChild(node, walk)
+  }
+  if (fn.body) ts.forEachChild(fn.body, walk)
+  return bindings
+}
+
+/**
+ * 把「二级 source」和「二级入参」一起算出来——**必须成对**，这是本轮的关键。
+ *
+ * 为什么要有这一层：判据原本只认「值里直接出现 `session`」。于是把一个派生值先存进局部常量再用——
+ * `const percent = contextUsedPercent(session.turnUsage?.context)` 然后 `contextPercent: percent`——
+ * 会被报成「没人喂数」。那是**假阳性**：这一列接得好好的，只是中间隔了一个绑定。
+ *
+ * 假阳性比漏报更危险的地方在于它的修法：下一个人看到一条安全的写法把判据打红，最省事的修法是
+ * 去改判据（放宽成 `referencesAny`），而那正好把这个文件反复堵过的 bypass 全放回来。所以这里选择
+ * **让判据看得懂这种写法**，而不是让它误伤然后等着被削弱。
+ *
+ * 而只放宽 source 一侧会当场开一个**镜像**的洞（[[banned-word-guard-misses-the-mirror]]）：
+ * `touchesInput` 判的是「值里出不出现 `input`」，同一个「先存进局部常量」的动作也能把它洗掉——
+ * `const n = input.unread?.[session.id] ?? 0` 然后 `unreadCount: n`，事故原样就复活了。所以两侧
+ * 同一次穿透：派生自 source 的局部名进 `sources`，碰了入参的局部名进 `forbidden`。
+ *
+ * 传递性只做一层（`const a = f(session); const b = a`：`b` 认不出）。这是刻意的边界，不是遗漏——
+ * 真要写成链式转手，判据会报假阳性并逼人在这里显式加一层，而不是悄悄放行。
+ *
+ * **声明的 source 优先于传递来的 forbidden**：`catalog` 本身就是 `const catalog = new Map(input.providerCatalog…)`
+ * ——它确实派生自入参，若不排除就会被扫进 forbidden，把 `scopes: resolveRosterScopes(…, catalog.get(…))`
+ * 误报成不合格（本轮实测就是这么红的）。排除它是有依据的而非图方便：A 条已经强制入参**无可选成员**，
+ * 所以一个被显式声明为 source 的整份派生，不可能是「这一列可以按调用点缺席」的那张许可证；事故形状
+ * 恰恰是从**可选**成员上按行取值。残留的洞记在文件头。
+ */
+function transitiveNames(
+  fn: ts.FunctionDeclaration,
+  sources: readonly string[],
+  forbidden: readonly string[]
+): { sources: string[]; forbidden: string[] } {
+  const bindings = constBindings(fn)
+  return {
+    // 只收初始化器真的派生自 source 的那些：`const zero = 0` 不会因为出现在这个函数里就变成 source。
+    sources: [...sources, ...bindings.filter((b) => valueDependsOnSource(b.initializer, sources)).map((b) => b.name)],
+    // 入参侧用 `referencesAny`：碰了入参在哪都算，和 `touchesInput` 同一把尺子。被显式声明为 source
+    // 的名字不进 forbidden——见上文，`catalog` 就是这一种。
+    forbidden: [
+      ...forbidden,
+      ...bindings
+        .filter((b) => !sources.includes(b.name) && referencesAny(b.initializer, forbidden))
+        .map((b) => b.name)
+    ]
+  }
+}
+
+/**
  * 行字面量里**不合格**的属性名。
  *
  * 合格的定义有两条，必须同时满足：
@@ -247,6 +329,25 @@ function underivedProperties(
 describe('名册只有一条"这一行需要我吗"的轴，且每一列都真的接上了', () => {
   const source = parse(LIB)
   const build = functionNamed(source, 'buildAgentRoster')
+
+  /**
+   * 一个函数的行字面量里，不合格的属性名——**自检与生产判据走同一条路**。
+   *
+   * 刻意不让自检直接调 `underivedProperties(lit, ['session'], ['input'])`：那样自检验的是一个生产侧
+   * 不再使用的入口，`transitiveNames` 出了什么事它一概不知（[[cover-key-cannot-be-in-two-families]]）。
+   */
+  function offendersIn(fn: ts.FunctionDeclaration): string[] {
+    const { sources, forbidden } = transitiveNames(fn, ['session', 'catalog'], ['input'])
+    const literal = rowLiteralIn(fn)
+    expect(literal, '这个函数里找不到行字面量——判据落在了空处').toBeDefined()
+    return underivedProperties(literal!, sources, forbidden)
+  }
+
+  function syntheticFn(body: string): ts.FunctionDeclaration {
+    const fn = functionNamed(parseText(body), 'f')
+    expect(fn, '合成源里解析不出 f——自检本身落空了').toBeDefined()
+    return fn!
+  }
 
   // 为什么每条自检各占一个 it（#742，本轮实测）：这两条门原先各把「谓词自检」与「生产判据」挤在
   // 同一个 it 里，且生产判据排在最后。于是任何一条自检失败都让生产判据变成**死代码**——变异
@@ -301,49 +402,64 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     // 提到了 `session`，只判「派生自 session」会放行它）、展开、以及**「提到但不派生」的伪装**
     // （`session.id ? '' : ''`：条件里提到 session，两支却是同一个常量，值恒为 ''）——最后这种正是
     // review agent 测得 2/2 green 的 bypass。
-    const synthetic = rowLiteralIn(
-      functionNamed(
-        parseText(
-          `function f(input: I) { return [{ sessionId: session.id, usage: { kind: 'unsupported', text: '', title: '' }, workspacePath: session.id ? '' : '', unreadCount: input.unacknowledgedThreads?.[session.id] ?? 0, ...extra }] }`
-        ),
-        'f'
-      )!
+    const synthetic = syntheticFn(
+      `function f(input: I) { return [{ sessionId: session.id, usage: { kind: 'unsupported', text: '', title: '' }, workspacePath: session.id ? '' : '', unreadCount: input.unacknowledgedThreads?.[session.id] ?? 0, ...extra }] }`
     )
-    expect(underivedProperties(synthetic!, ['session', 'catalog'], ['input'])).toEqual([
-      'usage',
-      'workspacePath',
-      'unreadCount',
-      '...展开'
-    ])
+    expect(offendersIn(synthetic)).toEqual(['usage', 'workspacePath', 'unreadCount', '...展开'])
   })
 
   it('前提自检：真的从 session/catalog 派生的字面量不许被误报', () => {
     // 反向：否则这条门只是恒红。这里成对钉住「三元条件里用 source 决定两个**不同**的真值」是合法
     // 派生——修法不能把这种正常写法一并误伤。
-    const clean = rowLiteralIn(
-      functionNamed(
-        parseText(
-          `function f() { return [{ sessionId: session.id, scopes: g(catalog), attention: session.busy ? 'a' : 'b' }] }`
-        ),
-        'f'
-      )!
+    const clean = syntheticFn(
+      `function f() { return [{ sessionId: session.id, scopes: g(catalog), attention: session.busy ? 'a' : 'b' }] }`
     )
-    expect(underivedProperties(clean!, ['session', 'catalog'], ['input'])).toEqual([])
+    expect(offendersIn(clean)).toEqual([])
+  })
+
+  it('前提自检：先存进局部常量再用，不算"没人喂数"（本轮加的第四层）', () => {
+    // 由来：`contextPercent: percent` 配 `const percent = contextUsedPercent(session.turnUsage?.context)`
+    // 被这条门报成没接数据——**假阳性**。这一列接得好好的，只是中间隔了一层绑定。
+    // 成对钉住三件事，缺一这层就会退化成一张放行许可证：
+    //   1. 派生自 session 的局部（`percent`）转手一次仍算派生；
+    //   2. 派生自 **catalog** 的局部（`scoped`）同样算——两个 source 不能只穿透一个；
+    //   3. 初始化器本身**与 source 无关**的局部（`const blank = ''`）不因为出现在函数里就变成 source。
+    // 第 3 条是这层的承重墙：少了它，「先存进常量」就成了洗掉任何写死常量的通用手法。
+    const locals = syntheticFn(
+      `function f() {
+         const percent = contextUsedPercent(session.turnUsage?.context)
+         const scoped = readScopes(catalog)
+         const blank = ''
+         return [{ sessionId: session.id, contextPercent: percent, scopes: scoped, workspacePath: blank }]
+       }`
+    )
+    expect(offendersIn(locals)).toEqual(['workspacePath'])
+  })
+
+  it('前提自检：把入参洗进局部常量再用，仍算"没人喂数"（镜像方向）', () => {
+    // 这条与上一条是**成对**的，本轮和上一条一起加：只放宽 source 一侧，等于给 `touchesInput` 开了
+    // 一模一样的洞——同一个「先存进局部常量」的动作，正着用是合法派生，反着用就把事故原样洗干净了
+    // （[[banned-word-guard-misses-the-mirror]]：只禁一个方向，同一个谎翻个面就存活）。
+    // `laundered` 的初始化器里既提到 input 也提到 session，于是它同时进 sources 和 forbidden——
+    // `touchesInput` 一票否决，仍报不合格。变异判别器：把 transitiveNames 的 forbidden 那一行删掉，
+    // 上一条仍绿、**本条**立刻转红。
+    const mirrored = syntheticFn(
+      `function f(input: I) {
+         const laundered = input.unacknowledgedThreads?.[session.id] ?? 0
+         return [{ sessionId: session.id, unreadCount: laundered }]
+       }`
+    )
+    expect(offendersIn(mirrored)).toEqual(['unreadCount'])
   })
 
   it('前提自检：三元两支运行期恒等、只是拼法不同也算"没人喂数"', () => {
     // 归一化自检（本轮加的第二层）：三元两支运行期恒等、只是拼法不同（引号风格 `'' : ""`、
     // 数字写法 `0 : 0x0`）也必须被抓——否则换个拼法就复活「提到但不派生」的 bypass。这一对成对钉住：
     // 恒等两支报为不合格，同一列换成**真的不同**的两支（`'a' : 'b'`）仍合法，修法不误伤正常派生。
-    const spellings = rowLiteralIn(
-      functionNamed(
-        parseText(
-          `function f() { return [{ sessionId: session.id, quoteConst: session.id ? '' : "", numConst: session.id ? 0 : 0x0, realDerive: session.busy ? 'a' : 'b' }] }`
-        ),
-        'f'
-      )!
+    const spellings = syntheticFn(
+      `function f() { return [{ sessionId: session.id, quoteConst: session.id ? '' : "", numConst: session.id ? 0 : 0x0, realDerive: session.busy ? 'a' : 'b' }] }`
     )
-    expect(underivedProperties(spellings!, ['session', 'catalog'], ['input'])).toEqual(['quoteConst', 'numConst'])
+    expect(offendersIn(spellings)).toEqual(['quoteConst', 'numConst'])
   })
 
   it('前提自检：嵌套常量三元也算"没人喂数"', () => {
@@ -356,19 +472,13 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     // （`session.a ? (session.b ? 'z' : 'y') : 'x'`）仍合法，修法不误伤。
     // 仍不覆盖（诚实记录，见文件头）：算术折叠 `? 'a'+'b' : 'ab'`、逗号运算 `? (session,'x') : 'x'`、
     // 跨变量 `? blank : blank2`——它们要 TypeChecker 的常量求值/过程间分析，语法层够不到。
-    const nested = rowLiteralIn(
-      functionNamed(
-        parseText(
-          `function f() { return [{ sessionId: session.id, nestConst: session.busy ? (x ? '' : '') : '', realNest: session.a ? (session.b ? 'z' : 'y') : 'x' }] }`
-        ),
-        'f'
-      )!
+    const nested = syntheticFn(
+      `function f() { return [{ sessionId: session.id, nestConst: session.busy ? (x ? '' : '') : '', realNest: session.a ? (session.b ? 'z' : 'y') : 'x' }] }`
     )
-    expect(underivedProperties(nested!, ['session', 'catalog'], ['input'])).toEqual(['nestConst'])
+    expect(offendersIn(nested)).toEqual(['nestConst'])
   })
 
   it('每一列都由 session/catalog 派生——写死的常量是"没人喂数"的另一种写法', () => {
-    const literal = rowLiteralIn(build!)
-    expect(underivedProperties(literal!, ['session', 'catalog'], ['input'])).toEqual([])
+    expect(offendersIn(build!)).toEqual([])
   })
 })
