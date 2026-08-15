@@ -77,13 +77,19 @@ export function humanizePromptDeliveryError(
       .replace(/The Agent Run is still running;[^.]*\./, 'The Agent Run has ended; resume or restart it before sending again.')
       .replace(/The previous Run status is no longer authoritative; refresh the canonical Session and retry only with its current Run\./, 'The Run has ended; resume or restart the Agent, then retry with its new Run.')
   } else if (options.semanticState) {
+    // 这四句都只在 **Run 仍 running** 时出现（runtime-controller.ts:815-819：`runState='ended'`
+    // 走的是上面那条 `if`，semanticState 只在它的 `else` 里赋值）。于是和 CONSUMED 那条同理，
+    // 它们一样不准点名 resume/restart——对 running 的 Run，resumeAgentRun 直接抛
+    // AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），Resume 按钮也只在
+    // disconnected/missing/exited 时渲染（SessionPane.tsx:254）。blocked/error 两条原先各带一个
+    // "or resume it"，是同一个缺陷的第四、第五例，被 CONSUMED 那条的禁止清单式守卫整整放过。
     const semanticMessage = options.semanticState === 'done'
       ? 'The Agent turn is complete, but composer readiness has not been verified yet; keep the draft and retry when the readiness check finishes.'
       : options.semanticState === 'waiting'
         ? 'The Agent is waiting for your reply, but composer readiness has not been verified yet; keep the draft and retry after the readiness check.'
         : options.semanticState === 'blocked'
-          ? 'The Agent is blocked and its composer readiness has not been verified yet; resolve the blocker or resume it before sending again.'
-          : 'The Agent reported an error; inspect or resume it before sending again.'
+          ? 'The Agent is blocked and its composer readiness has not been verified yet; clear what it is blocked on in its terminal, then send again.'
+          : 'The Agent reported an error but its Run is still alive; read its latest output to see what failed, then send again once readiness is observed.'
     message = message
       .replace(/The Agent Run is still running;[^.]*\./, semanticMessage)
       .replace(/The previous Run status is no longer authoritative; refresh the canonical Session and retry only with its current Run\./, semanticMessage)
