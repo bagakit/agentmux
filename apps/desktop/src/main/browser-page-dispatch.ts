@@ -48,6 +48,31 @@ const DEFAULT_WAIT_MS = 10_000
 /** 网络安静判定：这么久没有新请求就算静了。取自 CDP 惯例，不是可调项——调它只会让判据变模糊。 */
 const NETWORK_IDLE_QUIET_MS = 500
 
+/**
+ * 动作做完把页面内的光标还给人（T-012 「不抢焦点」）。
+ *
+ * `fillInput` / `typeText` / `pressKey` 都得先 `focus()` 才能让页面按真实输入那样反应，而那一下
+ * 抢的是**页面里的光标**：人正在一个输入框里打字，Agent 去填另一个框，人的字就打到别处去了。
+ * 三处都要还——只还一处等于另外两处照抢（MEMORY「守卫按出口数不按条件数」）。
+ *
+ * 写成一段共享的源码片段插进三个 declaration，而不是三份手抄：手抄的三份会各自漂移，而漂移的
+ * 那一份不会报错，只是悄悄不还了。
+ *
+ * 只在**焦点确实还在我们动过的那个元素上**时才还回去：动作可能让页面自己把焦点挪走
+ * （提交表单、弹出对话框），那时硬抢回来就是我们在跟页面打架。
+ *
+ * 注意这里还不了窗口级的焦点——驱动路从不调 `webContents.focus()` / `setVisible`，所以窗口级
+ * 抢焦点根本不存在。参考项目那套 `inert` + `opacity-0` 是给渲染进程里的 `<webview>` 宿主元素
+ * 写的，AgentMux 用的是窗口级 `WebContentsView`，**不能照搬**（不是漏抄）。
+ */
+const RESTORE_FOCUS_SNIPPET = `
+  const restoreFocus = (acted, previous) => {
+    if (previous === acted) return
+    if (document.activeElement !== acted) return
+    if (previous instanceof HTMLElement) previous.focus()
+    else if (acted instanceof HTMLElement) acted.blur()
+  }`
+
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string') throw new TypeError(`${name} must be a string, got ${typeof value}`)
   return value
@@ -258,13 +283,15 @@ export function createBrowserPageDispatch(
         // 表现为"填了但提交的是空的"（MEMORY「受控输入可静默变只读」是同一族的坑）。
         return await callOn(
           requireString(args[0], 'ref'),
-          `function (value) {
+          `function (value) {${RESTORE_FOCUS_SNIPPET}
+            const previous = document.activeElement
             this.focus()
             const setter = Object.getOwnPropertyDescriptor(this.constructor.prototype, 'value')?.set
             if (setter) setter.call(this, value)
             else this.value = value
             this.dispatchEvent(new Event('input', {bubbles: true}))
             this.dispatchEvent(new Event('change', {bubbles: true}))
+            restoreFocus(this, previous)
           }`,
           requireString(args[1], 'text')
         )
@@ -275,7 +302,8 @@ export function createBrowserPageDispatch(
         const text = requireString(args[1], 'text')
         return await callOn(
           ref,
-          `function (value) {
+          `function (value) {${RESTORE_FOCUS_SNIPPET}
+            const previous = document.activeElement
             this.focus()
             const setter = Object.getOwnPropertyDescriptor(this.constructor.prototype, 'value')?.set
             const next = (this.value ?? '') + value
@@ -283,20 +311,23 @@ export function createBrowserPageDispatch(
             else this.value = next
             this.dispatchEvent(new Event('input', {bubbles: true}))
             this.dispatchEvent(new Event('change', {bubbles: true}))
+            restoreFocus(this, previous)
           }`,
           text
         )
       }
       case 'pressKey':
-        // 键事件派到元素上，不是派到窗口上。派到窗口会打断用户当下的输入焦点——T-012 的那条线，
-        // 这里先不越过去。
+        // 键事件派到元素上，不是派到窗口上。派到窗口会打断用户当下的输入焦点——这是 T-012 划下的
+        // 那条线：Agent 驱动页面时不抢人的操作位。
         return await callOn(
           requireString(args[0], 'ref'),
-          `function (key) {
+          `function (key) {${RESTORE_FOCUS_SNIPPET}
+            const previous = document.activeElement
             this.focus()
             for (const type of ['keydown', 'keyup']) {
               this.dispatchEvent(new KeyboardEvent(type, {key, bubbles: true, cancelable: true}))
             }
+            restoreFocus(this, previous)
           }`,
           requireString(args[1], 'key')
         )

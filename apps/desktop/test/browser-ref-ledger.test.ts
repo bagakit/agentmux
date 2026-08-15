@@ -328,6 +328,9 @@ describe('自愈过的运行不许报成干净的成功', () => {
           setWindowOpenHandler() {}, setZoomFactor() {}, getZoomFactor: () => 1,
           getURL: () => 'https://example.invalid/', getTitle: () => 'Example',
           isLoading: () => false, isLoadingMainFrame: () => false, isDestroyed: () => false,
+          // 驱动期间 runScript 会往隔离世界里注一个角标。这里给个空壳：本文件判的是结局降级，
+          // 不判角标（那一半在 browser-ownership.test.ts 上真机判）。
+          executeJavaScriptInIsolatedWorld: async () => true,
           async loadURL() {}, close() {}
         }
         setVisible() {}
