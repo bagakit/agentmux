@@ -77,7 +77,8 @@ function browser(id: string, url = 'about:blank'): BrowserSnapshot {
     canGoBack: false,
     canGoForward: false,
     viewport: 'responsive',
-    error: null
+    error: null,
+    driving: false
   }
 }
 

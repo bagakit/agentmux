@@ -38,7 +38,8 @@ function browserSnapshot(id: string, url: string): BrowserSnapshot {
     canGoBack: false,
     canGoForward: false,
     viewport: 'responsive',
-    error: null
+    error: null,
+    driving: false
   }
 }
 

@@ -171,6 +171,15 @@
 }
 .workbench-tab__agent-mark > .status { position: absolute; right: -3px; bottom: -3px; padding:1px; border-radius: 50%; background: var(--tab-mark-seat); }
 .workbench-tab__agent-mark .status__dot { width: 5px; height: 5px; }
+/*
+ * 正在被 Agent 驱动的那一格。用与「Agent 在跑」同一个绿（`.status--working` 的 --green），因为它
+ * 说的是同一件事——有个 Agent 此刻正在动。图标已经换了形状（Bot 而非地球），颜色只是把它从一排
+ * 灰图标里挑出来，不承担区分的全部重量。
+ *
+ * 不加 `pulse` 动画：标签条上同时可能有好几张 Tab，每张都在呼吸就成了一片闪烁；而 Agent 状态点
+ * 的呼吸是有意义的（那一枚点单独存在）。这里静止的彩色已经够把它从灰图标里分出来。
+ */
+.workbench-tab__driving-mark { color: var(--green); }
 .workbench-tab__dirty { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--amber); }
 .workbench-tab__close {
   width: 16px;

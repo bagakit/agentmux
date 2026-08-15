@@ -884,7 +884,10 @@ const mockApi: AgentMuxDesktopApi = {
         canGoBack: false,
         canGoForward: false,
         viewport: 'responsive',
-        error: null
+        error: null,
+        // 预览里没有子进程，`runScript` 直接抛（见下面那条注释），所以这一位永远是 false——
+        // 不是省事，是预览里确实没有任何东西能驱动它。
+        driving: false
       }
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
@@ -1003,7 +1006,8 @@ const mockApi: AgentMuxDesktopApi = {
           canGoBack: false,
           canGoForward: false,
           viewport: input.viewport,
-          error: null
+          error: null,
+          driving: false
         }
         mockBrowsers.set(id, browser)
         browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))

@@ -41,7 +41,8 @@ function browserSurface(regionId: string, url: string, title: string): Workbench
     canGoForward: false,
     loading: false,
     viewport: 'desktop',
-    error: null
+    error: null,
+    driving: false
   }
 }
 
