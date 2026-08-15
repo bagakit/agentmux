@@ -3,6 +3,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, ShieldAlert } from 'lucide-react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
+import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
@@ -27,6 +28,20 @@ function stateFor(row: RosterRow): 'working' | 'waiting' | 'error' | null {
   if (row.attention === 'error') return 'error'
   return row.state === 'working' ? 'working' : null
 }
+
+/**
+ * 每档上下文压力对应的**下一步**，给悬停提示和屏幕阅读器用。
+ *
+ * 写的是用户能做的事，不是形容词。"high" 只是把百分比换了个说法，用户读完仍不知道该干什么；
+ * "wrap up or start a fresh session" 说的是在压缩发生之前还来得及做的那件事。
+ *
+ * 刻意不写「即将压缩」或任何时间预测：各家 Provider 在什么阈值压缩我们不知道，也不猜
+ * （`AgentContextUsage` 的正文已明说这条）。这里说的是**我们的提醒时机**，不是对 Provider 行为的预报。
+ */
+const CONTEXT_PRESSURE_HINT = {
+  caution: 'plan to wrap up or start a fresh session',
+  danger: 'wrap up now or start a fresh session'
+} as const
 
 export function RosterRowView({
   row,
@@ -63,7 +78,13 @@ export function RosterRowView({
             scopeText || 'no launch scope declared',
             // 用量作为可访问名的一部分：屏幕阅读器听到的是"最近一 turn 多少 token"或"此 Provider 不报用量"，
             // 而不是把这行事实漏掉。三态各自读得出，绝不读成 0。
-            row.usage.title
+            row.usage.title,
+            // 上下文压力只在够得上门槛时读出来，且读的是**为什么该看它**而不是颜色名——"amber" 对
+            // 听的人毫无信息。够不上门槛（或压根不知道）时整段缺席：给每一行都念一句"上下文正常"，
+            // 会把真正需要听见的那两行埋掉。
+            ...(row.contextPressure
+              ? [`context ${row.contextPercent}% full, ${CONTEXT_PRESSURE_HINT[row.contextPressure]}`]
+              : [])
           ].join(' · ')}
           onSelect={() => onSelect(row.sessionId)}
         >
@@ -81,6 +102,20 @@ export function RosterRowView({
             ) : null}
           </span>
           {row.awaitingReply ? <span className="agent-roster__pending">reply</span> : null}
+          {/* 上下文压力：只有够得上门槛才出现。一个用了 12% 的 Agent 不需要标记——给每行都发一枚
+              徽章，等于把真正快满的那两行埋进噪音里。严重度用 data-pressure 交给 CSS 上色，
+              逻辑层不出现颜色名（见 agent-usage.ts 的 contextPressure）。
+              aria-hidden：这句话已经在整行的 aria-label 里念过了，再让它单独可读会重复一遍。 */}
+          {row.contextPressure ? (
+            <span
+              className="agent-roster__pressure"
+              data-pressure={row.contextPressure}
+              title={`Context window ${row.contextPercent}% full — ${CONTEXT_PRESSURE_HINT[row.contextPressure]}`}
+              aria-hidden="true"
+            >
+              {row.contextPercent}%
+            </span>
+          ) : null}
           {/* token 用量：真实数用常规色，"不报"/"还没有"压低成静默灰——它们是缺席，不该抢注意力，
               更不能被读成一个跑出来的 0。 */}
           <span
@@ -149,6 +184,79 @@ export function AgentRoster({ total }: { total: number }) {
               <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />
             ))}
           </div>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+// The project→Agent tree behind ONE status-bar count. Each count segment (working / needs-you / error)
+// renders one of these beside its number: a chevron that hover-, click- or keyboard-discloses the
+// Agents in that class, bucketed by the Project that owns each one. It reuses `RosterRowView` — the same
+// row the window roster ships, with its state dot, scope mark, usage and right-click addressing — so
+// there is one row definition, not a second one that could drift.
+//
+// It is a SEPARATE control from the count button on purpose. needs-you/error already jump on click to
+// the Agent that has waited longest; that one-click jump is a capability the user has today and
+// principle 11 forbids removing it silently. So disclosure is added alongside the jump, never in place
+// of it — a distinct focusable chevron, which also keeps the tree keyboard-reachable (Radix gives Enter/
+// Space/Arrow for free on its trigger).
+//
+// A class with no Agents renders NOTHING here — no chevron, no dead click into an empty popover. That is
+// the single decision for the zero case, so working/needs-you/error behave identically when empty.
+export function AgentTreePanel({
+  filter,
+  heading,
+  label
+}: {
+  filter: AgentTreeFilter
+  heading: string
+  // The chevron's accessible name: it carries the fact ("Show the 3 working agents by project"), not
+  // just "expand", so a screen-reader user hears what opens.
+  label: string
+}) {
+  const sessions = useAppStore((state) => state.sessions)
+  const providerCatalog = useAppStore((state) => state.providerCatalog)
+  const workspaces = useAppStore((state) => state.config?.workspaces)
+  const selectSession = useAppStore((state) => state.selectSession)
+  const reportError = useAppStore((state) => state.reportError)
+  const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter })
+  if (projects.length === 0) return null
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          className="agent-status-bar__segment--action agent-tree__disclose"
+          type="button"
+          aria-label={label}
+          title={label}
+        >
+          <ChevronUp size={10} aria-hidden="true" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        {/* Presence-managed: keyframe animation scoped to [data-state='open'] — see the roster above. */}
+        <DropdownMenu.Content className="agent-roster agent-tree" side="top" align="start" sideOffset={6} collisionPadding={8}>
+          <div className="agent-roster__heading">
+            <span>{heading}</span>
+            <span className="agent-roster__heading-count">
+              {projects.reduce((sum, project) => sum + project.rows.length, 0)}
+            </span>
+          </div>
+          {projects.map((project) => (
+            <div className="agent-tree__project" key={project.key}>
+              <div className="agent-tree__project-name">
+                {project.name}
+                {project.hostId !== 'local' ? <small>{project.hostId}</small> : null}
+              </div>
+              <div className="agent-roster__list">
+                {project.rows.map((row) => (
+                  <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />
+                ))}
+              </div>
+            </div>
+          ))}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

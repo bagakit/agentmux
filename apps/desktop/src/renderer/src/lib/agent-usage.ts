@@ -1,4 +1,8 @@
 import type { AgentTurnUsage } from '@agentmux/core'
+// RiskTier 是严重度词汇的 SSOT，从 node-free 的子路径取值（根 barrel 会把 Core 的进程/文件系统运行时
+// 拖进渲染进程）。上下文压力借用它的 caution/danger 两档，而不是另造一套 amber/red——同一行上的授权
+// 标记已经用这套词，两套词汇表达同一个严重度轴，换主题时必然漏掉一套。
+import type { RiskTier } from '@agentmux/core/risk-tier'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 // 一个 Agent 的 token 用量在名册里怎么显示。
@@ -41,6 +45,41 @@ export function contextUsedPercent(context: AgentTurnUsage['context'] | undefine
   if (!Number.isFinite(context.capacityTokens) || context.capacityTokens <= 0) return null
   if (!Number.isFinite(context.usedTokens) || context.usedTokens < 0) return null
   return Math.min(100, Math.max(0, Math.round((context.usedTokens / context.capacityTokens) * 100)))
+}
+
+/**
+ * 上下文压力的档位，或 `null` = 「不该标记」（数不知道，或知道但还早）。
+ *
+ * **为什么档位是三个而不是两个。** 只分「安全/危险」会逼出一个假选择：70% 到底算不算危险？答案是
+ * 「还不危险，但该知道了」——它是**行动提前量**，不是警报。少了中间那档，要么 70% 就报红（一屏十个
+ * Agent 全红，红色不再意味任何东西），要么只在 90% 报（用户拿到的提前量只剩十个百分点，而一个正在
+ * 跑的 turn 就可能吃掉这么多）。
+ *
+ * **为什么复用 caution/danger 而不是自造 amber/red。** 本仓已经有一套风险档位词汇（`RISK_TIERS`：
+ * safe/caution/danger），名册行上的授权标记就用它，CSS 里 `[data-tier='caution'] → var(--amber)`
+ * 已经写好四处。逻辑层**绝不该出现颜色名**：颜色是 CSS 的事，逻辑只说「这有多严重」。自造一套
+ * amber/red 的后果是同一行上两个标记用两套词汇表达同一个严重度轴，换主题时必然有一套被漏掉。
+ *
+ * **返回 null 而不是 'safe'。** `contextUsedPercent` 答不上来时这里也必须是「不标记」，而不是
+ * 「安全」——把「没报用量」画成绿色，是拿沉默冒充好消息。低于门槛同样返回 null：一个用了 12% 的
+ * Agent 不需要任何标记，给它一枚"安全"徽章只是噪音，并且会稀释真正需要看见的那两枚。
+ *
+ * **门槛是产品判断，不是物理常数。** 70/90 来自「一个 turn 可能吃掉 10-20%」这个观察：90% 时下一个
+ * turn 就可能触发压缩，70% 时还有两三个 turn 的余量去做收尾或开新会话。Provider 各自在什么阈值压缩
+ * 我们不猜（`AgentContextUsage` 的文案已明说这一点），所以这两个数标的是**我们的提醒时机**，
+ * 不是在预测 Provider 的行为。
+ */
+export type ContextPressure = Extract<RiskTier, 'caution' | 'danger'>
+
+/** 提醒门槛。`danger` 在前：判档从最严重的开始落，新增一档时顺序不会悄悄改变语义。 */
+const PRESSURE_THRESHOLDS: readonly (readonly [ContextPressure, number])[] = [
+  ['danger', 90],
+  ['caution', 70]
+]
+
+export function contextPressure(percent: number | null): ContextPressure | null {
+  if (percent === null) return null
+  return PRESSURE_THRESHOLDS.find(([, floor]) => percent >= floor)?.[0] ?? null
 }
 
 /**

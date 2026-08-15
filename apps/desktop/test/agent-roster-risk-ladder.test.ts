@@ -52,7 +52,11 @@ function rowWith(scopes: RosterScope[]): RosterRow {
     observedAt: 1,
     awaitingReply: false,
     scopes,
-    usage: { kind: 'unsupported', text: '', title: '' }
+    usage: { kind: 'unsupported', text: '', title: '' },
+    // 上下文压力与本文件无关（`rowRiskTier` 只读 scopes），给「没报」这个占位值——不是 0，
+    // 因为 0 在 RosterRow 的语义里是「查过了，一点没用」，而这里是「本用例不关心」。
+    contextPercent: null,
+    contextPressure: null
   }
 }
 

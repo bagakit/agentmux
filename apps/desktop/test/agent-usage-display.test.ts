@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { agentUsageDisplay, formatTokenCount } from '../src/renderer/src/lib/agent-usage'
+import { agentUsageDisplay, contextPressure, formatTokenCount } from '../src/renderer/src/lib/agent-usage'
+import { RISK_TIERS } from '@agentmux/core/risk-tier'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import type { AgentCapabilities } from '@agentmux/core'
 
@@ -96,5 +97,47 @@ describe('agentUsageDisplay', () => {
     expect(display.kind).toBe('awaiting')
     expect(display.text).not.toContain('0')
     expect(display.text).toBe('—')
+  })
+})
+
+describe('contextPressure：什么时候该提醒「这个 Agent 快满了」', () => {
+  // 这一组守的是**门槛判定**本身。接线（名册行有没有真的调它）在 agent-roster.test.ts 里另守一道；
+  // 两者互相够不着——判定全对而没人调，与有人调但判定是假的，是两种不同的缺陷。
+
+  it('答不上来就不标记，绝不当成"安全"', () => {
+    // 这是本组最要紧的一条：把「没报用量」画成一个绿色的安全标记，是拿沉默冒充好消息。
+    // null 进 null 出——不知道就是不知道，不是一个档位。
+    expect(contextPressure(null)).toBeNull()
+  })
+
+  it('还早的时候不标记——不是发一枚"安全"徽章', () => {
+    // 给每一行都挂标记，等于把真正快满的那两行埋进噪音。低于门槛的正确答案是「什么都不画」。
+    expect(contextPressure(0)).toBeNull()
+    expect(contextPressure(12)).toBeNull()
+    expect(contextPressure(69)).toBeNull()
+  })
+
+  it('70 进 caution，90 进 danger，且门槛是闭区间', () => {
+    // 边界取闭区间（>=）而不是开区间：69 不标、70 标，是这两个数字的全部含义。
+    // 若哪天有人改成 >，这两条会红——那正是「门槛整体挪了一格」的信号。
+    expect(contextPressure(69)).toBeNull()
+    expect(contextPressure(70)).toBe('caution')
+    expect(contextPressure(89)).toBe('caution')
+    expect(contextPressure(90)).toBe('danger')
+    expect(contextPressure(100)).toBe('danger')
+  })
+
+  it('两档必须彼此可区分——把 danger 折成 caution 的改动要在这里红', () => {
+    // 只验单点时，「两档返回同一个值」照样全绿。所以显式要求它们不等。
+    expect(contextPressure(95)).not.toBe(contextPressure(75))
+  })
+
+  it('档位名取自共享的风险词汇，不是本地自造的颜色名', () => {
+    // 逻辑层出现 'amber'/'red' 就是把 CSS 的事搬进了判定：同一行上的授权标记已经用 RISK_TIERS
+    // 这套词（caution/danger → CSS 里各自上色），压力若另造一套，换主题时必然漏掉一套。
+    // 判据是「返回值确实是 RISK_TIERS 的成员」，而不是「字符串长得像」。
+    for (const percent of [75, 95]) {
+      expect(RISK_TIERS).toContain(contextPressure(percent))
+    }
   })
 })

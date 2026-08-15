@@ -305,3 +305,85 @@ describe('名册真的把 usage 投影接上了，而不是每行都写死"不�
     expect(new Set([kindOf('a-1'), kindOf('a-2'), kindOf('a-3')]).size).toBe(3)
   })
 })
+
+describe('名册行真的接上了上下文压力，而不是永远不标记', () => {
+  // 与上一组同样的形状：判定层（门槛、null 不塌成 safe、两档可区分）在 agent-usage-display.test.ts
+  // 里直接调纯函数守着。这一组守的是**接线**——把 agent-roster.ts 里的 `contextPressure(percent)`
+  // 换成写死的 `null`，判定层那五条一条都不会红，而名册上「快满了」的提醒会静默消失。
+
+  function withContext(id: string, usedTokens: number, capacityTokens: number): SessionSnapshot {
+    return agent(id, {
+      capabilities: {
+        terminal: true,
+        timeline: 'complete-events',
+        permission: 'observe',
+        providerResume: true,
+        replyCorrelation: 'none',
+        usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
+      },
+      turnUsage: {
+        inputTokens: 1, outputTokens: 1, totalTokens: 2, observedAt: 5,
+        context: { usedTokens, capacityTokens }
+      }
+    } as Partial<Extract<SessionSnapshot, { kind: 'agent' }>>)
+  }
+
+  it('百分比与档位都落到行上，且百分比真的由那两个数算出来', () => {
+    // 190_000/200_000 = 95%。写死一个常量、或者取错分母，都算不出这个数。
+    const rows = buildAgentRoster({
+      sessions: [withContext('a-1', 190_000, 200_000)],
+      providerCatalog: []
+    })
+
+    expect(rows[0]!.contextPercent).toBe(95)
+    expect(rows[0]!.contextPressure).toBe('danger')
+  })
+
+  it('三种压力在同一次投影里彼此可区分——把任意两类折成一类都要红', () => {
+    // 只验其中一类时，「所有行都返回 null」或「所有行都返回 danger」照样能过。
+    const rows = buildAgentRoster({
+      sessions: [
+        withContext('quiet', 20_000, 200_000),   // 10% → 不标记
+        withContext('warm', 150_000, 200_000),   // 75% → caution
+        withContext('full', 190_000, 200_000)    // 95% → danger
+      ],
+      providerCatalog: []
+    })
+    const pressureOf = (id: string) => rows.find((row) => row.sessionId === id)!.contextPressure
+
+    expect(pressureOf('quiet')).toBeNull()
+    expect(pressureOf('warm')).toBe('caution')
+    expect(pressureOf('full')).toBe('danger')
+    expect(new Set([pressureOf('quiet'), pressureOf('warm'), pressureOf('full')]).size).toBe(3)
+  })
+
+  it('不报用量的 Provider：百分比与档位都是 null，绝不塌成 0% 或"安全"', () => {
+    // 0% 会被读成「这个 Agent 刚开始跑，还早得很」，而真相是我们根本不知道它用了多少。
+    // 这是本组唯一一条能挡住「用 ?? 0 兜底」那类改动的断言。
+    const rows = buildAgentRoster({ sessions: [agent('no-usage')], providerCatalog: [] })
+
+    expect(rows[0]!.contextPercent).toBeNull()
+    expect(rows[0]!.contextPressure).toBeNull()
+  })
+
+  it('声明了 usage 但这一 turn 没带 context：同样是 null，不是 0', () => {
+    // 与上一条是不同的缺席形态——Provider 报用量、也跑完了一 turn，只是这一 turn 没采到 context。
+    // 两条都要，因为「按 capability 判」和「按 context 在不在判」是两个分岔点。
+    const rows = buildAgentRoster({
+      sessions: [agent('a-1', {
+        capabilities: {
+          terminal: true, timeline: 'complete-events', permission: 'observe',
+          providerResume: true, replyCorrelation: 'none',
+          usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
+        },
+        turnUsage: { inputTokens: 8000, outputTokens: 2432, totalTokens: 10432, observedAt: 5 }
+      } as Partial<Extract<SessionSnapshot, { kind: 'agent' }>>)],
+      providerCatalog: []
+    })
+
+    // 这一行仍然有 token 用量可显示——两件事互相独立，缺了存量不该把流量也抹掉。
+    expect(rows[0]!.usage.kind).toBe('tokens')
+    expect(rows[0]!.contextPercent).toBeNull()
+    expect(rows[0]!.contextPressure).toBeNull()
+  })
+})
