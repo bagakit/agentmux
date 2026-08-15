@@ -16,6 +16,14 @@ export type AgentComposerProps = {
   // pending queue from a stuck counter without seeing what is in it. Count is derived (`.length`), so
   // the badge and the list can never disagree.
   queued?: readonly string[]
+  // Whether the queue can still drain. The store's flush requires `processState === 'running'`
+  // (store.ts flushAgentSteerQueue), so once the run exits the entries stay put forever — but the badge
+  // went on promising "queued for delivery" over them, which is the one thing that can no longer happen.
+  // A pending interaction is NOT this case: that flush also early-returns, yet `respondInteraction`
+  // re-flushes the moment the user answers, so those really are still on their way. The distinction is
+  // "will this ever drain" and it does not line up with `canSubmit` — hence its own prop rather than
+  // reusing the submit axis.
+  queueDeliverable?: boolean
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
   skills?: Array<{ text: string; description: string }>
@@ -49,6 +57,7 @@ export function AgentComposer({
   tools,
   contextUsage,
   queued = [],
+  queueDeliverable = true,
   commands = [],
   skills = [],
   references = [],
@@ -176,7 +185,7 @@ export function AgentComposer({
               It opens: a bare count is indistinguishable from a stuck counter, so the messages
               themselves have to be reachable. Same native `popover` as the context chip, for the same
               reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
-          {queued.length > 0 ? <QueuedMessages queued={queued} /> : null}
+          {queued.length > 0 ? <QueuedMessages queued={queued} deliverable={queueDeliverable} /> : null}
         </div>
         <div>
           {contextUsage}
@@ -229,10 +238,21 @@ export function AgentComposer({
  * Order is delivery order (the store appends), and it is labelled as such, because "which one goes
  * next" is the actual question when you queue more than one. Each entry is clamped to a few lines by
  * CSS rather than truncated here: the full text stays in the DOM for screen readers and for select-copy.
+ *
+ * `deliverable` splits one label into two, because the promise "queued for delivery" has a precondition
+ * this component used to assert unconditionally. The store only drains while the run is `running`, so
+ * after it exits these entries are stranded — and the old copy went on telling the user they were on
+ * their way, which is the worst moment to be wrong: the words the user typed are still in there, and
+ * nothing else on screen says they will not arrive. Undeliverable is a plain statement plus where the
+ * text still is, NOT an error — the entries are intact and copyable, which is the honest remedy while
+ * the run is gone. We do not offer to resend: this component cannot know whether a next run is the same
+ * Agent, and silently replaying a stale steer into a fresh session is worse than saying nothing.
  */
-function QueuedMessages({ queued }: { queued: readonly string[] }) {
+function QueuedMessages({ queued, deliverable }: { queued: readonly string[]; deliverable: boolean }) {
   const cardId = useId()
-  const label = `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
+  const label = deliverable
+    ? `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
+    : `${queued.length} message${queued.length === 1 ? '' : 's'} never delivered`
   return (
     <>
       <button type="button" className="composer__queued" aria-label={label}
@@ -246,7 +266,11 @@ function QueuedMessages({ queued }: { queued: readonly string[] }) {
               own, and two identical prompts are a legitimate queue state — so text is not a key. */}
           {queued.map((prompt, index) => <li key={index}>{prompt}</li>)}
         </ol>
-        <p>Delivered in this order when the Agent finishes its current turn.</p>
+        <p>
+          {deliverable
+            ? 'Delivered in this order when the Agent finishes its current turn.'
+            : 'The Agent run ended before these were sent. Copy anything you still need — they are kept here, not sent.'}
+        </p>
       </div>
     </>
   )

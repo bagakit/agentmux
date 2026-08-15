@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
+    agentSteerQueues: {} as Record<string, Array<{ operationId: string; text: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     enqueueAgentSteer: vi.fn(),
@@ -90,6 +91,7 @@ afterEach(() => {
   fixture.state.sessions = []
   fixture.state.providerCatalog = []
   fixture.state.agentComposerDrafts = {}
+  fixture.state.agentSteerQueues = {}
   fixture.state.send.mockClear()
   fixture.state.interrupt.mockClear()
   fixture.state.setPosture.mockClear()
@@ -473,4 +475,53 @@ it('shows the context observation owned by this session in the Composer toolbar'
   const html = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
   expect(html).toContain('25% used')
   expect(html).toContain('75% remaining')
+})
+
+/**
+ * 接线判据：队列能否投递这件事，必须**从 Session 真读出来**交给 AgentComposer。
+ *
+ * 为什么单独立一组：AgentComposer 那侧已经有文案判据（agent-steer-queue-deliverability），但它只证明
+ * 「给了 false 就说实话」。删掉本组件里传 `queueDeliverable` 的那一行，那边照旧全绿——实测 31 passed，
+ * 因为 prop 有默认值 true，壳不接线正好落回乐观分支。本仓记过这一族：抽进 lib 只解决一半，
+ * 壳是否被执行无人守。
+ *
+ * 判据取 prop 而不是渲染文本，因为这里要钉的正是**这两层之间**那条线；文案由那边负责。
+ */
+describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
+  function deliverable(session: Extract<SessionSnapshot, { kind: 'agent' }>): unknown {
+    fixture.state.sessions = [session]
+    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', text: 'steer me' }] }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { queueDeliverable?: boolean }
+    }
+    return composer.props.queueDeliverable
+  }
+
+  it('running 时为 true', () => {
+    expect(deliverable(agentSession({ processState: 'running' }))).toBe(true)
+  })
+
+  it('exited 时为 false——这正是搁浅那一刻', () => {
+    expect(deliverable(agentSession({ processState: 'exited' }))).toBe(false)
+  })
+
+  it('interrupted 同样为 false：flush 的判据是 running，不是「没崩」', () => {
+    // 两个非 running 取值都要点名。只测 exited 的话，把实现写成 `!== 'exited'` 可以全绿，
+    // 而 interrupted 的队列一样排不空。
+    expect(deliverable(agentSession({ processState: 'interrupted' }))).toBe(false)
+  })
+
+  it('pendingInteraction 不算搁浅——答完卡片会重新 flush，仍在路上', () => {
+    // 与 canSubmit 刻意分开的那一条：那边此时为 false，这边必须仍是 true。
+    // 若把这里接成 submitMode.canSubmit，这条会红。
+    const pendingInteraction: Extract<SessionSnapshot, { kind: 'agent' }>['pendingInteraction'] = {
+      kind: 'permission',
+      id: 'permission-1',
+      agentSessionId: 'agent-1',
+      title: 'Allow command?',
+      options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+      evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
+    }
+    expect(deliverable(agentSession({ processState: 'running', pendingInteraction }))).toBe(true)
+  })
 })
