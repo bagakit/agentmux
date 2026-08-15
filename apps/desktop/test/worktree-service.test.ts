@@ -1188,4 +1188,110 @@ describe('WorktreeService', () => {
     expect(save).not.toHaveBeenCalled()
     expect((await stat(loser!.path)).isDirectory()).toBe(true)
   }, 30000)
+
+  // 判据是**用户看到的那件事**：fan-out 之后 `git status` 里不该多出一坨 `?? .worktrees/`。
+  // 不断言"写了哪个文件、写了哪一行"——那是实现；换成别的机制（真 .gitignore、把根挪到仓外）
+  // 只要 status 干净就同样是对的，而断言写法会把那些正确的改法判红。
+  //
+  // 用真 git：这条性质完全由 git 的 ignore 语义决定（锚定、目录尾斜杠、info/exclude 的生效范围），
+  // 假 host 只能证"我们发了那条命令"，证不了"git 因此闭嘴了"——而后者才是用户的体验。
+  it('creating a worktree leaves the user\'s git status clean, not littered with .worktrees', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-status-noise-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    // 必须在仓**内部**：这正是这条噪音的来源，也是 workspace-projects 有意的选择。
+    const worktreePath = join(repoPath, '.worktrees', 'lane')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    expect((await executionHost.run('git', ['-C', repoPath, 'init', '-b', 'main'])).exitCode).toBe(0)
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    expect((await executionHost.run('git', ['-C', repoPath, 'add', 'README.md'])).exitCode).toBe(0)
+    expect((await executionHost.run('git', [
+      '-C', repoPath,
+      '-c', 'user.name=AgentMux Test',
+      '-c', 'user.email=agentmux@example.invalid',
+      'commit', '-m', 'fixture'
+    ])).exitCode).toBe(0)
+
+    const status = async (): Promise<string> =>
+      (await executionHost.run('git', ['-C', repoPath, 'status', '--porcelain'])).stdout.trim()
+    // 起点必须干净，否则下面那条断言可能只是"本来就没东西"。
+    expect(await status()).toBe('')
+
+    const service = new WorktreeService(() => executionHost, { save: vi.fn(async (value: AppConfig) => value) })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+    await service.createForBranch({
+      workspaceId: 'repo', branch: 'lane-a', path: worktreePath, createBranch: true
+    }, branchConfig)
+
+    // 目录确实建出来了——先证靶子在场，否则"status 干净"可能是因为压根没创建成功。
+    expect((await stat(worktreePath)).isDirectory()).toBe(true)
+    expect(await status(), 'fan-out 不该在用户仓里留下未跟踪的 .worktrees').toBe('')
+
+    // 用户自己的改动仍然照常出现：挡掉的只能是 fan-out 的那个根，不能顺手把别的也遮了。
+    await writeFile(join(repoPath, 'mine.txt'), 'my work\n')
+    expect(await status()).toBe('?? mine.txt')
+
+    // 遮蔽面必须是**顶层的那个目录**，不是"名字里带 .worktrees 的任何东西"。
+    // 一条不锚定、不带尾斜杠的 `.worktrees` 同样能让上面那条断言变绿，却会连用户自己在任意深度
+    // 建的同名文件一起吞掉——那是把用户的东西弄丢，比留点噪音严重得多。
+    await mkdir(join(repoPath, 'docs'), { recursive: true })
+    await writeFile(join(repoPath, 'docs', '.worktrees'), 'notes about my worktrees\n')
+    expect(
+      (await status()).split('\n').sort(),
+      '只该遮住顶层那个 fan-out 根；用户在别处的同名文件必须照常出现'
+    ).toEqual(['?? docs/', '?? mine.txt'])
+
+    // 第二条 lane 不重复写：exclude 文件里那一行只能有一条。
+    await service.createForBranch({
+      workspaceId: 'repo', branch: 'lane-b', path: join(repoPath, '.worktrees', 'lane-b'), createBranch: true
+    }, branchConfig)
+    const exclude = await readFile(join(repoPath, '.git', 'info', 'exclude'), 'utf8')
+    expect(exclude.split('\n').filter((line) => line.includes('.worktrees'))).toHaveLength(1)
+  }, 30000)
+
+  // 写 exclude 是锦上添花，绝不能反过来把用户要的东西弄没。原则 11 class 2：我方这一步降级了，
+  // 但"创建 worktree"这个能力本身好好的——因为一次便利写入失败就让创建失败，是把用户真正要的
+  // 那件事拿走。
+  it('still creates the worktree when the exclude write cannot happen', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-exclude-failure-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    const worktreePath = join(repoPath, '.worktrees', 'lane')
+    await mkdir(repoPath)
+    const real = new LocalExecutionHost()
+    expect((await real.run('git', ['-C', repoPath, 'init', '-b', 'main'])).exitCode).toBe(0)
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    expect((await real.run('git', ['-C', repoPath, 'add', 'README.md'])).exitCode).toBe(0)
+    expect((await real.run('git', [
+      '-C', repoPath,
+      '-c', 'user.name=AgentMux Test',
+      '-c', 'user.email=agentmux@example.invalid',
+      'commit', '-m', 'fixture'
+    ])).exitCode).toBe(0)
+
+    // 只让那一次便利写入炸，其余全部走真 git——这样失败的确实是被测的那一步。
+    const executionHost: ExecutionHost = {
+      id: 'local', kind: 'local', label: 'This Mac',
+      exposeLoopbackPort: vi.fn(async (port: number) => port),
+      dispose: vi.fn(async () => {}),
+      run: vi.fn(async (command: string, args: readonly string[], options?: Parameters<ExecutionHost['run']>[2]) => {
+        if (command === 'sh') throw new Error('read-only .git')
+        return await real.run(command, args, options)
+      })
+    }
+    const service = new WorktreeService(() => executionHost, { save: vi.fn(async (value: AppConfig) => value) })
+    const creation = await service.createForBranch({
+      workspaceId: 'repo', branch: 'lane-a', path: worktreePath, createBranch: true
+    }, {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    })
+
+    expect(creation.workspace).toMatchObject({ path: worktreePath, branch: 'lane-a', kind: 'worktree' })
+    expect((await stat(worktreePath)).isDirectory()).toBe(true)
+  }, 30000)
 })
