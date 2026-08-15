@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_STEP_SUMMARY_LENGTH,
+  clampStep,
   stepSummary,
   stepTitle
 } from '../src/renderer/src/lib/activity-step-summary.js'
@@ -146,6 +147,75 @@ describe('路径保留尾部：同仓两个不同文件必须长得不一样', (
 
   it('短路径不加省略号', () => {
     expect(stepSummary('Read', JSON.stringify({ file_path: '/a.ts' }))).toBe('/a.ts')
+  })
+})
+
+// `slice()` 数的是 UTF-16 码元，会把 emoji 的代理对劈成两半，留下一个孤立代理项——渲染成 `�`。
+// 这不是假想：项目目录带 emoji、文件名带中日韩都很常见。同一个提交里给首字母用了 Intl.Segmenter，
+// 却在隔壁文件按码元切，那是同一个缺陷换了个位置。
+describe('按字素簇切，不吐半个字符', () => {
+  /** 有没有落单的代理项——它就是那个会渲染成 `�` 的东西。 */
+  const hasLoneSurrogate = (s: string): boolean =>
+    [...s].some((ch) => {
+      const code = ch.codePointAt(0)!
+      return code >= 0xd800 && code <= 0xdfff
+    })
+
+  it('尾切不劈开代理对', () => {
+    // pad=43 是实测会让切点正好落在 🚀 中间的那个长度。
+    const value = `${'/x'.repeat(60)}/🚀${'a'.repeat(43)}.ts`
+    const out = clampStep(value, 'tail')
+    expect(hasLoneSurrogate(out), `尾切吐出了孤立代理项：${JSON.stringify(out)}`).toBe(false)
+    expect(out.length).toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+  })
+
+  it('头切不劈开代理对', () => {
+    const value = `${'a'.repeat(46)}🚀${'b'.repeat(50)}`
+    const out = clampStep(value, 'head')
+    expect(hasLoneSurrogate(out), `头切吐出了孤立代理项：${JSON.stringify(out)}`).toBe(false)
+    expect(out.length).toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+  })
+
+  it('带 ZWJ 的家族 emoji 不被拆散——一个簇里好几个码点', () => {
+    // 👨‍👩‍👧 是 3 个 emoji + 2 个 ZWJ，共 8 个码元。要让这条有判别力，簇必须**正好骑在刀口上**：
+    // 尾切留最后 47 个码元，所以簇后面得有 40..46 个码元，刀才落进簇内部。取 43（40 个 a 加 `.ts`），
+    // 刀落在簇的第 4 个码元——劈开中间那个 👩。簇若离刀口远，整簇要么全留要么全丢，怎么切都不会红。
+    const value = `${'/deep/path'.repeat(8)}/👨‍👩‍👧${'a'.repeat(40)}.ts`
+    const out = clampStep(value, 'tail')
+    expect(hasLoneSurrogate(out), `家族被劈开了：${JSON.stringify(out)}`).toBe(false)
+    // 要么整簇都在，要么整簇都不在——不许出现残缺的家族。
+    if (/[👨👩👧]/u.test(out)) expect(out).toContain('👨‍👩‍👧')
+  })
+
+  it('扫一遍所有切点：两个方向都不许出现孤立代理项', () => {
+    // 单个 case 只证得了那一个偏移。必须让簇相对**各自那一刀**逐格移动，才覆盖得到「正好劈开」
+    // 那一格——两刀的落点不在同一头：尾切的刀从右边数，头切的刀从左边数，所以两组输入分别构造。
+    // 用同一组输入扫两个方向，等于其中一个方向压根没骑到刀口上，那一半是恒真的。
+    // 两种簇都扫：代理对（2 码元）与 ZWJ 序列（8 码元）劈开的方式不同，只扫前者对后者失明。
+    for (const cluster of ['🚀', '👨‍👩‍👧']) {
+      for (let offset = 0; offset < 80; offset += 1) {
+        const fromTail = `${'/x'.repeat(60)}/${cluster}${'a'.repeat(offset)}.ts` // 簇距右端 offset+3
+        const fromHead = `${'a'.repeat(offset)}${cluster}${'b'.repeat(120)}` //     簇距左端 offset
+        for (const [keep, value] of [
+          ['tail', fromTail],
+          ['head', fromHead]
+        ] as const) {
+          const out = clampStep(value, keep)
+          const where = `${keep} 在 ${cluster} offset=${offset}`
+          expect(hasLoneSurrogate(out), `${where} 吐出孤立代理项：${JSON.stringify(out)}`).toBe(false)
+          expect(out.length, `${where} 超上界`).toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+        }
+      }
+    }
+  })
+
+  it('经由 stepSummary 的真实路径也不吐半个字符', () => {
+    // 判据要落在产品真正走的那条路上，而不只是直接调 clampStep。同样要让 🚀 骑在刀口上：
+    // 尾切留 47 个码元，🚀 占 2 个，于是它后面须正好 46 个码元（37 个 x 加 `rocket.ts`）。
+    const path = `/Users/somebody/proj/${'nested/'.repeat(6)}🚀${'x'.repeat(37)}rocket.ts`
+    const out = stepSummary('Edit', JSON.stringify({ file_path: path }))!
+    expect(hasLoneSurrogate(out), `真实路径吐出孤立代理项：${JSON.stringify(out)}`).toBe(false)
+    expect(out).toContain('rocket.ts')
   })
 })
 
