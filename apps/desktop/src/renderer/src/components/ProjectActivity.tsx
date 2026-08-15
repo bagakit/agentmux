@@ -5,7 +5,7 @@ import { sessionRecentActivity } from '../lib/session-recency'
 import { projectActivityRow } from '../lib/project-activity-row'
 import { rowAttention } from '../lib/row-attention'
 import { workingAgentCount } from '../lib/project-board'
-import { workspaceForSession } from '../lib/workbench-tabs'
+import { workspaceForSession, workspaceRootForPath } from '../lib/workbench-tabs'
 import { buildAgentRoster } from '../lib/agent-roster'
 import {
   buildActivityGroups,
@@ -133,9 +133,17 @@ export function ProjectActivity({
               // 这一格归哪个 workspace：走共用谓词，不在这里再写一遍前缀匹配。此前这里是一段就地的
               // `path === w.path || startsWith(w.path + '/')`，与 workspaceForSession 是同一个问题的
               // 第二种拼法——两份迟早分岔（它还漏掉了 scratch 子目录那一支）。
+              //
+              // 显示的**名字**取归属（这一格属于哪个 Project），缩路径的**根**取包含（路径落在哪个
+              // 仓里）——子目录终端只有后者答得出，是两个问题，故取两次。
               const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session) : undefined
               const project = workspace?.name ?? (session.kind === 'agent' ? session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) : 'Terminal')
-              const activity = projectActivityRow(session, timelines[session.id]?.items ?? NO_TIMELINE, now, workspace?.path)
+              const activity = projectActivityRow(
+                session,
+                timelines[session.id]?.items ?? NO_TIMELINE,
+                now,
+                workspaceRootForPath(config ?? null, session)
+              )
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
                 data-attention={activity.attention ?? undefined}
                 onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{project} · {row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}</small></span></DropdownMenu.Item>

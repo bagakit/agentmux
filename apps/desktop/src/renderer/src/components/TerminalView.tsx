@@ -10,7 +10,7 @@ import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../sh
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { workspaceForSession } from '../lib/workbench-tabs'
+import { workspaceRootForPath } from '../lib/workbench-tabs'
 import {
   dismissOpenDestinationRequest,
   parseHttpLinkUrl,
@@ -243,12 +243,18 @@ export function TerminalView({
   // are the same file, so they cannot disagree about what the root is. After "Move to Workspace" the
   // active workspace is the target while the session still runs under its original root; when the
   // active root happens to be an ancestor of the session path, the prefix strip succeeds and points at
-  // the wrong repo. workspaceForSession is the existing predicate for "which workspace owns this
-  // session", already used by the store and quick-switch.
+  // the wrong repo.
+  //
+  // workspaceRootForPath, not workspaceForSession: the question here is containment ("which repo is
+  // this absolute path inside"), not ownership. A subdirectory terminal — FileExplorer's "Open in
+  // Terminal" on a folder — has workspacePath /repo/sub, which no workspace owns EXACTLY. Resolving
+  // that to '' would take away a capability the user has today: resolveWorkspaceRelativePath returns
+  // null for every absolute path when the root is empty, so path links in that terminal stop being
+  // clickable. Long is bad; dead is worse.
   //
   // A ref keeps it fresh for the attach-effect closure, which does not re-run on config change.
   const activeWorkspaceRoot = useAppStore((state) =>
-    workspaceForSession(state.config ?? null, session)?.path ?? ''
+    workspaceRootForPath(state.config ?? null, session) ?? ''
   )
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot

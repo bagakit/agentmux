@@ -334,6 +334,36 @@ export function workspaceForSession(config: AppConfig | null, session: SessionSn
   return config?.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, session))
 }
 
+/**
+ * 这个 Session 的磁盘路径**落在**哪个仓里——用来把绝对路径缩成相对路径，仅此一用。
+ *
+ * 与 {@link workspaceForSession} 是两个不同的问题，所以是两个函数而不是一个放宽了的谓词：
+ * 前者问「归属」（谁拥有这一格：决定 Tab 挂在哪、计数算给谁、Topic 是哪个），必须精确，
+ * 一个子目录终端不该被算进某个 Project 的 Agent 数里；后者问「包含」（这条绝对路径的前缀
+ * 是什么），子目录当然算——`/repo/sub` 里的文件就是 `/repo` 仓里的文件。
+ *
+ * 不合并的判据是**放宽归属会改动八个调用方**（侧栏计数、Topic 绑定、工具坞、持久化…），
+ * 它们都要的是精确归属。为了缩短一条路径去动那些，是拿正确性换排版。
+ *
+ * 取最长前缀而不是第一个命中：仓库可以嵌套（`/proj` 与 `/proj/repo` 都注册时，
+ * `/proj/repo/src/x.ts` 该按 `repo` 缩短，不是按 `proj`——否则剥出来的相对路径
+ * 读起来像是另一个仓里的文件，那正是 pane-workspace-root 那条判据钉住的坏输出）。
+ *
+ * 认不出仍然返回 undefined：宁可不缩短，也不拿一个凑合的根去剥。
+ */
+export function workspaceRootForPath(config: AppConfig | null, session: SessionSnapshot): string | undefined {
+  const owner = workspaceForSession(config, session)
+  if (owner) return owner.path
+  let best: string | undefined
+  for (const workspace of config?.workspaces ?? []) {
+    if (workspace.hostId !== session.hostId) continue
+    const root = workspace.path.replace(/[/\\]+$/u, '')
+    if (!root || !session.workspacePath.startsWith(`${root}/`)) continue
+    if (!best || root.length > best.length) best = root
+  }
+  return best
+}
+
 export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot): string | null {
   const workspace = workspaceForSession(config, session)
   return workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
