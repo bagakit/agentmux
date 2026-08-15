@@ -1188,7 +1188,7 @@
     {
       "feat_id": "f-25s8fqvvr",
       "title": "Agent 原生浏览器调试：让 Agent 在编辑器内驱动页面",
-      "status": "in_progress",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
