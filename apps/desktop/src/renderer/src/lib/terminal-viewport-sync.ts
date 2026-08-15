@@ -13,16 +13,18 @@ type TerminalViewportSynchronizerOptions = {
   fit(): void
   readGrid(): TerminalGridSize
   /**
-   * 把这个几何送到 PTY。返回 false = **没送到**（调用方自己的闸把这次 resize 挡掉了，
-   * 例如进程已死时不该再向 PTY 发 resize）。
+   * Deliver this grid to the PTY.
+   *
+   * - `false`: not delivered; the requested size must not be remembered as applied.
+   * - `true`: delivered at the requested size.
+   * - `{ cols, rows }`: delivered at the owner-confirmed applied size, which may
+   *   differ from the UI proposal.
    *
    * 这个返回值不是可选的礼貌信息，而是承重的：synchronizer 用「最后一次请求的几何」
    * 给相同尺寸的重复请求短路，所以一次被挡掉的 resize 若被记成成功，它就会以为 PTY
-   * 已经在那个几何上，而 PTY 其实停在改动前——此后同一尺寸的观察全被短路，xterm 与
-   * PTY 永久错位，直到用户恰好拖到**另一个**尺寸。返回 false 让这次请求不留痕，闸重新
-   * 打开后同一几何的下一次观察才能真正送达。
+   * 已经在那个几何上，而 PTY 其实停在改动前。返回 false 让这次请求不留痕。
    */
-  resize(size: TerminalGridSize): Promise<boolean>
+  resize(size: TerminalGridSize): Promise<boolean | TerminalGridSize>
   requestFrame(callback: FrameRequestCallback): number
   cancelFrame(frameId: number): void
   onResizeError?(error: unknown): void
@@ -364,7 +366,7 @@ export class TerminalViewportSynchronizer {
     const key = gridKey(size)
     if (key === this.lastRequestedGrid) {
       await this.resizeDrain
-      return this.lastRequestedGrid === key
+      return this.lastRequestedGrid !== null
     }
     this.lastRequestedGrid = key
     this.pendingResize = size
@@ -377,7 +379,7 @@ export class TerminalViewportSynchronizer {
       }).catch(() => {})
     }
     await this.resizeDrain
-    return this.lastRequestedGrid === key
+    return this.lastRequestedGrid !== null
   }
 
   private async drainPendingResizes(): Promise<void> {
@@ -389,7 +391,8 @@ export class TerminalViewportSynchronizer {
         // 被调用方的闸挡掉时，抹掉「已请求过这个几何」的记账。否则闸重新打开后，同一
         // 几何的观察会被 requestResize 的相同-key 短路吞掉，PTY 永远追不上 xterm。
         // 与下面 catch 的处理一致：两者都是「这个几何没到 PTY」，只是一个安静一个响亮。
-        if (!delivered) this.lastRequestedGrid = null
+        if (delivered === false) this.lastRequestedGrid = null
+        else if (delivered !== true) this.lastRequestedGrid = gridKey(delivered)
       } catch (error) {
         this.pendingResize = null
         this.lastRequestedGrid = null

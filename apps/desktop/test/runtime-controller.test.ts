@@ -1895,7 +1895,7 @@ describe('RuntimeController configuration transaction', () => {
       attachment.attachmentId,
       140,
       50
-    )).resolves.toBeUndefined()
+    )).resolves.toBeNull()
     expect(client.resizeTerminal).toHaveBeenCalledOnce()
     detachRenderer()
   })

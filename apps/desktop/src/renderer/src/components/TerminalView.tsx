@@ -554,8 +554,9 @@ export function TerminalView({
         // 这次几何没到 PTY，synchronizer 不许把它记成 PTY 的当前尺寸，否则恢复运行后
         // 同一几何被相同-key 短路吞掉，网格永久停在退出前（见 viewport-sync 的 resize 合同）。
         if (!canControlRunRef.current || attachmentId === null) return false
-        await api.sessions.resize(attachmentId, cols, rows)
-        return true
+        const applied = await api.sessions.resize(attachmentId, cols, rows)
+        if (!applied) return false
+        return { cols: applied.cols, rows: applied.rows }
       },
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (frameId) => cancelAnimationFrame(frameId),

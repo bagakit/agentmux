@@ -1277,7 +1277,11 @@ export type AgentMuxDesktopApi = {
     resume(session: AgentSessionControl, prompt: string, operationId: string): Promise<SessionSnapshot>
     acknowledge(session: SessionControl, throughByte: number): Promise<void>
     interrupt(session: SessionControl): Promise<void>
-    resize(attachmentId: string, cols: number, rows: number): Promise<void>
+    resize(
+      attachmentId: string,
+      cols: number,
+      rows: number
+    ): Promise<{ cols: number; rows: number } | null>
     refresh(session: SessionControl): Promise<SessionSnapshot>
     // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
     // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:

@@ -793,6 +793,45 @@ describe('TerminalViewportSynchronizer', () => {
     expect(delivered.at(-1), 'PTY 停在 100 列而 xterm 已是 140 列：被挡掉的 resize 被记成了成功')
       .toEqual({ cols: 140, rows: 30 })
   })
+
+  it('records the applied PTY size, not the UI proposal, as the delivered geometry', async () => {
+    const frames = frameHarness()
+    const proposed = { cols: 200, rows: 90 }
+    let actual = { ...proposed }
+    const delivered: Array<{ cols: number; rows: number }> = []
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit: () => { actual = { ...proposed } },
+      readGrid: () => actual,
+      resize: async (size) => {
+        delivered.push(size)
+        return { cols: 200, rows: 87 }
+      },
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    const settleFrames = async () => {
+      for (let index = 0; index < 20 && frames.count() > 0; index += 1) {
+        frames.runNext()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+    }
+
+    await sync.startLiveSynchronization()
+    await settleFrames()
+    expect(delivered.length).toBeGreaterThan(0)
+    expect(delivered.every((size) => size.cols === 200 && size.rows === 90)).toBe(true)
+
+    delivered.length = 0
+    sync.observeViewport()
+    await settleFrames()
+    expect(
+      delivered,
+      '把 UI 测得的 200x90 记成了 PTY 已生效尺寸，于是同一提案被短路，再也送不出 200x90'
+    ).toEqual([{ cols: 200, rows: 90 }])
+  })
 })
 
 it('a rejected resize is not reported as a successful Redraw request', async () => {

@@ -289,7 +289,7 @@ function screenStoredSession(): AgentMuxStoredAgentSession {
   }
 }
 
-function screenRun(): CtxmuxAdapterRun {
+function screenRun(cols: number | null = 80, rows: number | null = 24): CtxmuxAdapterRun {
   return {
     runId: 'screen-run',
     lifecycleOperationId: null,
@@ -298,8 +298,8 @@ function screenRun(): CtxmuxAdapterRun {
     workspacePath: '/tmp/screen-agent',
     pid: 321,
     state: { type: 'running' },
-    cols: 80,
-    rows: 24,
+    cols,
+    rows,
     latestOutputBytes: 0,
     firstAvailableByte: 0,
     acceptedInputBytes: 0
@@ -316,7 +316,10 @@ type ScreenWaiter = {
   ): Promise<number>
 }
 
-async function screenClient(replays: string[]): Promise<{
+async function screenClient(
+  replays: string[],
+  sizes: ReadonlyArray<{ cols: number | null; rows: number | null }> = []
+): Promise<{
   client: AgentMuxClient
   waiter: ScreenWaiter
   observeCalls: () => number
@@ -340,13 +343,14 @@ async function screenClient(replays: string[]): Promise<{
     _afterByte: number,
     accept: (event: CtxmuxAdapterObservationEvent) => void
   ) => {
-    const replay = replays[Math.min(observeCalls, replays.length - 1)] ?? ''
+    const replay = replays[Math.min(observeCalls, Math.max(0, replays.length - 1))] ?? ''
+    const size = sizes[Math.min(observeCalls, Math.max(0, sizes.length - 1))] ?? { cols: 80, rows: 24 }
     observeCalls += 1
     listener = accept
     const dataBytes = Uint8Array.from(Buffer.from(replay))
     replayedBytes += dataBytes.byteLength
     return {
-      run: screenRun(),
+      run: screenRun(size.cols, size.rows),
       replay: replay
         ? [{
             type: 'data' as const,
@@ -428,6 +432,54 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
       { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
     )).resolves.toBeGreaterThan(0)
     expect(observeCalls()).toBe(2)
+    await client.dispose()
+  })
+
+  it('Resized 后按新的 owner-confirmed 尺寸重建，不再用启动宽度解析后续输出', async () => {
+    const narrow = `${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
+    const wide = `${FRAME_START}\u001b[2J\u001b[22;1H› head\u001b[22;150Htail${FRAME_END}`
+    const { client, waiter, observeCalls, emit } = await screenClient(
+      [narrow, wide],
+      [
+        { cols: 80, rows: 24 },
+        { cols: 200, rows: 87 }
+      ]
+    )
+    const session = screenStoredSession()
+
+    await expect(waiter.wait(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'one',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )).resolves.toBeGreaterThan(0)
+
+    emit({ type: 'resized', runId: 'screen-run', cols: 200, rows: 87 })
+
+    await expect(waiter.wait(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === `head${' '.repeat(143)}tail`,
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )).resolves.toBeGreaterThan(0)
+    expect(observeCalls()).toBe(2)
+    await client.dispose()
+  })
+
+  it('current_size 未知时 fail-closed，不用 spec.size 造屏', async () => {
+    const { client, waiter } = await screenClient(
+      [`${FRAME_START}\u001b[22;1H› one${FRAME_END}`],
+      [{ cols: null, rows: null }]
+    )
+    await expect(waiter.wait(
+      screenStoredSession(),
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'one',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )).rejects.toMatchObject({ code: 'TERMINAL_SIZE_UNKNOWN' })
     await client.dispose()
   })
 })

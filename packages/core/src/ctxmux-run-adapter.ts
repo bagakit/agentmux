@@ -119,8 +119,12 @@ export type CtxmuxAdapterRun = {
     | { type: 'running' }
     | { type: 'exited'; code: number; signal: string | null }
     | { type: 'interrupted'; reason: string }
-  cols: number
-  rows: number
+  /**
+   * Owner-confirmed live PTY size, or `null` when no owner can confirm one.
+   * This is `RunInfo.current_size`, never `RunSpec.size`.
+   */
+  cols: number | null
+  rows: number | null
   latestOutputBytes: number
   firstAvailableByte: number
   acceptedInputBytes: number | null
@@ -148,10 +152,18 @@ export type CtxmuxAdapterGapEvent = {
   latestOutputBytes: number
 }
 
+export type CtxmuxAdapterResizedEvent = {
+  type: 'resized'
+  runId: string
+  cols: number
+  rows: number
+}
+
 export type CtxmuxAdapterEvent =
   | CtxmuxAdapterDataEvent
   | CtxmuxAdapterExitEvent
   | CtxmuxAdapterGapEvent
+  | CtxmuxAdapterResizedEvent
 
 export type CtxmuxAdapterObservationEvent =
   | CtxmuxAdapterEvent
@@ -311,23 +323,6 @@ function artifactDirectory(): string {
     `../vendor/ctxmux/${process.platform}-${process.arch}/`,
     import.meta.url
   ))
-}
-
-function projectRun(run: RunInfo): CtxmuxAdapterRun {
-  return {
-    runId: run.id,
-    lifecycleOperationId: run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID ?? null,
-    program: run.spec?.program ?? null,
-    args: run.spec?.args ?? [],
-    workspacePath: run.spec?.cwd ?? null,
-    pid: run.pid,
-    state: run.state,
-    cols: run.spec?.size.cols ?? 80,
-    rows: run.spec?.size.rows ?? 24,
-    latestOutputBytes: run.latest_output_bytes,
-    firstAvailableByte: run.first_available_byte,
-    acceptedInputBytes: run.applied_input_bytes
-  }
 }
 
 function translateCtxmuxError(error: unknown): AgentMuxError {
@@ -575,6 +570,33 @@ function decodeChunk(
   }
 }
 
+type OwnerConfirmedSize = { cols: number; rows: number }
+
+/**
+ * `RunInfo.current_size` is the snapshot authority. `undefined` means this snapshot
+ * predates the field (vendored types/daemon have not carried it yet); `null` is the
+ * protocol's explicit unknown and must not be replaced by `RunSpec.size`.
+ */
+function snapshotCurrentSize(run: RunInfo): OwnerConfirmedSize | null | undefined {
+  if (!('current_size' in run)) return undefined
+  return (run as RunInfo & { current_size: OwnerConfirmedSize | null }).current_size
+}
+
+function liveResizedSize(event: RunEvent): OwnerConfirmedSize | null {
+  if ((event as { type: string }).type !== 'resized') return null
+  const size = (event as { size?: OwnerConfirmedSize }).size
+  if (
+    !size ||
+    !Number.isInteger(size.cols) ||
+    size.cols <= 0 ||
+    !Number.isInteger(size.rows) ||
+    size.rows <= 0
+  ) {
+    return null
+  }
+  return { cols: size.cols, rows: size.rows }
+}
+
 export class CtxmuxRunAdapter {
   readonly socketPath = defaultCtxmuxSocketPath()
   readonly stateDirectory = defaultCtxmuxStateDirectory()
@@ -591,9 +613,36 @@ export class CtxmuxRunAdapter {
   /** Compatibility is independent of whether this process owns daemon cleanup rights. */
   runtimeOwnership: 'owned' | 'unverified' | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
+  /**
+   * Live owner-confirmed sizes observed on this connection: resize `applied_size`
+   * and `RunEvent::Resized`. Used only when a snapshot omits `current_size`.
+   * An explicit `current_size: null` stays unknown and does not fall back here
+   * or to `RunSpec.size`.
+   */
+  private readonly confirmedSizes = new Map<string, OwnerConfirmedSize>()
+
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
   private connectionLostListener: (() => void) | null = null
+
+  private projectRun(run: RunInfo): CtxmuxAdapterRun {
+    const snapshot = snapshotCurrentSize(run)
+    const size = snapshot === undefined ? (this.confirmedSizes.get(run.id) ?? null) : snapshot
+    return {
+      runId: run.id,
+      lifecycleOperationId: run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID ?? null,
+      program: run.spec?.program ?? null,
+      args: run.spec?.args ?? [],
+      workspacePath: run.spec?.cwd ?? null,
+      pid: run.pid,
+      state: run.state,
+      cols: size?.cols ?? null,
+      rows: size?.rows ?? null,
+      latestOutputBytes: run.latest_output_bytes,
+      firstAvailableByte: run.first_available_byte,
+      acceptedInputBytes: run.applied_input_bytes
+    }
+  }
 
   onEvent(listener: (event: CtxmuxAdapterEvent) => void): () => void {
     this.eventListener = listener
@@ -783,7 +832,7 @@ export class CtxmuxRunAdapter {
 
   async list(): Promise<CtxmuxAdapterRun[]> {
     try {
-      return (await this.requireClient().list()).map(projectRun)
+      return (await this.requireClient().list()).map((run) => this.projectRun(run))
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -791,7 +840,7 @@ export class CtxmuxRunAdapter {
 
   async status(runId: string): Promise<CtxmuxAdapterRun> {
     try {
-      return projectRun(await this.requireClient().status(runId))
+      return this.projectRun(await this.requireClient().status(runId))
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -815,7 +864,7 @@ export class CtxmuxRunAdapter {
         env: { ...localProcessEnvironment(), ...input.env },
         size: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
       }), createOperationKey(input.operationKey))
-      return projectRun(run)
+      return this.projectRun(run)
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -835,7 +884,7 @@ export class CtxmuxRunAdapter {
       this.attachments.set(runId, { attachment, token })
       void this.pump(runId, token, attachment, decoder)
       return {
-        run: projectRun(attachment.snapshot.run),
+        run: this.projectRun(attachment.snapshot.run),
         replay,
         gap: classifyReplayGap({
           truncated: attachment.snapshot.replay.truncated,
@@ -858,7 +907,7 @@ export class CtxmuxRunAdapter {
       attachment = await this.requireClient().attach(runId, afterByte)
       const decoder = new TextDecoder()
       return {
-        run: projectRun(attachment.snapshot.run),
+        run: this.projectRun(attachment.snapshot.run),
         replay: attachment.snapshot.replay.chunks.map((chunk) => (
           decodeChunk(runId, decoder, chunk)
         )),
@@ -922,36 +971,14 @@ export class CtxmuxRunAdapter {
         try {
           for await (const event of active.events()) {
             if (closed) return
-            if (event.type === 'output') {
-              listener(decodeChunk(runId, decoder, event.chunk))
-            } else if (event.type === 'gap') {
-              listener({ type: 'gap', runId, latestOutputBytes: event.latest_output_bytes })
-            } else if (event.type === 'tmux' || event.type === 'observation_discontinuity') {
-              listener({
-                type: 'error',
-                runId,
-                error: new AgentMuxError(
-                  `A native AgentMux Run received an unexpected ${event.type} event.`,
-                  'CTXMUX_EVENT_INVALID'
-                )
-              })
-            } else {
-              listener({
-                type: 'exit',
-                runId,
-                state: event.type === 'exited'
-                  ? event.state
-                  : { type: 'interrupted', reason: event.reason },
-                observedAt: Date.now()
-              })
-            }
+            listener(this.translateLiveEvent(runId, decoder, event))
           }
         } catch (error) {
           if (!closed) this.errorListener?.(translateCtxmuxError(error), runId)
         }
       })()
       return {
-        run: projectRun(snapshot.run),
+        run: this.projectRun(snapshot.run),
         replay,
         gap: classifyReplayGap({
           truncated: snapshot.replay.truncated,
@@ -999,7 +1026,7 @@ export class CtxmuxRunAdapter {
     try {
       const accepted = await this.requireClient().recoverableInput(recoverable)
       return {
-        run: projectRun(accepted.run),
+        run: this.projectRun(accepted.run),
         appliedByteRange: {
           startByte: accepted.receipt.start_byte,
           endByte: accepted.receipt.end_byte
@@ -1013,10 +1040,15 @@ export class CtxmuxRunAdapter {
   async resize(runId: string, cols: number, rows: number): Promise<{ run: CtxmuxAdapterRun; cols: number; rows: number }> {
     try {
       const accepted = await this.requireClient().resize(runId, { cols, rows })
+      // Receipt `applied_size` is the size the PTY confirmed for this command. Record it
+      // before projecting so a snapshot that still omits `current_size` does not fall back
+      // to `RunSpec.size`.
+      const applied = accepted.receipt.applied_size
+      this.confirmedSizes.set(runId, { cols: applied.cols, rows: applied.rows })
       return {
-        run: projectRun(accepted.run),
-        cols: accepted.receipt.applied_size.cols,
-        rows: accepted.receipt.applied_size.rows
+        run: this.projectRun(accepted.run),
+        cols: applied.cols,
+        rows: applied.rows
       }
     } catch (error) {
       throw translateCtxmuxError(error)
@@ -1095,27 +1127,56 @@ export class CtxmuxRunAdapter {
     }
   }
 
-  private emitRunEvent(runId: string, decoder: TextDecoder, event: RunEvent): void {
-    if (event.type === 'output') {
-      this.eventListener?.(decodeChunk(runId, decoder, event.chunk))
-      return
+  private translateLiveEvent(
+    runId: string,
+    decoder: TextDecoder,
+    event: RunEvent
+  ): CtxmuxAdapterObservationEvent {
+    const resized = liveResizedSize(event)
+    if (resized) {
+      this.confirmedSizes.set(runId, resized)
+      return { type: 'resized', runId, cols: resized.cols, rows: resized.rows }
     }
+    if ((event as { type: string }).type === 'resized') {
+      return {
+        type: 'error',
+        runId,
+        error: new AgentMuxError(
+          'A native AgentMux Run received a resized event without an owner-confirmed size.',
+          'CTXMUX_EVENT_INVALID'
+        )
+      }
+    }
+    if (event.type === 'output') return decodeChunk(runId, decoder, event.chunk)
     if (event.type === 'gap') {
-      this.eventListener?.({ type: 'gap', runId, latestOutputBytes: event.latest_output_bytes })
-      return
+      return { type: 'gap', runId, latestOutputBytes: event.latest_output_bytes }
     }
     if (event.type === 'tmux' || event.type === 'observation_discontinuity') {
-      this.errorListener?.(new AgentMuxError(
-        `A native AgentMux Run received an unexpected ${event.type} event.`,
-        'CTXMUX_EVENT_INVALID'
-      ), runId)
-      return
+      return {
+        type: 'error',
+        runId,
+        error: new AgentMuxError(
+          `A native AgentMux Run received an unexpected ${event.type} event.`,
+          'CTXMUX_EVENT_INVALID'
+        )
+      }
     }
-    this.eventListener?.({
+    return {
       type: 'exit',
       runId,
-      state: event.type === 'exited' ? event.state : { type: 'interrupted', reason: event.reason },
+      state: event.type === 'exited'
+        ? event.state
+        : { type: 'interrupted', reason: event.reason },
       observedAt: Date.now()
-    })
+    }
+  }
+
+  private emitRunEvent(runId: string, decoder: TextDecoder, event: RunEvent): void {
+    const translated = this.translateLiveEvent(runId, decoder, event)
+    if (translated.type === 'error') {
+      this.errorListener?.(translated.error, runId)
+      return
+    }
+    this.eventListener?.(translated)
   }
 }

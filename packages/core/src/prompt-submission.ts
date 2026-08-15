@@ -493,7 +493,9 @@ export class AgentPromptSubmissionCoordinator {
       if (
         !(error instanceof AgentMuxError) ||
         (error.code !== 'OUTPUT_GAP' && error.code !== 'AGENT_PROMPT_RENDER_TIMEOUT' &&
-          error.code !== 'AGENT_PROMPT_READINESS_CANCELLED')
+          error.code !== 'AGENT_PROMPT_READINESS_CANCELLED' &&
+          error.code !== 'TERMINAL_SIZE_UNKNOWN' &&
+          error.code !== 'TERMINAL_GEOMETRY_CHANGED')
       ) {
         throw error
       }
@@ -512,7 +514,10 @@ export class AgentPromptSubmissionCoordinator {
         state: 'unverified',
         mode: 'degraded',
         reason: error.code === 'OUTPUT_GAP' ? 'screen-evidence-gap'
-          : error.code === 'AGENT_PROMPT_READINESS_CANCELLED' ? 'screen-evidence-replaced'
+          : error.code === 'AGENT_PROMPT_READINESS_CANCELLED' ||
+            error.code === 'TERMINAL_GEOMETRY_CHANGED' ||
+            error.code === 'TERMINAL_SIZE_UNKNOWN'
+            ? 'screen-evidence-replaced'
           : 'prompt-render-timeout',
         submissionId,
         run: { ...session.run },
@@ -592,17 +597,32 @@ export class AgentPromptSubmissionCoordinator {
         'INVALID_AGENT_PROVIDER'
       )
     }
-    await this.deps.screenEvidence.wait(
-      session,
-      submission.outputCursorBytes,
-      true,
-      (screen) => screen.composerText(matcher.activeComposer, content.includes('\n')) === content,
-      {
-        timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS,
-        timeoutMessage: 'Timed out waiting for the Agent prompt to render.',
-        terminalMessage: 'Agent Run exited before the prompt was rendered.'
+    const deadline = Date.now() + TERMINAL_PROMPT_RENDER_TIMEOUT_MS
+    for (;;) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
+        throw new AgentMuxError(
+          'Timed out waiting for the Agent prompt to render.',
+          'AGENT_PROMPT_RENDER_TIMEOUT'
+        )
       }
-    )
+      try {
+        await this.deps.screenEvidence.wait(
+          session,
+          submission.outputCursorBytes,
+          true,
+          (screen) => screen.composerText(matcher.activeComposer, content.includes('\n')) === content,
+          {
+            timeoutMs: remaining,
+            timeoutMessage: 'Timed out waiting for the Agent prompt to render.',
+            terminalMessage: 'Agent Run exited before the prompt was rendered.'
+          }
+        )
+        return
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'TERMINAL_GEOMETRY_CHANGED') throw error
+      }
+    }
   }
 
   observeReadiness(
@@ -709,6 +729,22 @@ export class AgentPromptSubmissionCoordinator {
       if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_READINESS_CANCELLED') return
       if (this.readinessCancels.get(session.agentSessionId) === cancel) {
         this.readinessCancels.delete(session.agentSessionId)
+      }
+      if (error instanceof AgentMuxError && error.code === 'TERMINAL_GEOMETRY_CHANGED') {
+        try {
+          const current = this.deps.requireAgentSession(session.agentSessionId)
+          const currentReadiness = current.terminalPromptReadiness
+          if (
+            sameRun(current.run, session.run) &&
+            currentReadiness &&
+            currentReadiness.readyThroughByte === undefined
+          ) {
+            this.observeReadiness(current, currentReadiness)
+          }
+        } catch {
+          // Session left while geometry changed; there is nothing to re-arm.
+        }
+        return
       }
       this.deps.publisher.publish({
         type: 'agent-error',
