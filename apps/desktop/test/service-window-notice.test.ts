@@ -205,7 +205,7 @@ describe('输出通道断了、进程没死：放行必须配告知', () => {
     // 三段文案要点名「输出可能没在显示」「输入仍到达 Agent」，以及一个此刻真能走通的动作。
     expect(rendered!.notice.mode).toContain('Output may not be showing')
     expect(rendered!.notice.mode).toContain('input still reaches the Agent')
-    expect(rendered!.notice.restore).toContain('Switch to another tab and back')
+    expect(rendered!.notice.restore).toContain('Switch this pane to Activity and back to Terminal')
   })
 
   it('restore 不许点名 Resume——这个状态下按了等于没按', () => {

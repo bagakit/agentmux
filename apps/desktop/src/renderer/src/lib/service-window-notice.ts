@@ -204,18 +204,23 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
   // 也声称走那条路。实测不是：这条降级只在进程**还在跑**时产生，而 Resume 走
   // `ensureAgentContinuity`，对一个 running 的 Run 判出 `reattachable` 就直接返回投影——
   // 全程 attach 调用数为 0，标记原样留着（对 client 实跑验证过：verdict=reattachable、attach 0 次、
-  // 标记仍在）。也就是说上一版这句话点名的动作，在这个状态下按了等于没按。
+  // 标记仍在）。也就是说 Resume 在这个状态下按了等于没按。
   //
   // 真正能撤下它的是让这块屏**重新挂载**：卸载时 TerminalView 会 detach（runtime-controller 随之
   // 丢掉 attachment owner），重新挂载时 `existing` 缺席，于是走 `reattachAgent` → `attachAgentRun`
-  // → `clearOutputChannel`。切到别的 tab 再切回来就是用户手上唯一能走通这条路的动作——tab 冷却会
-  // 卸载 TerminalView，切回来重挂。切换 Activity/Terminal 视图同理，但那要求用户此刻正在终端视图，
-  // 而这条告示两个视图都会出现，所以文案取那个不预设当前视图的。
+  // → `clearOutputChannel`。
+  //
+  // 点名 Terminal/Activity 这个切换，而不是「切走再切回 tab」：后者要等冷却
+  // （TERMINAL_COLD_PARK_DELAY_MS = 30s，且还要过 TTL 或被挤出热集）才真的卸载，用户照字面做
+  // ——切走、马上切回——屏幕仍是热的、根本不重挂，于是什么都不会发生。这条视图切换是
+  // SessionPane 里一个真正的条件卸载，立即生效，且 pane 上就有那个带标签的按钮。
+  // 这条告示在两个视图下都会出现，所以措辞取「切到 Activity 再切回 Terminal」这个双向都说得通的
+  // 来回，而不是预设用户此刻在哪一侧。
   if (session.terminalOutputChannel?.reason === 'reattach-failed') {
     const step: ProcessStep = {
       label: 'Reattaching this window’s output',
       degradedMode: 'Output may not be showing here, but your input still reaches the Agent',
-      restore: 'Switch to another tab and back to reattach its output'
+      restore: 'Switch this pane to Activity and back to Terminal to reattach its output'
     }
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }

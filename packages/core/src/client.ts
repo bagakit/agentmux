@@ -877,8 +877,13 @@ export class AgentMuxClient {
         if (resumed === 'dead') {
           // 放行是对的（进程还活着，输入照常送达 Agent——第 2 类），但放行必须配告知：上面那条 agent-error
           // 会被后续会话快照的 `>=` 洗白，且它只在 Activity 视图里短暂存在。落一条**可持久**的降级事实，
-          // 说清「输出通道没了、进程没死」，渲染端据此长出一条「输出可能没在显示，Resume 可重新附着」的
-          // 服务窗——它挺过视图切换与快照刷新，直到一次成功的 reattach 就地撤下它（见 attachAgentRun）。
+          // 说清「输出通道没了、进程没死」，渲染端据此长出一条「输出可能没在显示，把这块 pane 在
+          // Activity/Terminal 之间切一下即可重新附着」的服务窗——它挺过视图切换与快照刷新，直到一次
+          // 成功的 reattach 就地撤下它（见 attachAgentRun）。
+          //
+          // 那句文案刻意不点名 Resume：这条降级只在进程还在跑时产生，而 Resume 对 running 的 Run 判出
+          // `reattachable` 直接返回投影，不碰 attach（实跑验证过 attach 调用数为 0）。详见
+          // clearOutputChannel 的注释与 service-window-notice.ts。
           await this.publishOutputChannelSevered(agentSession)
           continue
         }
