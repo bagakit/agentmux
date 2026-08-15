@@ -49,8 +49,7 @@ export async function runFanOutRequest(
   const branches = await ports.listBranches(input.workspaceId, config)
   if (branches.kind !== 'git-repository') {
     return { kind: 'rejected', reason: 'A fan-out needs a git repository.' }
-  }
-  const plan = planFanOut({
+  }  const plan = planFanOut({
     count: input.count,
     baseName: input.baseName,
     // 仓库根，不是 `workspace.path`。两者在多数 workspace 上是同一个字符串，所以取错不会当场出事——
@@ -72,13 +71,16 @@ export async function runFanOutRequest(
   // 被拒的计划原样返回，不吞掉理由；单 lane 也原样交还——一条 lane 不是 bake-off，它属于普通
   // 启动路径，不该为"和空无一物比较"付出编排代价。
   if (plan.kind !== 'fanout') return plan
+  // 每条 lane 各自取当前 config、各自立刻回写，而不是开头快照一份、末尾整份盖回去。理由见
+  // runFanOut 的「Why each lane re-reads the config」那段：扇出是长操作，期间主进程照常接别的 IPC，
+  // 整份回写会把中途别人写进去的东西静默抹掉（fanout-config-lost-update.test.ts 真跑出来过）。
   const result = await runFanOut({
     workspaceId: input.workspaceId,
     prompt: input.prompt,
     lanes: plan.lanes,
-    config,
+    readConfig: () => ports.config(),
+    commitConfig: (next) => ports.commitConfig(next),
     ports: ports.lanes(workspace)
   })
-  ports.commitConfig(result.config)
   return { kind: 'fanout', lanes: result.lanes }
 }
