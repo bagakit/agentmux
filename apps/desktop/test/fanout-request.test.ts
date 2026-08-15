@@ -64,10 +64,17 @@ type Recorded = {
 function ports(overrides: Partial<FanOutRequestPorts> = {}): FanOutRequestPorts & { recorded: Recorded } {
   const recorded: Recorded = { created: [], launched: [], removed: [], committed: [], laneSources: [] }
   let laneSeq = 0
+  // ipc.ts 那个可变的 config 闭包，如实照搬：`config()` 每次取**当前**值，`commitConfig` 就地推进它。
+  // 之前这里是 `config: () => CONFIG` 一个常量——那样读不读得到上一条 lane 的回写完全看不出来，
+  // 「每条 lane 从当前值出发」和「每条 lane 从开场快照出发」在常量下是同一个结果。
+  let live: AppConfig = CONFIG
   const base: FanOutRequestPorts = {
-    config: () => CONFIG,
+    config: () => live,
     listBranches: async () => gitRepository(),
-    commitConfig: (next) => recorded.committed.push(next),
+    commitConfig: (next) => {
+      live = next
+      recorded.committed.push(next)
+    },
     lanes: (source) => {
       recorded.laneSources.push(source)
       return {
@@ -134,12 +141,17 @@ describe('一次扇出请求真的跑到底', () => {
     // executor 少于 lane 数时循环复用。
     expect(p.recorded.launched.map((item) => item.executorId)).toEqual(['codex', 'claude', 'codex'])
     // 成功的 lane 注册了 worktree，config 因此必须回写——不回写，重启后那几个 worktree 无人认领。
-    expect(p.recorded.committed).toHaveLength(1)
-    expect(p.recorded.committed[0]!.workspaces.map((item) => item.id)).toEqual([
-      'repo',
-      'lane-1',
-      'lane-2',
-      'lane-3'
+    //
+    // **每条 lane 各回写一次**，不是攒到最后整份盖回去。这条从 1 改成 3 不是把断言放宽去迁就实现：
+    // 攒一份到最后回写，会把扇出进行期间别的 IPC 写进去的东西静默抹掉（扇出是几秒到几十秒的长
+    // 操作，主进程这期间照常接别的请求）。逐条发布因此是实质更强的契约——中途任何一个读 config
+    // 的 handler 都看得见盘上已经存在的那些 worktree。
+    expect(p.recorded.committed).toHaveLength(3)
+    // 而且是**累进**的，不是三份各自为政：最后一份必须含前两条 lane，否则后一条把前一条盖掉了。
+    expect(p.recorded.committed.map((entry) => entry.workspaces.map((item) => item.id))).toEqual([
+      ['repo', 'lane-1'],
+      ['repo', 'lane-1', 'lane-2'],
+      ['repo', 'lane-1', 'lane-2', 'lane-3']
     ])
   })
 

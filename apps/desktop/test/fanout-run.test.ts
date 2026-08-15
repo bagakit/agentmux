@@ -21,6 +21,26 @@ function lane(branch: string, executorId = 'codex') {
   return { branch, path: `/repo/.worktrees/${branch}`, executorId }
 }
 
+/**
+ * 主进程那个共享的 config 单元，原样对应 ipc.ts 的可变闭包。
+ *
+ * runFanOut 不再自己攒一份 config 最后整份交回——那样会把扇出进行期间别的 IPC 写进去的东西
+ * 静默盖掉（见 fanout-config-lost-update.test.ts）。现在它逐 lane 取当前值、逐 lane 回写，
+ * 所以"每条 lane 的注册都活到最后"这条性质要在**这个单元**上验，而不是在返回值上。
+ */
+function configCell(initial: AppConfig = config) {
+  let current = initial
+  return {
+    read: () => current,
+    commit: (next: AppConfig) => {
+      current = next
+    },
+    get value() {
+      return current
+    }
+  }
+}
+
 // Ports that succeed, threading a config that visibly accumulates one workspace per lane so the tests
 // can prove the config was carried forward rather than reset per lane.
 function ports(overrides: Partial<FanOutPorts> = {}): FanOutPorts {
@@ -48,28 +68,34 @@ function ports(overrides: Partial<FanOutPorts> = {}): FanOutPorts {
 
 describe('fan-out run', () => {
   it('launches one agent per lane and threads the config through every registration', async () => {
+    const cell = configCell()
     const result = await runFanOut({
       workspaceId: 'repo',
       prompt: 'Add retry to the uploader',
       lanes: [lane('retry-1'), lane('retry-2'), lane('retry-3')],
-      config,
+      readConfig: cell.read,
+      commitConfig: cell.commit,
       ports: ports()
     })
 
     expect(result.lanes.map((entry) => entry.status)).toEqual(['launched', 'launched', 'launched'])
-    // Each lane's worktree registration must survive into the final config; a lane that overwrote the
-    // config it was handed would silently drop the earlier lanes' workspaces.
-    expect(result.config.workspaces.map((workspace) => workspace.name))
+    // Each lane's worktree registration must survive into the shared config; a lane that started from
+    // anything other than what the previous lane published would silently drop the earlier workspaces.
+    // Read on the cell, not on the return value: runFanOut no longer carries a config out, because
+    // carrying one out is exactly what let it overwrite concurrent writers.
+    expect(cell.value.workspaces.map((workspace) => workspace.name))
       .toEqual(['retry-1', 'retry-2', 'retry-3'])
   })
 
   it('carries the same prompt down every lane, with each lane on its own worktree', async () => {
+    const cell = configCell()
     const io = ports()
     await runFanOut({
       workspaceId: 'repo',
       prompt: 'One prompt, three ways',
       lanes: [lane('a'), lane('b')],
-      config,
+      readConfig: cell.read,
+      commitConfig: cell.commit,
       ports: io
     })
 
@@ -80,14 +106,16 @@ describe('fan-out run', () => {
   })
 
   it('always creates the branch: a bake-off opens fresh branches, it does not adopt existing ones', async () => {
+    const cell = configCell()
     const io = ports()
-    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io })
+    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io })
 
     expect((io.createWorktree as ReturnType<typeof vi.fn>).mock.calls[0]![0])
       .toMatchObject({ createBranch: true, branch: 'a' })
   })
 
   it('keeps going when one lane fails — the point of a bake-off is the lanes that worked', async () => {
+    const cell = configCell()
     // Throwing on first failure would abandon the lanes that already succeeded with no record of them.
     const io = ports({
       launchAgent: vi.fn(async (input) => {
@@ -100,7 +128,8 @@ describe('fan-out run', () => {
       workspaceId: 'repo',
       prompt: 'p',
       lanes: [lane('a'), lane('b'), lane('c')],
-      config,
+      readConfig: cell.read,
+      commitConfig: cell.commit,
       ports: io
     })
 
@@ -109,6 +138,7 @@ describe('fan-out run', () => {
   })
 
   it('says where a failed lane left its worktree, so no directory becomes an orphan', async () => {
+    const cell = configCell()
     // A worktree with no agent in it is the state a person has to decide about. Reporting it as merely
     // "failed" would leave a real directory nobody knows to claim.
     const io = ports({
@@ -117,7 +147,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(result.lanes[0]).toMatchObject({
@@ -133,6 +163,7 @@ describe('fan-out run', () => {
   })
 
   it('hands a failed lane its worktree back when teardown is available', async () => {
+    const cell = configCell()
     const removeWorktree = vi.fn(async (_input: { workspaceId: string }, current: AppConfig) => ({
       config: { ...current, workspaces: [] }
     }))
@@ -142,7 +173,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(removeWorktree).toHaveBeenCalledWith({ workspaceId: 'ws-a' }, expect.anything())
@@ -154,6 +185,7 @@ describe('fan-out run', () => {
   })
 
   it('does not let a cleanup failure hide the launch failure that caused it', async () => {
+    const cell = configCell()
     // The user needs the original reason AND the truth that the directory is still there.
     const io = ports({
       launchAgent: vi.fn(async () => { throw new Error('the real problem') }),
@@ -161,7 +193,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(result.lanes[0]).toMatchObject({
@@ -177,6 +209,7 @@ describe('fan-out run', () => {
   })
 
   it('清理时 git 已经删掉目录、只是记录没撤下：不算搁浅，也不许说目录还在', async () => {
+    const cell = configCell()
     // 这是 `worktreeRetained: boolean` 唯一**答错**的那一档，也是它必须不再是布尔的理由：清理抛出时
     // 旧代码记 `retained = true`，即「目录还在」——而这一档 git 恰好已经把目录删了。
     //
@@ -190,7 +223,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     const [first] = result.lanes
@@ -204,6 +237,7 @@ describe('fan-out run', () => {
   })
 
   it('脏树的清理拒绝仍然算搁浅：那个签出真的还在，等人决定', async () => {
+    const cell = configCell()
     // 与上一条成对。同样是「清理没成功」，但这一档目录还在，所以它**必须**进搁浅清单——只钉上面
     // 那条时，把整个 strandedLanes 改成恒空也照旧全绿。
     const io = ports({
@@ -214,13 +248,14 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(strandedLanes(result).map((entry) => entry.branch)).toEqual(['a'])
   })
 
   it('distinguishes a lane that created nothing from one that created a worktree', async () => {
+    const cell = configCell()
     // worktree-failed has nothing to clean up; launch-failed might. Collapsing them would either invent
     // an orphan or hide one.
     const io = ports({
@@ -228,7 +263,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(result.lanes[0]).toEqual({
@@ -242,18 +277,20 @@ describe('fan-out run', () => {
   })
 
   it('reports an all-failed fan-out as empty rather than successful', async () => {
+    const cell = configCell()
     const io = ports({ createWorktree: vi.fn(async () => { throw new Error('no') }) })
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], config, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, commitConfig: cell.commit, ports: io
     })
 
     expect(launchedLanes(result)).toEqual([])
     expect(result.lanes.every((entry) => entry.status === 'worktree-failed')).toBe(true)
     // The config is unchanged: nothing registered, so nothing to unregister later.
-    expect(result.config.workspaces).toEqual([])
+    expect(cell.value.workspaces).toEqual([])
   })
 
   it('runs lanes sequentially, because they contend on one git repository', async () => {
+    const cell = configCell()
     // Concurrent `git worktree add` calls fight over the same index and metadata, and the config is
     // threaded through each registration — parallel lanes would race on both. The agents run
     // concurrently once launched, which is where the parallelism the user wants actually lives.
@@ -270,17 +307,21 @@ describe('fan-out run', () => {
       })
     })
 
-    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], config, ports: io })
+    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, commitConfig: cell.commit, ports: io })
 
     expect(order).toEqual(['create:a', 'created:a', 'create:b', 'created:b'])
   })
 
   it('handles an empty lane list without inventing work', async () => {
+    const cell = configCell()
     const io = ports()
-    const result = await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [], config, ports: io })
+    const result = await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [], readConfig: cell.read, commitConfig: cell.commit, ports: io })
 
     expect(result.lanes).toEqual([])
-    expect(result.config).toBe(config)
+    // Identity, not deep equality: no lane ran, so nothing was ever published — the cell still holds
+    // the very object it started with. A `toEqual` here would also pass on a gratuitous copy, and a
+    // gratuitous copy is precisely the write that clobbers a concurrent one.
+    expect(cell.value).toBe(config)
     expect(io.createWorktree).not.toHaveBeenCalled()
   })
 })
