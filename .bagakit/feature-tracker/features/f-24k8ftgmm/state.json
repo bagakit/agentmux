@@ -61,9 +61,18 @@
     {
       "action": "task_finished",
       "detail": "T-002 => done"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 6e1d13670c8604183637440d40a709d333e2fb0cc3399113b2c4302359a0a785"
     }
   ],
   "plan_status": "ready",
   "plan_revision": 1,
-  "review_ref": "docs/reviews/project-navigation-2026-09-09.md"
+  "review_ref": "docs/reviews/project-navigation-2026-09-09.md",
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-24k8ftgmm/goal.md",
+    "revision": "6e1d13670c8604183637440d40a709d333e2fb0cc3399113b2c4302359a0a785"
+  }
 }

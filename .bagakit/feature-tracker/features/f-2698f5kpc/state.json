@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "feat_id": "f-2698f5kpc",
+  "title": "PTY 尺寸：跨客户端 resize、重连与未知尺寸的诚实降级",
+  "slug": "pty-size-authority",
+  "goal": "ctxmux main 已提供 RunInfo.current_size 与 RunEvent::Resized，AgentMux 侧要把「当前尺寸是多少」这件事收敛到 owner 权威，并在拿不到权威时如实说不知道、而不是拿一个看起来像事实的旧值冒充。已验证的现状：(1) 投影已从 RunSpec.size 改成 current_size，且 current_size 显式为 null 时不回退（packages/core/test/ctxmux-run-current-size.test.ts，判别用例已补）。(2) 但仓内 vendored 的 ctxmux 是 c13ab114 / protocol 14，其 SDK 与 ctxmuxd 二进制里都没有 current_size 也没有 resized——实测 strings 计数为 0。于是今天 100% 的活尺寸来自 resize receipt 的 applied_size 缓存 confirmedSizes，它只覆盖「我们自己发的 resize」，覆盖不了别的客户端发的。(3) confirmedSizes 从不清除：disconnect() 与 markConnectionLost() 都清了 attachments、client、runtime，唯独不清它。于是重连之后投影出的是上一条连接确认过的尺寸，而断线期间别的客户端改过尺寸的话，这个值是错的、且 daemon 无法反驳它——屏幕证据会按这个错宽度重建。(4) Desktop 侧 TerminalViewportSynchronizer 已经按 receipt 的 applied size 记账（返回 {cols,rows} 而非 true），这一条有测试钉住。真正的缺口是重连后的尺寸重建与「拿不到权威尺寸」的降级路径是否会把一个健康的 Agent 锁死（原则 11 第 2 类）。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 6bcb88e6c1b36d20faac95eb56693a7ef991560bb4c268a70cef60f9447bbc56"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "6bcb88e6c1b36d20faac95eb56693a7ef991560bb4c268a70cef60f9447bbc56 -> 28a09c216def5f22e308114f2054fa326b045b8e3ac43ceba51f3ea312ce8048"
+    }
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-2698f5kpc/goal.md",
+    "revision": "28a09c216def5f22e308114f2054fa326b045b8e3ac43ceba51f3ea312ce8048"
+  }
+}

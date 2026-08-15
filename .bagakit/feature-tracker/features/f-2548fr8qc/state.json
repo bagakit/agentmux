@@ -39,6 +39,15 @@
     {
       "action": "task_started",
       "detail": "T-001"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 1c25910ebf0eb4294e2b058d0bfd14cf5b2202ec2933f7fdd0207f9d2c92f75b"
     }
-  ]
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-2548fr8qc/goal.md",
+    "revision": "1c25910ebf0eb4294e2b058d0bfd14cf5b2202ec2933f7fdd0207f9d2c92f75b"
+  }
 }
