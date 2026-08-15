@@ -1,5 +1,5 @@
 import { Info } from 'lucide-react'
-import type { RenderableServiceNotice } from '../lib/service-window-notice'
+import { serviceNoticeAriaLive, type RenderableServiceNotice } from '../lib/service-window-notice'
 
 /**
  * 服务窗（AGENTS.md 原则 11）。像窗口上贴的一条告示：停在旁边，不挡路，也不消失。
@@ -18,12 +18,15 @@ export function ServiceWindowNotice({
 }) {
   if (!notice) return null
   // 分不清与流程降级用同一种告示形态，只以 data 属性区分语气：两者都不阻断、都不静默。
+  // 音量不在这里挑——由判定层按 kind（承载存活判定）派生：降级/分不清轻声（polite），只有真正
+  // 需要打断的那一档才 assertive。role 跟着音量走，保持 ARIA 语义一致（assertive⟺alert）。
+  const ariaLive = serviceNoticeAriaLive(notice.kind)
   return (
     <aside
       className="service-window"
       data-kind={notice.kind}
-      role="status"
-      aria-live="polite"
+      role={ariaLive === 'assertive' ? 'alert' : 'status'}
+      aria-live={ariaLive}
     >
       <span className="service-window__icon" aria-hidden="true">
         <Info size={14} />

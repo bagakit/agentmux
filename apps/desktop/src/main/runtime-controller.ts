@@ -44,7 +44,8 @@ import {
 import { createExecutionHost } from './host-factory.js'
 import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
 import { ProcessResourceSampler } from './process-resource-sampler.js'
-import { humanizePromptDeliveryError } from './prompt-readiness-diagnostics.js'
+import { humanizePromptDeliveryError, isPromptReadinessSemanticState } from './prompt-readiness-diagnostics.js'
+import type { PromptReadinessSemanticState } from './prompt-readiness-diagnostics.js'
 import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
@@ -220,6 +221,9 @@ function projectSession(
         : {}),
       ...(subject.agentSession.terminalPromptDelivery
         ? { terminalPromptDelivery: structuredClone(subject.agentSession.terminalPromptDelivery) }
+        : {}),
+      ...(subject.agentSession.terminalOutputChannel
+        ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
         : {}),
       processState: run.state,
       ...runInterruptionFact(run),
@@ -802,7 +806,7 @@ export class RuntimeController {
         // authoritative Run before translating a readiness error so a stopped Agent is never told to
         // keep waiting for an observation that can no longer arrive.
         let runState: 'running' | 'ended' | undefined
-        let semanticState: 'waiting' | 'blocked' | 'done' | 'error' | undefined
+        let semanticState: PromptReadinessSemanticState | undefined
         if (error instanceof AgentMuxError && (
           error.code === 'AGENT_PROMPT_NOT_READY' ||
           error.code === 'AGENT_PROMPT_READINESS_CONSUMED' ||
@@ -814,7 +818,7 @@ export class RuntimeController {
               if (latest.run.state !== 'running') runState = 'ended'
               else {
                 const candidate = latest.session.semanticStatus?.state
-                if (candidate === 'waiting' || candidate === 'blocked' || candidate === 'done' || candidate === 'error') {
+                if (candidate && isPromptReadinessSemanticState(candidate)) {
                   semanticState = candidate
                 }
               }

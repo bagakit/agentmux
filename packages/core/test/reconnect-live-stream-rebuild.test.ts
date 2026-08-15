@@ -349,3 +349,65 @@ describe('T-001 重连后重建实时字节泵', () => {
     expect(terminalOutputs(events, 'run-1')).toContain('LIVE-VIA-EXISTING')
   })
 })
+
+// ---------------------------------------------------------------------------
+// T-002：输出通道断了、进程没死时，放行必须配一条可持久的告知。
+//
+// `resumed==='dead'` 分支刻意**跳过** republish 成 running（否则会洗掉刚发的 agent-error，见上面的
+// 部分失败测试）。但那条 agent-error 会被后续会话快照的 `>=` 洗白、且只在 Activity 视图短暂存在。真正
+// 欠着的是：Core 要落一条**可持久**的降级事实（`terminalOutputChannel`），渲染端据此长出「输出可能没在
+// 显示，Resume 可重新附着」的服务窗——它挺过快照刷新，直到一次成功的 reattach 撤下它。
+// ---------------------------------------------------------------------------
+
+function outputChannelOf(events: AgentMuxClientEvent[], agentSessionId: string): unknown[] {
+  return events
+    .filter((event): event is Extract<AgentMuxClientEvent, { type: 'agent-session' }> =>
+      event.type === 'agent-session' && event.session.agentSessionId === agentSessionId)
+    .map((event) => event.session.terminalOutputChannel)
+}
+
+describe('T-002 输出通道断了的可持久告知', () => {
+  it('重建失败：落一条 terminalOutputChannel 降级事实，说明「进程在跑、输出通道没了」', async () => {
+    const { client, events, state, kernel } = await fixture([storedSession()])
+
+    kernel.configureRuns([runningRun('run-1')])
+    kernel.configureAttach('run-1', { throwOnAttach: new Error('reattach boom') })
+
+    await driveReconnect(state, events)
+
+    // 承重条：这条降级事实必须被发布并持久化。删掉 `publishOutputChannelSevered` 那一发，这条红。
+    const persisted = client.agentSession('agent-1').terminalOutputChannel
+    expect(persisted).toMatchObject({
+      state: 'severed',
+      mode: 'degraded',
+      reason: 'reattach-failed',
+      run: { runId: 'run-1' }
+    })
+    // 事实要走 agent-session 事件到达渲染端（这才是渲染端消费的那条投影），而不是只存进 store。
+    expect(outputChannelOf(events, 'agent-1').some((fact) => fact !== undefined)).toBe(true)
+
+    // 进程没被报成 dead：`resumed==='dead'` 仍跳过 republish 成 running（不洗掉 error），
+    // 但会话本身没有被改成 exited——放行的前提是进程还活着。
+    expect(client.agentSession('agent-1').run.runId).toBe('run-1')
+  })
+
+  it('成功 reattach 撤下它——恢复路径：通道又通了，服务窗消失', async () => {
+    const { client, events, state, kernel } = await fixture([storedSession()])
+
+    // 先制造降级：重连时 attach 抛错。
+    kernel.configureRuns([runningRun('run-1')])
+    kernel.configureAttach('run-1', { throwOnAttach: new Error('reattach boom') })
+    await driveReconnect(state, events)
+    expect(client.agentSession('agent-1').terminalOutputChannel).toBeDefined()
+
+    // 用户点 Resume（走 reattachAgent → attachAgentRun 这条共享核心）：这次 attach 成功。
+    kernel.configureAttach('run-1', { run: runningRun('run-1') })
+    await client.reattachAgent('agent-1')
+
+    // 承重条：一次成功的 reattach 就地清除降级事实。删掉 attachAgentRun 里的 clearOutputChannel，这条红。
+    expect(client.agentSession('agent-1').terminalOutputChannel).toBeUndefined()
+    // 且清除也经 agent-session 事件到达渲染端——最后一条投影里这个字段是缺席的。
+    const lastFact = outputChannelOf(events, 'agent-1').at(-1)
+    expect(lastFact).toBeUndefined()
+  })
+})
