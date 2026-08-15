@@ -8,6 +8,7 @@ import {
   orphanCommitCountArgs,
   parseOrphanCommitCount
 } from '../src/shared/lane-orphan-commits.js'
+import { orphanCountableRef, type CountableBaseRef } from '../src/shared/base-ref.js'
 
 // ---------------------------------------------------------------------------
 // 判据本身用**真 git** 验，不用假 host。
@@ -45,8 +46,19 @@ async function repository(): Promise<{ repoPath: string; base: string }> {
   return { repoPath, base: 'main' }
 }
 
+/**
+ * base 走的是**生产的那道门**：`orphanCountableRef` 是全仓唯一铸得出可数 ref 的地方，测试里也不例外。
+ * 写成 `as CountableBaseRef` 当然更短，但那会让用例走一条生产走不到的路——真正要证的性质（想数就
+ * 必须先分级）在类型转换之下恰好消失。
+ */
+function countable(ref: string): CountableBaseRef {
+  const minted = orphanCountableRef({ ref, source: 'remote-head' })
+  if (minted === null) throw new Error(`权威来源竟然铸不出可数 ref: ${ref}`)
+  return minted
+}
+
 async function orphanCount(repoPath: string, branch: string, baseRef: string): Promise<number | null> {
-  const result = await host.run('git', orphanCommitCountArgs({ repoPath, branch, baseRef }))
+  const result = await host.run('git', orphanCommitCountArgs({ repoPath, branch, baseRef: countable(baseRef) }))
   return parseOrphanCommitCount(result.stdout, result.exitCode)
 }
 
