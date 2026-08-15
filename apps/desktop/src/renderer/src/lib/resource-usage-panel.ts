@@ -73,28 +73,45 @@ export function formatCpu(cpuPercent: number | null): string {
 }
 
 /**
+ * `usagePanelRows` 的可选输入。
+ *
+ * 收成一个对象而不是三个尾随形参：生产调用方只关心第一个和第三个，位置传参于是要写成
+ * `usagePanelRows(snapshot, sessions, timelines, undefined, workspaceRoots)`——中间那个字面量
+ * `undefined` 不表达任何意思，它只是在数格子。而 `now` 恰恰是最不该靠数格子传对的那个：传错
+ * 位置不会有类型错误（两侧都是可选对象/数字），只会让时长算错。
+ *
+ * 前两个参数留在位置上：它们必填、且顺序就是这个函数的语义（拿这份采样，配这批 Session）。
+ */
+export type UsagePanelOptions = {
+  /**
+   * store 里那份实时时间轴（启动时拉全、之后事件流补齐），用来算「最近在改什么」。
+   * 缺席即所有行都退回到只报状态——多数调用方不关心 activity。
+   */
+  timelines?: Readonly<Record<string, AgentTimelineSnapshot>>
+  /** 取一次时钟供所有行算 elapsed。缺席即现在。 */
+  now?: number
+  /**
+   * 每个 Session 的仓根，键取 session.id。缺席即不缩短路径。
+   *
+   * 传 map 而不是单个根，是因为这张面板一次列出**所有** Run，它们分属不同仓库——没有「这一格的
+   * 仓根」这个东西。调用方逐个解好再交进来，本函数不自己查配置（它已经是纯函数，不该为了一个
+   * 字段开始读 config）。
+   */
+  workspaceRoots?: Readonly<Record<string, string>>
+}
+
+/**
  * 采样按 runId 归并，显示要按 Agent 的名字——这里做这次配对。
  *
  * 配不上名字的 run 仍然显示（用 runId 前缀兜底）：它确实在吃资源，藏起来会让面板上的数
  * 与机器实际用量对不上，而对不上时用户无从判断是哪一边错了。
- *
- * `timelines` 是 store 里那份实时时间轴（启动时拉全、之后事件流补齐），用来算「最近在改什么」。
- * 缺省为空是因为多数调用方（含既有测试）不关心 activity——传空就等于所有行都退回到只报状态。
- */
-/**
- * @param workspaceRoots 每个 Session 的仓根，键取 session.id。缺席即不缩短路径。
- *
- * 传 map 而不是单个根，是因为这张面板一次列出**所有** Run，它们分属不同仓库——没有「这一格的仓根」
- * 这个东西。调用方按 workspaceForSession 逐个解好再交进来，本函数不自己查配置（它已经是纯函数，
- * 不该为了一个字段开始读 config）。
  */
 export function usagePanelRows(
   snapshot: UsageSnapshot | null,
   sessions: readonly SessionSnapshot[],
-  timelines: Readonly<Record<string, AgentTimelineSnapshot>> = {},
-  now = Date.now(),
-  workspaceRoots: Readonly<Record<string, string>> = {}
+  options: UsagePanelOptions = {}
 ): UsagePanelRow[] {
+  const { timelines = {}, now = Date.now(), workspaceRoots = {} } = options
   if (!snapshot) return []
   const sessionByRunId = new Map<string, SessionSnapshot>()
   const contextByRunId = new Map<string, { label: string; context: string; state: string }>()
