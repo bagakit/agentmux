@@ -91,10 +91,19 @@ describe('Topic 行的视觉收敛', () => {
   })
 
   it('逐个头像在场后不再另给一个计数——同一事实不说两遍', () => {
-    const row = source.slice(
-      source.indexOf('className="workspace-topic-agents"'),
-      source.indexOf('</SortableTopicItem>')
-    )
+    // 锚点取整行（`<SortableTopicItem` … `</SortableTopicItem>`）而不是头像簇那一小段：计数要是
+    // 回来了，它未必长在簇里，行上任何位置都算违约，扫整行才是这条性质真正的范围。
+    //
+    // 此前锚点写的是 `className="workspace-topic-agents"`，而那个类名早已不存在（头像簇换成了
+    // 共享的 `SelectorPresence`）。`indexOf` 返回 -1，`slice(-1, 23870)` 得到**空串**，于是下面两条
+    // `not.toContain` 恒真——判据在盘上、看着有主，实际一个字符都没扫（AGENTS.md:85-88 的第三种白绿）。
+    const start = source.indexOf('<SortableTopicItem')
+    const end = source.indexOf('</SortableTopicItem>')
+    expect(start, '行的起锚点不见了——下面扫的是空内容').toBeGreaterThan(-1)
+    expect(end, '行的止锚点不见了').toBeGreaterThan(start)
+    const row = source.slice(start, end)
+    // 扫描面自检：证明这一段真的是那一行，而不是恰好非空的别处。
+    expect(row, '扫到的这段里没有头像簇，锚点指错了地方').toContain('<SelectorPresence')
     expect(row).not.toContain('agents in ')
     expect(row).not.toContain('.length} agent')
   })
