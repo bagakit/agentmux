@@ -51,6 +51,7 @@ import type {
   NotificationModeId,
   RemoveWorktreeInput,
   RemoveWorktreeOutcome,
+  WorktreeRemovalNotice,
   RunFanOutInput,
   RunFanOutResult,
   SessionControl,
@@ -292,6 +293,16 @@ export async function registerIpc(args: {
   // 关键取舍：拒绝在这里**不当异常往上抛**，而是作为 `retained` 正常返回。保护的全部意义就是让
   // 「这里还有活儿」这句话传到用户眼前，而 IPC 上的异常只剩一句被压平的字符串，调用方分不出
   //「git 挂了」和「有未提交改动，你要不要先看看」。两者要走的下一步完全不同。
+  // 删之前先问一句：这条分支上有没有只存在于它自己身上的提交。
+  //
+  // 单独一个通道而不是塞进 removeWorktree 的返回值里——那时候已经删完了，话说晚了。这一问必须在
+  // 确认框弹出**之前**答完，用户才有机会据此改主意。
+  //
+  // 永不抛：答不出来是一个正常答案（文案里如实说「没查出来」）。为了一句提示而挡住删除，属于
+  // AGENTS.md 原则 11 的第 2 类——我们自己这段流程降级了，而用户的能力不该因此被收走。
+  handle('workspaces:worktreeRemovalNotice', async (workspaceId: string): Promise<WorktreeRemovalNotice> => ({
+    note: await worktrees.orphanCommitNote(workspaceId, config)
+  }))
   handle('workspaces:removeWorktree', async (input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome> => {
     try {
       const removal = await worktrees.removeWorktree(input, config)

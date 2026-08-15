@@ -31,6 +31,14 @@ export type WorktreeRemovalRequest = {
   branch: string
   /** worktree 在盘上的路径，给用户核对。 */
   path: string
+  /**
+   * 「这条分支会留下什么」那句话，main 侧数完独有提交之后给的（见 `lane-orphan-commits.ts`）。
+   *
+   * `null` 是**还没问到**（正在查，或者这次没查），不是「查了没有」。两者在屏幕上必须不同：没问到就
+   * 什么都不说，而「查了查不出来」有它自己的那句话，由 main 侧的 `branchRetentionNote(branch, null)`
+   * 给出——那句话会作为一个正常的 `note` 送到这里。所以这里的 `null` 只表示尚未抵达，不参与表态。
+   */
+  note?: string | null
   stage: WorktreeRemovalStage
 }
 
@@ -79,7 +87,14 @@ export function worktreeRemovalPrompt(request: WorktreeRemovalRequest): Worktree
   }
   return {
     title: 'Remove worktree?',
-    description: `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.`,
+    // 那句「分支会留下什么」接在后面，而不是替换掉前半句。前半句讲的是**这次动作做了什么**（签出没了、
+    // 分支不动），后半句讲的是**那条留下来的分支里有什么**——两件事，用户两件都要知道才判断得了。
+    //
+    // 没拿到就不说：宁可少一句，也不能因为「还没问到」而默认说一句安心话。真正查不出来的那一档有它
+    // 自己的措辞（`branchRetentionNote(branch, null)`），会作为一个正常的 note 送进来。
+    description:
+      `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.` +
+      (request.note ? ` ${request.note}` : ''),
     subject: request.path,
     confirmLabel: 'Remove',
     discardChanges: false
