@@ -34,12 +34,6 @@ export type AttentionVisibility = {
   sessionVisible: boolean
 }
 
-// `done` is the only state that means the Agent finished its turn. `exited` is the process leaving,
-// which is a lifecycle fact rather than a result, and it already shows up in the tab and Board.
-function isFinished(state: AgentDisplayState): boolean {
-  return state === 'done'
-}
-
 /**
  * Decide whether a single Agent's state change should interrupt the user.
  *
@@ -88,12 +82,34 @@ export function attentionEventFor(input: {
  * not a request for attention. It has its own neutral treatment in the shared status vocabulary
  * precisely so amber can mean "needs you" and nothing else — raising a notification for it would undo
  * that distinction.
+ *
+ * 穷举、无 default，和它下面三个兄弟（attentionSortClass / sessionBoardColumn / statusLabel）同一个形状。
+ * 此前它是一条 if 链、以 `return null` 收尾，于是四个状态映射里**只有它**对第十个状态静默：新状态直接
+ * 落到那个兜底的 null，而 12 个生产消费者一律把 null 读成「没什么可看的」——不通知、行无强调、名册与
+ * fan-out 的 attention 为空、卡片无边框、头像无标记。
+ *
+ * 「安静是默认」（见 attentionEventFor）这条规则没有变，五个 null 分支依旧返回 null；变的是**谁来做
+ * 这个决定**。落到 null 现在必须是有人写下的那一行，而不是忘了写的那一行。第十个状态那天，这里和
+ * 另外三处一起响亮地要求做决定：返回类型含 null 不影响穷举检查——漏一支得到的是隐式 undefined，而
+ * `AttentionCategory | null` 收不下它，tsc 报 TS2366（实测过，别再为此套一层 'none' 哨兵）。
  */
 export function categoryFor(state: AgentDisplayState): AttentionCategory | null {
   if (isNeedsYouState(state)) return 'needs-you'
-  if (isFinished(state)) return 'done'
-  if (state === 'error') return 'error'
-  return null
+  switch (state) {
+    case 'done':
+      return 'done'
+    case 'error':
+      return 'error'
+    // 以下五个刻意不进任何注意力档：starting/running/working 是「在跑」，本来就不该打扰人；
+    // disconnected 见上（掉线不是请求）；exited 是进程终结这一生命周期事实而不是一个结果——
+    // 「完成了一轮」只有 done 一个状态在说，而进程走了这件事，标签页与 Board 已经在画了。
+    case 'starting':
+    case 'running':
+    case 'working':
+    case 'disconnected':
+    case 'exited':
+      return null
+  }
 }
 
 /**

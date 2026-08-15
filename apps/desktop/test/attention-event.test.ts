@@ -147,16 +147,39 @@ describe('attention event decision', () => {
     // disconnected is absent on purpose: it is not a request for attention, and it has its own neutral
     // treatment precisely so amber means needs-you and nothing else. starting/running/exited are
     // process facts the tab and Board already carry.
-    for (const state of ['starting', 'running', 'disconnected', 'exited', 'unknown'] as const) {
-      expect(categoryFor(state as AgentDisplayState)).toBeNull()
+    //
+    // 这个清单曾经还带一个 `'unknown'`，经 `as AgentDisplayState` 强转进来——而 `unknown` 根本不是
+    // 显示态的成员，它是**语义态**的，唯一那条语义→显示的映射（core 的 agentDisplayState）把它折成
+    // `running`。于是这一条在断言一个永远到不了 categoryFor 的入参，强转把类型这一层的保护也一并
+    // 关掉了：categoryFor 改成穷举 switch 之后，那个不存在的成员从所有 case 之间漏过去得到
+    // undefined，红的是这条测试，不是实现。
+    for (const state of ['starting', 'running', 'disconnected', 'exited'] as const) {
+      expect(categoryFor(state)).toBeNull()
       expect(
         attentionEventFor({
-          session: agent('a', state as AgentDisplayState),
+          session: agent('a', state),
           previousState: 'working',
           visibility: away
         })
       ).toBeNull()
     }
+  })
+
+  it('每个状态要么进一个注意力档，要么是被写下来的那个 null——没有第三种', () => {
+    // 上面那条点名五个状态，是在说「这几个刻意安静」。这一条守的是另一件事：categoryFor 对整个联合
+    // 总函数。它遍历联合本身，所以 Core 加一个状态、而这里忘了给它裁决时，tsc 先红（穷举 switch 漏
+    // 一支即 TS2366）；万一有人用 default 把那道保护关掉，这条兜住——它要求每个答案都落在已知取值里，
+    // 而不是 undefined。
+    const answers = new Map(AGENT_DISPLAY_STATES.map((state) => [state, categoryFor(state)]))
+    expect(answers.size, '自证：联合必须真的有成员，否则下面的遍历是死代码').toBeGreaterThan(5)
+    for (const [state, category] of answers) {
+      expect(
+        ['done', 'needs-you', 'error', null],
+        `${state} 的裁决是 ${String(category)}——既不是一个档位也不是那个写下来的 null`
+      ).toContain(category)
+    }
+    // 自证：三个档位都得真的有状态落进去，否则上面那句 toContain 是在一张没人到达的清单上恒真。
+    expect([...new Set(answers.values())].sort()).toEqual(['done', 'error', 'needs-you', null])
   })
 
   it('raises an error event so a failure is not quieter than a success', () => {
