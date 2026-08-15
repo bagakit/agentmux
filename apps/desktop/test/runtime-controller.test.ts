@@ -1511,6 +1511,53 @@ describe('RuntimeController configuration transaction', () => {
     expect(semanticStatusStale(projected.status, lastHeardFrom)).toBe(false)
   })
 
+  it.each([
+    { source: 'acp' as const, kept: true },
+    { source: 'native-hook' as const, kept: true },
+    { source: 'user' as const, kept: false }
+  ])(
+    'reload 后语义状态按「来源是不是活动声明」保留：$source',
+    async ({ source, kept }) => {
+      // 这条守的是快照路径与实时路径（session-state.ts）判同一条规则。
+      //
+      // 此前两侧形状不同：实时侧是来源白名单（`native-hook || acp`），快照侧是在场判定
+      // （`semanticStatus` 非空即保留）。它们一致纯属巧合——那个字段的唯二写入方恰好就是这两个
+      // 来源。实测把快照侧收窄成只认 native-hook（等于 reload 后丢掉 ACP 的语义状态），
+      // runtime-controller + renderer-state-owners + run-process-status-convergence 共 93 条**全绿**：
+      // 实时侧有 ACP 的姊妹用例，快照侧一条都没有。这里补上缺的那半。
+      //
+      // `user` 是对照组，也是真正让这条有判别力的一半：只测两个 true 的话，把谓词改成恒真照样绿，
+      // 而恒真意味着一次 stop 留下的 `user` 印记会在 reload 后冒充 Agent 的活动状态。
+      const controller = await configuredController()
+      const client = runtimeFixture.FakeClient.instances[0]!
+      const status = agentStatusFixture()
+      client.runtimeProjection.mockResolvedValue({
+        hostId: 'local',
+        subjects: [{
+          subjectId: 'agent:local:agent-1',
+          kind: 'agent',
+          hostId: 'local',
+          workspacePath: '/repo',
+          providerId: 'codex',
+          executorId: 'review',
+          agentSession: {
+            ...status.session,
+            updatedAt: 3,
+            semanticStatus: { state: 'waiting', source, observedAt: 3 }
+          },
+          run: { ...status.run, state: 'running', observedAt: 4, exitCode: undefined }
+        }]
+      })
+
+      const projected = (await controller.snapshot(localConfig)).sessions[0]!
+
+      // 保留＝那条语义状态原样带回；不保留＝退回裸进程投影（running/run-process）。
+      // 两侧都断言，是因为只断言 state 的话，'waiting' 与 'running' 之外的漂移看不出来。
+      expect(projected.status.state).toBe(kept ? 'waiting' : 'running')
+      expect(projected.status.source).toBe(kept ? source : 'run-process')
+    }
+  )
+
   it('每个 Session 的能力声明按它自己的 providerId 取，两家不同的 Provider 不共用一份', async () => {
     // 这条守的是「能力声明从哪来」这条规则本身，而不是某几个取值。
     //
