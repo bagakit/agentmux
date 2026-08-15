@@ -356,7 +356,9 @@ describe('T-001 重连后重建实时字节泵', () => {
 // `resumed==='dead'` 分支刻意**跳过** republish 成 running（否则会洗掉刚发的 agent-error，见上面的
 // 部分失败测试）。但那条 agent-error 会被后续会话快照的 `>=` 洗白、且只在 Activity 视图短暂存在。真正
 // 欠着的是：Core 要落一条**可持久**的降级事实（`terminalOutputChannel`），渲染端据此长出「输出可能没在
-// 显示，Resume 可重新附着」的服务窗——它挺过快照刷新，直到一次成功的 reattach 撤下它。
+// 显示，把这块 pane 在 Activity/Terminal 之间切一下即可重新附着」的服务窗——它挺过快照刷新，直到一次成功
+// 的 reattach 撤下它。（恢复动作刻意不点名 Resume：Resume 对 running 的 Run 判出 `reattachable` 直接返回
+// 投影，根本不走 attach，见 client.ts 的 clearOutputChannel 注释。）
 // ---------------------------------------------------------------------------
 
 function outputChannelOf(events: AgentMuxClientEvent[], agentSessionId: string): unknown[] {

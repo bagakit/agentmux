@@ -124,7 +124,8 @@ describe('composerSubmitMode', () => {
     //   (a) 通道活着但不连续：observation_discontinuity / tmux 建议事件带来的 CTXMUX_EVENT_INVALID，
     //       泵继续跑、输出继续流。锁住它就是当初报上来的那个 bug。
     //   (b) 通道真死了：RECONNECT_REATTACH_FAILED。输入照样到得了 Agent；诚实的信号是一条服务窗
-    //       （「输出可能没在显示 — Resume 重新附着」），不是一个锁死的输入框。
+    //       （「输出可能没在显示 — 把这块 pane 切到 Activity 再切回来即可重新附着」），不是一个锁死的
+    //       输入框。那句恢复动作刻意不点名 Resume：running 的 Run 判出 reattachable 直接返回，不走 attach。
     // 既然分不清，就不该假装分得清。插回 `if (status.state==='error' && status.source==='run-process')
     // canType:false` 会让这条变红。
     for (const source of ['user', 'terminal-output', 'run-process'] as const) {
