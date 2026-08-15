@@ -1,4 +1,10 @@
-import type { SessionSnapshot, UsageSnapshot } from '../../../shared/contracts'
+import type {
+  AgentTimelineItem,
+  AgentTimelineSnapshot,
+  SessionSnapshot,
+  UsageSnapshot
+} from '../../../shared/contracts'
+import { sessionRecentActivity } from './session-recency'
 
 /**
  * 把一次采样快照配上 Session 的名字，变成面板要显示的几行。
@@ -8,6 +14,9 @@ import type { SessionSnapshot, UsageSnapshot } from '../../../shared/contracts'
  * 这个 Agent 在跑但不吃资源。所以 null 渲染成一个中性记号，绝不落成 0。
  */
 
+/** 时间轴按需拉取/事件流补齐，某个 Session 此刻还没有条目时统一退回这份空数组。 */
+const NO_TIMELINE: readonly AgentTimelineItem[] = []
+
 export type UsagePanelRow = {
   key: string
   label: string
@@ -15,6 +24,13 @@ export type UsagePanelRow = {
   rssText: string
   contextText: string
   stateText: string
+  /**
+   * 「这个 Agent 最近在改什么」——用户点开这个面板真正想看的那一行。走 `sessionRecentActivity`
+   * 那份唯一派生。**只有当它比裸状态更具体时才在场**：与状态相等就是「没有比 stateText 更多的话
+   * 可说」（时间轴还没到、或就是闲着），此时不编一行——空行/重复的「working」既是噪音也会把
+   * 「还没加载」伪装成「真的没在动」。配不上 Session 的 run（只有 runId）压根没有这层语义，也缺席。
+   */
+  activity?: string
 }
 
 /**
@@ -61,13 +77,26 @@ export function formatCpu(cpuPercent: number | null): string {
  *
  * 配不上名字的 run 仍然显示（用 runId 前缀兜底）：它确实在吃资源，藏起来会让面板上的数
  * 与机器实际用量对不上，而对不上时用户无从判断是哪一边错了。
+ *
+ * `timelines` 是 store 里那份实时时间轴（启动时拉全、之后事件流补齐），用来算「最近在改什么」。
+ * 缺省为空是因为多数调用方（含既有测试）不关心 activity——传空就等于所有行都退回到只报状态。
+ */
+/**
+ * @param workspaceRoots 每个 Session 的仓根，键取 session.id。缺席即不缩短路径。
+ *
+ * 传 map 而不是单个根，是因为这张面板一次列出**所有** Run，它们分属不同仓库——没有「这一格的仓根」
+ * 这个东西。调用方按 workspaceForSession 逐个解好再交进来，本函数不自己查配置（它已经是纯函数，
+ * 不该为了一个字段开始读 config）。
  */
 export function usagePanelRows(
   snapshot: UsageSnapshot | null,
   sessions: readonly SessionSnapshot[],
-  now = Date.now()
+  timelines: Readonly<Record<string, AgentTimelineSnapshot>> = {},
+  now = Date.now(),
+  workspaceRoots: Readonly<Record<string, string>> = {}
 ): UsagePanelRow[] {
   if (!snapshot) return []
+  const sessionByRunId = new Map<string, SessionSnapshot>()
   const contextByRunId = new Map<string, { label: string; context: string; state: string }>()
   for (const session of sessions) {
     if (session.kind !== 'agent') continue
@@ -75,14 +104,24 @@ export function usagePanelRows(
     const state = session.status.state
     const age = Math.max(0, Math.floor((now - session.updatedAt) / 1000))
     const idle = state === 'working' ? '' : age < 60 ? `${age}s idle` : age < 3600 ? `${Math.floor(age / 60)}m idle` : `${Math.floor(age / 3600)}h idle`
+    sessionByRunId.set(session.control.run.runId, session)
     contextByRunId.set(session.control.run.runId, { label: session.label, context: `${session.providerId} · ${project}`, state: idle || state })
   }
-  return snapshot.runs.map((run) => ({
-    key: run.runId,
-    label: contextByRunId.get(run.runId)?.label ?? run.runId.slice(0, 8),
-    cpuText: formatCpu(run.cpuPercent),
-    rssText: formatRss(run.rssKib),
-    contextText: contextByRunId.get(run.runId)?.context ?? 'Unknown project',
-    stateText: contextByRunId.get(run.runId)?.state ?? 'unknown'
-  }))
+  return snapshot.runs.map((run) => {
+    const session = sessionByRunId.get(run.runId)
+    // activity 只在「比裸状态更具体」时在场：相等意味着 sessionRecentActivity 也没有比 stateText
+    // 更多的话（时间轴还没到，或确实闲着）——此时不重复一行。没有 Session 的 run 没有这层语义。
+    const activity = session
+      ? sessionRecentActivity(session, timelines[session.id]?.items ?? NO_TIMELINE, workspaceRoots[session.id])
+      : undefined
+    return {
+      key: run.runId,
+      label: contextByRunId.get(run.runId)?.label ?? run.runId.slice(0, 8),
+      cpuText: formatCpu(run.cpuPercent),
+      rssText: formatRss(run.rssKib),
+      contextText: contextByRunId.get(run.runId)?.context ?? 'Unknown project',
+      stateText: contextByRunId.get(run.runId)?.state ?? 'unknown',
+      ...(activity && session && activity !== session.status.state ? { activity } : {})
+    }
+  })
 }

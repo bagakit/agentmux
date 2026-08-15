@@ -1,8 +1,11 @@
 import { ChevronRight, MessageCircle, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { AgentTimelineItem, AgentTimelineSnapshot, SessionSnapshot } from '../../../shared/contracts'
+import { sessionRecentActivity } from '../lib/session-recency'
+import { projectActivityRow } from '../lib/project-activity-row'
 import { rowAttention } from '../lib/row-attention'
 import { workingAgentCount } from '../lib/project-board'
+import { workspaceForSession } from '../lib/workbench-tabs'
 import { buildAgentRoster } from '../lib/agent-roster'
 import {
   buildActivityGroups,
@@ -12,30 +15,19 @@ import {
 } from '../lib/activity-groups'
 import { useAppStore } from '../store'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { AgentProviderIcon } from './AgentProviderIcon'
 
-function quietDuration(observedAt: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - observedAt) / 1000))
-  if (seconds < 60) return `${seconds}s idle`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m idle`
-  return `${Math.floor(minutes / 60)}h idle`
+/** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
+const NO_TIMELINE: readonly AgentTimelineItem[] = []
+
+function sessionReason(session: SessionSnapshot, timelines: Record<string, AgentTimelineSnapshot>): string {
+  return sessionRecentActivity(session, timelines[session.id]?.items ?? NO_TIMELINE)
 }
 
-export function projectSessionReason(session: SessionSnapshot): string {
-  if (session.kind !== 'agent') return session.status.state
-  const request = session.pendingInteraction
-  if (request) return request.kind === 'permission' ? request.title : request.questions.map((q) => q.prompt).join(' · ')
-  if (session.status.detail) return session.status.detail
-  if (session.status.state === 'waiting') return 'Waiting for your reply in the terminal'
-  if (session.status.state === 'error') return 'Agent reported an error; open the terminal for details'
-  return session.status.state
-}
-
-function groupSummary(group: ActivityGroup): string {
+function groupSummary(group: ActivityGroup, timelines: Record<string, AgentTimelineSnapshot>): string {
   const session = group.sessions[0]
   if (!session) return 'No recent activity'
-  const reason = projectSessionReason(session)
+  const reason = sessionReason(session, timelines)
   if (reason !== session.status.state) return reason
   switch (session.status.state) {
     case 'starting': return 'Starting Agent'
@@ -81,13 +73,16 @@ export function ProjectActivity({
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const config = useAppStore((state) => state.config)
+  const timelines = useAppStore((state) => state.timelines)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
   const running = workingAgentCount(sessions)
   if (!attention.category && !running) return null
+  // 一次渲染取一次时钟，供各行算 elapsed——与旧 quietDuration 在渲染时读 Date.now() 同口径。
+  const now = Date.now()
   const label = attention.category === 'needs-you' ? 'Needs you' : attention.category === 'error' ? 'Error' : `${running} running`
   const groups = buildActivityGroups(sessions, contexts)
-  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group)}`).join('\n')
+  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines)}`).join('\n')
   return <DropdownMenu.Root>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={details} aria-label={`${label}. ${details}`}>
       {attention.category === 'needs-you' ? <MessageCircle size={13} /> : attention.category === 'error' ? <TriangleAlert size={13} /> : <span className="project-activity__pulse" aria-hidden="true"><i /><i /><i /></span>}
@@ -112,7 +107,7 @@ export function ProjectActivity({
               onSelect={() => selectSession(first.id)}>
             <span className="project-activity-group__identity">
               <strong>{contextLabel(group)}</strong>
-              <small>{groupSummary(group)} · {groupState(group)}</small>
+              <small>{groupSummary(group, timelines)} · {groupState(group)}</small>
               {meta ? <em>{meta}</em> : null}
             </span>
             <span className="project-activity-group__avatars" aria-label={`${group.sessions.length} Agents in ${contextLabel(group)}`}>
@@ -135,12 +130,15 @@ export function ProjectActivity({
           {expanded ? <div className="project-activity-group__details">
             {rosterRows.map((row) => {
               const session = group.sessions.find((item) => item.id === row.sessionId)!
-              const workspace = session.kind === 'agent'
-                ? config?.workspaces.find((item) => item.hostId === session.hostId && (session.workspacePath === item.path || session.workspacePath.startsWith(`${item.path}/`)))
-                : undefined
+              // 这一格归哪个 workspace：走共用谓词，不在这里再写一遍前缀匹配。此前这里是一段就地的
+              // `path === w.path || startsWith(w.path + '/')`，与 workspaceForSession 是同一个问题的
+              // 第二种拼法——两份迟早分岔（它还漏掉了 scratch 子目录那一支）。
+              const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session) : undefined
               const project = workspace?.name ?? (session.kind === 'agent' ? session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) : 'Terminal')
+              const activity = projectActivityRow(session, timelines[session.id]?.items ?? NO_TIMELINE, now, workspace?.path)
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
-                onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{project} · {row.label}</strong><small>{session.kind === 'agent' ? agentProviderLabel(session.providerId) : 'Terminal'} · {projectSessionReason(session)} · {session.status.state === 'working' ? 'active now' : quietDuration(session.status.observedAt)}</small></span></DropdownMenu.Item>
+                data-attention={activity.attention ?? undefined}
+                onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{project} · {row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}</small></span></DropdownMenu.Item>
             })}
           </div> : null}
         </div>
