@@ -42,8 +42,20 @@ export function isPromptReadinessSemanticState(
 const PROMPT_READINESS_MESSAGES: Readonly<Record<PromptReadinessErrorCode, string>> = {
   AGENT_PROMPT_NOT_READY:
     'The prompt was not sent because this Run has no consumable composer readiness yet. The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. If it stays not ready, check the Provider readiness marker or Hook ingress.',
+  // 这条文案两次点名了「在该状态下根本执行不了的动作」，两次都由审计抓出来，所以判据写在这里：
+  // **只准点名从这个状态真能走通的动作**，而不是在源码里读着像能走通的那条。
+  //   第一版说「resume」——resumeAgentRun 对 running 的 Run 直接抛 AGENT_SESSION_STILL_RUNNING
+  //     （client.ts:1866-1868），而且 Resume 按钮在这个状态压根不渲染（SessionPane.tsx:254 要求
+  //     disconnected || missing || exited）。
+  //   第二版说「先 stop 再 resume」——更糟，因为它读起来可行：stopAgent 走
+  //     commitLifecycle(reservation, null)，store 那一侧是 sessions.delete（agent-session-store.ts:1475）
+  //     并记一条 retirement；此后 ensureAgentContinuity 判成 'retired'（agent-session-continuity.ts:139），
+  //     resumeAgentRun 根本不会被调用，renderer 直接把这一格摘掉（store.ts:4491）。也就是说 stop 之后
+  //     没有「resume」这个东西，只有新开一个 Agent。
+  // 所以这一版不再许诺任何一条恢复链，只说两件**确定为真**的事：什么条件下它会自己好，以及
+  // stop 的真实代价。宁可告诉用户「这里没有便宜的出路」，也不要给一条走到一半才发现是死的路。
   AGENT_PROMPT_READINESS_CONSUMED:
-    'The prompt was not sent because the current composer readiness epoch was already consumed by another submission. The Agent Run is still running; if another delivery is in flight this clears after the next readiness epoch, but if the turn ended without a Stop signal no new epoch is coming — if it does not clear, stop the Agent and then resume it, which mints a fresh epoch.',
+    'The prompt was not sent because the current composer readiness epoch was already consumed by another submission. The Agent Run is still running; if another delivery is in flight this clears after the next readiness epoch, but if the turn ended without a Stop signal no new epoch is coming — stopping this Agent retires the session rather than reviving it, so recovering that way means starting a new Agent and losing this one’s continuity.',
   AGENT_PROMPT_SUBMISSION_BUSY:
     'The prompt was not sent because another submission for this Run is still completing. The Agent Run is still running; keep this draft and wait for the existing delivery acknowledgement before trying again.',
   AGENT_PROMPT_READINESS_CONFLICT:
