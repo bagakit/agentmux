@@ -1,4 +1,4 @@
-import type { AgentDisplayState, AgentSemanticState, AgentStatus } from './types.js'
+import type { AgentDisplayState, AgentMuxEvidenceSource, AgentSemanticState, AgentStatus } from './types.js'
 
 /**
  * 语义状态的新鲜度判定：给定最后一次观察时刻与现在，这个状态还算不算数。
@@ -107,4 +107,42 @@ export function semanticStatusStale(
   now: number
 ): boolean {
   return semanticStatusCanDecay(status.state) && now - status.observedAt >= SEMANTIC_STATUS_STALE_AFTER_MS
+}
+
+/**
+ * 这个来源报出来的状态，是不是一条**活动声明**——即它是否应当压过裸的进程投影。
+ *
+ * 为什么要有这个判据，而不是让每处各写一遍 `source === 'native-hook' || source === 'acp'`：
+ * 这条规则此前有**两份拼法**，且两份形状不同。
+ *
+ * - 实时路径（renderer 的 session-state.ts）写的是显式白名单：`source === 'native-hook' || 'acp'`。
+ * - 快照/重载路径（main 的 runtime-controller.ts）写的是在场判定：`semanticStatus` 非空即保留。
+ *
+ * 它们今天一致，纯属巧合——`semanticStatus` 的唯二写入方恰好就是这两个来源，于是「字段在场」
+ * 恰好等价于「来源属于那两个」。一旦有第三个活动来源被持久化（本仓已经做过一次同形的事：ACP 是
+ * 后来补进那条白名单的），在场判定会自动接纳它，而白名单会**静默把它覆盖成裸 running**：实时看
+ * 转圈的 Agent 丢掉「等你」的提醒，重载又变回 waiting。同一个 Agent，两个视图两种说法，且没有
+ * 任何一条测试会红——实测过：把快照侧收窄成只认 native-hook，93 条全绿。
+ *
+ * 所以判据收到这里，两侧都 import 它。新增来源时只需回答一次「它算不算活动声明」，而不是去记得
+ * 世上还有第二处拼法。
+ *
+ * 用 `Record<AgentMuxEvidenceSource, boolean>` 总映射而不是 `||` 串或 switch：给
+ * {@link AgentMuxEvidenceSource} 加成员时少一格会让 tsc 变红，而不是安静落进 false——「忘了表态」
+ * 与「表态为否」必须能区分开，这正是上面那个缺陷的成因。
+ *
+ * `terminal-output` 恒为 false 不是遗漏，是本仓的设计红线：AgentMux 绝不从终端字节推断语义活动
+ * （见 types.ts 的 AgentMuxEvidenceSource 注释）。`run-process` 是进程投影本身——它不能压过自己。
+ * `user` 是用户动作留下的印记，不是 Agent 在干活的证据。
+ */
+const AGENT_ACTIVITY_STATUS_SOURCE: Record<AgentMuxEvidenceSource, boolean> = {
+  'terminal-output': false,
+  'run-process': false,
+  'native-hook': true,
+  acp: true,
+  user: false
+}
+
+export function isAgentActivityStatusSource(source: AgentMuxEvidenceSource): boolean {
+  return AGENT_ACTIVITY_STATUS_SOURCE[source]
 }

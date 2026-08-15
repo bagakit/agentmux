@@ -19,6 +19,7 @@ import {
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
+import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { WebContents } from 'electron'
 import type {
   ExecutorDetection,
@@ -196,8 +197,14 @@ function projectSession(
     ...runExitFacts(run)
   })
   if (subject.kind === 'agent') {
-    const status = run.state === 'running' && subject.agentSession.semanticStatus
-      ? structuredClone(subject.agentSession.semanticStatus)
+    // 「哪些来源的状态压得过裸进程投影」这条判据走 Core 的共享谓词，而不是在这里写「字段在场就保留」。
+    // 在场判定与实时路径（session-state.ts）的来源白名单今天等价，纯属巧合——`semanticStatus` 的唯二
+    // 写入方恰好就是那两个活动来源。新增第三个活动来源时，在场判定会自动接纳，而那边的白名单会把它
+    // 覆盖成裸 running：同一个 Agent 在场看 running、reload 看 waiting，且两侧都不会红（实测把这里
+    // 收窄成只认 native-hook，93 条全绿）。两侧现在同判一次，新增来源只需在 Core 那张表里表态一次。
+    const semantic = subject.agentSession.semanticStatus
+    const status = run.state === 'running' && semantic && isAgentActivityStatusSource(semantic.source)
+      ? structuredClone(semantic)
       : processStatus
     return {
       id: subject.agentSession.agentSessionId,
