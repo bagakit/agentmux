@@ -16,10 +16,21 @@ Feature: `f-25f8ffrme`
 | 原文要的东西 | 判别命令 |
 | --- | --- |
 | 建 worktree 后用户仓的 `git status` 不因它变脏 | `git grep -n excludeWorktreeRootFromStatus HEAD -- apps/desktop/src` |
-| 有真 git 判据，不是只断言"我们发了那条命令" | `git grep -n "git status --porcelain" HEAD -- apps/desktop/test/worktree-service.test.ts` |
+| 有真 git 判据，不是只断言"我们发了那条命令" | `git grep -n "'status', '--porcelain'" HEAD -- apps/desktop/test/worktree-service.test.ts` |
+| lane 落在仓库根下，与 exclude 的锚定对齐 | `git grep -n "join(branches.repoPath, '.worktrees')" HEAD -- apps/desktop/src` |
+
+第二条最初写的是 `git grep -n "git status --porcelain" …`，**它一条都匹配不到**：测试是按实参数组调
+git（`['-C', repoPath, 'status', '--porcelain']`），那个空格分隔的字面量根本不存在。照着跑的人会
+得出与本文档相反的结论——"没有真 git 判据"。判别命令自己必须先跑一遍，否则这份文档在它最该被
+相信的地方骗人。
 
 测试：`pnpm exec vitest run apps/desktop/test/worktree-service.test.ts` → **Test Files 1 passed,
 Tests 40 passed**。
+
+> 一处措辞更正，留在这里因为它写进过提交信息（不可改）：36c2991c 的 Follow-up 把四个待补
+> stop-doc 的 Feature 记作 `f-25s, f-23z8, f-24k, f-2548`，其中 `f-25s`（= `f-25s8fqvvr`，
+> Agent 原生浏览器调试）**没有入库**——它只在本机磁盘上，`git ls-tree HEAD` 查不到。只读提交历史
+> 的人找不到它。另外三个是真的：`f-23z8fgsw3`、`f-24k8ftgmm`、`f-2548fr8qc`。
 
 ## 原文列的三个待决策项，各自的答案
 
