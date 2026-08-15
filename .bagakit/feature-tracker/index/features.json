@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 120
+    "next_cursor": 121
   },
   "features": [
     {
@@ -1107,7 +1107,7 @@
     {
       "feat_id": "f-25h8fysz9",
       "title": "结果通报分级：不是每件事都值得报错",
-      "status": "proposal",
+      "status": "discarded",
       "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
@@ -1117,7 +1117,7 @@
     {
       "feat_id": "f-25j8fe2vc",
       "title": "上下文用量：数字被 7ch 截没了，且只说了一半",
-      "status": "proposal",
+      "status": "discarded",
       "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
@@ -1218,6 +1218,16 @@
     {
       "feat_id": "f-25v8f6kvk",
       "title": "关掉 App 就把活着的 Agent 锁死：搁浅的提交凭据跨重启存活",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25w8fa7mc",
+      "title": "最响的那一档通报没有任何生产调用方能走到",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
