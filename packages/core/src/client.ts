@@ -57,7 +57,7 @@ import {
 import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
-import { MAX_AGENT_PROMPT_BYTES } from './agent-terminal-screen.js'
+import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { cloneSession, sameRun } from './agent-session-identity.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { AgentPromptSubmissionCoordinator } from './prompt-submission.js'
@@ -326,7 +326,7 @@ function digestInteractionResponse(response: AgentMuxInteractionResponse): strin
 }
 
 function assertAgentPromptSize(prompt: string): void {
-  if (Buffer.byteLength(prompt) > MAX_AGENT_PROMPT_BYTES) {
+  if (agentPromptExceedsBudget(prompt)) {
     throw new AgentMuxError(
       `Agent prompt exceeds the ${MAX_AGENT_PROMPT_BYTES}-byte limit.`,
       'INVALID_AGENT_PROMPT'

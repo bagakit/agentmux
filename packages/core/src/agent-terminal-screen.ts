@@ -1,9 +1,11 @@
 import headless, { type Terminal as HeadlessTerminal } from '@xterm/headless'
+import {
+  AGENT_COMPOSER_SCAN_BACK_ROWS,
+  AGENT_SCREEN_SCROLLBACK_ROWS
+} from './agent-prompt-budget.js'
 import { AgentMuxError } from './errors.js'
 
 const { Terminal } = headless
-
-export const MAX_AGENT_PROMPT_BYTES = 64 * 1024
 
 export type AgentTerminalScreenChunk = {
   startByte: number
@@ -33,7 +35,7 @@ export class AgentTerminalScreen {
     this.terminal = new Terminal({
       cols,
       rows,
-      scrollback: MAX_AGENT_PROMPT_BYTES,
+      scrollback: AGENT_SCREEN_SCROLLBACK_ROWS,
       allowProposedApi: true,
       logLevel: 'off'
     })
@@ -57,7 +59,7 @@ export class AgentTerminalScreen {
   composerText(marker: string, allowHardLineBreaks = false): string | null {
     const buffer = this.terminal.buffer.active
     const cursorLine = buffer.baseY + buffer.cursorY
-    const firstTrackedLine = Math.max(0, cursorLine - MAX_AGENT_PROMPT_BYTES - 1)
+    const firstTrackedLine = Math.max(0, cursorLine - AGENT_COMPOSER_SCAN_BACK_ROWS - 1)
     for (let row = cursorLine; row >= firstTrackedLine; row -= 1) {
       const line = buffer.getLine(row)
       if (!line) continue
