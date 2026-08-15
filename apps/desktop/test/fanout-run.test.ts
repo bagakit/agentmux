@@ -276,6 +276,46 @@ describe('fan-out run', () => {
     expect(io.launchAgent).not.toHaveBeenCalled()
   })
 
+  /**
+   * 建树的两种失败，落到用户身上是**相反**的两件事。
+   *
+   * git 自己拒了（名字被占、路径已存在）——盘上什么都没有，没人需要去清理。
+   * git 建成了、记录没落上——盘上有一个真的 worktree 和一条真的分支，而没有任何记录指向它。
+   *
+   * 这一条以前被记成同一档 `worktree-failed`，那句注释原话是「Nothing was created, so nothing is
+   * stranded」。在第二种情形下它是假的：用户被告知这条 lane 没起来，于是没人去清，下一次同名扇出
+   * 还会撞上它。createForBranch 先跑 git 后写记录，所以这个顺序决定了第二种情形一定存在。
+   */
+  it('git 建成了但记录没落上：这条 lane 有目录没 Agent，不能报成「什么都没建」', async () => {
+    const cell = configCell()
+    const io = ports({
+      createWorktree: vi.fn(async () => {
+        throw new WorktreeRetainedError('git-failed', 'created but recording it failed: disk full')
+      })
+    })
+
+    const result = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+    })
+
+    // 判据不是"状态换了个名字"，而是这条 lane 进了「有签出、无 Agent、等人决定」那一档。
+    expect(result.lanes[0]).toMatchObject({ status: 'launch-failed', branch: 'a', path: '/repo/.worktrees/a' })
+    expect(strandedLanes(result), '有目录没 Agent 的 lane 必须出现在搁浅清单里，否则没人会去清它')
+      .toHaveLength(1)
+    // 反向：git 真的拒了的那一档不许跟着变——它盘上确实什么都没有。
+    const refused = configCell()
+    const refusedIo = ports({ createWorktree: vi.fn(async () => { throw new Error('branch already exists') }) })
+    const refusedResult = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: refused.read, commitConfig: refused.commit, ports: refusedIo
+    })
+    expect(refusedResult.lanes[0]!.status).toBe('worktree-failed')
+    expect(strandedLanes(refusedResult), '什么都没建的 lane 不该被列成搁浅——那是在发明一个不存在的孤儿')
+      .toHaveLength(0)
+    // 两档都不许去启动 Agent：没有注册好的 workspace 可启动。
+    expect(io.launchAgent).not.toHaveBeenCalled()
+    expect(refusedIo.launchAgent).not.toHaveBeenCalled()
+  })
+
   it('reports an all-failed fan-out as empty rather than successful', async () => {
     const cell = configCell()
     const io = ports({ createWorktree: vi.fn(async () => { throw new Error('no') }) })

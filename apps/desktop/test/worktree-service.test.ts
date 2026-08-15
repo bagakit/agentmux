@@ -1339,4 +1339,68 @@ describe('WorktreeService', () => {
     expect(creation.workspace).toMatchObject({ path: worktreePath, branch: 'lane-a', kind: 'worktree' })
     expect((await stat(worktreePath)).isDirectory()).toBe(true)
   }, 30000)
+  /**
+   * 建树成功、落记录失败——盘上多了一个真 worktree，而调用方被告知「什么都没建」。
+   *
+   * 这是 removeWorktree 那侧 `record-not-withdrawn` 的**镜像**：那边是 git 删了、记录没撤下，
+   * 已经有名字、有文案、有三档分类；这边是 git 建了、记录没写上，一个名字都没有。同一件事
+   * 在一条路上是一等公民，在另一条路上不存在。
+   *
+   * 后果不在这个函数里，在 runFanOut 的 catch：它把 createWorktree 的任何异常都记成
+   * `worktree-failed`，注释原话是「Nothing was created, so nothing is stranded」。那句话在
+   * save() 失败这一档上是**假的**——目录真的在，分支真的在，而用户看到的是「这条 lane 没建成」，
+   * 于是没人会去清理它。下一次同名扇出还会撞上它。
+   *
+   * 用真 git：这条性质的全部要害是「git 到底有没有在盘上留下东西」，假 host 答不了。
+   */
+  it('落记录失败时，盘上那个真 worktree 还在——而调用方此刻分不出它和「什么都没建」', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-register-fail-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    const worktreePath = join(repoPath, '.worktrees', 'lane')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    expect((await executionHost.run('git', ['-C', repoPath, 'init', '-b', 'main'])).exitCode).toBe(0)
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    expect((await executionHost.run('git', ['-C', repoPath, 'add', 'README.md'])).exitCode).toBe(0)
+    expect((await executionHost.run('git', [
+      '-C', repoPath,
+      '-c', 'user.name=AgentMux Test',
+      '-c', 'user.email=agentmux@example.invalid',
+      'commit', '-m', 'fixture'
+    ])).exitCode).toBe(0)
+
+    // 配置写盘失败。真实原因可以是磁盘满、权限、schema 拒绝——对本条而言只要它抛就行。
+    const save = vi.fn(async () => { throw new Error('disk full') })
+    const service = new WorktreeService(() => executionHost, { save })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+
+    // 抛出来的必须是**带分类**的那种错，不是一个裸 Error。上游 runFanOut 正是靠 instanceof 分辨
+    // 「git 拒了，盘上没东西」和「git 建了，记录没落上」——丢掉分类，这条 lane 会退回被报成
+    // 「什么都没建」，而目录还在盘上无人认领。只断言 rejects 的话，把分类整段删掉测试照样绿（实测）。
+    const thrown = await service.createForBranch({
+      workspaceId: 'repo', branch: 'lane-a', path: worktreePath, createBranch: true
+    }, branchConfig).then(() => null, (error: unknown) => error)
+    expect(thrown, '必须失败——否则下面每一条都在测一个没发生的场景').not.toBeNull()
+    expect(thrown, '丢了分类，上游就分不出这一档和「git 拒了」').toBeInstanceOf(WorktreeRetainedError)
+    // 档位必须是 git-failed：它承诺的是「没有东西被丢弃，目录还在」，而这正是此刻的真相。
+    // 不能是 record-not-withdrawn——那一档的定义是**目录已经没了**，用在这里会让用户以为产出被删了。
+    expect((thrown as WorktreeRetainedError).retention).toBe('git-failed')
+    // 原始失败原因不许被吞掉：用户得知道是磁盘满还是权限。
+    expect((thrown as Error).message).toContain('disk full')
+
+    // 先证靶子在场：save 真的被调过，也就是说 git 那一步确实走通了才轮到它失败。
+    expect(save).toHaveBeenCalledTimes(1)
+
+    // 判据：目录真的在盘上，git 也真的认它——这不是「什么都没建」。
+    expect((await stat(worktreePath)).isDirectory()).toBe(true)
+    const listed = await executionHost.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain'])
+    expect(listed.stdout, 'git 自己记着这个 worktree，所以它不是幽灵目录').toContain(worktreePath)
+    // 分支也建出来了，同样无人认领。
+    const branch = await executionHost.run('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', 'lane-a'])
+    expect(branch.exitCode, '分支也留下了').toBe(0)
+  }, 30000)
 })
