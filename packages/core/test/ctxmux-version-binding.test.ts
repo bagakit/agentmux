@@ -193,6 +193,7 @@ const IDENTITY_ROLES: Record<string, 'ssot' | 'manifest-verifier' | 'anchor' | '
   'packages/core/scripts/run-daemon-cutover-benchmark.mjs': 'manifest-verifier',
   'packages/core/test/package-consumer.integration.test.ts': 'manifest-verifier',
   'packages/core/test/daemon-cutover-benchmark.test.ts': 'anchor',
+  'packages/core/test/doctor-unverifiable-vs-missing.test.ts': 'anchor',
   'packages/core/test/doctor.test.ts': 'anchor',
   'packages/core/test/reliability-stress.integration.test.ts': 'anchor',
   'packages/core/test/fixtures/reliability-budgets.json': 'anchor',
