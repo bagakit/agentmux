@@ -29,17 +29,30 @@ import { speakerColorHue } from './conversation-avatar-color'
  * 先剥前缀再取。剥的是**两类**东西，它们都会让牌面空无一物，但 `trim()` 只认识其中一类：
  * - 空白：前导空格是名字的排版噪声，不是它的首字母。`trim()` 认识普通空格、NBSP、表意空格
  *   `　`、BOM（实测四者都被剥掉）。
- * - **零宽字符**：`trim()` **不**认识 U+200B。实测 `projectMonogram('​project')` 返回
+ * - **不可见字符**：`trim()` **不**认识 U+200B。实测 `projectMonogram('​project')` 返回
  *   U+200B——一枚完全看不见的牌子，正是本函数存在要消灭的那个结果。零宽空格是富文本复制粘贴
  *   的常见污染物，会跟着项目名一路进来。
  *
- * 只剥**前导**的零宽字符，不做全串替换：U+200D 在串中间是承重的（`👨‍👩‍👧` 靠它连成一个簇），
+ * 这一类**按 Unicode 属性判，不手抄码点清单**。此前这里是五个码点的枚举
+ * （U+200B-200D、U+2060、U+FEFF），而「不可见」远不止这五个：实测同一份语料里
+ * U+00AD 软连字符、U+034F CGJ、U+061C ALM、U+180E、U+2061-2064 不可见运算符、
+ * U+3164／U+115F 韩文填充符、U+E0001 语言标签共 **11 类**仍然画出空白牌子——枚举式的禁止
+ * 清单必漏，漏的那些恰好就是本函数要消灭的那个结果。`Default_Ignorable_Code_Point` 是
+ * Unicode 给这件事的**正式谓词**，实测是原先那五个码点的**严格超集**（逐个验过，无回归），
+ * 换过去后 11 类降到 1 类（U+FFF9 交错注释符不在该属性里，留着）。
+ *
+ * **没有换成允许清单**（「取第一个 `\p{L}/\p{N}/\p{Emoji}` 簇」）。它确实能清零，但要多付两样：
+ * `.gitignore` 的牌面从 `.` 变成 `G`、`-flag` 从 `-` 变成 `F`——跳过前导标点是另一个决定，
+ * 不该搭车；而且它对 U+3164 同样失效（韩文填充符 `\p{L}` 为真）。属性谓词只改「剥什么」，
+ * 不改「取哪个」，是这三条路里唯一不牵动第二个决定的。
+ *
+ * 只剥**前导**，不做全串替换：U+200D 在串中间是承重的（`👨‍👩‍👧` 靠它连成一个簇），
  * 全局剥掉会把家族 emoji 拆散——那正好是上面那条要守的东西。
  */
-const LEADING_ZERO_WIDTH = /^[​-‍⁠﻿]+/u
+const LEADING_IGNORABLE = /^\p{Default_Ignorable_Code_Point}+/u
 
 function firstGrapheme(value: string): string {
-  const trimmed = value.replace(LEADING_ZERO_WIDTH, '').trim()
+  const trimmed = value.replace(LEADING_IGNORABLE, '').trim()
   if (!trimmed) return ''
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   return [...segmenter.segment(trimmed)][0]?.segment ?? ''
