@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -646,6 +646,18 @@ describe('semantic session persistence boundary', () => {
 })
 
 describe('durable session identity root', () => {
+  // 宿主 AgentMux.app 会注入 AGENTMUX_AGENT_SESSION_STORE 覆盖默认路径，抹掉这里断言的 runtime 回退分支。
+  // 剥掉它让 defaultAgentMuxAgentSessionStorePath() 走 fallback，测完还原，不动断言本身。
+  let previousStoreOverride: string | undefined
+  beforeEach(() => {
+    previousStoreOverride = process.env.AGENTMUX_AGENT_SESSION_STORE
+    delete process.env.AGENTMUX_AGENT_SESSION_STORE
+  })
+  afterEach(() => {
+    if (previousStoreOverride === undefined) delete process.env.AGENTMUX_AGENT_SESSION_STORE
+    else process.env.AGENTMUX_AGENT_SESSION_STORE = previousStoreOverride
+  })
+
   it('round-trips the nativeHandle from a fresh instance and derives agent-timelines from the same root', async () => {
     // Root cause of the reported bug: the nativeHandle (the `claude --resume` / `codex resume` token)
     // must survive a restart. A second instance opened at the same path must read it back intact.

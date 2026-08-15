@@ -570,6 +570,7 @@ export function projectRuntimeEvent(
               pendingInteraction: _pendingInteraction,
               terminalCapability: _terminalCapability,
               terminalPromptDelivery: _terminalPromptDelivery,
+              terminalOutputChannel: _terminalOutputChannel,
               turnUsage: _turnUsage,
               ...current
             } = item
@@ -584,6 +585,9 @@ export function projectRuntimeEvent(
                 : {}),
               ...(core.session.terminalPromptDelivery
                 ? { terminalPromptDelivery: structuredClone(core.session.terminalPromptDelivery) }
+                : {}),
+              ...(core.session.terminalOutputChannel
+                ? { terminalOutputChannel: structuredClone(core.session.terminalOutputChannel) }
                 : {}),
               // 最近一 turn 的真实用量随收尾事件的 agent-session 快照到达 —— 权威镜像 Core：带就复制、
               // 缺就丢弃（destructure 把陈旧值从 ...current 里剔掉）。缺一条条件复制，live 路径就永远读不到

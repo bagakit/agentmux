@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   agentSessionServiceOutcome,
   classifyServiceNotice,
+  serviceNoticeAriaLive,
   serviceNoticeToRender
 } from '../src/renderer/src/lib/service-window-notice.js'
 import {
@@ -27,6 +28,7 @@ function agentSession(overrides: {
   kind?: 'agent' | 'terminal'
   detail?: string
   terminalCapability?: Extract<SessionSnapshot, { kind: 'agent' }>['terminalCapability']
+  terminalOutputChannel?: Extract<SessionSnapshot, { kind: 'agent' }>['terminalOutputChannel']
 }): SessionSnapshot {
   return {
     id: 's',
@@ -41,6 +43,7 @@ function agentSession(overrides: {
     executorId: 'claude-code',
     capabilities: {},
     ...(overrides.terminalCapability ? { terminalCapability: overrides.terminalCapability } : {}),
+    ...(overrides.terminalOutputChannel ? { terminalOutputChannel: overrides.terminalOutputChannel } : {}),
     status: {
       state: overrides.state ?? 'working',
       source: 'run-process',
@@ -169,6 +172,67 @@ describe('把一个 Agent Session 映成步骤结局：看进程，不看我们�
 })
 
 // ---------------------------------------------------------------------------
+// 输出通道断了、进程没死（T-002）。
+//
+// 缺陷形状：重连成功、进程仍在跑，但这一屏到该 Run 的实时输出泵没能重建（core 的 `resumed==='dead'`）。
+// 放行是对的——输入照常送达 Agent（原则 11 第 2 类），可它的输出永远到不了这块屏。此前我们放行却什么都
+// 不说，用户对着一块永不回显的屏幕打字。Core 落一条 `terminalOutputChannel` 降级事实，这里把它投影成
+// 一条服务窗。判据取 T-001 收敛后的那一处 `agentViabilityFromProcessState`，不新增第五份三分类。
+// ---------------------------------------------------------------------------
+
+/** 输出通道断了，但进程还在跑。 */
+const outputChannelSevered = agentSession({
+  state: 'working',
+  processState: 'running',
+  terminalOutputChannel: {
+    state: 'severed',
+    mode: 'degraded',
+    reason: 'reattach-failed',
+    run: { runId: 'r' },
+    observedAt: 20
+  }
+})
+
+describe('输出通道断了、进程没死：放行必须配告知', () => {
+  it('落成一条会渲染的服务窗——进程在跑就是第 2 类，放行 + 提醒', () => {
+    // 承重条：Core 发布这条事实后，Activity 视图必须显示服务窗，而不是一块沉默的屏幕。
+    // 删掉 core 里 `publishOutputChannelSevered` 那一发（事实永不到达），或删掉这里 lib 对它的投影，都让它红。
+    const outcome = agentSessionServiceOutcome(outputChannelSevered)
+    const classification = classifyServiceNotice(outcome)
+    expect(classification.kind).toBe('process-degraded')
+    const rendered = serviceNoticeToRender(classification)
+    expect(rendered).not.toBeNull()
+    // 三段文案要点名「输出可能没在显示」「输入仍到达 Agent」「Resume 重新附着」——正是用户此刻需要的判断。
+    expect(rendered!.notice.mode).toContain('Output may not be showing')
+    expect(rendered!.notice.mode).toContain('input still reaches the Agent')
+    expect(rendered!.notice.restore).toContain('Resume')
+  })
+
+  it('权威事实压过推断的 disconnected：即使 status 仍是 working 也要显示', () => {
+    // 这条事实比推断的连接状态强——它说的正是「重连成功了、只有这一个 Run 的输出泵没接上」。
+    // 所以判定不挂在 status.state 上（这里 status 是 working），而是直接读 Core 落下的标记。
+    expect(outputChannelSevered.status.state).not.toBe('disconnected')
+    expect(classifyServiceNotice(agentSessionServiceOutcome(outputChannelSevered)).kind).toBe('process-degraded')
+  })
+
+  it('进程退了就交给恢复横幅——输出通道事实不许把死掉的 Agent 画成「还能用」', () => {
+    // 判据是「Agent 还能干活吗」（进程），不是「有没有这条标记」：进程退了是第 1 类，服务窗不接手。
+    const exited = agentSession({
+      state: 'working',
+      processState: 'exited',
+      terminalOutputChannel: {
+        state: 'severed',
+        mode: 'degraded',
+        reason: 'reattach-failed',
+        run: { runId: 'r' },
+        observedAt: 20
+      }
+    })
+    expect(classifyServiceNotice(agentSessionServiceOutcome(exited)).kind).toBe('agent-broken')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 失联的两类：还在重连 vs 已经放弃。
 //
 // 缺陷形状：恢复横幅（terminal 视图）早就分了这两类，但**只在终端分支里**——Agent 在 Activity
@@ -279,5 +343,45 @@ describe('失联的两类文案（Activity 视图下唯一的失联出口）', (
     expect(source).toContain("from './session-state'")
     // 自检：别让上面两条被一句注释满足。判据必须真的参与比较。
     expect(source).toContain('=== CONNECTION_UNRECOVERABLE_DETAIL')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 通报的音量：由分类派生，降级轻声、dead 才刺眼（T-003，需求池 f-25h8fysz9）。
+//
+// 缺陷形状：此前所有通报一律用第 1 类的音量（assertive）说出来，第 2 类的降级也被喊成「Agent 完了」，
+// 用户学会忽略它，告知就失效了。修法是把音量做成分类的**派生值**——kind 已 1:1 承载存活判定，
+// 直接按 kind 映射就是「由 agentViability 推导」，不另起第二个枚举、不由调用点各自挑。
+//
+// 这里钉住的是**具体档位对应关系**（alive/unknown→polite、dead→assertive），不是「每个档位都被映射到了」——
+// 后者在映射改窄（比如把 dead 也改成 polite）时仍会全绿。
+// ---------------------------------------------------------------------------
+describe('通报音量随存活判定分档', () => {
+  it('第 2 类（alive，我们的流程坏了）用克制的 polite 说——降级不该喊狼来了', () => {
+    // 端到端：一个断连但存活的 Agent，其分类音量必须是 polite。改成 assertive 时这条变红。
+    const kind = classifyServiceNotice(agentSessionServiceOutcome(aliveButDisconnected)).kind
+    expect(kind).toBe('process-degraded')
+    expect(serviceNoticeAriaLive(kind)).toBe('polite')
+  })
+
+  it('分不清（unknown）也用 polite——如实标注不确定，不就高也不就低', () => {
+    const kind = classifyServiceNotice(agentSessionServiceOutcome(indeterminate)).kind
+    expect(kind).toBe('indeterminate')
+    expect(serviceNoticeAriaLive(kind)).toBe('polite')
+  })
+
+  it('第 1 类（dead，Agent 真没了）才 assertive——只有需要打断的那一档刺眼', () => {
+    const kind = classifyServiceNotice(agentSessionServiceOutcome(deadAndDisconnected)).kind
+    expect(kind).toBe('agent-broken')
+    expect(serviceNoticeAriaLive(kind)).toBe('assertive')
+  })
+
+  it('dead 与降级/分不清不同档——否则「轻声说」就没发生', () => {
+    // 挡住「一律 assertive」（原缺陷）与「一律 polite」（矫枉过正）两种退化：dead 必须比另两档响。
+    const degraded = serviceNoticeAriaLive('process-degraded')
+    const unknown = serviceNoticeAriaLive('indeterminate')
+    const dead = serviceNoticeAriaLive('agent-broken')
+    expect(dead).not.toBe(degraded)
+    expect(dead).not.toBe(unknown)
   })
 })

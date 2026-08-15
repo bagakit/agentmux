@@ -475,6 +475,7 @@ export type AgentMuxAgentSession = {
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
+  terminalOutputChannel?: AgentTerminalOutputChannelState
   semanticStatus?: AgentStatus
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
@@ -510,6 +511,25 @@ export type AgentTerminalCapabilityState = {
   state: 'unknown'
   mode: 'degraded'
   reason: 'handshake-timeout'
+  run: AgentMuxRunRef
+  observedAt: number
+}
+
+/**
+ * 服务窗事实（原则 11 第 2 类）：重连成功、进程仍在跑，但这一屏到该 Run 的**实时输出通道**没能重建
+ * （`republishLiveRunState` 的 `resumed === 'dead'` 分支——见 client.ts）。输入照常送达 Agent，可它的
+ * 输出永远到不了这块屏，用户对着一块永不回显的屏幕打字。放行是对的（能力还在，第 2 类），但放行必须
+ * 配告知，否则诚实只做了一半。
+ *
+ * 为什么单开一条状态位、不复用 `terminalCapability`/`terminalPromptDelivery`：三条各有各的生命周期，
+ * 且可**同时**成立。这条的清除路径是「实时通道重新接上」——一次成功的 reattach（`resumeLiveAttachment`
+ * 返回 `live`/`truncated`）就地撤下它，Run 被替换时随 Run 级状态一起清除。`state: 'severed'` 说的正是
+ * 「通道断了、进程没断」这件事本身。
+ */
+export type AgentTerminalOutputChannelState = {
+  state: 'severed'
+  mode: 'degraded'
+  reason: 'reattach-failed'
   run: AgentMuxRunRef
   observedAt: number
 }
