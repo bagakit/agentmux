@@ -308,7 +308,20 @@ describe('GitService (contract, fake executor)', () => {
   })
 })
 
-describe('GitService (real git, temporary repository)', () => {
+/**
+ * 每个用例都在临时目录里建真仓库、跑真 git 子进程，因此按子进程的量级给超时，而不是 vitest 那个
+ * 面向纯内存断言的 5000ms 默认值。实测（2026-09-13，孤立单跑）最慢的八个用例落在 4318–4623ms，
+ * 离默认上限只剩 7% 余量——`#765` 那一族每个用例要建**两个**仓库（`committedRepo` 各 6 次 git 调用，
+ * 合计 12 次），正踩在这条线上。后果不是偶发 flake 而是**系统性的假红**：孤立单跑三次就红了一次，
+ * 全仓 pnpm check 并发时更稳定地红六个，且红的全是 `Test timed out in 5000ms` 而非任何断言。
+ *
+ * 判据不是「调大数字让它变绿」：这里没有任何断言被放宽，红的也从来不是断言。真正的证据是文件内部
+ * 早就写着的那个不对称——每一次 `host.run('git', …)` 自带 `timeoutMs: 20_000`，即作者明确预期
+ * 单次 git 调用可以慢到 20 秒，而用例级超时却从未跟着抬起来。20_000ms 取的就是这个已有预算，
+ * 让用例级上限与它守的那个子进程上限一致；真正卡死的 git 仍会在内层 20 秒超时并带着 stderr 报错，
+ * 所以「挂住」这一族缺陷依然可被发现，只是不再由一个比内层预算还短的外层上限来伪造。
+ */
+describe('GitService (real git, temporary repository)', { timeout: 20_000 }, () => {
   async function makeRepo(): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-git-'))
     temporaryRoots.push(root)
