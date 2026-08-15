@@ -1,5 +1,10 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
+import {
+  attentionSortRank,
+  categoryFor,
+  isUrgentAttention,
+  type AttentionCategory
+} from './attention-event'
 
 // Attention that survives collapsing.
 //
@@ -47,8 +52,10 @@ export function rowAttention(sessions: readonly SessionSnapshot[]): RowAttention
     if (session.kind !== 'agent') continue
     agents += 1
     const category = categoryFor(session.status.state)
-    // Completion is real attention for a notification but not for a persistent row mark.
-    if (!category || category === 'done') continue
+    // Only the categories that earn ink roll up. That set is `URGENT_ATTENTION_CATEGORIES`, read here
+    // through `isUrgentAttention` rather than spelled as "not done": naming the exclusion inverts on
+    // the next category added, and this was one of three places spelling it by hand.
+    if (!isUrgentAttention(category)) continue
     counts.set(category, (counts.get(category) ?? 0) + 1)
     if (!winner || attentionSortRank(category) < attentionSortRank(winner)) winner = category
   }
