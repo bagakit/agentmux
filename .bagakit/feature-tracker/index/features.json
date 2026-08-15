@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 126
+    "next_cursor": 127
   },
   "features": [
     {
@@ -1278,6 +1278,16 @@
     {
       "feat_id": "f-2638fbvbd",
       "title": "MAX_AGENT_PROMPT_BYTES 一个常量承担字节与行数两种单位",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2648fvz2s",
+      "title": "超大 steer 会永久卡死整条队列，而角标仍承诺投递",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
