@@ -34,6 +34,12 @@ const READY = 'AGENTMUX_BROWSER_SCRIPT_READY'
  *
  * `js` 与 `cdp` 是**必须项不是可选项**：库里没有的能力，Agent 自己就能补，不用等我们加函数。
  * 少了这两个逃生口，这个方案就退化成「动词清单更长的 N 动词方案」。
+ *
+ * **这张清单只放派发层真能服务的名字**。一个 AgentMux Browser 就是一个页面（一个
+ * `WebContentsView`），它没有自己的标签页——所以早期设计里照抄参考实现的 `openOrReuseTab` /
+ * `switchTab` / `listTabs` 不在这里。注入一个必定失败的名字比不注入更糟：Agent 会把它当成
+ * 可用能力来规划，然后在半途撞上一句拒绝，而此时前面的动作已经做过了
+ * （AGENTS.md:32-52：不许让人发现得太晚）。要另一个页面就 `agentmux open browser`。
  */
 export const BROWSER_PAGE_FUNCTION_NAMES = [
   // 观察
@@ -53,11 +59,8 @@ export const BROWSER_PAGE_FUNCTION_NAMES = [
   'waitForLoad',
   'waitForNetworkIdle',
   'wait',
-  // 导航
+  // 导航。一个 Browser 一个页面，所以只有"去哪儿"，没有标签页动词。
   'gotoUrl',
-  'openOrReuseTab',
-  'switchTab',
-  'listTabs',
   // 逃生口
   'js',
   'cdp'
