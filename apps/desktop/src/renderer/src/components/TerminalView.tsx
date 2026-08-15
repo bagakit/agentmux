@@ -10,6 +10,7 @@ import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../sh
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { workspaceForSession } from '../lib/workbench-tabs'
 import {
   dismissOpenDestinationRequest,
   parseHttpLinkUrl,
@@ -233,12 +234,21 @@ export function TerminalView({
   const regionCaretFocus = useAppStore((state) =>
     regionCaretFocusTargets(state.regionCaretFocus, linkOrigin.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
-  // The active workspace's on-disk root — the base main resolves openFile against. Read from the
-  // WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still relativize
-  // absolute paths against the base main actually uses. A ref keeps it fresh for the attach-effect
-  // closure, which does not re-run on config change.
+  // The on-disk root this pane's paths are relative to — the base main resolves openFile against.
+  // Read from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still
+  // relativize absolute paths against the base main actually uses.
+  //
+  // Keyed on THIS pane's own session, not on activeWorkspaceId — same reasoning as SessionPane, and it
+  // has to be the same answer: a path link in the terminal and the same path in the Activity timeline
+  // are the same file, so they cannot disagree about what the root is. After "Move to Workspace" the
+  // active workspace is the target while the session still runs under its original root; when the
+  // active root happens to be an ancestor of the session path, the prefix strip succeeds and points at
+  // the wrong repo. workspaceForSession is the existing predicate for "which workspace owns this
+  // session", already used by the store and quick-switch.
+  //
+  // A ref keeps it fresh for the attach-effect closure, which does not re-run on config change.
   const activeWorkspaceRoot = useAppStore((state) =>
-    state.config?.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId)?.path ?? ''
+    workspaceForSession(state.config ?? null, session)?.path ?? ''
   )
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
