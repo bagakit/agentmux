@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * `runScript` 那条路的单元判据：**生产的 onPageCall 真的走派发层**，以及会话中途没了要如实报告。
@@ -85,7 +88,10 @@ const fakeElectron = vi.hoisted(() => {
   return { FakeWebContentsView }
 })
 
-vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView }))
+vi.mock('electron', () => ({
+  WebContentsView: fakeElectron.FakeWebContentsView,
+  app: { getPath: () => tmpdir() }
+}))
 
 // 只替换派发层。CDP 会话用真的——`endedReason` 那条判据要的就是它真实的记账行为。
 // 走 vi.hoisted 是因为 vi.mock 的工厂会被提到文件顶部，直接引用下面的 const 会撞到 TDZ。
@@ -104,6 +110,7 @@ vi.mock('../src/main/browser-page-dispatch.js', () => ({
   renderBrowserSnapshotText: () => ''
 }))
 
+import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 
 const profiles: BrowserProfileResolver = {
@@ -126,7 +133,10 @@ async function managerWithBrowser(): Promise<{
   dispatchCalls.length = 0
   createDispatch.mockClear()
   fakeElectron.FakeWebContentsView.instances.length = 0
-  const manager = new BrowserViewManager(fakeWindow(), profiles)
+  // ref 账本给临时路径：本文件 mock 掉了派发层，账本根本不会被读，但真路径会往 userData 里写文件。
+  const manager = new BrowserViewManager(fakeWindow(), profiles, new BrowserRefLedgerStore(
+    join(mkdtempSync(join(tmpdir(), 'agentmux-wiring-')), 'ref-ledger.json')
+  ))
   await manager.create('b1', 'https://example.invalid/')
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   return { manager, contents: view.webContents }

@@ -1531,6 +1531,9 @@ describe('RuntimeController configuration transaction', () => {
       const controller = await configuredController()
       const client = runtimeFixture.FakeClient.instances[0]!
       const status = agentStatusFixture()
+      // `exactOptionalPropertyTypes` 下「还在跑所以没有退出码」要**拿掉**这个键，而不是赋 undefined
+      // ——本文件 1029 行已经是这个写法。赋 undefined 表达的是"有这条事实，值是 undefined"。
+      const { exitCode: _exitCode, ...runningRun } = status.run
       client.runtimeProjection.mockResolvedValue({
         hostId: 'local',
         subjects: [{
@@ -1545,7 +1548,7 @@ describe('RuntimeController configuration transaction', () => {
             updatedAt: 3,
             semanticStatus: { state: 'waiting', source, observedAt: 3 }
           },
-          run: { ...status.run, state: 'running', observedAt: 4, exitCode: undefined }
+          run: { ...runningRun, state: 'running', observedAt: 4 }
         }]
       })
 

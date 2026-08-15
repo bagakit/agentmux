@@ -138,6 +138,12 @@ work, and a runaway program cannot take AgentMux down with it. Page functions (s
 click, waitForLoad, …) are injected into that subprocess; \`agentmux --skill\` lists them.
 Elements are addressed by the refs a snapshot hands you — never coordinates.
 
+A ref outlives the run that issued it: refs from an earlier \`browser run\`, even from before
+AgentMux restarted, are matched back onto the page by what they pointed at (role, name, and
+which one of the same-named). That match is by appearance, not identity — it can land on a
+different element that looks the same — so a run that used one is reported \`indeterminate\`
+with the details, not \`completed\`.
+
 Requires Agent browser automation to be enabled in Settings › Browser. It is off by default,
 and the refusal says so rather than failing quietly.
 
@@ -146,8 +152,10 @@ including on failure), and \`outcome\`, which is one of four:
   completed      the program finished
   script-failed  the program threw — fix the program
   stopped        we cut it off (too slow, or too much output) — the program is fine, its scale is not
-  indeterminate  the process died; HOW FAR IT GOT IS UNKNOWN. Look at the page before retrying:
-                 an action may already have been applied once.`],
+  indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for one of two reasons the message names:
+                 the process died partway (an action may already have been applied once), or a
+                 ref from an earlier run was matched back by appearance and may have landed on a
+                 look-alike. Either way, look at the page before retrying — do not blind-retry.`],
   ['discuss', `Start a Discussion with a dedicated Agent
 
 Usage:
@@ -341,14 +349,24 @@ return await snapshot()
 Act on the refs a snapshot gives you (\`@e1\`, \`@e2\`, …). Never coordinates: they go stale the
 moment anything reflows, and a stale coordinate clicks whatever moved into that spot.
 
+Refs survive the run that issued them — including across an AgentMux restart. A ref from an
+earlier run is matched back onto the page by what it pointed at (role, accessible name, and
+which one of the same-named), because the numbers themselves are re-issued from \`@e1\` on
+every snapshot and would otherwise silently address a different element. That recovery is by
+appearance, not identity: on a reordered list or a page of same-named buttons it can land on a
+look-alike. So a run that leaned on one comes back \`indeterminate\` with a line naming which
+ref and why — check the page rather than assuming the action hit what you meant. Taking a
+fresh \`snapshot()\` at the start of a run avoids the question entirely.
+
 One Browser is one page, so there are no tab functions — use \`gotoUrl\` to go elsewhere in it,
 and \`agentmux open browser\` when you want a second page. A snapshot's \`missingFrames\` lists
 what it could not read; an empty list is the only claim that the map is complete.
 
 This needs Agent browser automation enabled in Settings › Browser — off by default. Read the
-receipt's \`outcome\`: \`indeterminate\` means the run died partway and you do NOT know what
-already happened — that also covers the page's DevTools being opened mid-run, which severs the
-debugging session. Look at the page before running anything again; do not blind-retry.
+receipt's \`outcome\`: \`indeterminate\` means you do NOT know what already happened, either
+because the run died partway — that also covers the page's DevTools being opened mid-run,
+which severs the debugging session — or because a ref from an earlier run was recovered by
+appearance. Look at the page before running anything again; do not blind-retry.
 
 ## Apply a deliberate layout
 
