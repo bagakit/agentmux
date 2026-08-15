@@ -43,7 +43,7 @@ const PROMPT_READINESS_MESSAGES: Readonly<Record<PromptReadinessErrorCode, strin
   AGENT_PROMPT_NOT_READY:
     'The prompt was not sent because this Run has no consumable composer readiness yet. The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. If it stays not ready, check the Provider readiness marker or Hook ingress.',
   AGENT_PROMPT_READINESS_CONSUMED:
-    'The prompt was not sent because the current composer readiness epoch was already consumed by another submission. The Agent Run is still running; if another delivery is in flight this clears after the next readiness epoch, but if the turn ended without a Stop signal no new epoch is coming — resume or restart the Agent if it does not clear.',
+    'The prompt was not sent because the current composer readiness epoch was already consumed by another submission. The Agent Run is still running; if another delivery is in flight this clears after the next readiness epoch, but if the turn ended without a Stop signal no new epoch is coming — if it does not clear, stop the Agent and then resume it, which mints a fresh epoch.',
   AGENT_PROMPT_SUBMISSION_BUSY:
     'The prompt was not sent because another submission for this Run is still completing. The Agent Run is still running; keep this draft and wait for the existing delivery acknowledgement before trying again.',
   AGENT_PROMPT_READINESS_CONFLICT:

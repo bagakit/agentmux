@@ -166,7 +166,13 @@ describe('CONSUMED 分不清两个世界时如实说，不笃定 wait', () => {
       'no new epoch is coming'
     )
     // 且必须给一个用户真能执行的带内恢复，不能只说 wait。
-    expect(result.message).toMatch(/resume or restart/i)
+    // 恢复动作只能是「先 stop 再 resume」：这个世界里 Run 还在 running，而 resumeAgentRun 对
+    // running 的 Run 直接抛 AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），恢复横幅也只在
+    // disconnected/missing/exited 时才渲染（SessionPane.tsx:253）——光说 "resume" 在这一侧是句
+    // 做不到的话。stop 之后 Run 退出，resume 才会 delete 掉旧 readiness 并铸一枚新 epoch。
+    expect(result.message, 'CONSUMED 的恢复动作退回成了对 running Run 无效的裸 resume').toMatch(
+      /stop the Agent and then resume/i
+    )
   })
 
   it('续期确实在来的 waiting 世界不含「永不来」的措辞——判据真的把两侧分开了', () => {
