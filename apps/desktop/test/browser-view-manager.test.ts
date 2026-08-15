@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 function png(width = 2, height = 3): Buffer {
   const value = Buffer.alloc(33)
@@ -151,7 +154,12 @@ const fakeElectron = vi.hoisted(() => {
   return { FakeWebContentsView }
 })
 
-vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView }))
+// `app` 只为 BrowserRefLedgerStore 的默认路径参数而在：本文件每次都显式给路径，所以它不会被读到。
+// 不给的话，那条 import 在 mock 的命名空间里取不到名字。
+vi.mock('electron', () => ({
+  WebContentsView: fakeElectron.FakeWebContentsView,
+  app: { getPath: () => tmpdir() }
+}))
 
 import {
   assertAllowedBrowserUrl,
@@ -160,6 +168,7 @@ import {
   DEFAULT_BROWSER_ZOOM_FACTOR,
   normalizeBrowserUrl
 } from '../src/main/browser-view-manager.js'
+import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
 
 const profiles: BrowserProfileResolver = {
@@ -176,7 +185,11 @@ const profiles: BrowserProfileResolver = {
 }
 
 function browserManager(window: ReturnType<typeof fakeWindow>['window']): BrowserViewManager {
-  return new BrowserViewManager(window as never, profiles)
+  // ref 账本指向一个临时路径：本文件判的是 view 生命周期，不判持久化。给真路径会让这些用例
+  // 往用户的 userData 里写文件。
+  return new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(
+    join(mkdtempSync(join(tmpdir(), 'agentmux-bvm-')), 'ref-ledger.json')
+  ))
 }
 
 function fakeWindow() {

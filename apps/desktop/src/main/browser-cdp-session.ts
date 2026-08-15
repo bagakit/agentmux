@@ -18,7 +18,7 @@ import type { BrowserCdpSender } from './browser-page-snapshot.js'
 const AUTO_ATTACH_PARAMS = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }
 
 export class BrowserCdpSession {
-  /** sessionId → 该 frame 的 sender。主 frame 不在这里（它就是 {@link send}）。 */
+  /** sessionId → 该 frame 的 sender。主 frame 不在这里（它就是 {@link sendCommand}）。 */
   private readonly frameSenders = new Map<string, BrowserCdpSender>()
   /** 非 null 表示会话已经没了，值是原因。之后每一次 send 都要拿它说话，而不是发出去等一句泛化错误。 */
   private gone: string | null = null
@@ -90,8 +90,15 @@ export class BrowserCdpSession {
     return session
   }
 
-  /** 主 frame 的 sender。 */
-  readonly send: BrowserCdpSender = (method, params) => this.sendTo(undefined, method, params)
+  /**
+   * 主 frame 的 sender。
+   *
+   * 叫 `sendCommand` 而不是 `send`，与 Electron 的 `debugger.sendCommand` 同名：这不是风格。
+   * `src/main` 里的 `.send(<标识符或字面量>)` 被 ipc-event-channel-parity 当成一处 IPC 推送来数
+   * （它按实参形状判，不按接收者名字），于是 `session.send('Runtime.evaluate')` 会以一个 CDP 方法名
+   * 的身份混进 IPC 频道清单里。名字选对，那条判据就不需要为我们开例外。
+   */
+  readonly sendCommand: BrowserCdpSender = (method, params) => this.sendTo(undefined, method, params)
 
   /** 每个子 frame 的 sender，键是 CDP sessionId——快照会把它记进节点，动作靠它发回对的那一头。 */
   get frames(): Map<string, BrowserCdpSender> {

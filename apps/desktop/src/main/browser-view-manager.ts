@@ -19,6 +19,7 @@ import { BrowserCdpSession } from './browser-cdp-session.js'
 import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserRunOutcomeFromFailure } from './browser-run-outcome.js'
+import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
@@ -113,7 +114,12 @@ export class BrowserViewManager {
 
   constructor(
     private readonly window: BrowserWindow,
-    private readonly profiles: BrowserProfileResolver
+    private readonly profiles: BrowserProfileResolver,
+    /**
+     * ref 的跨轮/跨重启账本。和 `profiles` 一样从外面传进来，不给默认值：默认值要调
+     * `app.getPath('userData')`，那会让这个类在**构造时**就绑死 Electron，而它此前只在真正开页面时才需要。
+     */
+    private readonly refLedgers: BrowserRefLedgerStore
   ) {}
 
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
@@ -415,8 +421,11 @@ export class BrowserViewManager {
   async runScript(id: string, code: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
     const session = BrowserCdpSession.attach(entry.view.webContents)
+    // 本轮自愈过的 ref 都记在这里。自愈按外观匹配，可能落在一个长得一样的**另一个**元素上，
+    // 所以它不能只活在主进程的日志里——必须跟着结局回到 Agent 手上。
+    const notes: string[] = []
     try {
-      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session) })
+      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session, notes) })
       // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
       // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
@@ -435,6 +444,17 @@ export class BrowserViewManager {
         }
       }
       if (run.completed) {
+        // 自愈过就不是 `completed`。程序确实跑完了，但**它作用在什么上不确定**——role+name+nth
+        // 能匹配到一个长得一样的邻居。这正是 `indeterminate` 的含义（先看一眼页面，别盲目重试），
+        // 也是 `completed` 这一支承载不了的：它连一个放警告的字段都没有。返回值照常带回去——
+        // 那是程序真算出来的东西，丢掉它只会逼 Agent 再跑一遍。
+        if (notes.length > 0) {
+          return {
+            result: run.value,
+            logs: run.logs,
+            outcome: { kind: 'indeterminate', message: notes.join('\n') }
+          }
+        }
         return { result: run.value, logs: run.logs, outcome: { kind: 'completed' } }
       }
       return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
@@ -455,7 +475,8 @@ export class BrowserViewManager {
    */
   private pageCallHandler(
     entry: BrowserEntry,
-    session: BrowserCdpSession
+    session: BrowserCdpSession,
+    notes: string[]
   ): (name: string, args: unknown[]) => Promise<unknown> {
     const requireLive = (): WebContentsView => {
       const view = entry.view
@@ -477,7 +498,12 @@ export class BrowserViewManager {
       gotoUrl: async (url) => {
         await this.navigate(entry.id, url)
       },
-      captureScreenshot: async () => await this.captureScreenshot(entry.id)
+      captureScreenshot: async () => await this.captureScreenshot(entry.id),
+      readLedger: async () => await this.refLedgers.read(entry.id),
+      writeLedger: async (ledger) => {
+        await this.refLedgers.write(entry.id, ledger)
+      },
+      note: (text) => notes.push(text)
     })
     return async (name, args) => {
       requireLive()
