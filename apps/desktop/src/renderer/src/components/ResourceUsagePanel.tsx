@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import type { UsageSnapshot } from '../../../shared/contracts'
 import { formatRss, subscribeWhileOpen, usagePanelRows, type UsagePanelRow } from '../lib/resource-usage-panel'
-import { workspaceForSession } from '../lib/workbench-tabs'
+import { workspaceRootForPath } from '../lib/workbench-tabs'
 
 // 状态栏上的资源面板。
 //
@@ -42,12 +42,13 @@ export function ResourceUsagePanel() {
   // agent-timeline）。所以打开面板**不需要**触发一轮重拉——数据本就在手，读它即可。
   const timelines = useAppStore((state) => state.timelines)
   // 每个 Session 的仓根，用来把「最近在改什么」里的绝对路径缩成相对路径。必须逐个解：这张面板一次
-  // 列出所有 Run，它们分属不同仓库，没有「当前那个根」可用。走 workspaceForSession 这个共用谓词。
+  // 列出所有 Run，它们分属不同仓库，没有「当前那个根」可用。问的是**包含**不是归属（子目录终端
+  // 不被任何 workspace 精确拥有，但它的路径确实在那个仓里），故走 workspaceRootForPath。
   const config = useAppStore((state) => state.config)
   const workspaceRoots = useMemo(() => {
     const roots: Record<string, string> = {}
     for (const session of sessions) {
-      const path = workspaceForSession(config ?? null, session)?.path
+      const path = workspaceRootForPath(config ?? null, session)
       if (path) roots[session.id] = path
     }
     return roots
