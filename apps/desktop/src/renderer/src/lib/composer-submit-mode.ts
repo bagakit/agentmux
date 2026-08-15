@@ -43,6 +43,19 @@ export function composerSubmitMode(
   if (session.processState !== 'running') {
     return { canType: false, canSubmit: false, primaryAction: 'send', placeholder: 'Agent is not running' }
   }
+  // Deliberately NO `state === 'error'` gate here. A running process whose live OUTPUT channel died
+  // (RECONNECT_REATTACH_FAILED, a vanished-handshake run) and one that merely emitted a live-channel
+  // advisory (CTXMUX_EVENT_INVALID from an observation_discontinuity / tmux event — the pump keeps
+  // running, output keeps flowing) BOTH surface as { state:'error', source:'run-process' }: the reducer
+  // drops the code, so this function cannot tell them apart, and it must not try. Both are 原则 11 第 2 类
+  // (our observation stumbled, the Agent is fine). The viability question the composer answers is "can the
+  // Agent still take bytes?" — and while `processState === 'running'`, input reaches it: writeAgentInput /
+  // recoverableInput bypass the output attachment entirely (RED-LINES.md 反例 1). Greying the surface here
+  // would take away an ability the daemon still honours — RED-LINES.md 判定流程 "绕过我这段代码，这条路还能
+  // 不能通？ → 能" ⇒ red line. Degrade-and-allow: the honest signal for a dead output channel is a service
+  // window ("output may not be showing — Resume to reattach"), not a locked composer.
+  // ponytail: service window not wired here — it needs a degraded fact from core + a service-window-notice
+  //   mapping (both outside this file). Tracked as the first-class degrade-and-allow mechanism (f-25r8f2rt4).
   // `working` drives both axes but answers two questions: Stop stays the primary action AND Enter still
   // submits. Only while working is Stop offered; an idle-running Agent's primary action is Send.
   const primaryAction = session.status.state === 'working' ? 'stop' : 'send'
