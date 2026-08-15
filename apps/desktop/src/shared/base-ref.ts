@@ -89,15 +89,26 @@ export function parseRemoteHead(stdout: string, exitCode: number): BaseRef {
 }
 
 /**
- * 这个 base 够不够格用来数「独有提交」。
+ * 这个 base 够不够格用来数「独有提交」——够格的话，**连 ref 一起给出来**。
  *
  * 只有权威答案够格，理由见本文件顶部那张表：猜来的 base 在「它已经含有这条 lane」时会读出 0，而 0
  * 的意思是「删得放心」。少报一次的代价是用户照着一句错的安心话删掉自己的东西。
  *
- * 独立成一个有名字的判定，而不是在调用处写 `if (base.source === 'remote-head')`：这是一条**规则**，
- * 不是一次条件判断。写成散落的比较，下一个加消费方的人会照着 `source` 自己想一套，而这条规则的理由
- * （实测那张表）不在他眼前。
+ * ## 为什么返回 `string | null` 而不是 `boolean`
+ *
+ * 返回布尔的版本写出来是这样的：
+ *
+ * ```ts
+ * if (canCountOrphanCommits(base)) count(base.ref)   // 守住了
+ * count(base.ref)                                     // 也编译得过，而且没人会红
+ * ```
+ *
+ * 也就是说规则**全靠调用方自觉去问**，而这正是本仓反复证明无效的那种守卫：靠注释和自觉挡不住下一个
+ * 人。返回「够格时才给得出的那个 ref」之后，想拿到能数的 ref 只有这一条路——不问就没有 ref 可用。
+ * 拿 `base.ref` 硬来当然仍然写得出，但那已经不是"忘了检查"，而是绕过一个明说了理由的函数。
+ *
+ * 把判定和取值合成一次，也顺带消掉了「判的那次和用的那次之间 base 变了」这类两次解析的漂移。
  */
-export function canCountOrphanCommits(base: BaseRef): boolean {
-  return base.source === 'remote-head'
+export function orphanCountableRef(base: BaseRef): string | null {
+  return base.source === 'remote-head' ? base.ref : null
 }

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
 import {
-  canCountOrphanCommits,
   FALLBACK_BASE_REF,
+  orphanCountableRef,
   parseRemoteHead,
   remoteHeadArgs
 } from '../src/shared/base-ref.js'
@@ -63,9 +63,10 @@ describe('base 是哪条分支，以及这个答案权不权威', () => {
     ])
   })
 
-  it('只有权威答案够格拿去数独有提交', () => {
-    expect(canCountOrphanCommits({ ref: 'develop', source: 'remote-head' })).toBe(true)
-    expect(canCountOrphanCommits({ ref: 'main', source: 'fallback' })).toBe(false)
+  it('只有权威答案够格拿去数独有提交——且够格时连 ref 一起给出', () => {
+    // 返回 ref 而不是 true：想拿到能数的 ref 只有这一条路，规则就不再依赖调用方自觉去问。
+    expect(orphanCountableRef({ ref: 'develop', source: 'remote-head' })).toBe('develop')
+    expect(orphanCountableRef({ ref: 'main', source: 'fallback' })).toBeNull()
   })
 })
 
@@ -115,7 +116,7 @@ describe('为什么猜来的 base 不许用来数独有提交——两个方向�
     const remotes = await host.run('git', ['-C', repoPath, 'branch', '-r', '--contains', 'lane'])
     expect(remotes.stdout.trim(), '远端没有任何分支含有它').toBe('')
 
-    // 所以规则落在这里：这种 base 根本不该被拿去数。
-    expect(canCountOrphanCommits({ ref: 'main', source: 'fallback' })).toBe(false)
+    // 所以规则落在这里：这种 base 根本不该被拿去数，函数连 ref 都不给。
+    expect(orphanCountableRef({ ref: 'main', source: 'fallback' })).toBeNull()
   }, 30000)
 })
