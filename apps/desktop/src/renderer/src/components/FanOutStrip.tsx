@@ -8,6 +8,7 @@ import {
   type FanOutGroup,
   type FanOutLane
 } from '../lib/fanout-group'
+import { statusDotTier } from '../lib/attention-event'
 
 // The bake-off strip above the Board.
 //
@@ -27,11 +28,11 @@ import {
 // amber and red into `--status-ink` (the status vocabulary in chrome.css), and amber additionally
 // carries a `?` pip so needs-you survives colour-blindness. A second mark on the same chip would be
 // the same fact twice, which is what the Project Rail's "one signal per row" rule exists to prevent.
-function laneState(lane: FanOutLane): 'working' | 'waiting' | 'error' | null {
-  if (lane.attention === 'needs-you') return 'waiting'
-  if (lane.attention === 'error') return 'error'
-  if (!lane.session) return null
-  return lane.session.status.state === 'working' ? 'working' : null
+//
+// Which tier is decided in `attention-event.ts`, shared with the roster row. A lane with no Session
+// has no liveness to report, so it passes a null state and gets the resting dot.
+function laneState(lane: FanOutLane): ReturnType<typeof statusDotTier> {
+  return statusDotTier(lane.session?.status.state ?? null)
 }
 
 function LaneChip({

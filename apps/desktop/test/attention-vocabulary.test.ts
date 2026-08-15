@@ -592,10 +592,17 @@ describe('each attention call site is wired to the shared vocabulary', () => {
       ).toEqual([])
       // And the dot must still be derived from attention — otherwise the signal is gone entirely
       // rather than expressed once, which is the failure this deletion must not become. Two halves,
-      // both required: the mapper turns needs-you into the vocabulary's `waiting`, and the rendered
-      // class is interpolated from that mapper's result rather than from a state read straight off the
-      // session (which would drop needs-you back into invisibility while this mapper sat unused).
-      expect(source).toMatch(new RegExp(`function ${mapper}[\\s\\S]*?'needs-you'[\\s\\S]*?'waiting'`, 'u'))
+      // both required: the mapper feeds the row's attention into the shared tier decision, and the
+      // rendered class is interpolated from that mapper's result rather than from a state read
+      // straight off the session (which would drop needs-you back into invisibility).
+      //
+      // The needs-you -> `waiting` step itself is asserted where it now lives, in `statusDotTier`
+      // (attention-event.test.ts). It used to be spelled out in BOTH of these components, and that
+      // duplication was not harmless: both copies ended in `state === 'working' ? 'working' : null`,
+      // so a live `running` Agent drew the resting grey dot while the count above it said working.
+      // Matching the mapper's body for `'needs-you'` here would now be asserting that the copy came
+      // back.
+      expect(source).toMatch(new RegExp(`function ${mapper}[\\s\\S]*?statusDotTier\\(`, 'u'))
       expect(source).toMatch(new RegExp(`const state = ${mapper}\\(`, 'u'))
       expect(source).toContain('`status status--${state}`')
     }
@@ -664,9 +671,12 @@ describe('each attention call site is wired to the shared vocabulary', () => {
 
     for (const relative of CONSUMER_MODULES) {
       const source = read(relative)
-      // Must still reach the verdict through the table.
+      // Must still reach the verdict through the table. 判据是「这个名字从那个模块进来了」，不是
+      // 「这一行长这样」：同一条 import 上再带一个 `type NeedsYouState`，性质分毫未变，而按整行匹配
+      // 的旧写法会当场红。红了之后最省事的修法是把判据改松——那会把这个文件关掉的每一条旁路重新
+      // 打开。所以这里认那个安全拼法，而不是削弱断言。
       expect(source, relative).toMatch(
-        /import \{ isNeedsYouState \} from '\.\/attention-vocabulary'/
+        /import \{[^}]*\bisNeedsYouState\b[^}]*\} from '\.\/attention-vocabulary'/
       )
       const literals = codeStringLiterals(source, relative)
       // Self-check: an extractor returning nothing would make every consumer vacuously compliant.
