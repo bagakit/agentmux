@@ -374,6 +374,14 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
   标签上必须画两个，折成一个就是把"哪一格在被驱动"这条信息折没了。驱动是**瞬时事实**，随运行开始
   和结束，绝不进持久化：重启后复活一个"正在被驱动"的死标记，比不画更糟。
 - Browser Profile 由 Browser Tools 导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
+- **应用链接（`lark://`、`slack://`、`vscode://`、`mailto:` 等非 http(s) scheme）要像一般浏览器那样交给系统，不能当成非法地址挡掉。** 用户原话：「对齐一般浏览器，假定用户会自己把本应用当做浏览器」。今天这类链接一律抛「Unsupported browser URL protocol」，于是飞书文档的 "Authorize in Feishu App" 点下去什么都不发生——这不是一个安全姿态，是一个哑掉的浏览器。约束：
+  - **两条路都要接，只接一条等于没接。** 一条是页面自己导航过去（`will-navigate` / `will-redirect`），另一条是页面用 `window.open` 式的交接。后者今天**连错误都不报**：Browser 的 `webContents` 从未设过 `setWindowOpenHandler`，Electron 默认拒绝且不发事件，用户看到的是彻底的静默。修了前者而不修后者，最常见的那种授权按钮仍然是死的。
+  - **默认不静默移交，也不静默丢弃。** 一般浏览器在把地址交给另一个应用之前会问一次，并允许「以后都这样」。这里同样：每个 scheme 首次出现时问一次，记住选择；拒绝或失败要在同一工作面说出来，说到下一步为止，绝不是什么都不发生。需要这一层的理由是能力边界——一个被访问的页面可以任意构造 `scheme://…`，无条件移交等于让任意网页拿用户选定的参数去启动本机应用。
+  - **判定是纯函数，不是写在 Electron 回调里的语句。** 照 `window-security.ts` 的形状：那个文件的 docstring 记着两个**实测存活**的变异，都是因为判定住在回调体里、只能靠文本扫描守。这里的判定同样要能被单元测试直接质询，回调体里不留语句。
+  - `mailto:` 属于同一类，不单开一条通路。
+
+- **「把一个链接存成文件」和「打开一个存着链接的文件」是一般浏览器的既有能力，走标准格式，不自造。** 本机实测确认三种格式都被系统认得：`.webloc`（macOS，plist，键为 `URL`；`kMDItemContentType = com.apple.web-internet-location`，XML 与二进制 plist 两种皆可）、`.url`（`[InternetShortcut]` + `URL=`，CRLF；macOS 报 `com.microsoft.internet-shortcut`）、以及 Netscape bookmark HTML（`<!DOCTYPE NETSCAPE-Bookmark-file-1>`，每家浏览器导入导出都用它）。约束：单条链接的存取用前两者（`.webloc` 在本平台是首选，`.url` 只读即可），整批导入导出用第三者。存下来的文件必须能被本机 Finder 与其他浏览器直接打开——自造一份 JSON 就把这条能力关在了应用内部，那还不如不做。
+  - 这是与应用链接移交**不同的闭包**，单开 Feature，不混进同一批验收。
 - 内置浏览器只能打开本机可达的地址。**没有 SSH 转发或隧道**，因此"看远端主机的 dev server"当前不成立——这与 Remote 能力整体延后一致，不为它单开一条私有通路。
 
 ### Explorer 与 Editor
