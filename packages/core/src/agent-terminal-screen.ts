@@ -112,6 +112,7 @@ export type AgentTerminalScreenEvidenceEvent =
   | { type: 'data'; startByte: number; endByte: number; dataBytes: Uint8Array }
   | { type: 'gap' }
   | { type: 'exit' }
+  | { type: 'resized'; cols: number; rows: number }
   | { type: 'error'; error: Error }
 
 export type AgentTerminalScreenWait = {
@@ -129,6 +130,7 @@ export type AgentTerminalScreenWait = {
 type AgentTerminalScreenFailure =
   | { kind: 'gap' }
   | { kind: 'exit' }
+  | { kind: 'resized' }
   | { kind: 'error'; error: Error }
 
 /**
@@ -179,6 +181,7 @@ export class AgentTerminalScreenEvidence {
     if (this.disposed || this.failure) return
     if (event.type === 'gap') return this.fail({ kind: 'gap' })
     if (event.type === 'exit') return this.fail({ kind: 'exit' })
+    if (event.type === 'resized') return this.fail({ kind: 'resized' })
     if (event.type === 'error') return this.fail({ kind: 'error', error: event.error })
     this.tail = this.tail.then(async () => {
       if (this.disposed || this.failure) return
@@ -259,6 +262,12 @@ export class AgentTerminalScreenEvidence {
       return new AgentMuxError(
         'Terminal screen evidence was evicted from CtxMux replay.',
         'OUTPUT_GAP'
+      )
+    }
+    if (failure.kind === 'resized') {
+      return new AgentMuxError(
+        'Terminal screen geometry changed; rebuild from the owner-confirmed size.',
+        'TERMINAL_GEOMETRY_CHANGED'
       )
     }
     if (failure.kind === 'exit') {

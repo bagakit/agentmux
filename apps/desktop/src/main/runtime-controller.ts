@@ -748,31 +748,30 @@ export class RuntimeController {
     attachmentId: string,
     cols: number,
     rows: number
-  ): Promise<void> {
+  ): Promise<{ cols: number; rows: number } | null> {
     const lease = this.sessionAttachmentLeases.get(attachmentId)
-    if (!lease) return
+    if (!lease) return null
     if (lease.webContentsId !== webContentsId) {
       throw new Error('The Session Attachment lease belongs to a different Desktop client.')
     }
-    await this.serializeSessionAttachment(lease.key, async () => {
+    return await this.serializeSessionAttachment(lease.key, async () => {
       const currentLease = this.sessionAttachmentLeases.get(attachmentId)
-      if (!currentLease) return
+      if (!currentLease) return null
       if (currentLease.webContentsId !== webContentsId || currentLease.key !== lease.key) {
         throw new Error('The Session Attachment lease owner changed before resize.')
       }
       const owner = this.sessionAttachmentOwners.get(lease.key)
-      if (!owner?.attachmentIds.has(attachmentId)) return
+      if (!owner?.attachmentIds.has(attachmentId)) return null
       const client = await this.connectedClient(owner.control.hostId)
-      if (owner.control.kind === 'agent') {
-        await client.resizeAgent(
+      const applied = owner.control.kind === 'agent'
+        ? await client.resizeAgent(
           owner.control.agentSessionId,
           owner.control.run,
           cols,
           rows
         )
-      } else {
-        await client.resizeTerminal(owner.control.run, cols, rows)
-      }
+        : await client.resizeTerminal(owner.control.run, cols, rows)
+      return { cols: applied.cols, rows: applied.rows }
     })
   }
 

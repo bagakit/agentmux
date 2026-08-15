@@ -128,6 +128,8 @@ export class AgentScreenEvidenceStore {
         forward(event)
       } else if (event.type === 'gap') {
         forward({ type: 'gap' })
+      } else if (event.type === 'resized') {
+        forward({ type: 'resized', cols: event.cols, rows: event.rows })
       } else if (event.type === 'error') {
         forward({ type: 'error', error: event.error })
       } else if (event.type === 'exit') {
@@ -148,6 +150,13 @@ export class AgentScreenEvidenceStore {
       throw new AgentMuxError(
         'Terminal screen evidence was evicted from CtxMux replay.',
         'OUTPUT_GAP'
+      )
+    }
+    if (observation.run.cols === null || observation.run.rows === null) {
+      await observation.close().catch(() => {})
+      throw new AgentMuxError(
+        'Terminal screen evidence has no owner-confirmed size.',
+        'TERMINAL_SIZE_UNKNOWN'
       )
     }
     const built = new AgentTerminalScreenEvidence(

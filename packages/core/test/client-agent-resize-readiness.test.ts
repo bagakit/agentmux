@@ -120,6 +120,7 @@ async function resizeClient(
   observeCalls: () => number
   cancelEntry: () => (() => void) | undefined
   cancelCount: () => number
+  emit: (event: CtxmuxAdapterObservationEvent) => void
   swapRunDuringResize: (nextRunId: string) => void
   retireDuringResize: () => void
 }> {
@@ -130,14 +131,20 @@ async function resizeClient(
   await state.registry.load('local')
 
   let observeCalls = 0
+  let liveListener: ((event: CtxmuxAdapterObservationEvent) => void) | null = null
   // 在 `kernel.resize` 的 await 里跑一次真相变更，模拟 resize 与别的生命周期操作撞车的交错。
   // 换 Run（resume）与退场（stop/删除）各是一种，注入点相同，所以共用这一个钩子。
   let duringResize: (() => Promise<void>) | null = null
   state.kernel.isConnected = () => true
-  state.kernel.observeOutput = async () => {
+  state.kernel.observeOutput = async (
+    _runId: string,
+    _afterByte: number,
+    listener: (event: CtxmuxAdapterObservationEvent) => void
+  ) => {
     observeCalls += 1
+    liveListener = listener
     return {
-      run: runProjection(80, 24),
+      run: runProjection(observeCalls === 1 ? 80 : 200, observeCalls === 1 ? 24 : 87),
       replay: [] as CtxmuxAdapterObservationEvent[],
       gap: null,
       close: async () => {}
@@ -169,6 +176,7 @@ async function resizeClient(
     observeCalls: () => observeCalls,
     cancelEntry: () => cancels.get(AGENT_SESSION_ID),
     cancelCount: () => cancels.size,
+    emit: (event) => liveListener?.(event),
     swapRunDuringResize: (nextRunId: string) => {
       duringResize = async () => {
         // readiness 必须跟着换到新 Run 上：`terminalPromptReadiness` 的归一化要求它的 run 与 Session
@@ -314,6 +322,22 @@ describe('#660 resizeAgent 作废屏幕证据之后要重挂在途的 readiness 
       runId: RUN_ID,
       cols: 120,
       rows: 40
+    })
+  })
+})
+
+describe('别的客户端 resize 后，长连接 readiness 观察按 Resized 重建', () => {
+  it('收到 Resized 后重新 observeOutput，不继续用旧几何', async () => {
+    const fixture = await resizeClient(PENDING_READINESS)
+    await armPendingObservation(fixture)
+
+    fixture.emit({ type: 'resized', runId: RUN_ID, cols: 200, rows: 87 })
+
+    await vi.waitFor(() => {
+      expect(
+        fixture.observeCalls(),
+        'Resized 之后没有重挂：readiness 仍挂在 80x24 的屏幕上'
+      ).toBe(2)
     })
   })
 })

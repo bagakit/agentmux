@@ -213,6 +213,7 @@
 - **告示的音量由三分类派生，不由调用点各自挑。** 一个"我们的步骤没走通、Agent 好着呢"的降级，和一个"Agent 真的没了"，不该用同一个音量喊。音量因此是**分类的派生值**：第 2 类（放行 + 提醒）与"分不清"都轻声说，只有第 1 类才打断。让每个调用点自己挑音量，结果必然是全部取最响的那一档——一旦所有提示都在喊，用户就不再分辨哪条真的要紧，而真正要紧的那条也就失去了它的音量。这条约束同时约束**两个渲染面**（持续的服务窗告示与瞬时错误提示）：两个面共用同一条严重度轴，不允许各自维护一张严重度表。
 - **Prompt readiness 的拒绝必须按原因分别说清楚**。`not-ready`（还没有这个 Run 的可用 composer 证据）、`readiness-consumed`（当前 epoch 已被另一条 prompt 占用）、`submission-busy`（上一条 payload/render/submit 尚未收口）和 `readiness-conflict`（并发观察与 Session 的代次校验冲突）不是同一件事，不能再合成一句“Agent 仍在工作”。每种告示都要带上不含用户正文的 Run/epoch/submission 诊断与下一步动作，让用户或受管 Agent 能判断应等待、重试、刷新观测还是检查 Provider；Core 的拒绝门与草稿保留规则不因此放宽。
 - **屏幕语义证据不得按会话全史从零重建作为热路径**。每次提交或 readiness 观察若都从 byte 0 全量重放进临时 headless 终端，延迟随历史线性增长，并放大 gap 截断概率。活跃 Session 的屏幕证据应增量维护，或从最近完整 TUI 帧/检查点起点观察；失效（resize、重连、gap）时重建。字节史与 replay/checkpoint 权威仍在 ctxmux——Core 不另存第二份 Run 字节。Desktop cold-park 的重建成本与同一条有界证据合同对齐，见 [`agentmux-surface-density.md`](./agentmux-surface-density.md)。
+- **当前终端尺寸只认 ctxmux 的 owner-confirmed 事实。** `RunSpec.size` 是启动时请求的尺寸，此后不变，不能当作现在几列几行。Run 投影与虚拟屏幕使用 `RunInfo.current_size`；它为 `null` 时是明确的 unknown，不得回退成 spec.size。成功 resize 后的 `RunEvent::Resized` 让长连接屏幕证据失效并按新尺寸重建。Viewport 可以向 PTY 提交测得的网格，但只能把 receipt 里的 applied size 记成已经生效的尺寸。`current_size` 不能单独重建历史 TUI；跨尺寸历史仍按 gap/resync 处理。
 - 这条与《寻址与复制》里"失败结果要自带下一步命令"同源：失败不是终点，是一个要说清楚"现在怎么办"的时刻。
 
 ## 界面结构
