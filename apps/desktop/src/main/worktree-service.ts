@@ -88,6 +88,68 @@ const GIT_MUTATION_OPTIONS = {
 // Not a git invocation: this runs `test -e`, so it deliberately carries no git environment.
 const METADATA_PROBE_OPTIONS = { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 } as const
 
+/**
+ * The line written into the repository's private exclude file so fan-out worktrees stop showing up
+ * as untracked junk. Anchored (`/`) and directory-only (trailing `/`) so it matches the fan-out root
+ * at the top level and nothing else — an unanchored `.worktrees` would also hide a file with that
+ * name nested anywhere in the user's tree.
+ */
+const WORKTREE_EXCLUDE_LINE = '/.worktrees/'
+
+/**
+ * Keep the fan-out root out of the user's `git status`.
+ *
+ * Worktrees live at `<repo>/.worktrees/<branch>` — inside the repository, deliberately (see
+ * workspace-projects.ts: a sibling directory falls outside the project's ignore rules, moves, and
+ * file tree). The cost of being inside is that every fan-out leaves `?? .worktrees/` sitting in the
+ * user's `git status`, in their repository, mixed in with their own changes. Reproduced in a scratch
+ * repo: one `git worktree add` is enough. This repository's own `.gitignore` carries a hand-added
+ * `.worktrees` on line 1 — someone already hit this and patched it by hand.
+ *
+ * Written to `.git/info/exclude`, NOT to `.gitignore`. `.gitignore` is the user's tracked file: it
+ * would show up in the diff they are about to commit, travel to their teammates, and conflict with
+ * whatever they have. `info/exclude` is per-clone, untracked, and is precisely git's answer to "my
+ * tooling makes this directory, my repository should not care" — the same mechanism this repository
+ * already uses to keep local scratch out of version control.
+ *
+ * Best-effort by design: the return value is ignored and nothing here can fail the creation. The
+ * user asked for a worktree, and they got one — refusing it because a convenience write failed would
+ * take away the thing they actually wanted (principle 11 class 2: our step degraded, the capability
+ * is fine). A read-only `.git`, or a host where the write bounces, simply leaves the old noise.
+ *
+ * `--git-common-dir` rather than `--git-dir`: creating a worktree from inside another worktree must
+ * still write to the ONE shared exclude file, not to the linked worktree's private git directory
+ * where nothing would read it. `--path-format=absolute` so the answer does not depend on cwd.
+ *
+ * The path and the line are passed as `sh` ARGUMENTS, never interpolated into the script text, so a
+ * repository path containing a quote or a space cannot become shell syntax. `grep -qxF` makes it
+ * idempotent — verified by running it twice against a scratch repo and confirming one line.
+ */
+async function excludeWorktreeRootFromStatus(host: ExecutionHost, repoPath: string): Promise<void> {
+  try {
+    const gitDir = await host.run(
+      'git',
+      ['-C', repoPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      GIT_DISCOVERY_OPTIONS
+    )
+    const common = gitDir.stdout.trim()
+    if (gitDir.exitCode !== 0 || !common) return
+    await host.run(
+      'sh',
+      [
+        '-c',
+        'mkdir -p "$(dirname "$1")" && { grep -qxF "$2" "$1" 2>/dev/null || printf "%s\\n" "$2" >> "$1"; }',
+        'sh',
+        `${common}/info/exclude`,
+        WORKTREE_EXCLUDE_LINE
+      ],
+      METADATA_PROBE_OPTIONS
+    )
+  } catch {
+    // Deliberately silent: see the best-effort note above.
+  }
+}
+
 export function parseGitWorktreePorcelain(output: string): GitWorktree[] {
   const worktrees: GitWorktree[] = []
   let current: GitWorktree | null = null
@@ -216,6 +278,9 @@ export class WorktreeService {
     // Registration only happens after git succeeded, so a failed create never leaves a workspace record
     // pointing at a directory that does not exist.
     this.assertGit(result, 'Git worktree creation failed')
+    // After git succeeded, and never before: writing the exclude line for a worktree that failed to
+    // materialise would edit the user's repository on behalf of an operation that did not happen.
+    await excludeWorktreeRootFromStatus(host, snapshot.repoPath)
     return await this.register(config, {
       id: randomUUID(),
       name: branchName,
