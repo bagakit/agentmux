@@ -1,6 +1,6 @@
 import { ChevronRight, MessageCircle, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
-import type { AgentTimelineItem, AgentTimelineSnapshot, SessionSnapshot } from '../../../shared/contracts'
+import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { sessionRecentActivity } from '../lib/session-recency'
 import { projectActivityRow } from '../lib/project-activity-row'
 import { rowAttention } from '../lib/row-attention'
@@ -20,14 +20,30 @@ import { AgentProviderIcon } from './AgentProviderIcon'
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
 const NO_TIMELINE: readonly AgentTimelineItem[] = []
 
-function sessionReason(session: SessionSnapshot, timelines: Record<string, AgentTimelineSnapshot>): string {
-  return sessionRecentActivity(session, timelines[session.id]?.items ?? NO_TIMELINE)
+function sessionReason(
+  session: SessionSnapshot,
+  timelines: Record<string, AgentTimelineSnapshot>,
+  workspaceRoot?: string
+): string {
+  return sessionRecentActivity(session, timelines[session.id]?.items ?? NO_TIMELINE, workspaceRoot)
 }
 
-function groupSummary(group: ActivityGroup, timelines: Record<string, AgentTimelineSnapshot>): string {
+/**
+ * 组标题那行近况。
+ *
+ * 也要传仓根：这一行落在 `.project-activity-group__identity small` 里，而那个选择器带
+ * `text-overflow: ellipsis`（chrome.css）——CSS 的省略号永远吃尾巴，也就是路径的识别位。
+ * 与下面菜单行同一个理由，此前漏了这一处。根取**包含**（路径落在哪个仓里）而不是归属：
+ * 子目录终端不被任何 workspace 精确拥有，只有包含答得出。
+ */
+function groupSummary(
+  group: ActivityGroup,
+  timelines: Record<string, AgentTimelineSnapshot>,
+  config: AppConfig | null
+): string {
   const session = group.sessions[0]
   if (!session) return 'No recent activity'
-  const reason = sessionReason(session, timelines)
+  const reason = sessionReason(session, timelines, workspaceRootForPath(config, session))
   if (reason !== session.status.state) return reason
   switch (session.status.state) {
     case 'starting': return 'Starting Agent'
@@ -82,7 +98,7 @@ export function ProjectActivity({
   const now = Date.now()
   const label = attention.category === 'needs-you' ? 'Needs you' : attention.category === 'error' ? 'Error' : `${running} running`
   const groups = buildActivityGroups(sessions, contexts)
-  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines)}`).join('\n')
+  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
   return <DropdownMenu.Root>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={details} aria-label={`${label}. ${details}`}>
       {attention.category === 'needs-you' ? <MessageCircle size={13} /> : attention.category === 'error' ? <TriangleAlert size={13} /> : <span className="project-activity__pulse" aria-hidden="true"><i /><i /><i /></span>}
@@ -107,7 +123,7 @@ export function ProjectActivity({
               onSelect={() => selectSession(first.id)}>
             <span className="project-activity-group__identity">
               <strong>{contextLabel(group)}</strong>
-              <small>{groupSummary(group, timelines)} · {groupState(group)}</small>
+              <small>{groupSummary(group, timelines, config ?? null)} · {groupState(group)}</small>
               {meta ? <em>{meta}</em> : null}
             </span>
             <span className="project-activity-group__avatars" aria-label={`${group.sessions.length} Agents in ${contextLabel(group)}`}>
