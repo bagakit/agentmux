@@ -463,7 +463,7 @@ describe('git change classification is owned by git-porcelain-status.ts', () => 
       expect(
         declaration.getSourceFile().fileName,
         'a raw-column declaration came from outside the shared contract surface'
-      ).toBe(changeDecls[0].getSourceFile().fileName)
+      ).toBe(changeDecls[0]!.getSourceFile().fileName)
     }
   })
 

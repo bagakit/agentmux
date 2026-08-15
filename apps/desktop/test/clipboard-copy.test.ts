@@ -197,7 +197,13 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     ['components/AgentRoster.tsx', ['RosterRowView > writeClipboardText']],
     // EditorPane 的复制挂在编辑器命令的 `run` 上（Monaco action 的执行体）。
     ['components/EditorPane.tsx', ['EditorPane > registerCopyActions > run']],
-    ['components/WorkspaceRowContextMenu.tsx', ['WorkspaceRowContextMenu > copyText']]
+    ['components/WorkspaceRowContextMenu.tsx', ['WorkspaceRowContextMenu > copyText']],
+    // 卡在队列里、再也发不出去的那几条 steer 的唯一出路（`f1df9330` 加的，全树自检当场把它报成
+    // 「在转发却无人守」）。它比别处更该守住：`QueuedMessages` 里那句文案是**按 onCopy 在不在**
+    // 分岔的——接上时说 "so you can copy them"，接不上时改口说 "kept here, not sent"。所以删掉这处
+    // 转发不会留下一个点不动的按钮，而是整段静默换成另一句话，人只会以为这些字本来就没救了。
+    // 而这些字是人亲手打的、发不出去了，复制是把它们捞回来的唯一手段。
+    ['components/AgentSessionComposer.tsx', ['AgentSessionComposer > jsx:onCopyQueued']]
   ]
 
   it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {
