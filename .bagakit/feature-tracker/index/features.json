@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 127
+    "next_cursor": 129
   },
   "features": [
     {
@@ -1188,7 +1188,7 @@
     {
       "feat_id": "f-25s8fqvvr",
       "title": "Agent 原生浏览器调试：让 Agent 在编辑器内驱动页面",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1288,6 +1288,26 @@
     {
       "feat_id": "f-2648fvz2s",
       "title": "超大 steer 会永久卡死整条队列，而角标仍承诺投递",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2658fuxjd",
+      "title": "Worktree removal is silent about committed-but-unpushed lane work",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2668fqyhe",
+      "title": "Supervised dispatch and the delivery queue have no reachable surface",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
