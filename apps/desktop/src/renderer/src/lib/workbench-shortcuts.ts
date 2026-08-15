@@ -15,7 +15,11 @@ import {
   type SplitDirection,
   type WorkspaceLayout
 } from '@agentmux/layout'
+import type { SessionSnapshot } from '../../../shared/contracts'
 import type { WorkbenchTab } from './workbench-tabs'
+import { activeWorkbenchSurface } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
+import { nextAttentionSessionId } from './agent-attention'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
 import type { RegionFocusCause } from './region-focus'
@@ -179,6 +183,11 @@ export type WorkbenchShortcutStore = {
   activeWorkspaceId: string | null
   layouts: Readonly<Record<string, WorkspaceLayout>>
   tabs: Readonly<Record<string, WorkbenchTab>>
+  // 「下一个要你处理的 Agent」这条键要读的两样东西：整窗的 Session 投影（队列从它来），以及跳转动作。
+  // 跳转必须是全局那一个 `selectSession`——它自己解析 Workspace、复用已有的那一格、挂不上时响亮报错。
+  // 键盘另写一条「激活某个 Session 的 Tab」会是第二条导航路径，两条对同一个 Session 可能落在不同格。
+  sessions: readonly SessionSnapshot[]
+  selectSession(id: string, tabGroupId?: string): void
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
   // 键盘新建 Tab 走这条：落点交给 openLauncher 自己（它解析活动组、继承 Topic、失败时响亮报错）。
   // 留在这个类型里而不是让 handler 直接摸真实 store，是因为本层是纯函数缝——接线测试喂进来的是 spyStore，
@@ -315,6 +324,58 @@ export function dispatchWorkbenchCommand(
 }
 
 /**
+ * 当前正看着的那个 Session——焦点 Region 承载的那一个，没有则 null。
+ *
+ * 这是「下一个要你处理的 Agent」那条键的游标。为什么取**焦点 Region** 而不是活动 Tab 的标题面：分屏时
+ * 一张 Tab 同时显示两个 Session，标题面恒是左边那个，于是在右边那格上按键会从左边那个往后数——连按两下
+ * 才离开这张 Tab。焦点格正是「你正看着谁」的唯一真相，与绿环、与 caret 所在的那一格同一个答案。
+ *
+ * 落点沿用 `dispatchWorkbenchCommand` 同一条派生（Topic 投影 → 活动组 → 活动 Tab → 活动 Region），
+ * 不另算一份：各算一次就会出现「键盘认为游标在 A、界面绿环在 B」。
+ *
+ * Board 面（`mainSurface !== 'workbench'`）返回 null，因为那时一格 Session Region 都没挂载——
+ * 这与 `visibleSessionIdsForState` 对同一件事的判定是同一条。null 让那条键落到队首，正是从 Board
+ * 上按它应有的行为。
+ */
+export function focusedSessionId(store: WorkbenchShortcutStore): string | null {
+  if (store.mainSurface !== 'workbench') return null
+  const workspaceId = store.activeWorkspaceId
+  const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
+  if (!workspaceId || !storedLayout) return null
+  const layout = layoutForActiveTopic(
+    storedLayout,
+    store.tabs,
+    activeTopicIdFromLayout(storedLayout, store.tabs)
+  )
+  const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
+  const tab = group?.activeTabId ? store.tabs[group.activeTabId] : undefined
+  if (!tab) return null
+  const surface = activeWorkbenchSurface(tab)
+  return isSessionSurface(surface) ? surface.sessionId : null
+}
+
+/**
+ * 「跳到下一个要你处理的 Agent」的落点解析 + 转发，返回是否吃下这个键。
+ *
+ * 队列与游标各有一个唯一来源：队列是 `nextAttentionSessionId`（与花名册、活动列表同一张急迫表），
+ * 游标是 `focusedSessionId`（与绿环同一格）。这里只把两者接起来，然后走全局那一个 `selectSession`。
+ *
+ * **刻意不要求 `mainSurface === 'workbench'`**，与其余 workbench 命令相反：那些命令作用于 Workbench
+ * 自身的结构（切 Tab、分屏、关格），在 Board 上无处落脚；这一条是全局导航，在 Board 上按它的意思正是
+ * 「带我去那个卡住的 Agent」——`selectSession` 自己会把主面切回 Workbench。加那个前置条件会让这个键
+ * 在 Board 上静默失效。
+ *
+ * 队列为空时返回 false，不吃这个键：没有人在等你时按下它，应当原样放行（让 Cmd+J 回到浏览器/系统
+ * 默认行为），而不是假装做了什么。
+ */
+export function dispatchNextAttention(store: WorkbenchShortcutStore): boolean {
+  const target = nextAttentionSessionId(store.sessions, focusedSessionId(store))
+  if (!target) return false
+  store.selectSession(target)
+  return true
+}
+
+/**
  * 窗口作用域每个绑定 id 对应的处理器。App 把这份 map 原样喂给 `routeWindowShortcut`，自己不列举任何
  * id、不做任何分支——「路由一半」= 这份 map 缺 id，由测试挡住（它必须覆盖注册表里每一条 window scope
  * 绑定）。
@@ -334,7 +395,8 @@ export function windowShortcutHandlers(
     'help.shortcuts': () => {
       actions.toggleShortcutsHelp()
       return true
-    }
+    },
+    'attention.next': () => dispatchNextAttention(store)
   }
   // 把每条能翻译成 workbench 命令的 window 绑定接成一个 handler：翻译成命令 → 解析落点 → 转发。id 集合
   // 从注册表推导（不手抄），新增一条 workbench.* 绑定就自动接上，不会出现「注册了却没人处理」的漏。

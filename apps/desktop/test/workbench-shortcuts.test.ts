@@ -332,6 +332,10 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     activeWorkspaceId: 'ws',
     layouts: { ws: singleGroupLayout },
     tabs: { t1: tab('t1', 'r1'), t2: tab('t2', 'r2'), t3: tab('t3', 'r3') },
+    // 默认没有 Agent 投影：`attention.next` 的落点由 next-attention-shortcut.test.ts 单独喂 fixture，
+    // 这里只让它有个空队列可读，于是覆盖率那条用例调它时不会炸在 undefined 上。
+    sessions: [],
+    selectSession: (id) => calls.push(`selectSession:${id}`),
     activateTab: (w, g, t) => calls.push(`activateTab:${w}:${g}:${t}`),
     openLauncher: (g) => calls.push(`openLauncher:${g ?? ''}`),
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
