@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { GitFileChange } from '../src/shared/contracts.js'
+import type { GitFileChange } from '../src/shared/git-contracts.js'
 import {
   FILE_TREE_GIT_STATUS_CLASS,
   FILE_TREE_GIT_STATUS_LABEL,

@@ -20,7 +20,6 @@ import type {
   BrowserEvent,
   CreateWorkspacePathInput,
   FileDocument,
-  GitFileDiff,
   HostConfig,
   HostCheckResult,
   ExecutorDetection,
@@ -36,9 +35,12 @@ import type {
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
   RemoveWorktreeInput,
-  RemoveWorktreeOutcome,
-  CreatePullRequestResult
+  RemoveWorktreeOutcome
 } from '../../shared/contracts'
+import type {
+  GitFileDiff,
+  CreatePullRequestResult
+} from '../../shared/git-contracts'
 import {
   isScratchTopicId,
   scratchTopicIdFromWorkspacePath,

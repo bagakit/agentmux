@@ -1,4 +1,4 @@
-import type { GhAuthProbe } from '../../../shared/contracts'
+import type { GhAuthProbe } from '../../../shared/git-contracts'
 
 /**
  * Everything the PR-eligibility ladder needs to decide "can a PR be opened right now?", gathered from

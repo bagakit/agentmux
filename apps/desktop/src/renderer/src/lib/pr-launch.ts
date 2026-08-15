@@ -1,4 +1,8 @@
-import type { PrBaseSource, PrReadiness, WorkspaceRecord } from '../../../shared/contracts'
+import type { WorkspaceRecord } from '../../../shared/contracts'
+import type {
+  PrBaseSource,
+  PrReadiness
+} from '../../../shared/git-contracts'
 import type { CreatePrIntentState, CreatePrToken } from './create-pr-intent'
 import {
   evaluatePrEligibility,

@@ -6,7 +6,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { PrReadiness, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { WorkspaceRecord } from '../src/shared/contracts.js'
+import type { PrReadiness } from '../src/shared/git-contracts.js'
 import { PrLaunchSurface } from '../src/renderer/src/components/PrLaunchSurface.js'
 import {
   PR_BLOCKER_MESSAGES,

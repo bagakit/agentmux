@@ -14,7 +14,8 @@ import {
   Trash2
 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { GitFileChange, WorkspaceRecord } from '../../../shared/contracts'
+import type { WorkspaceRecord } from '../../../shared/contracts'
+import type { GitFileChange } from '../../../shared/git-contracts'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { usePrReadiness } from '../hooks/usePrReadiness'
 import { api } from '../lib/api'

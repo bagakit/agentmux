@@ -9,7 +9,11 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { GitFileChange, GitStatusResult, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { WorkspaceRecord } from '../src/shared/contracts.js'
+import type {
+  GitFileChange,
+  GitStatusResult
+} from '../src/shared/git-contracts.js'
 
 const fixture = vi.hoisted(() => ({
   git: { status: null as GitStatusResult | null, loading: false, error: null as string | null },

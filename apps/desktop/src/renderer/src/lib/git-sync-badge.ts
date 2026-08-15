@@ -1,4 +1,4 @@
-import type { GitAheadBehind } from '../../../shared/contracts'
+import type { GitAheadBehind } from '../../../shared/git-contracts'
 
 /**
  * 「这个分支相对 upstream 领先/落后多少」在界面上长什么样。

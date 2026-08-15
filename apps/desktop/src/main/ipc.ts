@@ -38,12 +38,8 @@ import type {
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
-  CreatePullRequestInput,
   CreateWorkspaceInput,
   DesktopControlResponse,
-  GitPullStrategy,
-  GitPushOptions,
-  GitRemoteOptions,
   HostConfig,
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
@@ -59,6 +55,12 @@ import type {
   WorkspaceFileWriteInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
+import type {
+  CreatePullRequestInput,
+  GitPullStrategy,
+  GitPushOptions,
+  GitRemoteOptions
+} from '../shared/git-contracts.js'
 import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,

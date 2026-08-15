@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GitFileDiff } from '../src/shared/contracts.js'
+import type { GitFileDiff } from '../src/shared/git-contracts.js'
 import { editorPaneStoreState } from './helpers/editor-pane-store.js'
 
 // The core guard for the diff feature: when a file Region is in diff mode, EditorPane must render
