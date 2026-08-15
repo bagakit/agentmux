@@ -63,7 +63,10 @@ export type { ScratchTopicSnapshot } from './scratch-topics'
 // the notification vocabulary is imported straight from ./notification-presentation where it is used.
 export type { NotificationDelivery, NotificationModeId } from './notification-presentation'
 
-export type LocalHostConfig = {
+// Not exported: the only consumer is the `HostConfig` union below. Its sibling `SshHostConfig` IS
+// exported because five call sites narrow on it by name; this one has none, and an export nobody
+// imports reads as a promise that the shape is part of the wire surface.
+type LocalHostConfig = {
   id: 'local'
   kind: 'local'
   label: string
@@ -374,7 +377,8 @@ export type CreateWorkspacePathInput = {
   kind: 'file' | 'directory'
 }
 
-export type WorkspacePathRef = {
+// Not exported: only `MoveWorkspacePathInput` below reads it, as the shape of its two ends.
+type WorkspacePathRef = {
   workspaceId: string
   path: string
 }
@@ -617,7 +621,9 @@ export type AgentSessionControl = {
   run: AgentMuxRunRef
 }
 
-export type TerminalSessionControl = {
+// Not exported, unlike its sibling `AgentSessionControl` (11 external narrowing sites): the two
+// consumers are the `SessionControl` union below and the terminal arm of the Session union.
+type TerminalSessionControl = {
   kind: 'terminal'
   hostId: string
   runId: string
