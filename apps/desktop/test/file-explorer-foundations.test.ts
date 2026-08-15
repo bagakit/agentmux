@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 import {
   createFileExplorerDirLoadScope,
   createFileExplorerDirLoadTracker
@@ -480,10 +481,7 @@ describe('读失败在树上真的被画出来', () => {
     new URL('../src/renderer/src/components/FileExplorer.tsx', import.meta.url),
     'utf8'
   )
-  const dock = readFileSync(
-    new URL('../src/renderer/src/styles/dock.css', import.meta.url),
-    'utf8'
-  )
+  const dock = allStyles()
 
   it('行的失败判定来自那处纯函数，不是就地又读一遍 error', () => {
     expect(

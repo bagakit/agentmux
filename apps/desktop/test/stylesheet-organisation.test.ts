@@ -1,3 +1,4 @@
+import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { clearsSemanticHues } from '../src/renderer/src/lib/conversation-avatar-color.js'
 import { allStyles, styleFiles } from './helpers/styles.js'
@@ -157,5 +158,37 @@ describe('样式表的组织', () => {
     expect(styles).toContain('.workspace-topic-item')  // dock
     expect(styles).toContain('.pane-body__region')     // workbench
     expect(styles).toContain('.activity-ruler')        // activity
+  })
+
+  /**
+   * 没有测试硬编码某个样式文件的路径。
+   *
+   * 上一条证明「整张表拼得起来」，这条证明**大家真的在读它**。判据的理由是实测出来的：
+   * `agent-roster-surface.test.tsx` 判「压力两档解析到不同颜色」，来源写死 `overlays.css`；
+   * 那三块面因 400 行上限被拆进 `agent-panels.css` 的当场，它红了——而**红是运气好**。
+   * 规则搬走、断言恰好不再覆盖到它时，扫描面变空，测试安安静静全绿（AGENTS.md:85-88 的第三种白绿）。
+   *
+   * 房规写在 docs/design/agentmux-surface-density.md《样式表的组织》，这里把它变成会响的东西。
+   * 判据按**文件**报，因为一处一处地改是唯一的修法：把 `readFileSync('…/styles/x.css')` 换成
+   * `allStyles()`（helpers/styles.js）。
+   */
+  it('没有测试硬编码单个样式文件——按表面再拆一刀时它们会失守', () => {
+    const testDir = new URL('../test/', import.meta.url)
+    const names = readdirSync(testDir).filter((name) => /\.tsx?$/.test(name))
+    // 扫描面自检：目录读空或后缀写错时，下面的循环一条不跑、这条恒绿。
+    expect(names.length, 'test 目录扫出来是空的——这条判据什么都没检查').toBeGreaterThan(100)
+
+    const offenders: string[] = []
+    for (const name of names) {
+      const text = readFileSync(new URL(name, testDir), 'utf8')
+      // 只认**读文件**的那种引用。注释里提一句 `styles/agent.css 提供了这条规则` 是在说明依赖，
+      // 不是在读它（agent-interaction-card.test.tsx 就有这么一句），按它报错是误伤。
+      const reads = text.match(/readFileSync\(\s*new URL\(\s*'[^']*styles\/[a-z-]+\.css'/g) ?? []
+      if (reads.length > 0) offenders.push(`${name}（${reads.length} 处）`)
+    }
+    expect(
+      offenders,
+      `这些测试从单个样式文件读规则，按表面再拆一刀就会失守——改用 allStyles()：\n${offenders.join('\n')}`
+    ).toEqual([])
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { allStyles } from './helpers/styles.js'
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import {
@@ -259,7 +259,7 @@ describe('statusDotTier：一行的状态点画哪一档', () => {
     // 判定层返回一个 CSS 不认识的档位，等于这行什么都没画，而上面几条断言照样全绿。所以直接读样式表。
     // 档位清单不手抄：把整个状态联合过一遍判定层，拿到的就是它今天会发出的全部档位。新增一个状态
     // 并给它一档、却忘了写 CSS 规则，这条当场红。
-    const css = readFileSync(new URL('../src/renderer/src/styles/chrome.css', import.meta.url), 'utf8')
+    const css = allStyles()
     const tiers = [...new Set(AGENT_DISPLAY_STATES.map(statusDotTier))].filter(
       (tier): tier is Exclude<typeof tier, null> => tier !== null
     )
