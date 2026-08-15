@@ -97,8 +97,8 @@ describe('the fan-out slug is idempotent — a single function, not a fixed poin
 // 加固（后续一轮）：#659 只归一了**字符类**的拼法，方法名仍硬钉在 `replace` 上，于是把同一个归一
 // 改写成 `.replaceAll(/[^a-z0-9]+/gu, '-')` 就整条绕过——既不算 slug 也不算 unclassified，静默返回
 // `[]`（记忆 counting-a-symbol-misses-other-spellings：这次换的是**方法名**不是字符类）。现在方法名
-// 放宽到 `replace|replaceAll`；`arg[1] === '-'` 那道闸保证仓库现有两处 `.replaceAll`（pr-fields 的边界
-// 替换、agent-address 的引号转义，替换实参都不是 '-'）不会被误报。存活变异的靶子见下面
+// 放宽到 `replace|replaceAll`；`arg[1] === '-'` 那道闸保证仓库现有的 `.replaceAll`（agent-address 与
+// providers/shared 的引号转义、bracketed-paste 的 ESC 转义，替换实参都不是 '-'）不会被误报。存活变异的靶子见下面
 // `判据自检：$why 被认成一次分支名归一` 那张表里的 `replaceAll 换了方法名`。
 //
 // 加固（本轮）：前两轮归一了**字符类拼法**与**方法名**，但「折成什么」仍硬钉在字面量 `'-'` 上
@@ -357,8 +357,8 @@ describe('the branch-name slug lives in exactly one file', () => {
     { why: '保留大写的路径段 slug', code: "const s = b.replace(/[^A-Za-z0-9._-]+/g, '-')" },
     { why: '保留大写的 provider id slug', code: "const s = p.replace(/[^A-Za-z0-9_-]/g, '-')" },
     { why: '普通字符串替换', code: "const s = v.replace('a', 'b')" },
-    // 合法的 replaceAll——替换实参不是 '-'（仓库现有两处：pr-fields 的边界替换、agent-address 的引号
-    // 转义都是这形状）。放宽方法名到 replaceAll 不能把它们误报成分支名 slug。
+    // 合法的 replaceAll——替换实参不是 '-'（仓库现有的引号/ESC 转义都是这形状）。放宽方法名到
+    // replaceAll 不能把它们误报成分支名 slug。
     { why: '替换实参不是连字符的 replaceAll 链', code: "const s = text.replaceAll(DATA_CLOSE, 'x').replaceAll(DATA_OPEN, 'y')" },
     { why: '保留大写的 replaceAll', code: "const s = b.replaceAll(/[^A-Za-z0-9._-]+/g, '-')" },
     // 函数替换物折成**别的**字符（不是 '-'）不是分支名 slug——反向钉住 replacementFoldsToHyphen 的
