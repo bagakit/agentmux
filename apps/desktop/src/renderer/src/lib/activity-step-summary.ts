@@ -61,11 +61,43 @@ function flatten(value: string): string {
   return value.replace(/\s+/gu, ' ').trim()
 }
 
-/** 超长时截断并加省略号，使标题永远只占一行。`keep` 说保留哪一头——理由见 TAIL_IDENTIFIED_FIELDS。 */
+/**
+ * 超长时截断并加省略号，使标题永远只占一行。`keep` 说保留哪一头——理由见 TAIL_IDENTIFIED_FIELDS。
+ *
+ * **按字素簇切，不按 UTF-16 码元切。** `slice()` 数的是码元，会把一个 emoji 的代理对劈成两半，留下
+ * 一个孤立代理项——渲染成 `�`。实测：`…\ude80aaaa….ts`（尾切）与 `aaa…\ud83d…`（头切）两边都中招。
+ * 这在路径上不是假想：项目目录带 emoji、文件名带中日韩都很常见，而带 ZWJ 的家族 emoji（`👨‍👩‍👧`）
+ * 更是一个簇里好几个码点，`slice` 一刀下去几乎必然劈开。
+ *
+ * 与 project-monogram 取首字母用的是同一条判断，只是方向相反：那边取**第一个**簇，这边留**最后
+ * （或最前）n 个**簇。同一个仓库里对「一个字符是什么」不该有两套答案——那边讲究了、这边不讲究，
+ * 就是同一个缺陷换了个位置。
+ *
+ * 预算按**码元**算而不是按簇算：上界要守的是「一行放不放得下」，而排版宽度跟码元数更接近（一个
+ * emoji 占两格，恰好也是两个码元）。所以这里是「在不超过 limit 个码元的前提下，尽可能多留完整的
+ * 簇」——切点只在簇边界上，宁可少留一个簇也不吐半个字符。
+ */
 export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit = MAX_STEP_SUMMARY_LENGTH): string {
   if (value.length <= limit) return value
-  if (keep === 'tail') return `…${value.slice(value.length - (limit - 1))}`
-  return `${value.slice(0, limit - 1).trimEnd()}…`
+  const budget = limit - 1 // 省略号占一格
+  const clusters = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)]
+  if (keep === 'tail') {
+    let taken = 0
+    let start = clusters.length
+    // 从尾部往前收，直到再收一簇就会超预算。
+    while (start > 0 && taken + clusters[start - 1]!.segment.length <= budget) {
+      start -= 1
+      taken += clusters[start]!.segment.length
+    }
+    return `…${value.slice(clusters[start]?.index ?? value.length)}`
+  }
+  let end = 0
+  let taken = 0
+  while (end < clusters.length && taken + clusters[end]!.segment.length <= budget) {
+    taken += clusters[end]!.segment.length
+    end += 1
+  }
+  return `${value.slice(0, clusters[end]?.index ?? value.length).trimEnd()}…`
 }
 
 /**
