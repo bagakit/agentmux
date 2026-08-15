@@ -110,6 +110,28 @@ export function semanticStatusStale(
 }
 
 /**
+ * 支撑这一行的**最后一次真实观察**是否已过新鲜度窗口——与衰减同一个阈值、同一个 observedAt，只是
+ * 去掉了「状态必须可衰减」那一层门。
+ *
+ * 为什么显示层需要一个不带 can-decay 门的版本，而不能直接用 {@link semanticStatusStale}：衰减把静默
+ * 超阈值的 `working` 落成显示态 `running`，且**原样保留 observedAt**（衰减是对旧观察的重新解读，不是
+ * 新观察，见 agent-status-decay.ts）。于是到了显示层，一个「15 分钟没人听到」的 Agent 状态已经是
+ * `running`、observedAt 是那条旧证据的时刻——`semanticStatusStale` 因为它不再是 `working` 而返回
+ * `false`，看不见它。显示层要回答的不是「它该不该衰减」（那是 `working` 的事、已在别处判过），而是
+ * 「支撑这一行『此刻在忙』声明的证据还新不新」，这个问题对 `running`（衰减产物、或 idle 待机）同样
+ * 成立。所以判据只看 observedAt，不看 state。
+ *
+ * 复用同一个 `SEMANTIC_STATUS_STALE_AFTER_MS`：不引入第二个阈值。`>=` 与 {@link semanticStatusStale}
+ * 同口径，正好到点即算陈旧。
+ */
+export function agentEvidenceStale(
+  status: Pick<AgentStatus, 'observedAt'>,
+  now: number
+): boolean {
+  return now - status.observedAt >= SEMANTIC_STATUS_STALE_AFTER_MS
+}
+
+/**
  * 这个来源报出来的状态，是不是一条**活动声明**——即它是否应当压过裸的进程投影。
  *
  * 为什么要有这个判据，而不是让每处各写一遍 `source === 'native-hook' || source === 'acp'`：
