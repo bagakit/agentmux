@@ -444,94 +444,28 @@ export class AgentPromptSubmissionCoordinator {
       this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
     }
 
-    // 谁持久化 claim，谁负责在自身失败路径上撤掉它（原则 11 第 2 类）。:243 那枚 claim 在**任何字节
-    // 发出之前**就落盘，payload/submit 两个 acknowledged 都是 false，且它同时把 epoch 标记为已消费。此
-    // 后每一步都可能抛——最可达的是 confirmRenderOrDegrade 自己那次 kernel.status 抛 CTXMUX_DISCONNECTED
-    // （:504-507 只特判 run_not_found，断线原样 rethrow）。一次这样的抛把 claim 永久留在 submit
-    // 未 ack 的状态：下一条 prompt 带着一个**结构上无法递回旧 id** 的新 submissionId（runtime-controller
-    // 每次 randomUUID，全链无 id 形参），必然撞 :190 的 BUSY 闸，而这个 Run 的 PTY 仍在接受字节。那是把
-    // 「我们的链路断了」（第 2 类）写成「Agent 没了」（第 1 类）——RED-LINES 反例族的第二个实例。
-    //
-    // 所以：submit 阶段 durably ack 之前的任何失败，都把 claim 回滚（删掉 submission 记录 + 取消 epoch 的
-    // 消费标记），再原样重抛原始错误。回滚是一次**存储 CAS，不碰 daemon**，所以链路断着也能撤——这正是
-    // 它必须在这里而不是在某个「等重连」信号上做的原因（那种信号不来就又是永久锁死）。
-    //
-    // 无法在本模块消除的残留，如实记下、不假装抹平：失败前**已经到达 composer 的字节留在 codex 的输入行
-    // 里**。回滚不回退 agentInputCursors（daemon 已受据到 payload 末尾，回退游标会让下一次 kernel.input
-    // 的 expectedByte 落在已受据区间里、被 daemon 拒），于是字节记账保持一致、下一条 send 从残留之后接着
-    // 发——但那段残留 draft 会**前缀**到下一条真实 send（两次实测证实 codex mid-turn 输入是缓冲的草稿，
-    // 非确定地或留作未发草稿、或另起一 turn）。清掉它需要 provider 私有的行删字节（还得打在一条已断的链
-    // 上）加屏幕语义推断——前者超出本模块、后者被 types.ts 明令禁止。用回滚把**永久锁死**换成**一次可自
-    // 愈的前缀污染**：前者要求杀 Run 重开、丢失全部连续性，后者用户下一 turn 即可纠正。方向明确更优。
-    const rollbackStrandedClaim = async (): Promise<void> => {
-      try {
-        await this.deps.registry.update(session.agentSessionId, session.run, (stored) => {
-          const stranded = stored.terminalPromptSubmission
-          // 只撤自己那枚、且尚未 durably ack 的 claim：submit 已 ack 说明这次提交已完整落地，
-          // 撤它会抹掉去重记录；submissionId 不同说明 Run 已被 resume/exit 换掉、claim 已非我所有。
-          if (!stranded || stranded.submissionId !== submissionId || stranded.submit.acknowledged) {
-            return stored
-          }
-          const next = { ...stored }
-          delete next.terminalPromptSubmission
-          // 提交键落没落地，决定这枚 readiness epoch 的去向——两种去向都不是「留着消费标记」：
-          // 存储不变量要求被消费的 epoch 必须指得出认领它的那枚 claim（agent-session-store.ts:1094-1106），
-          // claim 一撤，消费标记就无处可指，整次回滚会被存储拒收、claim 反而留下成永久 BUSY。
-          //   · \r 从未送达（最可达的搁浅点：confirmRenderOrDegrade 抛在 applyPhase('submit') 之前）——
-          //     turn 没开跑，epoch 仍然如实地就绪，撤掉消费标记让下一条 prompt 直接复用它。
-          //   · \r 已送达但 ack CAS 抛了（:364 先发字节，:412 才落盘）——那一 turn 已经开跑，这枚 epoch
-          //     是**真的**用掉了。此时整枚删掉，而不是撤消费标记：留着它等于宣告「composer 现在就绪」，
-          //     下一条 prompt 会拿着一枚作废的就绪对着生成中的 turn 投字节，正是本子系统存在的理由。
-          //     删掉之后下一条 prompt 得到 AGENT_PROMPT_NOT_READY——一条如实、且在下一枚 readiness epoch
-          //     落地时自愈的拒绝，而不是永久锁死。
-          const submitLanded =
-            acceptedInputBytes !== null &&
-            acceptedInputBytes >= stranded.submit.inputByteRange.endByte
-          const readiness = next.terminalPromptReadiness
-          if (readiness?.consumedBySubmissionId === submissionId) {
-            if (submitLanded) {
-              delete next.terminalPromptReadiness
-            } else {
-              const rolledBack = { ...readiness }
-              delete rolledBack.consumedBySubmissionId
-              next.terminalPromptReadiness = rolledBack
-            }
-          }
-          return { ...next, updatedAt: Date.now() }
-        })
-      } catch {
-        // 回滚是善后，不能盖过病因：STALE（Run 被换掉，claim 已被清除路径带走）本就无需回滚；其余
-        // 存储故障也吞掉，让**原始**传输错误照常上抛——一次失败的回滚不会让锁死比不撤更坏。
-      }
-    }
-
-    try {
-      if (submission.submit.acknowledged) {
-        await applyPhase('submit', plan.submit)
-        return
-      }
-      await applyPhase('payload', plan.payload)
-      submission = this.deps.requireAgentSession(session.agentSessionId).terminalPromptSubmission
-      if (!submission) {
-        throw new AgentMuxError(
-          'Agent prompt submission claim disappeared.',
-          'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
-        )
-      }
-      if (
-        !submission.submit.acknowledged &&
-        acceptedInputBytes !== null &&
-        acceptedInputBytes >= submission.submit.inputByteRange.endByte
-      ) {
-        await applyPhase('submit', plan.submit)
-        return
-      }
-      await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText)
+    if (submission.submit.acknowledged) {
       await applyPhase('submit', plan.submit)
-    } catch (error) {
-      await rollbackStrandedClaim()
-      throw error
+      return
     }
+    await applyPhase('payload', plan.payload)
+    submission = this.deps.requireAgentSession(session.agentSessionId).terminalPromptSubmission
+    if (!submission) {
+      throw new AgentMuxError(
+        'Agent prompt submission claim disappeared.',
+        'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
+      )
+    }
+    if (
+      !submission.submit.acknowledged &&
+      acceptedInputBytes !== null &&
+      acceptedInputBytes >= submission.submit.inputByteRange.endByte
+    ) {
+      await applyPhase('submit', plan.submit)
+      return
+    }
+    await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText)
+    await applyPhase('submit', plan.submit)
   }
 
   /**
