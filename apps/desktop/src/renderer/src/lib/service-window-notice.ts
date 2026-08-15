@@ -142,10 +142,15 @@ export function serviceNoticeToRender(classification: ServiceNoticeClass): Rende
  * 新增一类会让 tsc 变红。`assertive` 只给 dead，alive/unknown 都 `polite`——降级轻声说，不喊狼来了。
  *
  * 诚实一句：`serviceNoticeToRender` 对 `agent-broken` 与 `healthy` 都返回 null，所以服务窗只会渲染
- * `process-degraded`/`indeterminate`（都 polite），`assertive` 这一档**在本渲染面没有消费方**——它只被
- * 单元测试钉住。它不是无用的占位：真正一律 assertive 的告警面是 `TransientErrorNotice`（`reportError` 的
- * 唯一出口，72 处调用全走它），alarm-fatigue 缺陷在那儿。这张表是那次收敛的落点——TransientErrorNotice
- * 若要分档，应汇到这条 kind→音量的轴上，而不是各长一套。届时 dead 那档才有可见消费方。
+ * `process-degraded`/`indeterminate`（都 polite），`assertive` 这一档**在本渲染面没有消费方**。
+ * 它不是无用的占位：这张表已经是第二个渲染面的音量来源——`TransientErrorNotice`（`reportError` 的唯一
+ * 出口，~69 处调用全走它）原先一律硬编码 assertive，现在改为向本函数取音量（见该组件文件头）。
+ * 也就是说轴已经收敛成一条，两个渲染面共用，没有第二张严重度表。
+ *
+ * 但 `assertive` 至今仍**没有生产代码走到**：`App.tsx` 渲染 TransientErrorNotice 时不传 `kind`，
+ * 于是全部落在默认的 `indeterminate`。差的不是通路而是标注——要让某条结局真的喊出来，得由知道
+ * 「Agent 确实没了」的那个调用点显式传 `kind="agent-broken"`。逐个标注 ~69 处调用点是后续工作；
+ * 在那之前 assertive 只被单元测试钉住，这句话就得继续留着。
  *
  * f-25n8fzxzw 的处置：它的诊断（重连失败后字进沉默终端）成立，但它开的方子（status==='error' 时
  * canSubmit=false）是 RED-LINES.md 的红线，已由 8a62269b 反向钉死。它的真实残值是「把降级如实告知」
