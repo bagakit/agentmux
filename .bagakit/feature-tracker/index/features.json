@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 121
+    "next_cursor": 123
   },
   "features": [
     {
@@ -1228,6 +1228,26 @@
     {
       "feat_id": "f-25w8fa7mc",
       "title": "最响的那一档通报没有任何生产调用方能走到",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25x8fbavv",
+      "title": "doctor report 对一个 Provider 说了反话：hookInstallation 是全局常量而策略是每家自己的",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25y8ffp9c",
+      "title": "doctor report 对一个 Provider 说了反话：hookInstallation 是全局常量而策略是每家自己的",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
