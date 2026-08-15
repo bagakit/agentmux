@@ -109,32 +109,24 @@ describe('composerSubmitMode', () => {
     expect(mode.canSubmit).toBe(false)
   })
 
-  it('keeps a running Agent usable when its live OUTPUT channel errors — degrade-and-allow, never grey-out', () => {
+  it('never lets an output-channel error gate a running composer, on ANY evidence source', () => {
     // RED-LINES.md 判定流程: greying a `running` Agent takes away an ability the daemon still honours —
     // writeAgentInput / recoverableInput reach the process regardless of the output attachment. "绕过我这段
     // 代码，这条路还能不能通？ → 能" ⇒ blocking here is the red line (原则 11 第 2 类 written as 第 1 类).
     //
-    // Both faults land here as the SAME snapshot { state:'error', source:'run-process', running } — the
-    // reducer drops the error code, so this function cannot and must not tell them apart:
-    //   (a) a LIVE-but-discontinuous channel: CTXMUX_EVENT_INVALID from an observation_discontinuity / tmux
-    //       advisory; the pump keeps running, output keeps flowing. Locking it was the reported bug.
-    //   (b) a genuinely DEAD channel: RECONNECT_REATTACH_FAILED. Input still reaches the Agent; the honest
-    //       signal is a service window ("output may not be showing — Resume"), not a locked composer.
-    // Re-introducing `if (status.state==='error' && status.source==='run-process') canType:false` reds this.
-    const mode = composerSubmitMode(
-      agentSession({ processState: 'running', status: { state: 'error', source: 'run-process', observedAt: 3 } })
-    )
-
-    expect(mode.canType).toBe(true)
-    expect(mode.canSubmit).toBe(true)
-    expect(mode.placeholder).toBe('Ask, steer, or paste a command…')
-  })
-
-  it('never lets an output-channel error gate a running composer, on ANY evidence source', () => {
-    // The reducer flips status.state to 'error' for EVERY scoped agent-error and stamps a source. None of
-    // these means the Agent stopped accepting bytes while processState is 'running', so none may gate the
-    // surface: hook-install / launch-prompt / timeline-persist (source 'user'), prompt-readiness / OUTPUT_GAP
-    // (source 'terminal-output'), and live-output faults (source 'run-process') all stay open.
+    // 遍历全部三个 source 而不是只钉 run-process：reducer 对每一次 scoped agent-error 都把 state 翻成
+    // 'error' 并盖一个 source，只守一侧的话换个 source 就漏。三者都不意味着「进程 running 时 Agent 不再
+    // 收字节」——hook-install / launch-prompt / timeline-persist 走 'user'，prompt-readiness / OUTPUT_GAP
+    // 走 'terminal-output'，实时输出故障走 'run-process'。
+    //
+    // run-process 这一档尤其分不得：两种故障落到这里是同一个快照 { state:'error', source:'run-process' }，
+    // 因为 reducer 丢掉了 error code（SessionStatus 没有 code 字段）：
+    //   (a) 通道活着但不连续：observation_discontinuity / tmux 建议事件带来的 CTXMUX_EVENT_INVALID，
+    //       泵继续跑、输出继续流。锁住它就是当初报上来的那个 bug。
+    //   (b) 通道真死了：RECONNECT_REATTACH_FAILED。输入照样到得了 Agent；诚实的信号是一条服务窗
+    //       （「输出可能没在显示 — Resume 重新附着」），不是一个锁死的输入框。
+    // 既然分不清，就不该假装分得清。插回 `if (status.state==='error' && status.source==='run-process')
+    // canType:false` 会让这条变红。
     for (const source of ['user', 'terminal-output', 'run-process'] as const) {
       const mode = composerSubmitMode(
         agentSession({ processState: 'running', status: { state: 'error', source, observedAt: 3 } })
