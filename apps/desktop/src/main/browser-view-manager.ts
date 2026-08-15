@@ -25,7 +25,9 @@ import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
   buildBrowserAnnotationMarkerScript,
+  buildBrowserDriveBadgeScript,
   buildCancelBrowserAnnotationMarkerScript,
+  buildCancelBrowserDriveBadgeScript,
   buildBrowserElementSelectionScript,
   buildCancelBrowserElementSelectionScript
 } from './browser-selection-script.js'
@@ -45,6 +47,75 @@ type BrowserEntry = {
   visible: boolean
   viewport: BrowserViewport
   error: string | null
+  /** 这一刻有没有一段 Agent 程序在驱动它。只给导航后重注角标用。 */
+  driving: boolean
+}
+
+/** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
+type BrowserTakeover = { at: number | null; kind: string }
+
+/**
+ * 哪些 `input-event` 算「人伸手了」。
+ *
+ * **按白名单不按黑名单**，因为这个枚举里有 `mouseMove` / `mouseEnter` / `mouseLeave` /
+ * `pointerMove` / `pointerRawUpdate`——**指针只是从这一格上飘过去**就会连发一串。黑名单漏掉
+ * 其中一个，结果是人挪一下鼠标 Agent 就停，而且没人会注意到这是个 bug（只会觉得"这功能很吵"）；
+ * 白名单漏掉一个，结果只是少认一种接管方式——保守、可发现。Electron 往枚举里加新成员时，
+ * 这两个方向的代价差着一个数量级（MEMORY「禁止清单必漏」是同一族）。
+ *
+ * 为什么不用 `before-input-event`：那个只有键盘，而「人伸手抢方向盘」最常见的动作就是点一下。
+ */
+const HUMAN_INPUT_EVENT_TYPES = new Set([
+  'mouseDown',
+  'mouseUp',
+  'mouseWheel',
+  'keyDown',
+  'rawKeyDown',
+  'char',
+  'touchStart',
+  'pointerDown'
+])
+
+/**
+ * 接管之后被拒绝的页面函数。**只有动作在里面，观察一概放行。**
+ *
+ * 放行观察不是宽容，是诚实：程序被打断之后最该做的事就是「看一眼现在页面什么样」再决定怎么
+ * 报告。把 snapshot 也拦掉，它只能瞎猜着退出。而观察不改页面，跟人不会打架。
+ *
+ * `js` 和 `cdp` 两个逃生口按动作算——它们能做任何事，漏掉任何一个都等于没拦。`cdp` 还有一层：
+ * 它把方法名原样透传，所以 `cdp('Input.dispatchMouseEvent', …)` 能发出真的原生输入，从而让程序
+ * **触发自己的接管判据**。这不是安全问题（程序本来就能为所欲为），代价也是可接受的：它踩的是
+ * 自己，结局是一个 `stopped` 加一句说明，不是静默乱点。
+ */
+const BROWSER_ACTION_PAGE_CALLS = new Set([
+  'click',
+  'fillInput',
+  'typeText',
+  'pressKey',
+  'hover',
+  'scroll',
+  'gotoUrl',
+  'js',
+  'cdp'
+])
+
+/**
+ * 被接管之后说给 Agent 听的那句话。说到**下一步**为止，而且那一步真能走通。
+ *
+ * 点名的恢复动作是「页面空出来之后再跑一次」，不是去 Settings 关自动化总开关——后者不成比例
+ * （人从没要求禁用自动化），而且接管本来就是按次运行、自清的：下一次 `browser.run` 是干净的。
+ *
+ * 「之后的没跑」而不是「接管那一刻起什么都没跑」：输入到达时可能已经有一个页面调用在途，
+ * 那一个会正常跑完——CDP 已经发出去了，拦不住也不该硬拦。承诺一个做不到的精确度比不承诺更糟。
+ */
+function takeoverMessage(takeover: BrowserTakeover, refused?: string): string {
+  const what = refused === undefined ? 'the rest of the program' : `${refused}()`
+  return (
+    `Someone took control of this Browser (a real ${takeover.kind}) — the page is theirs now, so ${what} ` +
+    'was refused. A page call already in flight when they reached in still finished; nothing after that ' +
+    'ran. Your earlier actions did happen. Take a fresh snapshot() to see where things stand, and ' +
+    'run the program again once the page is free.'
+  )
 }
 
 /** Metadata retained while a hidden Browser native owner is released. */
@@ -208,7 +279,8 @@ export class BrowserViewManager {
       bounds: null,
       visible: false,
       viewport,
-      error: null
+      error: null,
+      driving: false
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -424,8 +496,19 @@ export class BrowserViewManager {
     // 本轮自愈过的 ref 都记在这里。自愈按外观匹配，可能落在一个长得一样的**另一个**元素上，
     // 所以它不能只活在主进程的日志里——必须跟着结局回到 Agent 手上。
     const notes: string[] = []
+    const takeover: BrowserTakeover = { at: null, kind: '' }
+    const contents = entry.view.webContents
+    const onInput = (_event: unknown, input: { type: string }): void => {
+      // 只记第一次：要报的是「什么时候被接管的」，后来的每一下都不改变这个答案。
+      if (takeover.at !== null || !HUMAN_INPUT_EVENT_TYPES.has(input.type)) return
+      takeover.at = Date.now()
+      takeover.kind = input.type
+    }
+    contents.on('input-event', onInput)
+    entry.driving = true
+    void this.showDriveBadge(entry, entry.view)
     try {
-      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session, notes) })
+      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session, notes, takeover) })
       // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
       // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
@@ -441,6 +524,28 @@ export class BrowserViewManager {
               `The debugging session ended mid-run (${ended}) — opening DevTools on the page does that. ` +
               'An action may have half-completed. Look at the page before running anything again.'
           }
+        }
+      }
+      // 被人接管过，同样压过程序自己的结局，而且**判在 `run.completed` 分叉之前**。
+      //
+      // 这个位置是承重的。放进 `run.completed` 分支里，只有「程序把拒绝 try/catch 吞了、照常
+      // 跑完」的那一次会被降级；而程序**没有**吞的时候，拒绝是抛着出来的，落进
+      // `browserRunOutcomeFromFailure` 报成 `script-failed`——**把人的动作记到 Agent 程序头上**，
+      // 还叫 Agent 去改一段本来没错的代码。两条路必须汇到同一个结局。
+      //
+      // 为什么是 `stopped` 不是 `indeterminate`：我们精确地知道它做到哪一步了。拦在 onPageCall
+      // 这道必经之路上，接管之前的动作都发生了，之后一个都没有。`indeterminate` 说的是"做到
+      // 哪一步不知道"，而这里知道——报错了会让 Agent 以为页面处于未知状态，其实它 snapshot
+      // 一下就看得清楚。
+      if (takeover.at !== null) {
+        // 返回值照常带回去，与自愈那一支同理：程序如果吞掉拒绝、拿观察看清了页面再 return，
+        // 那份东西正是这次运行**唯一**还有价值的产出。丢掉它就是在逼 Agent 再跑一遍——而"再跑
+        // 一遍"恰恰是我们刚刚告诉它现在不要做的事。程序没跑完时 `run.value` 不存在，这里就是
+        // undefined，与其它失败支一致。
+        return {
+          result: run.completed ? run.value : undefined,
+          logs: run.logs,
+          outcome: { kind: 'stopped', message: takeoverMessage(takeover) }
         }
       }
       if (run.completed) {
@@ -459,7 +564,43 @@ export class BrowserViewManager {
       }
       return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
     } finally {
+      // 监听器跟着这一次运行走，不跟着 entry 走。挂在整个 entry 生命周期上的话，人平时正常
+      // 用这个浏览器就一直在写 `takeover`，下一次 run 一启动就以为自己被接管了。
+      contents.removeListener('input-event', onInput)
+      entry.driving = false
+      void this.hideDriveBadge(entry.view)
       session.detach()
+    }
+  }
+
+  /**
+   * 角标注入与清除。
+   *
+   * **整段包在 try 里，不是只 `.catch()` 那个 Promise**：`executeJavaScriptInIsolatedWorld` 不存在
+   * 或同步抛的时候，`.catch()` 根本还没挂上，异常会从这个 async 方法里漏成一个未处理的 rejection
+   * ——而调用方是 `void`，于是一个纯装饰的角标能把进程搅成噪音甚至崩掉。提示失败就该无声。
+   */
+  private async showDriveBadge(entry: BrowserEntry, view: WebContentsView): Promise<void> {
+    try {
+      if (!this.owns(entry, view) || view.webContents.isDestroyed()) return
+      await view.webContents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildBrowserDriveBadgeScript() }]
+      )
+    } catch {
+      // 页面可能正好在导航、可能已经销毁。提示没注上不该打断这次运行。
+    }
+  }
+
+  private async hideDriveBadge(view: WebContentsView): Promise<void> {
+    try {
+      if (view.webContents.isDestroyed()) return
+      await view.webContents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildCancelBrowserDriveBadgeScript() }]
+      )
+    } catch {
+      // 同上。清不掉最多留一个角标到下次导航，比抛出去好。
     }
   }
 
@@ -476,7 +617,8 @@ export class BrowserViewManager {
   private pageCallHandler(
     entry: BrowserEntry,
     session: BrowserCdpSession,
-    notes: string[]
+    notes: string[],
+    takeover: BrowserTakeover
   ): (name: string, args: unknown[]) => Promise<unknown> {
     const requireLive = (): WebContentsView => {
       const view = entry.view
@@ -507,6 +649,11 @@ export class BrowserViewManager {
     })
     return async (name, args) => {
       requireLive()
+      // 人接管之后，动作停、观察放行。拦在这里是因为这是主进程唯一的介入点——`runBrowserScript`
+      // 不暴露 AbortSignal，程序跑在自己的子进程里；而每一次页面调用都要经过这道往返。
+      if (takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)) {
+        throw new Error(takeoverMessage(takeover, name))
+      }
       return await dispatch(name, args)
     }
   }
@@ -715,6 +862,9 @@ export class BrowserViewManager {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
+      // 导航把页面内的东西全冲掉了，角标也在其中。这一处已经是"导航后重新施加状态"的既有位置
+      // （上面两行就是），所以角标挂在这里，而不是另起一套重注机制。
+      if (entry.driving) void this.showDriveBadge(entry, view)
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame || !this.owns(entry, view)) return

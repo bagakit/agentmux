@@ -147,11 +147,20 @@ with the details, not \`completed\`.
 Requires Agent browser automation to be enabled in Settings › Browser. It is off by default,
 and the refusal says so rather than failing quietly.
 
+A person can take the page back at any time: a real click, keypress or scroll on that Browser
+hands ownership to them mid-run. Actions (click, fillInput, gotoUrl, js, cdp, …) are refused
+from that moment on; observation (snapshot, pageInfo, waitFor…) keeps working so the program
+can see where it left things. The page carries a badge while a program is driving it, so the
+takeover is a deliberate act, not a surprise. Nothing sticks: the next \`browser run\` starts
+with the page free again.
+
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:
   completed      the program finished
   script-failed  the program threw — fix the program
-  stopped        we cut it off (too slow, or too much output) — the program is fine, its scale is not
+  stopped        we cut it off — the program is fine. Either its scale is (too slow, too much
+                 output), or a person took the page back mid-run. Actions before that point
+                 did happen; nothing after did. Run it again once the page is free.
   indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for one of two reasons the message names:
                  the process died partway (an action may already have been applied once), or a
                  ref from an earlier run was matched back by appearance and may have landed on a
@@ -367,6 +376,13 @@ receipt's \`outcome\`: \`indeterminate\` means you do NOT know what already happ
 because the run died partway — that also covers the page's DevTools being opened mid-run,
 which severs the debugging session — or because a ref from an earlier run was recovered by
 appearance. Look at the page before running anything again; do not blind-retry.
+
+You are sharing the page with a person, and they outrank you on it. While your program runs,
+that Browser wears a badge saying so; the moment they click, type or scroll in it, the page is
+theirs. Your actions are refused from then on and the run comes back \`stopped\` — not
+\`script-failed\`, because nothing is wrong with your program. Observation still works, so take
+a \`snapshot()\` to see where you actually left things, say so, and run the program again when
+the page is free. Do not try to take the page back by driving harder.
 
 ## Apply a deliberate layout
 
