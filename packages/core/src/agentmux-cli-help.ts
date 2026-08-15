@@ -15,6 +15,7 @@ Intents:
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents or active Agent Sessions from their owners.
   open        Open typed content at one exact spatial destination.
+  browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
   handoff     Hand a task and its ownership to another Agent Session in one atomic act.
@@ -117,6 +118,36 @@ Usage: agentmux open browser --url <url> <destination>
 
 Exactly one destination from open --help is required. The Main Browser owner validates
 and opens the URL; Renderer layout state does not own Browser navigation truth.`],
+  ['browser', `Drive an already-open Browser
+
+Usage: agentmux browser run --browser <browser-id> < program.js
+
+\`open browser\` opens one; \`browser run\` drives one that is already open. Two different
+things, two commands — neither replaces the other.`],
+  ['browser.run', `Run a program in an open Browser
+
+Usage:
+  agentmux browser run --browser <browser-id> < program.js
+  echo 'return await snapshot()' | agentmux browser run --browser <browser-id>
+
+The program is read from stdin as a whole — there is no --code flag, because a real program
+contains quotes, backslashes and newlines that every shell layer would re-escape.
+
+It runs as an async function body in an isolated subprocess, so \`await\` and \`return\` both
+work, and a runaway program cannot take AgentMux down with it. Page functions (snapshot,
+click, waitForLoad, …) are injected into that subprocess; \`agentmux --skill\` lists them.
+Elements are addressed by the refs a snapshot hands you — never coordinates.
+
+Requires Agent browser automation to be enabled in Settings › Browser. It is off by default,
+and the refusal says so rather than failing quietly.
+
+The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
+including on failure), and \`outcome\`, which is one of four:
+  completed      the program finished
+  script-failed  the program threw — fix the program
+  stopped        we cut it off (too slow, or too much output) — the program is fine, its scale is not
+  indeterminate  the process died; HOW FAR IT GOT IS UNKNOWN. Look at the page before retrying:
+                 an action may already have been applied once.`],
   ['discuss', `Start a Discussion with a dedicated Agent
 
 Usage:
@@ -281,7 +312,38 @@ agentmux open browser --url "http://localhost:5173" --new-tab-after self
 \`\`\`
 
 Terminal commands execute once at creation through the host shell. Browser URLs go to
-the Main Browser owner. Do not simulate either payload with keyboard or UI automation.
+the Main Browser owner. Do not deliver either payload by typing it — no keystroke
+synthesis into a terminal, no typing a URL into the Browser chrome. Pass it as the flag.
+
+(This is about how the payload is delivered, not about driving the page afterwards.
+\`agentmux browser run\` is the supported way to drive an open Browser — see below.)
+
+## Drive an open Browser
+
+\`\`\`bash
+agentmux browser run --browser <browser-id> < program.js
+\`\`\`
+
+The program is read whole from stdin and runs in an isolated subprocess with page functions
+injected: \`snapshot\` / \`snapshotText\` / \`pageInfo\` / \`captureScreenshot\` to observe,
+\`click\` / \`fillInput\` / \`typeText\` / \`pressKey\` / \`hover\` / \`scroll\` to act,
+\`waitForElement\` / \`waitForLoad\` / \`waitForNetworkIdle\` / \`wait\` to wait,
+\`gotoUrl\` / \`openOrReuseTab\` / \`switchTab\` / \`listTabs\` to navigate, and \`js\` / \`cdp\`
+as escape hatches. Write one program that does the whole loop — that is the point of the verb:
+
+\`\`\`js
+const page = await snapshot()
+await click(page.nodes.find((node) => node.name === 'Submit').ref)
+await waitForLoad()
+return await snapshot()
+\`\`\`
+
+Act on the refs a snapshot gives you (\`@e1\`, \`@e2\`, …). Never coordinates: they go stale the
+moment anything reflows, and a stale coordinate clicks whatever moved into that spot.
+
+This needs Agent browser automation enabled in Settings › Browser — off by default. Read the
+receipt's \`outcome\`: \`indeterminate\` means the run died partway and you do NOT know what
+already happened. Look at the page before running anything again; do not blind-retry.
 
 ## Apply a deliberate layout
 
