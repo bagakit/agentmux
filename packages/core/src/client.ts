@@ -3704,17 +3704,25 @@ export class AgentMuxClient {
                 outputCursorBytes: stopRun.latestOutputBytes
               }
             }
-          : current.terminalPromptReadiness?.consumedBySubmissionId !== undefined
+          : normalized.lifecycleEvent === 'turn-end' &&
+              current.terminalPromptReadiness?.consumedBySubmissionId !== undefined
             ? {
+                // 判据显式带 `lifecycleEvent === 'turn-end'`：`stopRun` 为 null 有**两个**来源——断线的
+                // turn-end（该重铸）与任何非 turn-end 的 mid-turn hook（tool-use-start 等）。只判
+                // consumedBySubmissionId 会让 turn 中途每条 hook 都把已消费纪元重铸成未消费，等于在 Agent
+                // 还没交还控制权时解锁发送面（生成中放行 prompt 会打断当轮）。turn-end 才是「交还控制权」
+                // 的唯一信号；健康臂（stopRun truthy）本就只在 turn-end 为真，这里把断线臂对齐到同一判据。
+                //
                 // 断线拿不到光标（stopRun 为 null），但一条 turn-end 落在一个上一轮 epoch 已被永久消费的
                 // 会话上。什么都不写会把那枚 `consumedBySubmissionId` 原样留下——此后每条 prompt 永久撞
                 // AGENT_PROMPT_READINESS_CONSUMED，而 Agent 进程还活着（它刚发出这条 hook）、PTY 仍收字节。
                 // 这是把第 2 类（我们取光标那一步坏了）误写成第 1 类（Agent 死了）的红线反例 1。
                 //
-                // 重铸一枚**未消费**的 native-stop epoch 把发送面解锁。光标退回本会话最后一次权威
-                // `outputCursorBytes`——那是真实持久值，不是编造的 0（编造 0 会让 screenEvidence 从头扫、
-                // 把上一轮提示符认成这一轮，正是 client.ts:3659 拒绝的那件事）。`readyThroughByte` 缺席，
-                // 交给下面 turn-end 触发的 observeReadiness 用屏幕证据补齐；重连后新帧到达即自愈。
+                // **只**在有已消费纪元可解锁时才重铸：断线且无旧纪元可救时光标是真丢了，缺席保持缺席
+                // （编造起点会让 screenEvidence 从头扫、把上一轮提示符认成这一轮——正是 :3659 与
+                // hook-stop-kernel-disconnected.test.ts:177 拒绝的那件事）。重铸的光标退回本会话最后一次权威
+                // `outputCursorBytes`——真实持久值，非编造 0。`readyThroughByte` 缺席，交给下面 turn-end
+                // 触发的 observeReadiness 用屏幕证据补齐；重连后新帧到达即自愈。
                 terminalPromptReadiness: {
                   source: 'native-stop' as const,
                   id: receipt.id,
