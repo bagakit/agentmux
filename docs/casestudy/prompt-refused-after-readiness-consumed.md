@@ -146,9 +146,21 @@ git log -L 3660,3710:packages/core/src/client.ts
 
 ## 根因分析
 
-- **直接原因**：`client.ts:3698` 的 `...(stopRun ? { terminalPromptReadiness… } : {})`。
-  断线时 `kernel.status()` 返回 `null` ⇒ `stopRun` 为 `null` ⇒ 整个续期字段不写入 ⇒
-  上一轮那个**已消费**的 epoch 原样留在 store 里 ⇒ 之后每一次发送都撞 `:222` 的永久拒绝。
+- **直接原因**：epoch 被消费之后没有任何一条路重新铸出一枚未消费的 epoch。
+  已确认**两扇门**通向这个状态，本文初稿只认出了第一扇：
+
+  1. **断线门**：`client.ts:3698` 的 `...(stopRun ? { terminalPromptReadiness… } : {})`。
+     turn-end 回执到了，但断线时 `kernel.status()` 返回 `null` ⇒ `stopRun` 为 `null` ⇒
+     整个续期字段不写入 ⇒ 已消费的 epoch 原样留下。**已修**（`f4940636`）。
+  2. **无回执门**（**线上那次实际走的就是这扇**）：一轮 turn **根本没有收尾 hook**。
+     线上 transcript 显示该 run 以 `"Selected model is at capacity… server_overloaded"` 中止；
+     codex 对一轮出错的 turn 不发 `Stop`，于是 `acceptHookEvent` 压根没被调用，
+     上面那条重铸也就永远不会执行。此外 `client.ts:3646-3661` 的注释还记录了第三种形态：
+     断线期间 hook 子进程连吃 503（窗口可达 31.5s）后放弃，**回执被永久丢弃**。
+     **未修**——这是 P0 的主因，见遗留。
+
+  重要更正：本文初稿把断线门当成了事故本体。它是同一个死局的一扇门，但**不是线上那一次走的那扇**。
+  记在这里而不是悄悄替换，因为把"已修的那扇"讲成"事故本体"会让读者以为 P0 已经闭合。
 
 - **根因**（主语必须是流程/判断，不是某行代码）：
   **「续期」这件事被设计成依赖一个可能永远不到达的外部回执，而在设计它的时候，
@@ -194,10 +206,21 @@ git log -L 3660,3710:packages/core/src/client.ts
 向 daemon 要权威状态，`running` 就放行并落一条 `degraded` 服务窗事实，run 真没了才阻断。
 
 - **是否足够 root**：修的是**这一个实例**，不是这一类。类是「**凭我们自己的记账发放、
-  且只有单一续期路径的永久许可**」。同类已知实例：`RED-LINES.md` 的类扫描给出 3 个
-  （readiness epoch 本体、`composer-submit-mode.ts:44` 的投影硬禁、`continuous-progress.ts:39`
-  的静默停车），本条只覆盖第 1 个。**另 2 个未动**——第 2 个随投影翻回自愈（是「要盯的形状」
-  而非已证等价事故），第 3 个随本条的 epoch 修复一并解决但需要独立的服务窗断言。
+  且只有单一续期路径的永久许可**」。
+
+  **同类实例计数（已由全仓类扫描核实，取代本文初稿引用 `RED-LINES.md` 反面清单得到的「3 个」——那个数在三个轴上都不准）：**
+  - **按代码点位：5 个**（3 个已记录 + 2 个新发现）。
+  - **按根因归并：4 个** —— {epoch 被消费：反例 1 + 反例 3 共根}、{processState 投影}、
+    {搁浅的 submission claim}、{run-process 错误通道记账}。
+  - **按「和 P0 完全同形」（永久 + Agent 健康 + 无带内恢复）：1 个无条件 + 1 个有条件。**
+
+  两个新发现：
+  - `prompt-submission.ts:190-205`（`AGENT_PROMPT_SUBMISSION_BUSY`）——一条落盘失败但 daemon
+    已收字节的搁浅 submission 会拒掉新的 operationId。**PARTIAL / 只观察**：同 operationId 重试可续，可达性窄。
+  - `composer-submit-mode.ts:60-62`（本文初稿未覆盖，见下）——**这一个是 permanent-when-idle**。
+
+  **本条只覆盖 4 个根因里的 1 个**（epoch 那一个，连带解决共根的反例 3）。
+  **另 3 个根因未动。**
 - **能否彻底避免**：**不能彻底避免这一类，只能彻底修掉这一个实例。** 它堵住了
   `CTXMUX_DISCONNECTED` 这条已知路径，但「下一个凭自家记账发放永久许可的新代码」它拦不住。
   诚实地说：这是实例级修复，不是类级免疫。
@@ -209,20 +232,24 @@ git log -L 3660,3710:packages/core/src/client.ts
 ### 2. 让 epoch 在一个活着的 run 上可重铸（真正 root 的那一条）
 
 不变量：**只要 run 是 `running`，就必须存在一条通往可发送 epoch 的路。**
-实现形态是让消费不再是绝对终态——在权威状态确认 `running` 时允许重铸。
 
-- **是否足够 root**：这条**才是**类级修复的一半。它不再依赖「续期回执一定会来」这个
-  没有人拥有的假设，而是把「活 Agent 恒有路」变成系统自己维持的性质。
-  它同时解决 `continuous-progress.ts:39` 的静默停车（那 3 个实例里的第 3 个），
-  因为两者饿死于同一个 epoch。
-- **能否彻底避免**：**本可以阻止这次事故。** 有这条不变量，`923cbd19` 当天就会红——
-  它引入的正是一个「turn 1..n 无路可走」的状态。但它只覆盖 readiness 这一个资源，
-  换一个子系统再发明一个单调递减的许可，它同样看不见。
-- **是否降低系统熵**：**降低。** 它**去掉**「永久终态」这个概念，让 epoch 只有
-  「当前有效 / 需要重铸」两态，而不是「未铸 / 有效 / 永久死亡」三态。
-  被否掉的更简方案：给 epoch 加 TTL。更简单，但那是**增熵**——加一个时间参数、
-  一个需要调的常数、一个「TTL 到期但 Agent 正忙」的新竞态，而且它答的仍然不是
-  「Agent 还能干活吗」而是「过了多久」，用一个更弱的代理换掉了真判据（原则 2、原则 7）。故否。
+**两次独立架构 review 都给出了比这更进一步的结论，值得如实记下：**
+正确的做法可能不是「让 epoch 可重铸」，而是**根本不要持久化这枚许可**。
+`confirmRenderOrDegrade`（`prompt-submission.ts:504-521`）在 40 行之外已经把
+「这个 run 现在能不能收输入」当成一次**实时 daemon 查询**回答了——问权威状态，
+`running` 就放行（必要时降级 + 服务窗），run 真没了才阻断。
+若准入改成实时查询，**就不存在一个可被搁浅的单调递减资源**，这一类 bug
+不是「被测试守住」而是「按构造不可能」。而且它是**删代码**：少一个持久结构、
+少一个状态机、少三个错误码。
+
+- **是否足够 root**：「可重铸」修的是这个类的一半；「不要持久化许可」才是整类。
+  本条覆盖 4 个根因里的 1 个（连带共根的反例 3）。
+- **能否彻底避免**：「不要持久化许可」**本可以阻止**这次事故，且按构造阻止。
+  「可重铸」只能阻止**已知的**那些没铸出来的路径。
+- **是否降低系统熵**：**显著降低**——去掉概念而不是加概念。
+  被否掉的更简方案：给 epoch 加 TTL。更省事，但那是**增熵**——加一个要调的常数、
+  一个「TTL 到期但 Agent 正忙」的新竞态，而且它答的是「过了多久」而不是
+  「Agent 还能干活吗」，用更弱的代理换掉了真判据（原则 2、原则 7）。故否。
 
 ### 3. 修掉那条永不可达的建议文案
 
@@ -254,16 +281,60 @@ git log -L 3660,3710:packages/core/src/client.ts
   （`RED-LINES.md` 机械执行章节已点名），一个必然误报的守卫会被加豁免表、
   豁免表会过期，最后变成纯增熵的摆设。故否。
 
+### 5. 第二个永久实例：run-process 错误分支在 Agent 空闲时锁死 composer（新发现）
+
+`composer-submit-mode.ts:60-62` 在 `status.state === 'error' && status.source === 'run-process'` 时
+返回 `canType:false, canSubmit:false`。它的意图是诚实的第 1 类——输出通道真断了，
+让用户往沉默的终端里打字更坏。**但它在 Agent 空闲时是永久的**，链条已逐段核实：
+
+1. `session-state.ts:658-674` 把 `agent-error` 写成 `status.source='run-process'` 的 error。
+2. 唯一能把它换回非 error 的是 `process-state` 事件（`session-state.ts:522-526`，
+   `run-process` **不在**该分支的豁免名单里，只豁免 `native-hook`/`acp`）。
+3. 但 `publishRunState`（`client-event-publisher.ts:60`）只在状态**跃迁**时发，不周期发。
+4. 而失败重挂那条路 `client.ts:875` 的 `if (resumed === 'dead') continue`
+   **刻意跳过** running 的 republish（`client.ts:869-874` 的注释明说：紧跟一条 running
+   会把刚发的 error 洗掉）。
+
+于是对一个**空闲**的 Agent——没有 turn、没有退出、没有任何跃迁——没有任何事件能解锁它。
+用户看到的唯一信号是一个变灰的 placeholder：**没有横幅，没有服务窗**。
+这同时撞上原则 11 的第一条边界（不许静默降级）。
+
+**本文初稿把它判成「随投影翻回自愈」，那个判断是错的**，由全仓类扫描推翻、经上述四步逐段复核确认。
+记在这里而不是悄悄改掉，因为一篇复盘如果只展示结论、不展示被推翻的中间判断，
+读者就无法判断其余结论的可信度。
+
+- **是否足够 root**：这是第 4 个根因（run-process 错误通道记账），**与 epoch 那条完全独立**。
+  修复进行中（见遗留），本文不声称已修。
+- **能否彻底避免**：措施本身是「让阻断带上出口」而不是「不阻断」——通道真断时阻断仍然诚实。
+  所以它**不能避免**通道断掉，只能保证断掉之后用户有路可走、且知道自己在什么状态。
+- **是否降低系统熵**：取决于修法。正确的方向是让失败重挂发布一条**可恢复的降级事实**
+  （照 `confirmRenderOrDegrade`），而不是在下游再加一个「如果 error 但是 xxx」的分支——
+  后者是增熵，且会长出下一个豁免表。
+
 ## 验证
 
-- **措施 1、2（未落地，agent `a3aea4d9` 进行中）**：验收线是一条**可证伪的不变量测试**——
-  构造 run 处于 `running`、readiness 已 `consumedBySubmissionId`、无后续 `turn-end`，
-  断言系统**要么**重铸出可发送 epoch、**要么**暴露一条 in-band 恢复，
-  而**不是**永久 `AGENT_PROMPT_READINESS_CONSUMED`。
-  承重变异：把断线分支改回「不写续期」，该测试必须单独变红。
-  命令：`env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN
-  -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID pnpm exec vitest run <该测试路径>`（仓根）。
-  **当前状态：未验证。**
+- **措施 1（断线门，已落地 `f4940636`）**：`readiness-consumed-recovery-invariant.test.ts`。
+  命令（仓根，剥 ambient env）：
+  `env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN
+  -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID pnpm exec vitest run
+  packages/core/test/readiness-consumed-recovery-invariant.test.ts` — 2 passed；
+  连同 hook-stop-kernel-disconnected、hook-receipt-turn-end-spelling.guard、
+  agent-session-store、prompt-submission-diagnostics 共 **70 passed / 5 files**；core `tsc` exit 0。
+  承重变异两个，各自单独打红、各自 `diff -q` 还原：
+  (a) 重铸分支条件改 `false` → 断线那一档红；
+  (b) 重铸光标改字面量 `0` → **修正 fixture 之后才红**。
+  **(b) 是一条自查出来的假绿**：fixture 原本 `outputCursorBytes: 0`，于是
+  `current.outputCursorBytes` 与编造的 `0` 两个世界不可区分，防编造这一档零覆盖
+  （期望值不能由被测对象算出）。改成 512 并直接断言光标后才真正承重。
+  该测试自带正向控制（健康内核确实续期），保证断线那条断言不是空过。
+  **它不覆盖无回执门**——见遗留。
+
+- **措施 2（结构解法）**：**未动工，未验证。**
+
+- **措施 3（文案）**：**未动工。**
+
+- **措施 4（人闸留痕）**：`RED-LINES.md` 已入库（`3b929ff9`）并被 `AGENTS.md:53` 引用。
+  它没有自动判据——按设计如此，见该文「机械执行：能守住的与守不住的」。
 
 - **加重项 `2fe0a040`（已落地并验证）**：`canonicalHookLifecycleEvent(eventName) !== 'turn-end'`
   取代 `eventName !== 'Stop'`，堵住 `StopFailure` 合法回执被当成伪造丢弃的路径。
@@ -281,19 +352,28 @@ git log -L 3660,3710:packages/core/src/client.ts
 
 ## 遗留
 
-- **措施 1、2 尚未落地**，本文的验证一节对它们标注为「未验证」。在它们入库前，
-  本事故只做了**加重项**的修复（`2fe0a040`），**主因未修**——
-  一个活着的 Agent 仍然可能因为一次断线而永久失能。这是本文最重要的遗留。
-- **类扫描的实例计数标 PARTIAL**：3 个实例来自 `RED-LINES.md` 的反面清单，
-  仍有若干 audit agent 在跑全仓扫描（core 的 gating throws、desktop 的 disabled 状态、
-  lifecycle/resume 闸）。**计数可能上调**；上调后本文改进措施 1 的「同类已知 N 个实例」
-  必须同步更新，否则「只修了 N 个中的 1 个」这句话会失真。
-- **措施 3 的同类扫描未做**：「把没有保证的前提写成用户建议」这一类还有多少处，未知。
-- **症状 B（输入框空着打不进字）不在本文修复范围**。它是另一条机制
-  （`composer-submit-mode.ts:44` 的投影硬禁），在 `RED-LINES.md` 反例 2 中被标注为
-  「要盯的形状」而非已证等价事故——它随投影翻回就恢复，不具备本文这种永久性。
-  **有意识不在本文合并处理**，以免两个机制混成一个而让整篇复盘可被一条反例推翻。
-- **被有意识扣住未合入的改动**：一个「死通道时禁用 composer」的闸（另一 agent 产出，
-  双向变异已证）。它在一场「结论是我们拦得太多」的 P0 里**增加**阻断，
-  且其作者自己标注了一个洞（一个游离的 hook 事件会把闸重新打开）。
-  按 `RED-LINES.md` 的判定流程复核之前不合入。
+- **主因仍未修：无回执门。** `f4940636` 关掉了断线门，但**线上那次走的是另一扇**——
+  一轮 turn 因 `server_overloaded` 中止、codex 不发 `Stop`，于是重铸逻辑根本不被触发。
+  同族还有 `client.ts:3646-3661` 记录的 503 丢回执窗口。
+  **一个活着的 Agent 仍然可能永久失能。** 这是本文最重要的遗留。
+  结构解法（实时准入查询 / 屏幕证据铸 epoch）见改进措施 2，未动工。
+- **改进措施 2 的两条路线尚未择一**：「让 epoch 可重铸」与「根本不持久化许可」
+  是两个不同量级的改动，后者更 root 也更大。tracker `f-25q8fccdm`（proposal）持有这项决策。
+- **一条已知的假信心**：`readiness-consumed-recovery-invariant.test.ts` 只覆盖
+  「回执到了但 `status()` 失败」。它**不覆盖**回执根本没到的那条路——
+  而那正是线上走的路。测试变绿不等于 P0 闭合。
+- **`prompt-readiness-diagnostics.ts:45` 的文案仍在说谎**：它让用户
+  「wait for the next readiness epoch」。断线门修好后这句话对那条路成立了，
+  但对无回执门仍然不成立——那个 epoch 永远不会来，正确的建议是 resume/restart。
+- **hook 泄漏到非 AgentMux 会话**：codex 的 hook 写进 `<workspace>/.codex/hooks.json`
+  ——Provider 自己的配置，不是 AgentMux 私有的。用户在该 workspace 里**在 AgentMux 之外**
+  启动的 codex 会话也会触发我们的 hook 子进程。如果 hook 从「前置条件」降级为
+  「best-effort 加速器」，往用户共享配置里写它的理由就弱得多了。独立议题,未处理。
+- **类扫描的实例计数**：4 个根因里本轮修了 1 个（epoch 的断线那一半）。
+  另 3 个（processState 投影、搁浅的 submission claim、run-process 错误通道）未动，
+  其中第 3 个的修复进行中。
+- **症状 B（输入框空着打不进字）不在本文修复范围**，它是另一条机制,
+  **有意识不合并处理**，以免两个机制混成一个而让整篇复盘可被一条反例推翻。
+- **被有意识扣住未合入的改动**：一个「死通道时禁用 composer」的闸。
+  按 `RED-LINES.md` 判定流程复核后发现它**本身通过**第 1 问（通道真断了，绕过它也不通），
+  但暴露出 `composer-submit-mode.ts:60` 那个 permanent-when-idle 缺陷，正在修。
