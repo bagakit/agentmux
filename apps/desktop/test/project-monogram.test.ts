@@ -45,26 +45,40 @@ describe('projectIconHue：确定性与可分辨', () => {
     //
     // 判据必须是**间隔**而不是**互异**。此前这里只断言 `new Set(hues).size === hues.length`，
     // 那句话对「ws-1=0°, ws-2=1°, ws-3=2°」全真——正是注释说要挡的那个朴素实现，却能拿满分。
-    // 断言恒真的典型形态：判据比注释弱一档，读的人以为已经守住了。
-    const ids = ['ws-1', 'ws-2', 'ws-3', 'ws-4', 'ws-5']
+    //
+    // 但**「五个固定 id 两两都隔开 15°」同样不是判据**，而是这五个串的巧合。上一版这么写过，
+    // 实测揭穿：可用色相只有 190 个整数度（保留弧的补集），五个点里出现一对靠得近是生日问题，
+    // 一个**正确**的实现也会经常违反——连续 ws-N 五连窗口 500 组里 41.2% 违反（ws-266..270 差 0°），
+    // 随机 workspace id 五个一组 5000 组里 81.2% 违反。当前这组 ws-1..ws-5 最小弧 20.0°，
+    // 离阈值只剩 5° 余量。谁动一下 id 列表、或者加第六个 id，就会红——而那个红不指控任何缺陷。
+    //
+    // 真正的性质是**统计性**的：avalanche 让「相邻输入」与「随机输入」无区别，所以大量相邻对里
+    // 落在 15° 内的比例应该接近均匀分布的水平，而不是接近全部。实测：真实实现 6.5%，
+    // 朴素字符和 91.5%。取 25% 作阈值，两边都有 3-4 倍余量，且不依赖任何一组特定 id。
+    const ids = Array.from({ length: 201 }, (_, i) => `ws-${i + 1}`)
     const hues = ids.map(projectIconHue)
-    expect(new Set(hues).size, '相邻 id 撞到了同一个色相').toBe(hues.length)
 
     // 色相是环形的，差值要按环上的最短弧算：359° 与 1° 相差 2°，不是 358°。
     const arc = (a: number, b: number): number => {
       const d = Math.abs(a - b) % 360
       return d > 180 ? 360 - d : d
     }
-    // 15° 是肉眼能分开的下限量级（相邻色卡约 20-30°）。不写得更严：可用弧被语义色切成三段
-    // （见 conversation-avatar-color 的保留弧），五个点挤在窄弧里时过严的阈值会变成偶发红。
-    for (let i = 0; i < hues.length; i += 1) {
-      for (let j = i + 1; j < hues.length; j += 1) {
-        expect(
-          arc(hues[i]!, hues[j]!),
-          `${ids[i]} (${hues[i]!.toFixed(1)}°) 与 ${ids[j]} (${hues[j]!.toFixed(1)}°) 只差一点点，肉眼分不开`
-        ).toBeGreaterThan(15)
-      }
-    }
+
+    const pairs = hues.slice(1).map((hue, i) => ({ a: ids[i]!, b: ids[i + 1]!, gap: arc(hues[i]!, hue) }))
+    const tooClose = pairs.filter(({ gap }) => gap <= 15)
+    const share = tooClose.length / pairs.length
+    expect(
+      share,
+      `${(share * 100).toFixed(0)}% 的相邻 id 挤在 15° 内，例：${tooClose
+        .slice(0, 3)
+        .map(({ a, b, gap }) => `${a}/${b} 差 ${gap.toFixed(0)}°`)
+        .join('，')}`
+    ).toBeLessThanOrEqual(0.25)
+
+    // 只留这一条比例判据，**没有**再加一条「平均间隔 > 60°」：试过，它是恒真的。
+    // 三个变异体（朴素字符和、去 avalanche、只取前 20 个桶）里，凡是平均间隔塌掉的，比例判据先红；
+    // 而比例通过却平均塌掉，需要把所有相邻对精确挤在 16-30° 这条窄带上——没有哪个手滑改法能做到。
+    // 一条永远绿的断言会让下一个人以为这里守了两件事。
   })
 
   // 关于「大写钉死 en-US」这条：**它没有在进程内可写的判别器，所以这里不写测试。**

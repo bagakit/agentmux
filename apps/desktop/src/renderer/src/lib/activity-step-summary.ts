@@ -167,6 +167,13 @@ function stepSummaryWithin(
  * 实测 `stepTitle('Web  Search', undefined, undefined)` 返回 `'Web  Search'`（两个空格原样留着）。
  * 今天不成问题，因为工具名是标识符（`Bash`、`mcp__srv__do`）；但那是**假设**而不是证明，所以只写
  * 长度这一条能被测试钉死的。调用方若需要单行保证，自己压平——别把「今天恰好成立」读成契约。
+ *
+ * 门槛取 `budget <= 1` 而不是 `<= 0`，因为 `clampStep` 在预算 1 上会退化成**只剩一个省略号**
+ * （见它的「下界」那段），拼出来就是 `mcp__…__do …`——正是本函数开头说不要的那种空壳：它长得像
+ * 「参数是空的」，其实是格子不够。判据是「至少留得下一个真字符」，即 `budget >= 2`。
+ * 实测 46 字工具名：`<= 1` 给 `mcp__filesystem-readonly__read_text_file_range`，
+ * 改成 `<= 0` 给同一串再加 ` …`。取 `<= 2` 会把预算 2 那一档（`… p…`，一个真字符）也丢掉，
+ * 那一档薄但不空，所以留着。
  */
 export function stepTitle(title: string, toolName: string | undefined, rawInput: string | undefined): string {
   const prefix = `${title} `
