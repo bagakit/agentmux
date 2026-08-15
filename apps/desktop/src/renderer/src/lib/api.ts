@@ -787,7 +787,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     acknowledge: async () => {},
     interrupt: async () => {},
-    resize: async () => {},
+    resize: async (_attachmentId, cols, rows) => ({ cols, rows }),
     refresh: async (control) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)

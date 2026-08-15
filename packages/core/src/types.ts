@@ -106,8 +106,9 @@ export type AgentMuxRun = AgentMuxRunRef & {
   workspacePath: string
   pid: number | null
   state: AgentMuxRunState
-  cols: number
-  rows: number
+  /** Owner-confirmed live PTY size, or `null` when no owner can confirm one. */
+  cols: number | null
+  rows: number | null
   observedAt: number
   latestOutputBytes: number
   acceptedInputBytes: number

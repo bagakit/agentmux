@@ -3984,6 +3984,11 @@ export class AgentMuxClient {
       })
       return
     }
+    if (event.type === 'resized') {
+      // Screen evidence consumes Resized on its own attachment and fail-closes.
+      // This live pump must not treat geometry change as process exit.
+      return
+    }
     // run 进程终结是「这个 run 再不会有 hook 事件」的权威终点。子代理若被信号/OOM 杀死、或其
     // SubagentStop 投递失败，normalizer 的花名册里那条 id 永不删除、Map 条目随进程泄漏。在此清掉，
     // 给「子代理事件丢失」一个终结路径——否则那个 runId 的记账会长驻内存。

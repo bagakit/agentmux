@@ -563,9 +563,9 @@ export async function registerIpc(args: {
     await args.runtime.acknowledge(session, sequence)
   })
   handle('sessions:interrupt', async (session: SessionControl) => await args.runtime.interrupt(session))
-  handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => {
+  handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
-  })
+  ))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string) => await args.runtime.recoverSession(session, config, workspacePath))
   handle('sessions:stop', async (session: SessionControl) => await args.runtime.stopSession(session))
