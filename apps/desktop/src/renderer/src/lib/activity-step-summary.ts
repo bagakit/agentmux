@@ -17,6 +17,25 @@
 export const MAX_STEP_SUMMARY_LENGTH = 48
 
 /**
+ * 截断要保留哪一头，由**字段名**决定，因为字段名正是「这是不是一条路径」的声明。
+ *
+ * 路径的识别位在**尾部**。而工具收到的路径是绝对路径（Read/Edit/Write 的入参按约定就是绝对路径，
+ * 见 hook-normalizer 原样透传 `tool_input`），于是同一个仓库里每条路径的**前缀完全一样**——保留头部
+ * 等于把 48 格全花在 `/Users/<user>/proj/.../<repo>/` 上，两个不同的文件截出来一模一样。实测本仓：
+ *   `Edit /Users/…/lib/session-recency.ts`      → `Edit /Users/bytedance/proj/priv/bagakit/agentmu…`
+ *   `Edit /Users/…/lib/activity-step-summary.ts`→ `Edit /Users/bytedance/proj/priv/bagakit/agentmu…`
+ * 两条**全等**。这条摘要存在的唯一理由就是「不展开也认得出是哪个」，保留头部时它一个字节的识别力
+ * 都不提供，比没有摘要更坏——它看起来是答案。
+ *
+ * 其余字段一律保留头部，各有各的理由，不是「默认值」：
+ * - `command`：识别位在动词。`pnpm exec vitest run …` 的头告诉你在跑测试；尾只给最后一个文件参数。
+ *   危险命令同理由头识别（`rm -rf …`）。
+ * - `url`：头是域名，即这次抓取的身份；尾是查询串。
+ * - `pattern` / `query` / `description`：从左读的散文或表达式，头即主语。
+ */
+const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path', 'notebook_path'])
+
+/**
  * 每个工具从哪个字段取摘要。
  *
  * 一个工具可以给多个候选字段，按顺序取第一个非空的——同一个工具在不同 Provider 下字段名可能
@@ -42,10 +61,11 @@ function flatten(value: string): string {
   return value.replace(/\s+/gu, ' ').trim()
 }
 
-/** 超长时截断并加省略号，使标题永远只占一行。 */
-function clamp(value: string): string {
-  if (value.length <= MAX_STEP_SUMMARY_LENGTH) return value
-  return `${value.slice(0, MAX_STEP_SUMMARY_LENGTH - 1).trimEnd()}…`
+/** 超长时截断并加省略号，使标题永远只占一行。`keep` 说保留哪一头——理由见 TAIL_IDENTIFIED_FIELDS。 */
+export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit = MAX_STEP_SUMMARY_LENGTH): string {
+  if (value.length <= limit) return value
+  if (keep === 'tail') return `…${value.slice(value.length - (limit - 1))}`
+  return `${value.slice(0, limit - 1).trimEnd()}…`
 }
 
 /**
@@ -55,6 +75,17 @@ function clamp(value: string): string {
  * 展示层的措辞当成协议字段。
  */
 export function stepSummary(toolName: string | undefined, rawInput: string | undefined): string | null {
+  return stepSummaryWithin(toolName, rawInput, MAX_STEP_SUMMARY_LENGTH)
+}
+
+/**
+ * 同 {@link stepSummary}，但截到调用方给的预算内——给 {@link stepTitle} 用，见那里的「一个预算」说明。
+ */
+function stepSummaryWithin(
+  toolName: string | undefined,
+  rawInput: string | undefined,
+  limit: number
+): string | null {
   if (!toolName || !rawInput) return null
   const fields = SUMMARY_FIELDS[toolName.toLowerCase()]
   if (!fields) return null
@@ -71,7 +102,7 @@ export function stepSummary(toolName: string | undefined, rawInput: string | und
     const value = record[field]
     if (typeof value !== 'string') continue
     const flat = flatten(value)
-    if (flat) return clamp(flat)
+    if (flat) return clampStep(flat, TAIL_IDENTIFIED_FIELDS.has(field) ? 'tail' : 'head', limit)
   }
   return null
 }
@@ -81,8 +112,24 @@ export function stepSummary(toolName: string | undefined, rawInput: string | und
  *
  * 参数缺失时只返回工具名本身——不返回 `Bash ()` 这类空壳，那会让人以为参数是空的，而事实是
  * 我们没读到。
+ *
+ * **一个预算，只截一次。** 先摘要再拼工具名，合起来会超上界，于是下游只好再截一刀——而那一刀不知道
+ * 这半截是路径，会按头部截，把刚刚保住的文件名重新吃掉（实测：`Edit …/lib/session-recency.ts` 53 字符，
+ * 被下游头截成 `Edit …desktop/src/renderer/src/lib/session-rece…`，尾部截断白做了）。所以把工具名先占
+ * 掉的格子从预算里扣掉，让摘要**一次就截进**最终宽度内：截断方向只在认得字段名的这一层决定，且只决定
+ * 一次。
+ *
+ * 于是返回值**无条件** `<= MAX_STEP_SUMMARY_LENGTH`，调用方不需要、也不该再截——这不是巧合而是承诺，
+ * 由测试钉住。工具名自己就超界的那一路也必须守住这条：`title` 就是 hook 载荷里的 `tool_name`
+ * 原样（见 hook-normalizer 的 `append(kind, toolName, …)`），而 MCP 工具名形如
+ * `mcp__<server>__<tool>`，轻易过 48。放它裸奔出去，承诺就成了「通常成立」，下游读注释的人只能
+ * 自己补一刀——那一刀正是本函数要消灭的东西。
  */
 export function stepTitle(title: string, toolName: string | undefined, rawInput: string | undefined): string {
-  const summary = stepSummary(toolName, rawInput)
-  return summary ? `${title} ${summary}` : title
+  const prefix = `${title} `
+  const budget = MAX_STEP_SUMMARY_LENGTH - prefix.length
+  // 工具名本身就撑满一行，没有格子留给摘要了：只保留工具名，并按普通文本截进上界。
+  if (budget <= 1) return clampStep(title)
+  const summary = stepSummaryWithin(toolName, rawInput, budget)
+  return summary ? `${prefix}${summary}` : clampStep(title)
 }
