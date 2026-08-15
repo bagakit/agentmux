@@ -15,7 +15,9 @@ import {
   type BrowserViewport
 } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import { BrowserCdpSession } from './browser-cdp-session.js'
 import { browserPngFromNativeImage } from './browser-image.js'
+import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserRunOutcomeFromFailure } from './browser-run-outcome.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
@@ -398,9 +400,13 @@ export class BrowserViewManager {
   /**
    * 在这个 Browser 上跑一段 Agent 写的程序。
    *
-   * 这里只做**三件事**：确认 Browser 还在、把页面函数的调用接到这个 view 上、把结局翻译成契约形状。
-   * 程序本身在独立子进程里跑（`runBrowserScript`），页面能力由 `browserPageCallHandler` 派发——
-   * 那一层持有 CDP session 与快照，是 T-010 的主体。
+   * 这里只做**四件事**：确认 Browser 还在、接上 CDP 会话、把页面函数的调用派发出去、把结局翻译成
+   * 契约形状。程序本身在独立子进程里跑（`runBrowserScript`），页面能力由 `createBrowserPageDispatch`
+   * 派发——那一层持有快照缓存与 ref 解析。
+   *
+   * **CDP 会话按次开关**，不常驻：Electron 的 debugger 与 DevTools 互斥，常驻等于永久占着用户的
+   * DevTools（见 browser-cdp-session.ts 的说明）。`detach` 放在 finally 里，因为漏掉它的后果是
+   * 静默的——用户此后再也打不开这个页面的 DevTools，而且没有任何提示。
    *
    * 翻译成四类结局是承重的：执行器的失败联合有四支，任何两支折成一支都会让 Agent 走错方向。
    * 特别是 `crashed` → `indeterminate`——进程死了意味着**做到哪一步不知道**，页面上可能已经点过
@@ -408,43 +414,74 @@ export class BrowserViewManager {
    */
   async runScript(id: string, code: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
-    const dispatch = this.pageCallHandler(entry)
-    const run = await runBrowserScript({ code, onPageCall: dispatch })
-    if (run.completed) {
-      return { result: run.value, logs: run.logs, outcome: { kind: 'completed' } }
+    const session = BrowserCdpSession.attach(entry.view.webContents)
+    try {
+      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session) })
+      // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
+      // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
+      // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
+      // 而 `completed` 连个放警告的字段都没有。判在这一层，程序catch 不catch 都盖不住。
+      const ended = session.endedReason
+      if (ended !== null) {
+        return {
+          result: undefined,
+          logs: run.logs,
+          outcome: {
+            kind: 'indeterminate',
+            message:
+              `The debugging session ended mid-run (${ended}) — opening DevTools on the page does that. ` +
+              'An action may have half-completed. Look at the page before running anything again.'
+          }
+        }
+      }
+      if (run.completed) {
+        return { result: run.value, logs: run.logs, outcome: { kind: 'completed' } }
+      }
+      return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
+    } finally {
+      session.detach()
     }
-    return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
   }
 
   /**
    * 页面函数真正干活的那一头。
    *
-   * 现在只接了 T-007 那批名字里**不需要 CDP session 生命周期**的部分；需要 attach/detach 与快照
-   * 缓存的那些（snapshot / 按 ref 的动作 / cdp 逃生口）是 T-010 的主体，在此之前它们必须**响亮地
-   * 说"还没接"**，而不是返回 null 或空快照——返回空快照会让 Agent 的程序在一张不存在的页面上
-   * 继续往下跑，然后在某个毫不相干的地方失败（AGENTS.md:32-52：分不清的不许当成好的）。
+   * 这个方法是 `captureBrowserPageSnapshot` 与 `resolveBrowserRef` 的**唯一生产调用路径**——
+   * 它们此前只有测试在 import，而"看起来完整、生产走别的路"正是本任务点名要防的陷阱。
+   *
+   * 这里只做**归属校验**（这个 entry 还是不是当前那个、view 还在不在），页面语义一概交给
+   * `createBrowserPageDispatch`。归属留在这一层是因为只有 manager 知道 entry 有没有被换掉：
+   * 换掉之后继续在旧 view 上派发，Agent 会在一个已经不属于这个 Browser 的页面上动手。
    */
-  private pageCallHandler(entry: BrowserEntry): (name: string, args: unknown[]) => Promise<unknown> {
-    return async (name, args) => {
+  private pageCallHandler(
+    entry: BrowserEntry,
+    session: BrowserCdpSession
+  ): (name: string, args: unknown[]) => Promise<unknown> {
+    const requireLive = (): WebContentsView => {
       const view = entry.view
       if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
         throw new Error(`Browser ${entry.id} went away while the script was running`)
       }
-      if (name === 'pageInfo') {
+      return view
+    }
+    const dispatch = createBrowserPageDispatch({
+      session,
+      pageInfo: () => {
+        const view = requireLive()
         return {
           url: view.webContents.getURL(),
           title: view.webContents.getTitle(),
           navigationId: entry.navigationId
         }
-      }
-      if (name === 'gotoUrl') {
-        await this.navigate(entry.id, String(args[0]))
-        return null
-      }
-      if (name === 'captureScreenshot') return await this.captureScreenshot(entry.id)
-      throw new Error(
-        `Page function "${name}" is not wired to a live page yet (needs the CDP session lifecycle).`
-      )
+      },
+      gotoUrl: async (url) => {
+        await this.navigate(entry.id, url)
+      },
+      captureScreenshot: async () => await this.captureScreenshot(entry.id)
+    })
+    return async (name, args) => {
+      requireLive()
+      return await dispatch(name, args)
     }
   }
 
