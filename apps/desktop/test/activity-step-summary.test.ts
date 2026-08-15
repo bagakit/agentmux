@@ -231,6 +231,27 @@ describe('折叠行标题', () => {
     expect(stepTitle('Web  Search', undefined, undefined)).toBe('Web  Search')
   })
 
+  it('格子只够放一个省略号时不拼空壳——那正是本函数要消灭的东西', () => {
+    // `budget <= 1` 这道门槛此前没有判别器：改成 `<= 0` 全绿。因为要让两者分岔，工具名必须**正好**
+    // 落在 budget === 1 那一格（长度 46）——短一格走 `<= 2` 之外的普通路，长一格两边都直接截标题。
+    //
+    // 变异体在这一格拼出 `…range …`：省略号是 clampStep 在预算 1 上的退化产物（一个真字符都留不下），
+    // 拼上去看起来像「参数是空的」，而事实是格子不够。这与 `Bash ()` 是同一种谎，只是标点不同。
+    const name = 'mcp__filesystem-readonly__read_text_file_range'
+    expect(name.length, '这条判据依赖 budget 正好为 1，工具名必须是 46 字').toBe(46)
+    const out = stepTitle(name, 'Bash', JSON.stringify({ command: 'pnpm exec vitest run' }))
+    expect(out).toBe(name)
+    expect(out.endsWith('…'), `拼了个只有省略号的空壳：${JSON.stringify(out)}`).toBe(false)
+  })
+
+  it('格子只够放一个真字符时仍然拼——薄不等于空', () => {
+    // 门槛的另一侧：budget === 2（工具名 45 字）留得下一个字符加省略号。把门槛提到 `<= 2` 会把这一档
+    // 也丢掉，用户就少看见一个字节的识别力。薄摘要仍是摘要，空壳才不是。
+    const name = 'mcp__filesystem-readonly__read_text_file_rang'
+    expect(name.length).toBe(45)
+    expect(stepTitle(name, 'Bash', JSON.stringify({ command: 'pnpm exec vitest run' }))).toBe(`${name} p…`)
+  })
+
   it('取不到就只显示工具名，不显示空括号之类的空壳', () => {
     // 空壳会让人以为参数是空的，而事实是我们没读到。
     expect(stepTitle('Bash', 'Bash', '{bad')).toBe('Bash')
