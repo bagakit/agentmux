@@ -11,6 +11,7 @@ import {
   type AgentMuxRegion
 } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
+import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
   AgentLaunchResult,
   AgentSessionRecoveryCandidate,
@@ -630,7 +631,8 @@ type AppState = {
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
-  enqueueAgentSteer(sessionId: string, text: string): void
+  /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
+  enqueueAgentSteer(sessionId: string, text: string): boolean
   flushAgentSteerQueue(sessionId: string): Promise<void>
   send(sessionId: string, text: string): Promise<void>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
@@ -4412,9 +4414,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   enqueueAgentSteer(sessionId, text) {
-    if (!text.trim()) return
+    if (!text.trim()) return false
     const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return
+    if (!session || session.kind !== 'agent') return false
+    // Refuse an oversized prompt HERE, at the only door into the queue, rather than letting Core
+    // reject it at submit time. `INVALID_AGENT_PROMPT` is a permanent verdict for identical content,
+    // but `flushAgentSteerQueue` treats every throw as retryable: it keeps the entry and returns. So
+    // one oversized entry is retried on every runtime event, forever, and head-of-line-blocks every
+    // valid steer behind it. Checking at the consumer cannot fix that — by then the user's words are
+    // already in the queue with the draft cleared.
+    //
+    // Trim first, because Core measures the TRIMMED content (client.ts:2285). Measuring the raw text
+    // would refuse prompts Core would have accepted, and the two sides must agree on one boundary.
+    if (agentPromptExceedsBudget(text.trim())) {
+      get().reportError(new Error(
+        `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
+      ))
+      return false
+    }
     // Mint the operationId here, at the entry's birth — one id per queued prompt. It rides the entry
     // through every retry so a re-flushed entry replays with the same id; a second call for a genuinely
     // different prompt makes a second entry with its own id.
@@ -4428,6 +4445,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       text
     }
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
+    return true
   },
   async flushAgentSteerQueue(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
@@ -4451,6 +4469,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { agentSteerQueues }
         })
       } catch (error) {
+        // Every failure here is treated as retryable: the entry stays and the loop stops, so a
+        // transient refusal neither loses the user's words nor reorders what follows.
+        //
+        // That is only safe because nothing permanently-rejectable can reach this queue. A permanent
+        // verdict (INVALID_AGENT_PROMPT) would be retried on every runtime event forever and would
+        // head-of-line-block every entry behind it — which is why the size check lives at
+        // `enqueueAgentSteer`, the single door in, rather than here. If a second permanent rejection
+        // class ever appears, this catch is where it would wedge; classify it at the door too.
         get().reportError(error)
         return
       }
@@ -4465,7 +4491,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // an increase proves this invocation was retained for retry.
     const queuedBefore = get().agentSteerQueues?.[sessionId] ?? []
     const sameBefore = queuedBefore.filter((entry) => entry.text === text).length
-    get().enqueueAgentSteer(sessionId, text)
+    // A refused enqueue never reaches the queue, so the occurrence-count check below cannot see it —
+    // it would read "nothing was retained" and report success for a prompt that was never sent.
+    // enqueueAgentSteer has already told the user why; this throw only signals the Composer to keep
+    // the draft, via the same path a failed submit takes.
+    if (!get().enqueueAgentSteer(sessionId, text)) {
+      throw new Error('Prompt was not queued.')
+    }
     await get().flushAgentSteerQueue(sessionId)
     // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface that outcome to the
     // Composer so it must keep the user's draft instead of treating a retained queue item as success.
