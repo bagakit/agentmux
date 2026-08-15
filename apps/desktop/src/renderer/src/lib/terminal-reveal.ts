@@ -1,5 +1,5 @@
 import type { AgentMuxRunInputData, AgentMuxRunState } from '@agentmux/core'
-import type { StepOutcome } from './service-window-notice'
+import { agentViabilityFromProcessState, type StepOutcome } from './service-window-notice'
 
 /**
  * 揭示不得被我们自己的步骤无限期挡住（AGENTS.md 原则 11）。
@@ -167,7 +167,7 @@ export function terminalRevealServiceOutcome(input: {
       : 'The terminal is visible, but input will unlock when its attachment catches up',
     restore: 'Reopen or resume this session to replay it again'
   }
-  if (input.processState === 'running') return { completed: false, step, agentViability: 'alive' }
-  if (input.processState === 'exited') return { completed: false, step, agentViability: 'dead' }
-  return { completed: false, step, agentViability: 'unknown' }
+  // 判据是这个 Run 还能干活吗（进程），不是揭示步骤过了吗：running 放行提醒、exited 交给恢复
+  // 横幅、interrupted 如实说分不清——共用服务窗那唯一一处映射，绝不再手抄一遍。
+  return { completed: false, step, agentViability: agentViabilityFromProcessState(input.processState) }
 }
