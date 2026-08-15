@@ -58,8 +58,15 @@ export function orphanCommitCountArgs(input: {
   branch: string
   baseRef: string
 }): string[] {
-  // `--not <base> --remotes`：base 与任何远端可达的都不算。`--` 终止选项，否则以 `-` 开头的分支名
-  // 会被当成开关（本仓在 `worktree add` 上栽过同一个坑）。
+  // `--not <base> --remotes`：base 与任何远端可达的都不算。
+  //
+  // 末尾的 `--` 解决的是**「这个名字是 ref 还是路径」的歧义**，不是"挡住以短横线开头的分支名"。
+  // 后者曾经写在这里，是错的，而且错了两层：`--` 在所有 revision **之后**，压根保护不到它们
+  // （实测 `git rev-list --count main --not -weird --remotes --` 照样把 `-weird` 当开关，吐 usage）；
+  // 而 git 本来就不收以短横线开头的分支名（`git branch -- -dash-lane` → fatal），那种输入到不了这儿。
+  // 真正会发生的是仓里同时存在分支 `lane` 和文件 `lane`：没有 `--` 时 git 报
+  // `fatal: ambiguous argument 'lane': both revision and filename`，带上就正常数（实测 0）。
+  // lane 分支名来自分支、也常常同名于目录，所以这条歧义是真会撞上的。
   return [
     '-C',
     input.repoPath,
@@ -105,6 +112,7 @@ export function branchRetentionNote(branch: string, orphanCommits: number | null
   if (orphanCommits === 0) {
     return `Branch ${branch} stays in the repository, and its commits are already reachable elsewhere.`
   }
-  const commits = orphanCommits === 1 ? '1 commit' : `${orphanCommits} commits`
-  return `Branch ${branch} keeps ${commits} that exist nowhere else — not on any remote, not on the base branch. Removing this checkout leaves them reachable only by name.`
+  const commits =
+    orphanCommits === 1 ? '1 commit that exists' : `${orphanCommits} commits that exist`
+  return `Branch ${branch} keeps ${commits} nowhere else — not on any remote, not on the base branch. Removing this checkout leaves them reachable only by name.`
 }
