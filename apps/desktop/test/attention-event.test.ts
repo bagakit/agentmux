@@ -255,6 +255,41 @@ describe('statusDotTier：一行的状态点画哪一档', () => {
     expect(statusDotTier('done')).toBeNull()
   })
 
+  it('凡是被 Board 归进 needs-you 列的状态，点都不是「没有档位」', () => {
+    // 与上面那条 working 列的判据同一个形状，补的是隔壁一列。判据同样不点名状态，而是拿
+    // sessionBoardColumn 当表遍历：Board 说「这条要你处理」，名册同一行却画静止灰，是同一个事实的
+    // 两种说法——这正是 running 那次修掉的分岔，当时只补了在跑那一侧，needs-you 这侧漏了
+    // `disconnected`（它在这一列里，点却是 null）。
+    const needsYouColumn = AGENT_DISPLAY_STATES.filter(
+      (state) => sessionBoardColumn({ status: { state } } as never) === 'needs-you'
+    )
+    // 自证：这个 filter 必须真的筛出东西，否则下面的循环是死代码。
+    expect(needsYouColumn.length).toBeGreaterThan(0)
+    expect(needsYouColumn, '自证：disconnected 必须真的在这一列里，否则这条测不到它').toContain(
+      'disconnected'
+    )
+    for (const state of needsYouColumn) {
+      expect(
+        statusDotTier(state),
+        `${state} 被 Board 归进 needs-you 列，点却没有档位——名册说闲着，Board 说要你处理`
+      ).not.toBeNull()
+    }
+  })
+
+  it('终结状态里，崩掉的那种要画出来，干净完成的那种刻意不画', () => {
+    // 两个都在 Board 的 done 列，但它们不是同一件事，所以刻意给不同答案——把这条钉住，免得有人
+    // 觉得「同一列就该同一档」顺手把它们并起来。
+    // exited 可能带 exitReason: 'crashed'（client.ts 的退出分类），一个崩掉的 Agent 在扫一眼名册时
+    // 读成 idle 是真会误事的；chrome.css 把 .status--exited 与 .status--error 放同一条规则（红）。
+    expect(statusDotTier('exited')).toBe('exited')
+    // done 是判断不是疏漏：蓝色值一条通知，不值一个持续占着注意力的彩点（同 attentionAccentFor 里
+    // 「done 不吃墨」那条理由）。
+    expect(statusDotTier('done')).toBeNull()
+    // 自证：两者确实同属一列，否则上面那句「同一列不同档」是在说一件没发生的事。
+    expect(sessionBoardColumn({ status: { state: 'exited' } } as never)).toBe('done')
+    expect(sessionBoardColumn({ status: { state: 'done' } } as never)).toBe('done')
+  })
+
   it('每一档都在样式表里有规则——没有规则的档位等于画了个寂静', () => {
     // 判定层返回一个 CSS 不认识的档位，等于这行什么都没画，而上面几条断言照样全绿。所以直接读样式表。
     // 档位清单不手抄：把整个状态联合过一遍判定层，拿到的就是它今天会发出的全部档位。新增一个状态
@@ -265,7 +300,9 @@ describe('statusDotTier：一行的状态点画哪一档', () => {
     )
     expect(tiers.sort(), '自证：判定层必须真的发得出这几档').toEqual([
       'blocked',
+      'disconnected',
       'error',
+      'exited',
       'running',
       'waiting',
       'working'
