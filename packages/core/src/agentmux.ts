@@ -466,8 +466,44 @@ async function sessionMutation(operation: 'interrupt' | 'resume' | 'stop', args:
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
+/**
+ * browser：驱动一个已经开着的 Browser，跑一段程序。
+ *
+ * 为什么是顶层动词而不是挂在 `open` 下面：`open browser` 是**开**一个浏览器，`browser run` 是
+ * **驱动**一个已经开着的。两件事，两条命令，并存（AGENTS.md:21 也禁止为此加兼容层）。
+ *
+ * 程序只从 stdin 进，不提供 `--code`：一段真实的调试程序里有引号、反斜杠、换行和 `$`，走命令行
+ * 参数意味着每一层 shell 都要再转义一次，写的人和读的人都会错。stdin 是原样的字节。
+ */
+async function browserCommand(args: readonly string[]): Promise<number> {
+  if (args[0] !== 'run') throw cliError('Unknown browser command. Run agentmux browser --help.')
+  const flags = parseFlags(args.slice(1), { '--browser': 'value' })
+  const browserId = explicitSelectorId(flags.values.get('--browser'), 'Browser id')
+  const code = await readAllStdin()
+  // 空程序不是一次合法请求。放它过去的话，回执会是一份"跑完了、什么都没发生"的成功——与真的跑完
+  // 一段什么都不做的程序完全无法区分（AGENTS.md:32-52）。最常见的成因是忘了接管道。
+  if (code.trim() === '') {
+    throw cliError('The program is empty. Pipe it in, for example: agentmux browser run --browser <id> < script.js')
+  }
+  const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'browser.run', browserId, code })
+  printSuccess(receipt.operation, receipt.result); return 0
+}
+
+/** 把 stdin 整段读进来。程序可能有几十 KB，逐块拼，不假设一次 read 就到底。 */
+async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 function operationPath(args: readonly string[]): string | null {
   if (args[0] === 'open' && ['agent', 'terminal', 'browser'].includes(args[1] ?? '')) {
+    return `${args[0]}.${args[1]}`
+  }
+  // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
+  // 不写死 'run' 是因为将来若有第二个 browser 子命令，漏改这里会让它的 --help 静默落到 'browser'
+  // 那条上（拿到一份讲别的命令的帮助，而不是一句"没这个命令"）。
+  if (args[0] === 'browser' && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
     return `${args[0]}.${args[1]}`
   }
   return args[0] ?? null
@@ -546,6 +582,7 @@ async function main(): Promise<number> {
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
+  if (args[0] === 'browser') return await browserCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
   if (args[0] === 'handoff') return await handoffCommand(args.slice(1))
