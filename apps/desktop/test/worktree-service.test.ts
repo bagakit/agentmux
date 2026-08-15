@@ -1404,3 +1404,157 @@ describe('WorktreeService', () => {
     expect(branch.exitCode, '分支也留下了').toBe(0)
   }, 30000)
 })
+
+/**
+ * 删 worktree 之前那句「这条分支会留下什么」。
+ *
+ * 用真 git：这一问的全部内容就是 git 怎么数 reachability，假 host 只能证明我们发了某条命令——
+ * 恰恰是本仓反复栽的那种恒真断言。而且这里有一档（猜来的 base）**根本不发命令**，假 host 下
+ * 「没发命令」和「发了命令但读不出」长得一模一样。
+ */
+describe('删 worktree 之前，先说清这条分支会留下什么', () => {
+  /** 一个带远端的仓；`develop` 已推送并被声明为 origin/HEAD，所以 base 是**权威**的。 */
+  async function repositoryWithAuthoritativeBase(): Promise<{ repoPath: string; root: string }> {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-orphan-note-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    const remotePath = join(root, 'origin.git')
+    const host = new LocalExecutionHost()
+    await host.run('git', ['init', '-q', '--bare', remotePath])
+    await host.run('git', ['init', '-q', '-b', 'develop', repoPath])
+    const git = async (...args: string[]): Promise<void> => {
+      const result = await host.run('git', [
+        '-C', repoPath, '-c', 'user.name=AgentMux Test', '-c', 'user.email=agentmux@example.invalid', ...args
+      ])
+      expect(result.exitCode, `git ${args.join(' ')}: ${result.stderr}`).toBe(0)
+    }
+    await git('remote', 'add', 'origin', remotePath)
+    await git('commit', '-q', '--allow-empty', '-m', 'base')
+    await git('push', '-q', 'origin', 'develop')
+    // 这一句是「权威 base」的全部来源：有它 origin/HEAD 才解析得出来。
+    await git('remote', 'set-head', 'origin', 'develop')
+    return { repoPath, root }
+  }
+
+  async function serviceFor(repoPath: string): Promise<WorktreeService> {
+    const host = new LocalExecutionHost()
+    return new WorktreeService(() => host, { save: vi.fn(async (value: AppConfig) => value) })
+  }
+
+  function configWith(repoPath: string, worktreePath: string, branch: string): AppConfig {
+    return {
+      ...config,
+      workspaces: [
+        { id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' },
+        {
+          id: 'lane', name: 'lane', hostId: 'local', path: worktreePath,
+          kind: 'worktree', repoPath, branch
+        }
+      ]
+    }
+  }
+
+  it('分支上有只属于它的提交时，说清有几条、在哪条分支上', async () => {
+    const { repoPath, root } = await repositoryWithAuthoritativeBase()
+    const host = new LocalExecutionHost()
+    const git = async (...args: string[]): Promise<void> => {
+      const r = await host.run('git', ['-C', repoPath, '-c', 'user.name=T', '-c', 'user.email=t@e.invalid', ...args])
+      expect(r.exitCode, r.stderr).toBe(0)
+    }
+    const worktreePath = join(root, 'wt-lane')
+    await git('worktree', 'add', '-q', '-b', 'lane-a', '--', worktreePath, 'develop')
+    const inLane = async (...args: string[]): Promise<void> => {
+      const r = await host.run('git', ['-C', worktreePath, '-c', 'user.name=T', '-c', 'user.email=t@e.invalid', ...args])
+      expect(r.exitCode, r.stderr).toBe(0)
+    }
+    await inLane('commit', '-q', '--allow-empty', '-m', 'only here 1')
+    await inLane('commit', '-q', '--allow-empty', '-m', 'only here 2')
+
+    const service = await serviceFor(repoPath)
+    const note = await service.orphanCommitNote('lane', configWith(repoPath, worktreePath, 'lane-a'))
+
+    expect(note, '数量必须出现——「有点东西」不可判断，「2 条」才可以').toContain('2 commits')
+    expect(note, '分支名是记录撤下之后用户唯一的抓手').toContain('lane-a')
+    // 反向：不能同时说出那句安心话。
+    expect(note.toLowerCase(), '既说有独有提交又说别处也有，用户不知道信哪句')
+      .not.toContain('already reachable')
+  }, 30000)
+
+  it('提交已经推到远端时，如实说别处也有——这一档不该吓唬用户', async () => {
+    const { repoPath, root } = await repositoryWithAuthoritativeBase()
+    const host = new LocalExecutionHost()
+    const worktreePath = join(root, 'wt-pushed')
+    const git = async (cwd: string, ...args: string[]): Promise<void> => {
+      const r = await host.run('git', ['-C', cwd, '-c', 'user.name=T', '-c', 'user.email=t@e.invalid', ...args])
+      expect(r.exitCode, r.stderr).toBe(0)
+    }
+    await git(repoPath, 'worktree', 'add', '-q', '-b', 'lane-pushed', '--', worktreePath, 'develop')
+    await git(worktreePath, 'commit', '-q', '--allow-empty', '-m', 'work')
+    await git(worktreePath, 'push', '-q', 'origin', 'lane-pushed')
+
+    const service = await serviceFor(repoPath)
+    const note = await service.orphanCommitNote('lane', configWith(repoPath, worktreePath, 'lane-pushed'))
+
+    expect(note, '推上去了就是别处也有，说「只此一份」是假警报').toContain('already reachable')
+    expect(note).not.toContain('nowhere else')
+  }, 30000)
+
+  /**
+   * 这条是整套设计的要害：**base 猜出来时宁可说「没查出来」，也不给一个数**。
+   *
+   * 仓里没有 origin/HEAD（`git clone` 会写，本地建库再推的仓从来没有——本仓自己就没有）。此时退路
+   * 猜的是字面量 `main`，而这个仓真正的 base 叫 `develop`。若拿 `main` 去数，读出来的是 0，而 0
+   * 在产品里的意思是「查过了，删得放心」——对一批只活在本地 ref 上的提交说这句话，用户照做就失联了。
+   */
+  it('base 只是猜的时候，说「没查出来」，绝不给一个数——哪怕那个数是 0', async () => {
+    const { repoPath, root } = await repositoryWithAuthoritativeBase()
+    const host = new LocalExecutionHost()
+    const git = async (cwd: string, ...args: string[]): Promise<void> => {
+      const r = await host.run('git', ['-C', cwd, '-c', 'user.name=T', '-c', 'user.email=t@e.invalid', ...args])
+      expect(r.exitCode, r.stderr).toBe(0)
+    }
+    // 把 origin/HEAD 删掉：base 从此只能靠猜。这正是绝大多数本地仓的常态。
+    await git(repoPath, 'remote', 'set-head', 'origin', '--delete')
+    const worktreePath = join(root, 'wt-guess')
+    await git(repoPath, 'worktree', 'add', '-q', '-b', 'lane-guess', '--', worktreePath, 'develop')
+    await git(worktreePath, 'commit', '-q', '--allow-empty', '-m', 'LOCAL ONLY')
+    // 再造出那个致命形态：本地有一条 main，且它已经含有这条 lane。拿它去数会读出 0。
+    await git(repoPath, 'branch', 'main', 'lane-guess')
+
+    const service = await serviceFor(repoPath)
+    const note = await service.orphanCommitNote('lane', configWith(repoPath, worktreePath, 'lane-guess'))
+
+    expect(note, 'base 靠猜时只能说没查出来').toContain('could not be checked')
+    // 反向断言挡住那句更糟的说法：把猜出来的 0 说成「别处也有」，用户照着删就失联。
+    expect(note.toLowerCase(), '说「别处也有」= 拿猜出来的 0 冒充查过了，用户照着删就失联')
+      .not.toContain('already reachable')
+    // 注意这里**不能**断言不含 "nowhere else"：那句话本身长成
+    // 「whether it holds work that exists nowhere else could not be checked」——"nowhere else" 出现在
+    // 一个**疑问**里，不是一句断言。按字面禁掉它会逼着措辞绕开这个词，而那个词恰恰是用户看得懂的那半。
+    // 真正要挡的是「肯定句地说只此一份」，判据落在那句肯定句独有的动词上。
+    expect(note, '不许倒过来吓唬人——我们确实不知道，不能声称这些提交只此一份').not.toContain('keeps')
+
+    // 自证这个仓真的踩在那个坑上：拿猜的 base 去数，读出来正是 0。
+    const counted = await host.run('git', [
+      '-C', repoPath, 'rev-list', '--count', 'lane-guess', '--not', 'main', '--remotes', '--'
+    ])
+    expect(counted.stdout.trim(), '若不是 0，这条用例就没有在演那个致命形态').toBe('0')
+  }, 30000)
+
+  it('git 那边答不出来时也不阻断删除：给「没查出来」，不抛', async () => {
+    const { repoPath, root } = await repositoryWithAuthoritativeBase()
+    const worktreePath = join(root, 'wt-broken')
+    // 每一条 git 都炸。原则 11 第 2 类：我们自己这段流程降级了，不能因此收走用户删除的能力。
+    const executionHost: ExecutionHost = {
+      id: 'local', kind: 'local', label: 'This Mac',
+      exposeLoopbackPort: vi.fn(async (port: number) => port),
+      dispose: vi.fn(async () => {}),
+      run: vi.fn(async () => { throw new Error('git is gone') })
+    }
+    const service = new WorktreeService(() => executionHost, { save: vi.fn(async (v: AppConfig) => v) })
+
+    const note = await service.orphanCommitNote('lane', configWith(repoPath, worktreePath, 'lane-broken'))
+    expect(note, 'git 全炸也要给出一句话，而不是把异常甩给调用方').toContain('could not be checked')
+    expect(note).toContain('lane-broken')
+  }, 30000)
+})

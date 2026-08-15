@@ -382,6 +382,11 @@ const mockApi: AgentMuxDesktopApi = {
       retention: 'git-failed',
       reason: 'Removing a worktree needs the desktop app.'
     }),
+    // 预览环境没有 git，数不出独有提交——所以给「没查出来」那一档的原话。不说「已在别处」：那是一句
+    // 安心话，而这里根本没查。措辞取自 branchRetentionNote(null)，不在这里另写一句。
+    worktreeRemovalNotice: async () => ({
+      note: 'Whether this branch holds work that exists nowhere else could not be checked.'
+    }),
     // The web preview has no git and no processes, so a fan-out cannot be simulated honestly. Refusing
     // is the truthful answer — a fake set of "launched" lanes would be worse than no answer.
     runFanOut: async () => ({ kind: 'rejected', reason: 'Fan-out needs the desktop app.' }),
