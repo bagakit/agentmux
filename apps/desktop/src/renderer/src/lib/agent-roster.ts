@@ -48,8 +48,9 @@ export type RosterRow = {
   providerId: string
   workspacePath: string
   state: SessionSnapshot['status']['state']
-  // The attention class this Agent falls in, or null when it wants nothing. Drives ordering and lets the
-  // row reuse the shared status treatment.
+  // The attention class this Agent falls in, or null when it wants nothing. Drives the row's accent
+  // and lets it reuse the shared status treatment. Deliberately NOT the ordering input — that is
+  // `attentionSortClass(state)`, one expression shared with the quick switcher (see `rank` below).
   attention: AttentionCategory | null
   observedAt: number
   // True when Core is holding a typed request for this Agent — the rows that make this a work queue
@@ -81,8 +82,17 @@ export type RosterRow = {
 // also sorts by (see attentionSortClass/attentionSortRank in attention-event.ts), so the two can never
 // disagree about who is most urgent. `done` and idle share a rank there deliberately, pending #199's
 // unread/seen axis.
+//
+// One expression, not two. This used to short-circuit on `row.attention` (which is `categoryFor(state)`)
+// and only fall back to `attentionSortClass`. Both arms agreed on all nine states — measured, every
+// state where categoryFor answers produces the identical rank — so the branch bought nothing and cost
+// a drift surface: `error` and `done` are spelled independently inside `categoryFor` and inside
+// `attentionSortClass`, so a tenth state could be classed one way by each, and the roster would rank it
+// through the first while the quick switcher ranked it through the second. That is the #435/#477
+// divergence the shared table exists to prevent, reachable again through a back door.
+// Now the roster and the switcher evaluate the literally identical expression. `attention` stays on the
+// row for the accent, which is what it is actually for.
 function rank(row: RosterRow): number {
-  if (row.attention) return attentionSortRank(row.attention)
   return attentionSortRank(attentionSortClass(row.state))
 }
 
