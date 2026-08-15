@@ -59,7 +59,7 @@ export function ResourceUsagePanel() {
     [open]
   )
 
-  const rows = usagePanelRows(snapshot, sessions, timelines, undefined, workspaceRoots)
+  const rows = usagePanelRows(snapshot, sessions, { timelines, workspaceRoots })
   return (
     <DropdownMenu.Root open={open} onOpenChange={setOpen}>
       <DropdownMenu.Trigger asChild>

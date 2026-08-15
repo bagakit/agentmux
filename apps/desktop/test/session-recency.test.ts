@@ -188,9 +188,11 @@ describe('仓根要一路传到 stepTitle', () => {
     const rows = usagePanelRows(
       { runs: [{ runId: 'run-a1', cpuPercent: 1, rssKib: 1 }] } as never,
       [session],
-      { [session.id]: { items: [call] } } as never,
-      1,
-      { [session.id]: '/Users/me/proj/repo' }
+      {
+        timelines: { [session.id]: { items: [call] } } as never,
+        now: 1,
+        workspaceRoots: { [session.id]: '/Users/me/proj/repo' }
+      }
     )
     expect(rows[0]?.activity).toBe('Edit apps/desktop/src/main/agent-notifier.ts')
   })
