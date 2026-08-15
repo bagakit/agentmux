@@ -21,6 +21,8 @@ import { defaultExclude, defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   test: {
-    exclude: [...defaultExclude, '.claude/worktrees/**']
+    exclude: [...defaultExclude, '.claude/worktrees/**'],
+    // 见 vitest.setup.ts：把测试夹具跑的 git 与开发者本人的 gitconfig 隔开。
+    setupFiles: ['./vitest.setup.ts']
   }
 })
