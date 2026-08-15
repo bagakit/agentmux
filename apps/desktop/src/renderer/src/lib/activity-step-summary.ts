@@ -41,9 +41,21 @@ const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path'
 /**
  * 路径先**缩短**，再考虑截断——截断是有损的，缩短不是。
  *
- * 这两步换回来的格子实测很大：本仓 400 条真实源文件路径，原样尾切后**没有一条**能完整显示（0%），
- * 剥掉仓根之后 31% 完整显示，平均长度 97 → 53 个码元。而且省下的正是**零识别力**的那一段——
- * 同一个仓库里每条路径都带着同样的 `/Users/<user>/proj/.../<repo>/`。
+ * 这两步换回来的格子实测很大。语料：本仓 `git ls-files '*.ts' '*.tsx'` 的 992 条（2026-09-14），
+ * 每条拼上仓根当作工具真正收到的绝对路径，与 48 格上界比：
+ *
+ *   | | 完整显示 | 平均码元 |
+ *   | --- | --- | --- |
+ *   | 绝对路径 | **0%** | 93 |
+ *   | 剥掉仓根 | **49%** | 49 |
+ *
+ * 省下的正是**零识别力**的那一段——同一个仓库里每条路径都带着同样的
+ * `/Users/<user>/proj/.../<repo>/`。重新量：
+ * `git ls-files '*.ts' '*.tsx' | awk '{print length($0)}' | sort -n | uniq -c`（相对侧）。
+ *
+ * 上一版这里写的是「400 条路径 / 31% / 97 → 53」。那个 400 没说是哪 400 条——既不是 992 的全集，
+ * 也不是 apps/desktop 的 784 条子集，于是复现不出来，也就无从判断它是过时还是当初就算错了。
+ * 一个复现不出的数字读起来和实测过的一样权威，这比不给数字更坏；记数字就要记语料。
  *
  * 两条规则，都只动前缀：
  * - **仓根 → 相对路径。** 用户心里的路径本来就是 `apps/desktop/src/...`，绝对前缀是机器的记法。
@@ -65,6 +77,18 @@ function shortenPath(value: string, workspaceRoot: string | undefined): string {
  *
  * 一个工具可以给多个候选字段，按顺序取第一个非空的——同一个工具在不同 Provider 下字段名可能
  * 不同（`file_path` 与 `path`），但这仍是**声明**而非猜测：候选是写死的，不是从 JSON 里搜出来的。
+ *
+ * 为什么是一张逐工具的表，而不是一条通用规则？因为一个字段名的**角色是逐工具的，不通用**——实测
+ * 7.76 万次真实调用（本机 ~/.claude/projects 全部 transcript，2026-09-14），任何通用谓词都被真实载荷打脸：
+ * - 「取第一个短字符串」：SendMessage 的 `to` 是 agent id（`ad10e88e542eac233`），Artifact 的
+ *   `favicon` 是一个 emoji——都会取到会误导的东西。而且**非确定**：SendMessage 真实载荷的前两个键
+ *   实测出现过 `to,summary` / `message,summary` / `to,message` / `message,to` / `summary,to` 五种序，
+ *   「第一个」随序列化漂移。
+ * - 「取最长字符串」：Workflow 取到最长 46KB 的 `script` 源码、Agent 取到最长 23KB 的 `prompt`
+ *   指令块——把 KB 级 blob 截成 48 字的碎片，噪音不是识别力。
+ * - 「一张通用字段优先表」：`description` 在 Agent 里是标题、在 TaskCreate 里却是详情 blob（`subject` 才是
+ *   标题）；同一个排名编码不了两种角色。且它对 SendMessage(`summary`)/PushNotification(`message`) 完全漏判。
+ * 所以每个工具单独声明取哪个字段。取不到就如实裸名——见文件头「猜错的摘要比没有摘要更坏」。
  */
 const SUMMARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   bash: ['command'],
@@ -78,7 +102,31 @@ const SUMMARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   grep: ['pattern'],
   websearch: ['query'],
   webfetch: ['url'],
-  task: ['description']
+  task: ['description'],
+  // 以下每行都刻意避开一个更长/更靠前但会误导的字段——括号里写的就是被否掉的那个。
+  agent: ['description'], // 不是 prompt：指令块，实测最长 23KB
+  taskcreate: ['subject'], // 不是 description：那是详情 blob，subject 才是标题
+  taskupdate: ['status', 'subject'], // status 是状态动词（taskId 单独无意义）；无 status 时退回 subject 标题——
+  // 实测 1876 次里 208 次没有 status，其中 33 次带着真标题 subject，取它比裸名强
+  // （语料：本机 ~/.claude/projects 全部 transcript，2026-09-14 当日计数；数字会随使用增长，
+  //  钉住的是「无 status 的调用真实存在且其中一部分带 subject」这个形状，不是具体的数）
+  sendmessage: ['summary'], // 不是 to（agent id）/ message（~1KB）
+  workflow: ['description'], // 不是 script：源码，实测最长 46KB
+  monitor: ['description'], // 不是 command：原始 shell；本工具专门带了 description 标签就是干这个的
+  skill: ['skill'],
+  pushnotification: ['message'], // 不是 status：12 次里 8 次就是枚举 'proactive'，余下 4 次是人话但
+  // 说的是结果不是内容；message 则 12 次全在。取 status 会有三分之二的行长得一模一样。
+  schedulewakeup: ['reason'], // 不是 prompt（实测最长 523 字，且内容是要重放的整条指令，不是这次的理由）
+  sendfeedback: ['title'], // 不是 type（'bug'）/ details（~1KB）
+  artifact: ['title', 'description'], // title 缺席时退回 description（实测真实调用正是只有 description 的形态）
+  // 下面这些工具只有一个 id / 短枚举字段，那恰恰就是区分两行同名调用的东西，取它而非裸名。
+  taskget: ['taskId'],
+  taskstop: ['task_id'],
+  taskoutput: ['task_id'],
+  croncreate: ['cron'], // 不是 prompt（~1KB）：cron 是有界的排程表达式
+  crondelete: ['id']
+  // 故意不收：ListAgents/TaskList/CronList/EnterPlanMode（零参）——裸名就是它们诚实的样子。
+  // AskUserQuestion 的 `questions` 是嵌套列表、无顶层字符串，读 questions[0].question 是文件头拒绝的那种猜测。
 }
 
 /** 折行与制表符会把单行标题撑开，压成单个空格；首尾空白一并去掉。 */
