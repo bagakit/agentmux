@@ -117,6 +117,40 @@ last-writer-wins 当默认）。同时协议 16 自带 `RunEvent::Resized`，而
 唯一的活交付物是那条反向判别器，它钉住「恢复路径可达」这个让我们决定不加兜底的前提——
 谁删掉 `resizeAgent` 里的重挂块，它会红，那时才真的出现红线违规。
 
+## 上游确认：这两个字段今天在本仓**根本到不了**（2026-09-14，与 ctxmux owner 对账后各自独立实测）
+
+有一份需求描述写着「ctxmux 最新 main 已提供 `RunInfo.current_size` 和 `RunEvent::Resized`，可以直接
+使用」。**这句话对 ctxmux main 成立，对 AgentMux 实际消费的东西不成立**——我们吃的不是 main，是
+`packages/core/vendor/ctxmux/` 里冻结的构建快照。本机实测（不是推断，也不是转述）：
+
+| 判的事 | 命令 | 实测 |
+| --- | --- | --- |
+| vendored 的协议版本 | `packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd --version` | `ctxmuxd 0.1.0 (protocol 14)` |
+| 它是哪个 commit | `manifest.json` 的 `source.commit` | `c13ab114…`，**不是** main |
+| 二进制里有没有这两个词 | `strings bin/ctxmux \| grep -c current_size` 及 `ctxmuxd`、`resized` | 四个数**全是 0** |
+| SDK 里有没有这个字段 | 解包 `ctxmux-sdk-0.0.0.tgz` 看 `RunInfo.d.ts` | 字段止于 `applied_input_bytes`，**没有** `current_size` |
+| SDK 里有没有这个事件 | 同上看 `RunEvent.d.ts` | 六个变体 `output / exited / interrupted / tmux / observation_discontinuity / gap`，**没有** `resized` |
+
+**后果要说清楚**：今天在本仓写 `current_size` / `Resized` 的消费代码，**类型能过、注入假事件测试就能
+绿，而运行时对每一个 Run 永远走不到**。`if ('current_size' in run)` 恒假，`resized` 分支永不触发。
+这正是本仓记过的那条「声明了却静默不做的能力」——绿灯不等于交付。
+
+ctxmux owner 同时确认了两条**语义**（来自协议源码文档，不是猜的），先记下来，等 vendor 升级后直接用：
+
+- `current_size` 的 `null` 是**一个真答案**，意思是「没有任何 owner 能确认尺寸」（tmux 背书的 Run、
+  或被替代 daemon 恢复的历史 Run）。**绝不许拿 `spec.size` 顶替**——那是「启动时请求过」而非
+  「有人确认过」，顶替就是把「不知道」伪装成一个看起来像事实的错数字。本仓投影已按此实现。
+- receipt 的 `applied_size` 与 `current_size` **不可能冲突**：同一把锁里的同一个读回值。所以**不要**
+  实现任何「谁优先」的仲裁规则；真观察到不一致，那是 ctxmux 的 bug，应当上报而不是在这侧兜底。
+  唯一的次序问题是**新旧**（resize 前取的快照就是旧的），按时间新近解决，不按来源。
+
+升级到 protocol 16 需要 7 处 fail-closed 的东西同改（manifest、两个二进制、SDK tgz、
+`CTXMUX_COMMIT`+`CTXMUX_TREE`、`CTXMUX_MANIFEST_SHA256`、pnpm-lock），属于一次独立的 vendor 动作，
+不在本 Feature 范围内。
+
+**因此本 Feature 第 2 条的正确状态是「阻塞在上游 artifact」，不是「已完成」，也不是「我们没做」。**
+上游侧跟踪在 ctxmux 自己的 tracker（其 Task 1 仍 in_progress）；本仓这侧零新代码，理由见上一节。
+
 ## 边界
 
 不要重复实现 ctxmux 的尺寸能力。缺的是我们这侧的重建与诚实降级，不是再造一份尺寸真相。
