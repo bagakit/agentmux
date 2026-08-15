@@ -112,6 +112,22 @@ function stopHook(receiptId: string): NativeHookEnvelope {
   }
 }
 
+/**
+ * 一条**turn 中途**的 hook：PreToolUse 归一化成 tool-use-start（非 turn-end）。
+ * 它照样走到 persistReceipt 那段（回执/时间轴对每条事件都落），且它的 `stopRun` 恒为 null——
+ * status() 只在 turn-end 时才调。所以它命中的正是「断线臂」的 stopRun===null 分支。
+ */
+function midTurnHook(receiptId: string): NativeHookEnvelope {
+  return {
+    receiptId,
+    agentSessionId: SESSION_ID,
+    runId: RUN_ID,
+    providerId: 'claude',
+    eventName: 'PreToolUse',
+    payload: { session_id: 'native-1', tool_name: 'Bash' }
+  }
+}
+
 type Internals = {
   registry: { load(hostId: string): Promise<void> }
   kernel: Record<string, unknown>
@@ -185,6 +201,31 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
         session?.terminalPromptReadiness?.outputCursorBytes,
         '重铸的 epoch 用了编造的光标而不是会话最后一次权威 outputCursorBytes'
       ).toBe(512)
+    } finally {
+      await client.dispose()
+    }
+  })
+
+  it('turn 中途的 hook（tool-use-start）绝不许清掉消费标记——Agent 还没交还控制权（防解锁到生成中）', async () => {
+    // 反例 1 的修复只该在 **turn-end** 触发；断线臂的判据是 `lifecycleEvent === 'turn-end'`，不是
+    // 「stopRun 为 null」。后者对**每一条**非 turn-end 事件都为真——一次 PreToolUse（tool-use-start）
+    // 的 stopRun 也是 null。若断线臂只判 consumedBySubmissionId，这条 mid-turn hook 会把已消费纪元
+    // 重铸成未消费，等于在 Agent 仍在生成、还没把控制权交还时就解锁了发送面（empty-composer 陷阱同族：
+    // 生成中途放行 prompt 会打断当轮）。turn-end 才是「交还控制权」的唯一信号。
+    //
+    // 这条与上一条互为相反两侧（守卫按出口数不按条件数）：上一条钉「turn-end 必须清」，这条钉
+    // 「非 turn-end 必须不清」。删掉 gate 里的 `lifecycleEvent === 'turn-end' &&`，这条即红。
+    const { client, internals, stored } = await harness()
+    try {
+      disconnectKernel(internals)
+      // mid-turn hook 落在断线期间也不许抛（第 2 类：Agent 活着）。
+      await internals.acceptHookEvent(midTurnHook('receipt-mid-turn'), AbortSignal.timeout(5_000))
+
+      const session = await stored()
+      expect(
+        session?.terminalPromptReadiness?.consumedBySubmissionId,
+        'turn 中途的 hook 清掉了消费标记——在 Agent 还没交还控制权时解锁了发送面（会打断正在跑的 turn）'
+      ).toBe('submission-turn-0')
     } finally {
       await client.dispose()
     }
