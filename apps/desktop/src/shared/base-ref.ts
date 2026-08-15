@@ -42,6 +42,20 @@
 /** base 这个答案是从哪来的。`remote-head` 是远端自己说的，`fallback` 是我们猜的。 */
 export type BaseRefSource = 'remote-head' | 'fallback'
 
+declare const countableBrand: unique symbol
+
+/**
+ * 一个**已经过分级的** base ref。数独有提交的入口只收这个类型。
+ *
+ * 品牌类型在本仓是要讲理由的，这里的理由是：`orphanCountableRef` 返回 `string | null` 之后，规则仍然
+ * 只挡得住「忘了问」，挡不住「不问」——`orphanCommitCountArgs({ baseRef: base.ref })` 照样编译得过，
+ * 而那正是会读出 0（「删得放心」）的那条路。改成只有本模块铸得出的类型之后，想数就必须先分级，绕过
+ * 要写一句显式的 `as`——从「漏了一步」变成「明知故犯」。
+ *
+ * 只是个 string，运行时零开销；`unique symbol` 从不被赋值，纯粹用来让结构类型对不上。
+ */
+export type CountableBaseRef = string & { readonly [countableBrand]: true }
+
 export type BaseRef = {
   ref: string
   source: BaseRefSource
@@ -94,7 +108,7 @@ export function parseRemoteHead(stdout: string, exitCode: number): BaseRef {
  * 只有权威答案够格，理由见本文件顶部那张表：猜来的 base 在「它已经含有这条 lane」时会读出 0，而 0
  * 的意思是「删得放心」。少报一次的代价是用户照着一句错的安心话删掉自己的东西。
  *
- * ## 为什么返回 `string | null` 而不是 `boolean`
+ * ## 为什么返回 `CountableBaseRef | null` 而不是 `boolean`，也不是裸 `string`
  *
  * 返回布尔的版本写出来是这样的：
  *
@@ -104,11 +118,15 @@ export function parseRemoteHead(stdout: string, exitCode: number): BaseRef {
  * ```
  *
  * 也就是说规则**全靠调用方自觉去问**，而这正是本仓反复证明无效的那种守卫：靠注释和自觉挡不住下一个
- * 人。返回「够格时才给得出的那个 ref」之后，想拿到能数的 ref 只有这一条路——不问就没有 ref 可用。
- * 拿 `base.ref` 硬来当然仍然写得出，但那已经不是"忘了检查"，而是绕过一个明说了理由的函数。
+ * 人。返回「够格时才给得出的那个 ref」把它推进了一格——不问就没有 ref 可用。
+ *
+ * 但只推进一格还不够：裸 `string` 之下 `orphanCommitCountArgs({ baseRef: base.ref })` 依然编译得过，
+ * 于是绕过仍然只是"少写一行"。所以这里铸的是 {@link CountableBaseRef}，而数独有提交的入口只收它。
+ * 现在绕过必须显式写一句 `as CountableBaseRef`——那已经不是"忘了检查"，而是在一个明说了理由的类型上
+ * 签字。审计这个模块时，`as CountableBaseRef` 就是唯一要看的那个字符串。
  *
  * 把判定和取值合成一次，也顺带消掉了「判的那次和用的那次之间 base 变了」这类两次解析的漂移。
  */
-export function orphanCountableRef(base: BaseRef): string | null {
-  return base.source === 'remote-head' ? base.ref : null
+export function orphanCountableRef(base: BaseRef): CountableBaseRef | null {
+  return base.source === 'remote-head' ? (base.ref as CountableBaseRef) : null
 }

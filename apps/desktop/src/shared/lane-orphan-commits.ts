@@ -40,8 +40,9 @@
  *
  * 猜 `main` 的代价是不对称的：猜错成"存在的别的分支"会静默少报（用户以为安全，其实会失联），
  * 猜错成"不存在的名字"会让 git 直接 fatal。仓里已经有一个会回答这件事、并且**如实标注答案来不来自
- * 权威**的地方（`gh-service.ts` 的 `resolveBaseRef`：`origin/HEAD` 才是真答案，缺席是常态，退路必须
- * 被标成猜测）。同一个概念不在这里长第二套判定。
+ * 权威**的地方（`base-ref.ts`：`origin/HEAD` 才是真答案，缺席是常态，退路必须被标成猜测）。同一个
+ * 概念不在这里长第二套判定。而「够不够格拿来数」也在那边一处决定——见下面 `orphanCommitCountArgs`
+ * 为什么收 `CountableBaseRef` 而不是 `string`。
  *
  * ## 为什么在 `shared/` 而不在 `renderer/src/lib/`
  *
@@ -52,11 +53,20 @@
  * 等于让接线时被迫再抄一份判据出来——那正是这个模块要避免的事。
  */
 
-/** 构造那条 rev-list 的实参。调用方自己跑 git——本模块不碰进程，好让它能被纯函数地测。 */
+import type { CountableBaseRef } from './base-ref.js'
+
+/**
+ * 构造那条 rev-list 的实参。调用方自己跑 git——本模块不碰进程，好让它能被纯函数地测。
+ *
+ * `baseRef` 收的是 {@link CountableBaseRef} 而不是 `string`：能不能拿这个 base 来数，是
+ * `orphanCountableRef` 一处决定的事（理由见 `base-ref.ts` 顶部那张实测表——猜来的 base 在
+ * 「它已经含有这条 lane」时会读出 0，而 0 在产品里的意思是"删得放心"）。收裸 string 的话，那条规则
+ * 就退回成"调用方记得去问"，而本仓反复证明这种守卫挡不住下一个人。
+ */
 export function orphanCommitCountArgs(input: {
   repoPath: string
   branch: string
-  baseRef: string
+  baseRef: CountableBaseRef
 }): string[] {
   // `--not <base> --remotes`：base 与任何远端可达的都不算。
   //

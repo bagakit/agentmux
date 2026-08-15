@@ -7,7 +7,8 @@ import {
   FALLBACK_BASE_REF,
   orphanCountableRef,
   parseRemoteHead,
-  remoteHeadArgs
+  remoteHeadArgs,
+  type CountableBaseRef
 } from '../src/shared/base-ref.js'
 import { orphanCommitCountArgs, parseOrphanCommitCount } from '../src/shared/lane-orphan-commits.js'
 
@@ -35,8 +36,24 @@ async function git(repoPath: string, ...args: string[]): Promise<void> {
   expect(result.exitCode, `git ${args.join(' ')} failed: ${result.stderr}`).toBe(0)
 }
 
+/**
+ * 故意去数一个**规则不许数**的 base，好把「不许」的那个代价量出来。
+ *
+ * 生产里这条路走不通：`orphanCommitCountArgs` 只收 `CountableBaseRef`，而猜来的 base 铸不出。这里
+ * 之所以还要铸一个出来，是因为规则的全部理由就是「真去数会读出 0」——不实际数一次，那张表就只是
+ * 一句断言。所以这个 helper 的名字就叫 counterfactual：它是在演一件**已经被类型系统挡掉**的事。
+ */
+function counterfactualRef(ref: string): CountableBaseRef {
+  const minted = orphanCountableRef({ ref, source: 'remote-head' })
+  if (minted === null) throw new Error(`铸不出可数 ref: ${ref}`)
+  return minted
+}
+
 async function orphanCount(repoPath: string, branch: string, baseRef: string): Promise<number | null> {
-  const result = await host.run('git', orphanCommitCountArgs({ repoPath, branch, baseRef }))
+  const result = await host.run(
+    'git',
+    orphanCommitCountArgs({ repoPath, branch, baseRef: counterfactualRef(baseRef) })
+  )
   return parseOrphanCommitCount(result.stdout, result.exitCode)
 }
 
