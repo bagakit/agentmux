@@ -119,7 +119,8 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'list.agents': true,
   interrupt: true,
   resume: true,
-  stop: true
+  stop: true,
+  'browser.run': true
 }
 
 const PERMISSION_KIND_MEMBERS = Object.keys(PERMISSION_KIND_ANCHOR) as readonly PermissionOptionKind[]
@@ -287,7 +288,12 @@ describe('三条联合的成员判定只有一处声明', () => {
     // 缺失而抛（target/destination 不合法），关键是它**不会**抛「操作不合法」。于是这条恰好只钉住那道
     // membership 闸，不连带钉住十三种请求各自的形状。
     it('每个操作全部越过 membership 闸（各自因别的字段失败，不是因为操作名）', () => {
-      expect(CONTROL_OPERATION_MEMBERS.length, '操作锚点是空的，下面的循环是死代码').toBe(13)
+      // 自检只防「Object.entries/keys 拿到空」这种失灵——**条数由 tsc 钉住**：锚点是
+      // `Record<AgentMuxControlRequest['operation'], true>`，少一个键 TS2741、多一个键 TS2353。
+      // 写死具体条数不会多守住任何东西（封闭性已经是编译期的），只会让每加一个操作就多红一处，
+      // 而那种红教人「把数字改大」而不是「想想新操作对不对」。与 control-host.test.ts 里
+      // EXPECTED_BUDGET 那条自检同形，理由也是同一条。
+      expect(CONTROL_OPERATION_MEMBERS.length, '操作锚点是空的，下面的循环是死代码').toBeGreaterThan(10)
       for (const operation of CONTROL_OPERATION_MEMBERS) {
         expect(
           messageOf(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'request-1', operation })),
