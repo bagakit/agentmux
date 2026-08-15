@@ -144,7 +144,8 @@ describe('Renderer persistence boundary', () => {
       canGoBack: false,
       canGoForward: false,
       viewport: 'desktop',
-      error: null
+      error: null,
+      driving: false
     })
     tab = addWorkbenchRegion(tab, 'region-browser', 'down', {
       regionId: 'region-file',

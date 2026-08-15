@@ -1,0 +1,43 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/plans/agentmux-agent-browser-drive-requirements.md"
+  },
+  "source_refs": [
+    "docs/plans/agentmux-agent-browser-drive-requirements.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "apps/desktop/src/main/browser-view-manager.ts",
+    "apps/desktop/src/shared/contracts.ts",
+    "apps/desktop/src/renderer/src/lib/workbench-tab-marks.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "驱动状态进入 Browser 快照，并在标签标记上画出来",
+      "objective": "f-25s8fqvvr T-012 交付了页面内角标，它只在人看着那一页时成立；R5 记为「尚未做」的另一半是应用 chrome 上的驻留提示——人在别处干活时也知道哪一格在被 Agent 驱动。落点选标签标记簇（workbench-tab-marks.ts），因为它正好回答「这张我没切过去的 Tab 里有什么」，且它是本仓少数渲染能被测试真执行到的地方（WorkbenchTabMarks.tsx 当初就是为此单独拆出的）。",
+      "outcome": "Agent 在驱动某个 Browser 时，不切到那张 Tab 也能从标签上看出是哪一格；运行结束标记自行退回。",
+      "depends_on": [],
+      "acceptance": [
+        "BrowserSnapshot 增加驱动位，由 Main 的 runScript 在开始/结束时经既有 emit 推送——不新建第二条事件通路，也不在渲染进程另存一份驱动真相。",
+        "驱动位必须进入标记的 appearance（去重键）：两个 Browser Region 一个在被驱动一个没有，标签上要画两个标记。不进去的话它们被折成一个，「哪一格在被驱动」当场丢失——这正是 markAppearance 的注释写明的判据。",
+        "驱动是瞬时事实，绝不持久化：persistedSurfaceSurvives 对 browser 面已整面剥离，这条不得为它开口子。冷启动复活一个「正在被驱动」的死标记比不画更糟。",
+        "tooltip 的人话（markLabel）要说得出这件事——标记簇会在上限处截断，被折掉的那一个只剩这句话能表达。",
+        "变异红绿：驱动位从 appearance 里去掉、标签图标不随驱动位改变、Main 侧结束时不复位，三处各自有测试变红。",
+        "零调用者检查：grep 驱动位字段，命中不得全在定义文件内。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm vitest run apps/desktop/test/workbench-tab-marks.test.ts apps/desktop/test/browser-run-script-wiring.test.ts",
+          "proves": "驱动位从 Main 推到渲染，标签标记随之改变且参与去重；运行结束后复位。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-agent-browser-drive-requirements.md",
+        "apps/desktop/src/renderer/src/lib/workbench-tab-marks.ts",
+        "apps/desktop/src/main/browser-view-manager.ts"
+      ]
+    }
+  ]
+}

@@ -23,7 +23,7 @@ export type WorkbenchTabMark =
   | { kind: 'terminal'; regionId: string }
   | { kind: 'file'; regionId: string }
   | { kind: 'launcher'; regionId: string }
-  | { kind: 'browser'; regionId: string }
+  | { kind: 'browser'; driving: boolean; regionId: string }
 
 /**
  * 一个 Region 解析出来的 Agent 事实，或 null 表示「这个 Region 上没有 Agent」。
@@ -135,8 +135,14 @@ export function workbenchTabMarks(
  */
 export function markAppearance(mark: WorkbenchTabMark): string {
   // agent 标记画的是 Provider 图标 + 状态点，所以这两样都进 appearance：换 Provider 或换状态都是
-  // 肉眼能分辨的差别。其余每一类都只画一个固定图标，kind 本身就是它的全部外观。
-  return mark.kind === 'agent' ? `agent:${mark.providerId}:${mark.status.state}` : mark.kind
+  // 肉眼能分辨的差别。
+  if (mark.kind === 'agent') return `agent:${mark.providerId}:${mark.status.state}`
+  // browser 标记按「有没有 Agent 在驱动它」分成两个外观。这一位**必须**进来：一张 Tab 上一个
+  // Browser 在被驱动、另一个闲着时，不进来就会被折成一个标记，而「哪一格在被驱动」正是这次要
+  // 让人看见的那条信息——折掉它等于这个功能没做。它也确实画得不一样（驱动态画 Bot，闲着画地球）。
+  if (mark.kind === 'browser') return mark.driving ? 'browser:driving' : 'browser'
+  // 其余每一类都只画一个固定图标，kind 本身就是它的全部外观。
+  return mark.kind
 }
 
 function surfaceMark(
@@ -162,7 +168,7 @@ function surfaceMark(
     case 'launcher':
       return { kind: 'launcher', regionId: surface.regionId }
     case 'browser':
-      return { kind: 'browser', regionId: surface.regionId }
+      return { kind: 'browser', driving: surface.driving, regionId: surface.regionId }
     default:
       // noImplicitReturns 未开：少一支时 tsc 只把返回类型放宽含 undefined，标签上就静默漏画一种 Region
       // 的标记。这一句让新增 surface kind 在这里编译不过——与本文件 markLabel 的 never 守卫同一个理由，
@@ -221,7 +227,9 @@ function markLabel(mark: WorkbenchTabMark): string {
     case 'launcher':
       return 'New tab'
     case 'browser':
-      return 'Browser'
+      // 被驱动的那一格在 tooltip 里也要说得出来：标记簇会在上限处截断，被折掉时这句话是它唯一
+      // 的痕迹——而「哪一格在被 Agent 驱动」恰恰是最不该被静默折掉的那条。
+      return mark.driving ? 'Browser (Agent driving)' : 'Browser'
     default: {
       // 与渲染那边同一个理由：本仓没开 noImplicitReturns，少一支时 tsc 只是把返回类型放宽成含
       // undefined。这一句才让新增种类在这里也编译不过——否则新种类会在 tooltip 里静默变成 undefined。

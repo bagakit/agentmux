@@ -39,7 +39,7 @@ function fileSurface(regionId: string, path: string): WorkbenchSurface {
   return { regionId, kind: 'file', workspaceId: 'workspace', path }
 }
 
-function browserSurface(regionId: string): WorkbenchSurface {
+function browserSurface(regionId: string, driving = false): WorkbenchSurface {
   return {
     regionId,
     kind: 'browser',
@@ -54,7 +54,8 @@ function browserSurface(regionId: string): WorkbenchSurface {
     canGoForward: false,
     loading: false,
     viewport: 'desktop',
-    error: null
+    error: null,
+    driving
   }
 }
 
@@ -147,7 +148,7 @@ describe('workbenchTabMarks：画出来不一样的都要在', () => {
     const tab: WorkbenchTab = { ...base, titleRegionId: 'region-1' }
     // 若实现改成直接用 Object.values 的顺序，第一个标记会变成 terminal——标签上画的第一个图标
     // 就不是这张 Tab 自己的身份了。
-    expect(workbenchTabMarks(tab, noAgents)[0]).toEqual({ kind: 'browser', regionId: 'region-1' })
+    expect(workbenchTabMarks(tab, noAgents)[0]).toEqual({ kind: 'browser', driving: false, regionId: 'region-1' })
   })
 })
 
@@ -188,6 +189,46 @@ describe('workbenchTabMarks：画出来一样的只留一个', () => {
   })
 })
 
+/**
+ * 「这一格正在被 Agent 驱动」要在标签上认得出来。
+ *
+ * 为什么标签上非有这条不可：页面内角标（T-012）只在人**看着那一页**时成立，而人恰恰常在别处
+ * 干活。这条判的是另一半覆盖面——不切过去也知道是哪一格。
+ */
+describe('workbenchTabMarks：驱动中的 Browser 与闲着的分得开', () => {
+  it('一个在被驱动、一个闲着的两个 Browser Region，标签上画两个标记', () => {
+    // 这条是本功能的全部要害。`driving` 不进 appearance 的话这两个会被折成一个，而被折掉的
+    // 恰恰是「哪一格在被驱动」——功能当场归零，且看起来只是"去重工作正常"。
+    const tab = tabWith(browserSurface('region-0', true), browserSurface('region-1', false))
+    expect(workbenchTabMarks(tab, noAgents)).toEqual([
+      { kind: 'browser', driving: true, regionId: 'region-0' },
+      { kind: 'browser', driving: false, regionId: 'region-1' }
+    ])
+  })
+
+  it('反向：两个都在被驱动时仍然只画一个——它们画出来逐像素相同', () => {
+    // 没有这一半，一个「browser 标记一律不去重」的实现也会让上面那条绿，而那等于三个闲着的
+    // Browser 堆三个一样的地球图标，正是去重规则要挡的东西。
+    const tab = tabWith(browserSurface('region-0', true), browserSurface('region-1', true))
+    expect(workbenchTabMarks(tab, noAgents)).toEqual([
+      { kind: 'browser', driving: true, regionId: 'region-0' }
+    ])
+  })
+
+  it('appearance 把两种状态分成两个键，闲着的那两个仍是同一个键', () => {
+    // 直接判去重键本身：它同时是「画出来一不一样」的答案，两者收成一个取值就不会漂。
+    const driving = markAppearance({ kind: 'browser', driving: true, regionId: 'r' })
+    const idle = markAppearance({ kind: 'browser', driving: false, regionId: 'r' })
+    expect(driving).not.toBe(idle)
+    expect(markAppearance({ kind: 'browser', driving: false, regionId: 'other' })).toBe(idle)
+  })
+
+  it('tooltip 的人话说得出「正在被驱动」——被上限折掉时这句话是它唯一的痕迹', () => {
+    const tab = tabWith(browserSurface('region-0', true), fileSurface('region-1', 'a.ts'))
+    expect(tabRegionSummary(tab, noAgents)).toBe('Regions: Browser (Agent driving), File')
+  })
+})
+
 describe('workbenchTabMarks：上限', () => {
   it('可区分的种类超过上限时截断，且标题 Region 那个不被截掉', () => {
     const tab = tabWith(
@@ -201,7 +242,7 @@ describe('workbenchTabMarks：上限', () => {
     }))
     expect(marks).toHaveLength(WORKBENCH_TAB_MARK_LIMIT)
     // 头部必须是标题 Region：截断从尾部发生，不能把身份挤掉。
-    expect(marks[0]).toEqual({ kind: 'browser', regionId: 'region-0' })
+    expect(marks[0]).toEqual({ kind: 'browser', driving: false, regionId: 'region-0' })
   })
 
   it('上限是 3：这个数字本身有人守，改大改小都会红', () => {
@@ -282,6 +323,25 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     expect(html).toContain('lucide-square-terminal')
     // 两个：launcher 与终端画出来不一样，都要在（若被折成一种，这里只剩一个）。
     expect(html.match(/<svg/g)).toHaveLength(2)
+  })
+
+  it('被驱动的 Browser 画的不是地球——它与旁边闲着的那个一眼分得开', () => {
+    // 纯函数那一族只能证「算出来是两个标记」。这一条证**画出来真的不一样**：让渲染对 driving
+    // 视而不见（两支都返回 Globe2），纯函数那边照样全绿，而用户看到的是两个一模一样的地球。
+    const html = render(tabWith(browserSurface('region-0', true), browserSurface('region-1', false)))
+    expect(html).toContain('lucide-bot')
+    expect(html).toContain('lucide-earth')
+    expect(html.match(/<svg/g)).toHaveLength(2)
+    // 悬停也要说得出来：图标本身不自带含义，标签上没有别的地方能解释这只 Bot 是什么意思。
+    expect(html).toContain('Agent driving')
+  })
+
+  it('反向：没在被驱动的 Browser 画地球，不画 Bot', () => {
+    // 少了这一半，一个「browser 一律画 Bot」的实现会让上面那条绿——而那等于每个浏览器看起来
+    // 都在被 Agent 操作。
+    const html = render(tabWith(browserSurface('region-0', false)))
+    expect(html).toContain('lucide-earth')
+    expect(html).not.toContain('lucide-bot')
   })
 })
 
