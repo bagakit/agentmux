@@ -298,17 +298,25 @@ styles/
   base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
   chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
   selector.css    同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
-  dock.css        Tool Dock 及其面板（Explorer、Topics、Branches、Agents）
+  dock.css        Tool Dock 及其面板（Explorer、Topics、Agents）
+  source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
   workbench.css   Pane、Region、分屏、拖放
   terminal.css    终端表面与它的状态覆盖层
-  surfaces.css    Board、Settings、New Tab、Launch、Welcome
+  surfaces.css    Settings、New Tab、Launch、Welcome
+  board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   browser.css     Browser 工具与地址栏
-  agent.css       Composer、Markdown 回合、Roster
+  agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
+  composer.css    Composer——Agent 那格底部的输入条
   activity.css    Activity 时间线、机器步骤与标尺
   activity-conversation.css  Activity 对话回合与 Markdown 内容
+  conversation-avatar.css    两条对话轴共用的说话人身份标记
+  conversation-axis.css      说话人轴与 this-agent 轴（标尺之上的身份轨）
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
   agent-panels.css  Agent 的 Portal 面板（花名册、计数树、资源用量）——紧跟 overlays
 ```
+
+这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`
+列表逐一对上，拆一刀而忘了改这里当场红。描述那一列不锁——它是写给人看的判断，不是清单。
 
 约束：
 
