@@ -27,6 +27,21 @@ describe('projectMonogram：牌面上的那个字', () => {
     expect(projectMonogram('中文项目')).toBe('中')
   })
 
+  it('零宽字符不是首字母——它会画出一枚完全看不见的牌子', () => {
+    // trim() 认识空格/NBSP/表意空格/BOM，**不**认识 U+200B。实测未修前返回 U+200B：牌面空无一物，
+    // 而空无一物正是这个函数存在要消灭的结果。零宽空格是富文本复制粘贴的常见污染物。
+    expect(projectMonogram('​project')).toBe('P')
+    expect(projectMonogram('​​﻿  project')).toBe('P')
+    // trim() 本来就认识的那几类，一并钉住，免得有人把剥零宽那步误当成它们的守卫。
+    expect(projectMonogram(' project')).toBe('P')
+    expect(projectMonogram('　project')).toBe('P')
+  })
+
+  it('串中间的 ZWJ 是承重的——剥零宽只剥前导，不许拆散家族 emoji', () => {
+    // 若上面那条改成全串替换，这条立刻红：👨‍👩‍👧 靠 U+200D 连成一个簇，剥掉就只剩 👨。
+    expect(projectMonogram('​👨‍👩‍👧 family')).toBe('👨‍👩‍👧')
+  })
+
   it('取不到就返回空串——不编一个看起来像首字母的 ? 或 #', () => {
     // 空串让调用方如实退回图形字形；编一个字符会让人以为项目真叫那个名。
     expect(projectMonogram('')).toBe('')

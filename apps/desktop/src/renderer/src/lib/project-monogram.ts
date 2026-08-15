@@ -26,10 +26,20 @@ import { speakerColorHue } from './conversation-avatar-color'
  * `Intl.Segmenter` 是平台自带的正确答案，Electron 43 的 V8 早已支持（ECMA-402，Chrome 87+），
  * 因此不引库、不手写代理对拼接——爬梯子到「原生平台能力」这一级就停。
  *
- * 先 `trim()` 再取：前导空白是名字的排版噪声，不是它的首字母。
+ * 先剥前缀再取。剥的是**两类**东西，它们都会让牌面空无一物，但 `trim()` 只认识其中一类：
+ * - 空白：前导空格是名字的排版噪声，不是它的首字母。`trim()` 认识普通空格、NBSP、表意空格
+ *   `　`、BOM（实测四者都被剥掉）。
+ * - **零宽字符**：`trim()` **不**认识 U+200B。实测 `projectMonogram('​project')` 返回
+ *   U+200B——一枚完全看不见的牌子，正是本函数存在要消灭的那个结果。零宽空格是富文本复制粘贴
+ *   的常见污染物，会跟着项目名一路进来。
+ *
+ * 只剥**前导**的零宽字符，不做全串替换：U+200D 在串中间是承重的（`👨‍👩‍👧` 靠它连成一个簇），
+ * 全局剥掉会把家族 emoji 拆散——那正好是上面那条要守的东西。
  */
+const LEADING_ZERO_WIDTH = /^[​-‍⁠﻿]+/u
+
 function firstGrapheme(value: string): string {
-  const trimmed = value.trim()
+  const trimmed = value.replace(LEADING_ZERO_WIDTH, '').trim()
   if (!trimmed) return ''
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   return [...segmenter.segment(trimmed)][0]?.segment ?? ''

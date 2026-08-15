@@ -78,6 +78,13 @@ function flatten(value: string): string {
  *
  * 下界：单个簇就超预算时（例如 60 个组合重音叠在一个字母上）两边都留不下任何簇，只剩一个 `…`。
  * 有界、不崩，但也确实什么都没留下。路径里不会出现这种东西，故不为它加一条特例分支。
+ * 那两处 `?? value.length` 兜底正是这条下界的实现：它**承重**，换成 `?? 0` 会让尾切原样吐回整串
+ * （实测 65 个码元，超上界 17 格）。尾切那处有判据钉着；头切那处够不着（`value.length > budget`
+ * 保证循环收不完所有簇），是等价变异体，不为它写测试。
+ *
+ * 两头都要削掉切口上的空白：头切 `trimEnd()`，尾切 `trimStart()`。少任何一边都会漏出
+ * `…␠file.md` 或 `path␠…` 这种看起来像少了一截的东西。这在路径上**不是假想**——macOS 上
+ * `My Notes`、`Application Support` 都带空格，实测 `…␠zzz….md`。
  *
  * 预算按**码元**算而不是按簇算：上界要守的是「一行放不放得下」，而排版宽度跟码元数更接近（一个
  * emoji 占两格，恰好也是两个码元）。所以这里是「在不超过 limit 个码元的前提下，尽可能多留完整的
@@ -95,7 +102,7 @@ export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit =
       start -= 1
       taken += clusters[start]!.segment.length
     }
-    return `…${value.slice(clusters[start]?.index ?? value.length)}`
+    return `…${value.slice(clusters[start]?.index ?? value.length).trimStart()}`
   }
   let end = 0
   let taken = 0
@@ -111,18 +118,15 @@ export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit =
  *
  * `toolName` 缺失时**不拿标题去凑**：标题是展示文本，可能已经被上游改写过，用它查表等于把
  * 展示层的措辞当成协议字段。
+ *
+ * `limit` 默认是全宽上界；{@link stepTitle} 传一个扣掉工具名之后的小预算进来，见那里的
+ * 「一个预算」说明。此前这里是两个函数——一个导出的无参版包着一个私有的带预算版——而那个
+ * 私有版与本函数逐字相同，只多一个形参。默认值把两者合成一个。
  */
-export function stepSummary(toolName: string | undefined, rawInput: string | undefined): string | null {
-  return stepSummaryWithin(toolName, rawInput, MAX_STEP_SUMMARY_LENGTH)
-}
-
-/**
- * 同 {@link stepSummary}，但截到调用方给的预算内——给 {@link stepTitle} 用，见那里的「一个预算」说明。
- */
-function stepSummaryWithin(
+export function stepSummary(
   toolName: string | undefined,
   rawInput: string | undefined,
-  limit: number
+  limit: number = MAX_STEP_SUMMARY_LENGTH
 ): string | null {
   if (!toolName || !rawInput) return null
   const fields = SUMMARY_FIELDS[toolName.toLowerCase()]
@@ -180,6 +184,6 @@ export function stepTitle(title: string, toolName: string | undefined, rawInput:
   const budget = MAX_STEP_SUMMARY_LENGTH - prefix.length
   // 工具名本身就撑满一行，没有格子留给摘要了：只保留工具名，并按普通文本截进上界。
   if (budget <= 1) return clampStep(title)
-  const summary = stepSummaryWithin(toolName, rawInput, budget)
+  const summary = stepSummary(toolName, rawInput, budget)
   return summary ? `${prefix}${summary}` : clampStep(title)
 }
