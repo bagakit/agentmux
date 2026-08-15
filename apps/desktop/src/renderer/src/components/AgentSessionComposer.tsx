@@ -137,7 +137,10 @@ export function AgentSessionComposer({
     const value = text
     if (!value.trim()) return
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
-    enqueueAgentSteer(sessionId, value)
+    // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
+    // must leave the words in the box — the store has already said why, and clearing here would strand
+    // the user's message in a banner they cannot copy from.
+    if (!enqueueAgentSteer(sessionId, value)) return
     setAgentComposerDraft(sessionId, '')
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
     historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
