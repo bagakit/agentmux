@@ -83,6 +83,14 @@ export function humanizePromptDeliveryError(
     // AGENT_SESSION_STILL_RUNNING（client.ts:1866-1868），Resume 按钮也只在
     // disconnected/missing/exited 时渲染（SessionPane.tsx:254）。blocked/error 两条原先各带一个
     // "or resume it"，是同一个缺陷的第四、第五例，被 CONSUMED 那条的禁止清单式守卫整整放过。
+    //
+    // 可达性现状（2026-09-13 实查，会变，别当永久事实）：四条里只有 waiting / done 今天有活的生产者。
+    // blocked 与 error **当前没有任何 Provider 能产出**——hook 侧 eventState 只回
+    // working/waiting/done/unknown（hook-normalizer.ts:235-247），全仓 Provider 规则里没有一条
+    // state 是 blocked 或 error；另一个写入口是 ACP（client.ts:568），而今天没有 Provider 声明
+    // acpStrategy: adapter。所以那两条是**接上第一个这类 Provider 当天才会亮**的分支。
+    // 它们照样按真话写、也照样被守卫遍历到：休眠不是可以先写错的理由——正因为没有活的生产者，
+    // 错了也不会有人在使用中撞见，只会等到那一天直接发给用户。
     const semanticMessage = options.semanticState === 'done'
       ? 'The Agent turn is complete, but composer readiness has not been verified yet; keep the draft and retry when the readiness check finishes.'
       : options.semanticState === 'waiting'
