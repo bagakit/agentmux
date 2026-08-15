@@ -13,7 +13,7 @@ import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { regionDisplayName, regionSurfaceLabel } from '../lib/region-display-name'
 import { regionIds } from '@agentmux/layout'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
-import { workspaceForSession } from '../lib/workbench-tabs'
+import { workspaceRootForPath } from '../lib/workbench-tabs'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -132,12 +132,14 @@ export function SessionPane({
   // shortenPath matches and strips it, producing a relative path rooted at the wrong repo. Measured:
   // session /Users/me/proj/repo/src/auth.ts under a wrong root of /Users/me/proj renders `repo/src/auth.ts`,
   // which reads as a real answer. A wrong path that looks right is worse than a long one.
-  // workspaceForSession is the existing predicate for this question (it already handles scratch subdirs);
-  // this is its fourth caller, not a fourth spelling.
+  //
+  // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (/repo/sub) is
+  // owned by no workspace exactly, and answering '' there would make its absolute path links
+  // unclickable. See the same note in TerminalView.
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
   const activeWorkspaceRoot = useAppStore((state) =>
-    (session ? workspaceForSession(state.config ?? null, session)?.path : undefined) ?? ''
+    (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
   // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
   // surfaces through reportError — "click opened nothing" is never silent.

@@ -14,6 +14,11 @@ const fixture = vi.hoisted(() => ({
   state: {
     config: null as AppConfig | null,
     sessions: [] as SessionSnapshot[],
+    // 真 store 里 timelines 恒为一个对象（初值 `{}`，且不进 partialize，故重启后仍是 `{}`）。
+    // 这份手搓的 state 曾经漏了它，于是渲染出一个生产里不存在的世界：ProjectActivity 一读
+    // `timelines[session.id]` 就抛 TypeError，六条断言全红。漏一个字段的假 store 不是「测试挂了」，
+    // 是**判据在替被测代码回答问题**——它逼着组件去处理一个真实状态机里到不了的形状。
+    timelines: {} as Record<string, { items: unknown[] }>,
     activeWorkspaceId: 'project-a',
     mainSurface: 'workbench' as const,
     projectRailOpen: true,

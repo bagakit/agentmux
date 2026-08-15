@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
-import { workspaceForSession } from '../src/renderer/src/lib/workbench-tabs.js'
+import { workspaceForSession, workspaceRootForPath } from '../src/renderer/src/lib/workbench-tabs.js'
 import { stepSummary } from '../src/renderer/src/lib/activity-step-summary.js'
+import { resolveWorkspaceRelativePath } from '../src/renderer/src/lib/terminal-path-link.js'
 
 // 一格终端／时间线把绝对路径缩短时，用的是**哪个**仓根。
 //
@@ -46,7 +47,7 @@ describe('一格的仓根取自它自己的 session，不取当前激活的 work
   it('被搬走之后仍然缩短到自己的仓，而不是按目标仓剥前缀', () => {
     const session = agentAt('/Users/me/proj/repo')
     // 视图已被搬到 ws-parent（激活的是它），但 session 没动。
-    const root = workspaceForSession(config, session)?.path ?? ''
+    const root = workspaceRootForPath(config, session) ?? ''
     expect(root, '仓根应当由 session 的 workspacePath 决定，与哪个 workspace 被激活无关').toBe('/Users/me/proj/repo')
     expect(stepSummary('Read', readOf(SESSION_FILE), 48, root)).toBe('src/auth.ts')
   })
@@ -69,8 +70,48 @@ describe('一格的仓根取自它自己的 session，不取当前激活的 work
 
   it('认不出归属的 session 退回空根——宁可不缩短，也不拿一个凑合的根去剥', () => {
     const foreign = agentAt('/Users/me/elsewhere/thing')
-    expect(workspaceForSession(config, foreign)?.path).toBeUndefined()
+    expect(workspaceRootForPath(config, foreign)).toBeUndefined()
     // 空根＝不剥仓根，只做 ~ 折叠。长，但不假。
     expect(stepSummary('Read', readOf(SESSION_FILE), 48, '')).toBe('~/proj/repo/src/auth.ts')
+  })
+})
+
+// 「归属」与「包含」是两个问题，分成两个函数而不是把归属放宽——放宽会改动八个只要精确归属的调用方
+// （侧栏计数、Topic 绑定、工具坞、持久化…），拿正确性换排版。
+//
+// 触发这条判据的是一个真实操作：文件树右键「Open in Terminal」一个**子目录**，
+// store 落下 `workspacePath: /repo/sub`（store.ts `workspacePath ?? workspace.path`），
+// 而没有任何 workspace **精确**拥有它。
+describe('子目录终端：路径的根问「落在哪个仓里」，不问「归谁所有」', () => {
+  const subdir = agentAt('/Users/me/proj/repo/apps/desktop')
+
+  it('归属答不出——这正是它必须是另一个问题的原因', () => {
+    expect(workspaceForSession(config, subdir)).toBeUndefined()
+  })
+
+  it('包含答得出，并且取最长的那个仓（嵌套时不能剥到外层去）', () => {
+    // /Users/me/proj 与 /Users/me/proj/repo 都注册着，两个都「包含」它。取长的那个：
+    // 取短的会剥出 `repo/apps/...`，读起来像是 parent 仓里的文件——正是上面钉住的那种坏输出。
+    expect(workspaceRootForPath(config, subdir)).toBe('/Users/me/proj/repo')
+  })
+
+  it('取不到根时，这一格的绝对路径链接会整个失效——不是变长，是点不开', () => {
+    // resolveWorkspaceRelativePath 对任何绝对路径在空根下一律返回 null，
+    // 而 null 意味着这段文本不被下划线、点了也没有反应。
+    // 「长」只是难读，「死」是把用户本来有的能力拿走了（原则 11：绕过我这段代码这条路还通吗？通 ⇒ 红线）。
+    expect(resolveWorkspaceRelativePath(SESSION_FILE, '')).toBeNull()
+    expect(resolveWorkspaceRelativePath(SESSION_FILE, workspaceRootForPath(config, subdir) ?? ''))
+      .toBe('src/auth.ts')
+  })
+
+  it('不是同一台机器上的仓不算包含——前缀像也不行', () => {
+    const remote = { ...agentAt('/Users/me/proj/repo/apps'), hostId: 'other' } as SessionSnapshot
+    expect(workspaceRootForPath(config, remote)).toBeUndefined()
+  })
+
+  it('只在路径分隔处切，`/proj/repo-backup` 不算 `/proj/repo` 的子目录', () => {
+    // 裸 startsWith 会把它算进去，于是剥出 `-backup/x.ts` 这种没有任何意义的相对路径。
+    const sibling = agentAt('/Users/me/proj/repo-backup/src')
+    expect(workspaceRootForPath(config, sibling)).toBe('/Users/me/proj')
   })
 })
