@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 123
+    "next_cursor": 124
   },
   "features": [
     {
@@ -1248,6 +1248,16 @@
     {
       "feat_id": "f-25y8ffp9c",
       "title": "doctor report 对一个 Provider 说了反话：hookInstallation 是全局常量而策略是每家自己的",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25z8fff73",
+      "title": "待拍板：准入该用实时判定，还是把 claim 降级为幂等记录（评审给出反对意见）",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
