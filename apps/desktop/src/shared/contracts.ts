@@ -21,6 +21,7 @@ import type {
   AgentMuxRunState,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
+  AgentTerminalOutputChannelState,
   AgentTurnUsage,
   AgentMuxControlError,
   AgentMuxControlErrorCode,
@@ -868,6 +869,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
+      /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
+      terminalOutputChannel?: AgentTerminalOutputChannelState
       pendingInteraction?: AgentMuxInteractionRequest
       /**
        * The launch-option choice ids that fixed this Agent's security posture at spawn, projected from
