@@ -223,9 +223,14 @@ git log -L 3660,3710:packages/core/src/client.ts
     **【勘误，两条独立评审线各自发现并已逐条复核】这条 PARTIAL 评级是错的，它不是 partial，
     是同族的第二个完整永久锁死。** 原评级建立在「同 operationId 重试可续」这个前提上——
     该分支确实存在（`:186` 的 `existing?.submissionId === submissionId` 续做），但**产品侧递不进那个
-    id**：`runtime-controller.ts:798` 每次 `submitPrompt` 都 `randomUUID()`，两个 renderer 调用点
-    （`store.ts:2327` 手动、`store.ts:4405` steer 队列）都只传 `(control, text)`，没有任何途径把旧 id
-    传回去。于是产品**恒走** `:190` 的 BUSY 分支，续做分支从产品视角是死代码。
+    id**。论证**不走「数调用方」这条路**——数调用方天然脆，少数一个就崩（初稿只数了两个 renderer
+    调用点，漏了 `apps/desktop/src/main/index.ts:83` 的 continuous-progress 循环这第三个）。
+    真正的判据是**结构性**的：id 在唯一一处漏斗无条件铸出（`runtime-controller.ts:798`
+    的 `operationId: randomUUID()`），而**整条调用链上没有任何签名带 id 参数**可供注入——
+    IPC handler（`ipc.ts:547`）、preload（`preload/index.ts:180`）、契约
+    （`shared/contracts.ts:1199`）全是 `(session, prompt)` 两参。另一个 `submitInputPlan` 调用方
+    （`client.ts:3294` 的 deliverPostLaunchPrompt）也自铸 id。于是产品**恒走** `:190` 的 BUSY
+    分支，续做分支从产品视角是死代码。
     清除也只有两处：`client.ts:1008`（进程退出）与 `:1952`（resume 换新 runId）——turn-end 的
     persistReceipt 不碰它，重连的 republishLiveRunState 不碰它，无 TTL、无清扫。
     `:279-283` 的 stale-retry 把 BUSY 算进「可能陈旧」，但只做 `registry.load` 后用同一个新 id 再
@@ -233,6 +238,8 @@ git log -L 3660,3710:packages/core/src/client.ts
 
     **写下这条勘误的判别器**：原评级只读了 core 侧那条恢复分支的**存在性**，没有去数**产品侧有没有
     调用方能满足它的前提**。一条存在但无人能触发的恢复路径，在可达性上等于不存在。
+    **而论证不可达时，别用「数调用方」——要用「有没有签名能传进去」**：前者少数一个就崩（本条初稿
+    就漏了第三个调用方），后者是结构性的，一个新调用方也绕不过去。
     （tracker `f-25q8fccdm` T-007 认领修复。）
   - `composer-submit-mode.ts:60-62`（本文初稿未覆盖，见下）——**这一个是 permanent-when-idle**。
 
