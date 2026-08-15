@@ -76,7 +76,10 @@ describe('每一项的 gating——不该出现时不出现', () => {
 
   it('不可移除的行（Scratch）：不画移除，也就没有那道分隔线', () => {
     const entries = modelFor({ removable: false }).entries
-    expect(actionIds(entries)).not.toContain('remove')
+    // 钉整份动作清单而不是「remove 不在里面」：`not.toContain` 与下面那条 `some(...)===false`
+    // 都对空 entries 恒成立，于是菜单整个画不出来时这条照样绿——而那比多一项严重得多。
+    // （`modelFor` 的默认就是 branch:null + isLocal，所以基线里本来就没有 copy-branch。）
+    expect(actionIds(entries)).toEqual(['copy-path', 'reveal', 'open-terminal'])
     expect(entries.some((entry) => entry.kind === 'separator')).toBe(false)
   })
 

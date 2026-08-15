@@ -133,6 +133,9 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
       writeClipboardText: vi.fn(async () => {}),
       swapMenu: []
     }).entries
+    // 先钉住「菜单本身还在」：下面两条都是「没有 swap」的形状，对空 entries 恒成立，于是整份
+    // 菜单一项都不画时它们照样绿——而「右键出来个空菜单」比「多了两条换位项」严重得多。
+    expect(entries.filter((entry) => entry.kind === 'action').length).toBeGreaterThan(0)
     expect(entries.some((entry) => entry.kind === 'swap')).toBe(false)
     // 不给 swapMenu 时同样不出现。
     const withoutSwap = createRegionCopyModel({
@@ -140,6 +143,7 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
       agentSessionId: null,
       writeClipboardText: vi.fn(async () => {})
     }).entries
+    expect(withoutSwap.filter((entry) => entry.kind === 'action').length).toBeGreaterThan(0)
     expect(withoutSwap.some((entry) => entry.kind === 'swap')).toBe(false)
   })
 
@@ -216,8 +220,9 @@ describe('菜单画哪几项、什么顺序', () => {
   })
 
   it('没有交接可做时不画那道线', () => {
-    // 只有一组东西，线没有可隔的对象。
-    expect(entriesFor(null).some((entry) => entry.kind === 'separator')).toBe(false)
+    // 只有一组东西，线没有可隔的对象。钉整份 kind 序列而不是「没有 separator」：后者是
+    // `some(...)===false`，对空 entries 恒成立——菜单整个画不出来时它照样绿，而那更严重。
+    expect(entriesFor(null).map((entry) => entry.kind)).toEqual(['action'])
   })
 
   it('清单里每一项都真的点得动，且复制的内容与那个字段一致', async () => {
@@ -395,6 +400,8 @@ describe('促升一项住在 entries 里：给了 promote 就有，没有就整�
       agentSessionId: null,
       writeClipboardText: vi.fn(async () => {})
     }).entries
+    // 菜单本身得在：`some(...)===false` 与下面那条 `.at(-1)` 都对空 entries 恒成立。
+    expect(baseline.filter((entry) => entry.kind === 'action').length).toBeGreaterThan(0)
     expect(baseline.some((entry) => entry.kind === 'promote'), '没传 promote 却出现了促升项').toBe(false)
     // 不给一条挂在末尾、什么都不隔的分隔线。
     expect(baseline.at(-1)?.kind, '不传 promote 却留了一道尾部分隔线').not.toBe('separator')

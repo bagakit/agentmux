@@ -333,7 +333,9 @@ describe('Timeline convergence', () => {
     })
     await launched
 
-    expect(useAppStore.getState().sessions.some((candidate) => candidate.id === session.id)).toBe(false)
+    // 钉整份 sessions，不是 `some(id === …)===false`：这个 it() 从 `sessions: []` 起步，所以那一句
+    // 在「store 整个没动过」时也绿——而那正是另一种缺陷。空列表是这里正确的结局，直接说出来。
+    expect(useAppStore.getState().sessions).toEqual([])
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
   })
 

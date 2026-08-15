@@ -213,6 +213,17 @@ const DELIBERATE: ReadonlyArray<{
       '认出「谁又自己手抄了一份序表」——删了这个导出，那道守卫就没有权威清单可比，失明。'
   },
   {
+    module: 'lib/attention-event.ts',
+    name: 'URGENT_ATTENTION_CATEGORIES',
+    kind: 'test-only',
+    premise:
+      '「会上墨的 category」的 SSOT，从 ATTENTION_URGENCY 里 urgent 的键派生。生产侧三处 rollup' +
+      '（row-attention / fanout-group / attentionAccentFor）问的都是单个 category 紧不紧急，走类型守卫' +
+      'isUrgentAttention，不需要这份清单——它们此前各自手抄 `!== \'done\'`，af52fef9 收敛掉的正是那个。' +
+      '清单本身留给结构守卫：topic-agent-status.test.ts 与 board-run-card.test.ts 遍历它逐个驱动，' +
+      '删了这个导出，那两道守卫就只能手抄两个名字，Core 加一个会上色的 category 时它们静默漏测。'
+  },
+  {
     module: 'lib/attention-vocabulary.ts',
     name: 'AGENT_DISPLAY_STATES',
     kind: 'test-only',
@@ -327,7 +338,7 @@ const DELIBERATE: ReadonlyArray<{
  * 余量时才开火，买到的是运气而非封闭性，还随代码库长大静默失效。加一条豁免必须同时改这个数字，于是每次
  * 增减都在 review 里显形；下面「每条豁免逐条有效」的自检杀「同数换条」那一侧，两条合起来才封住这张表。
  */
-const DELIBERATE_COUNT = 14
+const DELIBERATE_COUNT = 15
 
 const exemptionKey = (module: string, name: string): string => `${module}#${name}`
 const EXEMPT = new Set(DELIBERATE.map((entry) => exemptionKey(entry.module, entry.name)))

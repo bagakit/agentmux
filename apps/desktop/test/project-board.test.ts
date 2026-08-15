@@ -141,6 +141,9 @@ describe('Project Branch × Status board projection', () => {
     const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
       session({ id: 'other-project', workspacePath: '/other-repo' })
     ])
+    // 先钉住「分支都投影出来了」：`every(...)===true` 对空数组恒成立，于是 lanes 一条都不产出
+    // 时这条照样绿——而「Board 上一条分支都不画」比「串了别的项目的 Session」更严重。
+    expect(lanes.map((lane) => lane.branch.name)).toEqual(['main', 'feature/ui', 'feature/unbound'])
     expect(lanes.every((lane) => lane.sessions.length === 0)).toBe(true)
   })
 
@@ -216,7 +219,11 @@ describe('Scratch Topic × Status board rows', () => {
   })
 
   it('always gives a Topic row a path, so its Inbox is never gated on creating a directory', () => {
-    expect(buildTopicBoardRows(topics, scratch, []).every((row) => row.path !== null)).toBe(true)
+    const rows = buildTopicBoardRows(topics, scratch, [])
+    // 先钉住「每个 Topic 都投影出了一行」：`every(...)===true` 对空数组恒成立，于是投影整个
+    // 不产出行时这条照样绿——而那正是「Topic 在 Board 上消失了」，比缺个 path 严重得多。
+    expect(rows).toHaveLength(topics.length)
+    expect(rows.every((row) => row.path !== null)).toBe(true)
   })
 
   it('matches Sessions onto the filesystem Topic list and never reverse-derives a Topic', () => {

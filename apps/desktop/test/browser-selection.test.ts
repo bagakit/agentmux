@@ -119,7 +119,11 @@ describe('Main-owned Browser selection sanitizer', () => {
     expect(sanitized.selector).toHaveLength(BROWSER_SELECTION_LIMITS.selector)
     expect(sanitized.text).toHaveLength(BROWSER_SELECTION_LIMITS.text)
     expect(Object.keys(sanitized.attributes)).toHaveLength(BROWSER_SELECTION_LIMITS.attributes)
-    expect(Object.values(sanitized.attributes).every(
+    // 用 entries 的长度而不是 keys 的：下面这条是 `every(...)===true`，对空 values 恒成立，
+    // 而「键在、值全被裁没了」正是它该抓的那种缺陷——拿同一份 values 自证非空才算数。
+    const attributeValues = Object.values(sanitized.attributes)
+    expect(attributeValues).toHaveLength(BROWSER_SELECTION_LIMITS.attributes)
+    expect(attributeValues.every(
       (value) => value.length === BROWSER_SELECTION_LIMITS.attributeValue
     )).toBe(true)
     expect(sanitized.nearbyText.length).toBeLessThanOrEqual(BROWSER_SELECTION_LIMITS.nearbyTextItems)

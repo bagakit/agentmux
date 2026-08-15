@@ -194,8 +194,11 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
     // The remote ANSWERED, so naming the branch as absent is a true statement the user can act on.
     expect(result.kind === 'refused' && result.reason).toContain('ghost')
     expect(result.kind === 'refused' && result.reason).toMatch(/does not exist/u)
-    // Nothing was created, so gh must never have run.
-    expect((host.run as ReturnType<typeof vi.fn>).mock.calls.some(([command]) => command === 'gh')).toBe(false)
+    // Nothing was created, so gh must never have run. Pinning the WHOLE command list, not
+    // `.some(… === 'gh') === false`: that is vacuously true when nothing ran at all, and "the preflight
+    // never even asked the remote" is the worse defect of the two — it would mean this test passes
+    // while the refusal came from somewhere else entirely.
+    expect((host.run as ReturnType<typeof vi.fn>).mock.calls.map(([command]) => command)).toEqual(['git'])
   })
 
   // "I could not check" is not "it is fine". An unavailable preflight must fail closed.
@@ -211,7 +214,9 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
     // That is a false claim about their remote, so the wording is the thing under test here.
     expect(result.kind === 'refused' && result.reason).not.toMatch(/does not exist/u)
     expect(result.kind === 'refused' && result.reason).toMatch(/[Cc]ould not verify/u)
-    expect((host.run as ReturnType<typeof vi.fn>).mock.calls.some(([command]) => command === 'gh')).toBe(false)
+    // Same reason as above: the whole command list, so "the preflight never ran" cannot pass as
+    // "gh never ran".
+    expect((host.run as ReturnType<typeof vi.fn>).mock.calls.map(([command]) => command)).toEqual(['git'])
   })
 
   it('treats any other preflight exit as unverified, not as absence', async () => {

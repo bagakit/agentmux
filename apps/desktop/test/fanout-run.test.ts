@@ -324,7 +324,9 @@ describe('fan-out run', () => {
     })
 
     expect(launchedLanes(result)).toEqual([])
-    expect(result.lanes.every((entry) => entry.status === 'worktree-failed')).toBe(true)
+    // 钉整列状态，不是 `every(...)===true`——后者对空数组恒成立，而两条 lane 一条都没进结果
+    // （fan-out 把它们整个丢了）比状态判错严重得多。
+    expect(result.lanes.map((entry) => entry.status)).toEqual(['worktree-failed', 'worktree-failed'])
     // The config is unchanged: nothing registered, so nothing to unregister later.
     expect(cell.value.workspaces).toEqual([])
   })

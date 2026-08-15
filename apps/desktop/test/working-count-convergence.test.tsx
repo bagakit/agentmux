@@ -327,10 +327,6 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 状态」同答案，点画成静止的中性灰，而计数树的标题按 sessionBoardColumn 把它算作 working。
   // 现已合并成 `attention-event.ts` 的 statusDotTier 一处，running 走它自己那一档（.status--running
   // 在 chrome.css 里一直就有：绿、不脉冲）。两个组件的条目因此删掉——它们不再自己判。
-  '/lib/attention-event.ts':
-    '两处，都问"这一个状态归哪一档"而不是"有几个在干活"。(1) statusDotTier：这一行的点画哪一档，'
-    + 'working 与 running 各一档，因为脉冲的含义是"此刻有 turn 在途"，而 running 是活着但不在途中。'
-    + '(2) attentionSortClass：这一个状态排哪个序类，穷举 switch，喂给 attentionSortRank',
   // 下面两条是把检测器从「`x.state` 比 working」放宽到「也认裸名 `state`」之后**当场浮出来**的——
   // 它们一直就在生产代码里，只是先把状态存进了一个叫 state 的局部变量/形参，于是整张表对它们失明。
   // 记在这里而不是回退检测器：两处都不是计数，各自回答别的问题，但「这一处到底问什么」必须写下来，
@@ -339,6 +335,11 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
     'StatusCount 的图标三元：问"这一档配哪个图标"。数字由 rollup 算好后传进来，这里不参与计数',
   '/lib/resource-usage-panel.ts':
     '资源面板每行的尾巴："在干活"就不显示闲置时长，否则显示闲了多久。问的是"这一行要不要报 idle"'
+  // `/lib/attention-event.ts` 曾在这里，理由是「两处，都问'这一个状态归哪一档'」——statusDotTier 与
+  // attentionSortClass。两处现在都是**穷举 switch**（`case 'working': return state`），而 case 不是
+  // 二元比较，本检测器天然看不见（这正是它承重的盲点，见上面自检第 3 条）。statusDotTier 是最后改过去
+  // 的那一个：它此前是 if 链，含一处 `state === 'working'`。所以这条豁免现在守着空地，删掉。
+  // 它在 WORKING_LITERAL_SITES 里仍有一条（与拼法无关的那张表，count 6），那是另一个问题。
   // `/lib/agent-roster.ts` 与 `/lib/activity-groups.ts` 曾各占一条，理由都写着「单 Session 排序类，
   // 喂给 attentionSortRank」。两处写的都是有损的 `state === 'working' ? 'working' : 'idle'`——对今天
   // 九个状态答案正确，但第十个状态会**静默**落进 idle，而同一个判定在 quick-switch.ts 是穷举 switch，
