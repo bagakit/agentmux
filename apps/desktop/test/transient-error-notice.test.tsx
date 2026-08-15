@@ -50,10 +50,14 @@ describe('transient error notice', () => {
   // and the component must actually CONSUME the derived value — not merely have the axis in scope. Each case
   // pins a CONCRETE tier→(aria-live, role) correspondence; "some mapping exists" would survive a collapse.
   describe('volume rides the service-window severity axis', () => {
-    // Reads the live <aside> the component renders for an active error.
+    // Reads the live <aside> the component renders for an active error. Omitting `kind` entirely (rather
+    // than passing `undefined`) is what exercises the default — under exactOptionalPropertyTypes those are
+    // different things, and an explicit `undefined` would not type-check against the optional prop.
     async function noticeFor(kind?: 'healthy' | 'process-degraded' | 'indeterminate' | 'agent-broken') {
       const host = await render(
-        <TransientErrorNotice error="Document save failed" dismissed={false} lastError="Document save failed" onDismiss={vi.fn()} onReopen={vi.fn()} kind={kind} />
+        kind === undefined
+          ? <TransientErrorNotice error="Document save failed" dismissed={false} lastError="Document save failed" onDismiss={vi.fn()} onReopen={vi.fn()} />
+          : <TransientErrorNotice error="Document save failed" dismissed={false} lastError="Document save failed" onDismiss={vi.fn()} onReopen={vi.fn()} kind={kind} />
       )
       return host.querySelector('.error-notice') as HTMLElement
     }
