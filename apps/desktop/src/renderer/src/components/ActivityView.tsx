@@ -401,12 +401,15 @@ function Row({
   item,
   origin,
   count,
-  showSource
+  showSource,
+  workspaceRoot
 }: {
   item: AgentTimelineItem
   origin: number
   count: number
   showSource: boolean
+  /** 用来把仓内绝对路径缩成相对路径，见 activity-step-summary 的 shortenPath。缺席则原样显示。 */
+  workspaceRoot: string
 }) {
   const [open, setOpen] = useState(false)
   // What the agent said is the content of the trace; what a tool was invoked with is its payload.
@@ -427,7 +430,7 @@ function Row({
   }, [payload, item.toolInput, item.title])
   // 折叠起来的一行只有裸工具名时，三行 `Bash` 分不出跑的是哪条命令——而不展开就认得出，
   // 正是折叠的前提。带上那个最具识别性的参数。
-  const heading = stepTitle(item.title, item.toolName, item.toolInput)
+  const heading = stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot)
 
   return (
     <Fragment>
@@ -573,7 +576,7 @@ function Turn({
   )
 }
 
-function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) {
+function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string }) {
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => timelineRows(items), [items])
   const failed = items.some((item) => item.status === 'failed')
@@ -609,7 +612,7 @@ function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) 
       </button>
       {open
         ? rows.map(({ item, count }, index) => (
-            <Row key={item.id} item={item} origin={origin} count={count} showSource={index === 0} />
+            <Row key={item.id} item={item} origin={origin} count={count} showSource={index === 0} workspaceRoot={workspaceRoot} />
           ))
         : null}
     </Fragment>
@@ -896,7 +899,7 @@ export function ActivityView({
               ref={registerSegment(key)}
             >
               {entry.kind === 'run' ? (
-                <Run items={entry.items} origin={origin} />
+                <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
               ) : speaker ? (
                 <Turn
                   item={entry.item}
@@ -909,7 +912,7 @@ export function ActivityView({
                   {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(items, entry.item.id)) } : {})}
                 />
               ) : (
-                <Row item={entry.item} origin={origin} count={1} showSource />
+                <Row item={entry.item} origin={origin} count={1} showSource workspaceRoot={workspaceRoot} />
               )}
             </div>
           )
