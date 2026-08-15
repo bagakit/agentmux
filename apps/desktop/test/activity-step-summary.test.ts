@@ -224,6 +224,13 @@ describe('折叠行标题', () => {
     expect(stepTitle('Bash', 'Bash', JSON.stringify({ command: 'pnpm test' }))).toBe('Bash pnpm test')
   })
 
+  it('承诺只有长度一条，不含压平空白——契约写到哪，测试就钉到哪', () => {
+    // stepTitle 的文档只承诺 `<= MAX`。`title` 原样透传协议里的 tool_name，本函数不 flatten 它。
+    // 钉住这条是为了守住**边界本身**：若日后有人顺手加上 flatten，这里会红，逼他去改那句承诺——
+    // 而不是让注释与行为悄悄分家。反过来，若注释写成「保证单行」，它就成了一句没人验的空话。
+    expect(stepTitle('Web  Search', undefined, undefined)).toBe('Web  Search')
+  })
+
   it('取不到就只显示工具名，不显示空括号之类的空壳', () => {
     // 空壳会让人以为参数是空的，而事实是我们没读到。
     expect(stepTitle('Bash', 'Bash', '{bad')).toBe('Bash')
