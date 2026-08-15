@@ -310,35 +310,61 @@ describe('批量收尾的分档告知', () => {
     ).not.toContain('uncommitted')
   })
 
-  it('git-failed 那句不许带删除动词——这一档的另一个生产者是「建」', () => {
+  it('git-failed 那句对两个方向都成立——它描述状态，不描述动作', () => {
     // 这一档现在有两个来源，做的是相反的动作：
     // - 删：git 拒绝移除（worktree-service 的 removeWorktree 路）
     // - 建：扇出时 git **建**成了 worktree、记录没落上（register 抛 git-failed，02acc703）
     // 两者都真实到达这句话：扇出的 launch-failed lane 带着 cleanup.retention 进 store 的
-    // retentionReport。所以横幅里任何删除动词，套到建的那一侧都是假话。
+    // retentionReport。横幅只由 retention 与条数算出，**不看** git 原话——所以它必须对两个方向
+    // 同时成立，而任何一个方向性动词都会对另一侧说假话。
     const created =
       'The worktree at /repo/.worktrees/lane-a was created, but recording it failed, so it is not registered: ENOSPC'
-    const banner = retentionReport([{ retention: 'git-failed', id: 'lane-a', reason: created }])!
+    const refused = 'fatal: could not lock config file'
+    const bannerFor = (reason: string): string =>
+      retentionReport([{ retention: 'git-failed', id: 'lane-a', reason }])!
 
-    // 旧措辞是 `Git refused to remove N worktree(s)`，于是整句读作「拒绝删除…: 这个 worktree 已经
-    // 建好了」。这条断言就是钉死那个自相矛盾。
-    expect(
-      banner.toLowerCase(),
-      '建成功那一侧被说成「删除被拒」：同一句话里既说没删掉又说已建好，用户无法判断盘上到底有没有东西'
-    ).not.toMatch(/\bremove\b|\bremoval\b|\brefused\b/)
-    // 反向：这一档真正成立的事必须还在，否则上面那条靠删字就能满足。
-    expect(banner, '「什么都没被丢弃」是这一档唯一的承诺，不能连它一起删掉').toMatch(
-      /nothing was discarded/i
-    )
-    // git 的原话原样带着——用户判断盘上有没有东西，全靠它。
-    expect(banner).toContain(created)
+    /**
+     * 我们自己撰写的那半句（剥掉 git 原话）里，有没有方向性动词。
+     *
+     * 判据是动词清单而不是「两个方向的文案是否相同」——后者恒真：横幅只由 retention 和条数算出，
+     * 压根不看原话，两侧本来就逐字一样。我第一版就写成了那个恒真断言，跑之前发现的。
+     *
+     * 清单两个方向都列。只列删那侧是审计员实测存活的那个洞：`Git created N worktree(s)` 当时全绿，
+     * 而它正是同一个谎言照镜子翻过来——对「git 拒绝删除」那一侧说「git 建了」。
+     */
+    const DIRECTIONAL = /\b(remove[ds]?|removal|refused|deleted?|created?|built|added?|discarded)\b/
+    const authored = (reason: string): string => bannerFor(reason).replace(reason, '')
 
-    // 对照：删的那一侧读起来仍然通顺，措辞没有为了迁就建那侧而变得谁都不认。
-    const removalBanner = retentionReport([
-      { retention: 'git-failed', id: 'lane-b', reason: 'fatal: could not lock config file' }
-    ])!
-    expect(removalBanner).toContain('fatal: could not lock config file')
-    expect(removalBanner).toMatch(/nothing was discarded/i)
+    for (const [label, reason] of [['建成功那侧', created], ['删被拒那侧', refused]] as const) {
+      // `nothing was discarded` 里的 discarded 是这一档的**承诺**不是动作，先摘掉再判，否则判据恒红。
+      const words = authored(reason).replace(/nothing was discarded/i, '')
+      expect(
+        words.toLowerCase().match(DIRECTIONAL)?.[0] ?? null,
+        `${label}：横幅里写了一个方向性动词。这句话由两个相反的动作共用，任何一个方向对另一侧都是假话`
+      ).toBeNull()
+    }
+
+    // 自证：这条判据认得出违规，否则它只是一句写着好看的话。三个都是真实出现过或实测存活过的措辞。
+    for (const mutant of [
+      'Git refused to remove 1 worktree(s)', // 修复前的原文，对「建」那侧是假话
+      'Git created 1 worktree(s)', // 审计员实测存活：镜像的谎言，对「删」那侧是假话
+      'Git deleted 1 worktree(s)'
+    ]) {
+      expect(mutant.toLowerCase(), `判据漏掉了 ${mutant}`).toMatch(DIRECTIONAL)
+    }
+
+    // 守不住的那一类，写明白而不是假装守住了：`Git touched N worktree(s)` 在这条判据下**存活**
+    // （实测）。它不点方向，所以对两个生产者都不算说谎——这条判据管的是「说了假话」，不是
+    // 「说得好不好」。含糊到什么程度算退化，没有可被机器检查的判据，硬凑一条只会得到一个
+    // 靠措辞手感维持的恒真断言。这一格由 review 承担，不由测试假装承担。
+
+    // ── 这一档真正成立的那个承诺还在。少了它，上面那些靠「写成空话」也能满足。
+    for (const reason of [created, refused]) {
+      expect(bannerFor(reason), '「什么都没被丢弃」是这一档唯一的承诺').toMatch(/nothing was discarded/i)
+      // git 的原话原样带着。我们自己那半句刻意不说方向，所以「到底发生了什么」**只能**由原话承担，
+      // 它必须完整在场——压平它，用户就再也判断不出盘上有没有东西。
+      expect(bannerFor(reason), 'git 的原话被压平了：我们自己那半句不说方向，方向就没人说了').toContain(reason)
+    }
   })
 
   it('三句话两两之间实词无交集：不是同一句话换个说法', () => {
