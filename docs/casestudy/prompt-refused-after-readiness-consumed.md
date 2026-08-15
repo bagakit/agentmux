@@ -212,11 +212,28 @@ git log -L 3660,3710:packages/core/src/client.ts
   - **按代码点位：5 个**（3 个已记录 + 2 个新发现）。
   - **按根因归并：4 个** —— {epoch 被消费：反例 1 + 反例 3 共根}、{processState 投影}、
     {搁浅的 submission claim}、{run-process 错误通道记账}。
-  - **按「和 P0 完全同形」（永久 + Agent 健康 + 无带内恢复）：1 个无条件 + 1 个有条件。**
+  - **按「和 P0 完全同形」（永久 + Agent 健康 + 无带内恢复）：~~1 个无条件 + 1 个有条件~~ → 2 个无条件**
+    （下面那条 PARTIAL 评级已被产品行为证伪，见勘误）。
 
   两个新发现：
   - `prompt-submission.ts:190-205`（`AGENT_PROMPT_SUBMISSION_BUSY`）——一条落盘失败但 daemon
-    已收字节的搁浅 submission 会拒掉新的 operationId。**PARTIAL / 只观察**：同 operationId 重试可续，可达性窄。
+    已收字节的搁浅 submission 会拒掉新的 operationId。~~**PARTIAL / 只观察**：同 operationId
+    重试可续，可达性窄。~~
+
+    **【勘误，两条独立评审线各自发现并已逐条复核】这条 PARTIAL 评级是错的，它不是 partial，
+    是同族的第二个完整永久锁死。** 原评级建立在「同 operationId 重试可续」这个前提上——
+    该分支确实存在（`:186` 的 `existing?.submissionId === submissionId` 续做），但**产品侧递不进那个
+    id**：`runtime-controller.ts:798` 每次 `submitPrompt` 都 `randomUUID()`，两个 renderer 调用点
+    （`store.ts:2327` 手动、`store.ts:4405` steer 队列）都只传 `(control, text)`，没有任何途径把旧 id
+    传回去。于是产品**恒走** `:190` 的 BUSY 分支，续做分支从产品视角是死代码。
+    清除也只有两处：`client.ts:1008`（进程退出）与 `:1952`（resume 换新 runId）——turn-end 的
+    persistReceipt 不碰它，重连的 republishLiveRunState 不碰它，无 TTL、无清扫。
+    `:279-283` 的 stale-retry 把 BUSY 算进「可能陈旧」，但只做 `registry.load` 后用同一个新 id 再
+    claim 一次，必然再撞 `:190`、在 `:316` 抛出——与 P0 现场「刷新重试也救不回来」同一机械原因。
+
+    **写下这条勘误的判别器**：原评级只读了 core 侧那条恢复分支的**存在性**，没有去数**产品侧有没有
+    调用方能满足它的前提**。一条存在但无人能触发的恢复路径，在可达性上等于不存在。
+    （tracker `f-25q8fccdm` T-007 认领修复。）
   - `composer-submit-mode.ts:60-62`（本文初稿未覆盖，见下）——**这一个是 permanent-when-idle**。
 
   **本条只覆盖 4 个根因里的 1 个**（epoch 那一个，连带解决共根的反例 3）。
