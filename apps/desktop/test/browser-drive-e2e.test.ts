@@ -10,8 +10,8 @@ import { afterAll, describe, expect, it } from 'vitest'
  * T-010 的真机判据：在一个真实可见的 `WebContentsView` 上走完 snapshot → click(ref) → re-snapshot，
  * 并观察到页面真的变了；外加一条纯源码判据，证这条路**在生产里真有人走**。
  *
- * 两条判据缺一不可，对应任务点名的那个陷阱（参考项目 orca 的 snapshot-engine.ts 看起来是完整实现，
- * 但 `new CdpBridge` 只在测试里出现，生产走的是 shell out）：
+ * 两条判据缺一不可，对应任务点名的那个陷阱（某个参考实现的 snapshot 引擎看起来是完整实现，
+ * 但它的 CDP 桥接只在测试里被构造，生产走的是 shell out）：
  *
  * - 真机那条证「这套代码在真页面上确实能闭环」。它不证有人调。
  * - 零调用者那条证「生产代码里确实有人调」。它不证调了能用。
@@ -377,7 +377,7 @@ describe('T-010 零调用者：这条路在生产里真有人走', () => {
    * 任务验收原话：「按该节给的 grep 形状搜索符号并排除定义文件本身——命中全在定义文件内即为
    * 竖切未闭合，如实标 blocked 不得蒙混。」这里把那条 grep 变成判据本身。
    *
-   * 只扫 `src/`，**不扫 `test/`**：测试里的调用正是这条判据要排除的东西——orca 那个陷阱的形状
+   * 只扫 `src/`，**不扫 `test/`**：测试里的调用正是这条判据要排除的东西——那个陷阱的形状
    * 就是"只有测试在调"。
    */
   function productionCallers(symbol: string, definedIn: string): string[] {
