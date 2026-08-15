@@ -41,10 +41,26 @@ Feature: `f-25e8fm2tf`
 | 它真的给出 remaining，不是只有 used | `git grep -n "remaining}% remaining" HEAD -- apps/desktop/src/renderer/src/components/AgentContextUsage.tsx` | 有命中 |
 | 它早于本 Feature 存在（所以是重做风险，不是新需求） | `git log --format=%ci -1 --diff-filter=A -- apps/desktop/src/renderer/src/components/AgentContextUsage.tsx` | 2026-09-06，早于 09-13 |
 | 分母来自运行时真值，不需要查表 | `git grep -n "capacityTokens" HEAD -- apps/desktop/src/renderer/src/components/AgentContextUsage.tsx` | 有命中 |
-| **剩余范围一**：名册行里还没有 | `git grep -n "AgentContextUsage" HEAD -- apps/desktop/src/renderer/src/components/AgentRoster.tsx apps/desktop/src/renderer/src/lib/agent-roster.ts` | **零命中**（做完后应有命中） |
-| **剩余范围二**：还没有阈值着色 | `git grep -nE "\b(70\|90)\b\|amber" HEAD -- apps/desktop/src/renderer/src/components/AgentContextUsage.tsx` | **零命中**（做完后应有命中） |
+| **剩余范围一**：名册行里还没有 | `git grep -nE "contextPressure\|contextPercent" HEAD -- apps/desktop/src/renderer/src/components/AgentRoster.tsx apps/desktop/src/renderer/src/lib/agent-roster.ts` | ~~零命中~~ → **已有命中（51f7a184 起）** |
+| **剩余范围二**：还没有阈值着色 | `git grep -nE "PRESSURE_THRESHOLDS\|\b(70\|90)\b" HEAD -- apps/desktop/src/renderer/src/lib/agent-usage.ts` | ~~零命中~~ → **已有命中（agent-usage.ts:75-77）** |
 
-最后两条是**零命中判据**：它们现在返回空、退出码 1，而这正是"还没做"的证据。
+**上面两条判别命令在 51f7a184 之后被改写过，因为原来那两条测不到交付物**（审计发现，记在这里而不是
+默默改掉）。原文两条都指向 `AgentContextUsage.tsx`：
+- 范围二原命令在那个组件里找 70/90——但阈值落在了 `agent-usage.ts` 的 `PRESSURE_THRESHOLDS`。
+  那条判据**永远翻不了绿**，而事情早已做完。
+- 范围一原命令搜 `AgentContextUsage` 这个名字——它有 1 处命中，但那是 `AgentRoster.tsx:39` 的一句
+  **注释**。判据命中注释、报出"已完成"，实际并没有验证任何交付：真实实现是复用
+  `agent-usage.ts` 的 `contextUsedPercent`/`contextPressure` 两个函数（正是下面「复用而不是新写」
+  一节要求的路子），而不是 import 那个组件。
+
+这正是零命中判据的反面教训：**判据要钉交付的性质落在哪儿，而不是钉实现前猜的那个落点**。猜错了
+落点，零命中就从"还没做"的证据退化成"这条命令问错了地方"，而两者退出码都是 1。
+
+其余四条（前提类）仍然成立，未改动。
+
+最后两条**当初**是零命中判据：它们返回空、退出码 1，而那正是"还没做"的证据。两块现已交付
+（51f7a184），所以它们今天都有命中——下面这段讲的是当时怎么把"没做完"写成可机器检查的形状，
+连同它踩过的坑一起留着。
 
 零命中要配**对照命令**才算数——一条命令返回空，可能是"东西不在"，也可能是"路径写错了、正则被表格
 转义搞坏了"，两者退出码都是 1。本仓刚栽过这个跟头：一份报告用 `-- AgentContextUsage.tsx`（裸文件名，
@@ -55,11 +71,11 @@ git grep -c "used" HEAD -- apps/desktop/src/renderer/src/components/AgentContext
 ```
 
 它必须**有命中**（实测 14）。同一个 pathspec 下对照有命中、目标零命中，零命中才是"东西不在"。
-上表第二条零命中命令里的 `\|` 是 markdown 表格的转义；直接粘到终端时写成 `\b(70|90)\b|amber`，
-两种写法实测都是零命中、退出码 1。
 
 只引用有命中的命令，文档就只会说"已完成"；零命中的那条才让"没做完"这件事同样可被机器检查。
-做完之后它们会翻成有命中——那一刻就是这两块的验收。
+**但这套办法还差一环，本 Feature 自己就栽了**：对照命令只证明 pathspec 解析得开，证明不了这个
+pathspec 就是交付物会落的地方。上面那两条的对照都有命中（同一个文件里确有 `used`），零命中因此
+读起来完全可信——而交付物落到了另一个文件里。所以判据除了要能翻绿，还得在**落点变了的时候被改**。
 
 ### 复用而不是新写
 
