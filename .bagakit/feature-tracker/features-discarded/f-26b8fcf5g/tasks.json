@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "feat_id": "f-26b8fcf5g",
+  "plan_status": "draft",
+  "plan_revision": 0,
+  "supersedes_revision": null,
+  "review_ref": "",
+  "source_refs": [],
+  "plan_history": [],
+  "tasks": [],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "已实现并合入 commit 9cc967f3；行为与理由记录在提交正文与两处 docstring（core agentEvidenceStale、project-activity-row working 臂）。goal 提到的 working 计数一并由 goal 自身的约束「不得制造第三份在不在干活的判据」解决：教计数认新鲜度正是它禁止的第三裁决点，故计数不动、只改行文案，收敛由 working-count-convergence.test.tsx 继续守住。",
+      "refs": [
+        "packages/core/src/agent-status-freshness.ts"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "与 dc77127c 同族：衰减机制正确而末端标签撒谎。派生谓词优于新增字段——存字段会与它复制的时间戳漂移。semanticStatusStale 的 can-decay 门让它对自己下游的衰减产物失明。",
+      "refs": [
+        "apps/desktop/test/project-activity-row-staleness.test.ts"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "同族教训已记在提交正文与 docstring",
+      "refs": []
+    }
+  }
+}

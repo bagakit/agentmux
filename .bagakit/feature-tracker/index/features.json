@@ -1358,7 +1358,7 @@
     {
       "feat_id": "f-26b8fcf5g",
       "title": "陈旧状态冒充 running：15 分钟没动静的 Agent 界面上写着 active now",
-      "status": "proposal",
+      "status": "discarded",
       "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
