@@ -4,6 +4,7 @@ import {
   attentionSortClass,
   attentionSortRank,
   categoryFor,
+  isUrgentAttention,
   type AttentionCategory
 } from './attention-event'
 import { workingAgentCount } from './project-board'
@@ -76,7 +77,8 @@ function groupAttention(sessions: readonly Extract<SessionSnapshot, { kind: 'age
   let winner: AttentionCategory | null = null
   for (const session of sessions) {
     const category = categoryFor(session.status.state)
-    if (!category || category === 'done') continue
+    // Same exclusion as the rail and the fan-out strip, read from the one list that owns it.
+    if (!isUrgentAttention(category)) continue
     if (!winner || attentionSortRank(category) < attentionSortRank(winner)) winner = category
   }
   return winner

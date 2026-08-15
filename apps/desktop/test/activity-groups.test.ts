@@ -73,4 +73,41 @@ describe('Activity work-line grouping', () => {
       { label: 'Unassigned', host: 'studio', ids: ['remote-orphan'] }
     ])
   })
+
+  it('一个跑完的 Agent 不会把它所在的组顶到「在干活」之上——完成不是一个请求', () => {
+    // 这条守的是组间排序里那个曾经手抄的排除：`!category || category === 'done'`。它今天由
+    // `isUrgentAttention` 回答，而这个判据要能在那个清单被扩错时报红。
+    //
+    // 为什么必须是「完成 + 在跑」**同一组**：`ATTENTION_SORT_RANK` 里 done 与 idle 同为 3，所以一个
+    // 只有 done 的组，无论 done 算不算紧急，档位都是 3——分歧不可观测。把一个 working 放进同一组，
+    // 两条路才分岔：正确时 `groupAttention` 返回 null，这组退到 `workingAgentCount > 0` 的 working
+    // （2）；把 done 错当紧急时它返回 'done'，档位变成 3。
+    //
+    // 光这样还不够——实测过：两组都是 2 时并列，尾部的 `label.localeCompare` 恰好给出与「mixed 掉到
+    // 3」相同的顺序，于是变异后照样绿。所以 mixed 必须在**并列时赢**，靠的是排序的第二段
+    // `updatedAt` 倒序。这样正确答案是 mixed 在前，而把 done 当紧急会让它掉到 busy 之后——变异这时
+    // 才真的翻面。判据落在顺序上，不落在某个内部字段，因为顺序才是用户看得见的那一面。
+    const contexts = activityContextsForWorkspaces([
+      workspace('w-mixed', 'repo-mixed', 'mixed'),
+      workspace('w-busy', 'repo-busy', 'busy')
+    ])
+    const groups = buildActivityGroups(
+      [
+        agent('mixed-done', 'repo-mixed', {
+          updatedAt: 50,
+          status: { state: 'done', source: 'native-hook', observedAt: 50 }
+        } as never),
+        agent('mixed-working', 'repo-mixed', { updatedAt: 50 } as never),
+        agent('busy-working', 'repo-busy', { updatedAt: 20 } as never)
+      ],
+      contexts
+    )
+
+    // 自证：两组都得真的在场，否则下面比的是一个长度为 1 的清单，恒真。
+    expect([...groups.map((group) => group.label)].sort()).toEqual(['busy', 'mixed'])
+    expect(
+      groups.map((group) => group.label),
+      '组里有一个跑完的 Agent，就把整组排到在干活的组后面了——done 被当成了一个请求'
+    ).toEqual(['mixed', 'busy'])
+  })
 })
