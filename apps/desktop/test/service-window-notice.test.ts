@@ -202,10 +202,27 @@ describe('输出通道断了、进程没死：放行必须配告知', () => {
     expect(classification.kind).toBe('process-degraded')
     const rendered = serviceNoticeToRender(classification)
     expect(rendered).not.toBeNull()
-    // 三段文案要点名「输出可能没在显示」「输入仍到达 Agent」「Resume 重新附着」——正是用户此刻需要的判断。
+    // 三段文案要点名「输出可能没在显示」「输入仍到达 Agent」，以及一个此刻真能走通的动作。
     expect(rendered!.notice.mode).toContain('Output may not be showing')
     expect(rendered!.notice.mode).toContain('input still reaches the Agent')
-    expect(rendered!.notice.restore).toContain('Resume')
+    expect(rendered!.notice.restore).toContain('Switch to another tab and back')
+  })
+
+  it('restore 不许点名 Resume——这个状态下按了等于没按', () => {
+    // 这条不是措辞洁癖，是可达性。这条降级**只在进程还在跑时**产生（core 的 `resumed==='dead'`
+    // 分支，进程退了根本不走到那里），而 Resume 走 `ensureAgentContinuity`：对 running 的 Run
+    // 判出 `reattachable` 直接返回投影，全程 attach 调用数为 0，标记原样留着。对 client 实跑
+    // 验证过：verdict=reattachable、attach 0 次、marker 仍在。
+    //
+    // 上一版这里写的正是 `toContain('Resume')`——它把那句不可达的文案**钉住**了，改对反而变红。
+    // 一个断言可以这样反着守：它守的是"这句话在场"，而该守的是"这句话点名的动作从当前状态走得通"。
+    // 这里改成点名禁止的那个词，是因为可达性没法在纯文案单测里直接断言（要跨 core 的 continuity
+    // 判定）；退而求其次钉住"别再写回那个已证不可达的动作"，并在上面留下实测证据。
+    const restore = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(outputChannelSevered))
+    )!.notice.restore
+    expect(restore).not.toContain('Resume')
+    expect(restore).not.toContain('resume')
   })
 
   it('权威事实压过推断的 disconnected：即使 status 仍是 working 也要显示', () => {
