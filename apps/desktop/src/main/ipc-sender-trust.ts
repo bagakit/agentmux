@@ -45,6 +45,9 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:selectElement': 'Browser selection',
   'browser:cancelElementSelection': 'Browser selection',
   'browser:setAnnotationMarkers': 'Browser annotation',
+  // 跑一段 Agent 现写的代码，是 browser:* 里权限最高的一条——比选元素高。任何能伪造这个频道的
+  // 发送者都能在用户已登录的页面上做任意操作。
+  'browser:runScript': 'Browser automation',
   [CONTROL_RESPONSE_CHANNEL]: 'control response'
 } as const
 

@@ -604,6 +604,22 @@ export async function registerIpc(args: {
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
+  /**
+   * 跑一段 Agent 写的程序。**授权闸在这里，不在调用方。**
+   *
+   * 放这一层是因为这是所有调用方的必经之路（今天是 Control 的 browser.run，明天可能是别的）。
+   * 放在 Control 那一侧的话，每多一个入口就要记得再写一遍同样的检查——而漏写是静默的：
+   * 那条新入口会在开关关着的时候照样跑。
+   *
+   * 拒绝要说清去哪开（AGENTS.md:32-52：不许静默、也不许给一句无法行动的拒绝）。
+   */
+  handleWithEvent('browser:runScript', async (event, id: string, code: string) => {
+    requireTrustedSender('browser:runScript', event)
+    if (config.browser.agentAutomation !== true) {
+      throw new Error('Agent browser automation is off. Turn it on in Settings › Browser.')
+    }
+    return await browsers.runScript(id, code)
+  })
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)
     return await browsers.selectElement(id)

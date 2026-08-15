@@ -42,7 +42,11 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'STALE_AGENT_SESSION_BINDING',
   'CTXMUX_DISCONNECTED',
   'CTXMUX_INPUT_CURSOR_MISSING',
-  'SIGNAL_UNSUPPORTED'
+  'SIGNAL_UNSUPPORTED',
+  // 用户没打开 Agent 驱动页面的总开关。既有 39 个码没有一个说得出这件事：`CONTROL_UNAVAILABLE` 是
+  // "这条路现在走不通"（没人拥有屏幕），会让 Agent 去重试；这里重试一万次也没用，要去改设置。
+  // 把"要你去做一个决定"说成"暂时不可用"，就是把一次明确拒绝降级成了一次疑似故障。
+  'BROWSER_AUTOMATION_DISABLED'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
@@ -186,6 +190,20 @@ export type AgentMuxControlResumeRequest = RequestBase & {
 export type AgentMuxControlStopRequest = RequestBase & {
   operation: 'stop'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
 }
+/**
+ * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
+ *
+ * **本方案对外表面的全部，只有这一条。** 页面能力（snapshot / click / waitFor / js / cdp……）
+ * 全在子进程注入的函数库里，那是内部 API——改名改签名不动这份契约。契约是版本化的，而
+ * AGENTS.md:21 禁止 backward-compat migration：发出去就撤不回。所以宁可只发一条通用的
+ * 「跑这段代码」，也不要发十九条动词。
+ *
+ * 没有 `destination`：它作用在一个已存在的 Browser 上（`browserId`），不是往某个空间落一个新东西。
+ * 这也是它不叫 `open.*` 的原因。
+ */
+export type AgentMuxControlBrowserRunRequest = RequestBase & {
+  operation: 'browser.run'; browserId: string; code: string; caller?: AgentMuxControlCaller
+}
 export type AgentMuxControlRequest =
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
@@ -200,6 +218,30 @@ export type AgentMuxControlRequest =
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
+  | AgentMuxControlBrowserRunRequest
+
+/**
+ * 一段 Agent 程序的结局——**四分类，不是布尔成败**。
+ *
+ * 与 renderer 的 `service-window-notice.ts` 那个 `StepOutcome` 是同一条原则（AGENTS.md:32-52）的两次
+ * 兑现，不是同一个类型：那个带的是服务窗的 UI 文案（label / degradedMode / restore），core 既看不见
+ * 也不该看见。这里落的是原则本身——**「分不清」必须是一等状态，不许折进成功或失败**。
+ *
+ * 四类各自对应调用方的一个不同动作：
+ *   - `completed`：程序跑完了，`result` 是它的返回值。
+ *   - `script-failed`：程序自己抛了（含语法错）。要改的是**程序**。
+ *   - `stopped`：我们主动截断的（跑太久 / 输出太多）。程序没问题，是它超出了预算——要改的是**规模**。
+ *   - `indeterminate`：进程非正常终止（堆爆、被信号杀掉、没报结果就退了）。**做到哪一步不知道**——
+ *     页面上可能已经点过一次了。不许当成失败重试，那正是「下单点两次」的来源。
+ *
+ * 为什么 `stopped` 不并进 `script-failed`：截断是我们的策略，不是程序的缺陷，合并会让 Agent 去改
+ * 一段本来没错的代码。为什么 `indeterminate` 不并进 `stopped`：前者我们不知道进度，后者知道。
+ */
+export type AgentMuxControlBrowserRunOutcome =
+  | { kind: 'completed' }
+  | { kind: 'script-failed'; message: string }
+  | { kind: 'stopped'; message: string }
+  | { kind: 'indeterminate'; message: string }
 
 export type AgentMuxControlResult =
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
@@ -218,6 +260,14 @@ export type AgentMuxControlResult =
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
+  // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
+  // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
+  | {
+      operation: 'browser.run'
+      result: unknown
+      logs: string[]
+      outcome: AgentMuxControlBrowserRunOutcome
+    }
 
 type SuccessByOperation<Operation extends AgentMuxControlResult['operation']> = {
   schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION
@@ -308,7 +358,11 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.agents': 'short',
   interrupt: 'short',
   resume: 'long',
-  stop: 'long'
+  stop: 'long',
+  // Agent 写的调试程序会等页面加载、等网络空闲、循环点很多次——短预算（2 秒）会把**正常执行**掐死，
+  // 而掐死的表现是 CONTROL_TIMEOUT，看起来像页面出了事。子进程自己还有一道更紧的超时兜底（脚本执行器
+  // 的 timeoutMs），所以这里给长预算不等于没有上限。
+  'browser.run': 'long'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */

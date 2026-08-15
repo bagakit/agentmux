@@ -260,6 +260,169 @@ describe('Control protocol', () => {
     })).toMatchObject({ ok: false, error: { code: 'REGION_ALREADY_SOLE' } })
   })
 
+  // T-008: browser.run 是对外契约的**全部**——页面能力（snapshot/click/...）都在子进程注入的函数库里，
+  // 那是内部 API。这一族钉的是这条操作在契约两侧（请求 / 回执）都真的存在且形状被校验。
+  it('parses browser.run with its Browser target and multi-line program', () => {
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-basic',
+      operation: 'browser.run',
+      browserId: 'browser:1',
+      code: 'const page = await snapshot()\nreturn page.title'
+    })).toMatchObject({
+      operation: 'browser.run',
+      browserId: 'browser:1',
+      code: 'const page = await snapshot()\nreturn page.title'
+    })
+    // 承重：程序必须走 text() 而不是 id()。换成 id() 之后单行程序照样过，只有带换行的会被拒——
+    // 而真实的 Agent 程序**全是**多行的，那个缺陷会以"我的脚本报 INVALID_CONTROL_REQUEST"出现。
+    // 上面那条已经带了 \n，这里再钉一条纯多行的，让意图无法被读成巧合。
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-multiline',
+      operation: 'browser.run',
+      browserId: 'browser:1',
+      code: ['await click("@e1")', 'await waitForLoad()', 'return await snapshot()'].join('\n')
+    })).toMatchObject({ operation: 'browser.run' })
+    // browserId 走 identity()：保留选择器 self 要被拒——browser.run 没有 self 语义，
+    // 目标永远是显式的一个 Browser。
+    expect(() => parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-self-browser',
+      operation: 'browser.run',
+      browserId: 'self',
+      code: 'return 1'
+    })).toThrow('Browser target')
+    // 没有程序就没有这次请求。缺席被静默收成空串的话，Agent 会拿到一份"跑完了、什么都没发生"的
+    // 成功回执——那正是 AGENTS.md:32-52 禁止的那种分不清。
+    expect(() => parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-no-code',
+      operation: 'browser.run',
+      browserId: 'browser:1'
+    })).toThrow('Browser script')
+  })
+
+  it('round-trips a browser.run receipt with its logs and four-class outcome', () => {
+    expect(parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-basic',
+      ok: true,
+      operation: 'browser.run',
+      result: { result: { title: 'Example' }, logs: ['clicked @e1'], outcome: { kind: 'completed' } }
+    })).toMatchObject({
+      operation: 'browser.run',
+      result: { result: { title: 'Example' }, logs: ['clicked @e1'], outcome: { kind: 'completed' } }
+    })
+    // 失败也带日志。程序炸掉之前打的那几行往往正是 Agent 需要的——这条钉的是失败路径不丢日志。
+    expect(parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-failed',
+      ok: true,
+      operation: 'browser.run',
+      result: {
+        logs: ['got this far'],
+        outcome: { kind: 'script-failed', message: 'element is gone' }
+      }
+    })).toMatchObject({
+      result: { logs: ['got this far'], outcome: { kind: 'script-failed', message: 'element is gone' } }
+    })
+  })
+
+  // 承重的一条。四类结局若在线上被折成两类（成功 / 失败），"做到哪一步不知道"就消失了——而那正是
+  // 真实危险所在：indeterminate 意味着页面上**可能已经点过一次**，调用方不许重试。
+  it('keeps all four browser.run outcome classes distinct on the wire', () => {
+    const outcomes = [
+      { kind: 'completed' },
+      { kind: 'script-failed', message: 'boom' },
+      { kind: 'stopped', message: 'script ran past its 60s budget' },
+      { kind: 'indeterminate', message: 'the script process died without reporting a result' }
+    ]
+    const parsed = outcomes.map((outcome) => {
+      const receipt = parseAgentMuxControlReceipt({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: 'run-outcomes',
+        ok: true,
+        operation: 'browser.run',
+        result: { logs: [], outcome }
+      })
+      if (!receipt.ok || receipt.operation !== 'browser.run') throw new Error('not a browser.run success receipt')
+      return receipt.result.outcome.kind
+    })
+    // 自检：四条都真的过了线，否则下面的去重判据在对空气生效（AGENTS.md:85-88）。
+    expect(parsed, '不是四条都被解析出来').toHaveLength(4)
+    expect(new Set(parsed).size, '四类结局在线上被折并了——"分不清"这一类正是被折掉的那个').toBe(4)
+    // 认不出的 kind 必须抛，而不是折成某一类。折成 indeterminate 看起来保守，实则把协议缺陷
+    // 伪装成一次正常的不确定结局，于是没人会去修它。
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-bogus-outcome',
+      ok: true,
+      operation: 'browser.run',
+      result: { logs: [], outcome: { kind: 'probably-fine' } }
+    })).toThrow('outcome is invalid')
+    // 带消息的三类缺了 message 也要抛：一条说不出原因的失败等于没说。
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-no-message',
+      ok: true,
+      operation: 'browser.run',
+      result: { logs: [], outcome: { kind: 'stopped' } }
+    })).toThrow('invalid')
+  })
+
+  // 日志是从另一个进程经 socket 过来的，而下游按 `string[]` 消费。不逐行校验的话，一份
+  // `logs: [{}]` 会一路流进 UI 渲染成 "[object Object]"，或者在某个 `.split()` 上炸得离题万里。
+  // 上限同理：这是线上解析器，对面不一定是我们自己的进程。
+  it('validates browser.run logs line by line and caps how many it will take', () => {
+    const receipt = parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-logs',
+      ok: true,
+      operation: 'browser.run',
+      result: { logs: ['one', 'two'], outcome: { kind: 'completed' } }
+    })
+    // 自检：合法的两行真的过了线，否则下面两条拒绝在对空气生效。
+    expect(receipt.ok && receipt.operation === 'browser.run' && receipt.result.logs).toEqual(['one', 'two'])
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-bad-log-line',
+      ok: true,
+      operation: 'browser.run',
+      result: { logs: ['fine', { message: 'not a string' }], outcome: { kind: 'completed' } }
+    })).toThrow('Browser script log')
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-too-many-logs',
+      ok: true,
+      operation: 'browser.run',
+      result: { logs: Array.from({ length: 10_001 }, () => 'x'), outcome: { kind: 'completed' } }
+    })).toThrow('logs are invalid')
+  })
+
+  // 授权关闭时的拒绝要带自己的码。用 CONTROL_UNAVAILABLE 的话，Agent 会把"你没开这个开关"
+  // 读成"这条路暂时不通"然后重试——重试一万次也不会通，要去改设置。
+  it('carries BROWSER_AUTOMATION_DISABLED as its own code, not CONTROL_UNAVAILABLE', () => {
+    const receipt = parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-disabled',
+      ok: false,
+      operation: 'browser.run',
+      error: {
+        code: 'BROWSER_AUTOMATION_DISABLED',
+        message: 'Agent browser automation is off. Turn it on in Settings › Browser.'
+      }
+    })
+    // 把这个码从 AGENTMUX_CONTROL_ERROR_CODES 删掉，controlErrorCode 会把它折成 CONTROL_FAILED，
+    // 这条当场转红——与 REGION_ALREADY_SOLE 那条同一个判据形状。
+    expect(receipt).toMatchObject({ ok: false, error: { code: 'BROWSER_AUTOMATION_DISABLED' } })
+    // 拒绝必须说清怎么开。只判码不判文案的话，一句 "Not allowed." 也能绿，而 Agent 就卡在那了。
+    expect(
+      !receipt.ok && receipt.error.message,
+      '拒绝没有指明去哪开——Agent 收到一句无法行动的拒绝'
+    ).toContain('Settings')
+  })
+
   it('preserves typed ambiguous message candidates through receipts', () => {
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -651,7 +814,10 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'list.agents': 'short',
       // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
       // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
-      interrupt: 'short'
+      interrupt: 'short',
+      // browser.run 等的是子进程里一段 Agent 现写的程序跑完，那是本表最典型的"等外面"：它会等页面
+      // 加载、等网络空闲、循环点很多次。两秒会把正常执行掐成 CONTROL_TIMEOUT。
+      'browser.run': 'long'
     }
     const entries = Object.entries(EXPECTED_BUDGET) as [AgentMuxControlRequest['operation'], 'long' | 'short'][]
     // 自检：表空了下面的循环就是死代码。条数由 tsc 钉住，这里只防「Object.entries 拿到空」这种失灵。
