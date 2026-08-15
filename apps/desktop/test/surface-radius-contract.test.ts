@@ -36,8 +36,7 @@ const COMPACT_CONTROLS = [
   '.pane-view-toggle button',
   '.workbench-region__close',
   '.pane-drop-overlay span',
-  '.terminal-replay-gap > button',
-  '.new-tab-surface kbd'
+  '.terminal-replay-gap > button'
 ]
 
 // Class 2 — micro marks and decoration: hairlines, ruler ticks, icon corners, selection marks.

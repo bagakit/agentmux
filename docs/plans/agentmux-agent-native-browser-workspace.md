@@ -28,7 +28,7 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 - Preload 只暴露窄的 typed Browser IPC；Renderer 不持有 WebContents、Cookie、Profile 目录或 DevTools 生命周期事实。
 - Renderer 的 Browser bar 和 Browser Tools 只投影 Main 的结果，并保存纯展示偏好。工具显隐不改变底层能力与安全策略。
 - Browser 元素上下文、批注和截屏只有在用户显式复制或发送后才进入 Agent 输入；Renderer 不把它们伪装成 Core Timeline 事实。提交给 Agent 时继续走现有 Composer/Core prompt owner。
-- `packages/core` 不依赖 Electron Browser，也不新增 Browser Runtime。Browser 仍是 Desktop Host capability。
+- `packages/core` 不依赖 Electron Browser，也不新增 Browser Runtime。Browser 仍是 Desktop Host capability。这条约束在「不另建浏览器运行时」这个意义上仍然成立：浏览器始终是 `WebContentsView`、始终归 Desktop Main 持有，`packages/core` 至多经 Control 契约投递一条操作请求。让 Agent 驱动页面所新增的，是一个跑 Agent 脚本的 Node 子进程——它执行脚本、经 CDP 与既有 WebContents 对话，与「浏览器运行时」是两回事。
 
 ## Profile 与隐私边界
 
@@ -67,7 +67,8 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 
 ## 非目标
 
-- 不为 Browser Workspace 新增 Store、daemon、`<webview>` owner、账号系统、Remote Browser 或 Agent Browser Runtime。
+- 不为 Browser Workspace 新增 Store、daemon、`<webview>` owner、账号系统、Remote Browser 或 Agent Browser Runtime。「不新增 Agent Browser Runtime」指的是不另建一个浏览器运行时——浏览器仍是 `WebContentsView`、仍归 Desktop Main 持有，这一条没有松动。让 Agent 结构化驱动页面所新增的是一个执行 Agent 脚本的 Node 子进程，不是第二个浏览器。
+- 不做坐标级的键鼠模拟。Agent 驱动页面走**结构化 ref 寻址**：目标由我方快照发出的 ref 指名，失败可判定、可审计。这与「猜屏幕坐标点下去」是两类做法，不是同一件事的两种实现，详见下一节。
 - 不在 `packages/core` 新增 Browser WebContents 或 Cookie owner。
 - 不增加旧 Browser 配置兼容、migration、fallback 或双写。
 - 不把 Profile 导入扩展成浏览器密码、历史、书签或扩展同步。

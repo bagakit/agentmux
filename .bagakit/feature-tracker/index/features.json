@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 108
+    "next_cursor": 120
   },
   "features": [
     {
@@ -636,7 +636,7 @@
     {
       "feat_id": "f-23z8fgsw3",
       "title": "Refproj-informed Provider Parity",
-      "status": "in_progress",
+      "status": "blocked",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -676,7 +676,7 @@
     {
       "feat_id": "f-2458fbphz",
       "title": "AgentMux Packaging SSOT and Change Audit",
-      "status": "blocked",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -826,7 +826,7 @@
     {
       "feat_id": "f-24m8fphma",
       "title": "Agent 自助创建与空间操作闭环",
-      "status": "in_progress",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1006,7 +1006,7 @@
     {
       "feat_id": "f-2578fv7m6",
       "title": "pnpm check 在 HEAD 上遗留的 12 个确定性红",
-      "status": "proposal",
+      "status": "discarded",
       "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
@@ -1097,6 +1097,127 @@
     {
       "feat_id": "f-25g8fvh3j",
       "title": "只能看当前分支的改动，看不了两个分支之间的差异",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25h8fysz9",
+      "title": "结果通报分级：不是每件事都值得报错",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25j8fe2vc",
+      "title": "上下文用量：数字被 7ch 截没了，且只说了一半",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25k8f8m9k",
+      "title": "Provider 与人机交互分层收敛",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25m8fzzgv",
+      "title": "跨 Agent 收件箱：一屏看住谁在等你",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25n8fzxzw",
+      "title": "失败重连之后 composer 仍可写，字进了沉默的终端",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "replacement_feat_id": "f-25r8f2rt4",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25p8fcqpa",
+      "title": "启动页布局：控件语汇、arity 契约与目录预算",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25q8fccdm",
+      "title": "活着的 Agent 永远有一条可发送的路",
+      "status": "in_progress",
+      "workspace_mode": "worktree",
+      "branch": "feat/live-query-admission",
+      "worktree_name": "live-query-admission",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25r8f2rt4",
+      "title": "降级放行是一等机制，不是每个子系统各修一遍",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25s8fqvvr",
+      "title": "Agent 原生浏览器调试：让 Agent 在编辑器内驱动页面",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25t8f5k2x",
+      "title": "替身 CLI 教的是已被证伪的模型",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25u8fcu4e",
+      "title": "Hook 装进了 Provider 的共享配置，非 AgentMux 会话也会触发",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-25v8f6kvk",
+      "title": "关掉 App 就把活着的 Agent 锁死：搁浅的提交凭据跨重启存活",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",

@@ -74,7 +74,7 @@
     },
     "learning": {
       "disposition": "candidates_reviewed",
-      "rationale": "Compared Orca explicit provider launch args and recorded Claude outside-read setting evidence.",
+      "rationale": "Compared Refproj explicit provider launch args and recorded Claude outside-read setting evidence.",
       "refs": [
         "docs/reviews/executor-yolo-2026-09-11.md"
       ]

@@ -18,12 +18,12 @@
   - A native hook can move a session to `waiting`, while tmux liveness remains independently observable.
   - The desktop app edits workspace files and lays out editor and agent consoles in resizable splits without owning tmux commands.
 - Evidence refs:
-  - `docs/a mature workbench-agent-runtime-notes.md`
+  - `docs/refproj-agent-runtime-notes.md`
   - `docs/plans/agentmux-runtime-desktop-review.md`
 
 ## Scope
-- In scope: local and SSH-hosted tmux detection, create/list/inspect/send/capture/stop, output following, normalized status/activity events, four built-in adapters, hook ingestion, safe config persistence, a terminal-first Electron shell, raw terminal and conversation projections, rich input, local/remote workspace file editing, tabs/resizable splits, an workbench-style workspace board, and local/remote Git worktree creation/registration.
-- Out of scope: a mature workbench-compatible relay/wire protocol, WSL transport, account switching, automatic global hook installation, mobile clients, and production auto-update/packaging.
+- In scope: local and SSH-hosted tmux detection, create/list/inspect/send/capture/stop, output following, normalized status/activity events, four built-in adapters, hook ingestion, safe config persistence, a terminal-first Electron shell, raw terminal and conversation projections, rich input, local/remote workspace file editing, tabs/resizable splits, an Refproj-style workspace board, and local/remote Git worktree creation/registration.
+- Out of scope: Refproj-compatible relay/wire protocol, WSL transport, account switching, automatic global hook installation, mobile clients, and production auto-update/packaging.
 
 ## Acceptance Criteria
 - Core public APIs are documented and exported from `@agentmux/core`.
@@ -45,7 +45,7 @@
 - Prove one vertical slice end to end before adding the next capability, without changing the owning architecture between slices.
 - Keep Provider, execution transport, tmux lifecycle, privileged desktop services, and renderer components modular and separately owned.
 - Prefer maintained libraries and platform facilities for process execution, validation, terminal rendering, editing, and split layout; inspect installed dependencies before adding another.
-- Use verified Warp, a mature workbench, and a mature workbench interaction/ownership patterns as references; do not invent parallel concepts without evidence.
+- Use verified Warp, Refpeer, and Refproj interaction/ownership patterns as references; do not invent parallel concepts without evidence.
 
 ## Impact
 - Code paths: `packages/core`, `apps/desktop`, root workspace configuration.

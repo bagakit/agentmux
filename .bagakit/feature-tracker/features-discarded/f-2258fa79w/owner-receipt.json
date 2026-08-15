@@ -2,7 +2,7 @@
   "schema": "bagakit.execution-owner-receipt.v2",
   "owner_kind": "feature_tracker",
   "owner_id": "f-2258fa79w",
-  "semantic_revision": "52e7d031eff86ecc9814769754e8b290372a4d2dc398078de24c1eb15ef9e969",
+  "semantic_revision": "066c343e279da087bb4682a5c1bdcee70cb0ac33c163fe7d77b7be6fa5c5fa49",
   "lifecycle_status": "discarded",
   "continuation": "unavailable",
   "active_item_ids": [],
@@ -14,6 +14,6 @@
   ],
   "evidence_hashes": {
     ".bagakit/feature-tracker/features-discarded/f-2258fa79w/state.json": "fad216e6eb01d8e03fa268d9d8788a315cc2dae984d50863371e2b57c4bf27ec",
-    ".bagakit/feature-tracker/features-discarded/f-2258fa79w/tasks.json": "810878201a00ebafe55eb586db082027a470a7f19b7abb2a843c883156d1b240"
+    ".bagakit/feature-tracker/features-discarded/f-2258fa79w/tasks.json": "57f68f110a9625f8a930987026b9d0af1edf1ab531e5ee675083f584fb1927f9"
   }
 }

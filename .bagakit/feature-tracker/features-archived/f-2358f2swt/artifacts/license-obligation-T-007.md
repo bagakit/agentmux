@@ -11,8 +11,8 @@ T-007 验收要求：若实现移植了参考项目的实质代码，必须按�
 
 ### 1. 代码里没有参考项目的痕迹
 
-对本 Feature 的全部实现文件 grep `a mature workbench` / `a mature workbench` / `traexon` / `deepseek` /
-`herdr` / `moshi`：
+对本 Feature 的全部实现文件 grep `refproj` / `refpeer` / `traexon` / `deepseek` /
+`refhrd` / `refmsh`：
 
 - `apps/desktop/src/main/git-service.ts`
 - `apps/desktop/src/main/gh-service.ts`
@@ -37,7 +37,7 @@ T-007 验收要求：若实现移植了参考项目的实质代码，必须按�
 
 ### 3. 与已登记条目的对比
 
-`THIRD_PARTY_NOTICES.md` 现有唯一条目（a mature workbench Browser screenshot markup）登记的是
+`THIRD_PARTY_NOTICES.md` 现有唯一条目（Refproj Browser screenshot markup）登记的是
 **确有改编**的情形：drawing model、Canvas renderer、PNG composition 等
 逐块改写自对方某个 commit。那是真正需要署名的形态。
 

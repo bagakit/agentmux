@@ -35,7 +35,7 @@
   - Rationale: Added one-click YOLO interaction and density constraints to design SSOT.
   - Refs: docs/design/agentmux-desktop-interaction.md
 - Execution Learning (Agent-authored): candidates_reviewed
-  - Rationale: Compared a mature workbench explicit provider launch args and recorded Claude outside-read setting evidence.
+  - Rationale: Compared Refproj explicit provider launch args and recorded Claude outside-read setting evidence.
   - Refs: docs/reviews/executor-yolo-2026-09-11.md
 - Promotion: not_needed
   - Rationale: No repository-wide principle change required.

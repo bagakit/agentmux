@@ -200,9 +200,14 @@ function stateNameOf(node: ts.Node, states: ReadonlySet<string>): StateNameNode 
  * Is this literal in a position the checker types as `AgentDisplayState`?
  *
  * Three routes, and each is needed for a shape present in the tree today:
- *   - contextual/declared type is a multi-member union of state members only — a state-typed argument or a
- *     state-typed array element. Requiring 2+ members is what keeps a literal whose own type is just
- *     itself (`'blocked'` in an unrelated string union of one) out.
+ *   - contextual/declared type is a union that COVERS every `AgentDisplayState` member — a state-typed
+ *     argument or a state-typed array element. Covering the whole union (assignable-FROM it), not merely
+ *     being a subset of its members, is what keeps a distinct semantic SUBTYPE out: `main/
+ *     prompt-readiness-diagnostics.ts::PromptReadinessSemanticState` is `waiting|blocked|done|error`, a
+ *     legitimate 4-member type whose every member is also an `AgentDisplayState` member but which is not an
+ *     `AgentDisplayState` position. A subset-of-members heuristic mis-classified it; requiring full
+ *     coverage does not. It also keeps a literal whose own type is just itself (`'blocked'` in an unrelated
+ *     string union of one) out, for the same reason.
  *   - the OTHER operand of `===`/`!==` is state-typed. `null`/`undefined` are allowed alongside, because
  *     `session?.status.state === 'waiting'` types the left side as `AgentDisplayState | undefined` and
  *     that is the ordinary spelling, not an evasion.
@@ -219,13 +224,19 @@ function isStateTypedPosition(
   checker: ts.TypeChecker,
   states: ReadonlySet<string>
 ): boolean {
-  const allStateMembers = (type: ts.Type, allowNullish: boolean): boolean => {
-    const parts = type.isUnion() ? type.types : [type]
-    if (parts.length < 2) return false
-    let sawState = false
-    for (const part of parts) {
+  // COVERS every state, not merely a subset of them. `AgentDisplayState` must be assignable INTO this
+  // position — every state member present, and no member that is not a state (nullish aside). A subset
+  // check ("every member is a state") flagged a distinct semantic SUBTYPE whose members happen to all be
+  // states: `PromptReadinessSemanticState` ('waiting'|'blocked'|'done'|'error') is a legitimate narrower
+  // type, not an `AgentDisplayState` position, and naming its members is not a needs-you re-derivation.
+  // Kept as literal coverage rather than `isTypeAssignableTo(AgentDisplayState, …)` on purpose: the latter
+  // is also true for `string` (every state IS a string), which would newly flag the documented
+  // widened-to-`string` blind spot below.
+  const coversEveryState = (type: ts.Type, allowNullish: boolean): boolean => {
+    const present = new Set<string>()
+    for (const part of type.isUnion() ? type.types : [type]) {
       if (part.isStringLiteral() && states.has(part.value)) {
-        sawState = true
+        present.add(part.value)
         continue
       }
       if (allowNullish) {
@@ -234,15 +245,26 @@ function isStateTypedPosition(
       }
       return false
     }
-    return sawState
+    return states.size > 0 && [...states].every((state) => present.has(state))
   }
 
-  // A table KEYED by state. Symmetric with `allStateMembers`: there every member of a union must be a
-  // state, here every property name must be. Two or more, for the same reason — a one-key object is not
-  // a table over the union.
+  // The DECLARED type of a `===`/`!==` operand, before control-flow narrowing. In
+  // `a === 'waiting' || a === 'blocked'` the checker narrows `a` on the second comparison to exclude
+  // `'waiting'`, so its flow type no longer covers the full union and the second literal would go
+  // uncounted — splitting one re-derivation across two half-seen comparisons and letting tier B miss it.
+  // The symbol's declared type is stable across the chain; fall back to the flow type when there is no
+  // symbol (an operand that is itself a call or other expression).
+  const declaredTypeOf = (node: ts.Expression): ts.Type => {
+    const symbol = checker.getSymbolAtLocation(node)
+    return symbol ? checker.getTypeOfSymbol(symbol) : checker.getTypeAtLocation(node)
+  }
+
+  // A table KEYED by state. Symmetric with `coversEveryState`: there every state member must be present,
+  // here every state must appear as a property name (extra non-state keys would fail the same way an extra
+  // non-state union member does). A partial table over a subset of the states is not this shape.
   const stateKeyedRecord = (type: ts.Type): boolean => {
-    const names = checker.getPropertiesOfType(type).map((property) => property.name)
-    return names.length >= 2 && names.every((name) => states.has(name))
+    const names = new Set(checker.getPropertiesOfType(type).map((property) => property.name))
+    return states.size > 0 && [...states].every((state) => names.has(state))
   }
 
   // WRITING a verdict table: `{ waiting: true, blocked: true }` annotated as
@@ -265,7 +287,7 @@ function isStateTypedPosition(
   }
 
   for (const type of [checker.getContextualType(literal), checker.getTypeAtLocation(literal)]) {
-    if (type && allStateMembers(type, false)) return true
+    if (type && coversEveryState(type, false)) return true
   }
 
   const parent = literal.parent
@@ -275,12 +297,12 @@ function isStateTypedPosition(
       parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken)
   ) {
     const other = parent.left === literal ? parent.right : parent.left
-    if (allStateMembers(checker.getTypeAtLocation(other), true)) return true
+    if (coversEveryState(declaredTypeOf(other), true)) return true
   }
 
   if (ts.isCaseClause(parent) && parent.expression === literal) {
     const statement = parent.parent.parent
-    if (ts.isSwitchStatement(statement) && allStateMembers(checker.getTypeAtLocation(statement.expression), false)) {
+    if (ts.isSwitchStatement(statement) && coversEveryState(declaredTypeOf(statement.expression), false)) {
       return true
     }
   }

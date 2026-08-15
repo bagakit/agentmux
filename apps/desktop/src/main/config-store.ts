@@ -78,6 +78,18 @@ const appearanceSchema = z.object({
     .transform((value) => (value === undefined ? undefined : clampTerminalFontSize(value)))
 }).strict()
 const browserSchema = z.object({
+  /**
+   * Agent 驱动页面的总授权位。默认关。
+   *
+   * 为什么是**一个布尔**而不是分级：分级最终会变成一堆没人看得懂的勾选框，而每一档都要永远解释
+   * 「这档到底准我做什么」。开了就是全套页面能力可用——不要顺手加只读模式、白名单域名或第二档。
+   *
+   * 为什么 `.optional()`：既有磁盘上的 config 没有这个字段，schema 里写成必需会让它们**整块**
+   * 判失败（见 :328 那段——一个损坏的 browser 不该连累别的节）。缺省由 `withBrowserAutomationDefault`
+   * 补齐成具体的 `false` 并落盘一次，此后每次读到的都是确定值。这是仓内既有的默认补齐模式
+   * （同 :284 withNotificationDefault），不是 migration。
+   */
+  agentAutomation: z.boolean().optional(),
   toolbar: z.object({
     selectElement: z.boolean(),
     screenshot: z.boolean(),
@@ -224,6 +236,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   workspaces: [],
   appearance: { appAppearance: 'dark', terminalTheme: 'graphite' },
   browser: {
+    agentAutomation: false,
     toolbar: {
       selectElement: true,
       screenshot: true,
@@ -271,6 +284,23 @@ function withScratchWorkspace(config: AppConfig): { config: AppConfig; added: bo
   if (present) return { config, added: false }
   return {
     config: { ...config, workspaces: [...config.workspaces, scratchWorkspace()] },
+    added: true
+  }
+}
+
+/**
+ * Agent 浏览器自动化授权的 back-fill：缺席补成具体的 `false` 并落盘一次，此后每次读到的都是确定值。
+ *
+ * 为什么要落盘而不是在读处兜底成 `?? false`：授权位是安全判据，`undefined` 与 `false` 在读处等价
+ * 只是**今天**如此——任何一个新读点写成 `!== false` 或 `?? true` 就静默放行了。让磁盘上是个具体的
+ * `false`，判据就只有一种形状。与下面的通知默认补齐同族。
+ *
+ * `browser` 整节缺席时不补：那是另一件事（整节缺省由 DEFAULT_CONFIG 负责），这里只补自己这一位。
+ */
+function withBrowserAutomationDefault(config: AppConfig): { config: AppConfig; added: boolean } {
+  if (!config.browser || config.browser.agentAutomation !== undefined) return { config, added: false }
+  return {
+    config: { ...config, browser: { ...config.browser, agentAutomation: false } },
     added: true
   }
 }
@@ -814,10 +844,12 @@ export class ConfigStore {
     if (scratch.added) persist = true
     const notifications = withNotificationDefault(scratch.config)
     if (notifications.added) persist = true
+    const browserAutomation = withBrowserAutomationDefault(notifications.config)
+    if (browserAutomation.added) persist = true
     if (persist) {
-      return await this.write(notifications.config, { enforceExecutorBinding: !retiring })
+      return await this.write(browserAutomation.config, { enforceExecutorBinding: !retiring })
     }
-    return notifications.config
+    return browserAutomation.config
   }
 
   async save(value: AppConfig): Promise<AppConfig> {

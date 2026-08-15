@@ -1,4 +1,4 @@
-# Feature Goal: a mature workbench-informed Provider Parity
+# Feature Goal: Refproj-informed Provider Parity
 
 Contract: `bagakit.feature-goal.v1`
 Feature: `f-23z8fgsw3`
@@ -29,7 +29,7 @@ resume、prompt delivery、reply-correlation 七条轴。
   task 再动手；改变结果/不变量/验收/授权/不可逆边界的，停下与用户对账；有价值但相邻的，
   记为 child Feature 或 backlog。
 - Completion or cycle stop: 十八个 task 全部 done 且 `pnpm check` 通过；registry 的
-  a mature workbench 对照 inventory 中每一条只有 implemented / deferred / not-comparable 一种归类，
+  Refproj 对照 inventory 中每一条只有 implemented / deferred / not-comparable 一种归类，
   deferred 必须写原因且**不得**冒充已实现。
 
 ## Protected Invariants

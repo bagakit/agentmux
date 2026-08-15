@@ -24,7 +24,7 @@
     "last_task_id": "T-005",
     "last_check_commands": [
       {
-        "command": "test -s docs/orca-agent-runtime-notes.md",
+        "command": "test -s docs/refproj-agent-runtime-notes.md",
         "exit_code": 0,
         "status": "pass"
       },
@@ -147,7 +147,7 @@
   "goal_contract": {
     "schema": "bagakit.feature-goal.v1",
     "ref": ".bagakit/feature-tracker/features-archived/f-2228fpnqm/goal.md",
-    "revision": "83e15194b6cc46bff57200697d146251c6a7d2d11ebf0eefe64ca7a911fea92f"
+    "revision": "8158c63bf7a836cec53c7c6bdf3fccade1ac2eec844ab0329ee27891e751fe01"
   },
   "closed_from_status": "done",
   "archived_cleanup": {

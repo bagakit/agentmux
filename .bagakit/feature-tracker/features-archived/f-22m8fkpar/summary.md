@@ -14,7 +14,7 @@
 - Archive Synthesis: none; archive does not reinterpret or rewrite requirements
 - Canonical Truth: tasks.json
 - Confirmed Plan Revision: 1
-- Confirmation Ref: docs/design/interaction-review.md
+- Confirmation Ref: docs/design/refproj-interaction-review.md
 
 ## Closure
 - Git Workspace: unchanged; use ordinary Git commands for worktree or branch cleanup
@@ -29,7 +29,7 @@
 ## Closeout Review
 - Documentation: verified_current
   - Rationale: Workspace file ownership, save/conflict, move/path-transaction, and mounted Desktop contracts are current on the exact final candidate.
-  - Refs: docs/design/interaction-review.md
+  - Refs: docs/design/refproj-interaction-review.md
 - Execution Learning (Agent-authored): no_reusable_learning
   - Rationale: The causal corrections are embodied in owner-level tests and current contracts; a separate learning artifact would duplicate truth.
   - Refs: 

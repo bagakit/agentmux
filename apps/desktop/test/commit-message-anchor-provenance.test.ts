@@ -158,17 +158,23 @@ describe('Detector 2: commit-message line anchor provenance', () => {
 
   // ---- Real-tree drive: the ban is REAL, and this detector reads actual history -----------
 
-  it('runs against the last 30 real commits and asserts the scan actually executed', async () => {
-    const shas = (await git(['rev-list', '--max-count=30', 'HEAD'])).trim().split('\n').filter(Boolean)
+  it('runs against real history (incl. a pinned anchor-bearing commit) and proves the regex still bites', async () => {
+    // 正则活性判据必须钉在「历史里确有的锚点」上，而不是「最近的提交恰好带锚点」上——后者会腐烂:
+    // 干净约定被强制执行后，近 30 条提交自然全是符号名、零锚点，滑动窗口就假红了。故显式钉入一条
+    // 真实历史提交 5815fa58（其 message 带 `apps/desktop/test/activity-groups.test.ts:30`），把
+    // 「正则还咬得动真实历史」与「锚点用得多近」解耦。若正则失效，这条真锚点扫不到 → 红。
+    const ANCHOR_BEARING_SHA = '5815fa58' // 真实历史，prose 锚点 activity-groups.test.ts:30
+    const recent = (await git(['rev-list', '--max-count=30', 'HEAD'])).trim().split('\n').filter(Boolean)
     // 前提自证 (AGENTS.md 契约测试第三种白绿: 扫到空内容): there MUST be commits to scan.
-    expect(shas.length, 'rev-list 返回空——没有历史可扫，下面的断言全是空转').toBeGreaterThan(0)
+    expect(recent.length, 'rev-list 返回空——没有历史可扫，下面的断言全是空转').toBeGreaterThan(0)
+    const shas = recent.includes(ANCHOR_BEARING_SHA) ? recent : [...recent, ANCHOR_BEARING_SHA]
     let anchorsSeen = 0
     for (const sha of shas) {
       const message = await git(['log', '-1', '--format=%B', sha])
       anchorsSeen += findMessageAnchors(message).length
     }
-    // The point of this assertion: the classifier ran over real messages (which DO contain
-    // tsc-diagnostic anchors), proving the scan found real targets rather than a dead regex.
-    expect(anchorsSeen, '30 条真实历史里一个锚点都没扫到——正则可能已失效').toBeGreaterThan(0)
+    // The point of this assertion: the classifier ran over real (not synthetic) commit messages and
+    // still found a real anchor, proving the regex bites live history rather than being a dead regex.
+    expect(anchorsSeen, '真实历史（含钉死的锚点提交）里一个锚点都没扫到——正则可能已失效').toBeGreaterThan(0)
   })
 })

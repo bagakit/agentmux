@@ -4,20 +4,20 @@
   "plan_status": "reviewed",
   "plan_revision": 1,
   "supersedes_revision": null,
-  "review_ref": "docs/design/orca-interaction-review.md",
+  "review_ref": "docs/design/refproj-interaction-review.md",
   "source_refs": [
     "AGENTS.md",
-    "docs/design/orca-interaction-review.md",
+    "docs/design/refproj-interaction-review.md",
     "docs/testing/strategy.md"
   ],
   "plan_history": [
     {
       "revision": 1,
       "supersedes_revision": null,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "task_ids": [
@@ -51,13 +51,13 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-interaction-review.md",
+          "ref": "docs/design/refproj-interaction-review.md",
           "proves": "Workspace 文件 Owner、revision、原子保存和冲突语义保持单一正式设计真相。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "supersedes": [],
@@ -66,7 +66,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -103,7 +103,7 @@
         }
       ],
       "source_refs": [
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "supersedes": [],
@@ -112,7 +112,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -149,7 +149,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "supersedes": [],
@@ -158,7 +158,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -177,7 +177,7 @@
       "disposition": "verified_current",
       "rationale": "Workspace file ownership, save/conflict, move/path-transaction, and mounted Desktop contracts are current on the exact final candidate.",
       "refs": [
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ]
     },
     "learning": {

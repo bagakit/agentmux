@@ -84,7 +84,7 @@
 
 ### Stop、Crash 与资源
 
-- POSIX Process Group 清理采用 a mature workbench 当前源码验证过的 `ps -p` → `ps -t` 模式；子进程组先于根进程组强停，共享 TTY 时回退到 node-pty 的根进程 Kill。
+- POSIX Process Group 清理采用 Refproj 当前源码验证过的 `ps -p` → `ps -t` 模式；子进程组先于根进程组强停，共享 TTY 时回退到 node-pty 的根进程 Kill。
 - 真实 PTY 测试启动同时忽略 HUP／TERM 的 Agent 根进程和工具子进程；Stop 先 Graceful，超时后 Force，最终两个 PID 都不存在。
 - 独立构建产物中的 `agentmuxd` 被真实 `SIGKILL` 后，替换 Daemon 从私有原子 Journal 恢复同一 Session／Incarnation／Operation 为 `lost`。显式 Stop lost Session 会先核对 PID 与 `lstart`，只清理仍匹配原启动身份的进程组。
 - `pnpm check`：通过。
@@ -208,7 +208,7 @@
 - Desktop 配置直接升级到 v2，不提供 Migration、Alias 或 Fallback。SSH Host 必须显式声明远端 Daemon 身份与路径。
 - Host 修改继续使用 `prepare → disk save → commit`，Daemon Discovery 失败不会推进 Runtime Signature；Host Check 使用隔离内存 Store，不污染 Semantic 真相。
 - Desktop Semantic Store 使用 0600 临时文件与原子 Rename，多 Host 写入串行，文档上限 1 MiB；持久化失败不会提前修改内存投影。
-- 当前架构、恢复、关闭和内存边界已记录在 `docs/plans/agentmux-desktop-daemon-cutover.md`；README 和 a mature workbench 设计文档不再把 tmux 描述为当前 Owner。
+- 当前架构、恢复、关闭和内存边界已记录在 `docs/plans/agentmux-desktop-daemon-cutover.md`；README 和 Refproj 设计文档不再把 tmux 描述为当前 Owner。
 
 ### 完整检查
 
@@ -235,7 +235,7 @@
 
 - Core 没有 Electron、React 或 Desktop Store import；Browser、文件与 Worktree 仍由 Electron Main 持有。
 - Main 没有第二份 Session Map；Renderer Store 不复制 Output；Terminal Pane 卸载会释放 Event Subscription、ResizeObserver、xterm Input 和实例，并只 Detach Client。
-- 搜索只剩历史决策、a mature workbench Fake-tmux 源码证据和切换前基线描述；产品代码不存在 tmux Runtime、Backend Selector 或兼容入口。
+- 搜索只剩历史决策、Refproj Fake-tmux 源码证据和切换前基线描述；产品代码不存在 tmux Runtime、Backend Selector 或兼容入口。
 - `.tmp/` 为用户文件，未读取、修改或纳入提交。
 
 ## Residual Risks
@@ -453,7 +453,7 @@ T-011 已把 Core 公共领域模型从混合 Session 拆成 Run、Agent Session
 ### 文档与熵处置
 
 - `docs/plans/agentmux-semantic-session.md` 已重写为长期领域合同，明确四对象、五动作、byte cursor、Evidence、Provider/Kernel Owner 与资源边界。
-- README、Core README、a mature workbench 研究、Desktop/SSH 历史文档和测试策略已同步新术语；过时 Store/Registry/Test 文件直接重命名。
+- README、Core README、Refproj 研究、Desktop/SSH 历史文档和测试策略已同步新术语；过时 Store/Registry/Test 文件直接重命名。
 - T-008 遗留、绑定旧 daemon candidate 且无法闭环的 benchmark 入口和三个未提交脚本/Fixture 已删除；T-013 只按 Kernel-neutral 合同重新采用 workload 与统计思想。
 - 用户 `.tmp/` 未读取、修改或纳入提交。
 

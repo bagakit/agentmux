@@ -21,7 +21,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-001",
@@ -40,7 +40,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-001",
@@ -60,7 +60,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-001",
@@ -83,7 +83,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-001",
@@ -107,7 +107,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-010",
@@ -157,7 +157,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "task_ids": [
         "T-010",
@@ -198,7 +198,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         "docs/plans/agentmux-semantic-session.md"
       ],
       "task_ids": [
@@ -245,7 +245,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         "docs/plans/agentmux-semantic-session.md"
       ],
       "task_ids": [
@@ -524,7 +524,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -576,7 +576,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -624,7 +624,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -671,7 +671,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -718,7 +718,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -765,7 +765,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -831,7 +831,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -878,7 +878,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -988,23 +988,14 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
-      "status": "blocked",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "pnpm check",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
+      "status": "cancelled",
+      "gate_result": null,
+      "last_gate_commands": [],
       "notes": [
         "Rev 10: 经评估与对抗复核后决定不做（人是信任锚，capability 认证只在 agent 自主编排时才值钱，而那是 plan 明确否认的）。保留在计划内是因为本模型只能表达'被取代'而非'被取消'；放弃的能力与重启条件记录在 ideas/index.md。不依赖 T-018。"
       ],
       "depends_on": [],
-      "last_blocker": {
-        "class": "internal_blocker",
-        "reason": "P0 竖切成立（startDiscussion 有 agentmux discuss 与 Board Canvas 两个真实入口；凭证、Thread、重启恢复均经变异验证）。P1 只交付 Core 侧状态机纯函数，竖切未闭合，不能盖章：(1) 去掉 client.ts 自身后，checkDeliveries/ackDeliveryBatch/answerAsk/cancelAsk/handOff/openDispatch/recordDispatchEvent 七个动作全仓零调用者——无 IPC、无 CLI、无 UI；(2) SSOT 要求的 send/acceptMessage/reply 三个 API 不存在，导致 accepted 与 replied 两状态在生产路径上不可达；(3) agent-session-store.ts 对 AgentThread/threadId/DeliveryQueue 零命中，Thread 与 consumer 游标活不过重启，'Core 重启后恢复同一 Thread 与未读 Inbox 投影'这条 oracle 无从谈起；(4) 九个 Provider 的 replyCorrelation 全为 none，correlated-reply 一类在 catalog 里没有素材，三类 Provider 竖切矩阵无法构造；(5) A→B→A cycle、hop/waiter/retry/token/Inbox 上限未实现，只有复用自 Prompt 的 64KB；(6) 消息侧 Remote typed unsupported 未接，REMOTE_UNSUPPORTED 只在 Run 路径；(7) Discussion Canvas 只读一个 delivered 常量，无 Thread 视图与回复/取消/超时。更正：上一轮我据 12 处变异验证写下'P1 全部机制已交付'，该结论已推翻并改正 docs/reviews/agentmux-agent-communication-final.md——变异证明代码被测试用到，不证明能力接到产品上。P1 量级与 P0 相当，建议单独立项。"
-      }
+      "cancel_reason": "Rev 10 评估与对抗复核后决定不做：人是信任锚，capability 认证只在 agent 自主编排时才值钱，而 plan 明确否认那个方向。此前记为 blocked 使整个 Feature 被误报成执行受阻；它不是在等任何人或任何上游，是一件已决之事。放弃的能力与重启条件在 ideas/index.md。"
     },
     {
       "id": "T-021",
@@ -1180,7 +1171,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1223,7 +1214,7 @@
       "source_refs": [
         "docs/plans/mux-runtime-decision.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -1231,7 +1222,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1242,7 +1233,7 @@
         }
       ],
       "notes": [
-        "source reference deleted (docs/orca-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
+        "source reference deleted (docs/refproj-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
       ],
       "superseded_by": [
         "T-010"
@@ -1276,7 +1267,7 @@
         "AGENTS.md",
         "docs/plans/mux-runtime-decision.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -1284,7 +1275,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1295,7 +1286,7 @@
         }
       ],
       "notes": [
-        "source reference deleted (docs/orca-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
+        "source reference deleted (docs/refproj-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
       ],
       "superseded_by": [
         "T-010"
@@ -1337,7 +1328,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1388,7 +1379,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1444,7 +1435,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1487,7 +1478,7 @@
       "source_refs": [
         "docs/plans/mux-runtime-decision.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 3,
@@ -1495,7 +1486,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1506,7 +1497,7 @@
         }
       ],
       "notes": [
-        "source reference deleted (docs/orca-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
+        "source reference deleted (docs/refproj-agent-runtime-notes.md removed in 4fb380d); no equivalent doc exists, so this reference is dead and the recorded pass is not reproducible against it."
       ],
       "superseded_by": [
         "T-010"
@@ -1520,7 +1511,7 @@
       "acceptance": [
         "运行前提交 Benchmark Protocol、硬件/软件 Manifest、Workload、Warmup、Sample Size、统计方法、置信区间、Outlier Policy、资源预算和原始结果格式，禁止看结果后改主指标。",
         "主维度至少包含 input-to-visible-output p50/p95/p99、sustained output throughput、attach/replay latency、并发 Session Scale、idle CPU、idle/per-session/steady/peak RSS、reconnect recovery 和 stop cleanup。",
-        "冻结当前真实 tmux Runtime 为强制 Baseline；tmux、Zellij、WezTerm mux、Orca/Paseo 可验证维度及其他可运行同类在同机同 Workload 下比较，不可比项明确解释且不得伪装为胜出。",
+        "冻结当前真实 tmux Runtime 为强制 Baseline；tmux、Zellij、WezTerm mux、Refproj/Refpeer 可验证维度及其他可运行同类在同机同 Workload 下比较，不可比项明确解释且不得伪装为胜出。",
         "AgentMux Daemon 在每个预先声明且可比的发布主维度都优于冻结 tmux Baseline；任何主维度回退都会阻止任务完成，而不是调低验收线。",
         "Benchmark 同时运行 correctness oracle、持久化检查、资源硬上限和泄漏检查；原始数据、汇总脚本、版本 SHA 与复现命令纳入仓库。",
         "至少两轮独立复跑得到一致结论；Flaky、环境噪声与失败样本完整保留，不只展示最佳结果。"

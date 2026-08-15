@@ -67,7 +67,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -105,7 +105,7 @@
       ],
       "source_refs": [
         "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/architecture/terminal-runtime.md"
       ],
       "supersedes": [],
@@ -114,7 +114,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -160,7 +160,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -207,7 +207,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

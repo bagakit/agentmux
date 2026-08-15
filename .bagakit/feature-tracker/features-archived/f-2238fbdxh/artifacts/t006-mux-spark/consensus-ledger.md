@@ -24,9 +24,9 @@
 
 ### local-ssh-parity: Local/SSH 一致性
 
-- Why: a mature workbench-like embedded Local 很简单，但 SSH 持久 PTY 需要远端 Session Owner
+- Why: Refproj-like embedded Local 很简单，但 SSH 持久 PTY 需要远端 Session Owner
 - Current state: ExecutionHost + tmux 为 Local/SSH 提供同构命令语义
-- Items: kk-a mature workbench-runtime, uu-remote-operations, kk-daemon-choice
+- Items: kk-refproj-runtime, uu-remote-operations, kk-daemon-choice
 - Questions: none
 - Risk if ignored: 永久 Hybrid 会带来双恢复模型和双测试面
 - Next probe: 确认是否接受安装和升级远端轻量 AgentMux Daemon
@@ -55,8 +55,8 @@
 
 - Meaning: Confirmed or directly available understanding.
 - `kk-current-tmux` confirmed: 当前 AgentMux 由真实 tmux 持有 Local/SSH PTY 与进程，Core 负责 Session 身份、输入顺序、Resize、Capture、Hook 状态、发现和精确停止。
-- `kk-a mature workbench-runtime` confirmed: a mature workbench Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。
-- `kk-prior-direction` confirmed: 用户此前明确说过采用 a mature workbench-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。
+- `kk-refproj-runtime` confirmed: Refproj Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。
+- `kk-prior-direction` confirmed: 用户此前明确说过采用 Refproj-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。
 - `kk-daemon-choice` confirmed: 用户明确选择 Local/SSH 统一的持久 AgentMux Session Daemon：App 完全退出、UI 崩溃或 SSH 网络中断后，Agent Session 必须继续运行并可恢复；接受 SSH Host 安装远端轻量组件。
 
 ### Known unknown
@@ -67,7 +67,7 @@
 ### Unknown known
 
 - Meaning: Inferred or latent understanding that needs confirmation.
-- `uk-long-term-preference` superseded: 此前对统一 a mature workbench-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。
+- `uk-long-term-preference` superseded: 此前对统一 Refproj-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。
 
 ### Unknown unknown
 
@@ -78,13 +78,13 @@
 
 - `kk-current-tmux` known_known/confirmed: 当前 AgentMux 由真实 tmux 持有 Local/SSH PTY 与进程，Core 负责 Session 身份、输入顺序、Resize、Capture、Hook 状态、发现和精确停止。
   - source: source_evidence; confidence: high; dimensions: ownership-persistence
-- `kk-a mature workbench-runtime` known_known/confirmed: a mature workbench Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。
+- `kk-refproj-runtime` known_known/confirmed: Refproj Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。
   - source: source_evidence; confidence: high; dimensions: local-ssh-parity
-- `kk-prior-direction` known_known/confirmed: 用户此前明确说过采用 a mature workbench-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。
+- `kk-prior-direction` known_known/confirmed: 用户此前明确说过采用 Refproj-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。
   - source: user; confidence: high; dimensions: migration-boundary
 - `ku-persistence-strength` known_unknown/superseded: 此前未知的持久化强度已由用户选择持久 Daemon 解决；由 kk-daemon-choice 接替。
   - source: agent_inference; confidence: high; dimensions: ownership-persistence
-- `uk-long-term-preference` unknown_known/superseded: 此前对统一 a mature workbench-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。
+- `uk-long-term-preference` unknown_known/superseded: 此前对统一 Refproj-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。
   - source: agent_inference; confidence: high; dimensions: migration-boundary
 - `uu-remote-operations` unknown_unknown/proposed: 远端 Daemon 的安装权限、版本升级、认证材料、Daemon 崩溃恢复和多 Client Owner Lease 可能成为比 tmux 交互延迟更大的实际成本。
   - source: agent_inference; confidence: medium; dimensions: local-ssh-parity
@@ -93,7 +93,7 @@
 
 ## Questions
 
-- `q-persistence` answered: a mature workbench-like embeddable 的最终方案是否必须保证 App 退出和 SSH 断线后 Session 继续运行并可恢复？
+- `q-persistence` answered: Refproj-like embeddable 的最终方案是否必须保证 App 退出和 SSH 断线后 Session 继续运行并可恢复？
 
 ## Evidence Requirements
 
@@ -103,9 +103,9 @@
 - `er-current-tmux-source` source_evidence/satisfied: item:kk-current-tmux
   - acceptance: 当前 Core 源码与确定性测试证明 tmux 是 Local/SSH 的唯一 PTY/Process Owner，并覆盖启动、输入、Resize、停止、发现与恢复
   - evidence: packages/core/src/tmux-client.ts, packages/core/src/runtime.ts, packages/core/src/execution-host.ts, packages/core/test/tmux-runtime.integration.test.ts, packages/core/test/runtime-recovery.test.ts
-- `er-a mature workbench-runtime-source` source_evidence/satisfied: item:kk-a mature workbench-runtime
-  - acceptance: a mature workbench 源码证据证明 Local node-pty 与 SSH 持久 Relay/Daemon、Owner Lease、版本身份、Flow Control、恢复记录属于不同复杂度层级
-  - evidence: docs/a mature workbench-agent-runtime-notes.md
+- `er-refproj-runtime-source` source_evidence/satisfied: item:kk-refproj-runtime
+  - acceptance: Refproj 源码证据证明 Local node-pty 与 SSH 持久 Relay/Daemon、Owner Lease、版本身份、Flow Control、恢复记录属于不同复杂度层级
+  - evidence: docs/refproj-agent-runtime-notes.md
 
 ## Snapshots
 

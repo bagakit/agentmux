@@ -3,7 +3,7 @@
   "feat_id": "f-23k8f8avd",
   "title": "AgentMux Surface Memory Budget and Cold Parking",
   "slug": "agentmux-surface-memory",
-  "goal": "解释并降低 AgentMux 相比 Orca 的内存占用：先以同条件证据定位 Renderer/Main/Browser/Terminal 的责任，再用有限 hot-retain 与可验证 cold-park 回收长期隐藏 surface，同时不破坏跨项目无缝回访。",
+  "goal": "解释并降低 AgentMux 相比 Refproj 的内存占用：先以同条件证据定位 Renderer/Main/Browser/Terminal 的责任，再用有限 hot-retain 与可验证 cold-park 回收长期隐藏 surface，同时不破坏跨项目无缝回访。",
   "status": "archived",
   "workspace_mode": "current_tree",
   "base_ref": "main",
@@ -95,7 +95,7 @@
   "goal_contract": {
     "schema": "bagakit.feature-goal.v1",
     "ref": ".bagakit/feature-tracker/features-archived/f-23k8f8avd/goal.md",
-    "revision": "daf135433d8a68ab30455179fb3e1cb011d2691934063e405b41ba43ed89b22a"
+    "revision": "cfe02ddad21b8fbc40466973489a987361c33a73d062d8c663c787236595ab7d"
   },
   "closed_from_status": "done"
 }

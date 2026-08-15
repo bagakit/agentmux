@@ -24,7 +24,7 @@
     "last_task_id": "T-004",
     "last_check_commands": [
       {
-        "command": "test -s docs/orca-agent-runtime-notes.md",
+        "command": "test -s docs/refproj-agent-runtime-notes.md",
         "exit_code": 0,
         "status": "pass"
       },

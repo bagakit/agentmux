@@ -4,5 +4,5 @@ workspace_mode=worktree
 execution_detail=worktree uses state.worktree_path=.worktrees/wt-f-22m8fkpar
 result=pass
 commands:
-- test -s docs/orca-agent-runtime-notes.md => pass (0)
+- test -s docs/refproj-agent-runtime-notes.md => pass (0)
 - pnpm check => pass (0)

@@ -6,5 +6,5 @@ result=fail
 reasons:
 - verification evidence requires a substantive Result or Outcome
 commands:
-- test -s docs/orca-agent-runtime-notes.md => pass (0)
+- test -s docs/refproj-agent-runtime-notes.md => pass (0)
 - pnpm check => pass (0)

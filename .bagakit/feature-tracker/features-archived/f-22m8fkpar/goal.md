@@ -48,5 +48,5 @@ Make AgentMux file navigation, editing, saving, conflict handling, and move oper
 ## Context References
 
 - `AGENTS.md`: project ownership, architecture, and no-compatibility constraints; read before implementation or review.
-- `docs/design/interaction-review.md`: Workspace file behavior and owner boundary; read when changing product semantics or interaction acceptance.
+- `docs/design/refproj-interaction-review.md`: Workspace file behavior and owner boundary; read when changing product semantics or interaction acceptance.
 - `docs/testing/strategy.md`: authoritative verification layers and mounted Desktop oracle; read before claiming readiness.

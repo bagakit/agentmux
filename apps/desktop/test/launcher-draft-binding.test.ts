@@ -2,6 +2,12 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// NewTabSurface 经 lib/api 在模块加载时判断宿主。先立起这个全局，否则下面对组件模块的静态 import
+// 会撞未定义的 __AGENTMUX_WEB_PREVIEW__（仅由 vite define 注入，root vitest.config.ts 不注入）。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
+
 // 证明"读"的一侧也按 regionId 取草稿：重挂的 NewTabSurface 会立刻显示上次输入，而不是空白。
 // 键取错（按 tabId、sessionId 或干脆用组件本地 state）这条就渲染不出那段文本。
 // 组件的 useAppStore(selector) 在 renderToStaticMarkup 下不会订阅真实 store，所以按仓库既有约定
@@ -38,6 +44,10 @@ const fixture = vi.hoisted(() => {
       promoteWarmTerminal: vi.fn(async () => {}),
       prewarmTerminal: vi.fn(),
       warmTerminal: null,
+      // 组件无条件读这两项（NewTabSurface 顶部）；带 regionId 会渲染到 Resume 按钮那段，
+      // 缺省表里它们必须在场，否则 recoveryCandidates.length 撞 undefined。默认与 store 一致（空表）。
+      recoveryCandidates: [],
+      recoverSession: vi.fn(async () => {}),
       createBrowser: vi.fn(async () => {})
     }
   }

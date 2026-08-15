@@ -8,7 +8,7 @@
   "source_refs": [
     "AGENTS.md",
     "docs/plans/agentmux-provider-timeline-executors.md",
-    "docs/orca-agent-runtime-notes.md",
+    "docs/refproj-agent-runtime-notes.md",
     "docs/testing/strategy.md"
   ],
   "plan_history": [
@@ -19,7 +19,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-provider-timeline-executors.md",
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         "docs/testing/strategy.md"
       ],
       "task_ids": [
@@ -65,7 +65,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -117,7 +117,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -170,7 +170,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

@@ -6,6 +6,6 @@ describe('activity workline density', () => {
     const sessions = [{ id: 'a', kind: 'agent', hostId: 'local', workspacePath: '/w', status: { state: 'working', source: 'native-hook', observedAt: 1 } }] as any
     const groups = buildActivityGroups(sessions, [])
     expect(groups).toHaveLength(1)
-    expect(groups[0].sessions).toHaveLength(1)
+    expect(groups[0]!.sessions).toHaveLength(1)
   })
 })

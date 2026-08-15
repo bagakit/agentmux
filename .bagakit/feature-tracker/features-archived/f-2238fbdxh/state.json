@@ -1,9 +1,9 @@
 {
   "version": 1,
   "feat_id": "f-2238fbdxh",
-  "title": "Orca-informed AgentMux Interaction Redesign",
-  "slug": "orca-informed-interaction-redesign",
-  "goal": "Review every existing AgentMux surface against Orca and redesign the desktop interaction model by directly adopting Orca's stronger information architecture, content, states, and workflows while retaining AgentMux's terminal-first identity.",
+  "title": "Refproj-informed AgentMux Interaction Redesign",
+  "slug": "refproj-informed-interaction-redesign",
+  "goal": "Review every existing AgentMux surface against Refproj and redesign the desktop interaction model by directly adopting Refproj's stronger information architecture, content, states, and workflows while retaining AgentMux's terminal-first identity.",
   "status": "archived",
   "workspace_mode": "current_tree",
   "base_ref": "main",
@@ -24,7 +24,7 @@
     "last_task_id": "T-006",
     "last_check_commands": [
       {
-        "command": "test -s docs/orca-agent-runtime-notes.md",
+        "command": "test -s docs/refproj-agent-runtime-notes.md",
         "exit_code": 0,
         "status": "pass"
       },
@@ -461,7 +461,7 @@
   "goal_contract": {
     "schema": "bagakit.feature-goal.v1",
     "ref": ".bagakit/feature-tracker/features-archived/f-2238fbdxh/goal.md",
-    "revision": "bbd87e619481525ac0ca457d611f15d3379fc0067f5ff5a0b7d9040cbadbbb6c"
+    "revision": "80fcc7a0b992b0b3c8ba16ee6c74d4ac230bfc9e3cb42fef818da7f52742aa01"
   },
   "closed_from_status": "done",
   "archived_cleanup": {

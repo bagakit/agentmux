@@ -29,7 +29,7 @@
 ## Closeout Review
 - Documentation: updated
   - Rationale: Desktop resource and interaction contracts now describe the current reusable Terminal, Topic, Tab, and owner boundaries without stale execution history.
-  - Refs: docs/testing/strategy.md, docs/design/interaction-review.md
+  - Refs: docs/testing/strategy.md, docs/design/refproj-interaction-review.md
 - Execution Learning (Agent-authored): candidates_reviewed
   - Rationale: The closeout reviewed stale launcher selectors, retired config fixtures, resource-owner baselines, and user corrections; reusable lessons are now enforced by stable Desktop actions, typed Topic APIs, regression tests, and the testing SSOT.
   - Refs: apps/desktop/src/shared/desktop-actions.ts, docs/testing/strategy.md

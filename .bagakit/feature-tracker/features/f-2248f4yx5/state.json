@@ -457,6 +457,18 @@
     {
       "action": "task_finished",
       "detail": "T-022 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-019"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-019 => cancelled"
+    },
+    {
+      "action": "task_cancelled",
+      "detail": "T-019 => plan rework"
     }
   ],
   "depends_on": [

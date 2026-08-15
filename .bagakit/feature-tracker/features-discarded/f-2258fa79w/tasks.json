@@ -21,7 +21,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/design/orca-surface-density-manifest.md",
+        "docs/design/refproj-surface-density-manifest.md",
         ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
       ],
       "task_ids": [
@@ -41,7 +41,7 @@
         "AGENTS.md",
         "docs/plans/mux-runtime-decision.md",
         "docs/plans/ctxmux-capability-audit.md",
-        "docs/design/orca-surface-density-manifest.md",
+        "docs/design/refproj-surface-density-manifest.md",
         "docs/testing/strategy.md",
         ".bagakit/feature-tracker/features/f-2258fa79w/proposal.md"
       ],

@@ -23,7 +23,7 @@
         "AGENTS.md",
         "docs/plans/mux-runtime-decision.md",
         "docs/plans/agentmux-semantic-session.md",
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         ".bagakit/feature-tracker/features/f-2268fqs8a/proposal.md"
       ],
       "task_ids": [
@@ -248,7 +248,7 @@
     "schema": "bagakit.feature-closeout-review.v1",
     "documentation": {
       "disposition": "updated",
-      "rationale": "Orca-like Agent communication is now the final reviewed task T-019 in AgentMux Core Maturity revision 6; the owning review and Orca notes were updated.",
+      "rationale": "Refproj-like Agent communication is now the final reviewed task T-019 in AgentMux Core Maturity revision 6; the owning review and Refproj notes were updated.",
       "refs": [
         "docs/plans/agentmux-core-maturity-review.md"
       ]
@@ -257,7 +257,7 @@
       "disposition": "candidates_reviewed",
       "rationale": "The proposal reliability constraints were reviewed and consolidated into T-019 without copying its separate execution lifecycle.",
       "refs": [
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ]
     },
     "promotion": {

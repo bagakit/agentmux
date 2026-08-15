@@ -72,7 +72,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

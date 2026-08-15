@@ -47,15 +47,15 @@ Production Electron 使用当前工作树构建产物、隔离目录 `/tmp/agent
 
 ## T-010 阶段结论
 
-T-010 的面性视觉、Titlebar Plane、可收起 Workspace 二级工具菜单和四个一方入口已经通过阶段验收。该结论只关闭 T-010 的范围；T-011 的 a mature workbench Explorer/Editor 移植、T-012 的 Project-scoped Branch Board、T-013 的最终 Production 回归和 T-006 的 mux 用户决策仍未完成，因此本 Feature 不能在此处宣称最终通过。
+T-010 的面性视觉、Titlebar Plane、可收起 Workspace 二级工具菜单和四个一方入口已经通过阶段验收。该结论只关闭 T-010 的范围；T-011 的 Refproj Explorer/Editor 移植、T-012 的 Project-scoped Branch Board、T-013 的最终 Production 回归和 T-006 的 mux 用户决策仍未完成，因此本 Feature 不能在此处宣称最终通过。
 
 ### Reference Provenance 与实现边界
 
-- `docs/design/a mature workbench-surface-density-manifest.md` 固定 a mature workbench `34f2a62cdaf58dc5924a3b01f560f91b53a5c277` 为 `style_reference`，记录了源码路径、Surface 层级、Density Budget、Control Ownership、重复 Token 和 Copy/Adapt/Omit 决策。
-- T-011 的源码移植基线仍是 a mature workbench `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`，没有被视觉参考更新漂移。
+- `docs/design/refproj-surface-density-manifest.md` 固定 Refproj `34f2a62cdaf58dc5924a3b01f560f91b53a5c277` 为 `style_reference`，记录了源码路径、Surface 层级、Density Budget、Control Ownership、重复 Token 和 Copy/Adapt/Omit 决策。
+- T-011 的源码移植基线仍是 Refproj `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`，没有被视觉参考更新漂移。
 - 当前实现删除 Renderer 根部的 38px 占位；Topbar 与 Project Rail Brand 都从 `Y=0` 开始，并把交互按钮标记为 no-drag。只有左上 Rail 保留 macOS Traffic Lights 安全区。
 - 二级工具状态只包含 `workspaceToolsOpen / workspaceTool / workspaceToolWidth`；没有 Config、Migration、插件发现、市场或第二套 Session 生命周期。
-- 像素宽度拖拽移植并最小适配 a mature workbench 的 `useSidebarResize`：拖拽中直接更新 owner DOM，结束时才写回 Zustand；全屏透明 Overlay 防止 Electron 原生 Surface 吞掉 `mouseup`。
+- 像素宽度拖拽移植并最小适配 Refproj 的 `useSidebarResize`：拖拽中直接更新 owner DOM，结束时才写回 Zustand；全屏透明 Overlay 防止 Electron 原生 Surface 吞掉 `mouseup`。
 
 ### 自动化与 Production Electron
 
@@ -104,7 +104,7 @@ T-010 的面性视觉、Titlebar Plane、可收起 Workspace 二级工具菜单�
 
 ## 状态
 
-本文件记录了 Plan Revision 3 交互模型的真实验收证据。2026-08-09 的体验复审随后将 T-009 标记为 `blocked`，并由 Plan Revision 4 的 T-010～T-013 接管视觉面性、二级工具菜单、a mature workbench Explorer/Editor 移植、Branch Board 和最终 Production 验收。
+本文件记录了 Plan Revision 3 交互模型的真实验收证据。2026-08-09 的体验复审随后将 T-009 标记为 `blocked`，并由 Plan Revision 4 的 T-010～T-013 接管视觉面性、二级工具菜单、Refproj Explorer/Editor 移植、Branch Board 和最终 Production 验收。
 
 因此，下述证据继续证明已经跑通的行为，但不再代表整个 Feature 或最终 Desktop 已通过；T-013 必须在新任务完成后复用并重跑这些检查。
 
@@ -257,9 +257,9 @@ pnpm check
 - 专家密度整体成立，但部分 Path、辅助标签和 Branch 元数据仍使用约 7–10px 字号，低于 Design Rule 中 11–13px 的理想范围；这属于后续可读性微调，不影响本 Feature 的对象所有权和交互闭环。
 - Unbound Branch 的 Create Worktree 面板会压缩并遮住原 Branch 行的大部分内容，表单仍保留 Branch 名称和 Path；后续视觉微调可进一步保持列表连续感。
 
-# T-011：直接移植 a mature workbench 的 Explorer 与 Editor 基础
+# T-011：直接移植 Refproj 的 Explorer 与 Editor 基础
 
-固定来源：a mature workbench `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`。逐文件 Copy / Adapt / Omit 清单见 `docs/design/interaction-review.md` 的“Explorer / Editor Copy、Adapt、Omit Manifest”。
+固定来源：Refproj `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`。逐文件 Copy / Adapt / Omit 清单见 `docs/design/refproj-interaction-review.md` 的“Explorer / Editor Copy、Adapt、Omit Manifest”。
 
 ## Repository Proof
 
@@ -274,7 +274,7 @@ git diff --check
 
 - Core/Desktop TypeScript 检查通过。
 - 21 个测试文件、85 项测试通过。
-- 新增的 a mature workbench 原始 Vue、Svelte、Astro、JSONL Monaco 注册测试全部通过。
+- 新增的 Refproj 原始 Vue、Svelte、Astro、JSONL Monaco 注册测试全部通过。
 - Language Detection 覆盖内置语言、精确文件名、四种已注册 Custom Language、未知类型与明确 Omit 的 Nim。
 - Explorer Foundations 覆盖 Row Projection、Arrow/Home/End/Left/Right、Range Selection、Rename/Delete 子树重映射、Reveal Ancestors、同目录乱序响应、Workspace Reset 与 Collapsed Stale Cache。
 - Main Process 的 Local/SSH Workspace Root Confinement、真实 Local Worktree 和 Core/tmux 测试继续通过。
@@ -285,7 +285,7 @@ git diff --check
 使用当前 `dev:web` 确定性 Renderer 夹具，在 `1440 × 900` 逐项操作：
 
 - 单击 `apps` 后 `aria-expanded=true`；聚焦目录后 ArrowRight 进入第一个子项 `apps/desktop`，End 跳到最后一项。
-- 初次验证发现 Shift 点击文件仍触发打开，Active File Reveal 随后把范围选择覆盖为单选；按 a mature workbench `selectRowWithModifiers` 合同修正为“Replace Click 才激活，Range/Toggle 只选择”。复验得到 `package.json + README.md` 两项 Range Selection。
+- 初次验证发现 Shift 点击文件仍触发打开，Active File Reveal 随后把范围选择覆盖为单选；按 Refproj `selectRowWithModifiers` 合同修正为“Replace Click 才激活，Range/Toggle 只选择”。复验得到 `package.json + README.md` 两项 Range Selection。
 - Manual Refresh 前后两项 Selection 和 `apps` Expanded 状态保持不变。
 - 展开 `packages/core/src` 并打开 `runtime.ts` 后，Active File 自动展开祖先、Reveal 对应 Row；模拟 Window Focus Refresh 后三个祖先仍展开，Selection 与 Row 均保持。
 - JSON Editor 呈现 5 组 token class / color；TypeScript Editor 呈现 5 组以上 token color，实际内容字号 `15px`、行高 `23px`。
@@ -306,7 +306,7 @@ git diff --check
 - 窗口为 `1480 × 940`，真实显示 `devicePixelRatio=2`、`visualViewport.scale=1`，Root/Body 没有 CSS transform，Root zoom 为 1。
 - HiDPI 截图物理尺寸为 `2960 × 1880`；Monaco 可见 canvas backing/CSS 为 `28/14 × 1656/828`，严格 `2:1`，不是低分辨率 bitmap 拉伸。
 - 打开真实 `apps/desktop/src/renderer/src/App.tsx`：Editor `15px / 23px`，Pane 与 Editor 同宽，多组 TypeScript token color，根级横纵 Overflow 均为 0。
-- 采用 a mature workbench Worker 策略的 AgentMux 适配后，假 unresolved-import squiggle 从整页红线降为 0；语义与建议诊断关闭，完整文件的语法诊断仍保留，JSX 使用 Preserve。
+- 采用 Refproj Worker 策略的 AgentMux 适配后，假 unresolved-import squiggle 从整页红线降为 0；语义与建议诊断关闭，完整文件的语法诊断仍保留，JSX 使用 Preserve。
 - Production Renderer Console 为 0 error / 0 warning。
 - 最新 Production Electron 已重新构建并保持启动，使用上述隔离配置。
 
@@ -531,7 +531,7 @@ DOM Node 与 Listener 在加载重型 Surface 后高于冷启动，但没有观�
 
 # T-031：二维 Branch × Status 看板与 Inbox Discussion Canvas
 
-验证时间：2026-08-10（Asia/Shanghai）。a mature workbench 源码对照固定为 `34f2a62cdaf58dc5924a3b01f560f91b53a5c277`，通过其 `.codegraph/` 读取 `AgentKanbanBoard`、`KanbanColumn`、`groupByBucket` 和卡片打开 Terminal 的调用链。AgentMux 复制固定状态列、列内最近变更排序、搜索／筛选、独立滚动与紧凑卡片层级，但把单轴 Agent Bucket 重组为用户确认的二维 Branch × Status 模型。
+验证时间：2026-08-10（Asia/Shanghai）。Refproj 源码对照固定为 `34f2a62cdaf58dc5924a3b01f560f91b53a5c277`，通过其 `.codegraph/` 读取 `AgentKanbanBoard`、`KanbanColumn`、`groupByBucket` 和卡片打开 Terminal 的调用链。AgentMux 复制固定状态列、列内最近变更排序、搜索／筛选、独立滚动与紧凑卡片层级，但把单轴 Agent Bucket 重组为用户确认的二维 Branch × Status 模型。
 
 ## SSOT 与产品对象
 
@@ -616,7 +616,7 @@ DOM Node 与 Listener 在加载重型 Surface 后高于冷启动，但没有观�
 
 Consensus Ledger 位于 `artifacts/t006-mux-spark/consensus-ledger.json` 与生成视图 `consensus-ledger.md`：
 
-- 当前 AgentMux tmux Owner 与 a mature workbench Local/SSH Runtime 的源码证据均为 `satisfied`；
+- 当前 AgentMux tmux Owner 与 Refproj Local/SSH Runtime 的源码证据均为 `satisfied`；
 - `q-persistence` 为 `answered`；
 - `er-persistence-confirmation` 由决策文档满足；
 - `mux-daemon-decision-v1` 为 `accepted` Snapshot；
@@ -624,14 +624,14 @@ Consensus Ledger 位于 `artifacts/t006-mux-spark/consensus-ledger.json` 与生�
 
 ## 源码比较与失败边界
 
-决策文档基于当前 `packages/core/src/runtime.ts`、`tmux-client.ts`、`execution-host.ts` 及对应测试，记录真实 tmux 的进程持有、发现、输入、Capture、Resize、Stop 与 Local/SSH 行为；a mature workbench 证据由 `docs/a mature workbench-agent-runtime-notes.md` 固定 Commit 和源码位置，并在本 Task 中通过 a mature workbench `.codegraph/` 重新核对 Local node-pty、远端 Owner Lease、版本身份、Flow Control 与 Recovery。
+决策文档基于当前 `packages/core/src/runtime.ts`、`tmux-client.ts`、`execution-host.ts` 及对应测试，记录真实 tmux 的进程持有、发现、输入、Capture、Resize、Stop 与 Local/SSH 行为；Refproj 证据由 `docs/refproj-agent-runtime-notes.md` 固定 Commit 和源码位置，并在本 Task 中通过 Refproj `.codegraph/` 重新核对 Local node-pty、远端 Owner Lease、版本身份、Flow Control 与 Recovery。
 
 比较覆盖真实 tmux、Main-owned node-pty、AgentMux Session Daemon、ctxmux 与长期 Hybrid：
 
 - tmux 已证明持久化与 Local/SSH 同构，但 command-per-input 和 capture polling 限制低延迟、Sequence、Replay 与 Backpressure；
 - Main-owned node-pty 有直接字节流，但 App 退出后失去 Owner，不满足用户确认的不变量；
 - ctxmux 有通用 Run 能力，但会把 AgentMux 核心交付绑定到另一项目的 Remote、发布和恢复能力边界，且被用户本次选择明确取代；
-- AgentMux Daemon 成本更高，必须自己承担协议、安全、Native Artifact、Remote 运维、资源预算与故障恢复，因此这些成本已进入后续 Task，而不是藏在“a mature workbench-like”一词后面。
+- AgentMux Daemon 成本更高，必须自己承担协议、安全、Native Artifact、Remote 运维、资源预算与故障恢复，因此这些成本已进入后续 Task，而不是藏在“Refproj-like”一词后面。
 
 Daemon Crash、主机重启、Terminal Replay 与 Provider-native Model Resume 被明确拆开。无法证明模型上下文连续时必须报告 `lost` 或新的 Semantic Session，不能用终端历史伪装恢复。
 
@@ -653,7 +653,7 @@ Daemon Crash、主机重启、Terminal Replay 与 Provider-native Model Resume �
 
 ## 正式 Gate
 
-- `test -s docs/a mature workbench-agent-runtime-notes.md`：通过。
+- `test -s docs/refproj-agent-runtime-notes.md`：通过。
 - `pnpm check`：通过，包含 Core/Desktop TypeScript、完整测试与 Production Build。
 - `git diff --check`：在决策与计划写入后通过。
 - Feature Tracker validation：当前 Feature 与 Core Maturity revision 4 写入后均通过。

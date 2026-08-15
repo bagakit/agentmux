@@ -135,6 +135,8 @@ const runtimeFixture = vi.hoisted(() => {
       rows
     }))
     readonly statusAgent = vi.fn()
+    // 三态探测：默认 available，各用例按需 mockResolvedValueOnce 改成 missing / check-failed。
+    readonly probeExecutorAvailability = vi.fn(async (): Promise<'available' | 'missing' | 'check-failed'> => 'available')
     readonly agentSession = vi.fn(() => ({
       kind: 'agent' as const,
       agentSessionId: 'agent-1',
@@ -365,6 +367,49 @@ describe('RuntimeController configuration transaction', () => {
 
     controller.commit(preparation)
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
+  })
+
+  // T-002 发现四态：detect 必须把探测的三态结局逐一透传，不折叠。check-failed（环境退化，没查成）
+  // 与 missing（查成了，确实没装）是两件事——那次误报正是把前者显示成了后者。unknown（还没查）
+  // 不是 detect 能得出的结论，由 store 的 checking 承载，故 detect 只透传三态。
+  it('carries the probe outcome verbatim so check-failed never collapses into missing', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        'codex-review': { label: 'Codex review', providerId: 'codex', command: 'codex', args: [], env: { CODEX_TOKEN: 'sk-secret-value' }, injectAgentMuxGuide: true }
+      }
+    }
+
+    client.probeExecutorAvailability.mockResolvedValueOnce('available')
+    await expect(controller.detect('codex-review', 'local', config))
+      .resolves.toMatchObject({ availability: 'available' })
+    client.probeExecutorAvailability.mockResolvedValueOnce('missing')
+    await expect(controller.detect('codex-review', 'local', config))
+      .resolves.toMatchObject({ availability: 'missing' })
+    client.probeExecutorAvailability.mockResolvedValueOnce('check-failed')
+    const checkFailed = await controller.detect('codex-review', 'local', config)
+    // 单钉这条判据：探测说 check-failed，detect 就必须报 check-failed，绝不许退化成 missing。
+    // 破坏点：runtime-controller.detect 里若把三态压回 boolean 再 ready?missing，这条红。
+    expect(checkFailed.availability).toBe('check-failed')
+  })
+
+  // T-002 不暴露环境值：发现元信息里不许出现任何环境变量的**值**（token/路径）。detect 只带
+  // executorId/providerId/hostId/availability——env 是启动期才用的，不进发现面。
+  it('never leaks an environment variable value onto the discovery surface', async () => {
+    const controller = await configuredController()
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        'codex-review': { label: 'Codex review', providerId: 'codex', command: 'codex', args: [], env: { CODEX_TOKEN: 'sk-secret-value' }, injectAgentMuxGuide: true }
+      }
+    }
+
+    const detection = await controller.detect('codex-review', 'local', config)
+    // 判据落在**实际序列化的那份对象**上，不是「object 里没有 env 字段」——后者在有人把 env 塞进
+    // 一个内部对象再 spread 出来时会假绿。这里断言整个 JSON 里不含那个秘密值。
+    expect(JSON.stringify(detection)).not.toContain('sk-secret-value')
   })
 
   it('does not advance host truth when Runtime discovery fails and retries the same config', async () => {

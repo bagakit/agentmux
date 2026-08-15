@@ -2,16 +2,11 @@
   "schema": "bagakit.execution-owner-receipt.v2",
   "owner_kind": "feature_tracker",
   "owner_id": "f-2248f4yx5",
-  "semantic_revision": "60be6090324376315d32866f9d22ec9bd096b53af9ca21b16a45404498c9959e",
+  "semantic_revision": "af5ba143474fe423cfdbc6dac7c76b0f45affc89e7fc989626181cc4a5f858c4",
   "lifecycle_status": "blocked",
   "continuation": "blocked",
   "active_item_ids": [],
   "blockers": [
-    {
-      "item_id": "T-019",
-      "class": "internal_blocker",
-      "reason": "P0 竖切成立（startDiscussion 有 agentmux discuss 与 Board Canvas 两个真实入口；凭证、Thread、重启恢复均经变异验证）。P1 只交付 Core 侧状态机纯函数，竖切未闭合，不能盖章：(1) 去掉 client.ts 自身后，checkDeliveries/ackDeliveryBatch/answerAsk/cancelAsk/handOff/openDispatch/recordDispatchEvent 七个动作全仓零调用者——无 IPC、无 CLI、无 UI；(2) SSOT 要求的 send/acceptMessage/reply 三个 API 不存在，导致 accepted 与 replied 两状态在生产路径上不可达；(3) agent-session-store.ts 对 AgentThread/threadId/DeliveryQueue 零命中，Thread 与 consumer 游标活不过重启，'Core 重启后恢复同一 Thread 与未读 Inbox 投影'这条 oracle 无从谈起；(4) 九个 Provider 的 replyCorrelation 全为 none，correlated-reply 一类在 catalog 里没有素材，三类 Provider 竖切矩阵无法构造；(5) A→B→A cycle、hop/waiter/retry/token/Inbox 上限未实现，只有复用自 Prompt 的 64KB；(6) 消息侧 Remote typed unsupported 未接，REMOTE_UNSUPPORTED 只在 Run 路径；(7) Discussion Canvas 只读一个 delivered 常量，无 Thread 视图与回复/取消/超时。更正：上一轮我据 12 处变异验证写下'P1 全部机制已交付'，该结论已推翻并改正 docs/reviews/agentmux-agent-communication-final.md——变异证明代码被测试用到，不证明能力接到产品上。P1 量级与 P0 相当，建议单独立项。"
-    },
     {
       "item_id": "T-021",
       "class": "external_blocker",
@@ -30,8 +25,8 @@
     ".bagakit/feature-tracker/features/f-2248f4yx5/goal.md"
   ],
   "evidence_hashes": {
-    ".bagakit/feature-tracker/features/f-2248f4yx5/state.json": "0fb6e2375e219d60002c5a2198a796f9c57f5c61df1ea40b03cd4c0dda25858f",
-    ".bagakit/feature-tracker/features/f-2248f4yx5/tasks.json": "dde6fb41b8aec75e482ffb7ab6ce843b5b7bbe7b8d2cf656337ce23a23a7dbf7",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/state.json": "c73561f200cee8a0173e7534cde2a25e0c3ee94559c35ffb3d220bb872a87c81",
+    ".bagakit/feature-tracker/features/f-2248f4yx5/tasks.json": "1715ad8553ed98b8a19ad272e9a283c69e9b0c2c2c6aa68d1756019db84d80f2",
     ".bagakit/feature-tracker/features/f-2248f4yx5/goal.md": "591f04229007aeecfca7479cd1933c1fe637ebe8be26c81c6ea0466413b2045e"
   }
 }

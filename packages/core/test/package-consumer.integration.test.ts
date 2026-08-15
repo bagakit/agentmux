@@ -576,8 +576,23 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
 
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
       const cliPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux')
+      // 这个测试靠合成 uid 把 runtime 目录（socket/state/hook-port）与真机隔离开。但隔离只管
+      // **派生**的那些路径：`AGENTMUX_AGENT_SESSION_STORE` 等 env 是**覆盖**，会直接盖过派生值。
+      // 当这条测试跑在一个已安装的 AgentMux.app 开出的终端里时，`...process.env` 会把 app 注入的
+      // `AGENTMUX_AGENT_SESSION_STORE`（指向 Desktop 在 `~/Library/Application Support/` 下的 userData 目录）
+      // 一路带进消费者，于是消费者读到的是**真机上那些活着的 Agent Session**。registry 非空 →
+      // 每个 Client 在 open() 里都去 `tryRestoreHookIngress()` 抢 Hook 端口 → 先建的那个 Client
+      // 一直占着，后面 `createAgent` 撞 EADDRINUSE，报成
+      // `Another AgentMux client owns the Hook ingress`。报错句式指向"另一个 App"，真凶却是本进程
+      // 自己先前那个 Client；2026-09-12 实测抓到五次 bind 全在同一个 pid 上。
+      //
+      // 这个测试本身从不读取环境里的 `AGENTMUX_*`——它要的每一个都在下面显式赋值。所以整族直接剥掉，
+      // 别逐个点名：漏掉一个就是又一次静默串台，而新增的覆盖项会自动落在这条规则里。
+      const ambientFreeEnvironment = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_'))
+      )
       const runtimeEnvironment = {
-        ...process.env,
+        ...ambientFreeEnvironment,
         NO_COLOR: '1',
         AGENTMUX_TEST_UID: testUid,
         NODE_OPTIONS: [

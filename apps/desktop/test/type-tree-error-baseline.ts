@@ -47,7 +47,6 @@ export const DESKTOP_TEST_TYPE_ERROR_BASELINE: Readonly<Record<string, number>> 
   "test/commit-fix-guard-coupling.test.ts": 3,
   "test/commit-message-anchor-provenance.test.ts": 2,
   "test/continuity-failure-notice.test.ts": 3,
-  "test/control.test.ts": 13,
   "test/create-note-wiring.test.tsx": 3,
   "test/dependency-tree-inside-repo.test.ts": 2,
   "test/desktop-agent-continuity.integration.test.ts": 10,

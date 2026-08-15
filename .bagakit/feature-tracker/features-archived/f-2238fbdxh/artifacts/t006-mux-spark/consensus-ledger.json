@@ -29,24 +29,24 @@
         "ownership-persistence"
       ],
       "evidence_refs": [
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "next_action": "作为选项 A 基线",
       "updated_at": "2026-08-09T20:58:46Z"
     },
     {
-      "id": "kk-orca-runtime",
+      "id": "kk-refproj-runtime",
       "created_at": "2026-08-09T20:58:47Z",
       "epistemic_class": "known_known",
       "status": "confirmed",
-      "statement": "Orca Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。",
+      "statement": "Refproj Local 使用 node-pty Session Owner 和持续字节流；跨 SSH 的持久语义依赖远端 Relay/Daemon、Authenticated Owner Lease、Multiplexing、Flow Control 与恢复记录，不是简单 ssh -tt。",
       "source": "source_evidence",
       "confidence": "high",
       "dimension_refs": [
         "local-ssh-parity"
       ],
       "evidence_refs": [
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "next_action": "作为选项 B 真实成本",
       "updated_at": "2026-08-09T20:58:47Z"
@@ -56,7 +56,7 @@
       "created_at": "2026-08-09T20:58:47Z",
       "epistemic_class": "known_known",
       "status": "confirmed",
-      "statement": "用户此前明确说过采用 Orca-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。",
+      "statement": "用户此前明确说过采用 Refproj-like embeddable 方向，但要求先不调整 mux，待其他交互完成后再讨论。",
       "source": "user",
       "confidence": "high",
       "dimension_refs": [
@@ -90,7 +90,7 @@
       "created_at": "2026-08-09T20:58:47Z",
       "epistemic_class": "unknown_known",
       "status": "superseded",
-      "statement": "此前对统一 Orca-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。",
+      "statement": "此前对统一 Refproj-like 长期架构的推断已获用户确认；由 kk-daemon-choice 接替。",
       "source": "agent_inference",
       "confidence": "high",
       "dimension_refs": [
@@ -157,10 +157,10 @@
     {
       "id": "local-ssh-parity",
       "name": "Local/SSH 一致性",
-      "why_it_matters": "Orca-like embedded Local 很简单，但 SSH 持久 PTY 需要远端 Session Owner",
+      "why_it_matters": "Refproj-like embedded Local 很简单，但 SSH 持久 PTY 需要远端 Session Owner",
       "current_state": "ExecutionHost + tmux 为 Local/SSH 提供同构命令语义",
       "item_refs": [
-        "kk-orca-runtime",
+        "kk-refproj-runtime",
         "uu-remote-operations",
         "kk-daemon-choice"
       ],
@@ -203,7 +203,7 @@
     {
       "id": "q-persistence",
       "created_at": "2026-08-09T20:58:48Z",
-      "question": "Orca-like embeddable 的最终方案是否必须保证 App 退出和 SSH 断线后 Session 继续运行并可恢复？",
+      "question": "Refproj-like embeddable 的最终方案是否必须保证 App 退出和 SSH 断线后 Session 继续运行并可恢复？",
       "status": "answered",
       "dimension_refs": [
         "ownership-persistence"
@@ -253,19 +253,19 @@
       "updated_at": "2026-08-09T21:05:52Z"
     },
     {
-      "id": "er-orca-runtime-source",
+      "id": "er-refproj-runtime-source",
       "created_at": "2026-08-09T21:05:52Z",
-      "subject_ref": "item:kk-orca-runtime",
+      "subject_ref": "item:kk-refproj-runtime",
       "evidence_kind": "source_evidence",
       "status": "satisfied",
-      "acceptance_criteria": "Orca 源码证据证明 Local node-pty 与 SSH 持久 Relay/Daemon、Owner Lease、版本身份、Flow Control、恢复记录属于不同复杂度层级",
+      "acceptance_criteria": "Refproj 源码证据证明 Local node-pty 与 SSH 持久 Relay/Daemon、Owner Lease、版本身份、Flow Control、恢复记录属于不同复杂度层级",
       "dimension_refs": [
         "local-ssh-parity"
       ],
       "evidence_refs": [
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
-      "note": "已通过 Orca .codegraph 对当前 on-disk 源码复核",
+      "note": "已通过 Refproj .codegraph 对当前 on-disk 源码复核",
       "updated_at": "2026-08-09T21:05:53Z"
     }
   ],

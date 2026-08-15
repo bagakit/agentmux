@@ -1,4 +1,4 @@
-# Feature Goal：采用 a mature workbench 成熟模式重构 AgentMux 交互
+# Feature Goal：采用 Refproj 成熟模式重构 AgentMux 交互
 
 Contract: `bagakit.feature-goal.v1`
 Feature: `f-2238fbdxh`
@@ -6,7 +6,7 @@ Feature: `f-2238fbdxh`
 开始工作前先验证 `owner-receipt.json`，再从 `state.json` 和 `tasks.json` 恢复当前执行状态。聊天上下文可能过时或属于其他 Feature，以本 Feature 目录为准。
 
 ## 首要目标
-先把 `packages/core` 交付成边界可靠的本地 Agent Runtime，再采用 a mature workbench 已验证的工作分区、状态与恢复模式，以及 Warp 高容量、Terminal-first 的组件语言，交付专家级 AgentMux 桌面交互：开发者能在真实 Local/SSH Project 中选择 Worktree，联动浏览和编辑文件，并在可自由分屏的 Universal Tab 中运行 Terminal、Agent 与 Browser。桌面端是 `packages/core` 的第一方 Client，必须证明可复用 Runtime 能被宿主安全地安排、检查、恢复和控制，而不是以 UI 完成度掩盖 Core 缺口。
+先把 `packages/core` 交付成边界可靠的本地 Agent Runtime，再采用 Refproj 已验证的工作分区、状态与恢复模式，以及 Warp 高容量、Terminal-first 的组件语言，交付专家级 AgentMux 桌面交互：开发者能在真实 Local/SSH Project 中选择 Worktree，联动浏览和编辑文件，并在可自由分屏的 Universal Tab 中运行 Terminal、Agent 与 Browser。桌面端是 `packages/core` 的第一方 Client，必须证明可复用 Runtime 能被宿主安全地安排、检查、恢复和控制，而不是以 UI 完成度掩盖 Core 缺口。
 
 ## 受保护的不变量
 - 最左 Project/Workspace Rail 只负责工程切换；Tools 入口固定在右侧主区最左侧、Workspace/Board 标题之前。Workspace 与 Board 共用可收起的高容量 Tool Dock，但分别恢复自己的内容：Workspace 为 Files + Branches、Browser Favorites、Terminal Shortcuts；Board 只承载 Project-scope 的 Branch 与筛选控制，Inbox 属于 Board 矩阵而不是 Tools 子 Tab。
@@ -27,15 +27,15 @@ Feature: `f-2238fbdxh`
 - Git Worktree 创建必须显式触发，且仅在 Git 成功后注册 Workspace。
 - SSH 使用系统 Client 与现有认证，不复制或保存 Private Key 内容。
 - 过时的固定布局 State、UI 结构、Alias、Migration、Compatibility Layer、Fallback Implementation 直接删除。
-- 成熟依赖负责成熟问题；当前依赖没有跨 Pane Drag/Drop Primitive，因此可采用 a mature workbench 已验证的 `@dnd-kit`。
-- 视觉保持 AgentMux 的 Graphite/Mint Terminal Language；只迁移 a mature workbench 的信息架构、内容层级、状态语义和交互模式。
+- 成熟依赖负责成熟问题；当前依赖没有跨 Pane Drag/Drop Primitive，因此可采用 Refproj 已验证的 `@dnd-kit`。
+- 视觉保持 AgentMux 的 Graphite/Mint Terminal Language；只迁移 Refproj 的信息架构、内容层级、状态语义和交互模式。
 - 默认画面和 Tab 内容必须在 Production Electron 中清晰：操作文字以 11–13px 为主，Terminal/Editor 默认 14–15px，并由 xterm/Monaco 原生处理 DPR；不得用 7–9px 大面积文字或 CSS 二次缩放制造假密度。
-- 非目标：复制 a mature workbench 的 Relay/Daemon、Account、Mobile、WSL、Emulator、Hosted Issue Integration 或兼容历史；也不在 Project Rail 中堆叠完整 File Tree、Branch List 和 Board 控制，不在 Board 任务中改造 mux Runtime、引入任务数据库或通用 Canvas 框架。
+- 非目标：复制 Refproj 的 Relay/Daemon、Account、Mobile、WSL、Emulator、Hosted Issue Integration 或兼容历史；也不在 Project Rail 中堆叠完整 File Tree、Branch List 和 Board 控制，不在 Board 任务中改造 mux Runtime、引入任务数据库或通用 Canvas 框架。
 
 ## 验收与停止规则
 - 验收：Repository Check 全部通过；Core 证明失败启动回滚、动态 Host Discovery 与 Local/SSH 恢复；Browser 证明 fail-closed 权限和协议边界；Workspace 身份、文件子树、Monaco 语言注册与 Project Snapshot 隔离有确定性测试。干净配置的 Production Electron 展示清晰的 Titlebar/Tab 内容、Project/Workspace Rail、标题前 Tools、Explorer/Branches 上下 Resize、Bound/Unbound Branch 与 Worktree Path、Worktree Selection 对文件上下文的真实联动，以及纵向按 Branch/Worktree、横向按 Inbox/Working/Needs You/Done 的 Board 矩阵；Inbox Discussion Canvas 能携带 Branch/Workspace 与 Provider 上下文，通过现有 Core/tmux 创建真实 Run 并回落到对应 Branch 行。Universal Tab 同时证明 Terminal/Agent/Browser/File 创建、四向 Drag-to-split、Resize/Move/Collapse、Editor Dirty/Save、Pane-local Terminal/Activity/Recovery、Host-scoped Codex/Claude/TraeX/Hermes/Pi、Local/SSH File 与 Worktree Flow。mux 讨论形成用户确认的中文决策与后续边界，但不在本 Feature 实施替换。
 - 不足：存在幽灵 Session、动态 Host 漏发现、Browser 权限默认放行或协议绕过、重复 Workspace 身份、字符串前缀误伤文件、未注册 Monaco Language ID、Project 切换首帧泄漏；Board 仍按 Agent 状态纵向分组、Branch 不是稳定行轴、Run 状态变化会跨 Branch、Inbox 仍是 Tools 独立页、Canvas 只创建 Mock 卡片或绕过 Core；画面或 Tab 默认内容因极小字号／错误缩放而发虚，Tools 位于标题之后或只在 Workspace 出现，Agent Launch 被塞进 Tools，Explorer 与 Branches 互不联动、Branch 选择隐式 checkout、已有 Tab 被静默换根、加号仍等同于 Agent Launcher、Browser 只是 iframe/Mock、仅在固定三栏上换皮、只有 Drag 装饰但不改变 Pane、Compatibility Scaffolding，或只有源码构建／截图没有行为与安全证据。
-- 以下情况先询问：修改用户全局 Agent Hook、改变 SSH Credential、没有 App 内明确确认就删除 File、发布 Package/Release、使用付费 API，或扩展到审计边界之外的 a mature workbench 系统。
+- 以下情况先询问：修改用户全局 Agent Hook、改变 SSH Credential、没有 App 内明确确认就删除 File、发布 Package/Release、使用付费 API，或扩展到审计边界之外的 Refproj 系统。
 
 ## 权限与执行原则
 - 只遵循本 Feature 的 Owner Receipt、State 和 Reviewed Task。
@@ -45,6 +45,6 @@ Feature: `f-2238fbdxh`
 
 ## 上下文引用
 - `AGENTS.md`：定义 Core 第一、编辑器为第一方 Client 的项目目标和工程原则；开始架构改动前读取。
-- `docs/design/interaction-review.md`：定义有证据的 Copy/Keep/Omit 决策；扩大 UI 前读取。
-- `.bagakit/design/a mature workbench-informed-interaction-redesign/design-packet.toml`：定义 Product Model、Tone、Rule、Risk 和 Checkpoint。
-- `docs/a mature workbench-agent-runtime-notes.md`：定义 Runtime 提取边界；改动 Provider、Hook、tmux、SSH 语义前读取。
+- `docs/design/refproj-interaction-review.md`：定义有证据的 Copy/Keep/Omit 决策；扩大 UI 前读取。
+- `.bagakit/design/refproj-informed-interaction-redesign/design-packet.toml`：定义 Product Model、Tone、Rule、Risk 和 Checkpoint。
+- `docs/refproj-agent-runtime-notes.md`：定义 Runtime 提取边界；改动 Provider、Hook、tmux、SSH 语义前读取。

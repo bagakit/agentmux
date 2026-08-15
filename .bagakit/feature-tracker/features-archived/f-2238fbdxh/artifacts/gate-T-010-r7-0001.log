@@ -9,5 +9,5 @@ reasons:
 - missing heading in verification evidence: ## Residual Risks
 - ui command failed: pnpm check
 commands:
-- test -s docs/orca-agent-runtime-notes.md => pass (0)
+- test -s docs/refproj-agent-runtime-notes.md => pass (0)
 - pnpm check => fail (1)

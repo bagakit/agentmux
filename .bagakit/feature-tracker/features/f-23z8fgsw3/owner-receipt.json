@@ -2,11 +2,19 @@
   "schema": "bagakit.execution-owner-receipt.v2",
   "owner_kind": "feature_tracker",
   "owner_id": "f-23z8fgsw3",
-  "semantic_revision": "872831a1d77d348e90147587c59014a09575cff4b472b3d3c57fc90efb919edf",
-  "lifecycle_status": "ready",
-  "continuation": "continue",
+  "semantic_revision": "9d9fcf0be9134d67073baa7e58fee72e36e9df0ce4d46187e7492aa44397794b",
+  "lifecycle_status": "blocked",
+  "continuation": "blocked",
   "active_item_ids": [],
-  "blockers": [],
+  "blockers": [
+    {
+      "item_id": "T-018",
+      "class": "external_blocker",
+      "reason": "T-018 自身的验收面已全绿：gate 命令 2（provider-conformance + agent-provider-protocol + package-consumer.integration）实测 Test Files 3 passed / Tests 42 passed。卡住的只有 gate 命令 1 的全仓 pnpm check，而它今天的 6 个红全部落在 Provider parity 之外、且都不是本 Feature 引入的：(1) apps/desktop/test/app-resize-owner.test.tsx —— selectDisplacedAgentNotices 在 control-spatial-commit.ts:63 抛 'Cannot convert undefined or null to object'，源文件与测试在 git 中均干净，属已入库回归（最近改动 848faeb5）；(2) packages/core/test/ctxmux-version-binding.test.ts —— 身份字面量覆盖面派生集合比分类表多出 doctor-unverifiable-vs-missing.test.ts 一项，需要该守卫的属主把新文件归类；(3) apps/desktop/test/type-tree-typecheck.test.ts —— 棘轮相等断言红在 agent-session-composer.test.tsx（实测 2 > 基线 1），同样是别人的已入库漂移；(4) apps/desktop/test/git-service.test.ts 单跑 33 passed、仅在全量并发下红，属并发假红。另注：核查期间 package-consumer 曾红在 'dist 比 src 旧' 的陈旧产物守卫上，跑 pnpm --filter @agentmux/core build 后即绿，与本 Feature 无关。结论：本 Feature 的实现与验收证据已完备，gate 被一条跨全仓的共享命令挡住，而该命令的红由其他属主的改动产生。",
+      "owner": "上述三处红各自的属主（control-spatial-commit / ctxmux-version-binding 覆盖面守卫 / desktop 类型棘轮基线）",
+      "resume_when": "全仓 pnpm check 回到绿（或 T-018 的 verification 改为只跑与 Provider parity 相关的命令，把跨 Feature 的全仓门禁从单个 Task 的验收里解耦）——两者任一成立即可直接 run-task-gate 收口，无需重做实现。"
+    }
+  ],
   "replacement_ref": null,
   "evidence_refs": [
     ".bagakit/feature-tracker/features/f-23z8fgsw3/state.json",
@@ -14,8 +22,8 @@
     ".bagakit/feature-tracker/features/f-23z8fgsw3/goal.md"
   ],
   "evidence_hashes": {
-    ".bagakit/feature-tracker/features/f-23z8fgsw3/state.json": "ab0c7f58cc360e78597ff7743e6fe97d630c1b2ea8a5619e98bc64c863294fc8",
-    ".bagakit/feature-tracker/features/f-23z8fgsw3/tasks.json": "37c715cb2d1c1bbaaf94dfefbf9719a30393c5c82fbce926aaf49828f70b7432",
-    ".bagakit/feature-tracker/features/f-23z8fgsw3/goal.md": "bad65ab82f2e581d18ad19dcb8a19463622bd3b088dc67c3c34da4dedb9ec268"
+    ".bagakit/feature-tracker/features/f-23z8fgsw3/state.json": "3c6b503d9697acc13d41905635a8dcaeab814803ccc02838fbcc12b03b667c0d",
+    ".bagakit/feature-tracker/features/f-23z8fgsw3/tasks.json": "437ad48028933c1c1977350947cea6eaa11884c0492a506242448986ff269865",
+    ".bagakit/feature-tracker/features/f-23z8fgsw3/goal.md": "21d068c65b73606b2a97195473bf5b0047bcd927cf0ddcbf7332e2c08d81586c"
   }
 }

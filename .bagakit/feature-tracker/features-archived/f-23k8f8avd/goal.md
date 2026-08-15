@@ -37,6 +37,6 @@ Before acting, verify `owner-receipt.json`, then recover current execution from 
 - Keep measurements reproducible and read-only with respect to the source tree; record evidence in the Feature's reviewed artifacts and use the existing Core/ctxmux and Desktop owner seams. Parallel work is allowed only when task dependencies and shared files remain explicit; reconcile through Feature Tracker before merging. Escalate unknown ownership or a repeated healthy-Agent process failure as a workflow warning rather than silently blocking the Agent.
 
 ## Context References
-- `docs/reviews/agentmux-surface-memory-plan.md`: reviewed task boundary and a mature workbench comparison; read before changing acceptance or lifecycle policy.
+- `docs/reviews/agentmux-surface-memory-plan.md`: reviewed task boundary and Refproj comparison; read before changing acceptance or lifecycle policy.
 - `docs/design/agentmux-desktop-interaction.md`: Workspace/Region continuity, cold-park protections, and Core/ctxmux authority; read before surface lifecycle changes.
 - `docs/design/agentmux-surface-density.md`: process/owner attribution and density constraints; read before measurement/report changes.

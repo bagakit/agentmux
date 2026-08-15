@@ -23,11 +23,11 @@
 
 ## Closeout Review
 - Documentation: updated
-  - Rationale: a mature workbench-like Agent communication is now the final reviewed task T-019 in AgentMux Core Maturity revision 6; the owning review and a mature workbench notes were updated.
+  - Rationale: Refproj-like Agent communication is now the final reviewed task T-019 in AgentMux Core Maturity revision 6; the owning review and Refproj notes were updated.
   - Refs: docs/plans/agentmux-core-maturity-review.md
 - Learning: candidates_reviewed
   - Rationale: The proposal reliability constraints were reviewed and consolidated into T-019 without copying its separate execution lifecycle.
-  - Refs: docs/a mature workbench-agent-runtime-notes.md
+  - Refs: docs/refproj-agent-runtime-notes.md
 - Promotion: not_needed
   - Rationale: This is task-truth consolidation inside the same repository, not a reusable principle promotion.
   - Refs: 

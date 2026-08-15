@@ -8,5 +8,5 @@ reasons:
 - missing heading in verification evidence: ## Manual Checks
 - missing heading in verification evidence: ## Residual Risks
 commands:
-- test -s docs/orca-agent-runtime-notes.md => pass (0)
+- test -s docs/refproj-agent-runtime-notes.md => pass (0)
 - pnpm check => pass (0)

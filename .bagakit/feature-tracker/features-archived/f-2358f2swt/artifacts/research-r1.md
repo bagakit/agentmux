@@ -1,12 +1,12 @@
 # Git 源码控制 + PR 管理 — 调研档
 
 > 给 team-lead 的调研档。三份细节笔记（含完整 argv 表与逐条 `file:line`）在同目录：
-> `a mature workbench-git-handler-notes.md`、`a mature workbench-pr-notes.md`、`agentmux-git-state-notes.md`。本文是综合与判断。
+> `refproj-git-handler-notes.md`、`refproj-pr-notes.md`、`agentmux-git-state-notes.md`。本文是综合与判断。
 >
-> **纪律**：a mature workbench 是 MIT（`/Users/bytedance/proj/github/a mature workbench/LICENSE` 已核实，commit `afd76a4df9`），
+> **纪律**：refproj 是 MIT（`/Users/bytedance/proj/github/refproj/LICENSE` 已核实，commit `afd76a4df9`），
 > 机制可借鉴甚至移植代码，但（1）若移植实质代码须在 `THIRD_PARTY_NOTICES.md` 登记（见文末）；
-> （2）a mature workbench 之名**不进** AgentMux 代码注释或设计文档 —— 所以下面的 `git-feature-tasks.json` 里
-> 所有机制都用 AgentMux 自己的语言写成"要求"，a mature workbench 的出处只留在本 `.tmp/` 档里。
+> （2）refproj 之名**不进** AgentMux 代码注释或设计文档 —— 所以下面的 `git-feature-tasks.json` 里
+> 所有机制都用 AgentMux 自己的语言写成"要求"，refproj 的出处只留在本 `.tmp/` 档里。
 
 ---
 
@@ -23,7 +23,7 @@
 - **cupboard 是空的**：仓库里没有 simple-git / isomorphic-git / dugite / nodegit / @octokit（锁文件 grep = 0），
   GitHub 从未被联系过。所以选 **shell out 系统 `git`/`gh`**（零新依赖、与现有 `WorktreeService` 同构）是
   最低熵的路，符合原则 5/6。
-- **最该照抄的结构**：a mature workbench 的 `GitExec` 回调模式 —— 所有解析/ref 运算/错误归一化都是接受一个执行器的
+- **最该照抄的结构**：refproj 的 `GitExec` 回调模式 —— 所有解析/ref 运算/错误归一化都是接受一个执行器的
   纯函数，用 fake 执行器单测、绝不碰 `child_process`。它正好落在我们 `ExecutionHost.run` 缝上。
 
 ---
@@ -53,7 +53,7 @@
 
 ---
 
-## 3. a mature workbench 机制摘要（机制参考，出处见细节笔记）
+## 3. refproj 机制摘要（机制参考，出处见细节笔记）
 
 ### 3.1 Git 能力边界（`git-handler.ts:208-272` 注册表）
 实现了：status(`--porcelain=v2 --branch --untracked-files=all`)、stage/unstage(±bulk)、commit、
@@ -93,7 +93,7 @@ diff 返回结构化对象不是 unified 文本。
 
 ---
 
-## 4. a mature workbench 踩过的坑清单（**最有价值** —— 每条注明 a mature workbench 证据 file:line + 对我们的意义）
+## 4. refproj 踩过的坑清单（**最有价值** —— 每条注明 refproj 证据 file:line + 对我们的意义）
 
 > 这些坑要么变成 `git-feature-tasks.json` 里的 acceptance 硬要求，要么变成设计约束。
 
@@ -153,7 +153,7 @@ diff 返回结构化对象不是 unified 文本。
 21. **每条 worktree 相对路径都过 `assertInWorktree`** 防穿越。`git-handler.ts:651-665`。
 22. **每个变更 RPC 前后清读缓存**（in-flight diff/`.gitmodules` 读不会并进陈旧结果）。`:305-320`。
 23. **compare-and-swap 删分支**（`update-ref -d <ref> <expectedHead>`）—— 删 workspace 后分支移动过就不会被误毁。
-24. **review-head durable ref**（`refs/a mature workbench/pull/<remote>-<hash(url)>/<n>`）解决 `FETCH_HEAD` 竞争 +
+24. **review-head durable ref**（`refs/refproj/pull/<remote>-<hash(url)>/<n>`）解决 `FETCH_HEAD` 竞争 +
     PR 身份混淆（repointed origin 的 #42 不能解析到另一项目的 head）。—— 我们 v1 不做 PR review checkout，暂不需要，
     但**日后要做 PR head fetch 时照此**，别用裸 `FETCH_HEAD`。
 
@@ -212,7 +212,7 @@ core 侧唯一被复用的是子进程缝 —— git 域逻辑留在 main，子�
 
 ## 7. THIRD_PARTY_NOTICES 登记（MIT 义务）
 
-`THIRD_PARTY_NOTICES.md` 已有一条 a mature workbench 的登记（Browser 截图标注模型，commit `4fd93ead…`），格式可循。
+`THIRD_PARTY_NOTICES.md` 已有一条 Refproj 的登记（Browser 截图标注模型，commit `4fd93ead…`），格式可循。
 **判断**：若最终实现是从零按 AgentMux 结构写（大概率如此 —— 我们的缝、类型、IPC 都不同），只借鉴机制，
 则 MIT 不强制登记（未复制实质代码）；**若移植了实质代码**（如某个解析器逐行照搬），则**必须**新增一条
-a mature workbench 登记（git-handler 相关，commit `afd76a4df9`），照现有条目格式。这一判断落在 T-007 的 acceptance 里。
+Refproj 登记（git-handler 相关，commit `afd76a4df9`），照现有条目格式。这一判断落在 T-007 的 acceptance 里。

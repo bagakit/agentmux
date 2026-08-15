@@ -205,21 +205,39 @@ describe('参考项目名不出现在跟踪文件里', () => {
     // 修法照搬同文件里 NUL 那条自检的判据（它正是被同一个坑烧过后升级来的）：拿 `git ls-files -z`
     // 的原始跟踪总数当基准，要求扫描面与它只差极少数几个（今天跳过的只有 12 个已知二进制）。
     // 任何把跳过面扩成一整类的改动都会把差距顶破这个上限而变红。
-    const tracked = execFileSync('git', ['ls-files', '-z'], {
+    const trackedList = execFileSync('git', ['ls-files', '-z'], {
       cwd: new URL('../../../', import.meta.url),
       maxBuffer: 64 * 1024 * 1024
     })
       .toString('utf8')
       .split('\0')
-      .filter((path) => path.length > 0).length
+      .filter((path) => path.length > 0)
+    const tracked = trackedList.length
     // 自检：扫描根指错时，是这条先红，而不是「零违规」静默通过。
     expect(tracked, '一个跟踪文件都没列到——扫描根不对').toBeGreaterThan(800)
-    // 覆盖率：跳过的必须是少数几个已知二进制，而不是一整类。差距上限 20（今天跳 12：8 png、
-    // 1 icns、1 tgz、2 mach-o）。砍掉 .tsx（106 个）会把差距撑到 100+，这条立刻红。
+    // 覆盖率不再用「差距 < N」这种计数代理。那个 20 是「今天有 12 个二进制」的快照，仓库一旦
+    // 合法地长出更多二进制（features-archived 里提交了 87 张 closeout 截图证据，二进制从 10 涨到
+    // 101），代理就与它守的属性脱钩，即使覆盖面一寸没缩也会假红。改为直接断言属性本身：
+    // **每一个没进扫描面的跟踪文件，要么在工作区里读不到（未 checkout / 并行删除），要么确实是
+    // 已知二进制。** 插一句 `if (path.endsWith('.tsx')) continue` 会让既在磁盘、又非二进制的 .tsx
+    // 落进未扫描集，这条立刻点名它——属性直接可判，不随仓库增长失真，严格强于旧的差距阈值。
+    const scannedPaths = new Set(scanned.map(({ path }) => path))
+    const unscannedText = trackedList.filter((path) => {
+      if (scannedPaths.has(path)) return false
+      if (isKnownBinary(path)) return false
+      try {
+        readFileSync(new URL(`../../../${path}`, import.meta.url))
+      } catch {
+        return false // 工作区里读不到——没有内容可扫，交代得过去
+      }
+      return true // 既在磁盘、又非已知二进制、却没被扫描——覆盖面漏洞
+    })
     expect(
-      scanned.length,
-      `扫描面与跟踪总数差太远（扫到 ${scanned.length} / 跟踪 ${tracked}）——有一整类文件被跳过了`
-    ).toBeGreaterThan(tracked - 20)
+      unscannedText,
+      `这些文件既在工作区里、又不是已知二进制，却没进扫描面——有一整类文件被按类别跳过了：${unscannedText
+        .slice(0, 20)
+        .join(', ')}`
+    ).toEqual([])
     const paths = new Set(scanned.map(({ path }) => path))
     expect(paths.has(LICENSE_ATTRIBUTION_FILE)).toBe(true)
     expect(paths.has('package.json')).toBe(true)
@@ -259,7 +277,7 @@ describe('参考项目名不出现在跟踪文件里', () => {
       maxBuffer: 64 * 1024 * 1024
     })
     const offenders: string[] = []
-    const skipped: string[] = []
+    const declaredBinaryWithoutNul: string[] = []
     let tracked = 0
     let checked = 0
     let allowedSeen = 0
@@ -267,7 +285,15 @@ describe('参考项目名不出现在跟踪文件里', () => {
       if (!path) continue
       tracked += 1
       if (isKnownBinary(path)) {
-        skipped.push(path)
+        // 声明为二进制的文件必须真的是二进制。含 NUL 是二进制的实证；把一个文本扩展名塞进
+        // isKnownBinary（旧 mutation：往 BINARY_EXTENSIONS 加 `.tsx`）会让一整类文本文件绕过下面
+        // 的 NUL 扫描，而它们不含 NUL——于是这里逐条点名它们。工作区里读不到的跳过（未 checkout）。
+        try {
+          const rawBinary = readFileSync(new URL(`../../../${path}`, import.meta.url))
+          if (!rawBinary.includes(0)) declaredBinaryWithoutNul.push(path)
+        } catch {
+          // 读不到就没有字节可证伪其二进制身份——留给覆盖率那条自检去管在场性。
+        }
         continue
       }
       let raw: Buffer
@@ -286,18 +312,21 @@ describe('参考项目名不出现在跟踪文件里', () => {
     }
     // 自检一：扫描根指错时，是这条先红，而不是「零违规」静默通过。
     expect(tracked, '一个跟踪文件都没列到——扫描根不对').toBeGreaterThan(800)
-    // 自检二：**跳过的必须是少数**。这是从一次实测教训里来的判据：曾经写成
-    // `expect(checked).toBeGreaterThan(400)`，而 `.ts` 一族自己就有 586 个文件，于是把清单缩到
-    // 只剩 `.ts` 仍然 checked=586 > 400，自检照旧通过，而 `.tsx`/`.md`/`.json`/`.css`/… 全部
-    // 重新变成可藏 NUL 的地方。一个「地板」阈值挡不住「按类别缩小覆盖面」这种放宽。
-    //
-    // 改成按覆盖率判：跳过的文件必须能被逐条数清（今天 12 个：8 张 png、1 个 icns、1 个 tgz、
-    // 2 个 mach-o）。任何把跳过面扩成一整类的改动都会顶破这个上限。
+    // 自检二不再用「跳过的数量 < N」这种计数代理。那个 20 是「今天有 12 个二进制」的快照：仓库
+    // 一旦合法地长出更多二进制（features-archived 里提交了 87 张 closeout 截图证据，二进制从 10 涨
+    // 到 101），代理就与它守的属性脱钩，即使跳过面一寸没扩也会假红。改为直接断言 isKnownBinary 的
+    // 声明本身诚实：**每一个被声明为二进制、且工作区里读得到的文件，都确实含 NUL。** 这不是循环
+    // 论证——skipped 是在读字节之前按 isKnownBinary 判出来的，这里再回读字节独立核对声明。把一个
+    // 文本扩展名塞进 BINARY_EXTENSIONS（旧 mutation `.tsx`），那些 .tsx 落进 skipped 却不含 NUL，
+    // 这条立刻点名它们。判据随仓库增长恒真，严格强于旧的数量阈值——数量 12 从不证明这 12 个是二进制。
     expect(
-      skipped.length,
-      `跳过的文件太多了（${skipped.length} 个）——跳过面被扩成了类别判断：${skipped.slice(0, 20).join(', ')}`
-    ).toBeLessThan(20)
-    expect(checked, '查到的文件数与跟踪总数差太远').toBeGreaterThan(tracked - 20)
+      declaredBinaryWithoutNul,
+      `这些文件被 isKnownBinary 声明为二进制，却不含 NUL——它们其实是文本，被整类排除在 NUL 扫描之外：${declaredBinaryWithoutNul
+        .slice(0, 20)
+        .join(', ')}`
+    ).toEqual([])
+    // checked 仅用于确认扫描确实读到了大量文本文件，不是空转；不设脆弱的「差距」上限。
+    expect(checked, '一个文本文件都没读到——扫描没有真的运行').toBeGreaterThan(800)
     // 豁免清单里的每一条都必须真的还含 NUL。否则一条过期的豁免会静默留在这里，将来某个文件
     // 挪到那个路径上就白拿一张免检票。
     expect(allowedSeen, '豁免清单里有条目已经不含 NUL 了——删掉它').toBe(NUL_ALLOWED_FILES.size)

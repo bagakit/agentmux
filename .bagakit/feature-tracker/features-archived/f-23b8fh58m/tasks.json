@@ -415,7 +415,7 @@
         "T-101"
       ],
       "title": "隐藏的 Region 保住终端实例，切回不再重放恢复态",
-      "objective": "用户原话：\"现在切换是都会 restoring terminal, 但是 orca 就不会, 可以看看差距在哪儿\"。差距是一个决定：WorkspaceWorkbench.tsx:647 的 {activeTab ? <PaneNode/> : null} 把\"不可见\"实现为\"不渲染\"，切走即卸载、xterm 实例销毁，切回时 TerminalView.tsx:115 的 useState(true) 让 hydrating 从 true 起步，必然重放。orca 把\"不可见\"实现为\"渲染但隐藏\"。修法在保住实例，不在加速重放。",
+      "objective": "用户原话：\"现在切换是都会 restoring terminal, 但是 refproj 就不会, 可以看看差距在哪儿\"。差距是一个决定：WorkspaceWorkbench.tsx:647 的 {activeTab ? <PaneNode/> : null} 把\"不可见\"实现为\"不渲染\"，切走即卸载、xterm 实例销毁，切回时 TerminalView.tsx:115 的 useState(true) 让 hydrating 从 true 起步，必然重放。refproj 把\"不可见\"实现为\"渲染但隐藏\"。修法在保住实例，不在加速重放。",
       "outcome": "切回一个已经打开过的终端立刻看到内容，不再重放 Restoring terminal…；隐藏期间的输出不丢，且隐藏的终端不消耗布局与渲染，开十个 tab 不会让窗口变慢。",
       "acceptance": [
         "切回一个已经打开过的终端不出现 Restoring terminal…：断言同一 Region 在 tab 切走再切回后 TerminalView 未被卸载重挂（实例同一）。",

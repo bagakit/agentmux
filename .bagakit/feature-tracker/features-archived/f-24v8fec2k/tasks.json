@@ -520,17 +520,17 @@
       "id": "T-008",
       "depends_on": [],
       "title": "浏览器新页面落点与右键菜单",
-      "objective": "参考 Orca；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
-      "outcome": "参考 Orca；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
+      "objective": "参考 Refproj；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
+      "outcome": "参考 Refproj；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
       "acceptance": [
-        "参考 Orca；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
+        "参考 Refproj；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。",
         "实现任务提供变异红绿和排除定义文件的生产调用者证据。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop exec vitest run test/browser-open-placement.test.ts",
-          "proves": "参考 Orca；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。"
+          "proves": "参考 Refproj；分屏来源在当前工作视图合理开格，独立 Tab 来源开新 Tab；右键复用位置菜单，不新建外部窗口。"
         }
       ],
       "source_refs": [

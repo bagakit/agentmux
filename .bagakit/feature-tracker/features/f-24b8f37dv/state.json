@@ -27,6 +27,15 @@
     {
       "action": "feat_created",
       "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 15217883a16b016f1b6951936cf2242ac6b8733fb0f0696f4f5ae84e6fbe4cef"
     }
-  ]
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-24b8f37dv/goal.md",
+    "revision": "15217883a16b016f1b6951936cf2242ac6b8733fb0f0696f4f5ae84e6fbe4cef"
+  }
 }

@@ -47,19 +47,19 @@
   "tasks": [
     {
       "id": "T-001",
-      "title": "Document Orca extraction boundary",
-      "objective": "Trace Orca's agent launch planning, PTY lifecycle, native hook status normalization, and Claude Agent Teams tmux special case into an evidence-backed extraction note.",
+      "title": "Document Refproj extraction boundary",
+      "objective": "Trace Refproj's agent launch planning, PTY lifecycle, native hook status normalization, and Claude Agent Teams tmux special case into an evidence-backed extraction note.",
       "outcome": "The implementation has a source-linked map of what to borrow, simplify, and deliberately omit.",
       "acceptance": [
         "The note covers Codex, Claude, Hermes, and Pi launch and status paths.",
         "The note distinguishes normal node-pty hosting from the Claude Agent Teams tmux shim.",
-        "Every material claim links to a repository-relative Orca source path and line reference."
+        "Every material claim links to a repository-relative Refproj source path and line reference."
       ],
       "verification": [
         {
           "kind": "artifact",
-          "ref": "docs/orca-agent-runtime-notes.md",
-          "proves": "The extraction decisions are grounded in the inspected Orca implementation."
+          "ref": "docs/refproj-agent-runtime-notes.md",
+          "proves": "The extraction decisions are grounded in the inspected Refproj implementation."
         }
       ],
       "source_refs": [
@@ -72,7 +72,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         }
@@ -105,7 +105,7 @@
         }
       ],
       "source_refs": [
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         "docs/plans/agentmux-runtime-desktop-review.md"
       ],
       "supersedes": [],
@@ -114,7 +114,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -172,7 +172,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -197,7 +197,7 @@
     {
       "id": "T-004",
       "title": "Build workspace board and worktree automation",
-      "objective": "Add an Orca-style workspace board plus explicit local/SSH Git worktree creation that automatically registers the resulting host-scoped workspace and can launch an agent there.",
+      "objective": "Add an Refproj-style workspace board plus explicit local/SSH Git worktree creation that automatically registers the resulting host-scoped workspace and can launch an agent there.",
       "outcome": "Repositories, worktrees, and their active agent sessions are navigable as both a sidebar hierarchy and a status board.",
       "acceptance": [
         "The board groups workspace cards by normalized agent state and shows branch/path/session evidence.",
@@ -220,7 +220,7 @@
       ],
       "source_refs": [
         ".bagakit/feature-tracker/features/f-2228fpnqm/proposal.md",
-        "docs/orca-agent-runtime-notes.md",
+        "docs/refproj-agent-runtime-notes.md",
         "docs/plans/agentmux-runtime-desktop-review.md"
       ],
       "supersedes": [],
@@ -229,7 +229,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -276,7 +276,7 @@
       ],
       "source_refs": [
         "README.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 2,
@@ -284,7 +284,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

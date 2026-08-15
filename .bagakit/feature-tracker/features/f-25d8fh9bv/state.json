@@ -3,7 +3,7 @@
   "feat_id": "f-25d8fh9bv",
   "title": "完成过的 Agent 与闲着的 Agent 长得一模一样",
   "slug": "agent-seen-unseen-state",
-  "goal": "跑完的 Agent 在每个界面上都和闲着的 Agent 像素级相同。rowAttention 有意把 done 排除在注意力之外（row-attention.ts:37,51），而全仓没有任何 ackAt / unseen / viewedAt / seenAt 概念（2026-09-13 实测：packages/core/src + apps/desktop/src 全树零命中）。完成时那一发一次性的通知飘走之后，'跑完了但还没人看过'与'闲着'就再也分不开。fan-out 已经交付，所以这不是假想：几十个 Agent 扇出时，你无法知道哪些完成结果已经被自己看过了。修法是加一个 per-session 的 ackAt，看过即清，再派生一个 unseen 判据供 rail 与 roster 消费——status.observedAt 已经是这条管线的一半。注意这不是把 done 放回 rowAttention：那样 rail 会永久亮着；unseen 是一个会被清掉的新状态，与 done 正交。判据必须端到端并且经得起变异：把投影那一行删掉要让测试变红。",
+  "goal": "【2026-09-13 重写：原提案前提被证伪，已逐条复核】原提案称'跑完的 Agent 在每个界面上都和闲着的 Agent 像素级相同'——实测为假。done 在多数界面上与 idle/running 明确不同：StatusDot 的 done 是蓝色、running/idle 是绿色（chrome.css:302 .status--done→--blue vs .status--working/--running→--green，深浅两套主题皆分明；此 --status-ink 一处设定驱动 tab/board/quick-switch/attention 全部形状）；project-board.ts:98-115 把 done/exited 归入独立的 'done' 列，与 working、needs-you 分开。唯一真正把 done 与 idle/running 抹平的界面是折叠态 rail 的 rollup（row-attention.ts:51 显式 `category === 'done'` 时 continue，docstring 明说这是有意——把 done 放进去会让 rail 永久亮着）。真正无处可分的一对是 SEEN-done 与 UNSEEN-done：全仓没有任何 ackAt / unseen / viewedAt / seenAt 概念（实测 packages/core/src + apps/desktop/src 零命中），SessionSnapshot.status 只有 state/source/observedAt/detail，于是'跑完了还没人看过'与'跑完了已经看过'在 StatusDot、board、rail 及各排序 rank 上完全一致。完成时那一发一次性通知飘走后，扇出几十个 Agent 时你无法知道哪些完成结果已被自己看过——fan-out 已交付，所以这是真缺口而非假想。这个未读/已读轴代码里已有名字：#199。attention-event.ts:141-143、agent-roster.ts:63、quick-switch.ts:52,72 都显式把 done 与 idle 同 rank 并注明'待 #199 的未读/已读轴'。本 Feature 就是落地 #199，不是新发现。修法：加一个 per-session 的 ackAt，看过即清，派生一个 unseen 判据供 rail 与 roster 消费。更正一处：status.observedAt 不是'这条管线的一半'——它是每次有新证据事件就刷新的'最近观测'时间戳（client.ts/store.ts 多处 Date.now()；衰减 reducer 有意原样保留 observedAt、只改 state，agent-status-decay.ts:42-58），故 observedAt > ackAt 会在任何新事件后把用户已看过的 Agent 重新点亮，未读轴必须新建、不能靠 observedAt 比较凑出。也不是把 done 放回 rowAttention（那样 rail 永久亮）：unseen 是会被清掉的新状态，与 done 正交。判据必须端到端且经得起变异：把投影那一行删掉要让测试变红。",
   "status": "proposal",
   "workspace_mode": "proposal_only",
   "base_ref": "main",
@@ -27,6 +27,10 @@
     {
       "action": "feat_created",
       "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "proposal_revised",
+      "detail": "2026-09-13 tracker hygiene: 原提案'done 与 idle 像素级相同'前提被证伪，五条断言逐条复核后重写。真实缺口是 SEEN-done vs UNSEEN-done，即代码里已命名的 #199 未读/已读轴。更正 observedAt 非'管线一半'（是随事件刷新的最近观测戳）。"
     }
   ]
 }

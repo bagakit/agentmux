@@ -21,11 +21,11 @@ Deliver a reusable, typed Provider core over local and SSH-hosted tmux that make
 - Delivery advances as runnable end-to-end vertical slices on the final architecture; incomplete breadth never replaces a working slice or justifies tearing one down.
 - Components remain modular with explicit ownership, while abstractions exist only for current variability (AgentProvider and local/SSH ExecutionHost), not anticipated possibilities.
 - Maintained libraries and platform facilities own established complexity after existing dependencies are inspected; custom infrastructure requires a concrete unmet need.
-- Architecture and interaction decisions use inspected Warp, a mature workbench, and a mature workbench patterns as evidence and are chosen for the long term, not as disposable interim designs.
-- Non-goal: reproduce a mature workbench's daemon/relay wire protocol, WSL transport, mobile client, account management, or remote credential manager.
+- Architecture and interaction decisions use inspected Warp, Refpeer, and Refproj patterns as evidence and are chosen for the long term, not as disposable interim designs.
+- Non-goal: reproduce Refproj's daemon/relay wire protocol, WSL transport, mobile client, account management, or remote credential manager.
 
 ## Acceptance And Stop Rules
-- Acceptance: repository checks pass; real local tmux and deterministic SSH transport tests prove the core lifecycle; all four adapters are covered; the built desktop workbench starts terminal-first, offers host selection, terminal/conversation modes, rich input, tabs/splits, rooted local/remote editing, a workspace board, and explicit create-and-register local/remote worktree flow; documentation links the design back to inspected a mature workbench source.
+- Acceptance: repository checks pass; real local tmux and deterministic SSH transport tests prove the core lifecycle; all four adapters are covered; the built desktop workbench starts terminal-first, offers host selection, terminal/conversation modes, rich input, tabs/splits, rooted local/remote editing, a workspace board, and explicit create-and-register local/remote worktree flow; documentation links the design back to inspected Refproj source.
 - Insufficient: mock-only lifecycle code, an Electron UI that bypasses the package, fabricated “reasoning”, status inferred solely from terminal text, a file editor without root confinement, a board with no real worktree path, compatibility/migration/fallback scaffolding, speculative abstractions, custom rewrites of mature maintained components without cause, or architecture prose without a runnable build.
 - Stop and ask before: mutating user-global agent hook configuration, creating or changing SSH credentials, opening non-SSH/non-loopback network listeners, publishing packages/releases, using paid APIs, deleting sessions/files not created or selected by AgentMux, or running Git worktree mutations outside an explicit user action in the app.
 
@@ -38,4 +38,4 @@ Deliver a reusable, typed Provider core over local and SSH-hosted tmux that make
 ## Context References
 - `.bagakit/feature-tracker/features/f-2228fpnqm/proposal.md`: defines the approved scope and extraction boundary; read before widening implementation.
 - `docs/plans/agentmux-runtime-desktop-review.md`: records principle, risk, and proof decisions; read before changing architecture or dependencies.
-- `docs/a mature workbench-agent-runtime-notes.md`: records source-grounded a mature workbench mechanisms; read before implementing or revising agent adapters and status semantics.
+- `docs/refproj-agent-runtime-notes.md`: records source-grounded Refproj mechanisms; read before implementing or revising agent adapters and status semantics.

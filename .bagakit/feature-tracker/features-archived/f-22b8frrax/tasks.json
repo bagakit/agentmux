@@ -9,7 +9,7 @@
     "AGENTS.md",
     "docs/plans/agentmux-workspace-agents-tool.md",
     "docs/plans/agentmux-semantic-session.md",
-    "docs/design/orca-interaction-review.md"
+    "docs/design/refproj-interaction-review.md"
   ],
   "plan_history": [
     {
@@ -20,7 +20,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-workspace-agents-tool.md",
         "docs/plans/agentmux-semantic-session.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "task_ids": [
         "T-001"
@@ -70,7 +70,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

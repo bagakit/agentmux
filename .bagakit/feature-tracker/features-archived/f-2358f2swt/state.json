@@ -3,7 +3,7 @@
   "feat_id": "f-2358f2swt",
   "title": "Git Source Control and Pull Requests",
   "slug": "git-source-control-pr",
-  "goal": "Git 源码控制, PR 等管理, 可以先从 orca 抄一个版本",
+  "goal": "Git 源码控制, PR 等管理, 可以先从 refproj 抄一个版本",
   "status": "archived",
   "workspace_mode": "current_tree",
   "base_ref": "main",

@@ -1,5 +1,6 @@
 # Region 布局的任意元数与重排
 
+Contract: `bagakit.feature-goal.v1`
 Feature: `f-24e8ffbzq`
 
 ## 用户原话（逐字，勿改写）
@@ -202,7 +203,7 @@ R1（Topic/Branch 行尾的缩略宫格）的设计稿是把 `workbenchRegionBou
 
 一手文档/源码已查证：i3 userguide（tree/orientation/split）、bspwm(1)、yabai(1)、
 xmonad-contrib 的 Dwindle/Spiral、VS Code `workbench.contribution.ts`（`splitSizing` 三档逐字）、
-Zed `crates/workspace/src/pane_group.rs`、tmux(1) + `layout.c` / `cmd-split-window.c`。
+Zed 仓库 `crates` 下 workspace crate 的 `src/pane_group.rs`、tmux(1) 的 `layout.c` 与 `cmd-split-window.c`。
 二手：squarified treemap 走的 Wikipedia 摘要（原始 PDF 调研时 503）。
 推断而非查证：dwm 的 master-stack 细节、「二叉四个面之后出阶梯」这条代价、各家 N=2/5/9 的体验、
 tmux `PANE_MINIMUM` 的具体数值（在 tmux.h，未读）。

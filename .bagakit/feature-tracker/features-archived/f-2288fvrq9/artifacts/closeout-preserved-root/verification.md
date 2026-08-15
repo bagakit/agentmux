@@ -1,11 +1,11 @@
-# T-004 a mature workbench Terminal 与文件菜单验收
+# T-004 Refproj Terminal 与文件菜单验收
 
 ## Automated Checks
 
 - Command: `pnpm check`
 - Result: 通过；Terminal／Explorer 交互、CtxMux 控制边界、黑底 Agent Surface、OSC 回复时序与 Production build 均有自动证据。
 - `pnpm check` 通过：Core/Desktop typecheck、194 个 Fast tests、1 个 checkout-external packed CtxMux native consumer 和 Production build 全绿。
-- `terminal-theme.test.ts` 固定 Graphite 真黑工作面、workbench-derived ANSI 色槽、12px 字号例外、1.0 行高、字重、滚动、Option 与对比度参数。
+- `terminal-theme.test.ts` 固定 Graphite 真黑工作面、Refproj-derived ANSI 色槽、12px 字号例外、1.0 行高、字重、滚动、Option 与对比度参数。
 - `terminal-osc-color-query.test.ts` 与 `runtime-controller.test.ts` 固定 OSC 10/11 完整／跨 chunk 解析，并证明 Desktop Main 必须等 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复，不与 Codex Terminal handshake 竞争 Input cursor。
 - `terminal-viewport-sync.test.ts` 固定 historical Run 只做本地 xterm fit，不发送 PTY Resize；Renderer 同时禁止其 Input 与 OSC 回复。
 - `terminal-shortcuts.test.ts` 固定 macOS Command 与其他平台 Ctrl+Shift 行为，不夺走 Agent CLI 的 Ctrl chord。
@@ -18,12 +18,12 @@
 - Step: 在当前安装候选中打开新 Codex 与历史 Run，并检查视觉层次、右键菜单、只读回放和元信息复制。
 - Outcome: 等待 Owner 在已安装候选中完成视觉与交互验收；自动 Gate 不代替人工结论。
 - 当前候选已重新安装；启动后必须确认 `AgentMux` Main 与其内置 `ctxmuxd` 都来自 Applications 路径。
-- 需要 Owner 在当前已打开的 Production App 中新建 Codex，确认输入区灰色语义背景、ANSI 色彩、字形密度、右键菜单和文件行菜单与 a mature workbench 参考一致。
+- 需要 Owner 在当前已打开的 Production App 中新建 Codex，确认输入区灰色语义背景、ANSI 色彩、字形密度、右键菜单和文件行菜单与 Refproj 参考一致。
 - Computer Use 当前缺少 Accessibility 权限，因此本轮没有把无法观察的窗口状态伪装成自动视觉通过。
 
 ## Residual Risks
 
-- AgentMux 使用与 xterm 5.5 兼容的稳定 Search/WebLinks/WebGL addons；a mature workbench 当前使用带大规模产品私有补丁的 xterm 6 beta。当前先对齐公开行为、palette、metrics 与渲染策略，不复制 a mature workbench 的 1,200 行 vendor patch。若 Owner 视觉验收仍发现渲染级差异，应以具体像素／行为证据决定是否需要更窄的上游修复，而不是整包引入 a mature workbench 私有 patch stack。
+- AgentMux 使用与 xterm 5.5 兼容的稳定 Search/WebLinks/WebGL addons；Refproj 当前使用带大规模产品私有补丁的 xterm 6 beta。当前先对齐公开行为、palette、metrics 与渲染策略，不复制 Refproj 的 1,200 行 vendor patch。若 Owner 视觉验收仍发现渲染级差异，应以具体像素／行为证据决定是否需要更窄的上游修复，而不是整包引入 Refproj 私有 patch stack。
 - 可选真实 Codex E2E 已证明本轮候选能创建真实 Run，Terminal handshake 持久化为 `[0,5)`，且没有复现 `applied-input cursor is 50, not expected 0`。完整用例未在 120 秒内闭合：用户 Codex 启动 8 个 MCP 时，`codex_apps` 返回 token expired，目标回答在测试门限后才输出；这属于外部 Codex 配置／延迟，不记为 T-004 自动通过。
 - T-003 的资源总验收仍是独立未完成任务；本文件只证明 T-004，不把 Terminal 交互通过外推为资源收敛完成。
 
@@ -100,7 +100,7 @@
 
 ## Automated Checks
 
-- 现有 `SidebarToggleChrome` 仍是所有顶行 owner 的单一组件；本任务只把其 macOS traffic-light pad 从 112px 收回到 a mature workbench 已验证的 80px，没有改动 Zustand、owner 交接或 dock 宽度计算。
+- 现有 `SidebarToggleChrome` 仍是所有顶行 owner 的单一组件；本任务只把其 macOS traffic-light pad 从 112px 收回到 Refproj 已验证的 80px，没有改动 Zustand、owner 交接或 dock 宽度计算。
 - 相关 16 个 focused tests、Desktop typecheck 与 `git diff --check` 通过；最终统一 Gate 由 Tracker 的 T-015 gate result 记录。
 
 ## Manual Checks
@@ -128,7 +128,7 @@
 
 ## Residual Risks
 
-- 24px 是参考成熟工作台 `icon-xs` 的视觉与命中尺寸，也是本轮继续压缩的下限；若未来需要更大的无障碍命中区，应通过不可见 hit slop 扩大点击区，不把角标重新画成 36px 浮动卡片。
+- 24px 是参考 Refproj `icon-xs` 的视觉与命中尺寸，也是本轮继续压缩的下限；若未来需要更大的无障碍命中区，应通过不可见 hit slop 扩大点击区，不把角标重新画成 36px 浮动卡片。
 
 # T-017 Agent / Terminal Pane 单行 Tabbar 验收
 

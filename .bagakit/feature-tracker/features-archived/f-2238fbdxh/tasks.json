@@ -4,21 +4,21 @@
   "plan_status": "reviewed",
   "plan_revision": 9,
   "supersedes_revision": 8,
-  "review_ref": "docs/design/orca-interaction-review.md",
+  "review_ref": "docs/design/refproj-interaction-review.md",
   "source_refs": [
     "AGENTS.md",
-    "docs/design/orca-interaction-review.md",
-    ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+    "docs/design/refproj-interaction-review.md",
+    ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
   ],
   "plan_history": [
     {
       "revision": 1,
       "supersedes_revision": null,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -32,11 +32,11 @@
     {
       "revision": 2,
       "supersedes_revision": 1,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -51,11 +51,11 @@
     {
       "revision": 3,
       "supersedes_revision": 2,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -74,11 +74,11 @@
     {
       "revision": 4,
       "supersedes_revision": 3,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -100,11 +100,11 @@
     {
       "revision": 5,
       "supersedes_revision": 4,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -128,11 +128,11 @@
     {
       "revision": 6,
       "supersedes_revision": 5,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -161,11 +161,11 @@
     {
       "revision": 7,
       "supersedes_revision": 6,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -196,11 +196,11 @@
     {
       "revision": 8,
       "supersedes_revision": 7,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -230,11 +230,11 @@
     {
       "revision": 9,
       "supersedes_revision": 8,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "task_ids": [
         "T-001",
@@ -270,7 +270,7 @@
     {
       "id": "T-001",
       "title": "重建 Workspace 交互基础",
-      "objective": "删除固定三栏 Renderer，改为 Workspace-owned Universal Tab、Focused Pane Group、Recursive Split Tree，以及 Orca 式 Tab 拖拽排序、移动和边缘分屏。",
+      "objective": "删除固定三栏 Renderer，改为 Workspace-owned Universal Tab、Focused Pane Group、Recursive Split Tree，以及 Refproj 式 Tab 拖拽排序、移动和边缘分屏。",
       "outcome": "File、Agent Session 和 Launch Surface 可以进入用户自行安排的可调整 Pane，同时不改变 tmux Core 的所有权边界。",
       "acceptance": [
         "每个 Workspace 拥有 Recursive Leaf/Split Layout 和 Last Focused Pane。",
@@ -292,8 +292,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -301,7 +301,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -326,7 +326,7 @@
     {
       "id": "T-002",
       "title": "让 File 和 Terminal 成为一等 Pane Content",
-      "objective": "实现 Orca 式层级 File Explorer 与 Pane-local Terminal/Editor State，并补齐受 Workspace Root 约束的 Local/SSH File Mutation、Terminal Recovery 和关闭行为。",
+      "objective": "实现 Refproj 式层级 File Explorer 与 Pane-local Terminal/Editor State，并补齐受 Workspace Root 约束的 Local/SSH File Mutation、Terminal Recovery 和关闭行为。",
       "outcome": "开发者可以在同一 Universal Pane Model 中管理文件并操作可恢复的 Agent Terminal。",
       "acceptance": [
         "Explorer 以 Folder 为先，支持折叠、搜索、刷新、键盘阅读，并表达 Selection/Dirty。",
@@ -348,7 +348,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -356,7 +356,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -380,7 +380,7 @@
     },
     {
       "id": "T-003",
-      "title": "采用 Orca 的 Settings 与共享状态模型",
+      "title": "采用 Refproj 的 Settings 与共享状态模型",
       "objective": "用 General、Agents、Hosts、Workspaces 分组 Settings 替代平铺 Drawer，并让 Host-scoped Detection/Health Truth 统一服务 Settings 和 Launch Surface。",
       "outcome": "Codex、Claude、TraeX、Hermes、Pi 与 SSH Host 成为可理解的操作对象，而不是一组无差别配置输入框。",
       "acceptance": [
@@ -404,7 +404,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -412,7 +412,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -437,7 +437,7 @@
     {
       "id": "T-004",
       "title": "重做 Workspace 导航与看板",
-      "objective": "将 Orca 的 Workspace Evidence Hierarchy、Filter、Shared Card 和 Host-aware Worktree Creation 引入 AgentMux Sidebar/Board。",
+      "objective": "将 Refproj 的 Workspace Evidence Hierarchy、Filter、Shared Card 和 Host-aware Worktree Creation 引入 AgentMux Sidebar/Board。",
       "outcome": "List 与 Board 一致表达 Branch、Path、Host 和 Agent Attention State。",
       "acceptance": [
         "Sidebar Card 展示 Identity、Branch/Path、Host、Aggregate Status 和 Inline Agent Row，不重复矛盾标签。",
@@ -459,7 +459,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -467,7 +467,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -515,8 +515,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 3,
@@ -524,7 +524,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -562,8 +562,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 3,
@@ -571,7 +571,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -585,15 +585,15 @@
     },
     {
       "id": "T-011",
-      "title": "直接移植 Orca 的 Explorer 与 Editor 基础",
-      "objective": "基于固定 Orca Commit 与源码清单，移植成熟的文件类型、语言识别和文件树交互基础，并按 AgentMux 的 Local/SSH 与 Workspace Root 边界做最小适配。",
+      "title": "直接移植 Refproj 的 Explorer 与 Editor 基础",
+      "objective": "基于固定 Refproj Commit 与源码清单，移植成熟的文件类型、语言识别和文件树交互基础，并按 AgentMux 的 Local/SSH 与 Workspace Root 边界做最小适配。",
       "outcome": "Explorer 与 Editor 不再依赖少量扩展名分支和自制缩水交互，而由可追溯、集中、经过测试的成熟实现承担基础行为。",
       "acceptance": [
-        "记录 Orca Commit、FileExplorerRow、language-detect、file-type-icons、file-explorer-keyboard-navigation 等源路径，以及逐项 Copy/Adaptation Manifest。",
-        "移植集中式 Language Detection 与 File Type Icon Registry，覆盖 Orca 已支持且适用于 AgentMux 的文件类型，并为扩展名、文件名、无扩展文件和未知类型提供确定性测试。",
+        "记录 Refproj Commit、FileExplorerRow、language-detect、file-type-icons、file-explorer-keyboard-navigation 等源路径，以及逐项 Copy/Adaptation Manifest。",
+        "移植集中式 Language Detection 与 File Type Icon Registry，覆盖 Refproj 已支持且适用于 AgentMux 的文件类型，并为扩展名、文件名、无扩展文件和未知类型提供确定性测试。",
         "移植并验证文件夹点击展开／收起、选择、键盘导航、Reveal、Watch/Refresh、Stale Response 与文件变更后的状态保持；文件创建、重命名、删除继续走显式确认。",
-        "保留 Monaco、Local/SSH Main Process Boundary 和 Workspace Root Confinement；不把 Orca Daemon、账户、Issue Integration 或兼容历史带入 AgentMux。",
-        "Orca 已解决且适用的基础能力不得另写功能缩水的替代实现；无法直接移植的项必须在 Manifest 说明技术原因和等价验收证据。"
+        "保留 Monaco、Local/SSH Main Process Boundary 和 Workspace Root Confinement；不把 Refproj Daemon、账户、Issue Integration 或兼容历史带入 AgentMux。",
+        "Refproj 已解决且适用的基础能力不得另写功能缩水的替代实现；无法直接移植的项必须在 Manifest 说明技术原因和等价验收证据。"
       ],
       "verification": [
         {
@@ -603,13 +603,13 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-interaction-review.md",
-          "proves": "固定 Orca 来源、Copy/Adaptation Manifest 与明确排除项可被审计。"
+          "ref": "docs/design/refproj-interaction-review.md",
+          "proves": "固定 Refproj 来源、Copy/Adaptation Manifest 与明确排除项可被审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
@@ -617,7 +617,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -655,8 +655,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/orca-agent-runtime-notes.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/refproj-agent-runtime-notes.md",
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -664,7 +664,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -701,7 +701,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -709,7 +709,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -746,7 +746,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -754,7 +754,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -791,7 +791,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -799,7 +799,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -819,7 +819,7 @@
       "acceptance": [
         "测试枚举 detector 可产生的全部 Language ID，并断言它们属于 Monaco 实际注册集合。",
         "notebook、mermaid、makefile、cmake、erlang、haskell、csv、tsv 等未注册映射被删除或在已有依赖足以支持时直接注册；不能只保留名字伪装高亮。",
-        "Vue、Svelte、Astro、JSONL 的 Orca-derived 注册继续保留；未知或明确未支持类型确定性返回 plaintext。",
+        "Vue、Svelte、Astro、JSONL 的 Refproj-derived 注册继续保留；未知或明确未支持类型确定性返回 plaintext。",
         "文件名优先、扩展名大小写和 Monaco 正确基础 ID 保持集中式测试；没有明确产品需求不新增 TextMate、Oniguruma 或语言包。"
       ],
       "verification": [
@@ -836,7 +836,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -844,7 +844,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -882,7 +882,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -890,7 +890,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -928,7 +928,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
@@ -936,7 +936,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -973,7 +973,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
@@ -981,7 +981,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1019,7 +1019,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
@@ -1027,7 +1027,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1065,7 +1065,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
@@ -1073,7 +1073,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1112,7 +1112,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md"
       ],
       "supersedes": [
@@ -1123,7 +1123,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1138,7 +1138,7 @@
     {
       "id": "T-031",
       "title": "重建二维 Branch × Status 看板与 Inbox Discussion Canvas",
-      "objective": "采用 Orca 已验证的 Project Scope 看板空间结构，把 Board 重建为纵向按 Branch/Worktree 分泳道、横向按工作状态分列的二维矩阵，并让 Inbox 成为可拉起现有 Core/tmux Agent 讨论的入口。",
+      "objective": "采用 Refproj 已验证的 Project Scope 看板空间结构，把 Board 重建为纵向按 Branch/Worktree 分泳道、横向按工作状态分列的二维矩阵，并让 Inbox 成为可拉起现有 Core/tmux Agent 讨论的入口。",
       "outcome": "用户可以按 Branch 观察 Run 在 Inbox、Working、Needs You、Done 之间的横向进展，并从任一 Branch 的 Inbox 直接进入讨论 Canvas；Board、Workspace、Branch 与 Session 继续共享单一项目真相。",
       "acceptance": [
         "Board 主体采用二维矩阵：Project 下每个 Branch/Worktree 对应一条纵向泳道（视觉上为一行），横向固定展示 Inbox、Working、Needs You、Done 状态列；不再使用只按 Agent 状态分组的四条纵向列表。",
@@ -1147,7 +1147,7 @@
         "Inbox 是 Board 本体的第一状态列，不再是 Board Tools 的独立子 Tab；空 Inbox 单元格和已有 Inbox 卡片都可以打开 Discussion Canvas，并携带当前 Branch 上下文。",
         "Discussion Canvas 提供最少的讨论主题、Branch/Workspace 和 Provider 选择，提交后复用现有 Core/tmux Agent Launch 路径创建真实 Session；成功 Run 回落到对应 Branch 泳道，失败保持可见且不产生幽灵卡片。",
         "Board 支持 Project Scope 的横向滚动、纵向 Branch 浏览、紧凑卡片与状态/Host 筛选，在常见窗口宽度下保留 Branch 标签和状态列头；不引入第二套 Board Store、通用 Canvas 框架、任务数据库、插件系统或 mux Runtime 改造。",
-        "更新中文设计文档、Goal 不变量与 Production 验收证据，明确二维轴、Inbox 归属、Canvas 启动边界和 Orca Copy/Adapt/Omit 依据；T-006 mux 讨论继续保持最后一项。"
+        "更新中文设计文档、Goal 不变量与 Production 验收证据，明确二维轴、Inbox 归属、Canvas 启动边界和 Refproj Copy/Adapt/Omit 依据；T-006 mux 讨论继续保持最后一项。"
       ],
       "verification": [
         {
@@ -1163,8 +1163,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 9,
@@ -1172,7 +1172,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1187,11 +1187,11 @@
     {
       "id": "T-006",
       "title": "与用户讨论并确定 mux 方案",
-      "objective": "在桌面交互验收完成后，基于 AgentMux 当前真实 tmux Runtime 与 Orca 的 embeddable PTY、daemon、SSH Provider 实现证据，和用户讨论 mux 的长期所有权与运行方式。",
+      "objective": "在桌面交互验收完成后，基于 AgentMux 当前真实 tmux Runtime 与 Refproj 的 embeddable PTY、daemon、SSH Provider 实现证据，和用户讨论 mux 的长期所有权与运行方式。",
       "outcome": "形成经用户明确确认、可指导后续独立实现工作的 mux 架构决策；本任务不改动 mux Runtime。",
       "acceptance": [
-        "对照当前 AgentMux 与 Orca 源码，明确比较进程持有、会话持久化、Local/SSH、输入输出、Resize、停止、状态监听和嵌入边界。",
-        "向用户说明保留真实 tmux、采用 Orca-like embeddable Runtime，以及必要时其他真实候选的收益、代价和失败边界，不虚构方案差异。",
+        "对照当前 AgentMux 与 Refproj 源码，明确比较进程持有、会话持久化、Local/SSH、输入输出、Resize、停止、状态监听和嵌入边界。",
+        "向用户说明保留真实 tmux、采用 Refproj-like embeddable Runtime，以及必要时其他真实候选的收益、代价和失败边界，不虚构方案差异。",
         "将用户确认的选择、理由、非目标、迁移边界和验收条件记录为中文决策文档。",
         "用户确认前不修改 mux 代码、配置或公共 API；若决定实施，通过后续 Feature 或 Task Plan Revision 明确排期，不在讨论任务中夹带实现。"
       ],
@@ -1204,7 +1204,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/orca-agent-runtime-notes.md"
+        "docs/refproj-agent-runtime-notes.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 6,
@@ -1212,7 +1212,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1249,8 +1249,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 2,
@@ -1292,8 +1292,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-005"
@@ -1314,10 +1314,10 @@
     {
       "id": "T-010",
       "title": "重建面性视觉、Titlebar 与二级工具菜单",
-      "objective": "以固定版本 Orca 为可审计的风格参考，降低线框和过量 Padding，修正顶部空行，并把文件专用面板重构为可收起的 Workspace 二级工具菜单。",
+      "objective": "以固定版本 Refproj 为可审计的风格参考，降低线框和过量 Padding，修正顶部空行，并把文件专用面板重构为可收起的 Workspace 二级工具菜单。",
       "outcome": "AgentMux 保留 Graphite/Mint 身份，同时获得由 Surface、密度和局部层级主导的成熟桌面构成；Workspace 工具入口有清晰且有限的所有权。",
       "acceptance": [
-        "在实现前记录 Orca 参考版本、Reference Provenance、Surface 层级、Density Budget、Control Ownership 和重复视觉 Token；Orca 被标记为 style_reference，而非像素级换皮。",
+        "在实现前记录 Refproj 参考版本、Reference Provenance、Surface 层级、Density Budget、Control Ownership 和重复视觉 Token；Refproj 被标记为 style_reference，而非像素级换皮。",
         "删除不承担语义的连续 1px 网格和过大统一 Padding；Topbar 进入 draggable Titlebar Plane，只为 macOS Traffic Lights 保留安全区，右侧主区不再被全局 38px 空行下推。",
         "原文件专用面板变为可整体收起／展开的二级工具菜单，并在 Workspace 模式记住所选工具、宽度和展开状态。",
         "首批工具仅为 Explorer、Web Bookmarks、Quick Terminal、Agent Launch；它们分别打开或聚焦 File/Browser/Terminal/Agent Universal Tab，不拥有第二套进程、Session 或状态生命周期。",
@@ -1337,8 +1337,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 4,
@@ -1346,7 +1346,7 @@
       "gate_result": "fail",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1371,7 +1371,7 @@
       "objective": "修复过小字号和 Tab 内容默认尺度造成的低分辨率感，把共享 Tools 入口移动到右侧主区 Titlebar 最左侧、标题之前，并让 Workspace 与 Board 使用同一容器但恢复各自子 Tab。",
       "outcome": "Production Electron 画面与 Terminal/Editor 默认内容清晰；Tools 在 Workspace/Board 都有稳定位置、共享展开和宽度 truth，同时保持 Surface-specific 子 Tab。",
       "acceptance": [
-        "保留已固定的 Orca Reference Provenance、Surface/Density 和 Titlebar Plane 证据；删除右侧主区顶部空行，Tools 按钮位于右侧主区最左侧、Workspace/Board 标题之前。",
+        "保留已固定的 Refproj Reference Provenance、Surface/Density 和 Titlebar Plane 证据；删除右侧主区顶部空行，Tools 按钮位于右侧主区最左侧、Workspace/Board 标题之前。",
         "审计 Production Electron 的 devicePixelRatio、xterm Canvas backing size 与 Monaco Font Info；操作文字以 11–13px 为主，Terminal/Editor 默认 14–15px，不添加 CSS transform 或二次缩放层。",
         "Workspace 与 Board 共用 Tools 的展开状态和像素宽度，但分别记住所选子 Tab；切换 Surface、收起／恢复和 Resize 后不得串用或丢失状态。",
         "Workspace 子 Tab 仅为 Files + Branches、Browser Favorites、Terminal Shortcuts；Board 子 Tab 仅为 Branch Lanes、Inbox。Agent Launch 从 Tools 删除，继续由 Universal New Tab 提供。",
@@ -1392,8 +1392,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-010"
@@ -1403,7 +1403,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1445,8 +1445,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-012"
@@ -1490,8 +1490,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-015"
@@ -1501,7 +1501,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1543,8 +1543,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-014",
@@ -1555,7 +1555,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1597,8 +1597,8 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-023",
@@ -1609,7 +1609,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },

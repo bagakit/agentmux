@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { workingAgentCount } from '../src/renderer/src/lib/project-board.js'
-import { projectWorkspaces, removeProjectWorkspaces } from '../src/renderer/src/lib/workspace-projects.js'
+import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey } from '../src/renderer/src/lib/workspace-projects.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -489,5 +489,47 @@ describe('Project Rail 的分组与嵌套', () => {
     const markup = renderRail()
     expect(markup).not.toContain('project-rail-group__header')
     expect(exactRow(markup, 'solo')).toContain('project-rail-row')
+  })
+
+  // 结构线（分组成员的竖直连接线）只挂在 `.project-rail-group--expanded` 上（chrome.css 的 ::before）。
+  // 上面的用例判 aria-expanded / 地址 / 成员行 / 卷积，却没有一条钉住这个真正开关结构线的类，
+  // 于是"仅展开的有名分组显示结构线；无分组和折叠无空线"是未证的。这里直接对分组容器的类断言。
+
+  /** 取出某个分组容器 `<div class="project-rail-group ...">` 的开标签。用它内含的成员行 aria-label 定位。 */
+  function groupDivFor(markup: string, memberName: string): string {
+    const divs = [...markup.matchAll(/<div class="project-rail-group[^"]*"[^>]*>[\s\S]*?(?=<div class="project-rail-group|<\/nav>)/g)]
+      .map((match) => match[0])
+      .filter((div) => new RegExp(`aria-label="${memberName}(?:[^"]*)?"`).test(div))
+    expect(`${memberName}: ${divs.length} 组`).toBe(`${memberName}: 1 组`)
+    return divs[0]!
+  }
+
+  it('有名且展开的分组挂上结构线的类', () => {
+    // 命名 + 展开：kit 领两个成员，其容器带 project-rail-group--expanded（结构线的唯一挂点）。
+    // 去掉 WorkspaceSidebar.tsx:219 的 group.label 判断 → 无名分组也会拿到类（下一条红）；
+    // 这一条正向证明命名+展开时类在场。
+    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
+    expect(groupDivFor(renderRail(), 'one')).toContain('project-rail-group--expanded')
+  })
+
+  it('无分组的单例不挂结构线的类——不留空线', () => {
+    // solo 独占一个无名分组：容器绝不能带 project-rail-group--expanded，否则会画出一条没有成员
+    // 关系的空竖线。去掉 :219 的 `group.label` → 无名分组也拿到类 → 本条红。
+    useWorkspaces([['solo', '/elsewhere/solo']])
+    expect(groupDivFor(renderRail(), 'solo')).not.toContain('project-rail-group--expanded')
+  })
+
+  it('折叠的有名分组不挂结构线的类——折叠态无成员亦无线', () => {
+    // 折叠时成员行已藏，容器不能再带 project-rail-group--expanded 画一条悬空的线。
+    // 折叠键走 SSOT 的 projectGroupKey，避免 JSON.stringify 形状在测试里另抄一份漂移。
+    // 去掉 :219 的 `!collapsed` → 折叠分组仍带类/画线 → 本条红。
+    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
+    const key = projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })!
+    fixture.state.collapsedProjectGroups = { [key]: true }
+    const markup = renderRail()
+    // 折叠后成员行不在，用分组头的 aria-label 定位该容器。
+    const header = markup.match(/<div class="project-rail-group[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ''
+    expect(header, '分组容器缺失').not.toBe('')
+    expect(header).not.toContain('project-rail-group--expanded')
   })
 })

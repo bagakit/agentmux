@@ -85,6 +85,7 @@ const PERSISTED_PREFERENCES = {
   toolDockWidth: 421,
   editorWordWrap: true,
   projectRailOpen: false,
+  projectRailWidth: 317, // 非默认（默认 210）且落在 clamp 区间 [180,420] 内，见 store.ts:1516
   toolsOpen: true,
   agentNames: { 'sess-1': '我给它起的名字' },
   scratchTopicOrder: ['topic-9', 'topic-3'],
@@ -170,6 +171,7 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.toolDockWidth, '侧栏宽度被重置了').toBe(PERSISTED_PREFERENCES.toolDockWidth)
     expect(state.editorWordWrap, '换行开关被重置了').toBe(PERSISTED_PREFERENCES.editorWordWrap)
     expect(state.projectRailOpen, '项目栏开合被重置了').toBe(PERSISTED_PREFERENCES.projectRailOpen)
+    expect(state.projectRailWidth, '项目栏宽度被重置了').toBe(PERSISTED_PREFERENCES.projectRailWidth)
     expect(state.toolsOpen, '工具面板开合被重置了').toBe(PERSISTED_PREFERENCES.toolsOpen)
     expect(state.agentNames, '用户自己起的 Agent 名字丢了').toEqual(PERSISTED_PREFERENCES.agentNames)
     expect(state.scratchTopicOrder, 'Topic 顺序丢了').toEqual(PERSISTED_PREFERENCES.scratchTopicOrder)

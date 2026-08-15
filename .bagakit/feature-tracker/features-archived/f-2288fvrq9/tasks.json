@@ -10,16 +10,16 @@
     "docs/plans/agentmux-optimization-convergence.md",
     "docs/plans/agentmux-desktop-package.md",
     "docs/testing/strategy.md",
-    "docs/design/orca-interaction-review.md"
+    "docs/design/refproj-interaction-review.md"
   ],
   "plan_history": [
     {
       "revision": 1,
       "supersedes_revision": null,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "task_ids": [
@@ -35,10 +35,10 @@
     {
       "revision": 2,
       "supersedes_revision": 1,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "task_ids": [
@@ -54,10 +54,10 @@
     {
       "revision": 3,
       "supersedes_revision": 2,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/testing/strategy.md"
       ],
       "task_ids": [
@@ -77,7 +77,7 @@
       "review_ref": "docs/plans/agentmux-terminal-interaction-latency.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
       ],
@@ -99,7 +99,7 @@
       "review_ref": "docs/plans/agentmux-terminal-interaction-latency.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
       ],
@@ -122,7 +122,7 @@
       "review_ref": "docs/plans/agentmux-terminal-interaction-latency.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
       ],
@@ -146,7 +146,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -172,7 +172,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -199,7 +199,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -227,7 +227,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -256,7 +256,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -286,7 +286,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -317,7 +317,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -349,7 +349,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -382,7 +382,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -416,7 +416,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
         "docs/testing/strategy.md"
@@ -451,7 +451,7 @@
       "review_ref": "docs/plans/agentmux-project-rail-navigation.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
+        "docs/design/refproj-interaction-review.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
         "docs/plans/agentmux-terminal-interaction-latency.md",
@@ -496,7 +496,7 @@
         "docs/plans/agentmux-optimization-convergence.md",
         "docs/plans/agentmux-desktop-package.md",
         "docs/testing/strategy.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "task_ids": [
         "T-001",
@@ -567,7 +567,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -605,7 +605,7 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -613,7 +613,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -627,16 +627,16 @@
     },
     {
       "id": "T-004",
-      "title": "移植 Orca 成熟 Terminal 交互",
-      "objective": "从固定 Orca 源码先一致移植 Terminal 外观、搜索、链接、复制粘贴、聚焦、清屏、滚动、Pane 放大、平台快捷键和文件右键菜单，同时保持 Core 是唯一 Session API、CtxMux 是唯一 Run/PTY owner。",
+      "title": "移植 Refproj 成熟 Terminal 交互",
+      "objective": "从固定 Refproj 源码先一致移植 Terminal 外观、搜索、链接、复制粘贴、聚焦、清屏、滚动、Pane 放大、平台快捷键和文件右键菜单，同时保持 Core 是唯一 Session API、CtxMux 是唯一 Run/PTY owner。",
       "outcome": "Terminal 不只是可显示字节，而是外观正确、可高频使用、鼠标优先且跨平台一致的一等工作面；Explorer 具备与已有文件能力一致的成熟右键操作面。",
       "acceptance": [
         "新建或切换到 Terminal 后输入焦点进入 xterm；搜索、清屏、滚动到底部、复制和粘贴有可见且可访问的入口与 CmdOrCtrl 快捷键。",
         "macOS 选中即复制/右键行为、Linux/Windows Ctrl 行为按平台明确实现，不硬编码 metaKey，不劫持 Agent CLI 自己的键位。",
         "OSC/URL 链接只通过安全的 Main-owned external-open 边界；不允许 file/javascript/data 协议或 Renderer 直接调用系统 Shell。",
-        "默认 Terminal palette、字重、行高、滚动、Option 语义与 Renderer 策略按固定 Orca 来源对齐，仅保留用户确认的 AgentMux 字号；启动期 OSC 10/11 query 在无 Renderer 时仍只经 Core → CtxMux Input 回复，replay 不重复注入。",
+        "默认 Terminal palette、字重、行高、滚动、Option 语义与 Renderer 策略按固定 Refproj 来源对齐，仅保留用户确认的 AgentMux 字号；启动期 OSC 10/11 query 在无 Renderer 时仍只经 Core → CtxMux Input 回复，replay 不重复注入。",
         "文件行右键菜单提供现有产品真实支持的创建、复制绝对／相对路径、查看、目录 Terminal、折叠、Finder、重命名与删除；复用 Explorer Selection/Mutation、typed Main IPC 和 CtxMux Terminal launch，不建立第二份文件状态。",
-        "所有交互复用当前 xterm、Pane、Typed IPC 和 Core Session owner；不复制 Orca daemon、历史兼容配置、插件或第二套 Terminal 状态机。",
+        "所有交互复用当前 xterm、Pane、Typed IPC 和 Core Session owner；不复制 Refproj daemon、历史兼容配置、插件或第二套 Terminal 状态机。",
         "Production Electron 在真实 DPR 下通过密度、输入、选择、搜索、链接和重启重连验收。"
       ],
       "verification": [
@@ -647,13 +647,13 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-interaction-review.md",
-          "proves": "固定 Orca 来源、Copy/Adapt 清单和排除项可审计。"
+          "ref": "docs/design/refproj-interaction-review.md",
+          "proves": "固定 Refproj 来源、Copy/Adapt 清单和排除项可审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -661,7 +661,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -675,8 +675,8 @@
     },
     {
       "id": "T-006",
-      "title": "对齐 Orca Branches 密度、创建与右键操作",
-      "objective": "从固定 Orca Worktree Composer、Creation Panel 与 Context Menu 提取已验证的交互模式，收紧 Branches 列表密度，把未绑定 Branch 的创建从挤压列表的底部表单改成独立对话框，为 Branch 行提供只映射现有真实能力的右键菜单，并投影该 Worktree 上仍在运行的 Agent。",
+      "title": "对齐 Refproj Branches 密度、创建与右键操作",
+      "objective": "从固定 Refproj Worktree Composer、Creation Panel 与 Context Menu 提取已验证的交互模式，收紧 Branches 列表密度，把未绑定 Branch 的创建从挤压列表的底部表单改成独立对话框，为 Branch 行提供只映射现有真实能力的右键菜单，并投影该 Worktree 上仍在运行的 Agent。",
       "outcome": "Branches 与 Files、Terminal 使用同一套紧凑 Surface 语言；选择、打开、创建、复制、刷新和运行中 Agent 一眼可见，同时 Git/Worktree 与 Session 真相仍分别只有 Main WorktreeService 和 Core Runtime Snapshot 一份。",
       "acceptance": [
         "Header、Repository、Group 与 Branch Row 使用 expert-dense 尺度；Branch 名称与 Worktree path 保持可扫读和截断，20 个 Branch 不因重复 Padding 浪费主要高度。",
@@ -695,13 +695,13 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-interaction-review.md",
-          "proves": "Orca 来源、Copy/Adapt 动作与排除项可审计。"
+          "ref": "docs/design/refproj-interaction-review.md",
+          "proves": "Refproj 来源、Copy/Adapt 动作与排除项可审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 3,
@@ -709,7 +709,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -756,7 +756,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -803,7 +803,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -850,7 +850,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -865,7 +865,7 @@
     {
       "id": "T-010",
       "title": "把 Scratch 固定为专属入口并支持 Project rail 收起",
-      "objective": "采用 Orca 已验证的全局入口与 Projects 分层，把 Scratch 从普通 Project 投影中分离并固定在 rail 顶部，同时提供不会丢失工作上下文的显式收起与展开行为。",
+      "objective": "采用 Refproj 已验证的全局入口与 Projects 分层，把 Scratch 从普通 Project 投影中分离并固定在 rail 顶部，同时提供不会丢失工作上下文的显式收起与展开行为。",
       "outcome": "Scratch 作为无项目工作区始终一眼可达，Projects 保持独立滚动；需要更多画布时可以收起左侧 Project rail，并从 macOS 标题栏安全区随时恢复。",
       "acceptance": [
         "Scratch 保持现有 WorkspaceRecord、磁盘路径和 selectWorkspace 语义，但不再进入普通 Project 分组，固定显示在 Projects heading 之前。",
@@ -884,13 +884,13 @@
         {
           "kind": "artifact",
           "ref": "docs/plans/agentmux-project-rail-navigation.md",
-          "proves": "用户确认的 Scratch 层级、Orca 参考边界、折叠行为和非目标可审计。"
+          "proves": "用户确认的 Scratch 层级、Refproj 参考边界、折叠行为和非目标可审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
@@ -898,7 +898,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -944,7 +944,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -988,7 +988,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1034,7 +1034,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1049,7 +1049,7 @@
     {
       "id": "T-014",
       "title": "把 Project rail 底部入口收口为紧凑工具条",
-      "objective": "参考 Orca 的 SidebarToolbar 密度，把整行 Settings & hosts 文字入口替换为直达现有 General 与 Hosts 的图标按钮，并在 rail 收起后保留左下角 Settings affordance。",
+      "objective": "参考 Refproj 的 SidebarToolbar 密度，把整行 Settings & hosts 文字入口替换为直达现有 General 与 Hosts 的图标按钮，并在 rail 收起后保留左下角 Settings affordance。",
       "outcome": "Project rail 底部不再浪费纵向空间，常用配置入口可凭图标与 tooltip 识别；为了画布收起 rail 后，Settings 仍始终可达。",
       "acceptance": [
         "Project rail 展开时底栏为带顶部边界的低高度 toolbar，只显示 Settings 与 Hosts 两个 28px 图标按钮，不显示 Settings & hosts 文案；Settings 打开 General，Hosts 直接打开 Hosts。",
@@ -1073,7 +1073,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
-        "docs/design/orca-surface-density-manifest.md"
+        "docs/design/refproj-surface-density-manifest.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 11,
@@ -1081,7 +1081,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1096,7 +1096,7 @@
     {
       "id": "T-015",
       "title": "把顶部双导航组贴近 macOS 红绿灯",
-      "objective": "采用 Orca 已验证的独立 80px traffic-light pad，把 Projects 与 Workspace tools 两个固定 toggle 从 Project rail 中部收回到红绿灯后的紧凑控制组。",
+      "objective": "采用 Refproj 已验证的独立 80px traffic-light pad，把 Projects 与 Workspace tools 两个固定 toggle 从 Project rail 中部收回到红绿灯后的紧凑控制组。",
       "outcome": "窗口左上角形成连续、可理解的红绿灯与双导航控制组，不再出现大片死区或悬在 rail 中间的图标。",
       "acceptance": [
         "macOS 普通窗口下 traffic-light safe area 固定为 80px；两个 28px toggle 以 2px 间距紧随其后，中心分别位于窗口 x=94px 与 x=124px。",
@@ -1113,7 +1113,7 @@
         {
           "kind": "artifact",
           "ref": "docs/plans/agentmux-project-rail-navigation.md",
-          "proves": "用户确认的图标位置问题、Orca traffic-light pad 参考与固定坐标要求可审计。"
+          "proves": "用户确认的图标位置问题、Refproj traffic-light pad 参考与固定坐标要求可审计。"
         }
       ],
       "source_refs": [
@@ -1126,7 +1126,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1141,7 +1141,7 @@
     {
       "id": "T-016",
       "title": "把 Project rail 底栏与收起角标压到内容密度",
-      "objective": "把展开态 Settings / Hosts 工具条和收起态 Settings 入口从宽松 footer、浮动卡片收敛为 Orca icon-xs 量级的低密度操作面。",
+      "objective": "把展开态 Settings / Hosts 工具条和收起态 Settings 入口从宽松 footer、浮动卡片收敛为 Refproj icon-xs 量级的低密度操作面。",
       "outcome": "Project rail 展开时底栏不再浪费纵向空间，收起后左下只留下一个轻量角标，同时 Settings 与 Hosts 仍然清晰、可达且不改变状态 owner。",
       "acceptance": [
         "展开态 toolbar 总高度为 32px，Settings 与 Hosts 使用局部 24px 按钮和约 13px 图标；不修改全局 icon-button 尺寸。",
@@ -1165,7 +1165,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
-        "docs/design/orca-surface-density-manifest.md"
+        "docs/design/refproj-surface-density-manifest.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 13,
@@ -1173,7 +1173,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1188,7 +1188,7 @@
     {
       "id": "T-017",
       "title": "把 Agent 与 Terminal Pane 收回单行 Tabbar",
-      "objective": "按 Orca 的成熟单行 Pane header 删除常驻 Session Info Bar，把必要的 Run 动作和低频 Session 信息重新归入 Tabbar、tooltip 与 context menu。",
+      "objective": "按 Refproj 的成熟单行 Pane header 删除常驻 Session Info Bar，把必要的 Run 动作和低频 Session 信息重新归入 Tabbar、tooltip 与 context menu。",
       "outcome": "Agent / Terminal 内容只保留一条 Tabbar，不再被第二行 ID、时间和 Recent 元数据挤压；Stop Run 与诊断信息仍真实可达。",
       "acceptance": [
         "Agent 与 Raw Terminal Pane 不再渲染 28px Session Info Bar，Pane Tabbar 成为内容上方唯一常驻 chrome，每个 Pane 回收 28px 内容高度。",
@@ -1205,14 +1205,14 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-surface-density-manifest.md",
-          "proves": "用户确认的 Orca 单行 Tabbar、元信息归属与 28px 回收要求可审计。"
+          "ref": "docs/design/refproj-surface-density-manifest.md",
+          "proves": "用户确认的 Refproj 单行 Tabbar、元信息归属与 28px 回收要求可审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md",
-        "docs/design/orca-surface-density-manifest.md"
+        "docs/design/refproj-interaction-review.md",
+        "docs/design/refproj-surface-density-manifest.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 14,
@@ -1220,7 +1220,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1258,15 +1258,15 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml",
-          "proves": "Orca 参考后的稳定宽度、overflow、焦点和 resize 设计规则已进入设计 SSOT。"
+          "ref": ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml",
+          "proves": "Refproj 参考后的稳定宽度、overflow、焦点和 resize 设计规则已进入设计 SSOT。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [],
       "introduced_in_revision": 16,
@@ -1274,7 +1274,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1318,7 +1318,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml",
+          "ref": ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml",
           "proves": "两层布局对象、交互入口和 Runtime 边界已进入设计 SSOT。"
         }
       ],
@@ -1326,8 +1326,8 @@
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
-        "docs/design/orca-interaction-review.md",
-        ".bagakit/design/orca-informed-interaction-redesign/design-packet.toml"
+        "docs/design/refproj-interaction-review.md",
+        ".bagakit/design/refproj-informed-interaction-redesign/design-packet.toml"
       ],
       "supersedes": [
         "T-018"
@@ -1337,7 +1337,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1352,7 +1352,7 @@
     {
       "id": "T-005",
       "title": "完成产品化、资源与 Terminal 总验收",
-      "objective": "在 Terminal、Explorer 与 Branches 的 Orca-derived 交互闭合后，于最终提交上重跑 Repository、Package、Production Desktop、资源和交互 Gate，安装并启动可体验的 AgentMux.app。",
+      "objective": "在 Terminal、Explorer 与 Branches 的 Refproj-derived 交互闭合后，于最终提交上重跑 Repository、Package、Production Desktop、资源和交互 Gate，安装并启动可体验的 AgentMux.app。",
       "outcome": "本轮优化以可运行安装包、可复现指标、稳定 Terminal、成熟 Branches 操作面和闭环 Git 版本结束。",
       "acceptance": [
         "pnpm check、Package Gate、Desktop Resource Gate、git diff --check 与 Tracker validation 均通过或有精确外部 blocker。",
@@ -1382,7 +1382,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1429,7 +1429,7 @@
         "docs/plans/agentmux-optimization-convergence.md",
         "docs/plans/agentmux-desktop-package.md",
         "docs/testing/strategy.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [
         "T-003"
@@ -1439,7 +1439,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1480,7 +1480,7 @@
         "AGENTS.md",
         "docs/plans/agentmux-project-rail-navigation.md",
         "docs/plans/agentmux-ai-native-desktop-composition-cli.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 15,
@@ -1488,7 +1488,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -1528,7 +1528,7 @@
       ],
       "source_refs": [
         "docs/testing/strategy.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -1552,7 +1552,7 @@
       "rationale": "Desktop resource and interaction contracts now describe the current reusable Terminal, Topic, Tab, and owner boundaries without stale execution history.",
       "refs": [
         "docs/testing/strategy.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ]
     },
     "learning": {

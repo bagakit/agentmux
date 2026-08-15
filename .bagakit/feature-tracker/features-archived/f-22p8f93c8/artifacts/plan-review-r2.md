@@ -34,7 +34,7 @@ Feature: `f-22p8f93c8` — Attention Surfaces and Failure Visibility
 同一份仓库里既有 feature 的 gate 也是这种引用式写法，因此在当前契约下同样跑不起来。
 `f-2278ffae4` T-001 的 receipt 里 `pnpm check => fail` 是旧策略时期留下的历史记录，
 不是当前契约下的有效证据。此外它的 gate 还引用了
-`test -s docs/a mature workbench-agent-runtime-notes.md`，而该文件已不存在，故那条 gate 必然失败。
+`test -s docs/refproj-agent-runtime-notes.md`，而该文件已不存在，故那条 gate 必然失败。
 
 这两点已记录，留给各自 feature 的 owner 处理，不在本次修订中一并改动——那会把别人的
 执行真相卷进这次修复。

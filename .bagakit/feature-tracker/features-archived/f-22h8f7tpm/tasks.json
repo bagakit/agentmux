@@ -4,19 +4,19 @@
   "plan_status": "reviewed",
   "plan_revision": 1,
   "supersedes_revision": null,
-  "review_ref": "docs/design/orca-interaction-review.md",
+  "review_ref": "docs/design/refproj-interaction-review.md",
   "source_refs": [
     "AGENTS.md",
-    "docs/design/orca-interaction-review.md"
+    "docs/design/refproj-interaction-review.md"
   ],
   "plan_history": [
     {
       "revision": 1,
       "supersedes_revision": null,
-      "review_ref": "docs/design/orca-interaction-review.md",
+      "review_ref": "docs/design/refproj-interaction-review.md",
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "task_ids": [
         "T-001"
@@ -37,7 +37,7 @@
         "Raw Terminal 永远不显示 Agent Composer。",
         "AgentComposer 是受控且无 Store 依赖的可复用组件；AgentSessionComposer 唯一绑定草稿、当前文件、Submit 与 Interrupt。",
         "Composer 表面透明，只保留边界与 focus ring，不使用黑色填充或黑色 drop shadow。",
-        "正式产品规则只由 docs/design/orca-interaction-review.md 持有，旧计划不复制第二份。",
+        "正式产品规则只由 docs/design/refproj-interaction-review.md 持有，旧计划不复制第二份。",
         "定向 Renderer 测试、Desktop typecheck、完整 fast suite 与 git diff check 通过。"
       ],
       "verification": [
@@ -53,13 +53,13 @@
         },
         {
           "kind": "artifact",
-          "ref": "docs/design/orca-interaction-review.md",
+          "ref": "docs/design/refproj-interaction-review.md",
           "proves": "Composer 的对象归属、状态、Raw Terminal 非目标和视觉合同保持唯一记录。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
@@ -67,7 +67,7 @@
       "gate_result": "pass",
       "last_gate_commands": [
         {
-          "command": "test -s docs/orca-agent-runtime-notes.md",
+          "command": "test -s docs/refproj-agent-runtime-notes.md",
           "exit_code": 0,
           "status": "pass"
         },
@@ -86,7 +86,7 @@
       "disposition": "updated",
       "rationale": "The owning Desktop interaction SSOT now defines Composer ownership, lifecycle visibility, reusable component boundary, Prompt readiness boundary, Raw Terminal non-goal, and transparent surface.",
       "refs": [
-        "docs/design/orca-interaction-review.md"
+        "docs/design/refproj-interaction-review.md"
       ]
     },
     "learning": {

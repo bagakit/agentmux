@@ -42,7 +42,7 @@ npx vitest run activity-ruler-mapping.test.ts activity-view.test.tsx
 ### 4. 参考项目名不得出现在代码注释或设计文档 —— 通过
 
 对 `activity-ruler.ts`、`ActivityView.tsx`、`docs/design/*.md` grep
-`deepseek` / `traexon` / `harness` / `a mature workbench` / `a mature workbench`，**零命中**。
+`deepseek` / `traexon` / `harness` / `refproj` / `refpeer`，**零命中**。
 机制来源没有被写进 AgentMux 的代码或文档，符合既有纪律。
 
 ### 5. 统一门禁 —— 通过

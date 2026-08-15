@@ -317,7 +317,7 @@
         "T-002"
       ],
       "title": "Pi：完成扩展/Hook 自动部署闭环",
-      "objective": "Owned change surface: packages/core/src/providers/pi.ts、Pi extension overlay installer 与 Pi tests。Known shared hotspots: registry 由 T-017 接线，Agent Session store 只消费既有 native locator。把现有 transcript-path resume 与 Orca 的 Pi/OMP/Prime extension 部署闭环接上，不把 extension 私有状态复制进 ctxmux。预计 Agent effort: 1h。",
+      "objective": "Owned change surface: packages/core/src/providers/pi.ts、Pi extension overlay installer 与 Pi tests。Known shared hotspots: registry 由 T-017 接线，Agent Session store 只消费既有 native locator。把现有 transcript-path resume 与 Refproj 的 Pi/OMP/Prime extension 部署闭环接上，不把 extension 私有状态复制进 ctxmux。预计 Agent effort: 1h。",
       "outcome": "Pi 首次启动能按 managed policy 安装/校正状态扩展，resume locator 与 Hook receipt 可 round-trip。",
       "acceptance": [
         "Pi catalog 的 native resume、Hook/status 与 extension deployment 状态一致，不再声明 unmanaged 但暗中依赖安装。",
@@ -361,7 +361,7 @@
         "T-002"
       ],
       "title": "Claude：补齐失败、压缩与队友生命周期事件",
-      "objective": "Owned change surface: packages/core/src/providers/claude.ts 与 Claude managed settings fixtures/tests。Known shared hotspots: registry 由 T-017 接线，公共 timeline 只消费 canonical event。补齐 StopFailure、PostToolUseFailure、TeammateIdle、PostCompact 等 Orca 已核实且 Claude CLI 可提供的事件，同时保持子代理未结束时不提前 done。预计 Agent effort: 0.5-1h。",
+      "objective": "Owned change surface: packages/core/src/providers/claude.ts 与 Claude managed settings fixtures/tests。Known shared hotspots: registry 由 T-017 接线，公共 timeline 只消费 canonical event。补齐 StopFailure、PostToolUseFailure、TeammateIdle、PostCompact 等 Refproj 已核实且 Claude CLI 可提供的事件，同时保持子代理未结束时不提前 done。预计 Agent effort: 0.5-1h。",
       "outcome": "Claude 的失败、压缩、队友空闲与主/子代理完成语义完整且可验证。",
       "acceptance": [
         "Claude managed settings 安装所有已核实事件，保留用户 foreign hooks。",
@@ -401,7 +401,7 @@
         "T-002"
       ],
       "title": "Hermes：补齐 approval 与 session lifecycle parity",
-      "objective": "Owned change surface: packages/core/src/providers/hermes.ts、Hermes plugin/overlay installer 与 Hermes tests。Known shared hotspots: registry 由 T-017 接线，Hook canonicalization 只消费 T-002。将 shell-hook 六事件升级为 Orca 已核实的 plugin overlay 事件，补 pre_approval_request、post_approval_response、on_session_finalize、on_session_reset。预计 Agent effort: 1h。",
+      "objective": "Owned change surface: packages/core/src/providers/hermes.ts、Hermes plugin/overlay installer 与 Hermes tests。Known shared hotspots: registry 由 T-017 接线，Hook canonicalization 只消费 T-002。将 shell-hook 六事件升级为 Refproj 已核实的 plugin overlay 事件，补 pre_approval_request、post_approval_response、on_session_finalize、on_session_reset。预计 Agent effort: 1h。",
       "outcome": "Hermes approval 等待/响应和 session finalize/reset 都能进入同一 status/timeline 合同，安装仍幂等且不扩大权限。",
       "acceptance": [
         "Hermes managed hooks 覆盖 approval 与 session lifecycle 事件，且 rules 引用的每个事件都真被装进 config.yaml 与 shell-hooks-allowlist.json 两份文件。",
@@ -524,7 +524,7 @@
         "T-002"
       ],
       "title": "纳入 Mimo Code Provider",
-      "objective": "Owned change surface: packages/core/src/providers/mimo-code.ts 与 Mimo Code tests。Known shared hotspots: registry 由 T-017 接线。按真实 CLI/Hook/session 证据实现，不复制 Orca 私有状态。预计 Agent effort: 1h。",
+      "objective": "Owned change surface: packages/core/src/providers/mimo-code.ts 与 Mimo Code tests。Known shared hotspots: registry 由 T-017 接线。按真实 CLI/Hook/session 证据实现，不复制 Refproj 私有状态。预计 Agent effort: 1h。",
       "outcome": "Mimo Code 的生命周期能力在 AgentMux catalog 与 Core session 中可用且可恢复。",
       "acceptance": [
         "launch、Hook、permission/status 与 native resume 能力均有可执行断言。",
@@ -558,7 +558,7 @@
         "T-002"
       ],
       "title": "纳入 Droid Provider",
-      "objective": "Owned change surface: packages/core/src/providers/droid.ts 与 Droid tests。Known shared hotspots: registry 由 T-017 接线。实现 Orca 已核实的 Hook/session/resume 能力，并保持宿主路径与 AgentMux 公共类型隔离。预计 Agent effort: 1h。",
+      "objective": "Owned change surface: packages/core/src/providers/droid.ts 与 Droid tests。Known shared hotspots: registry 由 T-017 接线。实现 Refproj 已核实的 Hook/session/resume 能力，并保持宿主路径与 AgentMux 公共类型隔离。预计 Agent effort: 1h。",
       "outcome": "Droid 可被发现、启动、观测并在 verified handle 下恢复。",
       "acceptance": [
         "Droid 的 Hook、resume、permission/status 声明与真实 executable 一致。",
@@ -699,7 +699,7 @@
         "T-002"
       ],
       "title": "纳入 Copilot Provider",
-      "objective": "Owned change surface: packages/core/src/providers/copilot.ts 与 Copilot tests。Known shared hotspots: registry 由 T-017 接线。实现 Orca 已核实的 managed Hook/status 与 native resume 语义，不把 GitHub/宿主认证 token 带进 AgentMux store。预计 Agent effort: 1h。",
+      "objective": "Owned change surface: packages/core/src/providers/copilot.ts 与 Copilot tests。Known shared hotspots: registry 由 T-017 接线。实现 Refproj 已核实的 managed Hook/status 与 native resume 语义，不把 GitHub/宿主认证 token 带进 AgentMux store。预计 Agent effort: 1h。",
       "outcome": "Copilot 可发现、可观测、可恢复，认证边界保持由其 CLI/环境负责。",
       "acceptance": [
         "Copilot Hook、resume 与 permission/status 能力均有 provider-specific 测试。",
@@ -785,11 +785,11 @@
         "T-016"
       ],
       "title": "[集成] 收口 registry、catalog 与 deferred inventory",
-      "objective": "Owned change surface: packages/core/src/agent-provider.ts 的 registry composition、内建 catalog snapshot 与 docs/reviews/agentmux-provider-parity-plan.md 的 evidence inventory。Known shared hotspots: index exports 与 provider conformance suite；只在本 Task 修改这些共享面。把所有已完成 Provider 接进一个 registry，逐项核对 Orca-only 条目并把 launch-only/宿主专属项标成 deferred，不增加隐形 fallback。预计 Agent effort: 1-2h；registry 与跨 Provider inventory 是不可安全并行的 heavy object。",
+      "objective": "Owned change surface: packages/core/src/agent-provider.ts 的 registry composition、内建 catalog snapshot 与 docs/reviews/agentmux-provider-parity-plan.md 的 evidence inventory。Known shared hotspots: index exports 与 provider conformance suite；只在本 Task 修改这些共享面。把所有已完成 Provider 接进一个 registry，逐项核对 Refproj-only 条目并把 launch-only/宿主专属项标成 deferred，不增加隐形 fallback。预计 Agent effort: 1-2h；registry 与跨 Provider inventory 是不可安全并行的 heavy object。",
       "outcome": "所有分支结果在同一 Feature workspace 中可共同发现；已纳入、暂缓纳入、Provider 专属 wrapper 三类条目有单一可审计归类。",
       "acceptance": [
         "registry.catalog() 包含所有本 Feature 已实现 Provider，重复 id 与遗漏 id 都会失败。",
-        "Orca 对照 inventory 的每个条目只有 implemented、deferred 或 not-comparable 一种归类，deferred 必须写原因，不把它当成功能。",
+        "Refproj 对照 inventory 的每个条目只有 implemented、deferred 或 not-comparable 一种归类，deferred 必须写原因，不把它当成功能。",
         "Desktop/CLI discovery 只消费 Core registry，不新增第二份 Provider 清单。"
       ],
       "verification": [
@@ -808,9 +808,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/agent-provider.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -848,10 +854,27 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "status": "blocked",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "pnpm check",
+          "exit_code": 1,
+          "status": "fail"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_blocker": {
+        "class": "external_blocker",
+        "reason": "T-018 自身的验收面已全绿：gate 命令 2（provider-conformance + agent-provider-protocol + package-consumer.integration）实测 Test Files 3 passed / Tests 42 passed。卡住的只有 gate 命令 1 的全仓 pnpm check，而它今天的 6 个红全部落在 Provider parity 之外、且都不是本 Feature 引入的：(1) apps/desktop/test/app-resize-owner.test.tsx —— selectDisplacedAgentNotices 在 control-spatial-commit.ts:63 抛 'Cannot convert undefined or null to object'，源文件与测试在 git 中均干净，属已入库回归（最近改动 848faeb5）；(2) packages/core/test/ctxmux-version-binding.test.ts —— 身份字面量覆盖面派生集合比分类表多出 doctor-unverifiable-vs-missing.test.ts 一项，需要该守卫的属主把新文件归类；(3) apps/desktop/test/type-tree-typecheck.test.ts —— 棘轮相等断言红在 agent-session-composer.test.tsx（实测 2 > 基线 1），同样是别人的已入库漂移；(4) apps/desktop/test/git-service.test.ts 单跑 33 passed、仅在全量并发下红，属并发假红。另注：核查期间 package-consumer 曾红在 'dist 比 src 旧' 的陈旧产物守卫上，跑 pnpm --filter @agentmux/core build 后即绿，与本 Feature 无关。结论：本 Feature 的实现与验收证据已完备，gate 被一条跨全仓的共享命令挡住，而该命令的红由其他属主的改动产生。",
+        "owner": "上述三处红各自的属主（control-spatial-commit / ctxmux-version-binding 覆盖面守卫 / desktop 类型棘轮基线）",
+        "resume_when": "全仓 pnpm check 回到绿（或 T-018 的 verification 改为只跑与 Provider parity 相关的命令，把跨 Feature 的全仓门禁从单个 Task 的验收里解耦）——两者任一成立即可直接 run-task-gate 收口，无需重做实现。"
+      }
     }
   ]
 }

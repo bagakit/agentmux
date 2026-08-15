@@ -1393,8 +1393,11 @@ describe('Session and Launcher lifecycle ownership', () => {
     useAppStore.setState({ sessions: [session], error: null })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('agent input is not ready'))
 
+    // send() rejects so the Composer refuses to treat a retained queue item as a successful send and
+    // keeps the user's draft; the rejection carries the retain-for-retry outcome, while the banner must
+    // still surface the real cause so the original failure is never swallowed.
     await expect(useAppStore.getState().send(session.id, 'keep this draft')).rejects.toThrow(
-      'agent input is not ready'
+      'retained for retry'
     )
     expect(useAppStore.getState().error).toBe('agent input is not ready')
   })

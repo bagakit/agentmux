@@ -14,7 +14,7 @@
 - Archive Synthesis: none; archive does not reinterpret or rewrite requirements
 - Canonical Truth: tasks.json
 - Confirmed Plan Revision: 1
-- Confirmation Ref: docs/design/interaction-review.md
+- Confirmation Ref: docs/design/refproj-interaction-review.md
 
 ## Closure
 - Git Workspace: unchanged; use ordinary Git commands for worktree or branch cleanup
@@ -29,7 +29,7 @@
 ## Closeout Review
 - Documentation: updated
   - Rationale: The owning Desktop interaction SSOT now defines Composer ownership, lifecycle visibility, reusable component boundary, Prompt readiness boundary, Raw Terminal non-goal, and transparent surface.
-  - Refs: docs/design/interaction-review.md
+  - Refs: docs/design/refproj-interaction-review.md
 - Execution Learning (Agent-authored): no_reusable_learning
   - Rationale: The change repaired one local ownership condition and component coupling without revealing a reusable repository-level principle beyond the existing design and coding rules.
   - Refs: 

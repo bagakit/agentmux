@@ -1,7 +1,7 @@
 # Feature Summary: f-2238fbdxh
 
-- Title: a mature workbench-informed AgentMux Interaction Redesign
-- Goal: Review every existing AgentMux surface against a mature workbench and redesign the desktop interaction model by directly adopting a mature workbench's stronger information architecture, content, states, and workflows while retaining AgentMux's terminal-first identity.
+- Title: Refproj-informed AgentMux Interaction Redesign
+- Goal: Review every existing AgentMux surface against Refproj and redesign the desktop interaction model by directly adopting Refproj's stronger information architecture, content, states, and workflows while retaining AgentMux's terminal-first identity.
 - Final Status: archived
 - Closed From Status: done
 - Workspace Mode: current_tree

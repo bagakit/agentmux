@@ -1,6 +1,6 @@
 # Claude / Codex 一键 YOLO
 
-Review: approved. 用户明确要求参考成熟工作台的一键 YOLO；范围为 Claude 与 Codex，包括绑定这两个 Provider 的自定义 Executor。
+Review: approved. 用户明确要求参考 Refproj 的一键 YOLO；范围为 Claude 与 Codex，包括绑定这两个 Provider 的自定义 Executor。
 
 复用现有 Executor args 与 config.save，不新增权限配置 owner；设置顶部一键开启并立即保存，也允许单个 Executor 开启。保留 model、effort、命令与环境，清除冲突的已知权限参数。只承诺后续启动/恢复的参数，不修改现有 Session 或 Provider 全局配置，不宣称绕过 Provider 的强制策略。
 
