@@ -347,6 +347,7 @@
 .project-rail-entry > .project-rail-row, .project-rail-entry > .project-rail-group__header { flex: 1; min-width: 0; }
 .project-rail-group__header { gap: var(--sp-2); }
 .project-rail-row__icon img { width: 16px; height: 16px; object-fit: contain; }
+
 .project-activity { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp-1); border: 0; padding: var(--sp-1); border-radius: var(--radius-sm); color: var(--green); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .project-activity:hover { background: var(--surface-3); }
 .project-activity[data-category='needs-you'] { color: var(--amber); }
@@ -358,7 +359,13 @@
 @keyframes rail-activity { to { transform: scaleY(.4); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .project-activity__pulse i { animation: none; } }
 .project-activity-menu { width: min(360px, 90vw); max-width: min(90vw, 360px); padding: var(--sp-1); }
-.project-activity-menu__item small { display: block; white-space: normal; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+/* 一行一条 <small>：主句吃剩余宽度并省略号截断，尾随事实靠右、不收缩、tabular 对齐，两段分列各占一侧扫得快。 */
+.project-activity-menu__item small { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.project-activity-menu__reason { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.project-activity-menu__meta { flex: 0 0 auto; color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* 关注度描色：卡在你身上的行与安静干活的行不该长一个样，取自共享 attentionAccentFor（同头像/快速切换器），只 needs-you/error 上色。 */
+.project-activity-menu__item[data-attention='needs-you'] small { color: var(--amber); }
+.project-activity-menu__item[data-attention='error'] small { color: var(--red-text); }
 .project-activity-menu__item { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .project-activity-group { margin: var(--sp-1) 0; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-2) 48%, transparent); }
 .project-activity-group__header { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: stretch; }
