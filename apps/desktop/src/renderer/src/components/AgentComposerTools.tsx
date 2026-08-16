@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Camera, Sparkles, Slash, LoaderCircle } from 'lucide-react'
+import { Camera, Sparkles, Slash, LoaderCircle, SlidersHorizontal } from 'lucide-react'
 import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
 import { presentError } from '../lib/error-presentation'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -17,7 +17,13 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState('')
+  const [mode, setMode] = useState<0 | 1 | 2>(1)
   return <>
+    <button type="button" className="composer-tool composer-tool--mode" disabled={disabled}
+      aria-label={mode === 0 ? 'Restore message tools' : mode === 1 ? 'Expand message tools' : 'Collapse message tools'}
+      title={mode === 0 ? 'Restore message tools' : mode === 1 ? 'Expand message tools' : 'Collapse message tools'}
+      onClick={() => setMode((current) => current === 0 ? 1 : current === 1 ? 2 : 0)}><SlidersHorizontal size={14} />{mode === 2 ? 'More' : ''}</button>
+    {mode === 0 ? null : <>
     {onCapture ? <button type="button" className="composer-tool" disabled={disabled || capturing}
       title="Capture a screen region" onClick={() => {
         setCapturing(true)
@@ -39,7 +45,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
           </DropdownMenu.Item>)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
-    {commands.length ? <DropdownMenu.Root>
+    {mode === 2 && commands.length ? <DropdownMenu.Root>
       <DropdownMenu.Trigger className="composer-tool" disabled={disabled}><Slash size={14} /> Commands</DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start" sideOffset={4}>
         {commands.map((command) => <DropdownMenu.Item key={command.text} className="tab-context-menu__item composer-menu__item" onSelect={() => onCommand(command.text)}>
@@ -47,5 +53,6 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         </DropdownMenu.Item>)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root> : null}
+    </>}
   </>
 }
