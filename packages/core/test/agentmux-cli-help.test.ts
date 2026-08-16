@@ -204,6 +204,17 @@ describe('agentmux CLI discovery', () => {
         .map((match) => match[3]!)
 
     const modules = ['agentmux', ...new Set(valueImports(cliSource))]
+    // 深一层：`client` 的码经 daemon 往返、由控制码表定型，但它**进程内**调到的模块不是。CLI 拿到的是
+    // 一个本地 `new AgentMuxClient`（connectLocalAgentMux），`client.resolveAgentSession` 转手就调
+    // `registry.resolve` —— 那些 throw 一路冒到同一条顶层 catch，与 agent-role-directory 完全同形。
+    //
+    // 只扫 client 的**全部**深二层会捞进 60 多个码，绝大多数 CLI 根本调不到（hook server、prompt
+    // submission、timeline……）。给到不了的码上户口是这道门自己记过的反面教材。所以取「CLI 真正
+    // 调的那几个 client 方法所触达的模块」这一层，并由下面的断言证明这张表没有凭空写。
+    const clientSource = await readFile(new URL('client.ts', src), 'utf8')
+    const calledOnClient = new Set([...cliSource.matchAll(/\bclient\.([a-zA-Z]+)\(/g)].map((m) => m[1]!))
+    const REACHED_THROUGH_CLIENT = ['agent-session-registry']
+    for (const name of REACHED_THROUGH_CLIENT) if (!modules.includes(name)) modules.push(name)
     // 控制码经 spread 在册，但它们不在 CLI_ERROR_CODES 的字面量里，所以要单独放行。
     const { AGENTMUX_CONTROL_ERROR_CODES } = await import('../src/control.js')
     const control = new Set<string>(AGENTMUX_CONTROL_ERROR_CODES)
@@ -227,9 +238,15 @@ describe('agentmux CLI discovery', () => {
       [...cliSource.matchAll(/from '\.\/([a-z0-9-]+)\.js'/g)].map((match) => match[1]!)
     )
     const TYPE_ONLY_OR_DELIBERATE: Record<string, string> = {
-      // 只取了一个类型（AgentMuxAgentSessionLookup），运行时没有这条边。
-      'agent-session-registry': 'type-only',
-      // daemon 客户端：它的码经协议往返，由 control 码表定型，不走本地 catch。
+      // 这条豁免的**理由曾经是错的**，写的是「只取了一个类型，运行时没有这条边」。直接 import 确实
+      // 只有一个类型，但 CLI 经 `client.resolveAgentSession` 进程内调到了这个模块的 throw——审计据此
+      // 找出一个当时真活着的漏网码（UNKNOWN_AGENT_SESSION_BINDING，`inspect --run <不存在>` 当场复现，
+      // 报 AGENTMUX_FAILED）。「没有直接边」与「到不了」是两件事，那次把前者当成了后者。
+      //
+      // 改成按 client 真正调到的那几个入口点名，下面 REACHED_THROUGH_CLIENT 把它们逐个扫进来。
+      'agent-session-registry': 'reached-through-client',
+      // daemon 客户端：它自己抛的码经协议往返，由 control 码表定型，不走本地 catch。它**进程内**调到的
+      // 模块不在此列——那正是上面那条踩过的坑，由 REACHED_THROUGH_CLIENT 单独负责。
       client: 'protocol-owned',
       // 多行 import，单行匹配看不见。它只导出协议常量与类型，不 throw——下面这条断言钉住这一点。
       control: 'no-throw'
@@ -247,6 +264,32 @@ describe('agentmux CLI discovery', () => {
       codesIn(await readFile(new URL('control.ts', src), 'utf8')).filter((code) => !control.has(code)),
       'control.ts 开始抛控制码表以外的码了——它不能再算作 no-throw 豁免'
     ).toEqual([])
+    // REACHED_THROUGH_CLIENT 也要自证。两头都查，因为这张表**两个方向都会烂**：
+    //  1. client 还得是进程内建的。哪天 CLI 改成连 daemon，这些码就归控制码表管，这层扫描就该撤掉。
+    //  2. client 还真的在调它。`registry.` 一个调用点都没有了，说明这条边没了，表该瘦。
+    // 反过来「client 开始调新模块」这一侧**不设断言**：那会要求这张表跟着 client.ts 的每次改动走，
+    // 而漏掉一个模块的后果是少报（门更松），不是误报。这条边界写在这里，免得读的人以为它守得住。
+    expect(
+      cliSource,
+      'CLI 不再进程内建 client 了——REACHED_THROUGH_CLIENT 这层扫描的前提没了'
+    ).toContain('connectLocalAgentMux')
+    for (const name of REACHED_THROUGH_CLIENT) {
+      expect(
+        clientSource.includes(`this.registry.`),
+        `client.ts 不再调 ${name} 了——这条深二层的边没了，把它从 REACHED_THROUGH_CLIENT 里删掉`
+      ).toBe(true)
+    }
+    expect(calledOnClient.size, 'CLI 一个 client 方法都没调——深二层扫描的前提不成立').toBeGreaterThan(3)
+    // 这条钉住审计找出来的那个真缺陷：它是 registry.resolve 抛的，经 client.resolveAgentSession 到达
+    // 顶层 catch。深二层扫描撤掉的话，这条立刻红。
+    expect(
+      calledOnClient.has('resolveAgentSession'),
+      'CLI 不再调 resolveAgentSession——registry 的那些码可能已经到不了了，重核这层扫描'
+    ).toBe(true)
+    expect(
+      [...reachable.keys()],
+      '扫描面漏掉了 agent-session-registry.ts——审计正是在这里找出一个活着的漏网码'
+    ).toContain('UNKNOWN_AGENT_SESSION_BINDING')
 
     // 模块粒度会多报：一个模块里可能有 CLI 根本不调的导出。逐个点名，并给出**可核验**的理由——
     // 理由不是注释，是下面那条反向断言真的去查一遍。
@@ -254,7 +297,24 @@ describe('agentmux CLI discovery', () => {
       // `connectSshAgentMux` 抛的。CLI 只调 `connectLocalAgentMux`（agentmux.ts 两处），远端那条
       // 目前唯一的调用方是 desktop 主进程（runtime-controller.ts）。给一个到不了的码上户口，
       // 等于在注册表里留一条永远不会出现的答案。
-      REMOTE_UNSUPPORTED: { symbol: 'connectSshAgentMux', why: 'CLI 只用 connectLocalAgentMux' }
+      REMOTE_UNSUPPORTED: { symbol: 'connectSshAgentMux', why: 'CLI 只用 connectLocalAgentMux' },
+      // 下面两个来自 agent-session-registry.ts，是深二层扫描按**模块**粒度捞进来的多报。CLI 只调
+      // `client.resolveAgentSession / agentSession / agentSessions`，它们落到 registry 的
+      // `resolve / get / list` 三个入口；这两个码分别由 `update`（写路径）与 `retiredAgentSession`
+      // 抛，而 client 里调它们的是 createAgent / resumeAgent / stopAgent / bindAcp / acknowledge——
+      // 一个都不在 CLI 的调用面上。
+      //
+      // 唯一一处「看起来够得着」的是 `connect()` 链上的 `invalidateEndedRunReadiness`，它写的是
+      // `void this.registry.update(…)`：浮着的 promise，拒绝不会传到 CLI 的顶层 catch。下面的自检
+      // 就钉这个 `void`——哪天有人给它补上 await，这个码就真到得了，豁免当场失效。
+      INVALID_AGENT_SESSION_STORE: {
+        symbol: 'update',
+        why: 'CLI 调不到写路径；connect 链上那一处是 void 浮 promise'
+      },
+      AGENT_SESSION_IDENTITY_CONFLICT: {
+        symbol: 'retiredAgentSession',
+        why: '只有 resumeAgent 调它，CLI 不调 resumeAgent'
+      }
     }
     const orphans = [...reachable].filter(
       ([code]) => !registered.has(code) && !control.has(code) && !(code in UNREACHABLE_WITHIN_MODULE)
@@ -268,17 +328,27 @@ describe('agentmux CLI discovery', () => {
     // 豁免清单必须自己证明自己还成立——本仓反复吃过「人手豁免清单会漏、会过期」的亏。两个方向都查：
     //  1. 名下那个符号还在、且 CLI 确实没有调它。它哪天被 CLI 调用了，豁免当场失效。
     //  2. 这个码确实还被抛着。码被删掉或改名后，一条过期的豁免会静静地替下一个同名码背书。
+    // 符号可能是顶层函数（connectSshAgentMux）也可能是类方法（update / retiredAgentSession），所以
+    // 只要求「声明得出来」，不钉 `export async function` 那一种写法——钉死一种拼法就等于给另一种放行。
     for (const [code, { symbol }] of Object.entries(UNREACHABLE_WITHIN_MODULE)) {
       expect(reachable.has(code), `${code} 已经不在扫描面里了——这条豁免过期了，删掉它`).toBe(true)
       const owner = await readFile(new URL(reachable.get(code)!, src), 'utf8')
-      expect(owner, `${symbol} 不在 ${reachable.get(code)} 里了——豁免点名的符号已经不存在`).toContain(
-        `export async function ${symbol}`
-      )
+      expect(
+        new RegExp(`^(export (async )?function |  (async )?)${symbol}[(<]`, 'm').test(owner),
+        `${symbol} 不在 ${reachable.get(code)} 里了——豁免点名的符号已经不存在`
+      ).toBe(true)
       expect(
         cliSource.includes(`${symbol}(`),
         `CLI 现在调用了 ${symbol}，${code} 到得了顶层 catch——豁免不再成立，把它加进 CLI_ERROR_CODES`
       ).toBe(false)
     }
+    // `INVALID_AGENT_SESSION_STORE` 的豁免比其它两条弱一档：`update` 确实在 connect 链上被调到了，
+    // 挡住它的只是那一处写成了 `void`（浮 promise，拒绝到不了顶层 catch）。这条断言把那个 `void` 钉住
+    // ——理由不是注释，是真的去查一遍。有人补上 await，这里立刻红，提醒把码加进 CLI_ERROR_CODES。
+    expect(
+      clientSource,
+      'connect 链上的 registry.update 不再是浮 promise 了——INVALID_AGENT_SESSION_STORE 现在到得了顶层 catch'
+    ).toContain('void this.registry.update(')
 
     // 自检：两个解析都不许在空集上恒绿，且判据真的认得出「抛了但没在册」。
     expect(registered.has('AGENTMUX_FAILED'), '注册表解析漏了已知成员').toBe(true)
