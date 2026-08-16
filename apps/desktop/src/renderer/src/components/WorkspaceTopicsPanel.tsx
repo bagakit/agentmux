@@ -38,6 +38,7 @@ import { presentError } from '../lib/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
+import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { TopicPresence } from './TopicPresence'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 
@@ -294,7 +295,7 @@ export function WorkspaceTopicsPanel({
                     tabIndex={pending !== null ? -1 : 0}
                     aria-disabled={pending !== null}
                     onClick={() => { if (pending === null) void openTopic(topic.id) }}
-                    onKeyDown={(event) => { if (event.target === event.currentTarget && pending === null && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openTopic(topic.id) } }}
+                    onKeyDown={(event) => { if (isImeCompositionKeyDown(event)) return; if (event.target === event.currentTarget && pending === null && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openTopic(topic.id) } }}
                   >
                     {/* 已 pin 的静息态标记：一枚小 Pin，扫一眼列表就分辨得出哪些被钉住了，不必 hover。
                         它**不是**第二个常驻图标按钮（那会跟标题抢宽度、也会撞 surface-tool-dock 那条

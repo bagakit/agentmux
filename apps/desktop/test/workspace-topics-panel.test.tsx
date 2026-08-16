@@ -138,6 +138,17 @@ afterEach(async () => {
 })
 
 describe('Topic live Agent presence', () => {
+  it('does not open a Topic while Enter confirms IME composition', async () => {
+    fixture.snapshot = [topic('view:ime', 'IME Topic')]
+    await mount()
+    const row = rowByTitle('IME Topic').querySelector<HTMLElement>('.workspace-topic-entry')!
+    expect(row).not.toBeNull()
+    await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })))
+    expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
+    await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:ime')
+  })
+
   it('renders only live Agents in layout tab order and opens the selected Session', async () => {
     const shared = topic('view:shared', 'Shared Topic')
     shared.collaborators = [
