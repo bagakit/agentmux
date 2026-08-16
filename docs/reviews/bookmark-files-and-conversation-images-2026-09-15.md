@@ -22,8 +22,30 @@ Status: approved for implementation.
   导进来无处安放。
 - 「**不要整页打包 就是保存个 link**」——存档整页那条路（`webContents.savePage` 的 MHTML /
   HTMLComplete，以及 `printToPDF`）**不做**。见 §2.10。
+- 「**如果是 binary 就不支持切换到编辑，如果是文件就支持**」——二进制 plist 不给「看源码」
+  这个动作。见 §2.7。
+- 「**提示绝对要极简，比如就是按钮灰掉，hover 告知**」——这一档的表达方式。见 §2.7。
 
 ## 2. 约束设计形状的发现
+
+### 2.0 两个格式各覆盖一个系统，不是冗余
+
+`.webloc` 注册在 macOS 的 `CoreTypes.bundle` 里（实测 `plutil -p` 读得到）：
+
+```
+UTTypeIdentifier: com.apple.web-internet-location
+UTTypeConformsTo: com.apple.internet-location → public.stored-url → public.data
+public.filename-extension: webloc      com.apple.ostype: ilht
+```
+
+**它是系统级注册的类型，但不是跨厂商规范**——`com.apple.` 前缀说明它是 Apple 自家的，没有
+RFC/W3C 那种文档。所以 macOS 上它很稳（Finder、Spotlight、Safari 都认，`public.stored-url`
+这条继承链是公开契约），而 Windows/Linux 完全不认。
+
+`.url` 反过来：Windows 侧的事实标准，macOS 上 `file` 命令认得
+（`MS Windows 95 Internet shortcut text`），Finder 双击也能开。
+
+两个都发，是为了覆盖两个系统，不是同一件事做两遍。
 
 ### 2.1 `@` 前缀缺陷不是附带的，它是贴图这条的前置条件
 
@@ -130,14 +152,49 @@ per-region 的模式位（`EditorPane.tsx:458` 按它分叉渲染）。注释写
 **LF 而不是 CRLF**，无 BOM，ASCII。`.webloc` 用 `plistlib` 生成、`plutil -lint` 判定为 OK 的
 XML 形态就是 Finder 认的形态。
 
-两条结论：
-- **发射**一律发 XML plist（Finder 和别的浏览器都认，且是文本，写得进 `files.write`）。
-  不发二进制——没有理由，且会把自己锁死在一个 `files.read` 读不回来的格式上。
-- **解析**要能应付二进制。不引 plist 依赖：macOS 自带 `plutil -convert xml1 -o -` 能把
-  二进制转成 XML，而 `runProcess`（`packages/core/src/process-runner.ts:27`）已经是本仓
-  shell-out 的既有形状（`composer-screenshot.ts:12` 就这么用 `/usr/sbin/screencapture`）。
-  `ponytail:` 这是「先按文本解析，失败再 shell 出去」的两段式，上限是多一次进程启动；
-  真要常态化再考虑依赖。
+**发射**一律发 XML plist（Finder 和别的浏览器都认，且是文本，写得进 `files.write`）。
+不发二进制——没有理由，且会把自己锁死在一个 `files.read` 读不回来的格式上。
+
+**打开**（取出 URL 去导航）要能应付二进制，因为别的软件存的 `.webloc` 我们管不着。
+不引 plist 依赖：macOS 自带 `plutil -convert xml1 -o -` 能把二进制转成 XML，而
+`runProcess`（`packages/core/src/process-runner.ts:27`）已经是本仓 shell-out 的既有形状
+（`composer-screenshot.ts:12` 就这么用 `/usr/sbin/screencapture`）。
+
+**看源码则不然：二进制那一档直接不给这个动作。** 用户的原话是「如果是 binary 就不支持切换
+到编辑，如果是文件就支持」。
+
+这不是少做一档，是唯一诚实的处理。`files.read` 把二进制过一遍 `toString('utf8')` 会**静默
+破坏**内容：用户看到一屏乱码，分不清是文件坏了还是应用坏了，而一旦在那个状态下保存，文件就
+真的坏了。本仓房规是绝不静默降级——够不着就说够不着。
+
+判据是**读到的字节里有没有 NUL**，不是扩展名，也不是「解析 XML 失败了」。同一个判据本仓已有
+先例（`reference-name-containment.test.ts` 就是按 `raw.includes(0)` 区分二进制的）。
+
+**表达方式：按钮灰掉，hover 告知，到此为止。** 用户的原话是「提示绝对要极简，比如就是按钮
+灰掉，hover 告知」。
+
+- 不弹对话框、不发 toast、不在页面上插一条警告条。
+- 按钮**在场但 disabled**——不是隐藏。隐藏会让人以为这个能力不存在；灰掉才说明「这个动作在
+  这里用不了」，而那正是事实。
+- 那句话只说清「为什么这一个不行」，不解释 plist 有几种格式。
+
+### 2.7.1 `.webloc` 里可以放自定义键，但本轮只放不会过期的
+
+实测：往 plist 里加 `URL` 以外的键，`plutil -lint` 仍 OK，`mdls` 仍报
+`com.apple.web-internet-location`，系统 plist API 读回来三个键都在、`URL` 原样可取。
+plist 是字典，多余的键天然被忽略者跳过——这是**格式自带的扩展点，不是钻空子**。
+
+但能放不等于该放。判据是**这条信息会不会和页面漂移**：
+
+- 标题、保存时间：是关于「这次保存」的事实，永远为真。**可以放**（Safari 自己也带标题）。
+- 页面摘要：是关于「页面内容」的断言，页面一改它就过期，而用户无从知道漂了。**本轮不放**。
+
+摘要的价值是真的（Agent 不用重抓就知道这页讲什么），但那是「给链接做索引」这个另外的能力，
+它需要自己的载体和更新机制。塞进书签文件会变成一份没人维护的过期缓存——和 §2.10 拒绝整页
+存档是同一个理由的小号版本。
+
+`.url` 那边**只写 `URL=`**：本机五个真实样本全是纯一行，没有先例证明别的软件容忍多余键，
+而这个格式的全部价值就是跨到 Windows 侧还能用。
 
 ### 2.8 写入只能落在 workspace 内
 
@@ -218,3 +275,5 @@ Finder 双击交给系统默认浏览器，那本来就对，不需要我们做�
 - 新的 workbench surface kind（§2.6）。
 - 二进制 plist 的发射（§2.7）。
 - 整页存档：MHTML / HTMLComplete / PDF（§2.10，用户原话「不要整页打包 就是保存个 link」）。
+- 二进制 `.webloc` 的「看源码」（§2.7，用户原话「如果是 binary 就不支持切换到编辑」）。
+- 往书签里写页面摘要（§2.7.1）——会过期的信息不进不会过期的载体。
