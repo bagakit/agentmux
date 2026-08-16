@@ -5,19 +5,18 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 /**
- * `confirmedSizes` 从不清除条目。这**只有在「这个 Run 的几何没有第二个写者」成立时才是对的**——
- * 否则别人改了尺寸，我们照旧投影缓存里的旧值，且永远收不到通知。
+ * 我们从不启动 vendored 的那个 `ctxmux` CLI。**本文件守这一条**。
  *
- * 支撑它的三条前提**全是 AgentMux 的部署事实，不是 ctxmux 的保证**：ctxmux 的接口是那个 socket，
- * 它自带的 CLI 和我们一样只是个客户端。三条各有各的守处：
+ * 曾经它是一条更大的推理的第三分之一：adapter 里有一本本地台账记着我们自己发起的 resize，只有在
+ * 「这个 Run 的几何没有第二个写者」成立时才不会投影出陈旧尺寸。protocol 16 之后那本台账没了——
+ * `RunInfo.current_size` 是必填字段，`RunEvent::Resized` 广播给所有 attachment，谁改了尺寸我们都
+ * 被告知，几何上的「第二个写者」不再是个会静默伤人的前提。
  *
- *   1. 只有一个 app 实例 —— `apps/desktop/test/main-window-setup.test.ts` 已钉住（单实例锁在构造任何
- *      运行时 owner 之前执行）。不在本文件重复。
- *   2. 我们从不启动 vendored 的 CLI —— **本文件守这一条**。
- *   3. protocol 14 没有任何入站几何通道 —— `ctxmux-run-current-size.test.ts` 的
- *      `expect(PROTOCOL_VERSION).toBe(14)` 已钉住（换代即红）。不在本文件重复。
+ * 那这条判据为什么还留着？因为它守的从来不止几何。vendored 的 CLI 是一个**完整的客户端**：能 attach、
+ * 能写输入、能 stop。我们的 daemon 归属证明（owner receipt）、单写者输入游标、以及「一个 Run 一条
+ * Attachment」的自我约束，全都建立在「这个进程里没人把它拉起来」之上。几何只是它曾经最先咬人的那一面。
  *
- * 为什么第 2 条值得单独一条判据：它不是「今天恰好没人调」，而是**结构上够不着**。注意准确的说法不是
+ * 为什么它值得一条**结构性**判据：这不是「今天恰好没人调」，而是**结构上够不着**。注意准确的说法不是
  * 「CLI 的路径从未被拼出来」——`verifyArtifact` 为了 stat+sha 会把传给它的任何描述符都拼成路径，CLI
  * 也不例外。准确的说法是：**那条路径从不逃出校验函数**。`verifyArtifacts` 只返回
  * `{ daemonPath, daemonSha256 }`，`cli` 这个绑定除了「在不在」和「校验它」之外没有第三种用法。
@@ -25,8 +24,8 @@ import { describe, expect, it } from 'vitest'
  * 所以判据钉两件事：**`cli` 不流向任何拼路径/拉进程的调用**，和**每一次拉起进程拉的都是 daemon**。
  * 这个性质会被一行 `const cliPath = join(root, cli.path)` 悄悄破坏，而那一行读起来完全无害。
  *
- * 本文件红的时候不一定是缺陷：可能是有人**故意**要跑 CLI。那时该做的是先回答「第二个写者出现后，
- * confirmedSizes 的陈旧投影怎么办」，再改这条判据——而不是反过来。
+ * 本文件红的时候不一定是缺陷：可能是有人**故意**要跑 CLI。那时该做的是先回答「第二个客户端出现后，
+ * owner receipt 与单写者输入游标怎么办」，再改这条判据——而不是反过来。
  */
 
 const here = dirname(fileURLToPath(import.meta.url))

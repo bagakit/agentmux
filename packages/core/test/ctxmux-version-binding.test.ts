@@ -123,11 +123,18 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
 
 // --- 第二道：覆盖面派生所需的常量与提取器 -------------------------------------
 
-/** 可区分的身份哈希：commit / tree / manifest-sha256。每个都长到不会误命中别的东西。 */
+/**
+ * 可区分的身份哈希：commit / tree / manifest-sha256。每个都长到不会误命中别的东西。
+ *
+ * **这里必须是当前 vendored artifact 的三个值。** 派生器靠它们搜出「还有谁手抄了身份字面量」——
+ * 留着上一代的值，搜到的就是一张过期的地图：新 artifact 的手抄一份都看不见，而 anchor 角色那些
+ * **故意**写死历史值的 test fixture 会继续命中，于是清单看起来还是满的、判据却已经全空。
+ * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
+ */
 const IDENTITY_HASHES = [
-  'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7',
-  'c43e3992e2e127d4b4e65e447fd23b9037be7f9c',
-  '3a790a05eebc576a2f1a91f8481e140eef57665a04d4dd6033598cf7c98176c9'
+  'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02',
+  '1d97495e717cce1c3ac588a3c0712d9555b5c871',
+  'e71a4bf25a3506d74c35b5c331e8a79d60e52eee5b3f87a8fffea30a7655ce0f'
 ] as const
 
 /** 两种「组合版本串」形态。api.ts 的预览串只由这里命中（它不含任何哈希）。 */
@@ -184,6 +191,11 @@ function identityMentioningFiles(): string[] {
  * 分类表：凡是提到身份字面量的 tracked 文件，都必须在这里被点名并归入一个角色。
  * 这不是「该绑定的白名单」，而是「派生集合 === 这张表」的对账基准；派生集合多一个/少一个都红。
  * 角色语义见文件头「本守卫看不见什么」第 4、5 条。
+ *
+ * bump artifact 时这张表会**两头动**：手抄当前身份的文件要跟着新值改（否则漂移），而那些写死了
+ * **上一代**字面量的纯 fixture 会就此掉出派生集合、要从表里删掉。后者不是遗漏——判据是「谁提到了
+ * 当前身份」，一个拿旧 SHA 当占位符的合成 fixture 本来就不在这个问题域里（`doctor.test.ts` 那两个
+ * 就是：它们的 `protocolVersion: 12` 从来没对应过任何真实 artifact）。
  */
 const IDENTITY_ROLES: Record<string, 'ssot' | 'manifest-verifier' | 'anchor' | 'preview-mock' | 'guard'> = {
   'packages/core/test/ctxmux-version-binding.test.ts': 'guard',
@@ -193,8 +205,6 @@ const IDENTITY_ROLES: Record<string, 'ssot' | 'manifest-verifier' | 'anchor' | '
   'packages/core/scripts/run-daemon-cutover-benchmark.mjs': 'manifest-verifier',
   'packages/core/test/package-consumer.integration.test.ts': 'manifest-verifier',
   'packages/core/test/daemon-cutover-benchmark.test.ts': 'anchor',
-  'packages/core/test/doctor-unverifiable-vs-missing.test.ts': 'anchor',
-  'packages/core/test/doctor.test.ts': 'anchor',
   'packages/core/test/reliability-stress.integration.test.ts': 'anchor',
   'packages/core/test/fixtures/reliability-budgets.json': 'anchor',
   'packages/core/test/runtime-paths.test.ts': 'anchor',
