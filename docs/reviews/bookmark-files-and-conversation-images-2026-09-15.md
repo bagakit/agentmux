@@ -233,16 +233,56 @@ Finder 双击交给系统默认浏览器，那本来就对，不需要我们做�
 
 不开 draft 记这条。真要存档时它是一行 API，比一条会过期的 tracker 条目更可靠。
 
+### 2.11 纯模块放 `shared/` 而不是 `main/`——本文档第一版在这里写错了
+
+第一版的 §3.A 把书签纯模块钉在 `apps/desktop/src/main/bookmark-file.ts`，理由是「照
+`browser-app-link.ts` 的形状」。**这是错的**，实现方在开工前发现并顶了回来，核查确认：
+
+- `renderer/` **从不 import `main/`**（全仓零命中）。Vite 分包加
+  `raw-source-dependency-boundary.test.ts` 是硬边界。
+- 跨进程纯代码的既有家是 `shared/`：`browser-bounds.ts` 两端都 import
+  （`main/browser-view-manager.ts` 与 `renderer/lib/browser-bounds-sync.ts`），
+  `scratch-topics.ts` 被八个渲染侧文件 import。
+- `shared/` 下**零 `node:` 导入**——这是它能被渲染侧 import 的前提，不是巧合。
+
+而书签的消费者本来就在渲染侧：`openFile` 的分派（§3.A）、存（§2.8 走 `files.write`，在渲染
+侧发起）、二进制判定（§2.7 决定按钮灰不灰）。扩展名元组是 SSOT 不许抄第二份，所以它只能在
+两端都够得着的地方。
+
+**错的根因值得留下**，因为它会再犯：`browser-app-link.ts` 的消费者**只有主进程**，所以它待在
+`main/` 是对的；它之所以「纯」是为了可测，不是为了留在 `main/`。第一版把「纯」这个性质和
+「放 `main/`」这个位置当成了一回事，而**位置该由消费者决定**——写的时候没有数消费者。
+同一类错本仓记过：可达性要在被改的那一层核。
+
+正确的切分是两个文件：
+
+- `apps/desktop/src/shared/bookmark-file.ts` —— 纯、零 `node:` 依赖。扩展名元组与双向精确断言、
+  分类、从文本取 URL、发射两种格式、NUL 判二进制、文件名派生。两端都 import。
+  文件名派生里不许用 `node:path`，自己做字符串处理。
+- `apps/desktop/src/main/bookmark-file.ts` —— 只放真正需要主进程的那一件事：二进制 `.webloc`
+  走 `plutil -convert xml1 -o - -`。`runProcess` 由调用方注入（照 `browser-app-link.ts` 注入
+  `openExternal` 的形状），注入而不是 import 才保得住可测性；传的时候别摘方法丢掉 receiver。
+
+净效果还更好：二进制打开只需要一条新 IPC，热点四件套里的 diff 更小，正合并发要求。
+
+`shared/bookmark-file.ts` 的 docstring 要写明「为什么在 shared 而不在 main：消费者跨两个进程」
+——否则下一个人照 `browser-app-link.ts` 抄时会重犯这个错。
+
 ## 3. 落地形状
 
 ### A. 书签文件
 
-**新纯模块 `apps/desktop/src/main/bookmark-file.ts`**，照 `browser-app-link.ts` 的形状：
-不 import electron、无模块级副作用，判定可被单测直接质询。
+**两个模块**（位置的理由见 §2.11——本节第一版把它们合成一个放在 `main/`，那是错的）：
 
-- 扩展名成员收成一个导出元组（`schema-enum-ssot` 房规）。
-- 解析：取出 URL；解析不了返回 `null`，不抛。
-- 发射：给 URL 和标题，产出文本。
+- **`apps/desktop/src/shared/bookmark-file.ts`** —— 纯、零 `node:` 依赖、无模块级副作用，
+  两端都 import。判定可被单测直接质询。
+  - 扩展名成员收成一个导出元组（`schema-enum-ssot` 房规）。
+  - 解析文本：取出 URL；解析不了返回 `null`，不抛。
+  - 发射：给 URL 和标题，产出文本。
+  - NUL 判二进制（渲染侧要用它决定「看源码」这个入口灰不灰）。
+  - 文件名派生（不许用 `node:path`）。
+- **`apps/desktop/src/main/bookmark-file.ts`** —— 只放需要主进程的那一件事：二进制 `.webloc`
+  走 `plutil`，`runProcess` 由调用方注入。
 
 **存**：BrowserPane 工具栏第 6 个按钮。注意这会打红
 `browser-toolbar.ts:54-57` 的双向精确性证明、`DEFAULT_CONFIG`、zod schema 和 mock —— 这是
