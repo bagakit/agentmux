@@ -50,7 +50,7 @@ const config: AppConfig = {
     { id: 'workspace-a', name: 'A', hostId: 'local', path: '/repo/a', kind: 'folder' }
   ],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 function agentSession(id: string, runId: string): Extract<SessionSnapshot, { kind: 'agent' }> {
