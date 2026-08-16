@@ -281,7 +281,7 @@ packages:
     engines: {node: '>=6.9.0'}
 
   '@ctxmux/sdk@file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz':
-    resolution: {integrity: sha512-RPXXuAGGzvrdg3D71QjJhatwqwpYkFDM7si0TTTZ/hrNHrP+LsuPwUh2CKFUo4oLXgc8hPKl7iRtQO10dsSvnw==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
+    resolution: {integrity: sha512-+AVzJ1CUj2IWxRAAu6St6daOST3t32fBTFKc6zX/sPnybV7YjqxGK/gnK9Qq+ZnNf7Th+I4Ou5K0KpFmq6xyYw==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
     version: 0.0.0
     engines: {node: '>=24'}
 
