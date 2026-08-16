@@ -1392,7 +1392,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     for (const [agentSessionId, reservation] of this.reservations) {
       if (
         reservation.ownerId !== claim.ownerId &&
-        reservation.expiresAt > claim.now &&
         processIsAlive(reservation.ownerPid)
       ) continue
       const next = lifecycleReservation({
@@ -1741,7 +1740,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       claimed = document.reservations.flatMap((reservation) => {
         if (
           reservation.ownerId !== claim.ownerId &&
-          reservation.expiresAt > claim.now &&
           processIsAlive(reservation.ownerPid)
         ) return []
         return [lifecycleReservation({
