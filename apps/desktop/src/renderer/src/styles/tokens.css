@@ -115,7 +115,7 @@
      它读不到 CSS 规则，只能从计算样式取这个属性——于是这个数必须有一个能被 JS 读到的名字。
      此前它是 `outline-offset: -2px` 的绝对值，取值方式与绘制方式绑死：换绘制机制（outline
      换覆盖层）就会让取值方静默读到 0、原生视图回到满铺，而两侧测试各自全绿。 */
-  --region-focus-ring-width: 2px;
+  --region-focus-ring-width: 1px;
   --pane-tabbar-height: 31px;
   /* elevation：阴影梯度让表面浮起来 */
   --elev-1: 0 1px 2px #00000045;

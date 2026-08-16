@@ -190,23 +190,29 @@ button.agent-avatar:active { transform: translateY(0); }
 /* 已 pin 的静息态标记：品牌绿小 Pin，扫一眼列表就分辨得出（不靠 hover）。行首可空槽里的东西
    （同 leading spinner，只在 pinned 时占位），不是按钮——切换 pin 的动作在右键菜单里。 */
 .workspace-topic-entry__pin { flex: 0 0 auto; color: var(--green); }
-/* 行尾那枚 Region 分屏缩略图（34×22px）。只在 Topic 开着一张 Tab 时出现，画的是那张 Tab 的
-   Region 分屏缩影。34×22 与 border-radius 都不在尺度合同扫描的属性里（surface-scale-contract 只扫
+/* 行尾那枚 Region 分屏缩略图（48×28px）。只在 Topic 开着一张 Tab 时出现，画的是那张 Tab 的
+   Region 分屏缩影。48×28 与 border-radius 都不在尺度合同扫描的属性里（surface-scale-contract 只扫
    font-size / gap / padding / margin，surface-radius 只管 <6px 的圆角），故无需例外条目。 */
 .topic-region-mosaic {
   flex: 0 0 auto;
   position: relative;
-  width: 34px; height: 22px;
+  width: 48px; height: 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-0);
   overflow: hidden;
 }
+.topic-presence { display: flex; align-items: center; gap: var(--sp-2); }
 .topic-region-mosaic__cell {
   position: absolute;
+  display: grid;
+  place-items: center;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid var(--surface-0);
   background: var(--surface-3);
 }
+.topic-region-mosaic__cell .agent-avatar { transform: scale(.6); transform-origin: center; }
 .workspace-topic-item.current .topic-region-mosaic__cell { background: var(--green-line); }
 .surface-tool-action-surface > .primary-button { margin-bottom:var(--sp-6); }
 .surface-tool-unavailable { width: 100%; min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4); border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); }
