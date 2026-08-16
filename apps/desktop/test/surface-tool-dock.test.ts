@@ -32,8 +32,8 @@ import {
   workspaceAgentGroups
 } from '../src/renderer/src/lib/surface-tool-dock.js'
 
-const surfaceToolDockSource = readFileSync(
-  new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+const topicsPanelSource = readFileSync(
+  new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
   'utf8'
 )
 const fileExplorerSource = readFileSync(
@@ -344,12 +344,12 @@ describe('shared surface tool dock resize', () => {
   })
 
   it('把 Topic 目录定位到自家文件面板，而不是打开系统文件管理器', () => {
-    expect(surfaceToolDockSource).toContain('onRevealDirectory(topic.directoryPath)')
+    expect(topicsPanelSource).toContain('onRevealDirectory(topic.directoryPath)')
     // 图标要表达「聚焦定位」而不是「打开文件夹」——它把自家那棵树滚到这个目录，
     // 不是在系统文件管理器里开一个窗口。
-    expect(surfaceToolDockSource).toContain('title="Reveal in Files"')
-    expect(surfaceToolDockSource).toContain('<Crosshair size={13} />')
-    expect(surfaceToolDockSource).not.toContain('api.files.reveal(workspace.id, topic.directoryPath)')
+    expect(topicsPanelSource).toContain('title="Reveal in Files"')
+    expect(topicsPanelSource).toContain('<Crosshair size={13} />')
+    expect(topicsPanelSource).not.toContain('api.files.reveal(workspace.id, topic.directoryPath)')
     expect(fileExplorerSource).toContain('next.add(revealRequest.path)')
     expect(fileExplorerSource).toContain('setSelection(createSingleFileExplorerSelection(revealRequest.path))')
   })
@@ -380,7 +380,7 @@ describe('shared surface tool dock resize', () => {
 
     // SurfaceToolDock 上的图标按钮：className 里含 workspace-topic-reveal。
     const dockButton = findJsxElementByClassName(
-      parseTsx('SurfaceToolDock.tsx', surfaceToolDockSource),
+      parseTsx('WorkspaceTopicsPanel.tsx', topicsPanelSource),
       'workspace-topic-reveal'
     )
     expect(dockButton, 'SurfaceToolDock 里找不到 reveal 图标按钮——判据落空，下面几条会恒真').not.toBeUndefined()
@@ -433,9 +433,9 @@ describe('shared surface tool dock resize', () => {
   it('keeps exactly one always-visible action on a Topic row', () => {
     // 用户："改名不用给个专门图标, 可以放进 topic 右键菜单"。行上只留最高频的那个动作，
     // 其余进右键菜单——两个常驻图标按钮会一直跟标题抢宽度。
-    const topicRow = surfaceToolDockSource.slice(
-      surfaceToolDockSource.indexOf('<SortableTopicItem'),
-      surfaceToolDockSource.indexOf('</SortableTopicItem>')
+    const topicRow = topicsPanelSource.slice(
+      topicsPanelSource.indexOf('<SortableTopicItem'),
+      topicsPanelSource.indexOf('</SortableTopicItem>')
     )
     expect(topicRow.match(/className="icon-button workspace-topic-/g)).toHaveLength(1)
     expect(topicRow).toContain('workspace-topic-reveal')
@@ -445,9 +445,9 @@ describe('shared surface tool dock resize', () => {
   it('drops the decorative icon from the head of every Topic row', () => {
     // 一列全同的图标不是信息，是宽度开销（密度合同《控件语言》）。行首只在真的有话说时占位——
     // 打开中的 spinner——所以那一段是**条件渲染**的，不是一个常驻的图标槽。
-    const topicRow = surfaceToolDockSource.slice(
-      surfaceToolDockSource.indexOf('className="workspace-topic-entry"'),
-      surfaceToolDockSource.indexOf('</button>', surfaceToolDockSource.indexOf('className="workspace-topic-entry"'))
+    const topicRow = topicsPanelSource.slice(
+      topicsPanelSource.indexOf('className="workspace-topic-entry"'),
+      topicsPanelSource.indexOf('</button>', topicsPanelSource.indexOf('className="workspace-topic-entry"'))
     )
     expect(topicRow).not.toContain('<NotebookText')
     expect(topicRow).toContain('<LoaderCircle')
@@ -486,7 +486,7 @@ describe('shared surface tool dock resize', () => {
     // 自检：判据必须真的落在"可空的那一段"上。leading 若哪天变成常驻的，这条断言会红，
     // 提醒重新判断上面那套理由还成不成立（#467 的成因就是它可空）。
     expect(segments.children).toContain('selector-row__leading')
-    expect(surfaceToolDockSource).toMatch(/leading=\{pending === topic\.id \?/)
+    expect(topicsPanelSource).toMatch(/leading=\{pending === topic\.id \?/)
   })
 
   it('stacks the avatars instead of tiling them, with the rightmost on top', () => {
@@ -504,12 +504,12 @@ describe('shared surface tool dock resize', () => {
   it('renames Topic titles inline while keeping stable Topic directories out of generic Rename', () => {
     // 改名移进了右键菜单，但功能不退化：菜单项仍走同一个 beginRename/commitRename。
     expect(topicContextMenuSource).toContain('<span>Rename Topic</span>')
-    expect(surfaceToolDockSource).toContain('onRename={() => beginRename(topic)}')
-    expect(surfaceToolDockSource).toContain('void commitRename(topic)')
+    expect(topicsPanelSource).toContain('onRename={() => beginRename(topic)}')
+    expect(topicsPanelSource).toContain('void commitRename(topic)')
     // Escape 取消已经搬进 lib/topic-rename.ts 的按键决策点（那里同时拦下冒泡，
     // 否则空格与方向键会被 dnd-kit 的 KeyboardSensor 吞掉）。这里只断言接线还在，
     // 行为本身由 topic-rename.test.tsx 守。
-    expect(surfaceToolDockSource).toContain('handleTopicRenameKeyDown(event, { cancel: cancelRename })')
+    expect(topicsPanelSource).toContain('handleTopicRenameKeyDown(event, { cancel: cancelRename })')
     expect(fileExplorerSource).toContain('scratchTopicIdFromDirectoryName(node.path) !== null')
     expect(fileExplorerSource).toContain('canRename={canRenameFileExplorerNode(workspaceId, node)}')
     const topicDirectory = {
@@ -549,7 +549,7 @@ describe('shared surface tool dock resize', () => {
     // **真的是同一段代码**——竖切闭合检查：只接一侧就等于抽了个组件却没接上，两处仍会各自漂移
     // （此前正是如此：Branch 侧头像截断到 4 给 +N，Topic 侧无上限铺完；一个 header 用 small
     // 一个用 em）。这条断言两个面板都经同一批共享符号渲染。
-    for (const source of [surfaceToolDockSource, branchesPanelSource]) {
+    for (const source of [topicsPanelSource, branchesPanelSource]) {
       expect(source).toContain("from './SelectorList'")
       expect(source).toContain('<SelectorListHeader')
       expect(source).toContain('<SelectorRow')
@@ -558,8 +558,8 @@ describe('shared surface tool dock resize', () => {
     // 反向：两侧都不得再留一份自己的写法。
     expect(branchesPanelSource).not.toContain('branch-row__agents')
     expect(branchesPanelSource).not.toContain('branch-row__identity')
-    expect(surfaceToolDockSource).not.toContain('workspace-topic-agents')
-    expect(surfaceToolDockSource).not.toContain('workspace-topic-title-line')
+    expect(topicsPanelSource).not.toContain('workspace-topic-agents')
+    expect(topicsPanelSource).not.toContain('workspace-topic-title-line')
     // 而那些写法的 CSS 也要一起走，否则死规则会留在表里让人以为还有第二套。
     expect(stylesSource).not.toContain('.branch-row__agents')
     expect(stylesSource).not.toContain('.workspace-topic-title-line')

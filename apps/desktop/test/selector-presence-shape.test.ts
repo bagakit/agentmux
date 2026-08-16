@@ -97,7 +97,7 @@ describe('SelectorPresence 的入参里不许有第二个注意力真相', () =>
     expect(
       withPresence.map(({ name }) => name).sort(),
       '认不出 <SelectorPresence agents={…}> 了——提取器瞎了，这道门此刻是恒真的'
-    ).toEqual(['BranchesPanel.tsx', 'SurfaceToolDock.tsx'])
+    ).toEqual(['BranchesPanel.tsx', 'WorkspaceTopicsPanel.tsx'])
   })
 
   it('没有任何调用方写出 attention 键', () => {

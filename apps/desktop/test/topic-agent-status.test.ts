@@ -78,7 +78,7 @@ describe('Topic 行显示每个 Agent 的运行状态', () => {
 
 describe('Topic 行的视觉收敛', () => {
   const source = readFileSync(
-    new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+    new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
     'utf8'
   )
   const avatarSource = readFileSync(
@@ -449,7 +449,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     'utf8'
   )
   const dock = readFileSync(
-    new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+    new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
     'utf8'
   )
   const selector = readFileSync(
