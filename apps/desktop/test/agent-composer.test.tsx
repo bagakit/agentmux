@@ -52,7 +52,7 @@ describe('AgentComposer reusable surface', () => {
       value: 'steer me',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      queued: ['first', 'second', 'third'].map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const })),
+      queued: ['first', 'second', 'third'].map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const, deliverable: true })),
       primaryAction: 'stop',
       onChange: vi.fn(),
       onSubmit: vi.fn(),
@@ -72,7 +72,7 @@ describe('AgentComposer reusable surface', () => {
     // A bare "2" beside a working Agent is indistinguishable from a stuck counter — it reads as a bug.
     // The badge therefore opens a card carrying the actual queued prompts, in delivery order.
     const prompts = ['check the fifth level for a bug', 'move the hint clear of the mechanism']
-    const queued = prompts.map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const }))
+    const queued = prompts.map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const, deliverable: true }))
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: '',
       disabled: false,

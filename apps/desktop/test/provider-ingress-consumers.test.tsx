@@ -16,8 +16,6 @@ import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
  * Core's single delivery owner). We assert on what reaches that call, so a convergence that re-introduces a
  * second delivery state machine, drops the operationId reuse, or clears an edited draft fails here.
  *
- * vitest cannot run on this machine (Gatekeeper hang); every assertion is written to be correct by
- * inspection and each names the exact production line to mutate.
  */
 
 const initial = useAppStore.getState()
@@ -38,7 +36,8 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
 
-    await useAppStore.getState().send('s', 'do the thing')
+    expect(useAppStore.getState().send('s', 'do the thing')).toBe(true)
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
 
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[1]).toBe('do the thing')
@@ -48,18 +47,12 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('a rejected send keeps the item queued (deferred) and send() reports the retention (draft must be kept)', async () => {
+  it('admission succeeds even if transport defers the entry for retry', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('link dropped'))
 
-    // send() must THROW so the Composer keeps the draft; the entry must remain queued for the next flush.
-    // MUTATION: make flushAgentSteerQueue delete the entry on catch (store.ts:4537-4547) — send() no longer
-    // throws and the entry vanishes → both assertions red.
-    //
-    // `deferred`, not `failed`: the fixture agent is processState 'running', so Core refused while the
-    // Agent is alive — our step, not its failure. send()'s retention check counts OCCURRENCES of the text
-    // rather than statuses, so it still throws for a deferred entry and the draft is still kept.
-    await expect(useAppStore.getState().send('s', 'retry me')).rejects.toThrow()
+    expect(useAppStore.getState().send('s', 'retry me')).toBe(true)
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s?.[0]?.status).toBe('deferred'))
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
       { operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'deferred', error: 'link dropped' }
     ])
@@ -133,14 +126,14 @@ describe('badge keeps Host-accepted separate from Provider-consumed/unknown at t
   function render(deliverable: boolean): string {
     return renderToStaticMarkup(createElement(AgentComposer, {
       value: '', disabled: false, placeholder: '',
-      queued: [{ id: 'a', text: 'a', status: 'queued' }, { id: 'b', text: 'b', status: 'queued' }], queueDeliverable: deliverable, onChange: () => {}
+      queued: [{ id: 'a', text: 'a', status: 'queued', deliverable }, { id: 'b', text: 'b', status: 'queued', deliverable }], onChange: () => {}
     }))
   }
 
   it('a live run promises delivery-in-order; it never claims the Agent replied or accepted', () => {
     const markup = render(true)
     expect(markup).toContain('queued for delivery')
-    expect(markup).toContain('Delivered in this order when the Agent finishes its current turn.')
+    expect(markup).toContain('Messages for the current Run are sent in order as soon as the Agent can accept them.')
     // "queued for delivery" is Host-accepted intent, NOT proof the Provider consumed anything.
     // MUTATION: change the deliverable-branch copy in AgentComposer.tsx:300 to say "replied"/"accepted" —
     // this pair splits → red.
@@ -151,7 +144,7 @@ describe('badge keeps Host-accepted separate from Provider-consumed/unknown at t
   it('an ended run does not promise delivery and says where the words are kept', () => {
     const markup = render(false)
     expect(markup).not.toContain('queued for delivery')
-    expect(markup).toContain('not sent')
+    expect(markup).toContain('Not sent')
     // MUTATION: collapse the two branches to one optimistic label (AgentComposer.tsx:284-285) — a
     // non-deliverable queue would read "queued for delivery" → red.
     expect(markup).toContain('kept here')

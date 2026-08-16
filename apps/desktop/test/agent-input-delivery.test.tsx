@@ -36,6 +36,7 @@ describe('queued steer delivery', () => {
     useAppStore.setState({ sessions: [session as never] })
     vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.getState().enqueueAgentSteer('s', 'same')
-    await expect(useAppStore.getState().send('s', 'same')).resolves.toBeUndefined()
+    expect(useAppStore.getState().send('s', 'same')).toBe(true)
+    await useAppStore.getState().flushAgentSteerQueue('s')
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })

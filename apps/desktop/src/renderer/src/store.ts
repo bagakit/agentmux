@@ -251,39 +251,12 @@ export type HostCheckState = {
   observedAt?: number
 }
 
-/**
- * One queued steer, carrying the correlation key for its ONE submission attempt. The id is born when the
- * entry is enqueued and dies when the entry drains. A rejected flush keeps the entry (see the `status`
- * doc below) and retries it on the next opportunity, reusing the SAME `operationId` — so Core can
- * recognize an accepted-but-unacknowledged attempt instead of writing it twice. A user-triggered
- * "Send now" reuses it too. Two distinct prompts are two distinct entries with two distinct ids.
- *
- * 这份队列**进** `partialize`，但它进去的理由只覆盖用户亲手写下的那部分。此前这里写着「never added
- * to partialize」，论据是「一次在途尝试的关联键不是用户想跨重启留下的布局」——那句话对 `operationId`
- * 成立，对 `text` 不成立：排着的是用户敲下的字。草稿重启后还在、排队的消息却没了，是把 AGENTS.md
- * 第 12 条反过来做。关联键跟着条目一起存下来不引入新事实：它的意义正是「这一条的那次尝试」，
- * 重启后继续用同一个 id 重试，恰好就是 Core 幂等识别所要的。
- *
- * `runId` 是这条 steer 当时对着的 run，它让「过期」成为可判定的事实，而不是某处要记得做的清理。
- * 队列按 agentSessionId 存，而 agentSessionId 在 resume 前后不变、runId 会变（api.ts 的 recover
- * 原地换 `control.run.runId`）。没有这个字段，对着已死 run 排的 steer 会被静默投进下一个接手该
- * agentSessionId 的 run——那正是 composer 拒绝提供「重发」按钮的理由。**这个字段也是队列敢持久化的
- * 前提**：重启后 runId 对不上的条目照旧显示为不可投递、交给用户处置，内容不替用户丢掉。
- * 判据留在消费点，见 lib/agent-steer-queue-drain.ts。
- */
-/**
- * `deferred` 是第三个成员，不是 `failed` 的一种色调。
- *
- * 两个成员的 union 强迫「投不出去但 Agent 好着呢」去冒充另一个状态，而两种冒充法都是红线：冒充
- * `failed` 就是 AGENTS.md 第 11 条把第 2 类写成第 1 类（健康 Agent 被我们自己的观测判死刑，还要
- * 连坐它后面排队的条目）；冒充 `queued` 则是同一条原则的另一侧边界——角标会照 healthy 路径念
- * 「N messages queued for delivery」，把一次降级静默放行（`error` 那行 `<small>` 挂在
- * `popover="auto"` 里，默认是收起的，不算「停在旁边」）。所以这一档必须在模型里有名字。
- *
- * 判据是「Agent 还能干活吗」：还能 → `deferred`（继续等下一次可投递时机，同时如实说没投出去和
- * 原因）；真不能了 → `failed`（终局，停止重试）。`failed` 因此只剩一个生产者：条目对着的 run 已
- * 被换掉那条（一个可判定的事实），而不是「它抛了」这种由错误反推的猜测。
- */
+// Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
+// a semantic resume from silently consuming messages addressed to its predecessor.
+export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
+// Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean }>()
+
 export type AgentSteerQueueEntry = {
   operationId: string
   runId: string
@@ -357,6 +330,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
+  agentSteerInFlight: Record<string, string>
   agentSteerQueues: Record<string, AgentSteerQueueEntry[]>
   /**
    * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
@@ -723,7 +697,7 @@ type AppState = {
   removeAgentSteer(sessionId: string, operationId: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string): Promise<void>
-  send(sessionId: string, text: string): Promise<void>
+  send(sessionId: string, text: string): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -1344,6 +1318,7 @@ function startSessionMembershipResync(
           }
           return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [] }
         })
+        for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) void useAppStore.getState().flushAgentSteerQueue(sessionId)
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
         if (!membershipGap) return
       }
@@ -1710,6 +1685,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
   agentSteerQueues: {},
+  agentSteerInFlight: {},
   launcherNameDrafts: {},
   agentNames: {},
   mainSurface: 'workbench',
@@ -1987,6 +1963,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
       }
       booting = false
+      for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
       // Cold-start browser rehydration. `restoreTab` is a pure presentation projection that emits a
@@ -2416,6 +2393,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Explicit resume returned another Agent Session.')
       }
       set((current) => projectRecoveredSession(current, session.id, resumed))
+      void get().flushAgentSteerQueue(session.id)
       if (signal?.aborted) throw controlCancellation(signal)
       return { operation: request.operation, agentSessionId: resumed.id, runId: resumed.control.run.runId }
     }
@@ -4601,38 +4579,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!text.trim()) return false
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return false
-    // Refuse an oversized prompt HERE, at the only door into the queue, rather than letting Core
-    // reject it at submit time. `INVALID_AGENT_PROMPT` is a permanent verdict for identical content,
-    // but `flushAgentSteerQueue` treats every throw as retryable: it keeps the entry and returns. So
-    // one oversized entry is retried on every runtime event, forever, and head-of-line-blocks every
-    // valid steer behind it. Checking at the consumer cannot fix that — by then the user's words are
-    // already in the queue with the draft cleared.
-    //
-    // Trim first, because Core measures the TRIMMED content (client.ts:2285). Measuring the raw text
-    // would refuse prompts Core would have accepted, and the two sides must agree on one boundary.
+    if ((get().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+      get().reportError(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
+      return false
+    }
+    // Core measures trimmed content. Admission must reject permanent size errors before taking
+    // ownership of the draft; retrying an identical oversized head would block every later entry.
     if (agentPromptExceedsBudget(text.trim())) {
       get().reportError(new Error(
         `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
       ))
       return false
     }
-    // Mint the operationId here, at the entry's birth — one id per queued prompt. It rides the entry
-    // through every retry so a re-flushed entry replays with the same id; a second call for a genuinely
-    // different prompt makes a second entry with its own id.
-    //
-    // The runId is stamped here for the same reason and at the same moment: this is the only point where
-    // "which run was the user talking to" is knowable without guessing. By flush time the session may
-    // already be on a different run under the same agentSessionId.
     const entry: AgentSteerQueueEntry = {
       operationId: crypto.randomUUID(),
       runId: session.control.run.runId,
-      text,
+      text: text.trim(),
       status: 'queued'
     }
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
     return true
   },
   removeAgentSteer(sessionId, operationId) {
+    // A submitted request cannot be recalled by deleting its local projection.
+    if (get().agentSteerInFlight[sessionId] === operationId) return
     set((state) => {
       const current = state.agentSteerQueues[sessionId] ?? []
       const next = current.filter((entry) => entry.operationId !== operationId)
@@ -4642,139 +4612,74 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       else delete agentSteerQueues[sessionId]
       return { agentSteerQueues }
     })
+    void get().flushAgentSteerQueue(sessionId)
   },
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
-    if (!entry) return
     const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
-    if (!steerEntryTargetsRun(entry, session.control.run.runId)) {
-      const error = new Error('This message belongs to an earlier Agent run. Start a new message to send it.')
-      set((state) => ({
-        agentSteerQueues: {
-          ...state.agentSteerQueues,
-          [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
-            item.operationId === operationId ? { ...item, status: 'failed', error: error.message } : item
-          )
-        }
-      }))
-      throw error
-    }
-    try {
-      await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
-      get().removeAgentSteer(sessionId, operationId)
-    } catch (error) {
-      // 与自动 flush 同一个判据，理由也同一条：这条路走到这里时 run 已被上面的
-      // `steerEntryTargetsRun` 认过是当前 run，Agent 活着，所以拒绝属第 2 类，标 `deferred`。
-      //
-      // 这一处尤其容易被写成 `failed`，而它恰恰是最常被点到的那条：「Send now」就是用户想催一条
-      // 排队消息时按的，而催的时机基本都在 Agent 生成中——那正是 Core 抛 `AGENT_PROMPT_NOT_READY`
-      // 的正常时刻。把它记成终局，等于一次正常的「催一下」就让整条队列对着一个健康 Agent 停摆。
-      //
-      // 这里保留 `throw`：手动点击是一次用户发起的动作，用户在等一个当场的答复，Composer 靠这个
-      // throw 把原因弹出来（onSendQueued 的 .catch(reportError)）。与自动路径的差别只在这一点——
-      // 自动路径没有人在等，所以它不弹；两处对「这算不算失败」的判定完全一致。
-      set((state) => ({
-        agentSteerQueues: {
-          ...state.agentSteerQueues,
-          [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
-            item.operationId === operationId
-              ? { ...item, status: 'deferred', error: presentError(error) }
-              : item
-          )
-        }
-      }))
-      throw error
-    }
-  },
-  async flushAgentSteerQueue(sessionId) {
-    const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return
-    const queued = get().agentSteerQueues[sessionId] ?? []
-    if (queued.length === 0 || !steerQueueCanDrainNow(session)) return
-    const runId = session.control.run.runId
-    for (const entry of queued) {
-      // `failed` 是真终局，且此刻只由一个生产者写出：条目对着的 run 已被换掉（见
-      // sendQueuedAgentSteer 的 stale 分支）——那是一个可判定的事实，不是从「它抛了」反推的猜测。
-      // 停在队首而不是跳过它：保序说的是「按作者顺序投递」，跳过会把用户写下的先后顺序打乱，而
-      // 「要不要丢掉一条写给旧 run 的话」不是这个循环该替用户做的决定。
-      //
-      // 只有 `failed` 停，`deferred` 不停：后者说的是「这次没投出去，Agent 还好着」，它下一轮必须
-      // 再试——那正是用户那句「即使当时发不出去，它也应该还是在队列里面一直等着」。
-      if (entry.status === 'failed') return
-      // A steer typed at a run that is gone is NOT sent to whatever run inherited the agentSessionId.
-      // Skipping rather than deleting: the badge still shows the user their words (the composer labels
-      // them undeliverable), and deciding to discard user-authored text is not this loop's call.
-      if (!steerEntryTargetsRun(entry, runId)) continue
-      try {
-        await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
-        set((state) => {
-          const current = state.agentSteerQueues[sessionId] ?? []
-          const next = current[0] === entry ? current.slice(1) : current.filter((item) => item !== entry)
-          const agentSteerQueues = { ...state.agentSteerQueues }
-          if (next.length) agentSteerQueues[sessionId] = next
-          else delete agentSteerQueues[sessionId]
-          return { agentSteerQueues }
-        })
-      } catch (error) {
-        // 这里的拒绝**不是**失败。这个循环的入口闸门是 `steerQueueCanDrainNow(session)`，它读的是
-        // Core 给的 processState——也就是说走到这一行时，「Agent 还活着」这件事上游已经问过并且答
-        // 案是「活着」。既然如此，拒绝的原因只能是我们自己的某一步没走通（readiness 还没观察到、
-        // epoch 被消费了、Provider 此刻忙、连接抖了），这正是 AGENTS.md 第 11 条的第 2 类：绝不阻断。
-        //
-        // 所以标 `deferred` 而不是 `failed`，而这不只是换个词：下面那道头部闸门认的是 `failed`，
-        // 把一个活着的 Agent 的队首标成 `failed`，就是用我们的观测失败把它后面所有能投的条目一起
-        // 连坐——本次修复要去掉的就是这个。
-        //
-        // 上报**只在第一次发现**这条被拒时做，之后的自动重试保持安静。
-        //
-        // 两侧都不能少：`send()`（用户刚敲完回车）走的就是这个 catch，那一刻用户在等一个答复，
-        // 而且横幅是他唯一能看到真正原因的地方——用户报的那条 raw
-        // 「Error invoking remote method …」正是从这里剥干净的（见 session-launch-lifecycle 那两条）。
-        // 另一侧：每个 runtime 事件都会重新 flush，如果每次都上报，同一件事会一遍遍弹。
-        //
-        // 判据是 `entry.status`：它是本轮循环开始时的状态，所以「还不是 deferred」恰好等于
-        // 「这条拒绝是新消息」。一次降级是驻留状态，驻留状态由徽标那一档常驻表达，不靠 toast 重复。
-        const firstRefusal = entry.status !== 'deferred'
-        set((state) => ({
-          agentSteerQueues: {
-            ...state.agentSteerQueues,
-            [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
-              item.operationId === entry.operationId
-                ? { ...item, status: 'deferred', error: presentError(error) }
-                : item
-            )
-          }
-        }))
-        if (firstRefusal) get().reportError(error)
-        // `return` 保留：保序是「按作者顺序投递」，本次不再往下投，下一个 runtime 事件从队首重试。
-        return
-      }
-    }
-  },
-  async send(sessionId, text) {
-    if (!text.trim()) return
-    const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return
-    // Compare occurrence counts rather than `includes(text)`: an identical prompt may already be
-    // queued. A successful send removes one occurrence while the pre-existing duplicate remains; only
-    // an increase proves this invocation was retained for retry.
-    const queuedBefore = get().agentSteerQueues?.[sessionId] ?? []
-    const sameBefore = queuedBefore.filter((entry) => entry.text === text).length
-    // A refused enqueue never reaches the queue, so the occurrence-count check below cannot see it —
-    // it would read "nothing was retained" and report success for a prompt that was never sent.
-    // enqueueAgentSteer has already told the user why; this throw only signals the Composer to keep
-    // the draft, via the same path a failed submit takes.
-    if (!get().enqueueAgentSteer(sessionId, text)) {
-      throw new Error('Prompt was not queued.')
-    }
+    if (!entry || session?.kind !== 'agent' || !steerEntryTargetsRun(entry, session.control.run.runId)) return
+    // Manual retry uses the same ordered consumer and the entry's original operation identity.
     await get().flushAgentSteerQueue(sessionId)
-    // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface that outcome to the
-    // Composer so it must keep the user's draft instead of treating a retained queue item as success.
-    const sameAfter = (get().agentSteerQueues?.[sessionId] ?? []).filter((entry) => entry.text === text).length
-    if (sameAfter > sameBefore) {
-      throw new Error('Prompt was retained for retry because the Agent did not accept it yet.')
+  },
+  flushAgentSteerQueue(sessionId) {
+    const active = agentSteerDrains.get(sessionId)
+    if (active) {
+      active.wake = true
+      return active.promise
     }
+    const drain = { promise: Promise.resolve(), wake: false }
+    drain.promise = Promise.resolve().then(async () => {
+      try {
+        for (;;) {
+          drain.wake = false
+          // Every await can change the queue, Run, connection or interaction. Never retain a tail.
+          const state = get()
+          const session = state.sessions.find((item) => item.id === sessionId)
+          if (session?.kind !== 'agent' || !steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
+          const entry = state.agentSteerQueues[sessionId]?.find((item) => steerEntryTargetsRun(item, session.control.run.runId))
+          if (!entry) return
+          set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
+          try {
+            await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
+            set((current) => {
+              const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
+              const agentSteerQueues = { ...current.agentSteerQueues }
+              if (next.length) agentSteerQueues[sessionId] = next
+              else delete agentSteerQueues[sessionId]
+              return { agentSteerQueues }
+            })
+          } catch (error) {
+            // A delivery refusal is a retained local fact, not another global notification.
+            set((current) => ({
+              agentSteerQueues: {
+                ...current.agentSteerQueues,
+                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map((item) =>
+                  item.operationId === entry.operationId ? { ...item, status: 'deferred', error: presentError(error) } : item
+                )
+              }
+            }))
+            // A readiness/reconnect wake arriving during the attempt must not be lost.
+            if (!drain.wake) return
+          } finally {
+            set((current) => {
+              const agentSteerInFlight = { ...current.agentSteerInFlight }
+              delete agentSteerInFlight[sessionId]
+              return { agentSteerInFlight }
+            })
+          }
+        }
+      } finally {
+        agentSteerDrains.delete(sessionId)
+      }
+    })
+    agentSteerDrains.set(sessionId, drain)
+    return drain.promise
+  },
+  send(sessionId, text) {
+    // Admission transfers ownership from draft to queue; transport completion is a separate fact.
+    if (!get().enqueueAgentSteer(sessionId, text)) return false
+    void get().flushAgentSteerQueue(sessionId)
+    return true
   },
   async respondInteraction(sessionId, response) {
     const session = get().sessions.find((item) => item.id === sessionId)
@@ -4818,6 +4723,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!hasAttachedSessionView(state.tabs, sessionId)) return state
         return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
       })
+      void get().flushAgentSteerQueue(sessionId)
     } catch (error) {
       get().reportError(error)
     }
@@ -4866,6 +4772,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ownerStillCurrent
       ) {
         set((state) => projectRecoveredSession(state, sessionId, session))
+        void get().flushAgentSteerQueue(sessionId)
         return
       }
       if (session.control.run.runId === current.control.run.runId) return
@@ -4955,6 +4862,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       enqueueSessionMembershipEvent(sessionMembershipResync, event)
       return
     }
+    const core = event.event
+    const previous = core.type === 'agent-session'
+      ? get().sessions.find((session) => session.id === core.session.agentSessionId) : undefined
+    const interactionCleared = core.type === 'agent-session' && !core.session.pendingInteraction &&
+      previous?.kind === 'agent' && Boolean(previous.pendingInteraction)
     let timelineGapSessionId: string | undefined
     let sessionMembershipGap = false
     set((state) => {
@@ -4965,10 +4877,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-    // Runtime events can clear an interaction gate or mark a process ready. Retry
-    // queued steers after projection; the flush guard keeps pending/running states safe.
-    for (const sessionId of Object.keys(get().agentSteerQueues)) {
-      void get().flushAgentSteerQueue(sessionId)
+    if (core.type === 'connection-state' && core.state === 'restored') {
+      for (const session of get().sessions) {
+        if (session.hostId === event.hostId && get().agentSteerQueues[session.id]?.length) void get().flushAgentSteerQueue(session.id)
+      }
+    } else {
+      // A consumed/degraded snapshot can be emitted by the attempt itself. It is not a new
+      // delivery opportunity: waking on it would let a persistent refusal sustain its own loop.
+      const ready = core.type === 'agent-session' && core.session.terminalPromptReadiness
+      const sessionId = core.type === 'agent-session' && (interactionCleared ||
+        (ready && ready.readyThroughByte !== undefined && ready.consumedBySubmissionId === undefined))
+        ? core.session.agentSessionId
+        : core.type === 'agent-status' || (core.type === 'process-state' && core.state === 'running') ? core.agentSessionId : undefined
+      if (sessionId && get().agentSteerQueues[sessionId]?.length) void get().flushAgentSteerQueue(sessionId)
     }
   },
   decayStaleAgentStatuses(now) {
