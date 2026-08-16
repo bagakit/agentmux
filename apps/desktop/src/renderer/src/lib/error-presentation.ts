@@ -212,6 +212,37 @@ function unwrapZodIssueMessages(message: string): string | undefined {
   return joinIssueLeaves(leaves)
 }
 
+// `main/prompt-readiness-diagnostics.ts` is the ONE place that appends a machine detail to a
+// user-facing sentence (`${message} Diagnostic: ${detail}` — grep `Diagnostic: ` across src, it is a
+// single construction site). What it appends is deliberately volatile: `promptReadinessDetail`
+// (packages/core `prompt-submission.ts:42`) prints `latestOutputBytes=<run.latestOutputBytes>`, an
+// output cursor that grows with every byte the Agent prints.
+const DIAGNOSTIC_SUFFIX = /\s*Diagnostic:\s[\s\S]*$/u
+
+/**
+ * The stable identity of a presented error: which failure this is, with the volatile diagnostic
+ * context removed.
+ *
+ * This exists because a user dismisses a *cause*, not a string. `reportError` deduped on whole-message
+ * equality, and the readiness refusal carries `latestOutputBytes` in its `Diagnostic:` tail — so a
+ * still-generating Agent made every re-report a *different* string, the equality never matched, and the
+ * dismissed banner came back over and over (field report 2026-09-19; the diagnostic is the only part
+ * that changed between them).
+ *
+ * Identity strips presentation context and keeps the sentence, so two reports of the same refusal
+ * collapse while two different refusals stay distinct. It is NOT keyed on `AgentMuxError.code`: this
+ * module's header documents that several codes carry different meanings at different throw sites
+ * (`AGENT_PROMPT_READINESS_CONFLICT` spans two unrelated failures), so a code key would over-dedup —
+ * suppressing a genuinely new failure is worse than showing one twice. Codes also do not survive
+ * `ipcRenderer.invoke`, which is the path this defect was reported on.
+ *
+ * Apply it to BOTH sides of a comparison — never store an identity next to the message it came from and
+ * compare those, or the two keys drift apart the moment one write site forgets.
+ */
+export function errorIdentity(message: string): string {
+  return message.replace(DIAGNOSTIC_SUFFIX, '').trimEnd()
+}
+
 /** The unabridged text of a caught value, before any framing is stripped. Never lossy. */
 function rawText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)

@@ -247,6 +247,39 @@ describe('Renderer persistence boundary', () => {
     }
   })
 
+  it('排队的消息跟草稿一样挺过重启——连它那次尝试的关联键一起', () => {
+    // 用户原话的另一半：排着的是他亲手敲下的字。草稿重启后还在、排队的消息却没了，是把 AGENTS.md
+    // 第 12 条反过来做。这条从 partialize 里漏掉时，缺陷只在重启后才看得见——而重启是最不常在
+    // 测试里走的那条路，所以这里把它钉死。
+    //
+    // 关联键（operationId）与 runId 必须**一起**存下来，不是附带：重启后继续用同一个 id 重试，
+    // 才是 Core 幂等识别所要的；runId 则是「这条对着哪个 run 写的」，恢复后的可投递性全靠它判
+    // （steerEntryTargetsRun），丢了它就会把旧 run 的话静默投进新 run。
+    const state = useAppStore.getState()
+    useAppStore.setState({
+      agentSteerQueues: {
+        'agent-a': [
+          { operationId: 'op-1', runId: 'run-1', text: '别忘了加测试', status: 'queued' },
+          { operationId: 'op-2', runId: 'run-1', text: '这条没投出去', status: 'deferred', error: 'not ready yet' }
+        ]
+      }
+    })
+    try {
+      const partialize = useAppStore.persist.getOptions().partialize
+      const persisted = partialize!(useAppStore.getState()) as Record<string, unknown>
+      // 逐字钉死整份结构，而不是判「这个 key 在场」：只判在场的话，把条目投影成
+      // `{text}`（丢掉 operationId/runId/status）照样绿，而那恰好是恢复后最坏的形状。
+      expect(persisted.agentSteerQueues).toEqual({
+        'agent-a': [
+          { operationId: 'op-1', runId: 'run-1', text: '别忘了加测试', status: 'queued' },
+          { operationId: 'op-2', runId: 'run-1', text: '这条没投出去', status: 'deferred', error: 'not ready yet' }
+        ]
+      })
+    } finally {
+      useAppStore.setState({ agentSteerQueues: state.agentSteerQueues })
+    }
+  })
+
   it('explorerCollapsed round-trips a per-workspace override through persist (true and false both stored)', () => {
     // Slice 1 whitelist entry. Unlike collapsedProjectGroups, BOTH booleans are values here — the map
     // records the user's explicit override and absence means "use the workspace kind default".

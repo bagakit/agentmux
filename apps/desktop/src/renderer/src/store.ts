@@ -49,7 +49,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
-import { presentError } from './lib/error-presentation'
+import { errorIdentity, presentError } from './lib/error-presentation'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge } from './lib/git-bridge'
@@ -253,24 +253,42 @@ export type HostCheckState = {
 
 /**
  * One queued steer, carrying the correlation key for its ONE submission attempt. The id is born when the
- * entry is enqueued and dies when the entry drains — it lives ONLY on the entry, never in a persisted
- * field. A failed automatic flush changes the entry to `failed` and never retries it. A user-triggered
- * "Send now" reuses the SAME `operationId`; Core can therefore recognize an accepted-but-unacknowledged
- * attempt instead of writing it twice. Two distinct prompts are two distinct entries with two distinct ids. Never added to `partialize` — a
- * correlation key for an in-flight attempt is not layout the user meant to keep across a restart.
+ * entry is enqueued and dies when the entry drains. A rejected flush keeps the entry (see the `status`
+ * doc below) and retries it on the next opportunity, reusing the SAME `operationId` — so Core can
+ * recognize an accepted-but-unacknowledged attempt instead of writing it twice. A user-triggered
+ * "Send now" reuses it too. Two distinct prompts are two distinct entries with two distinct ids.
  *
- * `runId` is the run this steer was typed AT, and it is what makes "stale" a decidable fact rather than
- * a cleanup someone has to remember. The queue is keyed by agentSessionId, which SURVIVES a resume —
- * only the runId changes (api.ts recover swaps `control.run.runId` in place). Without this field a steer
- * queued against a dead run is silently replayed into whatever run next takes that agentSessionId, which
- * is exactly the "silently replaying a stale steer into a fresh session" the composer refuses to offer
- * as a button. See lib/agent-steer-queue-drain.ts for why the check lives at the consumer.
+ * 这份队列**进** `partialize`，但它进去的理由只覆盖用户亲手写下的那部分。此前这里写着「never added
+ * to partialize」，论据是「一次在途尝试的关联键不是用户想跨重启留下的布局」——那句话对 `operationId`
+ * 成立，对 `text` 不成立：排着的是用户敲下的字。草稿重启后还在、排队的消息却没了，是把 AGENTS.md
+ * 第 12 条反过来做。关联键跟着条目一起存下来不引入新事实：它的意义正是「这一条的那次尝试」，
+ * 重启后继续用同一个 id 重试，恰好就是 Core 幂等识别所要的。
+ *
+ * `runId` 是这条 steer 当时对着的 run，它让「过期」成为可判定的事实，而不是某处要记得做的清理。
+ * 队列按 agentSessionId 存，而 agentSessionId 在 resume 前后不变、runId 会变（api.ts 的 recover
+ * 原地换 `control.run.runId`）。没有这个字段，对着已死 run 排的 steer 会被静默投进下一个接手该
+ * agentSessionId 的 run——那正是 composer 拒绝提供「重发」按钮的理由。**这个字段也是队列敢持久化的
+ * 前提**：重启后 runId 对不上的条目照旧显示为不可投递、交给用户处置，内容不替用户丢掉。
+ * 判据留在消费点，见 lib/agent-steer-queue-drain.ts。
+ */
+/**
+ * `deferred` 是第三个成员，不是 `failed` 的一种色调。
+ *
+ * 两个成员的 union 强迫「投不出去但 Agent 好着呢」去冒充另一个状态，而两种冒充法都是红线：冒充
+ * `failed` 就是 AGENTS.md 第 11 条把第 2 类写成第 1 类（健康 Agent 被我们自己的观测判死刑，还要
+ * 连坐它后面排队的条目）；冒充 `queued` 则是同一条原则的另一侧边界——角标会照 healthy 路径念
+ * 「N messages queued for delivery」，把一次降级静默放行（`error` 那行 `<small>` 挂在
+ * `popover="auto"` 里，默认是收起的，不算「停在旁边」）。所以这一档必须在模型里有名字。
+ *
+ * 判据是「Agent 还能干活吗」：还能 → `deferred`（继续等下一次可投递时机，同时如实说没投出去和
+ * 原因）；真不能了 → `failed`（终局，停止重试）。`failed` 因此只剩一个生产者：条目对着的 run 已
+ * 被换掉那条（一个可判定的事实），而不是「它抛了」这种由错误反推的猜测。
  */
 export type AgentSteerQueueEntry = {
   operationId: string
   runId: string
   text: string
-  status: 'queued' | 'failed'
+  status: 'queued' | 'deferred' | 'failed'
   error?: string
 }
 
@@ -1435,6 +1453,7 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 
 type PersistedAppState = {
   agentComposerDrafts?: Record<string, string>
+  agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
   dirtyDocuments?: Record<string, boolean>
   restoredWorkbench: PersistedWorkbench
@@ -4645,12 +4664,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
       get().removeAgentSteer(sessionId, operationId)
     } catch (error) {
+      // 与自动 flush 同一个判据，理由也同一条：这条路走到这里时 run 已被上面的
+      // `steerEntryTargetsRun` 认过是当前 run，Agent 活着，所以拒绝属第 2 类，标 `deferred`。
+      //
+      // 这一处尤其容易被写成 `failed`，而它恰恰是最常被点到的那条：「Send now」就是用户想催一条
+      // 排队消息时按的，而催的时机基本都在 Agent 生成中——那正是 Core 抛 `AGENT_PROMPT_NOT_READY`
+      // 的正常时刻。把它记成终局，等于一次正常的「催一下」就让整条队列对着一个健康 Agent 停摆。
+      //
+      // 这里保留 `throw`：手动点击是一次用户发起的动作，用户在等一个当场的答复，Composer 靠这个
+      // throw 把原因弹出来（onSendQueued 的 .catch(reportError)）。与自动路径的差别只在这一点——
+      // 自动路径没有人在等，所以它不弹；两处对「这算不算失败」的判定完全一致。
       set((state) => ({
         agentSteerQueues: {
           ...state.agentSteerQueues,
           [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
             item.operationId === operationId
-              ? { ...item, status: 'failed', error: presentError(error) }
+              ? { ...item, status: 'deferred', error: presentError(error) }
               : item
           )
         }
@@ -4665,9 +4694,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (queued.length === 0 || !steerQueueCanDrainNow(session)) return
     const runId = session.control.run.runId
     for (const entry of queued) {
-      // Failed is a terminal AUTO-delivery state. Keeping it at the head preserves authored order and
-      // prevents every runtime event from hammering the same rejected submission. Only the explicit
-      // sendQueuedAgentSteer action is allowed to retry it.
+      // `failed` 是真终局，且此刻只由一个生产者写出：条目对着的 run 已被换掉（见
+      // sendQueuedAgentSteer 的 stale 分支）——那是一个可判定的事实，不是从「它抛了」反推的猜测。
+      // 停在队首而不是跳过它：保序说的是「按作者顺序投递」，跳过会把用户写下的先后顺序打乱，而
+      // 「要不要丢掉一条写给旧 run 的话」不是这个循环该替用户做的决定。
+      //
+      // 只有 `failed` 停，`deferred` 不停：后者说的是「这次没投出去，Agent 还好着」，它下一轮必须
+      // 再试——那正是用户那句「即使当时发不出去，它也应该还是在队列里面一直等着」。
       if (entry.status === 'failed') return
       // A steer typed at a run that is gone is NOT sent to whatever run inherited the agentSessionId.
       // Skipping rather than deleting: the badge still shows the user their words (the composer labels
@@ -4684,17 +4717,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { agentSteerQueues }
         })
       } catch (error) {
+        // 这里的拒绝**不是**失败。这个循环的入口闸门是 `steerQueueCanDrainNow(session)`，它读的是
+        // Core 给的 processState——也就是说走到这一行时，「Agent 还活着」这件事上游已经问过并且答
+        // 案是「活着」。既然如此，拒绝的原因只能是我们自己的某一步没走通（readiness 还没观察到、
+        // epoch 被消费了、Provider 此刻忙、连接抖了），这正是 AGENTS.md 第 11 条的第 2 类：绝不阻断。
+        //
+        // 所以标 `deferred` 而不是 `failed`，而这不只是换个词：下面那道头部闸门认的是 `failed`，
+        // 把一个活着的 Agent 的队首标成 `failed`，就是用我们的观测失败把它后面所有能投的条目一起
+        // 连坐——本次修复要去掉的就是这个。
+        //
+        // 上报**只在第一次发现**这条被拒时做，之后的自动重试保持安静。
+        //
+        // 两侧都不能少：`send()`（用户刚敲完回车）走的就是这个 catch，那一刻用户在等一个答复，
+        // 而且横幅是他唯一能看到真正原因的地方——用户报的那条 raw
+        // 「Error invoking remote method …」正是从这里剥干净的（见 session-launch-lifecycle 那两条）。
+        // 另一侧：每个 runtime 事件都会重新 flush，如果每次都上报，同一件事会一遍遍弹。
+        //
+        // 判据是 `entry.status`：它是本轮循环开始时的状态，所以「还不是 deferred」恰好等于
+        // 「这条拒绝是新消息」。一次降级是驻留状态，驻留状态由徽标那一档常驻表达，不靠 toast 重复。
+        const firstRefusal = entry.status !== 'deferred'
         set((state) => ({
           agentSteerQueues: {
             ...state.agentSteerQueues,
             [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
               item.operationId === entry.operationId
-                ? { ...item, status: 'failed', error: presentError(error) }
+                ? { ...item, status: 'deferred', error: presentError(error) }
                 : item
             )
           }
         }))
-        get().reportError(error)
+        if (firstRefusal) get().reportError(error)
+        // `return` 保留：保序是「按作者顺序投递」，本次不再往下投，下一个 runtime 事件从队首重试。
         return
       }
     }
@@ -4945,11 +4998,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   reportError(error) {
     const message = presentError(error)
-    // Replayed runtime events and polling can report the same transient failure
-    // repeatedly. Once the user dismissed that exact message, do not resurrect it
-    // until a different error arrives or they explicitly reopen it.
+    // Replayed runtime events and polling can report the same transient failure repeatedly. Once the
+    // user dismissed that failure, do not resurrect it until a different one arrives or they explicitly
+    // reopen it.
+    //
+    // The key is the failure's IDENTITY, not the presented string. Whole-string equality looked right and
+    // was wrong: the prompt-readiness refusal appends `Diagnostic: … latestOutputBytes=<cursor>`, and that
+    // cursor grows with every byte the Agent prints. So a still-generating Agent produced a *new* string
+    // each time, `===` never matched, and the dismissed banner came back on every retry (field report
+    // 2026-09-19). The user dismissed the cause; the code was comparing the presentation.
+    //
+    // Both sides go through `errorIdentity` on every comparison — the newest message and the one we
+    // remembered. Storing a precomputed key beside `lastError` would be the same defect one level up: two
+    // places deciding identity, drifting the first time a write site forgets one of them.
     const current = get()
-    if (current.errorDismissed && current.lastError === message) return
+    if (current.errorDismissed && current.lastError !== null
+      && errorIdentity(current.lastError) === errorIdentity(message)) return
     set({ error: message, lastError: message, errorDismissed: false })
   },
   dismissError() {
@@ -5004,6 +5068,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   partialize: (state) => ({
     agentComposerDrafts: state.agentComposerDrafts,
+    // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
+    // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
+    // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
+    // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
+    agentSteerQueues: state.agentSteerQueues,
     documents: Object.fromEntries(Object.entries(state.documents).filter(([key]) => state.dirtyDocuments[key])),
     dirtyDocuments: Object.fromEntries(Object.entries(state.dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
