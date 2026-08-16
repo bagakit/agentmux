@@ -201,11 +201,11 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
     // error 画成琥珀的缺陷。
     const styles = allStyleRules()
     expect(statusInk('error', styles), 'error 不是红了——「坏了」被画成别的意思').toBe('var(--red)')
-    expect(statusInk('exited', styles), 'exited 也该是红（进程非正常离开）').toBe('var(--red)')
+    expect(statusInk('exited', styles), '进程结束本身不是故障').toBe('var(--text-3)')
     expect(statusInk('waiting', styles), 'waiting 不是琥珀了——「等你」被改色').toBe('var(--amber)')
     expect(statusInk('blocked', styles), 'blocked 不是琥珀了').toBe('var(--amber)')
     expect(statusInk('working', styles), 'working 不是绿了').toBe('var(--green)')
-    expect(statusInk('running', styles), 'running 不是绿了').toBe('var(--green)')
+    expect(statusInk('running', styles), 'running 用蓝色区别于 working').toBe('var(--blue)')
     expect(statusInk('done', styles), 'done 不是蓝了').toBe('var(--blue)')
     // 自检：色相各不相同，否则上面几条可能同时指向同一个恒定值而失去意义。
     expect(new Set([

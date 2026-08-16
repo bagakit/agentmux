@@ -89,20 +89,29 @@ function statusAfterProcessEvent(
 }
 
 describe('实时路径的进程状态投影', () => {
+  it('keeps Runtime restart recoverable and a deliberate stop neutral on the live path', () => {
+    expect(sessionAfterProcessEvent({ state: 'interrupted', interruptionReason: 'daemon_restart' }))
+      .toMatchObject({ processState: 'interrupted', interruptionReason: 'daemon_restart', status: {
+        state: 'disconnected', detail: 'The Runtime restarted and interrupted this Run.'
+      } })
+    expect(statusAfterProcessEvent({ state: 'exited', exitCode: 137, exitSignal: 'SIGKILL', exitReason: 'user-stopped' }))
+      .toMatchObject({ state: 'exited', exitReason: 'user-stopped' })
+  })
+
   it('被信号打死时当场说是哪个信号——这条事实此前只有 reload 之后才看得到', () => {
     // 缺陷的正脸。删掉 session-state.ts 里传 exitSignal 那一行，这条红，而 exitCode/exitReason 那两条仍绿。
     expect(statusAfterProcessEvent({
       state: 'exited',
       exitCode: 139,
       exitSignal: 'SIGSEGV'
-    })).toMatchObject({ state: 'exited', detail: 'signal SIGSEGV' })
+    })).toMatchObject({ state: 'error', detail: 'signal SIGSEGV' })
   })
 
-  it('PTY 消失时给出 interrupt 那句说明，且显示态是 error', () => {
+  it('PTY 消失时给出 interrupt 那句说明，且显示态诚实断开', () => {
     // 独立承重：文案与 signal 各走投影里的一条分支，改一条不影响另一条。
     expect(statusAfterProcessEvent({ state: 'interrupted' })).toMatchObject({
-      state: 'error',
-      detail: 'The Run owner interrupted this PTY.'
+      state: 'disconnected',
+      detail: 'The Run was interrupted; the cause was not reported.'
     })
   })
 

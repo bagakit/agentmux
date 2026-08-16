@@ -610,3 +610,35 @@ describe('SessionPane 失联横幅区分「重连中」与「已放弃」', () =
     expect(reconnecting).not.toBe(gaveUp)
   })
 })
+
+
+describe('honest recovery controls', () => {
+  it.each(['agent', 'terminal'] as const)('keeps %s recovery available after daemon restart without a red error', (kind) => {
+    const current = { ...session(kind), processState: 'interrupted', interruptionReason: 'daemon_restart',
+      status: { state: 'disconnected', source: 'run-process', observedAt: 2 } } as SessionSnapshot
+    fixture.state.sessions = [current]
+    fixture.state.viewModes = { [current.id]: 'terminal' }
+    const markup = render(current.id, kind)
+    expect(markup).toContain('terminal-recovery--disconnected')
+    expect(markup).toContain('The Runtime restarted')
+    expect(markup).toContain(kind === 'agent' ? 'Resume' : 'Restart terminal')
+    expect(markup).not.toContain('Check again')
+    expect(markup).not.toContain('Remote terminal disconnected')
+    expect(markup).not.toContain('Open a new session')
+  })
+
+  it.each([
+    ['user-stopped', 'exited', 'terminal-recovery--exited'],
+    ['crashed', 'error', 'terminal-recovery--error']
+  ] as const)('paints %s from the shared process projection', (exitReason, state, expectedClass) => {
+    fixture.state.sessions = [{ ...session('agent'), processState: 'exited', status: { state, source: 'run-process', observedAt: 2, exitReason } } as SessionSnapshot]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+    const markup = render('agent-1', 'agent')
+    expect(markup).toContain(expectedClass)
+    expect(markup).toContain('Resume')
+    if (exitReason === 'user-stopped') {
+      expect(markup).toContain('You stopped this session.')
+      expect(markup).not.toContain('lucide-triangle-alert')
+    }
+  })
+})

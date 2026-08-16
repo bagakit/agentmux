@@ -1288,8 +1288,8 @@ export class AgentMuxClient {
     // 三条轴的观察合同：语义活性优先取 Session 自己声明的 semanticStatus（它带 native-hook/acp 来源，
     // 以及那条声明的观察时刻）；缺席时如实退回进程投影这条中性事实（source `run-process`），绝不伪造一条
     // 活动声明。就绪性读 pendingInteraction（卡在待答请求上）与终端能力降级（握手未确认）。
-    const status = session.semanticStatus ?? {
-      state: runDisplayState(projectedRun.state),
+    const status = (projectedRun.state === 'running' ? session.semanticStatus : undefined) ?? {
+      state: runDisplayState(projectedRun),
       source: 'run-process' as const,
       observedAt: projectedRun.observedAt
     }

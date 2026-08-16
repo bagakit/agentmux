@@ -1,48 +1,8 @@
-import type { AgentMuxRunExitReason } from './agent-run-exit.js'
+import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import type { AgentDisplayState, AgentMuxEvidenceSource, AgentMuxRunState } from './types.js'
 
-/**
- * 「一个 run 的进程事实长什么样」→「界面上那一行状态说什么」的**唯一**投影。
- *
- * 为什么要有这个文件：这段投影本来存在**两份独立实现**，各自读一个不同形状的输入——
- * - 快照路径（主进程 runtime-controller 的 projectSession）：App 冷启动、reload、重连补发时走它，
- *   输入是 daemon 的 run 快照。
- * - 实时路径（renderer 的 session-state 收 process-state 事件）：进程状态当场变化时走它，
- *   输入是 Core 的事件。
- *
- * 两条路投影**同一个概念**，却在两个包里各写一遍，于是它们必然漂移，而且漂移的症状极难归因：同一个
- * 已退出的 Agent，「在场时看到的」与「reload 之后看到的」不是一句话。实测坐实过两处：
- * - 快照路径带 `signal SIGSEGV` 的 detail，实时路径整段没有（`exitSignal` 在 session-state.ts 零命中）。
- *   于是崩溃**当下**看不到也搜不到是哪个信号，关掉窗口再打开反而看到了。
- * - 'The Run owner interrupted this PTY.' 这句文案被逐字手抄两份，改一份不会有任何测试红。
- *   今天两句字面相同所以用户看不出问题，那只是「还没漂」，不是「不会漂」。
- *
- * 所以判据不是「两处取值凑巧相等」，而是**同一个决定只做一次**：两侧各自只负责从自己的输入形状里把
- * Core 事实取出来，喂给这里；「这些事实该显示成什么」只有这一个答案。
- *
- * 为什么落在 Core 而不是 renderer 的 lib：主进程与 renderer 分居两个包，只有 Core 是它们的公共下游。
- * 为什么单独一个文件（配 `./run-status` 子路径导出）而不是塞进 `types.ts` 或直接从包根导出：从包根
- * `@agentmux/core` import 会把 `runtime-paths.js` 一起拖进来，那条链要 `node:crypto`，renderer 的构建
- * 会当场炸。先例是 `agent-provider-id.ts` / `agent-status-freshness.ts`，同样的理由、同样的做法。
- *
- * 刻意**不**包含的东西：实时路径那道 `observedAt` 严格单调门禁。那是事件流特有的去抖（同一条状态会被
- * 反复重发），属于「这条证据要不要采纳」，不属于「采纳了该显示什么」。把它塞进来会让快照路径凭空多出
- * 一个它根本没有的概念。
- */
-
-/**
- * 一次进程观察投影出来的界面状态。
- *
- * 刻意**不**复用 `AgentStatus`：那是「语义状态」的形状（Agent 自己声明的 working/waiting/done 等），
- * 它没有 `exitReason`。而进程投影必须带 exitReason——桌面侧的 `SessionStatus` 正是 `AgentStatus`
- * 加上 exitReason/continuity 等几条的超集，两条路径投出来的都要落进它。所以这里声明进程投影自己的
- * 返回形状，恰好是那个超集里进程事实能填的那几条。
- *
- * 少写一条，那条事实就到不了界面（`exitSignal` 与 `exitReason` 各自实测漏过一次，全绿存活）。多写一条
- * 则**没有编译器挡**：两个调用方都是把返回值存进变量再传下去，不是内联字面量，所以 TS 的
- * excess-property check 根本不触发，`exactOptionalPropertyTypes` 管的也只是「可选属性别显式赋
- * undefined」而不是「别多一个键」。守这件事的是 `agent-run-status.test.ts` 里那条按键集比对的断言——
- * 判据必须是逐键相等，写成 `toMatchObject` 就抓不到多出来的那个。
+/** Shared process projection for Core observations, desktop snapshots and live events.
+ * Runtime owns process facts; this module only decides how to present them. It has no host imports.
  */
 export type RunProcessStatus = {
   state: AgentDisplayState
@@ -53,86 +13,58 @@ export type RunProcessStatus = {
   exitReason?: AgentMuxRunExitReason
 }
 
-/** 进程事实投影所需的输入。两条路径各自把自己的输入形状归一到这里，字段语义与 Core 事件同源。 */
-export type RunProcessObservation = {
-  /** 内核报的 run 状态。 */
+type RunExitFacts = {
+  exitCode?: number
+  exitSignal?: string
+  exitReason?: AgentMuxRunExitReason
+  interruptionReason?: string
+}
+
+export type RunProcessObservation = RunExitFacts & {
   state: AgentMuxRunState
-  /** 这条观察的来源与时刻，直接落到 status 上。 */
   source: AgentMuxEvidenceSource
   observedAt: number
-  /** 内核报的退出码；缺席表示这条观察没带码。 */
-  exitCode?: number
-  /** 内核报的终止信号名；缺席表示不是被信号杀的（或这条观察没带）。 */
-  exitSignal?: string
-  /** 退出原因的诚实分类，由 Core 合成（意图 + 结果）。 */
-  exitReason?: AgentMuxRunExitReason
 }
 
-/**
- * `interrupted` 的说明文案。
- *
- * 单独拎成常量而不是在投影里写字面量，是因为它此前被手抄了两份。常量化之后「这句话是什么」有且只有
- * 一个出处，改它必然同时改两条路径。
- *
- * 为什么 `interrupted` 需要一句话而 `exited` 不需要同款：`interrupted` 是「PTY 没了」，它既没有退出码
- * 也没有信号可给，不解释一句用户只会看到一个没有下文的 error。
- */
-export const RUN_INTERRUPTED_DETAIL = 'The Run owner interrupted this PTY.'
+export const RUN_INTERRUPTED_DETAIL = 'The Run was interrupted; the cause was not reported.'
 
-/**
- * 进程状态在界面上的显示态。`interrupted`（PTY 消失）对用户就是「出错了」——它不是一个用户能理解的
- * 独立状态，而 `processState` 仍保留原值供需要区分的地方读。
+/** An interrupted Runtime is not evidence that the Agent crashed. A recorded user stop takes
+ * precedence over its resulting signal/code. Unknown exits stay neutral, without claiming success.
  */
-export function runDisplayState(state: AgentMuxRunState): AgentDisplayState {
-  return state === 'interrupted' ? 'error' : state
+export function runDisplayState(observation: RunExitFacts & { state: AgentMuxRunState }): AgentDisplayState {
+  if (observation.state === 'running') return 'running'
+  const reason = observation.exitReason ?? classifyRunExit({
+    stopRequested: false,
+    ...(observation.exitCode === undefined ? {} : { exitCode: observation.exitCode }),
+    ...(observation.exitSignal === undefined ? {} : { exitSignal: observation.exitSignal })
+  })
+  if (reason === 'user-stopped') return 'exited'
+  if (reason === 'crashed') return 'error'
+  return observation.state === 'interrupted' ? 'disconnected' : 'exited'
 }
 
-/**
- * 一次退出观察里「内核和 Client 报了什么」的那三条事实，从任何带着它们的形状里取出来。
- *
- * 为什么要有这个函数：`projectRunProcessStatus` 的两个调用方（主进程的快照路径、renderer 的实时路径）
- * 此前各自手抄了同一段三行 `...(x === undefined ? {} : { x })`。那不是风格问题——**漏抄一行没有任何
- * 东西会红**：字段可选、`RunProcessObservation` 不要求在场，于是少喂一条事实只表现为「那条事实到不了
- * 界面」。这正是实测发生过的事故：`exitSignal` 在实时路径漏了一行，同一个被 SIGSEGV 打死的 Agent，
- * 崩溃当下看不到信号，reload 之后反而看到了；`exitReason` 后来独立地又漏了一次，形状一模一样。
- *
- * 所以判据不是「两处凑巧抄得一样」，而是**只有一个地方决定取哪几条**。两个调用方各自只保留自己形状
- * 独有的部分（快照的 source 是写死的 'run-process'，实时路径要从 evidence 里取），退出事实一律走这里。
- *
- * 入参刻意收成「带这三条可选字段的任意对象」而不是某个具名类型：两侧的载体本就是两个不同的类型
- * （台账里的 run vs 线上的 process-state 事件），它们只在这三条上同名同义。
- */
-export function runExitFacts(source: {
-  exitCode?: number
-  exitSignal?: string
-  exitReason?: AgentMuxRunExitReason
-}): { exitCode?: number; exitSignal?: string; exitReason?: AgentMuxRunExitReason } {
+/** Preserve optional facts in both projection paths; absence is not an empty or invented fact. */
+export function runExitFacts(source: RunExitFacts): RunExitFacts {
   return {
-    // 三条都是「带就带上、缺就缺席」。不用 `?? 0` / `?? ''` 兜底：0 是合法退出码，空串不是信号名，
-    // 兜底会把「没报」伪造成「报了一个中性值」。
     ...(source.exitCode === undefined ? {} : { exitCode: source.exitCode }),
     ...(source.exitSignal === undefined ? {} : { exitSignal: source.exitSignal }),
-    ...(source.exitReason === undefined ? {} : { exitReason: source.exitReason })
+    ...(source.exitReason === undefined ? {} : { exitReason: source.exitReason }),
+    ...(source.interruptionReason === undefined ? {} : { interruptionReason: source.interruptionReason })
   }
 }
 
-/**
- * 把一次进程观察投影成界面那一行状态。
- *
- * detail 的取值顺序即优先级：`interrupted` 用固定文案（它没有码也没有信号可说）；否则若内核报了信号，
- * 说是哪个信号——`signal SIGSEGV` 比一个裸 error 有用得多，而且它是可搜索的文本。两者都没有就不写
- * detail，绝不写空串或占位符（那会把「没有更多信息」伪装成「信息是空的」）。
- *
- * `exitCode` / `exitReason` 都是「带就带上、缺就缺席」：0 是一个合法的退出码，用 `?? 0` 兜底会把
- * 「没报码」伪造成「干净退出」。
- */
 export function projectRunProcessStatus(observation: RunProcessObservation): RunProcessStatus {
+  const interruptionDetail = observation.interruptionReason === 'daemon_restart'
+    ? 'The Runtime restarted and interrupted this Run.'
+    : observation.interruptionReason
+      ? `The Run was interrupted (${observation.interruptionReason}).`
+      : RUN_INTERRUPTED_DETAIL
   return {
-    state: runDisplayState(observation.state),
+    state: runDisplayState(observation),
     source: observation.source,
     observedAt: observation.observedAt,
     ...(observation.state === 'interrupted'
-      ? { detail: RUN_INTERRUPTED_DETAIL }
+      ? { detail: interruptionDetail }
       : observation.exitSignal === undefined
         ? {}
         : { detail: `signal ${observation.exitSignal}` }),

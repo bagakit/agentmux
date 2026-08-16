@@ -1186,7 +1186,7 @@ describe('RuntimeController configuration transaction', () => {
 
     const snapshot = await controller.snapshot(localConfig)
 
-    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'exited', exitReason: 'crashed' })
+    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'error', exitReason: 'crashed' })
   })
 
   it('carries the killing signal into the visible detail — the same sentence the live path shows', async () => {
@@ -1212,7 +1212,24 @@ describe('RuntimeController configuration transaction', () => {
 
     const snapshot = await controller.snapshot(localConfig)
 
-    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'exited', detail: 'signal SIGSEGV' })
+    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'error', detail: 'signal SIGSEGV' })
+  })
+
+  it.each([
+    [{ state: 'interrupted', interruptionReason: 'daemon_restart' }, 'disconnected', 'The Runtime restarted and interrupted this Run.'],
+    [{ state: 'exited', exitCode: 137, exitSignal: 'SIGKILL', exitReason: 'user-stopped' }, 'exited', 'signal SIGKILL']
+  ] as const)('restores honest status from the durable Run after reconnect: %j', async (run, expectedState, detail) => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: '/repo',
+      providerId: status.session.providerId, executorId: status.session.executorId,
+      agentSession: status.session, run: { ...status.run, ...run }
+    }] })
+    const snapshot = await controller.snapshot(localConfig)
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(snapshot.sessions[0]).toMatchObject({ id: 'agent-1', processState: run.state, status: { state: expectedState, detail } })
   })
 
   it('says the PTY went away in the same words the live path uses', async () => {
@@ -1237,8 +1254,8 @@ describe('RuntimeController configuration transaction', () => {
     const snapshot = await controller.snapshot(localConfig)
 
     expect(snapshot.sessions[0]?.status).toMatchObject({
-      state: 'error',
-      detail: 'The Run owner interrupted this PTY.'
+      state: 'disconnected',
+      detail: 'The Run was interrupted; the cause was not reported.'
     })
   })
 

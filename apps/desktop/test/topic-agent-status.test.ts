@@ -185,6 +185,22 @@ describe('状态到颜色的映射只有一处定义', () => {
     )
   })
 
+  it('only true errors earn the shared exclamation glyph', () => {
+    const glyphs = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+      .filter((match) => /content:\s*["']!["']/.test(match[2]!))
+      .flatMap((match) => match[1]!.split(',').map((selector) => selector.trim()))
+    expect(glyphs.filter((selector) => selector.includes('.status__dot'))).toEqual(['.status--error .status__dot::after'])
+  })
+
+  it('running is a hollow dot while working retains the active fill', () => {
+    const hollow = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+      .filter((match) => match[1]!.split(',').some((selector) => selector.trim() === '.status--running .status__dot'))
+    expect(hollow).toHaveLength(1)
+    expect(hollow[0]![2]).toContain('background: transparent')
+    expect(hollow[0]![2]).toContain('inset 0 0 0 1.5px var(--status-ink)')
+    expect(hollow[0]![1]).not.toContain('.status--working')
+  })
+
   it('四个色相各自归属哪些状态——红/蓝那两侧此前完全无人守', () => {
     // 这条补的是一个实测存活过的洞：把 `.status--error, .status--exited` 的 `--status-ink` 从
     // `var(--red)` 改成 `var(--amber)`，全仓 2980 条无一变红。于是一个崩掉的 Agent 在**每一个**读色表
@@ -200,11 +216,11 @@ describe('状态到颜色的映射只有一处定义', () => {
     // 从蓝改成红仍然全绿。
     const ink = inkByState()
     const HUE_OWNERS: Record<string, readonly AgentDisplayState[]> = {
-      'var(--green)': ['working', 'running'],
+      'var(--green)': ['working'],
       'var(--amber)': ['waiting', 'blocked'],
-      'var(--red)': ['error', 'exited'],
-      'var(--blue)': ['done'],
-      'var(--text-3)': ['disconnected']
+      'var(--red)': ['error'],
+      'var(--blue)': ['done', 'running'],
+      'var(--text-3)': ['disconnected', 'exited']
     }
     // 自检：色表真的被读到了，否则下面每条 `.get()` 都是 undefined 对 undefined。
     expect(ink.size).toBeGreaterThan(4)

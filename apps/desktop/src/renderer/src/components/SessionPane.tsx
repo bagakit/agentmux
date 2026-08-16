@@ -1,4 +1,4 @@
-import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
+import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
@@ -29,21 +29,14 @@ import {
 
 const NO_TIMELINE_ITEMS: never[] = []
 
-const INTERRUPTION_REASON_COPY: Record<string, string> = {
-  daemon_restart: 'The terminal backend restarted, so this session’s process was lost. Open a new session to continue here.',
-  tmux_server_unavailable: 'The terminal backend became unavailable and this session’s process was lost. Open a new session to continue here.',
-  tmux_target_changed: 'The underlying terminal target changed, so this session could no longer be tracked. Open a new session to continue here.',
-  tmux_protocol_error: 'The terminal backend hit a protocol error and this session’s process was lost. Open a new session to continue here.'
-}
-
 function humanizeDetail(
   interruptionReason: string | undefined,
   detail: string | undefined,
   exited: boolean,
   exitReason: AgentMuxRunExitReason | undefined
 ): string {
-  if (interruptionReason && INTERRUPTION_REASON_COPY[interruptionReason]) {
-    return INTERRUPTION_REASON_COPY[interruptionReason]
+  if (interruptionReason === 'daemon_restart') {
+    return 'The Runtime restarted and interrupted this process. Use the recovery action below to continue.'
   }
   // 退出时，先按 Core 合成的原因说清「是你关的还是它崩的」——这正是 T-012 要区分的事。
   if (exited && exitReason) {
@@ -178,8 +171,8 @@ export function SessionPane({
   // daemon can't spin us into a relaunch loop. Keyed by the session id we last recovered from.
   const autoRecoveredRef = useRef<string | null>(null)
 
-  const disconnected = session?.status.state === 'disconnected'
-  const missing = session?.processState === 'interrupted' && session?.status.state === 'error'
+  const disconnected = session?.processState === 'running' && session.status.state === 'disconnected'
+  const missing = session?.processState === 'interrupted'
   const exited = session?.processState === 'exited'
   const interruptionReason = session?.interruptionReason
   const continuity = session?.status.continuity
@@ -271,16 +264,16 @@ export function SessionPane({
               />
             )}
             {disconnected || missing || exited ? (
-              <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited }))} role="status" aria-live="polite">
+              <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
-                  {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : disconnected ? <ServerOff size={16} /> : <AlertTriangle size={16} />}
+                  {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
                 </span>
                 <div>
                   <strong>{recoveryTitle}</strong>
                   <span>{
                     continuityNotice
                       ? continuityNotice.reason
-                      : humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
+                      : humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
                   }</span>
                 </div>
                 <div className="terminal-recovery__actions">

@@ -12,16 +12,17 @@ import type { AgentDisplayState } from '@agentmux/core'
  * 状态色表——这正是横幅此前的形状：它把 `disconnected` 写死成 `var(--amber)`，而色表明确判它是
  * `--text-3`，并在注释里写明"琥珀只表示等你"。于是一条掉线的链路被画成了"你是瓶颈"。
  *
- * 三个入参就是渲染现场已有的那三个事实，顺序即优先级：还连着但链路断了（`disconnected`）优先于
- * 进程已退（`exited`），两者都不是才是"会话不可用"（`error`）。
+ * 进程投影明确报错才使用 error；结束是中性生命周期事实，其余不可用按断开呈现。
  */
 export function sessionRecoveryState(input: {
   disconnected: boolean
   exited: boolean
+  failed: boolean
 }): AgentDisplayState {
+  if (input.failed) return 'error'
   if (input.disconnected) return 'disconnected'
   if (input.exited) return 'exited'
-  return 'error'
+  return 'disconnected'
 }
 
 /**
