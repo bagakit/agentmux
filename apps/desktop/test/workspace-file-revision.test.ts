@@ -92,14 +92,15 @@ describe('store 只经由这个函数改失效计数', () => {
     )
   })
 
-  it('八个写入面都还在调它', () => {
+  it('九个写入面都还在调它', () => {
     // 数调用次数是刻意的：上面那条 not.toMatch 只证明「没有手抄」，
     // 把某个面的 bump 整行删掉同样能满足它——那正是漏 bump 的原样子。
-    // 八个面 = 保存 scratch 文档 / 建 topic / 改 topic 标题 / 建笔记 / 启动 scratch agent
-    //        + 建路径 / 改名 / 删路径（后三个是 FileExplorer 的写入面）。
-    // 这条守不住「新增第九个面却忘了 bump」（没有任何文本判据能守住那个），
-    // 但守得住「已有的八个被悄悄拆掉一个」。
-    expect(store.split('bumpWorkspaceFileRevision(').length - 1).toBe(8)
+    // 九个面 = 保存 scratch 文档 / 建 topic / 改 topic 标题 / 建笔记 / 启动 scratch agent
+    //        + 建路径 / 改名 / 删路径（这三个是 FileExplorer 的写入面）
+    //        + 把当前页存成书签（bd347a06 的第九个面，与 createPath 共用这个计数器）。
+    // 这条守不住「新增第十个面却忘了 bump」（没有任何文本判据能守住那个），
+    // 但守得住「已有的九个被悄悄拆掉一个」。
+    expect(store.split('bumpWorkspaceFileRevision(').length - 1).toBe(9)
   })
 })
 

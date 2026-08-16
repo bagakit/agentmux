@@ -102,7 +102,12 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
       ['apps/desktop/scripts/dev-desktop.mjs', 'dev 分支脚本的 plutil 写入'],
       ['apps/desktop/src/main/index.ts', 'userData 目录名'],
       ['apps/desktop/scripts/probe-file-editing.mjs', '注释：说明探针刻意不用这个真实目录'],
-      ['docs/plans/agentmux-desktop-package.md', '文档描述，不参与构建']
+      ['docs/plans/agentmux-desktop-package.md', '文档描述，不参与构建'],
+      // 下面两处是**注释里的证据引用**，不是写入点：98f5bf96 修「存量 v9 配置缺 saveBookmark
+      // 就加载不了」时，举证依据正是本机那份真实配置的所在目录，注释里点名它才说得清这不是
+      // 假想缺陷。没有任何代码读这两处，改掉它们也不会让任何一份用户数据换位置。
+      ['apps/desktop/src/main/config-store.ts', '注释：举证那份缺键的真实 v9 配置在哪'],
+      ['apps/desktop/test/config-store.test.ts', '注释：同上，回归用例的出处说明']
     ])
 
     const unexpected = hits.filter((path) => !known.has(path))
