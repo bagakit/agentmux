@@ -26,12 +26,16 @@ import type {
   AgentMuxControlError,
   AgentMuxControlErrorCode,
   AgentMuxControlBrowserRunOutcome,
+  AgentMuxControlBrowserOperation,
   AgentMuxControlRequest,
   AgentMuxControlResult,
   AgentMuxExecutorProbeOutcome,
   AgentTimelineItem,
   AgentTimelineSnapshot
 } from '@agentmux/core'
+import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
+export type { BrowserActivityState, BrowserOperator } from './browser-operation'
+export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
 import {
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -325,6 +329,19 @@ const _appLinkSchemeChoicesAreExactlyTheUnion: [
 ] = [true, true]
 void _appLinkSchemeChoicesAreExactlyTheUnion
 
+/**
+ * Project Rail 的密度档，唯一真源。用户拥有：控件就地落在 Projects 标题行加号旁，不进设置页。
+ *
+ * 极少的档位而非无级滑块——三个拨盘（每层缩进 / 行图标 / 行高）一起从缺省移到更紧，只有两三个
+ * 好值，滑块只会逼用户自己找一个。缺席即 `default`（DEN「Project Rail 与 Topic 行密度」）。
+ *
+ * 与 `APP_LINK_SCHEME_CHOICES` 同形：`config-store.ts` 用 `z.enum(...)` 校验磁盘值，成员必须
+ * **追溯到一个 import 进来的元组**（`schema-enum-ssot.test.ts`），手抄一份 `z.enum(['default',...])`
+ * 会在加档时静默丢值。类型直接派生自元组，加档两处一起变宽。
+ */
+export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact'] as const
+export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
+
 export type AppearanceConfig = {
   appAppearance?: AppAppearanceId
   terminalTheme: TerminalThemeId
@@ -354,7 +371,7 @@ export type BrowserConfig = {
    */
   agentAutomation?: boolean
   /**
-   * 用户对「把某个 scheme 的应用链接交给系统」记住的答案，按 scheme 名存（不带冒号，如 `lark`）。
+   * 用户对「把某个 scheme 的应用链接交给系统」记住的答案，按 scheme 名存（不带冒号，如 `alphaapp`）。
    *
    * 为什么按 scheme 而不按站点：用户回答的那一问是「准不准这类链接启动本机应用」，那是一个关于
    * **目标应用**的判断，不是关于当前这个页面的。按站点存会让同一个应用链接在文档域和开放平台域
@@ -431,6 +448,14 @@ export type AppConfig = {
    * 补上默认」的回填都会把删掉的东西送回来——删了又回来比一开始不能删更糟。
    */
   composerShortcuts?: ComposerShortcut[]
+  /**
+   * 用户就地选的 Project Rail 密度档。可选是因为字段后加（同 `appLinkSchemes` 的落地路径）：既有
+   * 磁盘 config 没有它，写成必需会让整块判失败。
+   *
+   * **不回填**（同 `appLinkSchemes`）：缺席即默认档，读的地方一律 `?? 'default'`，落盘只在用户
+   * 真的切了档时发生。密度是看法不是数据，补一次盘只是白写。
+   */
+  projectRailDensity?: ProjectRailDensity
 }
 
 export type FileDocument = {
@@ -960,6 +985,8 @@ export type BrowserSnapshot = {
    * 页面上的一次点击。
    */
   appLinkPrompt: { url: string; scheme: string } | null
+  /** Latest bounded Browser operation projection; transient while the native page is live. */
+  activity?: BrowserActivityState
 }
 
 export type BrowserProfileImportedSource = {
@@ -1056,6 +1083,7 @@ export type BrowserScriptRunReport = {
   /** 程序 console 出来的每一行，**失败时照样有**——炸掉之前打的那几行往往正是要看的。 */
   logs: string[]
   outcome: AgentMuxControlBrowserRunOutcome
+  runOperation: AgentMuxControlBrowserOperation
 }
 
 export type BrowserElementRect = {
@@ -1365,7 +1393,12 @@ export type AgentMuxDesktopApi = {
      * 这是 Main 侧唯一对外暴露的驱动入口——页面能力（snapshot/click/...）是注入给那段程序的内部函数库，
      * 不在这个契约上，所以改它们不动这里。
      */
-    runScript(id: string, code: string): Promise<BrowserScriptRunReport>
+    runScript(id: string, code: string, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
+    listOperationHistory(): Promise<BrowserOperation[]>
+    replayPlan(operationId: string): Promise<BrowserReplayPlan | null>
+    runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
+    returnControl(id: string): Promise<BrowserSnapshot>
+    stopOperation(id: string): Promise<BrowserSnapshot>
     selectElement(id: string): Promise<BrowserElementSelection | null>
     /**
      * 回答这一页上待答的那个应用链接提问。`remember` 为真时把这个答案按 scheme 记进

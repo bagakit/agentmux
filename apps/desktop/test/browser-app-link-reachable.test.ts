@@ -62,16 +62,16 @@ function flat(text: string): string {
 }
 
 function refusalSectionName(): string | null {
-  const match = appLinkRefusedMessage('lark').match(/Settings\s*›\s*([A-Za-z ]+?)(?:\.|$)/u)
+  const match = appLinkRefusedMessage('alphaapp').match(/Settings\s*›\s*([A-Za-z ]+?)(?:\.|$)/u)
   return match?.[1]?.trim() ?? null
 }
 
 describe('应用链接：拒绝点名的位置真的到得了', () => {
   it('拒绝文案点名了一个 Settings 小节，而且说的是「怎么撤回」', () => {
-    const message = appLinkRefusedMessage('lark')
+    const message = appLinkRefusedMessage('alphaapp')
     // 前提自检：这条判据的靶子还在。整句被重写时下面取名字会得到 null，而 null 在「没点名」
     // 与「判据坏了」之间不可区分，所以先把在场判掉。
-    expect(message, '拒绝文案里连 scheme 都没说，用户不知道是哪一类链接被挡了').toContain('lark')
+    expect(message, '拒绝文案里连 scheme 都没说，用户不知道是哪一类链接被挡了').toContain('alphaapp')
     expect(refusalSectionName(), '拒绝没点名具体是 Settings 的哪一节，用户只能自己翻').not.toBeNull()
 
     // 点名位置还不够：得说清在那儿做什么。「去 Settings 看看」是一句无法行动的话。

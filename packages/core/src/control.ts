@@ -204,6 +204,12 @@ export type AgentMuxControlStopRequest = RequestBase & {
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'; browserId: string; code: string; caller?: AgentMuxControlCaller
 }
+export type AgentMuxControlBrowserHistoryRequest = RequestBase & {
+  operation: 'browser.history'; browserId?: string
+}
+export type AgentMuxControlBrowserReplayRequest = RequestBase & {
+  operation: 'browser.replay'; browserId: string; operationId: string; mode?: 'preview' | 'step' | 'run'; step?: number; caller?: AgentMuxControlCaller
+}
 export type AgentMuxControlRequest =
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
@@ -219,6 +225,8 @@ export type AgentMuxControlRequest =
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
   | AgentMuxControlBrowserRunRequest
+  | AgentMuxControlBrowserHistoryRequest
+  | AgentMuxControlBrowserReplayRequest
 
 /**
  * 一段 Agent 程序的结局——**四分类，不是布尔成败**。
@@ -242,6 +250,30 @@ export type AgentMuxControlBrowserRunOutcome =
   | { kind: 'script-failed'; message: string }
   | { kind: 'stopped'; message: string }
   | { kind: 'indeterminate'; message: string }
+
+/** Stable operation facts returned with a Browser run receipt. The detailed step
+ * vocabulary is intentionally opaque to Core; Desktop owns Browser semantics. */
+export type AgentMuxControlBrowserOperation = {
+  id: string
+  browserId: string
+  operator: { id: string; name: string; providerId?: string }
+  startedAt: number
+  finishedAt?: number
+  phase: string
+  summary: string
+  url: string
+  steps: unknown[]
+  replayOf?: string
+  warning?: string
+}
+
+/** Core keeps replay assets opaque beyond their version and join identity. Desktop owns step semantics. */
+export type AgentMuxControlBrowserReplayPlan = {
+  schema: 'agentmux.browser-replay.v1'
+  operationId: string
+  url: string
+  steps: unknown[]
+}
 
 export type AgentMuxControlResult =
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
@@ -267,14 +299,33 @@ export type AgentMuxControlResult =
       result: unknown
       logs: string[]
       outcome: AgentMuxControlBrowserRunOutcome
+      // 不叫 `operation`：这个联合的判别键就是 `operation`（上面每一支的 `'browser.run'` 等字面量），
+      // 同一个成员里再放一个同名字段会让 tsc 报 Duplicate identifier，且判别键被覆盖后整个联合的
+      // 收窄全部失效。receipt 侧改名，wire 侧的字段名不动（那是协议，见 control-host 的读取点）。
+      runOperation: AgentMuxControlBrowserOperation
+    }
+  | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
+  | {
+      operation: 'browser.replay'
+      mode: 'run' | 'step'
+      result: unknown
+      logs: string[]
+      outcome: AgentMuxControlBrowserRunOutcome
+      runOperation: AgentMuxControlBrowserOperation
+    }
+  | {
+      operation: 'browser.replay'
+      mode: 'preview'
+      plan: AgentMuxControlBrowserReplayPlan
     }
 
+type WithoutOperation<T> = T extends unknown ? Omit<T, 'operation'> : never
 type SuccessByOperation<Operation extends AgentMuxControlResult['operation']> = {
   schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION
   requestId: string
   ok: true
   operation: Operation
-  result: Omit<Extract<AgentMuxControlResult, { operation: Operation }>, 'operation'>
+  result: WithoutOperation<Extract<AgentMuxControlResult, { operation: Operation }>>
 }
 export type AgentMuxControlSuccessReceipt = {
   [Operation in AgentMuxControlResult['operation']]: SuccessByOperation<Operation>
@@ -362,7 +413,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // Agent 写的调试程序会等页面加载、等网络空闲、循环点很多次——短预算（2 秒）会把**正常执行**掐死，
   // 而掐死的表现是 CONTROL_TIMEOUT，看起来像页面出了事。子进程自己还有一道更紧的超时兜底（脚本执行器
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
-  'browser.run': 'long'
+  'browser.run': 'long',
+  'browser.history': 'short',
+  'browser.replay': 'long'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */

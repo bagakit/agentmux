@@ -41,7 +41,7 @@ export type BrowserTargetKind =
 export interface BrowserTarget {
   readonly kind: BrowserTargetKind
   /**
-   * `hand-off` 时是那个 scheme 的名字（不带冒号，如 `lark`）——记住的选择按它存，问的话也说它。
+   * `hand-off` 时是那个 scheme 的名字（不带冒号，如 `alphaapp`）——记住的选择按它存，问的话也说它。
    * 其余两种为 `null`。
    */
   readonly scheme: string | null
@@ -55,7 +55,7 @@ const REFUSE: BrowserTarget = { kind: 'refuse', scheme: null }
  * 一律算应用链接。
  *
  * 第三段刻意兜底而不枚举：一般浏览器的做法就是把未知 scheme 交给 OS 判，我们枚举不完
- * `lark` / `slack` / `zoommtg` / `vscode` / `mailto` 之外的世界。安全边界是**那一问**，不是那张表。
+ * `alphaapp` / `betaapp` / `mailto` 之外的世界。安全边界是**那一问**，不是那张表。
  *
  * 解析不了的字符串算 `refuse`：连 scheme 都取不出来的东西，没有任何理由递给 `shell.openExternal`。
  */

@@ -38,6 +38,7 @@ import {
   browserCaptureMatchesIdentity,
   BrowserPane
 } from '../src/renderer/src/components/BrowserPane.js'
+import { api } from '../src/renderer/src/lib/api.js'
 import { BrowserToolbarPreferences } from '../src/renderer/src/components/SurfaceToolDock.js'
 import { BrowserAnnotationsPanel } from '../src/renderer/src/components/SurfaceToolDock.js'
 
@@ -202,12 +203,68 @@ describe('Browser bar contract', () => {
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
 
-  it('shows an accessible control handoff state while an Agent operates the page', () => {
+  it('shows one accessible operation rail while an Agent operates the page', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={{ ...tab, driving: true }} visible />)
-    expect(markup).toContain('Agent is operating this page')
-    expect(markup).toContain('Interact with the page to take control back.')
+    expect(markup).toContain('Agent control active')
+    expect(markup).toContain('Activity details are loading')
     expect(markup).toContain('role="status"')
-    expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent is operating this page')
+    expect(markup).not.toContain('browser-control-status')
+    expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
+  })
+
+  it('wires the rail takeover and stop controls to the Main-owned stop operation', async () => {
+    const stopOperation = vi.spyOn(api.browser, 'stopOperation').mockResolvedValue(tab)
+    const activeTab = {
+      ...tab,
+      driving: true,
+      activity: {
+        control: 'agent' as const,
+        operation: {
+          id: 'operation-1',
+          browserId: tab.browserId,
+          operator: { id: 'agent-1', name: 'Navigator', providerId: 'codex' },
+          startedAt: 1,
+          phase: 'running' as const,
+          summary: 'Inspect page',
+          url: tab.url,
+          steps: []
+        }
+      }
+    }
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => root.render(<BrowserPane tab={activeTab} visible />))
+    expect(container.textContent).toContain('Take control')
+    const takeControlButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Take control'))
+    expect(takeControlButton).not.toBeUndefined()
+    await act(async () => takeControlButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const stop = container.querySelector('button[aria-label="Stop browser operation"]')
+    expect(stop).not.toBeNull()
+    await act(async () => stop!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(stopOperation).toHaveBeenCalledTimes(2)
+    expect(stopOperation).toHaveBeenNthCalledWith(1, tab.browserId)
+    expect(stopOperation).toHaveBeenNthCalledWith(2, tab.browserId)
+    await act(async () => root.unmount())
+    container.remove()
+    stopOperation.mockRestore()
+  })
+
+  it('opens durable operation history from the rail and loads it on demand', async () => {
+    const listOperationHistory = vi.spyOn(api.browser, 'listOperationHistory').mockResolvedValue([])
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => root.render(<BrowserPane tab={tab} visible />))
+    const openHistory = container.querySelector('button[aria-label="Open browser activity timeline"]')
+    expect(openHistory).not.toBeNull()
+    await act(async () => openHistory!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(listOperationHistory).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('Recent operations')
+    expect(container.textContent).toContain('No recorded Browser operations yet.')
+    await act(async () => root.unmount())
+    container.remove()
+    listOperationHistory.mockRestore()
   })
 
   it('renders an explicit release state without pretending a hidden Browser still owns WebContents', () => {

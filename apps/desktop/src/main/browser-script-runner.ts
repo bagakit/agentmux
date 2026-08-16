@@ -105,6 +105,8 @@ export type BrowserScriptRunInput = {
    * 而不是一个看起来像页面没响应的挂起。
    */
   onPageCall?: (name: string, args: unknown[]) => Promise<unknown>
+  /** Main-owned stop/hand-off signal. Aborting kills only this isolated script process. */
+  signal?: AbortSignal
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -264,6 +266,11 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
     // 第四条 'ipc' 就是页面调用的通道，与 stdout 分开走。
     { env: environment, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }
   )
+  const abortChild = (): void => {
+    if (!child.killed) child.kill('SIGKILL')
+  }
+  if (input.signal?.aborted) abortChild()
+  else input.signal?.addEventListener('abort', abortChild, { once: true })
   // Node 的类型只给三元组 stdio 配了"三条流都在"的精确重载；四元组会把每条流推成
   // 可能为 null。这里三条管道是我们自己在上面写死的，必然存在——与其在每处访问上加断言，
   // 不如在这一处把事实说清楚。
@@ -375,7 +382,10 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
       child.once('error', (error) => resolve({ code: null, signal: null, spawnError: error }))
       child.once('close', (code, signal) => resolve({ code, signal }))
     }
-  ).finally(() => clearTimeout(timer))
+  ).finally(() => {
+    clearTimeout(timer)
+    input.signal?.removeEventListener('abort', abortChild)
+  })
 
   // 这里不处理"最后一行没有换行符"的残留：子进程写的每一帧都自带 `\n`，而 `close` 在 stdout
   // 读完之后才触发，所以收尾时 pending 必然是空的（实测确认过）。补一段永远不执行的兜底，

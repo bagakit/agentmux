@@ -480,7 +480,7 @@ describe('BrowserViewManager', () => {
         internals.snapshot = (...args) => {
           snapshotCalls += 1
           if (snapshotCalls === 2) throw new Error(`${failurePoint} failed`)
-          return original!(...args)
+          return original!.apply(manager, args)
         }
       } else {
         internals[failurePoint] = () => { throw new Error(`${failurePoint} failed`) }

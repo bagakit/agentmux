@@ -652,6 +652,9 @@ describe('agentmux browser 顶层动词', () => {
     )
     const verb = await run(['browser', '--help'])
     expect(verb, 'browser --help 没讲它和 open browser 的分工').toContain('neither replaces the other')
+    expect(verb, 'browser --help 没有历史记录入口').toContain('browser history')
+    expect(verb, 'browser --help 没有回放入口').toContain('browser replay')
+    expect(verb, 'browser --help 没有回放模式').toContain('--preview')
   })
 
   // operationPath 此前只对 `open` 做两级拼接。没有这条，把 browser 那一枝删掉后

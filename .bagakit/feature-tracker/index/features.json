@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 158
+    "next_cursor": 163
   },
   "features": [
     {
@@ -1328,8 +1328,8 @@
     {
       "feat_id": "f-2688fn733",
       "title": "认得出是哪一格、哪个 Agent 在干什么：四处身份与近况的补齐",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -1598,6 +1598,56 @@
     {
       "feat_id": "f-2748fftu5",
       "title": "Browser 操作与交还状态条",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2758fp4kj",
+      "title": "Browser CDP 逃生口正向闭环",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2768fsc64",
+      "title": "Browser Agent 元素上下文入口",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2778fzy4c",
+      "title": "Browser RSI：Agent 操作、交接、回放与时间线",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2788fa4ey",
+      "title": "Browser RSI 验收修复",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2798fxrr5",
+      "title": "Browser 协议交接泛化",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

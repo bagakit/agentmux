@@ -303,13 +303,44 @@ describe('Control protocol', () => {
     })).toThrow('Browser script')
   })
 
+  it('parses Browser history and replay receipts without losing operation identity', () => {
+    const history = parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'history', operation: 'browser.history', browserId: 'browser:1'
+    })
+    expect(history).toMatchObject({ operation: 'browser.history', browserId: 'browser:1' })
+    const operation = { id: 'op:replay', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
+    const replay = parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'replay', ok: true, operation: 'browser.replay',
+      result: { result: { ok: true }, logs: [], outcome: { kind: 'completed' }, runOperation: operation }
+    })
+    expect(replay).toMatchObject({ operation: 'browser.replay', result: { runOperation: { id: 'op:replay' } } })
+  })
+
+  it('parses explicit Browser replay modes and step selectors', () => {
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'preview', operation: 'browser.replay', browserId: 'browser:1', operationId: 'op:1', mode: 'preview'
+    })).toMatchObject({ operation: 'browser.replay', mode: 'preview' })
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'step', operation: 'browser.replay', browserId: 'browser:1', operationId: 'op:1', mode: 'step', step: 2
+    })).toMatchObject({ operation: 'browser.replay', mode: 'step', step: 2 })
+    expect(() => parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'bad-step', operation: 'browser.replay', browserId: 'browser:1', operationId: 'op:1', mode: 'step'
+    })).toThrow(/step is required/i)
+  })
+
   it('round-trips a browser.run receipt with its logs and four-class outcome', () => {
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'run-basic',
       ok: true,
       operation: 'browser.run',
-      result: { result: { title: 'Example' }, logs: ['clicked @e1'], outcome: { kind: 'completed' } }
+      result: { result: { title: 'Example' }, logs: ['clicked @e1'], outcome: { kind: 'completed' }, runOperation: operation }
     })).toMatchObject({
       operation: 'browser.run',
       result: { result: { title: 'Example' }, logs: ['clicked @e1'], outcome: { kind: 'completed' } }
@@ -322,7 +353,7 @@ describe('Control protocol', () => {
       operation: 'browser.run',
       result: {
         logs: ['got this far'],
-        outcome: { kind: 'script-failed', message: 'element is gone' }
+        outcome: { kind: 'script-failed', message: 'element is gone' }, runOperation: operation
       }
     })).toMatchObject({
       result: { logs: ['got this far'], outcome: { kind: 'script-failed', message: 'element is gone' } }
@@ -332,6 +363,7 @@ describe('Control protocol', () => {
   // 承重的一条。四类结局若在线上被折成两类（成功 / 失败），"做到哪一步不知道"就消失了——而那正是
   // 真实危险所在：indeterminate 意味着页面上**可能已经点过一次**，调用方不许重试。
   it('keeps all four browser.run outcome classes distinct on the wire', () => {
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     const outcomes = [
       { kind: 'completed' },
       { kind: 'script-failed', message: 'boom' },
@@ -344,7 +376,7 @@ describe('Control protocol', () => {
         requestId: 'run-outcomes',
         ok: true,
         operation: 'browser.run',
-        result: { logs: [], outcome }
+        result: { logs: [], outcome, runOperation: operation }
       })
       if (!receipt.ok || receipt.operation !== 'browser.run') throw new Error('not a browser.run success receipt')
       return receipt.result.outcome.kind
@@ -359,7 +391,7 @@ describe('Control protocol', () => {
       requestId: 'run-bogus-outcome',
       ok: true,
       operation: 'browser.run',
-      result: { logs: [], outcome: { kind: 'probably-fine' } }
+      result: { logs: [], outcome: { kind: 'probably-fine' }, runOperation: operation }
     })).toThrow('outcome is invalid')
     // 带消息的三类缺了 message 也要抛：一条说不出原因的失败等于没说。
     expect(() => parseAgentMuxControlReceipt({
@@ -367,7 +399,7 @@ describe('Control protocol', () => {
       requestId: 'run-no-message',
       ok: true,
       operation: 'browser.run',
-      result: { logs: [], outcome: { kind: 'stopped' } }
+      result: { logs: [], outcome: { kind: 'stopped' }, runOperation: operation }
     })).toThrow('invalid')
   })
 
@@ -375,12 +407,13 @@ describe('Control protocol', () => {
   // `logs: [{}]` 会一路流进 UI 渲染成 "[object Object]"，或者在某个 `.split()` 上炸得离题万里。
   // 上限同理：这是线上解析器，对面不一定是我们自己的进程。
   it('validates browser.run logs line by line and caps how many it will take', () => {
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     const receipt = parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'run-logs',
       ok: true,
       operation: 'browser.run',
-      result: { logs: ['one', 'two'], outcome: { kind: 'completed' } }
+      result: { logs: ['one', 'two'], outcome: { kind: 'completed' }, runOperation: operation }
     })
     // 自检：合法的两行真的过了线，否则下面两条拒绝在对空气生效。
     expect(receipt.ok && receipt.operation === 'browser.run' && receipt.result.logs).toEqual(['one', 'two'])
@@ -389,14 +422,14 @@ describe('Control protocol', () => {
       requestId: 'run-bad-log-line',
       ok: true,
       operation: 'browser.run',
-      result: { logs: ['fine', { message: 'not a string' }], outcome: { kind: 'completed' } }
+      result: { logs: ['fine', { message: 'not a string' }], outcome: { kind: 'completed' }, runOperation: operation }
     })).toThrow('Browser script log')
     expect(() => parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'run-too-many-logs',
       ok: true,
       operation: 'browser.run',
-      result: { logs: Array.from({ length: 10_001 }, () => 'x'), outcome: { kind: 'completed' } }
+      result: { logs: Array.from({ length: 10_001 }, () => 'x'), outcome: { kind: 'completed' }, runOperation: operation }
     })).toThrow('logs are invalid')
   })
 

@@ -126,7 +126,10 @@ person once. The answer is remembered per scheme, not per site, and is theirs to
 itself leads to.`],
   ['browser', `Drive an already-open Browser
 
-Usage: agentmux browser run --browser <browser-id> < program.js
+Usage:
+  agentmux browser run --browser <browser-id> < program.js
+  agentmux browser history [--browser <browser-id>]
+  agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
 
 \`open browser\` opens one; \`browser run\` drives one that is already open. Two different
 things, two commands — neither replaces the other.`],
@@ -135,6 +138,8 @@ things, two commands — neither replaces the other.`],
 Usage:
   agentmux browser run --browser <browser-id> < program.js
   echo 'return await snapshot()' | agentmux browser run --browser <browser-id>
+  agentmux browser history [--browser <browser-id>]
+  agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
 
 The program is read from stdin as a whole — there is no --code flag, because a real program
 contains quotes, backslashes and newlines that every shell layer would re-escape.
@@ -153,13 +158,19 @@ with the details, not \`completed\`.
 Requires Agent browser automation to be enabled in Settings › Browser. It is off by default,
 and the refusal says so rather than failing quietly.
 
+Every receipt also includes an \`operation\` object with one stable operation id, the operator identity,
+ordered semantic steps, and a replay reference. Keep that id when refining a program: it is the join key
+for the Browser activity timeline, the desktop operation journal, and later replay. Raw passwords, cookies,
+page text, coordinates, and opaque JavaScript/CDP arguments are never stored in replay facts; sensitive
+steps remain explicit review gates.
+
 A person can take the page back at any time: a real click, keypress or scroll on that Browser
 hands ownership to them mid-run. Actions (click, fillInput, gotoUrl, js, cdp, …) are refused
 from that moment on; observation (snapshot, pageInfo, waitFor…) keeps working so the program
 can see where it left things. The page carries a badge while a program is driving it, and the
 Tab it sits in is marked too, so the takeover is a deliberate act, not a surprise — they can
-see which Browser you are in without switching to it. Nothing sticks: the next \`browser run\`
-starts with the page free again.
+see which Browser you are in without switching to it. A subsequent \`browser run\` stays refused
+until the person explicitly chooses Return to Agent (or an equivalent handoff control).
 
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:

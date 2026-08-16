@@ -2413,13 +2413,60 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'browser.run') {
       // 授权闸不在这层，在 Main 的 browser:runScript handler 里：那是所有调用方的必经之路，
       // 而这里只是今天唯一的一个调用方。放在这层的话，每多一个入口就要记得再写一遍同样的检查。
-      const report = await api.browser.runScript(request.browserId, request.code)
+      const report = await api.browser.runScript(request.browserId, request.code, request.caller
+        ? { id: request.caller.agentSessionId, name: `Agent ${request.caller.agentSessionId}` }
+        : undefined)
       requireActive()
       return {
         operation: request.operation,
         result: report.result,
         logs: report.logs,
-        outcome: report.outcome
+        outcome: report.outcome,
+        runOperation: report.runOperation
+      }
+    }
+    if (request.operation === 'browser.history') {
+      requireActive()
+      const operations = await api.browser.listOperationHistory()
+      return {
+        operation: request.operation,
+        operations: request.browserId ? operations.filter((operation) => operation.browserId === request.browserId) : operations
+      }
+    }
+    if (request.operation === 'browser.replay') {
+      const plan = await api.browser.replayPlan(request.operationId)
+      if (!plan) throw controlFailure('CONTROL_FAILED', 'Browser replay operation was not found.')
+      const mode = request.mode ?? 'run'
+      if (mode === 'preview') {
+        return {
+          operation: request.operation,
+          mode: 'preview',
+          plan
+        }
+      }
+      let runPlan = plan
+      if (mode === 'step') {
+        if (!request.step || request.step < 1 || request.step > plan.steps.length) {
+          throw controlFailure('INVALID_CONTROL_REQUEST', 'Browser replay step is outside the operation plan.')
+        }
+        const step = plan.steps[request.step - 1]
+        if (!step) throw controlFailure('INVALID_CONTROL_REQUEST', 'Browser replay step is missing.')
+        if (step.blockedReason) {
+          throw controlFailure('CONTROL_FAILED', `Browser replay step requires review: ${step.blockedReason}`)
+        }
+        runPlan = { ...plan, steps: [step] }
+      }
+      const report = await api.browser.runReplay(request.browserId, runPlan, request.caller
+        ? { id: request.caller.agentSessionId, name: `Agent ${request.caller.agentSessionId}` }
+        : undefined)
+      requireActive()
+      return {
+        operation: request.operation,
+        mode: mode === 'step' ? 'step' : 'run',
+        result: report.result,
+        logs: report.logs,
+        outcome: report.outcome,
+        runOperation: report.runOperation
       }
     }
 
