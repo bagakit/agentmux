@@ -14,7 +14,7 @@ import type { PastedImage } from '../src/shared/contracts.js'
 //   - a read failure falls back to the plain-text reference, never a broken <img> frame.
 
 const DATA_URL = 'data:image/png;base64,aGVsbG8='
-const IMAGE: PastedImage = { mimeType: 'image/png', dataUrl: DATA_URL, byteLength: 5 }
+const IMAGE: PastedImage = { dataUrl: DATA_URL }
 const TOKEN = '@/Users/dev/.agentmux/pasted/paste-1.png'
 
 describe('splitPastedImageReferences — the narrow app-owned judgement', () => {

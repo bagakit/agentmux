@@ -997,15 +997,12 @@ export const PASTED_IMAGE_MIME_TYPES: Record<PastedImageExtension, string> = {
 export const PASTED_IMAGE_MAX_BYTES = 16 * 1024 * 1024
 
 /**
- * A pasted image read back from disk as an `<img>`-ready data URI. Shape clones `BrowserPng`'s
- * `{ mimeType, dataUrl, byteLength }` so the renderer treats both the same way (see `ScreenshotEditor`,
- * which drops such a `dataUrl` straight into an `<img src>`). No width/height: unlike a browser
- * screenshot these are not decoded in main, and the thumbnail sizes itself with CSS.
+ * A pasted image read back from disk as an `<img>`-ready data URI. The only consumer (`ConversationImage`)
+ * drops the `dataUrl` straight into an `<img src>`; no width/height (unlike a browser screenshot these are
+ * not decoded in main, and the thumbnail sizes itself with CSS).
  */
 export type PastedImage = {
-  mimeType: string
   dataUrl: string
-  byteLength: number
 }
 
 export type BrowserScreenshotCapture = {

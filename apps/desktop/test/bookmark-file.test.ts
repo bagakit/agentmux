@@ -224,4 +224,15 @@ describe('file name derivation is a safety boundary', () => {
   it('keeps ordinary punctuation like hyphens', () => {
     expect(bookmarkFileNameFromTitle('My Cool-Page v2')).toBe('My Cool-Page v2')
   })
+
+  // 截断按码点，不按 UTF-16 code unit。119 个 ASCII + 一个 emoji（😀 占 2 个 code unit）共 120 个
+  // 码点、121 个 code unit。旧实现 `slice(0, 120)`（按 code unit）会切在代理对中间，留下半个字符
+  // （孤立高代理 U+D800–U+DBFF）；按码点截则把 emoji 整个留下。
+  it('truncates on code-point boundaries, never leaving a lone surrogate', () => {
+    const name = bookmarkFileNameFromTitle('a'.repeat(119) + '\u{1F600}')
+    // 孤立高代理（后面不跟低代理）——修好后不该出现。
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(name)).toBe(false)
+    // emoji 被整个保留（第 120 个码点），绝不半个。
+    expect(name).toBe('a'.repeat(119) + '\u{1F600}')
+  })
 })

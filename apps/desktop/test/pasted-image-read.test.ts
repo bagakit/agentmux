@@ -33,15 +33,12 @@ describe('readPastedImage — reads inside the pasted directory', () => {
   it('returns an <img>-ready data URI for a real pasted image', async () => {
     const image = await readPastedImage(home, join(dir, 'paste-1.png'))
     expect(image).not.toBeNull()
-    expect(image!.mimeType).toBe('image/png')
     expect(image!.dataUrl).toBe(`data:image/png;base64,${PNG_BYTES.toString('base64')}`)
-    expect(image!.byteLength).toBe(PNG_BYTES.byteLength)
   })
 
   it('maps jpg and jpeg to image/jpeg from the shared mime table', async () => {
     await writeFile(join(dir, 'shot.jpeg'), PNG_BYTES)
     const image = await readPastedImage(home, join(dir, 'shot.jpeg'))
-    expect(image!.mimeType).toBe('image/jpeg')
     expect(image!.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true)
   })
 })
