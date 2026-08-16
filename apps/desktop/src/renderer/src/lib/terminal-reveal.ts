@@ -82,7 +82,18 @@ export function terminalInputSender(input: {
   write: (data: AgentMuxRunInputData) => void
 }): (data: AgentMuxRunInputData) => void {
   return (data) => {
-    if (input.accepts()) input.write(data)
+    if (!input.accepts()) return
+    // 空载荷不上线。xterm 有两处会送出「按了键但没有字节要发」：IME 组字途中的 `onData('')`，
+    // 以及旧式鼠标上报被禁用/坐标越界时 `onBinary('')`（经 encodeTerminalBinaryInput 变成零长
+    // Uint8Array）。ctxmux daemon 的 RecoverableInput 校验会拒绝空载荷，抛
+    // `recoverable native Input must not be empty`——于是用户只是在 TUI 里正常打字（尤其用中文
+    // 输入法），就吃到一个「Something failed unexpectedly」。
+    //
+    // 闸放在这个唯一出口而不是两个订阅里各加一份：accepts 的极性已经只在这里判一次
+    // （见 subscribeTerminalInput 的注释），空值判据跟着它走，否则下一次改闸必漏一处。
+    // 判长度而不是判真值：`'0'` 是合法输入而 `''`/零长字节不是，`if (!data)` 会把两者混为一谈。
+    if (data.length === 0) return
+    input.write(data)
   }
 }
 

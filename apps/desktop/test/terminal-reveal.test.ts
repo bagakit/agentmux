@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import type { AgentMuxRunInputData } from '@agentmux/core'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   encodeTerminalBinaryInput,
@@ -210,6 +211,27 @@ describe('揭示了不等于输入通了', () => {
     accepts = false
     send('closed-again')
     expect(sent).toEqual(['after'])
+  })
+
+  it('空载荷不上线：xterm 的两个空事件都不送，非空的照送', () => {
+    // 实战报告：用户没用 Composer，只在 Agent 的 TUI 里打字，却间断收到
+    // `recoverable native Input must not be empty`——那是 vendored ctxmux daemon 的
+    // RecoverableInput 校验，而空载荷是**正常**的终端事件：IME 组字途中的 `onData('')`，
+    // 以及旧式鼠标上报被禁用/越界时的 `onBinary('')`（经 encodeTerminalBinaryInput 成零长字节）。
+    // Agent 好得很，坏的是我们把一个无操作当成了一次输入（AGENTS.md 原则 11 第 2 类）。
+    //
+    // 根因闸在 Core（packages/core/test/empty-terminal-input-is-not-a-failure.test.ts），
+    // 这里是纵深防御：把这一行删掉即转红，所以它不是白写的。
+    const sent: AgentMuxRunInputData[] = []
+    const send = terminalInputSender({ accepts: () => true, write: (data) => sent.push(data) })
+
+    send('')
+    send(encodeTerminalBinaryInput(''))
+    // 判长度不判真值：`'0'` 是合法击键而 `''` 不是，`if (!data)` 会把两者混为一谈——且对零长
+    // Uint8Array 完全失明（`!new Uint8Array(0)` 是 false，对象恒 truthy）。
+    send('0')
+    send(new Uint8Array([0]))
+    expect(sent).toEqual(['0', new Uint8Array([0])])
   })
 })
 

@@ -850,7 +850,13 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       interrupt: 'short',
       // browser.run 等的是子进程里一段 Agent 现写的程序跑完，那是本表最典型的"等外面"：它会等页面
       // 加载、等网络空闲、循环点很多次。两秒会把正常执行掐成 CONTROL_TIMEOUT。
-      'browser.run': 'long'
+      'browser.run': 'long',
+      // history 只是把 journal 已经在内存里的那份记录读出来（store 那条臂上只有一次
+      // listOperationHistory，不碰页面、不等子进程），所以它跟 list.agents 同档。
+      'browser.history': 'short',
+      // replay 会把录下来的步骤真的重放到页面上——它就是一次 browser.run，只是程序是我们生成的。
+      // 给短预算等于把一次正常回放掐成 CONTROL_TIMEOUT，而此时页面上已经点过几下了。
+      'browser.replay': 'long'
     }
     const entries = Object.entries(EXPECTED_BUDGET) as [AgentMuxControlRequest['operation'], 'long' | 'short'][]
     // 自检：表空了下面的循环就是死代码。条数由 tsc 钉住，这里只防「Object.entries 拿到空」这种失灵。

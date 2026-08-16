@@ -127,7 +127,7 @@ describe('BrowserOperationTimeline', () => {
       operation: {
         ...operation,
         steps: [{
-          ...operation.steps[1],
+          ...operation.steps[1]!,
           target: { role: 'button', name: 'Open settings', ordinal: 1, count: 2 }
         }]
       }
@@ -165,7 +165,7 @@ describe('BrowserReplayPreview', () => {
 
   it('keeps non-completed receipts visible after replay', () => {
     const markup = renderToStaticMarkup(createElement(BrowserReplayPreview, {
-      plan: { ...plan, steps: [plan.steps[0]] },
+      plan: { ...plan, steps: [plan.steps[0]!] },
       outcome: { kind: 'indeterminate', message: 'The page changed before the result was known.' }
     }))
     expect(markup).toContain('Replay needs review')

@@ -1,4 +1,5 @@
 import type { AgentMuxControlBrowserRunOutcome } from '@agentmux/core'
+import type { BrowserOperationPhase } from '../shared/browser-operation.js'
 import type { BrowserScriptFailure } from './browser-script-runner.js'
 
 /**
@@ -46,4 +47,28 @@ export function browserRunOutcomeFromFailure(
   failure: BrowserScriptFailure
 ): AgentMuxControlBrowserRunOutcome {
   return OUTCOME_BY_FAILURE[failure.kind](failure)
+}
+
+/**
+ * 结局 → journal 的 phase。**Agent 收到的那句话和人在历史里看到的那句话必须是同一个结论。**
+ *
+ * 这张表存在的全部理由是 `indeterminate`：它两边同名，却曾经被写成 `kind === 'stopped' ?
+ * 'stopped' : 'failed'` 折进 `failed`。于是一次子进程崩溃，收据对 Agent 说"做到哪一步不知道，
+ * 先看页面、别重试"，历史对人说"失败了，改完重跑"——两个人按相反的结论行动，而页面上可能
+ * 已经点过一次了。
+ *
+ * 同样写成 `Record<kind, …>` 而不是三元/switch：契约往结局联合里加一支时，这张表少一格是
+ * TS2741，而不是安静落进 `failed`——那正是这条修补要拦住的那类遗漏。
+ */
+const PHASE_BY_OUTCOME: Record<AgentMuxControlBrowserRunOutcome['kind'], BrowserOperationPhase> = {
+  completed: 'completed',
+  'script-failed': 'failed',
+  stopped: 'stopped',
+  indeterminate: 'indeterminate'
+}
+
+export function browserOperationPhaseFromOutcome(
+  kind: AgentMuxControlBrowserRunOutcome['kind']
+): BrowserOperationPhase {
+  return PHASE_BY_OUTCOME[kind]
 }

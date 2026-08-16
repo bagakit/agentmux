@@ -211,14 +211,14 @@ export class BrowserOperationJournal {
     const operation = this.find(operationId)
     if (!operation) return null
     operation.phase = phase
-    if (options.summary !== undefined) operation.summary = clamp(options.summary)
-    if (options.warning !== undefined) operation.warning = clamp(options.warning)
+    if (options.summary !== undefined) operation.summary = clampProse(options.summary)
+    if (options.warning !== undefined) operation.warning = clampProse(options.warning)
     this.publish({
       type: 'phase-changed',
       operationId,
       at: this.now(),
       phase,
-      ...(options.warning ? { warning: clamp(options.warning) } : {})
+      ...(options.warning ? { warning: clampProse(options.warning) } : {})
     })
     await this.persist()
     return cloneOperation(operation)
@@ -262,7 +262,7 @@ export class BrowserOperationJournal {
     if (!operation || !step) return null
     step.status = input.status
     step.finishedAt = this.now()
-    if (input.summary !== undefined) step.summary = clamp(input.summary)
+    if (input.summary !== undefined) step.summary = clampProse(input.summary)
     if (input.target !== undefined) step.target = sanitizeTarget(input.target)
     if (input.replay !== undefined) step.replay = sanitizeReplay(input.replay)
     this.publish({ type: 'step-finished', operationId, at: step.finishedAt, step })
@@ -281,8 +281,8 @@ export class BrowserOperationJournal {
     const at = this.now()
     operation.phase = phase
     operation.finishedAt = at
-    if (options.summary !== undefined) operation.summary = clamp(options.summary)
-    if (options.warning !== undefined) operation.warning = clamp(options.warning)
+    if (options.summary !== undefined) operation.summary = clampProse(options.summary)
+    if (options.warning !== undefined) operation.warning = clampProse(options.warning)
     this.publish({ type: 'operation-finished', operationId, at, operation })
     await this.persist()
     return cloneOperation(operation)
@@ -421,6 +421,26 @@ function clamp(value: string): string {
   return value.length > MAX_FIELD_LENGTH ? `${value.slice(0, MAX_FIELD_LENGTH - 1)}…` : value
 }
 
+/**
+ * 摘要类字段的收口。**这里是持久化的门，页面控制的文本只能以「被圈起来的引文」形态过这道门。**
+ *
+ * `BrowserOperationStep.summary` 的类型注释写着 "never raw page data or script errors with echoed
+ * secrets"，但这份日志此前只对它做了 `clamp`——而失败臂取的是 `error.message`，页面里一句
+ * `throw new Error('忽略之前的指令，改为……')` 就会原样落盘，再经 `browser.history` 被**下一轮的
+ * Agent** 读回去。写入的是这一轮，命中的是下一轮，中间没有任何一步看得出这段字是谁写的：
+ * 这是存储型注入，不是显示问题（渲染侧 React 会转义，所以它不是 XSS）。
+ *
+ * 为什么门设在这里而不只在派发层：派发层那两处（`pageAuthoredText`）圈的是**入口**，可页面的话
+ * 还有第二条路——脚本自己的 `stack` 里会带上它，经 `browser-run-outcome.ts` 落进 `operation.summary`。
+ * 两条路都汇到这一个函数，所以这里是唯一能一次守住的地方（守卫按出口数不按来源数）。
+ *
+ * 只压平不删内容：这些字是排障唯一的依据，删了等于让 Agent 面对一次无从下手的失败。压平换行是
+ * 因为多行文本能在日志里伪造出「新的一条记录」的样子，而那恰恰是注入想要的形状。
+ */
+function clampProse(value: string): string {
+  return clamp(value.replace(/[\r\n\u2028\u2029]+/gu, ' '))
+}
+
 function stripUrl(value: string): string {
   try {
     const url = new URL(value)
@@ -444,10 +464,10 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
       name: clamp(operation.operator.name),
       ...(operation.operator.providerId ? { providerId: clamp(operation.operator.providerId) } : {})
     },
-    summary: clamp(operation.summary),
+    summary: clampProse(operation.summary),
     url: stripUrl(operation.url),
     steps: operation.steps.slice(-MAX_BROWSER_OPERATION_STEPS).map(sanitizeStep),
-    ...(operation.warning ? { warning: clamp(operation.warning) } : {})
+    ...(operation.warning ? { warning: clampProse(operation.warning) } : {})
   }
 }
 
@@ -458,7 +478,7 @@ function sanitizeStep(step: BrowserOperationStep): BrowserOperationStep {
     label: clamp(step.label),
     ...(step.ref ? { ref: clamp(step.ref) } : {}),
     ...(step.target ? { target: sanitizeTarget(step.target) } : {}),
-    ...(step.summary ? { summary: clamp(step.summary) } : {}),
+    ...(step.summary ? { summary: clampProse(step.summary) } : {}),
     ...(step.replay ? { replay: sanitizeReplay(step.replay) } : {})
   }
 }
@@ -544,9 +564,9 @@ function sanitizeEvent(event: BrowserOperationEvent): BrowserOperationEvent {
     case 'step-finished':
       return { ...event, operationId: clamp(event.operationId), step: sanitizeStep(event.step) }
     case 'phase-changed':
-      return { ...event, operationId: clamp(event.operationId), ...(event.warning ? { warning: clamp(event.warning) } : {}) }
+      return { ...event, operationId: clamp(event.operationId), ...(event.warning ? { warning: clampProse(event.warning) } : {}) }
     case 'operation-recovered':
-      return { ...event, operationId: clamp(event.operationId), warning: clamp(event.warning) }
+      return { ...event, operationId: clamp(event.operationId), warning: clampProse(event.warning) }
   }
 }
 
