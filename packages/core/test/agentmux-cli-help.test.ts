@@ -128,49 +128,190 @@ describe('agentmux CLI discovery', () => {
     }
   })
 
-  it('CLI 抛出的每一个码都在 CLI_ERROR_CODES 里——不在册的会被静默折成 AGENTMUX_FAILED', async () => {
+  it('CLI 够得着的每一个码都在 CLI_ERROR_CODES 里——不在册的会被静默折成 AGENTMUX_FAILED', async () => {
     // 上面那条是行为判据，只盯住一个码。这条是结构判据，盯住**下一个**码。
     //
     // 形状：`cliErrorCode` 对不在册的值一律返回 `AGENTMUX_FAILED`（agentmux.ts 顶层 catch）。于是
-    // "在 agentmux.ts 里 throw 一个新 AgentMuxError 却忘了把码加进 CLI_ERROR_CODES" 这件事
-    // **不产生任何编译错误、不产生任何测试失败**，只是机读侧永远看不到那个码。本仓记过这一族：
-    // 声明与消费两份清单各自漂移，而漂移的一侧是沉默的那侧。
+    // "throw 一个新 AgentMuxError 却忘了把码加进 CLI_ERROR_CODES" 这件事**不产生任何编译错误、
+    // 不产生任何测试失败**，只是机读侧永远看不到那个码。
     //
-    // 判据只扫 `agentmux.ts` 自己 throw 的字面量码，不扫整个 src/：从别处冒上来的码（control 那 39 个
-    // 经 spread 已在册；core 内部还有 70 余个码走 daemon/IPC 而不经这个 CLI 顶层 catch）不归这条管。
-    // 把判据放大到全仓会得到一张必须人手维护的豁免清单，而那种清单会漏——这正是本仓反复吃过的亏。
-    const source = await readFile(new URL('../src/agentmux.ts', import.meta.url), 'utf8')
+    // ## 扫描面为什么是「CLI 直接 import 的模块」而不是「agentmux.ts 一个文件」
+    //
+    // 这条判据最初只扫 agentmux.ts，而那样它**看不见自己要守的那个码**：
+    // `AGENT_ROLE_DIRECTORY_UNREADABLE` 是 `agent-role-directory.ts` 抛的，agentmux.ts 里只有注册表
+    // 那一处字面量。顶层 catch 不管是谁抛的——`roleCommand` 直接 await 那个函数，异常一路冒到
+    // `main().then(…, …)`，照样过 `cliErrorCode`。所以判据的边界不是「哪个文件写的 throw」，
+    // 而是「哪些 throw 到得了那个 catch」，这两者只在缺陷处分岔（本仓记过 derivation-source 那一族）。
+    //
+    // 取「CLI 直接 import 的 core 模块」这一层：它由 import 图派生、不是人手清单，且覆盖每一条
+    // 命令实现真正调用的东西。深一层（client.ts 再 import 的那些）不扫——那些码经 daemon 往返，
+    // 由 control 协议的码表负责，不走这条本地 catch。
+    //
+    // **`import type` 不算边**：它编译期就被抹掉，运行时一行代码都不会执行。初版把它算进来，于是
+    // `agent-session-registry.ts` 的三个码被报成「够得着却没在册」——而 CLI 从那里只取了一个类型
+    // （`AgentMuxAgentSessionLookup`）。一道要求给到不了的码上户口的守卫，本身就是缺陷。
+    const src = new URL('../src/', import.meta.url)
+    const cliSource = await readFile(new URL('agentmux.ts', src), 'utf8')
 
-    const registry = /const CLI_ERROR_CODES = \[([\s\S]*?)\] as const/.exec(source)
+    const registry = /const CLI_ERROR_CODES = \[([\s\S]*?)\] as const/.exec(cliSource)
     expect(registry, 'CLI_ERROR_CODES 的声明没解析出来——判据看不见它的目标就必须红').not.toBeNull()
-    // spread 进来的那 39 个控制码在别处（control.ts）声明，这里只看本文件字面列出的。
-    const registered = new Set([...registry![1]!.matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]!))
+    // spread 进来的那些控制码在别处（control.ts）声明，这里只看本文件字面列出的。
+    // 注释行先剥掉：这段注册表每个成员都带一段说明，说明里随手点名另一个码就会被算成「已在册」——
+    // 那是**放松**的方向（漏报），而说明不是注册。
+    //
+    // 剥离与匹配必须是**同一个函数**，不能是「一个 helper + 调用处自己拼」：那样把调用处的
+    // `withoutComments(...)` 去掉，helper 的自检照样绿，整个收紧静默失效（本仓刚为这同一形状连修两个
+    // 提交——判据与它的接线是两处会坏的地方）。所以下面的自检喂的就是这个函数本身。
+    const registryMembers = (body: string): string[] =>
+      [...body.replace(/^[ \t]*\/\/[^\n]*$/gm, '').matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]!)
+    const registered = new Set(registryMembers(registry![1]!))
 
-    const thrown = new Set(
-      [...source.matchAll(/new AgentMuxError\([\s\S]*?,\s*'([A-Z_]+)'/g)].map((match) => match[1]!)
-    )
-    expect(thrown.size, 'agentmux.ts 里一个 throw 都没解析出来——下面的循环是死代码').toBeGreaterThan(2)
+    // 每个 throw 取它实参里的大写串。**不能**用 `new AgentMuxError\(([\s\S]*?)\)`：非贪婪的 `\)`
+    // 停在第一个右括号上，而 message 常是带调用的模板串（``…${file(workspacePath)}``），于是实参被
+    // 截断在码之前——实测 agent-role-directory.ts 的三处 throw 因此一个都取不到。所以从 `(` 起
+    // 数括号配平，取完整实参。
+    const codesIn = (source: string): string[] => {
+      const found: string[] = []
+      for (const match of source.matchAll(/new AgentMuxError\(/g)) {
+        let depth = 0
+        let index = match.index + match[0].length - 1
+        for (; index < source.length; index += 1) {
+          if (source[index] === '(') depth += 1
+          else if (source[index] === ')') { depth -= 1; if (depth === 0) break }
+        }
+        const args = source.slice(match.index, index)
+        found.push(...[...args.matchAll(/'([A-Z][A-Z_]{3,})'/g)].map((code) => code[1]!))
+      }
+      return found
+    }
 
-    // 控制码经 spread 在册，但它们不在本文件的字面量里，所以要单独放行。
+    // 只收值 import：`import type { … } from './x.js'` 与 `import { type A }` 都不产生运行时边。
+    // 子句里**不许出现换行**（`[^\n]`）：本仓不写分号，用 `[\s\S]*?` 或 `[^;]*?` 都会一路吞过好几条
+    // import，于是 `type` 关键字落在匹配开头之外、判不出来——实测把 agent-session-registry 那条
+    // type-only import 算成了值边，它那三个到不了的码被报成缺陷。多行 import 由下面的自检兜住。
+    const valueImports = (source: string): string[] =>
+      [...source.matchAll(/^import\s+(type\s+)?([^\n]*?)\s*from '\.\/([a-z0-9-]+)\.js'/gm)]
+        .filter((match) => {
+          if (match[1]) return false
+          const clause = match[2]!.trim()
+          if (!clause.startsWith('{')) return true
+          // 整段只有 `{ type A, type B }` 时同样没有值绑定。
+          return clause.replace(/[{}]/g, '').split(',').some((binding) => {
+            const name = binding.trim()
+            return name !== '' && !name.startsWith('type ')
+          })
+        })
+        .map((match) => match[3]!)
+
+    const modules = ['agentmux', ...new Set(valueImports(cliSource))]
+    // 控制码经 spread 在册，但它们不在 CLI_ERROR_CODES 的字面量里，所以要单独放行。
     const { AGENTMUX_CONTROL_ERROR_CODES } = await import('../src/control.js')
     const control = new Set<string>(AGENTMUX_CONTROL_ERROR_CODES)
-
-    const orphans = [...thrown].filter((code) => !registered.has(code) && !control.has(code))
+    const reachable = new Map<string, string>()
+    for (const name of modules) {
+      // client.ts 是 daemon 客户端：它的码经协议往返，不由本地 catch 定型。
+      if (name === 'client') continue
+      let source: string
+      try { source = await readFile(new URL(`${name}.ts`, src), 'utf8') } catch { continue }
+      for (const code of codesIn(source)) if (!reachable.has(code)) reachable.set(code, `${name}.ts`)
+    }
+    expect(reachable.size, 'CLI 的 import 面上一个 throw 都没解析出来——下面的循环是死代码').toBeGreaterThan(5)
     expect(
-      orphans.sort(),
-      `这些码 agentmux.ts 抛得出来，却不在 CLI_ERROR_CODES 里：${orphans.join(', ')}。` +
-        'cliErrorCode 会把它们折成 AGENTMUX_FAILED——与「命令打错了」同一个码，机读侧分不出。' +
-        '把它们加进 CLI_ERROR_CODES，或者确认它们真的不该有自己的码。'
+      [...reachable.keys()],
+      '扫描面漏掉了 agent-role-directory.ts——这条判据当初正是因为看不见它而漏掉了自己要守的码'
+    ).toContain('AGENT_ROLE_DIRECTORY_UNREADABLE')
+    // 扫描面的完整性自检：单行 import 匹配看不见多行的 `import {\n … \n} from './x.js'`，而 CLI 正有
+    // 这样一条（control.js）。漏掉一个模块是**静默**的——少扫等于少报，门只会更松。所以这里按
+    // 「源码里出现过的相对 import 路径」核一遍差集，凡是漏掉的都要在此点名并说明为何不算。
+    const everyRelativeImport = new Set(
+      [...cliSource.matchAll(/from '\.\/([a-z0-9-]+)\.js'/g)].map((match) => match[1]!)
+    )
+    const TYPE_ONLY_OR_DELIBERATE: Record<string, string> = {
+      // 只取了一个类型（AgentMuxAgentSessionLookup），运行时没有这条边。
+      'agent-session-registry': 'type-only',
+      // daemon 客户端：它的码经协议往返，由 control 码表定型，不走本地 catch。
+      client: 'protocol-owned',
+      // 多行 import，单行匹配看不见。它只导出协议常量与类型，不 throw——下面这条断言钉住这一点。
+      control: 'no-throw'
+    }
+    const missed = [...everyRelativeImport].filter(
+      (name) => !modules.includes(name) && !(name in TYPE_ONLY_OR_DELIBERATE)
+    )
+    expect(
+      missed.sort(),
+      `这些模块 CLI import 了，却没进扫描面：${missed.join(', ')}。少扫是静默的——补进 modules，` +
+        '或在 TYPE_ONLY_OR_DELIBERATE 里写明为什么它的码到不了这条 catch。'
+    ).toEqual([])
+    // `control` 被列为 no-throw，这条把那个理由钉住：它哪天开始 throw，豁免就不再成立。
+    expect(
+      codesIn(await readFile(new URL('control.ts', src), 'utf8')).filter((code) => !control.has(code)),
+      'control.ts 开始抛控制码表以外的码了——它不能再算作 no-throw 豁免'
     ).toEqual([])
 
-    // 自检：两个解析都不许在空集上恒绿，且判据真的认得出"抛了但没在册"。
-    expect(registered.has('AGENTMUX_FAILED'), '注册表解析漏了已知成员').toBe(true)
-    expect(thrown.has('MAINTAINER_TARGET_UNRESOLVED'), 'throw 解析漏了已知的那一处').toBe(true)
-    const probe = "throw new AgentMuxError('probe', 'NEVER_REGISTERED_CODE')"
+    // 模块粒度会多报：一个模块里可能有 CLI 根本不调的导出。逐个点名，并给出**可核验**的理由——
+    // 理由不是注释，是下面那条反向断言真的去查一遍。
+    const UNREACHABLE_WITHIN_MODULE: Record<string, { symbol: string; why: string }> = {
+      // `connectSshAgentMux` 抛的。CLI 只调 `connectLocalAgentMux`（agentmux.ts 两处），远端那条
+      // 目前唯一的调用方是 desktop 主进程（runtime-controller.ts）。给一个到不了的码上户口，
+      // 等于在注册表里留一条永远不会出现的答案。
+      REMOTE_UNSUPPORTED: { symbol: 'connectSshAgentMux', why: 'CLI 只用 connectLocalAgentMux' }
+    }
+    const orphans = [...reachable].filter(
+      ([code]) => !registered.has(code) && !control.has(code) && !(code in UNREACHABLE_WITHIN_MODULE)
+    )
     expect(
-      [...probe.matchAll(/new AgentMuxError\([\s\S]*?,\s*'([A-Z_]+)'/g)].map((match) => match[1]!),
-      '判据认不出一处普通的 throw——上面那条扫描是死代码'
-    ).toEqual(['NEVER_REGISTERED_CODE'])
+      orphans.map(([code, where]) => `${code} (${where})`).sort(),
+      '这些码 CLI 够得着，却不在 CLI_ERROR_CODES 里。cliErrorCode 会把它们折成 AGENTMUX_FAILED——' +
+        '与「命令打错了」同一个码，机读侧分不出。加进 CLI_ERROR_CODES，或确认它们真的不该有自己的码。'
+    ).toEqual([])
+
+    // 豁免清单必须自己证明自己还成立——本仓反复吃过「人手豁免清单会漏、会过期」的亏。两个方向都查：
+    //  1. 名下那个符号还在、且 CLI 确实没有调它。它哪天被 CLI 调用了，豁免当场失效。
+    //  2. 这个码确实还被抛着。码被删掉或改名后，一条过期的豁免会静静地替下一个同名码背书。
+    for (const [code, { symbol }] of Object.entries(UNREACHABLE_WITHIN_MODULE)) {
+      expect(reachable.has(code), `${code} 已经不在扫描面里了——这条豁免过期了，删掉它`).toBe(true)
+      const owner = await readFile(new URL(reachable.get(code)!, src), 'utf8')
+      expect(owner, `${symbol} 不在 ${reachable.get(code)} 里了——豁免点名的符号已经不存在`).toContain(
+        `export async function ${symbol}`
+      )
+      expect(
+        cliSource.includes(`${symbol}(`),
+        `CLI 现在调用了 ${symbol}，${code} 到得了顶层 catch——豁免不再成立，把它加进 CLI_ERROR_CODES`
+      ).toBe(false)
+    }
+
+    // 自检：两个解析都不许在空集上恒绿，且判据真的认得出「抛了但没在册」。
+    expect(registered.has('AGENTMUX_FAILED'), '注册表解析漏了已知成员').toBe(true)
+    // 注册表解析的方向性：注释里写出来的码**不算**在册。这条钉住的是「漏报是静默的」那一侧——
+    // 本文件的注册表每个成员都带一段说明，说明里点名别的码是常事，而说明不是注册。
+    expect(
+      registryMembers("  'REAL_MEMBER',\n  // 与 'COMMENTED_CODE' 是相反的两件事\n"),
+      '注释里的码被算成了在册——于是一个真的没在册的码会被这段说明背书'
+    ).toEqual(['REAL_MEMBER'])
+    expect(reachable.has('MAINTAINER_TARGET_UNRESOLVED'), 'throw 解析漏了 agentmux.ts 里已知的那一处').toBe(true)
+    // message 里带逗号 + 大写词：靠「紧跟第一个逗号」取码的写法会在这里取错。
+    expect(
+      codesIn("throw new AgentMuxError('Tab, region, or NONE matched.', 'REAL_CODE_HERE')"),
+      '判据被 message 里的逗号骗过，取到的不是真正的码'
+    ).toContain('REAL_CODE_HERE')
+    // message 是带调用的模板串：非贪婪 `\)` 会停在 `file(x)` 的右括号上，码被截在实参之外。
+    // 这正是本判据初版在 agent-role-directory.ts 上实测取空的那种形状。
+    expect(
+      codesIn('throw new AgentMuxError(`bad: ${file(path)}`, \'TEMPLATE_CALL_CODE\')'),
+      '判据被 message 模板串里的括号截断，取不到码'
+    ).toContain('TEMPLATE_CALL_CODE')
+    expect(codesIn("new AgentMuxError('probe', 'NEVER_REGISTERED')"), '判据认不出一处普通的 throw').toEqual([
+      'NEVER_REGISTERED'
+    ])
+    // import 形状的自检：值 import 要收，两种 type-only 写法都不许收（否则 agent-session-registry
+    // 那三个到不了的码会被报成缺陷，这道门就成了让人给死码上户口的噪音）。
+    expect(valueImports("import { requestAgentMuxControl } from './control-host.js'")).toEqual(['control-host'])
+    expect(valueImports("import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'")).toEqual([])
+    expect(valueImports("import { type SplitDirection } from './split-direction-ssot.js'")).toEqual([])
+    expect(
+      valueImports("import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'"),
+      '混合 import 里有值绑定，仍然是一条运行时边'
+    ).toEqual(['split-direction-ssot'])
   })
 
   it('deletes old command trees and requires managed identity for self', async () => {
