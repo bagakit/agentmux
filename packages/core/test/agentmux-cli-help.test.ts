@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,15 @@ async function run(args: readonly string[]): Promise<string> {
 }
 async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
   try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } }) } catch (error) {
+    const failure = error as { stdout: string; stderr: string; code: number }
+    return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
+  }
+  throw new Error('CLI unexpectedly succeeded.')
+}
+
+/** 同 {@link fail}，但从某个目录里跑——`roles` 三条子命令读的是 `process.cwd()`，不是任何选项。 */
+async function failIn(cwd: string, args: readonly string[]) {
+  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, cwd }) } catch (error) {
     const failure = error as { stdout: string; stderr: string; code: number }
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
   }
@@ -94,6 +103,74 @@ describe('agentmux CLI discovery', () => {
     expect(skill).toContain('candidates[].agentSessionId')
     expect(skill).toContain('Send never broadcasts and never resumes')
     expect(skill).toContain('No failure')
+  })
+
+  it('损坏的角色目录报自己的码，不折成「命令打错了」那一个', async () => {
+    // `cliErrorCode` 对不在 `CLI_ERROR_CODES` 里的码一律折成 `AGENTMUX_FAILED`（agentmux.ts 的
+    // 顶层 catch）。`AGENT_ROLE_DIRECTORY_UNREADABLE` 此前不在册，于是机读侧看到的码与「未知命令」
+    // 完全一样——人读的 message 一直说的是真话，机读的码在撒谎。
+    //
+    // 判据钉的是**码**而不是 message：折叠只发生在码上，断言 message 会恒绿。两个世界要分得开，
+    // 所以同时钉住 `AGENTMUX_FAILED` 这个具体的坏答案，而不是只问「码是不是它自己」——后者对
+    // 「折成了别的某个码」也红，读起来却像同一条失败。
+    const workspace = await mkdtemp(join(tmpdir(), 'agentmux-roles-unreadable-'))
+    try {
+      await mkdir(join(workspace, '.agents'), { recursive: true })
+      await writeFile(join(workspace, '.agents', 'agentmux-roles.json'), '{ this is not json')
+      const broken = await failIn(workspace, ['roles', 'list'])
+      const reported = JSON.parse(broken.stderr).error
+      expect(reported.code, `角色目录读不出来却报 ${reported.code}——与「命令打错了」同一个码`).toBe(
+        'AGENT_ROLE_DIRECTORY_UNREADABLE'
+      )
+      expect(reported.code).not.toBe('AGENTMUX_FAILED')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('CLI 抛出的每一个码都在 CLI_ERROR_CODES 里——不在册的会被静默折成 AGENTMUX_FAILED', async () => {
+    // 上面那条是行为判据，只盯住一个码。这条是结构判据，盯住**下一个**码。
+    //
+    // 形状：`cliErrorCode` 对不在册的值一律返回 `AGENTMUX_FAILED`（agentmux.ts 顶层 catch）。于是
+    // "在 agentmux.ts 里 throw 一个新 AgentMuxError 却忘了把码加进 CLI_ERROR_CODES" 这件事
+    // **不产生任何编译错误、不产生任何测试失败**，只是机读侧永远看不到那个码。本仓记过这一族：
+    // 声明与消费两份清单各自漂移，而漂移的一侧是沉默的那侧。
+    //
+    // 判据只扫 `agentmux.ts` 自己 throw 的字面量码，不扫整个 src/：从别处冒上来的码（control 那 39 个
+    // 经 spread 已在册；core 内部还有 70 余个码走 daemon/IPC 而不经这个 CLI 顶层 catch）不归这条管。
+    // 把判据放大到全仓会得到一张必须人手维护的豁免清单，而那种清单会漏——这正是本仓反复吃过的亏。
+    const source = await readFile(new URL('../src/agentmux.ts', import.meta.url), 'utf8')
+
+    const registry = /const CLI_ERROR_CODES = \[([\s\S]*?)\] as const/.exec(source)
+    expect(registry, 'CLI_ERROR_CODES 的声明没解析出来——判据看不见它的目标就必须红').not.toBeNull()
+    // spread 进来的那 39 个控制码在别处（control.ts）声明，这里只看本文件字面列出的。
+    const registered = new Set([...registry![1]!.matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]!))
+
+    const thrown = new Set(
+      [...source.matchAll(/new AgentMuxError\([\s\S]*?,\s*'([A-Z_]+)'/g)].map((match) => match[1]!)
+    )
+    expect(thrown.size, 'agentmux.ts 里一个 throw 都没解析出来——下面的循环是死代码').toBeGreaterThan(2)
+
+    // 控制码经 spread 在册，但它们不在本文件的字面量里，所以要单独放行。
+    const { AGENTMUX_CONTROL_ERROR_CODES } = await import('../src/control.js')
+    const control = new Set<string>(AGENTMUX_CONTROL_ERROR_CODES)
+
+    const orphans = [...thrown].filter((code) => !registered.has(code) && !control.has(code))
+    expect(
+      orphans.sort(),
+      `这些码 agentmux.ts 抛得出来，却不在 CLI_ERROR_CODES 里：${orphans.join(', ')}。` +
+        'cliErrorCode 会把它们折成 AGENTMUX_FAILED——与「命令打错了」同一个码，机读侧分不出。' +
+        '把它们加进 CLI_ERROR_CODES，或者确认它们真的不该有自己的码。'
+    ).toEqual([])
+
+    // 自检：两个解析都不许在空集上恒绿，且判据真的认得出"抛了但没在册"。
+    expect(registered.has('AGENTMUX_FAILED'), '注册表解析漏了已知成员').toBe(true)
+    expect(thrown.has('MAINTAINER_TARGET_UNRESOLVED'), 'throw 解析漏了已知的那一处').toBe(true)
+    const probe = "throw new AgentMuxError('probe', 'NEVER_REGISTERED_CODE')"
+    expect(
+      [...probe.matchAll(/new AgentMuxError\([\s\S]*?,\s*'([A-Z_]+)'/g)].map((match) => match[1]!),
+      '判据认不出一处普通的 throw——上面那条扫描是死代码'
+    ).toEqual(['NEVER_REGISTERED_CODE'])
   })
 
   it('deletes old command trees and requires managed identity for self', async () => {
