@@ -388,6 +388,28 @@ export type BrowserConfig = {
  */
 export const CONFIG_VERSION = 9
 
+/**
+ * 用户自己的一条本地 prompt。
+ *
+ * 这一族此前是渲染层的一个 `as const` 数组（`COMPOSER_SHORTCUT_PRESETS`），于是「快捷指令」有两套：
+ * Provider 声明的原生命令，和代码里写死的两条 prompt。用户的判断是「应该只有一套」，且要能自定义
+ * ——所以正文搬到配置里，内置那两条降为**可改可删的默认项**。删掉即永久没有：保留一档不可删的
+ * 内置就是保留两套数据所有权，只是把重复从界面挪到了数据层。
+ *
+ * `keyword` 一个字段供两处识别：`/` 候选的补全词，以及正文里的裸词识别（打出 `eli5` 即命中）。
+ * 不建第二份注册表——两份清单必然漂移，而漂移时自己不会响。
+ *
+ * `providerId` 缺席即「对所有 Agent 可见」，不是「对谁都不可见」：一条不绑定的 prompt 是通用的，
+ * 那是最常见的情形，所以它必须是缺席的那一档。绑定后只在该 Provider 的 Composer 出现。
+ */
+export type ComposerShortcut = {
+  id: string
+  keyword: string
+  label: string
+  body: string
+  providerId?: AgentProviderId
+}
+
 export type AppConfig = {
   version: typeof CONFIG_VERSION
   hosts: HostConfig[]
@@ -399,6 +421,16 @@ export type AppConfig = {
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".
   notifications?: NotificationSettings
+  /**
+   * 用户拥有的本地 prompt 库。可选是因为字段是后加的（同 `appLinkSchemes` 的落地路径），既有磁盘
+   * config 没有它，写成必需会让整块配置判失败。
+   *
+   * 与 `notifications` 不同，这一个**不回填**：缺席就地解析成空列表，不补一次盘。理由同
+   * `appLinkSchemes`——空与缺席语义完全一样（都是「一条都没有」），补盘只是白写。更要紧的是它必须
+   * 不回填：内置那两条是 `DEFAULT_CONFIG` 里的默认项，用户删光之后配置里就是空列表，任何「缺席即
+   * 补上默认」的回填都会把删掉的东西送回来——删了又回来比一开始不能删更糟。
+   */
+  composerShortcuts?: ComposerShortcut[]
 }
 
 export type FileDocument = {

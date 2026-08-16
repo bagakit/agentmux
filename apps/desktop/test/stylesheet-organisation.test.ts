@@ -30,6 +30,7 @@ describe('样式表的组织', () => {
       'composer.css',
       'activity.css',
       'activity-conversation.css',
+      'workflow.css',
       'conversation-avatar.css',
       'conversation-axis.css',
       'overlays.css',

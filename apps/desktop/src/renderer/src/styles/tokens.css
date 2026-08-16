@@ -26,6 +26,11 @@
   --tab-select-bar: color-mix(in srgb, var(--text) 60%, var(--surface-1));
   --red: #ef7773;
   --blue: #82b3f2;
+  /* 语义 token 的第四个色相。composer 的三类引用（skill / component / subcommand）靠色相区分类型
+     ——interaction SSOT 要求「显示短名、类型与下划线」，而 component 那一档一直引用一个从未被定义
+     的 var()：CSS 一声不吭地丢掉整条声明，于是 component 与 skill 画得一模一样，"类型"这一半静默
+     缺席。与其删掉那条声明（那是把缺陷固化成设计），这里把这个色相补齐。 */
+  --purple: #b7a3ef;
   --radius: 9px;
   --radius-sm: 6px;
   --radius-lg: 12px;
@@ -87,7 +92,7 @@
   /* Light appearance palette values remain in the single token table; the mode selector only aliases them. */
   --light-bg: #f4f6f5; --light-surface-0: #ffffff; --light-surface-1: #eef1ef; --light-surface-2: #e3e8e5; --light-surface-3: #d7dfda;
   --light-line: #c6d0c9; --light-line-soft: #dce3de; --light-text: #17201a; --light-text-2: #46554b; --light-text-3: #6b786f;
-  --light-green: #267a48; --light-green-2: #2f965b; --light-amber: #9a6500; --light-red: #b33b37; --light-blue: #2869a7;
+  --light-green: #267a48; --light-green-2: #2f965b; --light-amber: #9a6500; --light-red: #b33b37; --light-blue: #2869a7; --light-purple: #6244b8;
   --light-neutral-1: #c4cec7; --light-neutral-2: #87958b; --light-neutral-3: #5c6b61; --light-focus-line: #4b8b63;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* 动效刻度：节奏与曲线也是 token，不在各表面手写毫秒数（见 agentmux-surface-density.md《动效》）。
@@ -130,6 +135,6 @@
   color-scheme: light;
   --bg: var(--light-bg); --surface-0: var(--light-surface-0); --surface-1: var(--light-surface-1); --surface-2: var(--light-surface-2); --surface-3: var(--light-surface-3);
   --line: var(--light-line); --line-soft: var(--light-line-soft); --text: var(--light-text); --text-2: var(--light-text-2); --text-3: var(--light-text-3);
-  --green: var(--light-green); --green-2: var(--light-green-2); --amber: var(--light-amber); --red: var(--light-red); --blue: var(--light-blue);
+  --green: var(--light-green); --green-2: var(--light-green-2); --amber: var(--light-amber); --red: var(--light-red); --blue: var(--light-blue); --purple: var(--light-purple);
   --neutral-1: var(--light-neutral-1); --neutral-2: var(--light-neutral-2); --neutral-3: var(--light-neutral-3); --focus-line: var(--light-focus-line);
 }
