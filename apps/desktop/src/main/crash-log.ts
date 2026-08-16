@@ -5,6 +5,15 @@ import { app } from 'electron'
 import { appendWithinBudget, serializeCrashRecord, type CrashRecord } from './crash-capture.js'
 
 /**
+ * 崩溃证据落盘的那个文件。**导出**是因为它有第二个消费者：`ui:revealCrashLog` 要在 Finder 里点出
+ * 这个文件。两处各写一次 `join(userData, …)` 就是两个真相，改名时只改一处会让「显示崩溃日志」安静地
+ * 指向一个不存在的路径——而那条路径本来就常常不存在（没崩过），于是分不出是没崩过还是指错了。
+ */
+export function crashLogPath(): string {
+  return join(app.getPath('userData'), 'crash-log.ndjson')
+}
+
+/**
  * 崩溃证据的落盘存储：一份 NDJSON 文件，放在 Electron userData 里，和 config/window-geometry 并排。
  * 每次崩溃追加一行，读回全文、在字节上界内追加、再原子替换——体量有硬顶，崩溃循环写不满磁盘。
  *
@@ -17,7 +26,7 @@ export class CrashLog {
   private writeTail: Promise<void> = Promise.resolve()
 
   constructor(
-    private readonly path = join(app.getPath('userData'), 'crash-log.ndjson'),
+    private readonly path = crashLogPath(),
     /** NDJSON 文件的体量上界。默认 1 MiB：够留下最近一批崩溃，又不会让崩溃循环吃满盘。 */
     private readonly maxBytes = 1024 * 1024
   ) {}

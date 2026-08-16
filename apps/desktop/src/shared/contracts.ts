@@ -1119,6 +1119,17 @@ export type AgentMuxDesktopApi = {
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
     /**
+     * Reveal the local crash-evidence file in the OS file manager, or report that nothing has been
+     * written yet.
+     *
+     * The log is append-only NDJSON in userData and has never had a reader — evidence the app collects
+     * about its own failures was, until this, visible only to someone who knew the path. `false` means
+     * the file does not exist, which is the good case (no crashes recorded), and the caller must say so
+     * rather than silently doing nothing. Reveal rather than an in-app viewer on purpose: the file is a
+     * support artifact people attach to a report, and the OS file manager is where attaching happens.
+     */
+    revealCrashLog(): Promise<boolean>
+    /**
      * Ask Desktop main to raise a native notification about one Agent Session.
      *
      * The renderer decides WHETHER a state change deserves a person's attention and passes the chosen

@@ -579,6 +579,10 @@ const mockApi: AgentMuxDesktopApi = {
     // No native dialog outside Electron; dismissing is the honest answer.
     chooseFiles: async () => null,
     savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
+    // No file manager to reveal into, and no crash log here either — main writes it. `false` is the
+    // same answer the desktop gives for "nothing recorded", and the caller already has to say that out
+    // loud, so this needs no second wording.
+    revealCrashLog: async () => false,
     // A browser tab has no OS notification channel we own, so this reports unsupported rather than
     // claiming delivery. The caller's contract already handles that by falling back to the in-window
     // signal, which is all a web view can honestly offer.
