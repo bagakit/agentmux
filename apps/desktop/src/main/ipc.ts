@@ -2,7 +2,7 @@ import { projectAppearance } from './project-appearance.js'
 import { discoverAgentSkills } from '@agentmux/core'
 import { captureComposerScreenshot } from './composer-screenshot.js'
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 /** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. */
@@ -80,6 +80,7 @@ import { ConfigStore } from './config-store.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
+import { crashLogPath } from './crash-log.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
@@ -510,6 +511,22 @@ export async function registerIpc(args: {
     const path = join(directory, `paste-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`)
     await writeFile(path, bytes, { mode: 0o600 })
     return path
+  })
+  handleWithEvent('ui:revealCrashLog', async (event) => {
+    requireTrustedSender('ui:revealCrashLog', event)
+    // 崩溃证据一直在写，却从来没有读者——没人知道路径就等于没有。这里只做「在文件管理器里点出来」，
+    // 不做应用内查看器：这个文件的用途是附在一份反馈里，而附文件发生在文件管理器里。
+    //
+    // 不存在时返回 false 而不是静默成功。文件不存在是**好消息**（没崩过），但调用方必须能说出这句话
+    // ——按钮点下去什么都不发生，用户分不清是没崩过还是按钮坏了。
+    const path = crashLogPath()
+    try {
+      await stat(path)
+    } catch {
+      return false
+    }
+    shell.showItemInFolder(path)
+    return true
   })
   handleWithEvent('ui:notifyAgentAttention', async (event, input: AgentAttentionNotifyInput) => {
     requireTrustedSender('ui:notifyAgentAttention', event)
