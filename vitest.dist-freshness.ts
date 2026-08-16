@@ -43,7 +43,8 @@ import { join, resolve } from 'node:path'
 
 const repositoryRoot = import.meta.dirname
 const packageDirectory = resolve(repositoryRoot, 'packages/core')
-const rebuild = 'pnpm --filter @agentmux/core build'
+/** 消解这道守卫要跑的那条命令。导出给测试断言文案确实点名了它——错误信息第一行就该是可执行的动作。 */
+export const rebuild = 'pnpm --filter @agentmux/core build'
 
 /**
  * 目录里 mtime 的极值那一个。`wins` 决定取最新还是最旧。
@@ -76,14 +77,25 @@ export function distIsStale(
   return oldestArtifact.at <= newestSource.at
 }
 
-export default async function assertCoreDistBuiltFromCurrentSource(): Promise<void> {
+/**
+ * 判据的**全部**，对任意一个 `{ src, dist }` 目录对成立。
+ *
+ * 取 `packageDirectory` 作参数而不是读模块作用域那个常量，是因为守卫真正会坏的地方不止两个纯函数
+ * 内部，还有**它们之间的接线**：哪个目录配哪个比较器。审计实测过这条缝——把 `src` 与 `dist` 的两个
+ * 比较器对调，于是拿「src 里最旧的」比「dist 里最新的」，一份真陈旧的 dist 判出 false，守卫静默
+ * 放行，而那时的 7 条用例（只测两个纯函数）**全绿**。
+ *
+ * 参数化之后这条缝可以喂两个临时目录去测，代价只是多一个形参；此前把「必须读真 packages/core」当成
+ * 既定事实，其实是那个模块作用域常量造成的，不是问题本身要求的。
+ */
+export async function staleDistComplaint(packageDirectory: string): Promise<string | null> {
   const entryPoint = join(packageDirectory, 'dist', 'index.js')
   try {
     await stat(entryPoint)
   } catch {
-    throw new Error(
+    return (
       `先跑 \`${rebuild}\`：packages/core/dist/index.js 不存在。` +
-        'desktop 的测试与 tsc 都经 dist 消费 @agentmux/core，没有它这次运行测的是空气。'
+      'desktop 的测试与 tsc 都经 dist 消费 @agentmux/core，没有它这次运行测的是空气。'
     )
   }
 
@@ -92,14 +104,18 @@ export default async function assertCoreDistBuiltFromCurrentSource(): Promise<vo
   // 两个 undefined 分支不是防御性代码，是扫描根写错时的判别器：目录不存在会在上面 readdir 抛，
   // 而一个**存在但空**的目录会让下面的比较无声通过（本仓记过 false-green-gate-patterns：
   // 「扫描根写错」与「空集合满足一切断言」是同一族假绿的两个入口）。
-  if (!newestSource) throw new Error('packages/core/src 下一个文件都没有——扫描根写错了。')
-  if (!oldestArtifact) throw new Error(`packages/core/dist 是空的：先跑 \`${rebuild}\`。`)
+  if (!newestSource) return 'packages/core/src 下一个文件都没有——扫描根写错了。'
+  if (!oldestArtifact) return `packages/core/dist 是空的：先跑 \`${rebuild}\`。`
 
-  if (distIsStale(newestSource, oldestArtifact)) {
-    throw new Error(
-      `先跑 \`${rebuild}\`：packages/core/dist 比 src 旧，这次运行加载的是上一次构建的 Core。\n` +
-        `  最旧产物 ${oldestArtifact.path}\n` +
-        `  晚于它的源码 ${newestSource.path}`
-    )
-  }
+  if (!distIsStale(newestSource, oldestArtifact)) return null
+  return (
+    `先跑 \`${rebuild}\`：packages/core/dist 比 src 旧，这次运行加载的是上一次构建的 Core。\n` +
+    `  最旧产物 ${oldestArtifact.path}\n` +
+    `  晚于它的源码 ${newestSource.path}`
+  )
+}
+
+export default async function assertCoreDistBuiltFromCurrentSource(): Promise<void> {
+  const complaint = await staleDistComplaint(packageDirectory)
+  if (complaint) throw new Error(complaint)
 }

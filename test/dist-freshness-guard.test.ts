@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, utimes, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { distIsStale, extremeModification } from '../vitest.dist-freshness.js'
+import { distIsStale, extremeModification, rebuild, staleDistComplaint } from '../vitest.dist-freshness.js'
 
 // 守卫自己的守卫。
 //
@@ -63,6 +63,68 @@ describe('extremeModification：取的是极值那一个，不是碰到的第一
     // 守卫靠这个 undefined 区分「扫描根写错/build 没跑」与「真的比较过了」。返回一个占位值会让
     // 那两条 throw 永远不触发，于是扫描根写错时整道守卫静默通过。
     expect(await extremeModification(await scratch(), (a, b) => a > b)).toBeUndefined()
+  })
+})
+
+describe('staleDistComplaint：两个纯函数之间的接线', () => {
+  // 审计指出的缝：上面两组用例把 extremeModification 与 distIsStale 各自钉死了，却都够不着
+  // 「哪个目录配哪个比较器」。实测过的坏世界——把 src 与 dist 的比较器对调，于是拿「src 里最旧的」
+  // 比「dist 里最新的」，一份真陈旧的 dist 判成 false、守卫静默放行，而那时的 7 条用例全绿。
+  //
+  // 判据落在**抱怨不抱怨**（返回串还是 null），不落在具体措辞：文案会改，性质不该跟着改。
+
+  async function corePair(sourceSeconds: number, artifactSeconds: number): Promise<string> {
+    const root = await scratch()
+    await mkdir(join(root, 'src'))
+    await mkdir(join(root, 'dist'))
+    await fileAt(join(root, 'src'), 'index.ts', sourceSeconds)
+    await fileAt(join(root, 'dist'), 'index.js', artifactSeconds)
+    return root
+  }
+
+  it('产物晚于源码 → 不抱怨', async () => {
+    expect(await staleDistComplaint(await corePair(1000, 2000))).toBeNull()
+  })
+
+  it('产物早于源码 → 抱怨，且把该跑的命令写进去', async () => {
+    // 这一条与上一条是接线正确时的两个相反世界。比较器一对调，两条同时翻面。
+    const complaint = await staleDistComplaint(await corePair(2000, 1000))
+    expect(complaint).toContain(rebuild)
+  })
+
+  it('多文件时比的是 src 最新 vs dist 最旧，不是任意两个', async () => {
+    // 真正钉死接线方向的那一条。dist 里有一个比所有源码都新的产物（9000），也有一个更旧的（1000）：
+    // 判据必须取最旧那个去比源码最新那个（2000 > 1000 ⇒ 陈旧）。任何「src 取最旧」或「dist 取最新」
+    // 的写法都会在这里判成不陈旧——那正是审计演示的那次静默失效。
+    const root = await scratch()
+    await mkdir(join(root, 'src'))
+    await mkdir(join(root, 'dist'))
+    await fileAt(join(root, 'src'), 'old.ts', 500)
+    await fileAt(join(root, 'src'), 'new.ts', 2000)
+    await fileAt(join(root, 'dist'), 'index.js', 1000)
+    await fileAt(join(root, 'dist'), 'fresh.js', 9000)
+
+    expect(await staleDistComplaint(root), 'dist 里最旧的产物早于 src 里最新的源码，应当报陈旧').toContain(rebuild)
+  })
+
+  it('入口不存在 → 先报入口，而不是去比一个不存在的目录', async () => {
+    const root = await scratch()
+    await mkdir(join(root, 'src'))
+    await fileAt(join(root, 'src'), 'index.ts', 1000)
+
+    expect(await staleDistComplaint(root)).toContain('dist/index.js 不存在')
+  })
+
+  it('src 空 → 报扫描根，不是无声通过', async () => {
+    // 空集合让一切比较无声成立，是本仓记过的一族假绿。这两条要求它响亮失败。
+    const root = await corePair(1000, 2000)
+    const empty = await scratch()
+    await mkdir(join(empty, 'src'))
+    await mkdir(join(empty, 'dist'))
+    await fileAt(join(empty, 'dist'), 'index.js', 2000)
+
+    expect(await staleDistComplaint(root)).toBeNull()
+    expect(await staleDistComplaint(empty)).toContain('扫描根')
   })
 })
 
