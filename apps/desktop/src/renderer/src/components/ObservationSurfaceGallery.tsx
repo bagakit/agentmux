@@ -8,6 +8,8 @@ import { SemanticIcon } from './semantic-icons'
 import { AgentComposer, type ComposerQueuedMessage } from './AgentComposer'
 import { appendSemanticReference, expandSemanticReferences, encodeSemanticReference } from '../lib/composer-semantic-reference'
 import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../../shared/composer-shortcut-library'
+import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
+import { AgentAvatar } from './AgentAvatar'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
@@ -37,6 +39,7 @@ const degradedNotice: RenderableServiceNotice = {
 }
 
 export function ObservationSurfaceGallery() {
+  const feedback = useComposerFeedback('gallery')
   const [draft, setDraft] = useState(() => appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' }))
   const [queued, setQueued] = useState<ComposerQueuedMessage[]>([
     { id: 'gallery-q-1', text: 'Run the focused tests', status: 'deferred', deliverable: true, error: 'The Agent is not ready to accept another message yet.' },
@@ -101,6 +104,9 @@ export function ObservationSurfaceGallery() {
       <article id="composer-details" className="observation-sample observation-sample--composer observation-sample--full">
         <div className="observation-sample__label">Agent workspace composer</div>
         <AgentComposer
+          feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
+          identity={{ name: 'Review agent', avatar: <AgentAvatar providerId="codex" state="running" label="Review agent" /> }}
+          onAttach={() => setComposerAction('Example file picker requested')}
           value={draft}
           disabled={false}
           placeholder="Ask, steer, or paste a command…"
@@ -112,7 +118,7 @@ export function ObservationSurfaceGallery() {
           commands={[{ text: '/status', description: 'Provider command' }, composerShortcutSuggestion(GALLERY_PROMPT)]}
           onSelectSuggestion={(text) => { const mine = composerShortcutForBareWord([GALLERY_PROMPT], text.replace(/^\//, '')); return mine ? encodeSemanticReference({ token: text, label: mine.label, kind: 'subcommand', reference: mine.body }) : text }}
           onActivateSemanticReference={(reference) => setComposerAction(`Open reference: ${reference.reference}`)}
-          tools={<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} reportError={(error) => setComposerAction(String(error))} />}
+          tools={<AgentComposerTools onCapture={async () => { setComposerAction('Example screen capture requested') }} disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} runAction={feedback.run} />}
         />
         {composerAction ? <p role="status">{composerAction}</p> : null}
         <small>队列保留未投递消息和原因；旧 Run 条目不阻塞当前消息。引用以短 token 展示。</small>

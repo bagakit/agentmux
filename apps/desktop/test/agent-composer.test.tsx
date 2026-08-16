@@ -681,44 +681,24 @@ describe('AgentComposer reusable surface', () => {
 // 缺席（占位符会把「没有可信名字」谎报成「有个东西」），外加水印的 CSS 归位。
 // -----------------------------------------------------------------------------
 describe('AgentComposer Region 名水印', () => {
-  it('给了 regionName 就把它渲染出来', () => {
+  it('renders controlled identity in the tool row, with an accessible full name', () => {
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
-      value: '',
-      disabled: false,
-      placeholder: 'Ask the Agent…',
-      regionName: 'Terminal 2',
-      onChange: vi.fn()
+      value: '', disabled: false, placeholder: 'Message', onChange: vi.fn(),
+      identity: { name: 'Review worker', avatar: createElement('span', { role: 'img', 'aria-label': 'Codex' }), context: 'Release review' }
     }))
-    expect(markup, '水印没渲染：Region 名依然无处可见').toContain('composer__region')
-    expect(markup).toContain('Terminal 2')
-    // 装饰性身份复述：对 SR 隐藏，否则每次聚焦输入框都多读一遍冗余身份。
-    expect(markup, '水印没有 aria-hidden：会向屏幕阅读器重复朗读身份').toMatch(/class="composer__region"[^>]*aria-hidden="true"/)
+    expect(markup).toContain('composer__identity')
+    expect(markup).toContain('Review worker · Release review')
+    expect(markup).toContain('aria-label="Codex"')
+    expect(markup).not.toContain('composer__region')
+    expect(markup.indexOf('composer__identity')).toBeGreaterThan(markup.indexOf('composer__toolbar'))
   })
 
-  it('没给 regionName 时整段缺席——不是占位符、不是 Unknown', () => {
-    // 缺席即诚实的答案。无 Region 上下文的宿主（launcher / PR / board）此路不该有名字，
-    // 而一个 "Unknown" 水印比空白更糟：它把「没有可信名字」谎报成一个真名。
+  it('renders no invented identity when the host has none', () => {
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
-      value: '',
-      disabled: false,
-      placeholder: 'Ask the Agent…',
-      onChange: vi.fn()
+      value: '', disabled: false, placeholder: 'Message', onChange: vi.fn()
     }))
-    expect(markup, '没有 regionName 却渲染了水印容器').not.toContain('composer__region')
+    expect(markup).not.toContain('composer__identity')
     expect(markup).not.toContain('Unknown')
-  })
-
-  it('水印靠既有 token 定位在右上、不参与流、对指针透明', () => {
-    // 复用 --text-3 与既有间距 token（不发明新颜色），absolute 定位避开 placeholder（左上）与
-    // Send（右下），pointer-events:none 让点击穿透回输入框，overflow+ellipsis 收口长名。
-    const rule = allStyleRules().match(/\.composer__region \{([^}]*)\}/)?.[1] ?? ''
-    expect(rule, '水印规则不在样式表里').not.toBe('')
-    expect(rule).toContain('position: absolute')
-    expect(rule).toContain('pointer-events: none')
-    expect(rule).toContain('text-overflow: ellipsis')
-    expect(rule).toContain('var(--text-3)')
-    // 绝不发明颜色字面量——只准用 token。
-    expect(rule, '水印用了字面量颜色而不是 token').not.toMatch(/#[0-9a-f]{3,}/i)
   })
 })
 

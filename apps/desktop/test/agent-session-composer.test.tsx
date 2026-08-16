@@ -1,3 +1,4 @@
+import { renderComponentBoundary } from './helpers/render-component-boundary'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -161,21 +162,21 @@ describe('AgentSessionComposer adapter', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
-    expect(AgentSessionComposer({ sessionId: 'agent-1' }).props.value).toContain('Browser element context')
-    expect(AgentSessionComposer({ sessionId: 'agent-1' }).props.value).toContain('Selector: main > button')
+    expect(renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }).props.value).toContain('Browser element context')
+    expect(renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }).props.value).toContain('Selector: main > button')
   })
 
   it('submits and compare-clears the exact shared draft snapshot', async () => {
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Browser element context' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit(): void }
     }
 
     composer.props.onSubmit()
 
     await vi.waitFor(() => {
-      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context')
+      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context', expect.any(Function))
       expect(fixture.state.clearAgentComposerDraftIfUnchanged)
         .toHaveBeenCalledWith('agent-1', 'Browser element context')
     })
@@ -185,7 +186,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Retry this context' }
     fixture.state.send.mockReturnValueOnce(false)
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit(): void }
     }
 
@@ -198,10 +199,10 @@ describe('AgentSessionComposer adapter', () => {
   it('queues a working Agent message instead of risking readiness failure', () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Actually, edit the other file' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file', expect.any(Function))
   })
 
   it('clears the draft when a message enters the queue, so entering is observable', () => {
@@ -210,9 +211,9 @@ describe('AgentSessionComposer adapter', () => {
     // the badge count going up is the other half. Without this the user cannot tell a queue happened.
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'queue me and clear the box' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box', expect.any(Function))
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
   })
 
@@ -223,9 +224,9 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'too large to queue' }
     fixture.state.enqueueAgentSteer.mockReturnValueOnce(false)
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue', expect.any(Function))
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
@@ -234,9 +235,9 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'same words, distinct intent' }
     fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'old', runId: 'run-1', text: 'same words, distinct intent', status: 'queued' }] }
     fixture.state.send.mockReturnValueOnce(false)
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit(): void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onSubmit(): void } }
     composer.props.onSubmit()
-    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent')
+    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent', expect.any(Function))
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
@@ -246,7 +247,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentSteerQueues = {
       'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'keep exactly one copy', status: 'deferred', error: 'readiness not observed' }]
     }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
 
     composer.props.onSubmit?.()
 
@@ -258,7 +259,7 @@ describe('AgentSessionComposer adapter', () => {
     // the second call inside the window is dropped. The first still enqueues — suppression must not eat it.
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'stop double-queueing me' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
     composer.props.onQueue?.()
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledOnce()
@@ -271,10 +272,10 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'first prompt' }
     // Record one submit through the real path so history has an entry (recorded after send() resolves).
-    const first = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
+    const first = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
     first.props.onSubmit?.()
     fixture.state.agentComposerDrafts = { 'agent-1': '' }
-    const recall = () => (AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const recall = () => (renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onHistoryRecall?: (d: 'older' | 'newer', draft: string, caret: number) => string | null }
     }).props.onHistoryRecall
     // Poll until the async record lands: arrowing up from an empty first-line draft recalls the entry.
@@ -297,7 +298,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'retry me' }
     fixture.state.send.mockReturnValueOnce(false)
 
-    const submit = () => (AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const submit = () => (renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void }
     }).props.onSubmit
     submit()?.()
@@ -313,7 +314,7 @@ describe('AgentSessionComposer adapter', () => {
     // Steer must not move or replace the Stop button — a user mid-turn must not mis-click. Both an Enter
     // submit path AND a Stop interrupt path exist at once; they are different questions.
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
     }
 
@@ -325,7 +326,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Steer while codex is mid-turn' }
     fixture.state.send.mockReturnValueOnce(false)
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void }
     }
 
@@ -353,7 +354,7 @@ describe('AgentSessionComposer adapter', () => {
     })
     fixture.state.sessions = [waiting]
     fixture.state.agentComposerDrafts = { 'agent-1': 'This must not go out' }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void; onQueue?: () => void; disabled: boolean }
     }
 
@@ -361,7 +362,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onSubmit).toBeUndefined()
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out', expect.any(Function))
   })
 
   it('一张待答卡片不许夺走中断——daemon 那条路从来没关过', () => {
@@ -386,7 +387,7 @@ describe('AgentSessionComposer adapter', () => {
       }
     })
     fixture.state.sessions = [waiting]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onInterrupt?: () => void; onSubmit?: () => void; primaryAction: string }
     }
 
@@ -405,7 +406,7 @@ describe('AgentSessionComposer adapter', () => {
     // 上一条的相反世界。少了它，把 onInterrupt 写成无条件传入也照样"通过"，而那会让一个没在跑的
     // Agent 也显示出可点的中断。
     fixture.state.sessions = [agentSession({ status: { state: 'waiting', source: 'native-hook', observedAt: 1 } })]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onInterrupt?: () => void; primaryAction: string }
     }
 
@@ -429,7 +430,7 @@ describe('AgentSessionComposer adapter', () => {
       }
     })
     fixture.state.sessions = [waiting]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onAttach?: () => void; onPasteImage?: (image: unknown) => void; disabled: boolean }
     }
 
@@ -461,7 +462,7 @@ describe('AgentSessionComposer adapter', () => {
     })
     fixture.state.providerCatalog = [postureCatalogEntry()]
     fixture.state.sessions = [waiting]
-    const pending = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const pending = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSetPosture?: (modeId: string) => void; onAttach?: () => void; postureControl?: unknown }
     }
 
@@ -476,7 +477,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [
       agentSession({ providerId: 'grok', status: { state: 'working', source: 'native-hook', observedAt: 2 } })
     ]
-    const clear = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const clear = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSetPosture?: (modeId: string) => void }
     }
     expect(clear.props.onSetPosture, '没有卡片时姿态该是可用的').toBeTypeOf('function')
@@ -587,15 +588,14 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Look at this' }
     nativeApi.savePastedImage.mockRejectedValueOnce(new Error('Pasted image exceeds the size limit.'))
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
     }
 
     composer.props.onPasteImage({ bytes: new Uint8Array([1, 2, 3]), extension: 'png' })
 
-    await vi.waitFor(() => expect(fixture.state.reportError).toHaveBeenCalledOnce())
-    expect(message(fixture.state.reportError.mock.calls[0]?.[0]))
-      .toContain('Pasted image exceeds the size limit.')
+    await vi.waitFor(() => expect(nativeApi.savePastedImage).toHaveBeenCalledOnce())
+    expect(fixture.state.reportError).not.toHaveBeenCalled()
     // The draft is untouched: a failed paste must not silently rewrite what the user typed.
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
@@ -603,20 +603,20 @@ describe('AgentSessionComposer adapter', () => {
   it('surfaces a failed file attachment instead of swallowing it', async () => {
     fixture.state.sessions = [agentSession()]
     nativeApi.chooseFiles.mockRejectedValueOnce(new Error('Workspace file picker failed.'))
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onAttach(): void }
     }
 
     composer.props.onAttach()
 
-    await vi.waitFor(() => expect(fixture.state.reportError).toHaveBeenCalledOnce())
-    expect(message(fixture.state.reportError.mock.calls[0]?.[0])).toContain('Workspace file picker failed.')
+    await vi.waitFor(() => expect(nativeApi.chooseFiles).toHaveBeenCalledOnce())
+    expect(fixture.state.reportError).not.toHaveBeenCalled()
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
   it('keeps a successful paste on its existing path-reference behaviour', async () => {
     fixture.state.sessions = [agentSession()]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
     }
 
@@ -649,7 +649,7 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
   function deliverable(session: Extract<SessionSnapshot, { kind: 'agent' }>): unknown {
     fixture.state.sessions = [session]
     fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me', status: 'queued' }] }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { queued: Array<{ deliverable: boolean }> }
     }
     return composer.props.queued[0]?.deliverable
@@ -690,7 +690,7 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
     fixture.state.agentSteerQueues = {
       'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run', status: 'queued' }]
     }
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { queued: Array<{ deliverable: boolean }> }
     }
     expect(composer.props.queued[0]?.deliverable).toBe(false)
@@ -711,7 +711,7 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
  */
 describe('AgentSessionComposer 的 / 候选是命令与我的 prompt 的并集', () => {
   function candidates(): Array<{ text: string; description: string }> {
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { commands?: Array<{ text: string; description: string }> }
     }
     return composer.props.commands ?? []
@@ -752,7 +752,7 @@ describe('AgentSessionComposer 的 / 候选是命令与我的 prompt 的并集',
     fixture.state.config.composerShortcuts = [
       { id: 'p-1', keyword: 'review-changes', label: 'Review changes', body: 'Review the working diff.' }
     ]
-    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
       props: { onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => string | void }
     }
 

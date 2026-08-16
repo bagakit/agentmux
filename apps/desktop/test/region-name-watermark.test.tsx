@@ -7,11 +7,8 @@ import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 
-// 这条测的是那个「难题」：composer 自己不知道它在哪个 Region，Region 的名字又取决于兄弟格。
-// SessionPane 是唯一持有 Region 起点（linkOrigin 的 tabId + regionId）的宿主，所以名字在它这里
-// 按 store 里那张 Tab 的全体 regions（视觉顺序）现算，再喂给 composer。这里把 AgentSessionComposer
-// 换成一个只回吐 regionName 的桩，驱动 SessionPane，断言它算出并交出了正确的名字。
-const captured = vi.hoisted(() => ({ regionName: undefined as string | undefined }))
+// SessionPane supplies authored Tab context; AgentSessionComposer owns Session identity.
+const captured = vi.hoisted(() => ({ tabName: undefined as string | undefined }))
 
 const fixture = vi.hoisted(() => ({
   state: {
@@ -45,11 +42,11 @@ vi.mock('../src/renderer/src/components/OpenDestinationBar.js', () => ({
 vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
   AgentInteractionCard: () => <div data-test-interaction-card />
 }))
-// 桩把 SessionPane 交下来的 regionName 俘获出来——这正是被测的那次派生的产物。
+// 桩把 SessionPane 交下来的 tabName 俘获出来——这正是被测的那次派生的产物。
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
-  AgentSessionComposer: ({ regionName }: { regionName?: string }) => {
-    captured.regionName = regionName
-    return <div data-test-agent-composer data-region-name={regionName ?? 'absent'} />
+  AgentSessionComposer: ({ tabName }: { tabName?: string }) => {
+    captured.tabName = tabName
+    return <div data-test-agent-composer data-region-name={tabName ?? 'absent'} />
   }
 }))
 
@@ -80,8 +77,7 @@ function agentSession(id: string, label: string): SessionSnapshot {
   } as SessionSnapshot
 }
 
-// 一张有两格的 Tab：两格都是终端表面（regionSurfaceLabel 给它们同一个裸名 "Terminal"），于是去重
-// 编号必须把它们分成 "Terminal 1" / "Terminal 2"。layout 用一个横向 split（左 r1、右 r2）给出视觉顺序。
+// Both regions share the same authored Tab context.
 function twoTerminalTab(): WorkbenchTab {
   return {
     id: 'tab-1',
@@ -126,41 +122,40 @@ afterEach(() => {
   fixture.state.sessions = []
   fixture.state.tabs = {}
   fixture.state.viewModes = {}
-  captured.regionName = undefined
+  captured.tabName = undefined
 })
 
-describe('SessionPane 把 Region 名喂给 composer 水印', () => {
-  it('名字随 Region 上下文出现——同名两格里这一格拿到带编号的名', () => {
-    // 两格同名 "Terminal"，右格（r2）在视觉顺序里是第二个，所以它的名字是 "Terminal 2"。
-    // 这钉住了两件事：名字确实到达了 composer；同名去重的编号确实生效。
+describe('SessionPane supplies current Tab context', () => {
+  it('passes the authored Tab name to the Composer', () => {
     fixture.state.sessions = [agentSession('term-b', 'Codex')]
-    fixture.state.tabs = { 'tab-1': twoTerminalTab() }
+    fixture.state.tabs = { 'tab-1': { ...twoTerminalTab(), name: 'Release review' } }
     fixture.state.viewModes = { 'term-b': 'terminal' }
 
     render('term-b', ORIGIN_R2)
 
-    expect(captured.regionName, 'Region 名没到达 composer').toBe('Terminal 2')
+    expect(captured.tabName).toBe('Release review')
   })
 
-  it('第一格拿到 "Terminal 1"——编号跟着视觉顺序走', () => {
+  it('Tab 重命名后传入当前名', () => {
     fixture.state.sessions = [agentSession('term-a', 'Codex')]
-    fixture.state.tabs = { 'tab-1': twoTerminalTab() }
+    fixture.state.tabs = { 'tab-1': { ...twoTerminalTab(), name: 'Release review' } }
     fixture.state.viewModes = { 'term-a': 'terminal' }
 
     render('term-a', { ...ORIGIN_R2, regionId: 'r1' })
 
-    expect(captured.regionName).toBe('Terminal 1')
+    expect(captured.tabName).toBe('Release review')
+    fixture.state.tabs['tab-1'] = { ...twoTerminalTab(), name: 'Updated review' }
+    render('term-a', { ...ORIGIN_R2, regionId: 'r1' })
+    expect(captured.tabName).toBe('Updated review')
   })
 
   it('无 Region 上下文（origin 缺 tabId/regionId）时名字缺席', () => {
-    // 无 Region 的宿主用的正是这种半截 origin（同 canSplit 读的那对真相）。名字必须是 undefined，
-    // 让 composer 那层整段不渲染水印，而不是渲染一个占位符。
     fixture.state.sessions = [agentSession('term-b', 'Codex')]
-    fixture.state.tabs = { 'tab-1': twoTerminalTab() }
+    fixture.state.tabs = { 'tab-1': { ...twoTerminalTab(), name: 'Release review' } }
     fixture.state.viewModes = { 'term-b': 'terminal' }
 
     render('term-b', { workspaceId: 'workspace-1', tabGroupId: 'group-1' })
 
-    expect(captured.regionName, '没有 Region 上下文却算出了名字').toBeUndefined()
+    expect(captured.tabName, '没有 Region 上下文却算出了名字').toBeUndefined()
   })
 })

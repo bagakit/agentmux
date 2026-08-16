@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import type { LucideProps } from 'lucide-react'
-import { Activity, Ban, Blocks, Bot, CheckCircle2, ChevronRight, Circle, CircleDot, CircleX, Command, GitBranch, Hammer, Layers3, ListOrdered, MessageSquareText, PanelTop, PauseCircle, Radio, ShieldAlert, SlidersHorizontal, Sparkles, Terminal, UserRound, Workflow } from 'lucide-react'
+import { Activity, Ban, Blocks, Bot, CheckCircle2, ChevronRight, Circle, CircleDot, CircleX, Command, GitBranch, Hammer, Layers3, ListOrdered, MessageSquareText, PanelTop, PauseCircle, Radio, ShieldAlert, PanelBottomOpen, Maximize2, Minimize2, Sparkles, Terminal, UserRound, Workflow } from 'lucide-react'
 import type { WorkflowAgentStatus } from '../workflow/types'
 
 /** Product-level icon vocabulary. Components ask for meaning, never for a library glyph. */
@@ -30,6 +30,8 @@ export type SemanticIconName =
   | 'component'
   | 'subcommand'
   | 'message-tools'
+  | 'composer-grow'
+  | 'composer-collapse'
 
 const icons = {
   workflow: Workflow,
@@ -55,7 +57,9 @@ const icons = {
   skill: Sparkles,
   component: Blocks,
   subcommand: Command,
-  'message-tools': SlidersHorizontal
+  'message-tools': PanelBottomOpen,
+  'composer-grow': Maximize2,
+  'composer-collapse': Minimize2
 } as const
 
 export type SemanticIconRenderer = ComponentType<LucideProps>

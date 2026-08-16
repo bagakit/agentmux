@@ -1,15 +1,20 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from 'vitest'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { nextToolDockPhase } from '../src/renderer/src/components/AgentComposerTools.js'
+import { AgentComposerTools, nextToolDockPhase } from '../src/renderer/src/components/AgentComposerTools.js'
 import { allStyleRules } from './helpers/styles.js'
 
 describe('Message Tools three-state interaction', () => {
-  it('collapses first, restores the current density, then expands to multiple tools', () => {
-    const first = nextToolDockPhase('current')
+  it('cycles from the quiet input through the tool row and a large editor', () => {
+    const first = nextToolDockPhase('collapsed')
     const second = nextToolDockPhase(first)
     const third = nextToolDockPhase(second)
-    expect([first, second, third]).toEqual(['collapsed', 'restored', 'expanded'])
+    expect([first, second, third]).toEqual(['current', 'expanded', 'collapsed'])
   })
 
   it('returns from the expanded state to the quiet collapsed state', () => {
@@ -52,6 +57,12 @@ describe('Message Tools three-state interaction', () => {
     const expanded = [...rules.matchAll(/([^{}]*\[data-mode='expanded'\][^{}]*)\{([^{}]*)\}/g)]
     expect(expanded.length, "样式表里没有任何规则按 data-mode='expanded' 命中：大输入框态不存在").toBeGreaterThan(0)
     const expandedBody = expanded.map(([, , body]) => body!).join(' ')
+    expect(expandedBody).toContain('--composer-input-height: min(240px, 40vh)')
+    const editors = [...rules.matchAll(/([^{}]*)\{([^{}]*)\}/g)]
+      .filter(([, selector]) => selector!.trim() === '.composer__editor .tiptap')
+    expect(editors).toHaveLength(1)
+    expect(editors[0]![2]).toContain('height: var(--composer-input-height, auto)')
+
     expect(expandedBody, '大输入框态没有改动高度预算——"大输入框"这个名字没有对应的几何').toMatch(/--composer-input-max:/)
     expect(expandedBody, '大输入框态动了 min-height：静息地板会多出第二处，空输入框被抬成两行高').not.toMatch(/min-height:/)
     expect(
@@ -80,46 +91,32 @@ describe('Message Tools three-state interaction', () => {
     collapsedOverrides.set(target, `${collapsedOverrides.get(target) ?? ''}${body}`)
   }
 
-  it('一行态里绝对定位的装饰必须收掉——它们的落点正是工具条与 Send 的位置', () => {
+  it('keeps identity in the control flow instead of overlaying the editor', () => {
     // 形状：`position: absolute` **且**钉了边距。钉边距才会脱离静态位置跑到盒子角上，而一行态里
     // 右上角与右下角都被控件占着，于是装饰直接压在按钮上（用户原话「叠在一起」）。
     // 不判 `position: fixed` 那两张卡：它们走 `popover` 进顶层、由 anchor 定位，且是用户点开的
     // 临时浮层，不是静息装饰。也不判没钉边距的那个 placeholder ::before——它待在静态位置，
     // 就在编辑区里，一行态下并不挪窝。
+    expect(ruleList.length).toBeGreaterThan(0)
     const decorations = ruleList
       .filter(({ selector, body }) => selector.startsWith('.composer') && !selector.startsWith(COLLAPSED))
       .filter(({ body }) => /position:\s*absolute/.test(body) && /(?:^|;)\s*(?:top|right|bottom|left):/.test(body))
       .map(({ selector }) => selector)
-    // 扫描有收获，且收获的是那个已知的载体——扫到空、或者扫到一堆别的东西，下面的循环都恒真。
-    expect(decorations, 'Composer 里没有扫到任何绝对定位装饰：这条判据在一个空集合上恒成立').toEqual([
-      '.composer__region'
-    ])
-    for (const selector of decorations) {
-      expect(
-        collapsedOverrides.get(selector) ?? '',
-        `${selector} 在一行态里没有被收掉：它钉在盒子角上，而那里正是工具条与 Send，压出来的是糊成一团`
-      ).toMatch(/display:\s*none/)
-    }
+    expect(decorations).toEqual([])
+
   })
 
   it('一行态里不许有 wrap——右列宽度由内容决定，一折行按钮就叠成两层', () => {
     // 这是「叠在一起」的第二个来源，和上面那条是两件事：一个压的是装饰，一个是控件自己叠自己。
     // 一行态的右列是 `auto`，宽度由内容决定；两行态那份 `flex-wrap: wrap` 继承下来，窄宽度下
     // 按钮就折成第二层，而这一行的高度只够一层。
+    expect(ruleList.length).toBeGreaterThan(0)
     const wrapping = ruleList
       .filter(({ selector, body }) => selector.startsWith('.composer') && !selector.startsWith(COLLAPSED))
       .filter(({ body }) => /flex-wrap:\s*wrap/.test(body))
       .map(({ selector }) => selector)
-    expect(wrapping, 'Composer 里没有扫到任何 wrap：这条判据在一个空集合上恒成立').toEqual([
-      '.composer__toolbar',
-      '.composer__toolbar > div'
-    ])
-    for (const selector of wrapping) {
-      expect(
-        collapsedOverrides.get(selector) ?? '',
-        `${selector} 在一行态里仍然允许折行：窄宽度下它的按钮会叠成两层`
-      ).toMatch(/flex-wrap:\s*nowrap|display:\s*none/)
-    }
+    expect(wrapping).toEqual([])
+
   })
 
   it('自检：这个取值口认得出档位规则的缺席，否则上面那条只是恒绿', () => {
@@ -133,18 +130,112 @@ describe('Message Tools three-state interaction', () => {
     expect([...rules.matchAll(/\[data-mode='expanded'\]/g)].length).toBeGreaterThan(0)
   })
 
-  it('收起/展开只有一个入口——第二个共用同一枚图标的入口已废止', () => {
-    // 用户原话「而不是右边那个 collapse」。判据不是"disclosure 的类名没了"（换个类名即绕过），
-    // 而是**渲染 message-tools 这枚图标的收起/展开控件全表只有一处**：重复之所以是重复，是因为
-    // 同一枚图标出现在两处而用户无从区分。WorkflowComponentGallery 那处是画廊里的一个目录链接，
-    // 不是 Composer 的控件，所以只数 Composer 这两个文件。
-    const composerSources = ['AgentComposer.tsx', 'AgentComposerTools.tsx']
-    const carriers = composerSources.flatMap((name) => {
-      const source = readFileSync(resolve(import.meta.dirname, '../src/renderer/src/components', name), 'utf8')
-      return [...source.matchAll(/name="message-tools"/g)].map(() => name)
-    })
-    expect(carriers, 'Composer 里渲染 message-tools 图标的控件不止一处：收起入口又长回了两个').toEqual([
-      'AgentComposerTools.tsx'
-    ])
+  it('has one reachable layout control even when Agent input is unavailable', () => {
+    const markup = renderToStaticMarkup(createElement(AgentComposerTools, {
+      disabled: true, commands: [], loadSkills: async () => [],
+      onChooseSkill: vi.fn(), onCommand: vi.fn(), runAction: async (action: () => void | Promise<void>) => { await action() }
+    }))
+    expect(markup.match(/composer-tool--mode/g)).toHaveLength(1)
+    expect(markup).toContain('aria-label="Show the message tool row"')
+    expect(markup).toContain('lucide-panel-bottom-open')
+    expect(markup).not.toContain('disabled=""')
+    const composer = readFileSync(resolve(import.meta.dirname, '../src/renderer/src/components/AgentComposer.tsx'), 'utf8')
+    const toolbar = composer.indexOf('<div className="composer__toolbar">')
+    const tools = composer.indexOf('{tools}', toolbar)
+    const fileButton = composer.indexOf('<button', toolbar)
+    expect(toolbar).toBeGreaterThan(-1)
+    expect(tools).toBeGreaterThan(toolbar)
+    expect(fileButton).toBeGreaterThan(tools)
+    expect(composer.slice(toolbar, fileButton)).toContain('{tools}')
   })
+
+  it('keeps the trigger group before the editor and the primary action after it in one-line mode', () => {
+    for (const [selector, column] of [
+      [".composer__toolbar > div:first-child", 1],
+      [".composer__editor", 2],
+      [".composer__toolbar > div:last-child", 3]
+    ] as const) {
+      expect(collapsedOverrides.has(selector)).toBe(true)
+      expect(collapsedOverrides.get(selector)).toContain(`grid-column: ${column}`)
+    }
+    const root = ruleList.find(({ selector }) => selector === COLLAPSED)
+    expect(root).toBeDefined()
+    expect(root!.body).toContain('grid-template-columns: auto minmax(0, 1fr) auto')
+  })
+})
+
+
+it('cycles the real Composer without replacing its editor or draft, with a distinct next-action icon', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const onChange = vi.fn()
+  try {
+    await act(async () => root.render(createElement(AgentComposer, {
+      value: 'Keep [review](agentmux-skill:%40%2Fskills%2Freview%2FSKILL.md)',
+      disabled: false, placeholder: 'Message', onChange,
+      tools: createElement(AgentComposerTools, { disabled: false, commands: [], loadSkills: async () => [],
+        onChooseSkill: vi.fn(), onCommand: vi.fn(), runAction: async (action: () => void | Promise<void>) => { await action() } })
+    })))
+    const editor = container.querySelector('.tiptap')
+    expect(editor).not.toBeNull()
+    const text = editor!.textContent
+    expect(text).toContain('Keep')
+    expect(editor!.querySelectorAll('.composer-semantic-token')).toHaveLength(1)
+    const expected = [
+      ['collapsed', 'Show the message tool row', 'lucide-panel-bottom-open'],
+      ['current', 'Grow the input box for long text', 'lucide-maximize2'],
+      ['expanded', 'Collapse the composer to one line', 'lucide-minimize2'],
+      ['collapsed', 'Show the message tool row', 'lucide-panel-bottom-open']
+    ]
+    for (const [mode, label, icon] of expected) {
+      const buttons = container.querySelectorAll<HTMLButtonElement>('.composer-tool--mode')
+      expect(buttons).toHaveLength(1)
+      expect(container.querySelector('.composer-tools')?.getAttribute('data-mode')).toBe(mode)
+      expect(buttons[0]!.getAttribute('aria-label')).toBe(label)
+      expect(buttons[0]!.querySelector('svg')?.classList.contains(icon!)).toBe(true)
+      expect(container.querySelector('.tiptap')).toBe(editor)
+      expect(editor!.textContent).toBe(text)
+      expect(editor!.querySelectorAll('.composer-semantic-token')).toHaveLength(1)
+      await act(async () => buttons[0]!.click())
+    }
+    expect(onChange).not.toHaveBeenCalled()
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('uses the Region width to shed tool text while retaining labelled icon controls', () => {
+  const css = readFileSync(resolve(import.meta.dirname, '../src/renderer/src/styles/composer.css'), 'utf8')
+  const start = css.indexOf('@container composer (max-width: 560px)')
+  const end = css.indexOf('\n.composer__toolbar > div:first-child', start)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  const narrow = css.slice(start, end)
+  expect(narrow).toContain('.composer-tool__label { display: none; }')
+  expect(narrow).not.toMatch(/\.composer-tool\s*\{[^}]*display:\s*none/)
+  expect(css).toContain('container-type: inline-size; container-name: composer')
+  const markup = renderToStaticMarkup(createElement(AgentComposerTools, {
+    disabled: false, layoutControl: false, commands: [{ text: '/status', description: 'Status' }],
+    loadSkills: async () => [], onChooseSkill: vi.fn(), onCommand: vi.fn(), onCapture: async () => {}, runAction: async (action: () => void | Promise<void>) => { await action() }
+  }))
+  expect(markup).toContain('aria-label="Capture a screen region"')
+  expect(markup).toContain('aria-label="Choose a skill"')
+  expect(markup).toContain('aria-label="Choose a command"')
+  expect(markup.match(/class="composer-tool__label"/g)).toHaveLength(3)
+})
+
+it('clips an empty editor placeholder to its own input column at narrow widths', () => {
+  const css = allStyleRules()
+  const editor = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].find(([, selector]) => selector!.trim() === '.composer__editor .tiptap')
+  const placeholder = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].find(([, selector]) => selector!.includes('.tiptap:has(') && selector!.includes('::before'))
+  expect(editor).toBeDefined()
+  expect(placeholder).toBeDefined()
+  expect(editor![2]).toContain('position: relative')
+  expect(placeholder![2]).toContain('white-space: nowrap')
+  expect(placeholder![2]).toContain('overflow: hidden')
+  expect(placeholder![2]).toContain('max-width: calc(100% - 2 * var(--sp-5))')
 })

@@ -37,7 +37,7 @@ it('delegates discovery to loadSkills on each open and shows the result — cach
   const skill = { name: 'review', description: 'Review', path: '/skills/review/SKILL.md', source: 'project' as const }
   const loadSkills = vi.fn(async () => [skill])
   await act(async () => root.render(<AgentComposerTools disabled={false} commands={[]}
-    loadSkills={loadSkills} onChooseSkill={vi.fn()} onCommand={vi.fn()} reportError={vi.fn()} />))
+    loadSkills={loadSkills} onChooseSkill={vi.fn()} onCommand={vi.fn()} runAction={async (action) => { try { await action() } catch { /* host error rendering is covered by composer-local-feedback */ } }} />))
   await revealTools()
   await pointer(skillsButton(), 'pointerover')
   await act(async () => {})
@@ -56,7 +56,7 @@ it('shows a discovery failure and retries on the next open rather than freezing 
     .mockRejectedValueOnce(new Error('discovery boom'))
     .mockResolvedValueOnce([{ name: 'later', description: '', path: '/s/later/SKILL.md', source: 'user' as const }])
   await act(async () => root.render(<AgentComposerTools disabled={false} commands={[]}
-    loadSkills={loadSkills} onChooseSkill={vi.fn()} onCommand={vi.fn()} reportError={vi.fn()} />))
+    loadSkills={loadSkills} onChooseSkill={vi.fn()} onCommand={vi.fn()} runAction={async (action) => { try { await action() } catch { /* host error rendering is covered by composer-local-feedback */ } }} />))
   await revealTools()
   await pointer(skillsButton(), 'pointerover')
   await act(async () => {}) // let the rejected promise settle

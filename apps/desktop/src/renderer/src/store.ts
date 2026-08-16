@@ -693,11 +693,11 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string): boolean
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string): Promise<void>
-  send(sessionId: string, text: string): boolean
+  send(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -4575,18 +4575,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text) {
+  enqueueAgentSteer(sessionId, text, onRejected) {
     if (!text.trim()) return false
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return false
     if ((get().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
-      get().reportError(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
+      (onRejected ?? get().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
       return false
     }
     // Core measures trimmed content. Admission must reject permanent size errors before taking
     // ownership of the draft; retrying an identical oversized head would block every later entry.
     if (agentPromptExceedsBudget(text.trim())) {
-      get().reportError(new Error(
+      (onRejected ?? get().reportError)(new Error(
         `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
       ))
       return false
@@ -4675,9 +4675,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.set(sessionId, drain)
     return drain.promise
   },
-  send(sessionId, text) {
+  send(sessionId, text, onRejected) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    if (!get().enqueueAgentSteer(sessionId, text)) return false
+    if (!get().enqueueAgentSteer(sessionId, text, onRejected)) return false
     void get().flushAgentSteerQueue(sessionId)
     return true
   },

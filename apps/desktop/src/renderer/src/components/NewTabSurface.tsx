@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Paperclip, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -21,6 +21,7 @@ import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { AgentComposerTools } from './AgentComposerTools'
+import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 
 export function NewTabSurface({
   tabGroupId,
@@ -46,13 +47,19 @@ export function NewTabSurface({
   const [localPrompt, setLocalPrompt] = useState('')
   // 读与写的 key 由 launcherPromptBinding 判一次，与名字那两格同一范式。分开算两次会漂移，而
   // 漂移的症状是 textarea 静默不响应——实测只改写侧那处 key，18 条全绿地存活（读侧则有 1 条红）。
-  const { prompt, set: setPrompt } = launcherPromptBinding({
+  const { prompt, set: writePrompt } = launcherPromptBinding({
     regionId,
     drafts: promptDrafts,
     writeShared: setAgentComposerDraft,
     local: localPrompt,
     writeLocal: setLocalPrompt
   })
+  const latestPrompt = useRef(prompt)
+  latestPrompt.current = prompt
+  function setPrompt(value: string) {
+    latestPrompt.current = value
+    writePrompt(value)
+  }
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
   // 启动时给名字是可选的。两个都留空是最常见的情况，此时一个字都不写，显示名交还派生链
   // （lib/display-name.ts）。名字只在启动成功后由 store 落地——它自己才握有 sessionId 与 tabId。
@@ -136,6 +143,8 @@ export function NewTabSurface({
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
   const selectedProviderId = executors.find((executor) => executor.id === executorId)?.providerId
+  const toolsScope = JSON.stringify([regionId, workspace?.id, selectedProviderId])
+  const feedback = useComposerFeedback(toolsScope)
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
     [providerCatalog, selectedProviderId]
@@ -215,7 +224,7 @@ export function NewTabSurface({
   }
 
   function appendReference(path: string): void {
-    setPrompt(appendFileReferences(prompt, [path], workspace?.path))
+    setPrompt(appendFileReferences(latestPrompt.current, [path], workspace?.path))
   }
 
   async function captureComposerScreenshot(): Promise<void> {
@@ -225,7 +234,7 @@ export function NewTabSurface({
 
   async function chooseComposerFiles(): Promise<void> {
     const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
-    for (const path of paths ?? []) appendReference(path)
+    if (paths?.length) setPrompt(appendFileReferences(latestPrompt.current, paths, workspace?.path))
   }
 
   return (
@@ -346,7 +355,8 @@ export function NewTabSurface({
       */}
       <div className="composer__toolbar">
         <div>
-          <AgentComposerTools
+          <AgentComposerTools key={toolsScope}
+            layoutControl={false}
             disabled={busy !== null || !workspace}
             commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}
             loadSkills={() => workspace && selectedProviderId
@@ -355,13 +365,15 @@ export function NewTabSurface({
             onChooseSkill={(skill) => appendReference(skill.path)}
             onCommand={(command) => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
             {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
-            reportError={(error) => setError(presentError(error))}
+            runAction={feedback.run}
           />
-          <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => void chooseComposerFiles()} title="Reference files for the Agent">
-            Files
+          <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => { void feedback.run(chooseComposerFiles) }} title="Reference files for the Agent" aria-label="Reference files for the Agent">
+            <Paperclip size={14} /><span className="composer-tool__label">Files</span>
           </button>
         </div>
       </div>
+
+      <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
 
       <div className="launch-names">
         <input
