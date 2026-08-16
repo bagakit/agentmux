@@ -46,6 +46,44 @@ describe('splitPastedImageReferences — the narrow app-owned judgement', () => 
     ])
     expect(splitPastedImageReferences('nothing here')).toEqual([{ kind: 'text', text: 'nothing here' }])
   })
+
+  it('starts the path at the leftmost slash, not at an @ inside it', () => {
+    // `@` is an ordinary character INSIDE a path; it is a sigil only directly before the start. Walking
+    // left merely as far as `@` would cut the path short here and emit a `path` that reads nothing.
+    expect(splitPastedImageReferences('/srv/a@b/.agentmux/pasted/x.png')).toEqual([
+      { kind: 'image', text: '/srv/a@b/.agentmux/pasted/x.png', path: '/srv/a@b/.agentmux/pasted/x.png' }
+    ])
+  })
+
+  it('needs a slash before the anchor — a relative-looking token is plain text', () => {
+    // The shape is an ABSOLUTE path. In `x/.agentmux/…` the only slash is the anchor's own, so there is
+    // no path start and nothing is claimed. Deleting that guard does not merely mis-split: the scan
+    // stops advancing and hangs, so this case is also the loop's termination proof.
+    expect(splitPastedImageReferences('x/.agentmux/pasted/a.png')).toEqual([
+      { kind: 'text', text: 'x/.agentmux/pasted/a.png' }
+    ])
+  })
+
+  it('stops at whitespace — an earlier word with a slash is not dragged into the path', () => {
+    // The path start is the leftmost slash, but only within the current WORD: whitespace cannot appear
+    // inside a path. Without that left wall the scan reaches back into `/etc` and emits a `path`
+    // containing a space, which reads nothing and eats the prose in between.
+    expect(splitPastedImageReferences('see /etc and /Users/d/.agentmux/pasted/a.png')).toEqual([
+      { kind: 'text', text: 'see /etc and ' },
+      { kind: 'image', text: '/Users/d/.agentmux/pasted/a.png', path: '/Users/d/.agentmux/pasted/a.png' }
+    ])
+  })
+
+  it('stays linear on a slash-dense run with no token (render thread must not freeze)', () => {
+    // Agent output is untrusted and this runs synchronously on the render thread. The obvious pattern
+    // (`/[^\s]*?/\.agentmux/pasted/…`) is O(N²) here: the lazy quantifier restarts at every `/` and
+    // rescans to failure. Measured on that pattern: 64k→549ms, 256k→8.9s of frozen UI. The scan is
+    // anchored on the literal instead, so this is bounded by the number of real occurrences — zero.
+    const hostile = '/a'.repeat(128_000) // 256k chars, slash-dense, not one valid token
+    const started = performance.now()
+    expect(splitPastedImageReferences(hostile)).toEqual([{ kind: 'text', text: hostile }])
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
 })
 
 let container: HTMLDivElement
