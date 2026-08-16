@@ -22,8 +22,7 @@
    字号或行高一动，地板自己跟着动；写死的 px 会在下一次调字号时静默变回「高出一点」。
    border-box（base.css 的 `*`）让 min-height 含 padding，所以要把 padding 的上下两档加回来。
    max-height 是**生长上限**，回答的是另一个问题（最多长到多高），刻意仍用 px。 */
-.composer textarea { width: 100%; min-height: calc(1lh + var(--sp-4) + var(--sp-1)); max-height: 132px; field-sizing: content; display: block; resize: none; padding:var(--sp-4) var(--sp-5) var(--sp-1); border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--fs-meta); line-height: 1.45; }
-.composer textarea::placeholder { color: var(--neutral-2); }
+
 /* Region 名水印：右上角，一个 Region 唯一的名字露出。位置刻意避开另外两处文字——placeholder 从
    左上起、Send 在右下——所以贴右上角谁都不压。比 placeholder 更小（--fs-micro vs textarea 的
    --fs-meta）、更淡、且不随光标闪动，于是不会被误读成 placeholder 或可编辑文本。定宽 + 省略号收口：
@@ -31,7 +30,6 @@
    pointer-events:none 让点击与文本选择照旧穿透到下面的输入框。父级 overflow:hidden 会裁掉盒外的东西，
    所以它必须落在盒内——右上角正好在盒内的空白处。 */
 .composer__region { position: absolute; top: var(--sp-4); right: var(--sp-5); z-index: 1; max-width: 38%; overflow: hidden; color: var(--text-3); opacity: .55; font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
-.composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
 .composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
 .composer-tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
@@ -67,7 +65,6 @@
 .composer__suggestions button { display: flex; gap: var(--sp-3); border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
 .composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
 .composer__suggestions small { color: var(--text-3); }
-.composer__semantic-tokens { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 0 var(--sp-4) var(--sp-2); }
 .composer-semantic-token { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); border: 0; border-bottom: 1px solid currentColor; color: var(--blue); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .composer-semantic-token--component { color: var(--purple); }
 .composer-semantic-token--subcommand { color: var(--green); }
@@ -107,3 +104,17 @@
 .composer__context-card h3 { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .composer__context-card strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }
 .composer__context-card p { margin: var(--sp-2) 0 0; color: var(--text-3); }
+
+/* The document is plain prose plus atomic tool references; ProseMirror owns native editing. */
+.composer__editor .tiptap { width: 100%; min-height: calc(1lh + var(--sp-4) + var(--sp-1)); max-height: 132px; overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-1); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer__editor .tiptap p { margin: 0; }
+.composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; }
+.composer__editor[data-disabled='true'] { color: var(--text-3); }
+.composer__editor .composer-semantic-token { font-size: inherit; vertical-align: baseline; border-bottom: 0; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
+.composer__editor .ProseMirror-selectednode { background: var(--surface-3); outline: 1px solid var(--focus-line); }
+
+.composer-tool--mode { min-width: 28px; }
+.composer__editor-fallback { display: none; }
+
+.composer-prompt-presets { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); }
+.composer-tool--preset { color: var(--purple); }

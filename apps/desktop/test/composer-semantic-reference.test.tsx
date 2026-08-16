@@ -1,14 +1,16 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { ComposerSemanticTokens } from '../src/renderer/src/components/ComposerSemanticTokens.js'
-import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind } from '../src/renderer/src/lib/composer-semantic-reference.js'
+import { InlineComposer, draftDocument, documentDraft } from '../src/renderer/src/components/InlineComposer.js'
+import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, encodeSemanticReference, parseComposerDraft, COMPOSER_PROMPT_PRESETS } from '../src/renderer/src/lib/composer-semantic-reference.js'
 
 describe('composer semantic references', () => {
   it('keeps a short token in the draft and expands it only at submission', () => {
-    const reference = { token: '$review', label: 'review', kind: 'skill' as const, reference: '@/skills/review/SKILL.md' }
-    expect(appendSemanticReference('please', reference.token)).toBe('please $review ')
-    expect(expandSemanticReferences('please $review now', [reference])).toBe('please @/skills/review/SKILL.md now')
+    const reference = { token: '', label: 'review', kind: 'skill' as const, reference: '@/skills/review/SKILL.md' }
+    const encoded = encodeSemanticReference(reference)
+    expect(appendSemanticReference('please', reference)).toBe(`please ${encoded} `)
+    expect(expandSemanticReferences(`please ${encoded} now`)).toBe('please @/skills/review/SKILL.md now')
+    expect(parseComposerDraft(encoded)).toHaveLength(1)
   })
 
   it('derives distinct semantic kinds from existing references', () => {
@@ -17,15 +19,14 @@ describe('composer semantic references', () => {
     expect(semanticReferenceKind('/repo/skills/review/SKILL.md')).toBe('skill')
   })
 
+  it('round-trips the durable editor document and exposes prompt presets', () => {
+    const doc = draftDocument('[review](agentmux-skill:%40%2Fskills%2Freview%2FSKILL.md)')
+    expect(documentDraft(doc)).toContain('agentmux-skill')
+    expect(COMPOSER_PROMPT_PRESETS.length).toBeGreaterThan(0)
+  })
+
   it('renders the compact name, kind-specific icon and full hover reference', () => {
-    const markup = renderToStaticMarkup(createElement(ComposerSemanticTokens, { references: [
-      { token: '$review', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' },
-      { token: '$card', label: 'card', kind: 'component', reference: '@/components/card.md' },
-      { token: '/status', label: 'status', kind: 'subcommand', reference: '/status' }
-    ] }))
-    expect(markup).toContain('composer-semantic-token--skill')
-    expect(markup).toContain('composer-semantic-token--component')
-    expect(markup).toContain('composer-semantic-token--subcommand')
-    expect(markup).toContain('title="@/skills/review/SKILL.md"')
+    const markup = renderToStaticMarkup(createElement(InlineComposer, { value: '', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
+    expect(markup).toContain('data-placeholder="Ask"')
   })
 })

@@ -4,6 +4,7 @@ import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
 import { presentError } from '../lib/error-presentation'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
+import { COMPOSER_PROMPT_PRESETS } from '../lib/composer-semantic-reference'
 
 type ToolDockPhase = 'current' | 'collapsed' | 'restored' | 'expanded'
 
@@ -16,12 +17,13 @@ export function nextToolDockPhase(phase: ToolDockPhase): ToolDockPhase {
   }
 }
 
-export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, reportError }: {
+export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onPromptPreset, onCapture, reportError }: {
   disabled: boolean
   commands: NonNullable<AgentCatalogEntry['composer']>['commands']
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
   onCommand(text: string): void
+  onPromptPreset?: (preset: (typeof COMPOSER_PROMPT_PRESETS)[number]) => void
   onCapture?: () => Promise<void>
   reportError(error: unknown): void
 }) {
@@ -67,6 +69,9 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         </DropdownMenu.Item>)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root> : null}
+    {onPromptPreset ? <span className="composer-prompt-presets" aria-label="Editable prompt presets">
+      {COMPOSER_PROMPT_PRESETS.map((preset) => <button type="button" key={preset.text} className="composer-tool composer-tool--preset" disabled={disabled} title={preset.description} onClick={() => onPromptPreset(preset)}><SemanticIcon name="subcommand" size={13} />{preset.label}</button>)}
+    </span> : null}
     </>}
   </span>
 }

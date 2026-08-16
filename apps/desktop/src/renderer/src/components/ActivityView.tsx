@@ -1,6 +1,6 @@
 import { ChevronRight, Info } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
-import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
+import type { AgentDisplayState } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -33,18 +33,18 @@ import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { speaksAsAgent, speaksAsHuman, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
-import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/conversation-speaker'
+import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
+import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
-import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ConversationMessage } from './ConversationMessage'
 import { SemanticIcon } from './semantic-icons'
 
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
- * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link Turn}），
+ * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link ConversationMessage}），
  * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
  */
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
@@ -506,81 +506,6 @@ export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
   )
 }
 
-/**
- * A readable conversation turn — the second register threaded on the same spine as the machine Row. It
- * shares the log's 20px node hole-punch so chronology is unbroken, but the substance is the words: the
- * caption is a quiet speaker tag, and the body is the largest, brightest text in the view. Never folded,
- * always on screen. This is the register the machine Row deliberately is not.
- */
-function Turn({
-  item,
-  origin,
-  speaker,
-  describeSpeaker,
-  openWorkspaceFile,
-  readPastedImage,
-  openHttpLink,
-  workspaceRoot,
-  onContinue
-}: {
-  item: AgentTimelineItem
-  origin: number
-  /** 这一轮的说话人。由调用方从唯一判据（`speakerOf`）取得——Turn 只在有说话人时才被渲染。 */
-  speaker: ConversationSpeaker
-  describeSpeaker?: DescribeSpeaker
-  openWorkspaceFile?: OpenWorkspaceFile
-  readPastedImage?: ReadPastedImage
-  openHttpLink?: (url: string, event: LinkClickModifiers) => void
-  workspaceRoot: string
-  onContinue?: () => void
-}) {
-  // 形状由**身份**驱动，不由 kind。这是本任务的全部：`log-turn--${item.kind}` 会让「谁说的」永远
-  // 只有两种可能，A2A 落地后第三个身份无处可去；而 `data-speaker-role` 上挂的是身份判定的结论。
-  // role 是**画法**的维度（human 一种画法、agent 一种画法），身份本身是 speaker.id——所以这里没有
-  // 把开放集压回二值：多个 Agent 共享 `agent` 这一种画法，各自的头像与名字仍然不同。
-  const described = describeSpeaker?.(speaker)
-  return (
-    <div className="log-turn" data-speaker-role={speaker.role} data-status={item.status}>
-      <span className="log-turn__node">
-        {/* 头像与两条轴上用的是同一个组件、同一套身份表示——不是「正文一套、轴一套」。缺 describe
-            时退回 role 形状（人形/Bot），因为没有名字的头像认不出谁，此时颜色与图标也不再承载身份。 */}
-        <ConversationSpeakerAvatar
-          speaker={speaker}
-          name={described?.name ?? (speaker.role === 'human' ? 'You' : 'Agent')}
-          size={20}
-          {...(described?.providerId === undefined ? {} : { providerId: described.providerId })}
-        />
-      </span>
-      <div className="log-turn__head">
-        {/* 名字是身份的判别器（同 provider 的两个 Agent 共用一枚图标、色相有 52% 概率撞在 20° 内，
-            已实测），所以 caption 给的是 describe 出来的名字，不是 role 的字面量。 */}
-        <span className="log-turn__who">{described?.name ?? (speaker.role === 'human' ? 'You' : 'Assistant')}</span>
-        {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
-        {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-        {/* 回合上给**时刻**，机器行仍给偏移量。这两路问的不是同一个问题：一条 tool_call 关心的是
-            "距开始多久"（它属于某一段执行），而一句话关心的是"什么时候说的"。时刻带 title 里的
-            偏移量兜底，两个事实都答得出而只占一列宽。 */}
-        <span className="log-turn__time" title={`${formatClock(item.createdAt)} · ${formatOffset(item.createdAt, origin)} from start`}>
-          {formatClock(item.createdAt)}
-        </span>
-      </div>
-      {/* Only the TURN register renders markdown. The machine Row (log-row__prose) stays plain text: it
-          carries payload, not prose someone reads for meaning. */}
-      {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
-      {item.content ? (
-        <AgentMarkdown
-          content={item.content}
-          className="log-turn__body"
-          workspaceRoot={workspaceRoot}
-          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-          {...(readPastedImage ? { readPastedImage } : {})}
-          {...(openHttpLink ? { openHttpLink } : {})}
-        />
-      ) : null}
-    </div>
-  )
-}
-
 function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string }) {
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => timelineRows(items), [items])
@@ -894,10 +819,9 @@ export function ActivityView({
       />
       <div className="activity-log" ref={logRef}>
         {placed.map(({ entry, key, from }) => {
-          // 判据只问一次：`speakerOf` 的**结论**既决定走哪个寄存器，又是 Turn 需要的那个身份。
-          // 原先这里问 `isConversationTurn`、Turn 里再问一遍 `speakerOf`，两处必须一致却各调一次；
-          // 现在结论直接传下去，Turn 拿到的是非空身份，"有说话人"与"是一轮对话"不可能再漂移。
+          // Identity is resolved once here; the shared message only renders that verdict.
           const speaker = entry.kind === 'run' ? null : speakerOf(entry.item)
+          const described = speaker ? describeSpeaker?.(speaker) : undefined
           return (
             // One wrapper per segment carries the scroll target, the observer key, and the selection
             // marker, so the three log registers below stay unaware of the ruler wiring.
@@ -909,12 +833,14 @@ export function ActivityView({
               {entry.kind === 'run' ? (
                 <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
               ) : speaker ? (
-                <Turn
-                  item={entry.item}
+                <ConversationMessage
+                  content={entry.item.content ?? ''}
+                  status={entry.item.status}
+                  createdAt={entry.item.createdAt}
                   origin={origin}
                   speaker={speaker}
                   workspaceRoot={workspaceRoot}
-                  {...(describeSpeaker ? { describeSpeaker } : {})}
+                  {...(described ?? {})}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                   {...(readPastedImage ? { readPastedImage } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}

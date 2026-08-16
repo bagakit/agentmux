@@ -128,3 +128,5 @@
   .wf-spin { animation: none; }
   .wf-chev, .wf-rail__fill { transition: none; }
 }
+
+.wf-agent--compact { min-width: 0; }

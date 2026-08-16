@@ -280,11 +280,13 @@ export function WorkspaceTopicsPanel({
                     />
                   </form>
                 ) : (
-                  <button
+                  <div
                     className="workspace-topic-entry"
-                    type="button"
-                    disabled={pending !== null}
-                    onClick={() => void openTopic(topic.id)}
+                    role="button"
+                    tabIndex={pending !== null ? -1 : 0}
+                    aria-disabled={pending !== null}
+                    onClick={() => { if (pending === null) void openTopic(topic.id) }}
+                    onKeyDown={(event) => { if (pending === null && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openTopic(topic.id) } }}
                   >
                     {/* 已 pin 的静息态标记：一枚小 Pin，扫一眼列表就分辨得出哪些被钉住了，不必 hover。
                         它**不是**第二个常驻图标按钮（那会跟标题抢宽度、也会撞 surface-tool-dock 那条
@@ -329,7 +331,7 @@ export function WorkspaceTopicsPanel({
                           : null
                       }
                     />
-                  </button>
+                  </div>
                 )}
                 {/* 行上只留最高频的那个动作。改名收进右键菜单——它一天用不了一次，
                     占一个常驻图标位是在跟标题抢宽度。

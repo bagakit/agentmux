@@ -14,17 +14,16 @@ import {
  *
  * ─── 这一族**不能**用行为测试守到底，必须明说 ───
  *
- * desktop 包没有 DOM/IME 测试环境：无 jsdom / happy-dom / @testing-library，渲染只有
- * `renderToStaticMarkup`（不跑 effect、不派发事件、更不会有 composition 事件）。所以「真的按中文、
- * 真的被 IME 改坏」在本仓**无法复现**，这一点在设计修复方案时就已认定，不是这轮偷懒。
+ * 本文件验证 textarea 状态机和静态接线。desktop 已有 happy-dom，可派发合成 composition 事件，
+ * 但它不能代替真实操作系统的中文输入法；不要把这些断言读成真实 IME 端到端验证。
  *
  * 于是判据分三层，各自能独立变红（本仓记过「抽进 lib 只解决一半」「守卫要判可达性不是在场」）：
  *
  *   行为层 —— 状态机、渲染取值、四个处理器的副作用。可直接调用并断言。
  *   接线层 —— AST：`ComposerTextarea` 那个 textarea 上四个属性真的在场、每个的值就是对应那次转发，
  *             `value` 真的经过 `composerRenderValue`。这一层抓「lib 写对了但壳没接 / 接错了一个」。
- *   消费层 —— AST：`AgentComposer` 用的是 `ComposerTextarea` 而不是裸 `<textarea>`。这一层抓
- *             「壳做对了但那一格没用它」——那种情况下前两层全绿而用户的缺陷完好无损。
+ *   消费层 —— AST：普通 textarea 使用 `ComposerTextarea`；AgentComposer 已接入 InlineComposer，
+ *             其组字、选择与撤销由 ProseMirror 负责。两种编辑面都必须接真实取值与草稿写回口。
  *
  * 接线层与消费层**不**保证：组件会被挂载、React 真的会把这些属性接成 DOM 监听器、Chromium 真的按这个
  * 顺序派发 composition 事件。那三件事要真 DOM 环境。别把这族测试读成「IME 已验证正常」。
@@ -325,9 +324,10 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
     ).toContain('textarea')
 
     // 消费者侧的在场证明：至少要有若干文件在用这层壳。写成 `toBeGreaterThan(0)` 不够——那在
-    // 「只剩 AgentComposer 一个、其余 7 格被改回裸 textarea」时也成立，而上面那条会把它们逮到；
+    // 「只剩某一个消费者、其余格被改回裸 textarea」时也成立，而上面那条会把它们逮到；
     // 这里要的是「这层壳真的被广泛用着」，所以地板取自实测值。改动接线时这个数要跟着改，且改的
-    // 时候必须说明为什么某一格不再需要壳。
+    // 时候必须说明为什么某一格不再需要壳。AgentComposer 改用 ProseMirror 后，实际仍有 7 个
+    // 消费文件（包括 Gallery 的普通文本示例），所以保留这个地板。
     const consumers = files.filter(
       (file) => file !== SOLE_RAW_TEXTAREA && tagNamesIn(`${RENDERER_SRC}/${file}`).includes('ComposerTextarea')
     )
@@ -340,12 +340,13 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 消费层补充：AgentComposer 那一格喂进壳的是什么。标签名在场之外还要钉实参——接成 `value={''}`
+// 消费层补充：AgentComposer 那一格喂进 InlineComposer 的是什么。标签名在场之外还要钉实参——接成 `value={''}`
 // 或 `onValueChange={() => {}}` 时标签判据全绿，而那一格分别变成永久空、或者永远存不下草稿。
+// InlineComposer 使用 ProseMirror 的组字生命周期，不再套 textarea 的 React value 镜像。
 // ---------------------------------------------------------------------------
-describe('AgentComposer 喂给壳的是受控取值与草稿写回口', () => {
-  it('喂给壳的是受控取值与草稿写回口，不是别的东西', () => {
-    const attributes = attributesOfTag(CONSUMER, 'ComposerTextarea')
+describe('AgentComposer 接入 InlineComposer 的受控取值与草稿写回口', () => {
+  it('新编辑面仍收到真实取值与写回回调', () => {
+    const attributes = attributesOfTag(CONSUMER, 'InlineComposer')
     expect(attributes.size).toBeGreaterThan(0)
     expect(attributes.get('value')).toBe('value')
     expect(attributes.get('onValueChange')).toBe('onChange')
