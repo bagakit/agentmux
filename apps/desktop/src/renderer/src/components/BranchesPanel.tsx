@@ -5,6 +5,7 @@ import {
   GitBranch,
   GitCompareArrows,
   LoaderCircle,
+  Pin,
   Plus,
   RefreshCw,
   Unlink,
@@ -27,7 +28,8 @@ import {
   runningAgentPresenceByWorktree,
   worktreePresenceKey
 } from '../lib/branch-agent-presence'
-import { defaultWorktreePath } from '../lib/workspace-projects'
+import { defaultWorktreePath, workspaceProjectId } from '../lib/workspace-projects'
+import { partitionPinned } from '../lib/topic-order'
 import { branchHasWorktree, branchOpenIntent, branchWorktreePath } from '../lib/workspace-branches-state'
 import {
   nextAfterWorktreeRemoval,
@@ -51,6 +53,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const removeWorktree = useAppStore((state) => state.removeWorktree)
+  const pinnedItems = useAppStore((state) => state.pinnedItems)
+  const togglePinnedItem = useAppStore((state) => state.togglePinnedItem)
+  // 分支名只在一个 repo 内唯一——两个项目都能有 `main`。所以 pin 的 scope 必须**派生**自
+  // workspaceProjectId（= `[hostId, repoPath]`，横跨一个 repo 的多个 worktree），绝不在这里手写一个
+  // 字面量：手写的常量在单项目测试下看着没问题，真实使用里会跨项目串 pin（见 pinnedItems 的注释）。
+  const pinScope = workspaceProjectId(workspace)
+  const pinnedBranches = pinnedItems[pinScope] ?? []
   const [selectedBranch, setSelectedBranch] = useState(workspace.branch ?? null)
   const [createBranch, setCreateBranch] = useState<WorkspaceBranchRecord | null>(null)
   const [worktreePath, setWorktreePath] = useState('')
@@ -97,6 +106,15 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     () => runningAgentPresenceByWorktree(sessions),
     [sessions]
   )
+
+  // 置顶是**组内**的一次分区，不是重新分组：`partitionPinned` 只重排一段里的次序（置顶的靠前，
+  // 两段各自的相对次序原样保留），绝不把一个没有 worktree 的分支提进「Worktrees」组——那会让
+  // 那个标题说谎。所以对 bound / unbound 各调一次，而不是对合并后的全表调一次。
+  function pinFirst(branches: WorkspaceBranchRecord[]): WorkspaceBranchRecord[] {
+    const order = partitionPinned(branches.map((branch) => branch.name), pinnedBranches)
+    const byName = new Map(branches.map((branch) => [branch.name, branch]))
+    return order.map((name) => byName.get(name)!)
+  }
 
   function openCreateDialog(branch: WorkspaceBranchRecord): void {
     if (snapshot?.kind !== 'git-repository' || branchHasWorktree(branch)) return
@@ -217,6 +235,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   function branchRow(branch: WorkspaceBranchRecord) {
     const selectedRow = selectedBranch === branch.name
+    const pinned = pinnedBranches.includes(branch.name)
     // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
     const worktree = branchWorktreePath(branch)
     const runningAgents = worktree !== null && snapshot?.kind === 'git-repository'
@@ -318,6 +337,22 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
                   {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
                 </span>
+                {/* `.branch-row` 本身是个 <button>：这枚嵌套控件必须 stopPropagation，否则点它会连带
+                    触发外层的 openBranch——「pin 一下」变成「pin 并打开」。pinned 态是持久的类，不靠
+                    hover：扫一眼列表就该看出哪些分支被 pin 了（见 CSS 里 --pinned 那条）。 */}
+                <button
+                  type="button"
+                  className={`icon-button branch-row__pin ${pinned ? 'branch-row__pin--pinned' : ''}`}
+                  aria-pressed={pinned}
+                  aria-label={pinned ? `Unpin ${branch.name}` : `Pin ${branch.name}`}
+                  title={pinned ? 'Unpin branch' : 'Pin branch'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    togglePinnedItem(pinScope, branch.name)
+                  }}
+                >
+                  <Pin size={11} />
+                </button>
               </>
             }
           />
@@ -354,8 +389,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       />
       {snapshot?.kind === 'git-repository' ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
       <div className="branches-scroll">
-        {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{bound.map(branchRow)}</div> : null}
-        {unbound.length > 0 ? <div className="branch-group"><span>Without worktree</span>{unbound.map(branchRow)}</div> : null}
+        {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{pinFirst(bound).map(branchRow)}</div> : null}
+        {unbound.length > 0 ? <div className="branch-group"><span>Without worktree</span>{pinFirst(unbound).map(branchRow)}</div> : null}
         {!loading && snapshot?.kind === 'not-a-git-repository' ? (
           <div className="branches-empty"><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
         ) : null}
