@@ -241,6 +241,41 @@ describe('ConfigStore workspace identity', () => {
     expect(loaded.browser.agentAutomation, '用户开过的授权被复位了').toBe(true)
   })
 
+  // saveBookmark 这一项比 toolbar 另外五个晚到，而 CONFIG_VERSION 没跟着升。于是磁盘上存在
+  // **写于它之前的 v9 配置**（本机 dev.agentmux.desktop 那份就是：toolbar 只有五个键）。
+  // v9 不小于 CONFIG_VERSION，走不到 retiredConfigReplacement 退休路径，直接进 configSchema.parse。
+  // 它当初写成必需 `z.boolean()`，parse 抛 invalid_type → get() 抛 → **应用起不来**。
+  // 这不是假想：把 `.default(true)` 摘掉，下面这条立刻红。
+  it('toolbar 缺 saveBookmark 的存量 v9 配置仍能加载（不是抛，应用起得来）', async () => {
+    const { store, path } = await storeFixture()
+    const { saveBookmark: _omitted, ...withoutSaveBookmark } = baseConfig.browser.toolbar
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      browser: { ...baseConfig.browser, toolbar: withoutSaveBookmark }
+    }))
+
+    const loaded = await store.get()
+    expect(loaded.browser.toolbar.saveBookmark, '缺席该读成开着，与 DEFAULT_CONFIG 同值').toBe(true)
+    // 另外五个不能被这次补齐连带改写。
+    expect(loaded.browser.toolbar.more).toBe(baseConfig.browser.toolbar.more)
+  })
+
+  it('用户关掉的 saveBookmark 不被默认值吃回去', async () => {
+    // `.default()` 最常见的坑：只喂缺席那一侧，把默认写成无条件覆盖也全绿，
+    // 而用户关掉的按钮每次冷启动都自己亮回来。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      browser: {
+        ...baseConfig.browser,
+        toolbar: { ...baseConfig.browser.toolbar, saveBookmark: false }
+      }
+    }))
+
+    const loaded = await store.get()
+    expect(loaded.browser.toolbar.saveBookmark, '用户关掉的开关被默认值复位了').toBe(false)
+  })
+
   it('salvages each preference on its own, so a damaged toolbar does not cost the theme', async () => {
     // 与 workspaces 同一条规矩：逐条判定，不整份判定。整份判定会让下一次「browser 形状变了」
     // 的 bump 顺手清掉主题。
