@@ -140,6 +140,11 @@
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
 .scratch-workspace-row__icon { background: transparent; }
+/* Pinned Topic / Branch child rows: a sibling row one --rail-depth deeper, one type step smaller
+   than the project name (--fs-meta → --fs-micro) so it reads as a child hanging under its parent,
+   not another top-level entry. Everything else it inherits from .project-rail-row. */
+.project-rail-row--pinned-child { min-height: 22px; }
+.project-rail-row--pinned-child .project-rail-row__identity strong { font-size: var(--fs-micro); font-weight: 560; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
 .project-rail-toolbar {
   min-height: 32px;

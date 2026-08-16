@@ -1,8 +1,8 @@
 import { ProjectIcon } from './ProjectIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower } from 'lucide-react'
-import { useMemo, useState, type CSSProperties } from 'react'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { useMemo, useState, Fragment, type CSSProperties, type ReactNode } from 'react'
+import { SCRATCH_WORKSPACE_ID, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import {
   projectGroupKey,
@@ -41,6 +41,7 @@ export function WorkspaceSidebar({
   const setConfig = useAppStore((state) => state.setConfig)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
+  const pinnedItems = useAppStore((state) => state.pinnedItems)
   const reportError = useAppStore((state) => state.reportError)
   const [removeRequest, setRemoveRequest] = useState<ReturnType<typeof projectRailNavigation>['projects'][number] | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -92,6 +93,40 @@ export function WorkspaceSidebar({
     } finally {
       setRemoving(false)
     }
+  }
+
+  // Pinned Topics / Branches hang as smaller sibling rows right after their parent (Scratch or the
+  // owning Project), one --rail-depth deeper — the single indent mechanism the rail already uses
+  // (see the depth spread in projectRow). Emitted from the pin list alone; the pinned id is enough
+  // to label the row, so no branch fetch enters the rail. Zero pins in a scope → nothing at all
+  // (no empty container, no heading). Rendered inside projectRow / the Scratch slot, so a collapsed
+  // group never reaches this code and cannot leak its children.
+  function pinnedChildRows(
+    scope: string,
+    depth: number,
+    resolve: (id: string) => { label: string; targetId: string | undefined }
+  ): ReactNode {
+    const ids = pinnedItems[scope] ?? []
+    if (ids.length === 0) return null
+    return ids.map((id) => {
+      const { label, targetId } = resolve(id)
+      return (
+        <div className="project-rail-entry" key={`${scope}:${id}`}>
+          <button
+            type="button"
+            className="project-rail-row project-rail-row--pinned-child"
+            aria-label={label}
+            title={label}
+            style={{ '--rail-depth': depth } as CSSProperties}
+            onClick={() => {
+              if (targetId) void selectWorkspace(targetId)
+            }}
+          >
+            <span className="project-rail-row__identity"><strong>{label}</strong></span>
+          </button>
+        </div>
+      )
+    })
   }
 
   function projectRow({ project, depth }: ProjectRailNode) {
@@ -153,16 +188,31 @@ export function WorkspaceSidebar({
       </button>
     )
     return (
-      <WorkspaceRowContextMenu
-        key={project.id}
-        path={project.repoPath}
-        branch={branch}
-        isLocal={project.hostId === 'local'}
-        workspaceId={preferred ?? project.preferredWorkspaceId}
-        onRemove={() => setRemoveRequest(project)}
-      >
-        <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} contexts={activityContextsForWorkspaces(project.workspaces)} /></div>
-      </WorkspaceRowContextMenu>
+      <Fragment key={project.id}>
+        <WorkspaceRowContextMenu
+          path={project.repoPath}
+          branch={branch}
+          isLocal={project.hostId === 'local'}
+          workspaceId={preferred ?? project.preferredWorkspaceId}
+          onRemove={() => setRemoveRequest(project)}
+        >
+          <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} contexts={activityContextsForWorkspaces(project.workspaces)} /></div>
+        </WorkspaceRowContextMenu>
+        {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
+            projectWorkspaces). The pinned branch name labels the row; navigation prefers the
+            worktree carrying that branch (in-scope data, no fetch), else the project's preferred
+            workspace — the same selectWorkspace path the parent row uses. */}
+        {pinnedChildRows(
+          project.id,
+          Math.min(depth + 1, PROJECT_RAIL_MAX_DEPTH),
+          (branchName) => ({
+            label: branchName,
+            targetId:
+              project.workspaces.find((workspace) => workspace.branch === branchName)?.id ??
+              preferred ?? project.preferredWorkspaceId
+          })
+        )}
+      </Fragment>
     )
   }
 
@@ -210,6 +260,15 @@ export function WorkspaceSidebar({
             contexts={activityContextsForWorkspaces([scratch], scratchTopics ?? [])}
           /></div>
           </WorkspaceRowContextMenu>
+          {/* Pinned Topics hang under Scratch. The pin list alone is enough to render — a Topic
+              whose snapshot has not loaded (scratchTopics null, or id not yet in it) falls back to
+              its id rather than disappearing. Clicking selects the Scratch workspace, following the
+              row above. Note: these child rows use --rail-depth + a smaller type, distinct from the
+              static <Pin> badge above (which means "this workspace is pinned"). */}
+          {pinnedChildRows(SCRATCH_WORKSPACE_ID, 1, (topicId) => ({
+            label: scratchTopics?.find((topic) => topic.id === topicId)?.title ?? topicId,
+            targetId: scratch.id
+          }))}
         </div>
       ) : null}
       <div className="sidebar__section-heading">
