@@ -539,11 +539,23 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: '主按钮 Stop/Send：问"有在途回合吗"。idle-running 没有可打断的回合，故严格判 working 是对的'
   },
   '/lib/attention-event.ts': {
-    count: 6,
-    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值 + categoryFor 的 case：这个文件是"一个状态归哪一档"的裁决点，画点、排序、注意力三问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle。categoryFor 那一处是把 if 链改成穷举 switch 时新增的：它此前以 return null 收尾，是四个状态映射里唯一对第十个状态静默的一个'
+    count: 9,
+    why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值 + categoryFor 的 case：这个文件是"一个状态归哪一档"的裁决点，画点、排序、注意力三问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle。categoryFor 那一处是把 if 链改成穷举 switch 时新增的：它此前以 return null 收尾，是四个状态映射里唯一对第十个状态静默的一个。2026-09-19 新增 3 处，全属 activityGlyphFor（返回类型联合、tier 比较、返回值）：它把 ProjectActivity 菜单行就地手抄的那份字形判定收成 statusDotTier 的投影——判据仍只有 statusDotTier 一处，这三个字面量是投影的出口拼写，不是第二次裁决'
   },
   '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
   '/lib/api.ts': { count: 1, why: 'browser preview 的 mock 数据，不是生产状态写入路径' },
+  '/components/semantic-icons/index.tsx': {
+    count: 2,
+    why: 'SemanticIconName union 的成员名 + SemanticIcon 里 `name === "working"` 挂动势类（2026-09-19）：问"这个字形要不要带节奏"，不问"有几个在干活"。它拿的是**图标名**而不是 session state，所以上面那条 stateEqualsWorkingSites 的检测器看不见它——这条豁免守的是本表的次数轴，不是那一轴'
+  },
+  '/components/ConversationMessage.tsx': {
+    count: 1,
+    why: 'Streaming 提示片里写死的 `name="working"`：这条回合正在产出，取的是"正在产出"这个字形，与 session state 无关（它没有 state 可读）'
+  },
+  '/components/ObservationSurfaceGallery.tsx': {
+    count: 1,
+    why: 'Gallery 的固定示例 status（`state: "working"`）：给组件截图用的静态 fixture，不是生产状态写入路径，同 /lib/api.ts 的 mock'
+  },
 
   // ---- 单行/单 lane 的状态点：不是计数，但各有已记录的分岔 ----
   // `/components/AgentRoster.tsx` 与 `/components/FanOutStrip.tsx` 曾各占一条（各 3 次，理由都写着
@@ -552,7 +564,7 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
   // 与 fanout-group 做过同样的清理，理由见上面那两段注释）。
   '/components/ProjectActivity.tsx': {
     count: 1,
-    why: 'switch 的 "working" case（"Working · no recent summary"）：问"这一个 Session 在 working 吗"。逐行 "active now" 那处已搬到 project-activity-row.ts，计数走同文件已 import 的 workingAgentCount'
+    why: 'switch 的 "working" case（"Working · no recent summary"）：问"这一个 Session 在 working 吗"。逐行 "active now" 那处已搬到 project-activity-row.ts，计数走同文件已 import 的 workingAgentCount。菜单行的字形此前在这里又抄了一份 `state === working ? working : state === running ? running : neutral`（其余七支全塌成中性灰），2026-09-19 收敛为 attention-event.ts 的 activityGlyphFor——它是 statusDotTier 的投影，不是第二份状态判定'
   },
   '/lib/project-activity-row.ts': {
     count: 1,
