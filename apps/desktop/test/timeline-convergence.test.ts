@@ -292,7 +292,7 @@ describe('Timeline convergence', () => {
     expect(useAppStore.getState().sessions).toContainEqual(expect.objectContaining({
       id: session.id,
       processState: 'exited',
-      status: expect.objectContaining({ state: 'exited', exitCode: 7 })
+      status: expect.objectContaining({ state: 'error', exitCode: 7 })
     }))
   })
 
@@ -523,7 +523,7 @@ describe('Timeline convergence', () => {
     expect(useAppStore.getState().sessions).toContainEqual(expect.objectContaining({
       id: pendingSession.id,
       processState: 'exited',
-      status: expect.objectContaining({ state: 'exited', exitCode: 7 })
+      status: expect.objectContaining({ state: 'error', exitCode: 7 })
     }))
     expect(useAppStore.getState().timelines[pendingSession.id]).toEqual({
       agentSessionId: pendingSession.id,
@@ -789,7 +789,7 @@ describe('Timeline convergence', () => {
     expect(useAppStore.getState().sessions).toContainEqual(expect.objectContaining({
       id: session.id,
       processState: 'exited',
-      status: expect.objectContaining({ state: 'exited', exitCode: 7 })
+      status: expect.objectContaining({ state: 'error', exitCode: 7 })
     }))
   })
 

@@ -15,14 +15,29 @@ import {
   runExitFacts
 } from '../src/agent-run-status.js'
 
-describe('interrupted 对用户就是出错', () => {
-  it('显示态落到 error，而不是把一个内部词直接给用户看', () => {
-    expect(runDisplayState('interrupted')).toBe('error')
+describe('honest terminal process states', () => {
+  it.each([
+    [{ state: 'running' }, 'running'],
+    [{ state: 'interrupted', interruptionReason: 'daemon_restart' }, 'disconnected'],
+    [{ state: 'interrupted' }, 'disconnected'],
+    [{ state: 'exited', exitCode: 0 }, 'exited'],
+    [{ state: 'exited' }, 'exited'],
+    [{ state: 'exited', exitCode: 137, exitSignal: 'SIGKILL', exitReason: 'user-stopped' }, 'exited'],
+    [{ state: 'interrupted', exitReason: 'user-stopped' }, 'exited'],
+    [{ state: 'exited', exitReason: 'crashed' }, 'error'],
+    [{ state: 'interrupted', exitReason: 'crashed' }, 'error'],
+    [{ state: 'exited', exitCode: 1 }, 'error'],
+    [{ state: 'exited', exitSignal: 'SIGSEGV' }, 'error']
+  ] as const)('%j presents as %s', (observation, expected) => {
+    expect(runDisplayState(observation)).toBe(expected)
   })
 
-  it('其余状态原样透出——只有 interrupted 需要翻译', () => {
-    expect(runDisplayState('running')).toBe('running')
-    expect(runDisplayState('exited')).toBe('exited')
+  it('preserves the daemon restart explanation instead of claiming a crash', () => {
+    expect(projectRunProcessStatus({ state: 'interrupted', interruptionReason: 'daemon_restart', source: 'run-process', observedAt: 7 }))
+      .toEqual({ state: 'disconnected', detail: 'The Runtime restarted and interrupted this Run.', source: 'run-process', observedAt: 7 })
+    expect(projectRunProcessStatus({ state: 'interrupted', interruptionReason: 'owner_lost', source: 'run-process', observedAt: 7 }).detail)
+      .toBe('The Run was interrupted (owner_lost).')
+    expect(runExitFacts({ interruptionReason: 'daemon_restart' })).toEqual({ interruptionReason: 'daemon_restart' })
   })
 })
 
@@ -34,7 +49,7 @@ describe('detail 说清「为什么是这个状态」', () => {
       state: 'interrupted',
       source: 'run-process',
       observedAt: 7
-    }).detail).toBe('The Run owner interrupted this PTY.')
+    }).detail).toBe('The Run was interrupted; the cause was not reported.')
   })
 
   it('常量与投影用的是同一句——手抄第二份文案会红在这里', () => {
@@ -137,7 +152,7 @@ describe('带就带上、缺就缺席', () => {
       exitSignal: 'SIGSEGV',
       exitReason: 'crashed'
     })).toEqual({
-      state: 'exited',
+      state: 'error',
       source: 'run-process',
       observedAt: 7,
       detail: 'signal SIGSEGV',
