@@ -1,0 +1,191 @@
+{
+  "date": "2026-09-20",
+  "scope": "Message Tools confirmed gaps",
+  "mutations": [
+    {
+      "name": "cycle-return",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "actual-expanded-height",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "consume-height",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "mode-moves-right",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "left-column",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "narrow-text",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "wrap-tools",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "placeholder-wrap",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "local-feedback-mount",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "retry-no-action",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "capture-silent",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "skill-menu-only",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "admission-global",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "launcher-last-file-only",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "launcher-stale-draft",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "launcher-dead-mode",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "identity-disconnected",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "identity-rename-stale",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "identity-wrong-provider",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "success-keeps-stale-error",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "late-error-crosses-provider",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "retry-crosses-provider",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "skills-cross-provider",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "simultaneous-draft-results",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "tab-context-disconnected",
+      "caught": true,
+      "exit": 1
+    },
+    {
+      "name": "scope-aba",
+      "caught": true,
+      "exit": 1
+    }
+  ],
+  "test_runs": [
+    {
+      "files": 34,
+      "passed": 312,
+      "log": "/tmp/message-tools-complete-tests.log"
+    },
+    {
+      "file": "composer-local-feedback.test.tsx",
+      "passed": 17,
+      "includes": "two additional ABA regressions",
+      "log": "/tmp/message-tools-scope-tests.log"
+    }
+  ],
+  "browser": {
+    "engine": "Ego Chromium, real Gallery components",
+    "viewport_widths": [
+      320,
+      420,
+      900
+    ],
+    "empty_editor_height": {
+      "collapsed": 24,
+      "current": 26,
+      "expanded": 240
+    },
+    "fixed_trigger_x": {
+      "320": [
+        33,
+        33,
+        33
+      ],
+      "420": [
+        33,
+        33,
+        33
+      ],
+      "900": [
+        41,
+        41,
+        41
+      ]
+    },
+    "narrow_editor_width": 137,
+    "long_text_scrolls": true,
+    "token_and_draft_survive_cycle": true,
+    "toolbar_overlaps_send": false,
+    "host_adjustment": "Gallery host made viewport-scrollable; no Composer CSS overrides"
+  },
+  "production_callers": [
+    "SessionPane → AgentSessionComposer → AgentComposer",
+    "AgentSessionComposer → AgentAvatar / agentDisplayName",
+    "AgentSessionComposer / NewTabSurface → AgentComposerTools / ComposerFeedback"
+  ],
+  "mutation_logs": "/tmp/message-tools-mutations",
+  "typecheck": "pnpm --filter @agentmux/desktop typecheck"
+}

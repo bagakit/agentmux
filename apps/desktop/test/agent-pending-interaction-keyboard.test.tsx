@@ -1,3 +1,4 @@
+import { renderComponentBoundary } from './helpers/render-component-boundary'
 import { Children, type ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
@@ -38,7 +39,7 @@ function input(state: 'waiting' | 'blocked' | 'running', pending: boolean, suffi
   } as Extract<SessionSnapshot, { kind: 'agent' }>]
   fixture.state.agentComposerDrafts = { [id]: 'keep this thought' }
   // Follow both production components to the actual handler passed to the rich input.
-  const surface = AgentSessionComposer({ sessionId: id })
+  const surface = renderComponentBoundary(AgentSessionComposer, { sessionId: id })
   const composer = AgentComposer(surface.props as AgentComposerProps)
   const editor = Children.toArray(composer.props.children)[0] as ReactElement<InlineComposerProps>
   expect(editor.type).toBe(InlineComposer)
@@ -61,7 +62,7 @@ describe('pending interaction queue keyboard path', () => {
       const key = enter()
       keyDown(key.event, 17)
       expect(key.preventDefault).toHaveBeenCalledOnce()
-      expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought')
+      expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought', expect.any(Function))
       expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought')
       expect(fixture.state.flushAgentSteerQueue).toHaveBeenCalledExactlyOnceWith(id)
       expect(fixture.state.send).not.toHaveBeenCalled()
@@ -83,7 +84,7 @@ describe('pending interaction queue keyboard path', () => {
     const key = enter()
     keyDown(key.event, 17)
     expect(key.preventDefault).toHaveBeenCalledOnce()
-    expect(fixture.state.send).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought')
+    expect(fixture.state.send).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought', expect.any(Function))
     expect(fixture.state.enqueueAgentSteer).not.toHaveBeenCalled()
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought')
   })

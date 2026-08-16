@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 164
+    "next_cursor": 168
   },
   "features": [
     {
@@ -1659,6 +1659,16 @@
       "feat_id": "f-27a8f3deq",
       "title": "认出并寻址到某个 Agent：终端右键的身份入口与同 provider 的字母判别器",
       "status": "blocked",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27e8fkcsx",
+      "title": "Message Tools 三档真正变形，入口清楚且保持左侧",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

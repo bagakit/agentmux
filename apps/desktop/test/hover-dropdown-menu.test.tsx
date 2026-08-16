@@ -105,7 +105,7 @@ it('Composer tools select actual skill and command references without submitting
   const onChooseSkill = vi.fn(), onCommand = vi.fn(), onCapture = vi.fn(async () => {})
   const skill = { name: 'review', description: 'Review the code', path: '/skills/review/SKILL.md', source: 'project' as const }
   await act(async () => root.render(<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Session status' }]}
-    loadSkills={async () => [skill]} onChooseSkill={onChooseSkill} onCommand={onCommand} onCapture={onCapture} reportError={vi.fn()} />))
+    loadSkills={async () => [skill]} onChooseSkill={onChooseSkill} onCommand={onCommand} onCapture={onCapture} runAction={async (action) => { await action() }} />))
   const find = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes(label))!
   // Composer 现在静息在一行态（工具收起），所以先按真实产品路径点一下那枚三态键切到工具可见的一档。
   // 这条测试断言的是「能力可达」而不是「默认停在哪一档」——默认档由 composer-form-actions.test.tsx

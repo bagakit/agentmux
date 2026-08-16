@@ -20,6 +20,10 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from './AgentComposer'
+import { AgentAvatar } from './AgentAvatar'
+import { agentProviderLabel } from './AgentProviderIcon'
+import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 
 export type AgentComposerAvailability = {
   disabled: boolean
@@ -29,14 +33,8 @@ export type AgentComposerAvailability = {
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
-// Per-session composer state that must NOT live in React: several tests call AgentSessionComposer() as a
-// plain function and read its props, which throws on any hook. It also should not live in the Store — that
-// file is owned elsewhere right now, and this is renderer-only convenience state (like the queue itself),
-// not something Core or persistence needs. Keyed by sessionId so history and the resubmit guard survive a
-// composer remount and a switch away-and-back, which is exactly per-session shell-history semantics.
-// ponytail: in-memory only — history is lost on app restart, and a dead session leaves a small stale entry
-// (same shape the persisted agentNames map already accepts). Cross-restart persistence would need a
-// store.ts change; see the report. Upgrade path: move both maps behind a store slice + partialize entry.
+// History and the resubmit guard survive a Composer remount within the same application run.
+// Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
 const historyBySession = new Map<string, HistoryState>()
 const lastSubmitBySession = new Map<string, LastSubmit>()
 
@@ -66,15 +64,14 @@ export function agentComposerAvailability(
 export function AgentSessionComposer({
   sessionId,
   disabled = false,
-  regionName
+  tabName
 }: {
   sessionId: string
   disabled?: boolean
-  // 这一格的显示名（含去重编号），由 SessionPane 现算好传进来——它是唯一持有 Region 起点（tabId +
-  // regionId + 兄弟格）的宿主。缺席即水印整段不渲染（launcher/PR/board 那些无 Region 的宿主本就不
-  // 经这条路走 AgentComposer，此处只透传，不判断）。
-  regionName?: string
+  // Authored Tab name is contextual; the Session identity remains primary.
+  tabName?: string
 }) {
+  const feedback = useComposerFeedback(sessionId)
   const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
@@ -89,6 +86,11 @@ export function AgentSessionComposer({
   const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  const userName = useAppStore((state) => state.agentNames?.[sessionId])
+  const firstPrompt = useAppStore((state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
+  const displayName = session?.kind === 'agent' ? agentDisplayName({
+    userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
+  }) : undefined
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
       session?.kind === 'agent' && workspaceOwnsSessionPath(item, session)
@@ -122,8 +124,6 @@ export function AgentSessionComposer({
   // 于是打 `/review` 一条候选都不出，而 tsc 干净、测试全绿：那句 `.find()` 长得就是「已经合并了」
   // 的样子（判「两套是否真的合并」要从消费侧的数据来源反推，不读桥接代码的意图）。
   //
-  // 不套 useMemo：本组件通篇没有 React hook，一切经 zustand 选择器取；这两处都是每次渲染现算的
-  // 纯映射，且下游 AgentComposer 只在渲染时遍历它们，没有按引用比较的消费者。
   // Shortcut 段排在 Agent 原生命令**之前**：这是用户自己配的那套，也是他来这个列表要找的东西；
   // 段序即此处的拼装序（AgentComposer 用保插入序的 Map 分组，不另立优先级表）。
   const commandCandidates = [
@@ -146,7 +146,8 @@ export function AgentSessionComposer({
     if (!submitMode.canSubmit || !text.trim()) return
     const value = expandSemanticReferences(text)
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
-    if (!send(sessionId, value)) return
+    if (!send(sessionId, value, feedback.report)) return
+    feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
     historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
@@ -159,7 +160,8 @@ export function AgentSessionComposer({
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value)) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report)) return
+    feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
@@ -189,33 +191,18 @@ export function AgentSessionComposer({
   async function attachFiles(): Promise<void> {
     if (!submitMode.canType) return
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    try {
-      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
-      if (!chosen || chosen.length === 0) return
-      // Read the draft at completion, not at click: the dialog is modal but the store is the owner.
-      const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-      setAgentComposerDraft(sessionId, appendFileReferences(current, chosen, workspacePath))
-    } catch (error) {
-      reportError(error)
-    }
+    const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
+    if (!chosen?.length) return
+    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+    setAgentComposerDraft(sessionId, appendFileReferences(current, chosen, workspacePath))
   }
 
   async function pasteImage(image: { bytes: Uint8Array; extension: string }): Promise<void> {
     if (!submitMode.canType) return
-    // The prompt channel is text with a hard size cap and no Provider speaks ACP, so an image can only
-    // reach the Agent as a file it opens itself. Save it, then reference the path like any other file.
-    try {
-      const path = await api.ui.savePastedImage(image)
-      const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-      const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-      setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
-    } catch (error) {
-      // Main refuses an empty image, one over the byte cap, or a failed write. Every one of those is
-      // reachable, and each is fired as `void pasteImage(...)` from a paste handler — so without this
-      // the rejection is unobserved and the paste just appears to do nothing. Surface it where the
-      // sibling actions on this same Composer already surface theirs.
-      reportError(error)
-    }
+    const path = await api.ui.savePastedImage(image)
+    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
+    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+    setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
   }
 
   function insertReference(path: string): void {
@@ -279,13 +266,17 @@ export function AgentSessionComposer({
         onCommand={(command) => {
           const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
           setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
-        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} reportError={reportError} />}
+        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
       onHistoryRecall={historyRecall}
-      {...(regionName ? { regionName } : {})}
+      {...(session?.kind === 'agent' && displayName ? { identity: {
+        name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
+        ...(tabName && tabName !== displayName ? { context: tabName } : {})
+      } } : {})}
+      feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
@@ -309,8 +300,8 @@ export function AgentSessionComposer({
       // These three only edit the local draft — nothing leaves the renderer — so a pending card is
       // irrelevant to them.
       {...(submitMode.canType ? {
-        onAttach: () => void attachFiles(),
-        onPasteImage: (image: { bytes: Uint8Array; extension: string }) => void pasteImage(image),
+        onAttach: () => { void feedback.run(attachFiles) },
+        onPasteImage: (image: { bytes: Uint8Array; extension: string }) => { void feedback.run(() => pasteImage(image)) },
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
       // Posture and submit share one gate because they are literally the same write.

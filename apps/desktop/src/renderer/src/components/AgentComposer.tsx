@@ -61,12 +61,8 @@ export type AgentComposerProps = {
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
   primaryAction?: 'send' | 'stop'
-  // 这一格的显示名（含同名去重编号，"Terminal 2"）——右上角的 Region 名水印。Region 没有名字字段
-  // （Tab 有专门的名字位），这是它唯一的露出。**缺席即整段不渲染**：不是占位符、不是 "Unknown"。
-  // 名字取决于兄弟格（只有另一格也叫 "Terminal" 时这格才成 "Terminal 2"），故由持有 Region 起点的
-  // 宿主（SessionPane）现算好传进来，本组件从不自己去 store 猜「当前活动格」——你正在打字的 composer
-  // 未必在活动格里，猜错格的名字比没有名字更糟。
-  regionName?: string
+  identity?: { name: string; avatar: ReactNode; context?: string }
+  feedback?: ReactNode
   postureControl?: AgentPostureControl
   // Shell-style history recall on the up/down arrows. The shell owns the keys; the semantics (line
   // boundary + the recall reducer) live in the adapter so they stay unit-testable — this component cannot
@@ -100,7 +96,8 @@ export function AgentComposer({
   references = [],
   onSelectSuggestion,
   primaryAction = 'send',
-  regionName,
+  identity,
+  feedback,
   postureControl,
   onChange,
   onSubmit,
@@ -221,28 +218,21 @@ export function AgentComposer({
         {...(onActivateSemanticReference ? { onActivateReference: onActivateSemanticReference } : {})}
         placeholder={placeholder}
       />
-      {/* Region 名水印：右上角，一个 Region 唯一的名字露出（Tab 有名字位，Region 没有）。缺席即整段
-          不渲染——占位符或 "Unknown" 会把「这格没有可信名字」谎报成「有个叫 Unknown 的东西」。
-          aria-hidden：这是装饰性的身份复述，SR 用户是**导航进**这一格的、已有其上下文，把它挂进
-          可访问树只会让每次聚焦输入框时多读一遍冗余身份。pointer-events:none 让它永不挡住输入框的
-          点击与文本选择。长名（浏览器标题、长文件名）由 CSS 定宽 + 省略号收口，绝不推动布局或压到
-          Send（它 absolute 定位、不参与流），故不必在 JS 里截断。放在 textarea 之后而非之前：绝对
-          定位与视觉位置无关，但保住了既有测试按 children[0] 取到 textarea 的约定。 */}
-      {regionName ? (
-        <span className="composer__region" aria-hidden="true" title={regionName}>{regionName}</span>
-      ) : null}
       <div className="composer__toolbar">
         <div>
+          {tools}
+          {identity ? <span className="composer__identity" title={identity.context ? `${identity.name} · ${identity.context}` : identity.name}>
+            {identity.avatar}<span>{identity.name}</span>
+          </span> : null}
           <button
             type="button"
             className="composer-tool"
             disabled={disabled || !onAttach}
             onClick={onAttach}
-            title="Reference files for the Agent to read"
+            aria-label="Reference files for the Agent to read" title="Reference files for the Agent to read"
           >
-            <Paperclip size={14} /> Files
+            <Paperclip size={14} /> <span className="composer-tool__label">Files</span>
           </button>
-          {tools}
           {/* A shortcut to the file already open, not a second way to attach — so it appears only
               when there is one, rather than sitting permanently greyed out. */}
           {activeFile && onReferenceActiveFile ? (
@@ -251,9 +241,9 @@ export function AgentComposer({
               className="composer-tool"
               disabled={disabled}
               onClick={onReferenceActiveFile}
-              title={`Reference ${activeFile}`}
+              aria-label={`Reference ${activeFile}`} title={`Reference ${activeFile}`}
             >
-              <AtSign size={14} /> {activeFile.split('/').at(-1)}
+              <AtSign size={14} /> <span className="composer-tool__label">{activeFile.split('/').at(-1)}</span>
             </button>
           ) : null}
           {/* Absence hides: only a Provider that declared an addressable posture control renders this,
@@ -319,6 +309,7 @@ export function AgentComposer({
           )}
         </div>
       </div>
+      {feedback}
       <QueueDeliveryNotice queued={queued} canCopy={Boolean(onCopyQueued)} />
       {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
         {/* 按 group 分段并给每段一个标题。分组只在**确实有两个以上来源**时出现：单一来源时加一个
