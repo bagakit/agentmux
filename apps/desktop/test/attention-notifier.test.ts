@@ -131,6 +131,7 @@ describe('attention notifier', () => {
       windowFocused: true,
       visibleSessionIds: new Set(['a']),
       mode: 'standard',
+      sound: false,
       timelines: {}
     })
 
