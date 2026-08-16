@@ -186,6 +186,9 @@ button.agent-avatar:active { transform: translateY(0); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
+/* 已 pin 的静息态标记：品牌绿小 Pin，扫一眼列表就分辨得出（不靠 hover）。行首可空槽里的东西
+   （同 leading spinner，只在 pinned 时占位），不是按钮——切换 pin 的动作在右键菜单里。 */
+.workspace-topic-entry__pin { flex: 0 0 auto; color: var(--green); }
 /* 行尾那枚 Region 分屏缩略图（34×22px）。只在 Topic 开着一张 Tab 时出现，画的是那张 Tab 的
    Region 分屏缩影。34×22 与 border-radius 都不在尺度合同扫描的属性里（surface-scale-contract 只扫
    font-size / gap / padding / margin，surface-radius 只管 <6px 的圆角），故无需例外条目。 */

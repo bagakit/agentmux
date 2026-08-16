@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, Pencil } from 'lucide-react'
+import { Copy, Crosshair, Pencil, Pin, PinOff } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 /**
@@ -8,19 +8,28 @@ import type { ReactNode } from 'react'
  * 行上只留得下一个动作，所以留给最高频的那个（定位到目录）；改名一天用不了一次，占一个常驻
  * 图标位是在跟标题抢宽度。用户的说法是："改名不用给个专门图标, 可以放进 topic 右键菜单"。
  *
+ * pin/unpin 走同一条理由收进这里：行上再多一个常驻图标按钮会跟标题抢宽度，也会撞
+ * surface-tool-dock 那条「行上只留一个常驻动作」的断言。已 pin 的**状态**在行内以一枚静息态
+ * 小 Pin 标记表达（见 WorkspaceTopicsPanel 的 workspace-topic-entry__pin），这里提供切换它的**动作**。
+ * 键盘可达：Radix ContextMenu 的 Trigger 挂在可聚焦的行上，Shift+F10 / 菜单键即唤出。
+ *
  * 复用 `tab-context-menu` 那套基座——密度合同要求全部 Context Menu 共用一套，新开一套只会让
  * 两处的行高与内缩慢慢走偏。
  */
 export function TopicContextMenu({
   children,
+  pinned,
   onCopyPath,
   onRename,
-  onReveal
+  onReveal,
+  onTogglePin
 }: {
   children: ReactNode
+  pinned: boolean
   onCopyPath(): void
   onRename(): void
   onReveal(): void
+  onTogglePin(): void
 }) {
   return (
     <ContextMenu.Root>
@@ -31,6 +40,11 @@ export function TopicContextMenu({
           collisionPadding={8}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onTogglePin}>
+            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
+            <span>{pinned ? 'Unpin Topic' : 'Pin Topic'}</span>
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRename}>
             <Pencil size={14} />
             <span>Rename Topic</span>
