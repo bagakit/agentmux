@@ -204,9 +204,35 @@ export type AgentMuxControlStopRequest = RequestBase & {
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'; browserId: string; code: string; caller?: AgentMuxControlCaller
 }
+/**
+ * 读回这个 Browser 上已经发生过的操作。
+ *
+ * **为什么它值得占一个契约档位**（上面那段说了「宁可只发一条通用的跑代码」，这里要交代为什么是三条
+ * 而不是一条）：它是 `browser.replay` 的**唯一入口**。回放要一个 `operationId`，而那个 id 是主进程
+ * 生成的、只存在日志里——没有这条，Agent 手上永远没有一个合法的 id 可填，`browser.replay` 就是一个
+ * 发出去却没人能调的操作。两条一起才构成一个闭环，单独发任何一条都不完整。
+ *
+ * 为什么不做成注入的页面函数（那样不动契约，代价更小）：页面函数跑在 `browser.run` 的子进程里，
+ * 而那条路**要求自动化开关是开的**（ipc.ts 的 `agentAutomation` 闸）。「只是想看看刚才那次干了什么」
+ * 不该被一个驱动页面的开关拦住——出了问题要复盘的时候，人的第一反应恰恰是先把自动化关掉。
+ *
+ * `browserId` 可省：不给就是这台机器上所有 Browser 的记录。省略比要求它更有用——Agent 重启后
+ * 未必还记得自己上次开的是哪个 id，而「先列出来再挑」正是这条要服务的第一个场景。
+ */
 export type AgentMuxControlBrowserHistoryRequest = RequestBase & {
   operation: 'browser.history'; browserId?: string
 }
+/**
+ * 把日志里记下来的步骤重放一遍。
+ *
+ * 为什么它不能被 `browser.run` 顶掉（那是本族里最该问的问题）：`browser.run` 收的是 Agent 现写的
+ * 一段代码，而这条收的是**我们自己录下来的一份计划**。中间那层生成器（`buildReplayScript`）会给每一步
+ * 加上页面身份校验与目标校验，还会把敏感步骤钉成闸门——那些保证是主进程给的，不能指望 Agent
+ * 自己在它那段代码里复现一遍。让它走 `browser.run` 就等于把这些校验交给被回放的那一方自证。
+ *
+ * 三档 `mode` 不是配置层，是三件不同的事：`preview` 只取计划不碰页面（人要先看），`step` 只做第
+ * n 步（出错之后接着走），`run` 整份跑完。合成一条布尔会丢掉「只看不做」这个最常用的档。
+ */
 export type AgentMuxControlBrowserReplayRequest = RequestBase & {
   operation: 'browser.replay'; browserId: string; operationId: string; mode?: 'preview' | 'step' | 'run'; step?: number; caller?: AgentMuxControlCaller
 }
