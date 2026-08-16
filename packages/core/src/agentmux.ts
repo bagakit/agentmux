@@ -46,7 +46,28 @@ const CLI_ERROR_CODES = [
   //
   // 不进控制码表而进这里：它是**进程内**抛的（CLI 直接 new AgentMuxClient，registry 是本地 Map），
   // 不经 daemon 往返，定型它的是这条顶层 catch。
-  'UNKNOWN_AGENT_SESSION_BINDING'
+  'UNKNOWN_AGENT_SESSION_BINDING',
+  // Session 存档自身读不出来。判据是一条真命令：把 store 的 `version` 改成 5 以外的值，
+  // `agentmux inspect --session <任意>` 报的是「Agent Session store is invalid.」，而码折成了
+  // `AGENTMUX_FAILED`——与「命令打错了」同一个码。和 `AGENT_ROLE_DIRECTORY_UNREADABLE` 完全同族：
+  // 人读的 message 一直对，机读的码在撒谎，而这一个说的是「去修你那个文件」，不是「去改你的命令」。
+  //
+  // 注意它**不是**只在写路径上：`connect()` → `registry.load` → `store.load()` 的读路径同步就抛，
+  // 于是每一条 `withClient` 命令都够得着。（垃圾字节反而不抛——那条路会 salvage+quarantine；
+  // 真正抛的是 schema 对不上。）
+  'INVALID_AGENT_SESSION_STORE',
+  // `handoff` / `discuss` 的凭证校验。两条命令都经 `client.handOff` / `client.startDiscussion` →
+  // `resolveMessageAuthor` → `resolveCapabilityAuthor`（agent-capability.ts）在**进程内**抛，同样
+  // 落这条顶层 catch。三个码说的是三件不同的事——凭证不对 / 还没生效 / 属于已被替换的 Run——
+  // 而它们此前一起折成 `AGENTMUX_FAILED`，于是「你的凭证过期了，重取一个」和「你把命令打错了」
+  // 在机读侧无从分辨。agent-capability.ts 的注释自己写着「调用方就只能猜该重试还是该放弃」，
+  // 折叠恰好把那句话变成现实。
+  'AGENT_CAPABILITY_INVALID',
+  'AGENT_CAPABILITY_NOT_READY',
+  'AGENT_CAPABILITY_STALE_RUN',
+  // 同一条 `discuss` 线更深一层（agent-discussion.ts）：跨 workspace 的对话被拒。这一个说的是
+  // 「你要谈的对象不在这个 workspace」，属于用户改得动的事，更不该长着「命令打错了」的脸。
+  'AGENT_MESSAGE_CROSS_WORKSPACE'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
 type FlagKind = 'boolean' | 'value' | 'data'
