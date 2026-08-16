@@ -27,6 +27,12 @@ import { SidebarToggleChrome } from './TopRowChrome'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { activityContextsForWorkspaces } from '../lib/activity-groups'
 
+function projectCollapseKey(id: string): string { return `project:${id}` }
+function isPathInside(inner: string, outer: string): boolean {
+  const root = outer.replace(/[\\/]+$/, '')
+  return inner.startsWith(`${root}/`) || inner.startsWith(`${root}\\`)
+}
+
 export function WorkspaceSidebar({
   onOpenSettings
 }: {
@@ -37,6 +43,7 @@ export function WorkspaceSidebar({
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
+  const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const setConfig = useAppStore((state) => state.setConfig)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
@@ -50,6 +57,18 @@ export function WorkspaceSidebar({
     [config?.workspaces]
   )
   const { scratch, projects } = navigation
+  const projectNodes = useMemo(() => projectRailTree(projects).flatMap((group) => group.nodes), [projects])
+
+  function projectHasChildren(projectId: string): boolean {
+    const parent = projectNodes.find((node) => node.project.id === projectId)?.project
+    return Boolean(parent && projectNodes.some((node) => node.project.id !== projectId && node.project.hostId === parent.hostId && isPathInside(node.project.repoPath, parent.repoPath)))
+  }
+
+  function isProjectHidden(projectId: string): boolean {
+    const node = projectNodes.find((item) => item.project.id === projectId)
+    if (!node) return false
+    return projectNodes.some((ancestor) => ancestor.project.id !== projectId && ancestor.project.hostId === node.project.hostId && isPathInside(node.project.repoPath, ancestor.project.repoPath) && collapsedProjectGroups[projectCollapseKey(ancestor.project.id)] === true)
+  }
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
   const { topics: scratchTopics } = useScratchTopics(scratch?.id ?? null)
   const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
@@ -104,12 +123,12 @@ export function WorkspaceSidebar({
   function pinnedChildRows(
     scope: string,
     depth: number,
-    resolve: (id: string) => { label: string; targetId: string | undefined }
+    resolve: (id: string) => { label: string; targetId: string | undefined; onSelect?: () => void }
   ): ReactNode {
     const ids = pinnedItems[scope] ?? []
     if (ids.length === 0) return null
     return ids.map((id) => {
-      const { label, targetId } = resolve(id)
+      const { label, targetId, onSelect } = resolve(id)
       return (
         <div className="project-rail-entry" key={`${scope}:${id}`}>
           <button
@@ -119,7 +138,8 @@ export function WorkspaceSidebar({
             title={label}
             style={{ '--rail-depth': depth } as CSSProperties}
             onClick={() => {
-              if (targetId) void selectWorkspace(targetId)
+              if (onSelect) onSelect()
+              else if (targetId) void selectWorkspace(targetId)
             }}
           >
             <span className="project-rail-row__identity"><strong>{label}</strong></span>
@@ -157,6 +177,14 @@ export function WorkspaceSidebar({
     const preferredWorkspace = project.workspaces.find((workspace) => workspace.id === preferred)
     const branch = preferredWorkspace?.branch ?? null
     const row = (
+      <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
+      {projectHasChildren(project.id) ? <button
+        type="button"
+        className="project-rail-row__collapse"
+        aria-label={`${collapsedProjectGroups[projectCollapseKey(project.id)] ? 'Expand' : 'Collapse'} ${project.name}`}
+        aria-expanded={collapsedProjectGroups[projectCollapseKey(project.id)] !== true}
+        onClick={(event) => { event.stopPropagation(); toggleProjectGroup(projectCollapseKey(project.id)) }}
+      >{collapsedProjectGroups[projectCollapseKey(project.id)] ? <ChevronRight size={11} /> : <ChevronDown size={11} />}</button> : <span className="project-rail-row__collapse-spacer" aria-hidden="true" />}
       <button
         className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
         title={`${project.repoPath} · ${countTitle}`}
@@ -186,6 +214,7 @@ export function WorkspaceSidebar({
           ) : null}
         </span>
       </button>
+      </div>
     )
     return (
       <Fragment key={project.id}>
@@ -196,7 +225,7 @@ export function WorkspaceSidebar({
           workspaceId={preferred ?? project.preferredWorkspaceId}
           onRemove={() => setRemoveRequest(project)}
         >
-          <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} contexts={activityContextsForWorkspaces(project.workspaces)} /></div>
+          {isProjectHidden(project.id) ? null : <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} contexts={activityContextsForWorkspaces(project.workspaces)} /></div>}
         </WorkspaceRowContextMenu>
         {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
             projectWorkspaces). The pinned branch name labels the row; navigation prefers the
@@ -267,7 +296,8 @@ export function WorkspaceSidebar({
               static <Pin> badge above (which means "this workspace is pinned"). */}
           {pinnedChildRows(SCRATCH_WORKSPACE_ID, 1, (topicId) => ({
             label: scratchTopics?.find((topic) => topic.id === topicId)?.title ?? topicId,
-            targetId: scratch.id
+            targetId: scratch.id,
+            onSelect: () => void openScratchTopic(topicId)
           }))}
         </div>
       ) : null}
