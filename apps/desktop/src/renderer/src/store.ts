@@ -696,6 +696,8 @@ type AppState = {
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string): boolean
+  removeAgentSteer(sessionId: string, operationId: string): void
+  sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string): Promise<void>
   send(sessionId: string, text: string): Promise<void>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
@@ -4556,6 +4558,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
     return true
+  },
+  removeAgentSteer(sessionId, operationId) {
+    set((state) => {
+      const current = state.agentSteerQueues[sessionId] ?? []
+      const next = current.filter((entry) => entry.operationId !== operationId)
+      if (next.length === current.length) return state
+      const agentSteerQueues = { ...state.agentSteerQueues }
+      if (next.length) agentSteerQueues[sessionId] = next
+      else delete agentSteerQueues[sessionId]
+      return { agentSteerQueues }
+    })
+  },
+  async sendQueuedAgentSteer(sessionId, operationId) {
+    const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
+    if (!entry) return
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
+    await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
+    get().removeAgentSteer(sessionId, operationId)
   },
   async flushAgentSteerQueue(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)

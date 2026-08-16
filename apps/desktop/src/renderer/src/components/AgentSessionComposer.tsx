@@ -77,6 +77,8 @@ export function AgentSessionComposer({
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
+  const removeAgentSteer = useAppStore((state) => state.removeAgentSteer)
+  const sendQueuedAgentSteer = useAppStore((state) => state.sendQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
   // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
@@ -217,6 +219,9 @@ export function AgentSessionComposer({
     <AgentComposer
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       queued={queuedEntries.map((entry) => entry.text)}
+      queuedIds={queuedEntries.map((entry) => entry.operationId)}
+      onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
+      onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
       // Read the same fact the store's flush guard reads, through the same predicate — not a second
       // hand-copy of `processState === 'running'`. `steerQueueCanEverDrain` answers "will this queue
       // EVER empty"; the flush guard adds the pendingInteraction gate on top of it, which is the one
