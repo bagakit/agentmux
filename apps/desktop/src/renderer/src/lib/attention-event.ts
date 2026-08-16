@@ -244,6 +244,24 @@ export function statusDotTier(
 }
 
 /**
+ * 「这个状态在活动菜单里画哪个字形」——{@link statusDotTier} 的字形投影，不是第二份状态判定。
+ *
+ * 项目 hover 菜单此前就地手抄了一份 `state === 'working' ? 'working' : state === 'running' ?
+ * 'running' : 'neutral'`：对 working / running 两支答对，其余七支全塌成中性灰。它与 `statusDotTier`
+ * 回答的是同一个问题（这个状态长什么样），于是 working-count-convergence 的两条结构断言同时指着它。
+ *
+ * 收成投影而不是扩成七档：那一行旁边的 `data-attention` 已经承载注意力档，字形只需要区分「在产出」
+ * 「活着但没产出」「其余」三种——这与收敛前的视觉**逐档相同**，变的只是判据从两处变一处。真要给
+ * error / exited / needs-you 各自的字形，是一个设计决定，那时只改这一个函数，不必回到组件里再抄一遍。
+ */
+export function activityGlyphFor(state: AgentDisplayState | null): 'working' | 'running' | 'neutral' {
+  const tier = statusDotTier(state)
+  if (tier === 'working') return 'working'
+  if (tier === 'running') return 'running'
+  return 'neutral'
+}
+
+/**
  * The one ORDERING the attention surfaces sort by, most urgent first.
  *
  * The roster and the quick switcher both rank rows, and both must agree about who sorts above whom.

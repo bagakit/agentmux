@@ -2,6 +2,7 @@ import { ChevronRight, MessageCircle, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { sessionRecentActivity } from '../lib/session-recency'
+import { activityGlyphFor } from '../lib/attention-event'
 import { turnWorking } from '../lib/activity-working-state'
 import { projectActivityRow } from '../lib/project-activity-row'
 import { rowAttention } from '../lib/row-attention'
@@ -206,7 +207,7 @@ export function ProjectActivity({
               )
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
                 data-attention={activity.attention ?? undefined}
-                onSelect={() => selectSession(row.sessionId)}><SemanticIcon name={session.status.state === 'working' ? 'working' : session.status.state === 'running' ? 'running' : 'neutral'} size={13} /><span><strong>{agentNames[row.sessionId] ?? row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}<span className="project-activity-menu__meta">{project} · {row.providerId}</span></small></span></DropdownMenu.Item>
+                onSelect={() => selectSession(row.sessionId)}><SemanticIcon name={activityGlyphFor(session.status.state)} size={13} /><span><strong>{agentNames[row.sessionId] ?? row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}<span className="project-activity-menu__meta">{project} · {row.providerId}</span></small></span></DropdownMenu.Item>
             })}
           </div> : null}
         </div>

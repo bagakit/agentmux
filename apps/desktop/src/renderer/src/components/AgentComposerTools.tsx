@@ -43,6 +43,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   reportError(error: unknown): void
 }) {
   const [skills, setSkills] = useState<AgentSkill[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState('')
@@ -60,9 +61,11 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         void onCapture().catch(reportError).finally(() => setCapturing(false))
       }}>{capturing ? <LoaderCircle size={14} className="spin" /> : <Camera size={14} />} Capture</button> : null}
     <DropdownMenu.Root onOpenChange={(open) => {
-      if (!open) return
+      // Opening the menu is not evidence the skill folders changed (design SSOT: 同一份结果不得反复重算).
+      // Discover once per mount; a workspace/provider switch remounts this via a fresh loadSkills closure.
+      if (!open || loaded) return
       setLoading(true); setError('')
-      void loadSkills().then(setSkills).catch((cause) => {
+      void loadSkills().then((found) => { setSkills(found); setLoaded(true) }).catch((cause) => {
         setError(presentError(cause))
       }).finally(() => setLoading(false))
     }}>
