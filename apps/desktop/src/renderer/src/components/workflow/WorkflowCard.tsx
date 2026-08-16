@@ -5,6 +5,7 @@ import { WorkflowProgressRail } from './WorkflowProgressRail'
 import { WorkflowStatusGlyph } from './WorkflowStatusGlyph'
 import { workflowStatusLabel, type WorkflowSnapshot, type WorkflowVariant } from './types'
 import { WorkflowToolRow } from './WorkflowToolRow'
+import { workflowPresentation } from './presentation'
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -13,26 +14,36 @@ function safeId(value: string): string {
 export function WorkflowCard({
   workflow,
   variant = 'inline',
-  defaultExpanded
+  defaultExpanded,
+  expanded: expandedProp,
+  onExpandedChange
 }: {
   workflow: WorkflowSnapshot
   variant?: WorkflowVariant
   defaultExpanded?: boolean
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }) {
   const generatedId = useId()
   const contentId = `wf-card-${safeId(workflow.id)}-${safeId(generatedId)}`
-  const [expanded, setExpanded] = useState(defaultExpanded ?? (workflow.status === 'running' || workflow.status === 'failed'))
+  const presentation = workflowPresentation(workflow)
+  const [expanded, setExpanded] = useState(defaultExpanded ?? (presentation.kind === 'card' && presentation.defaultExpanded))
   const [phasesExpanded, setPhasesExpanded] = useState(true)
-  const open = expanded && !workflow.legacyNotice
+  const expandedValue = expandedProp ?? expanded
+  const open = expandedValue && !workflow.legacyNotice
+  const setExpandedValue = (next: boolean): void => {
+    if (expandedProp === undefined) setExpanded(next)
+    onExpandedChange?.(next)
+  }
 
-  if (workflow.legacyNotice) {
+  if (presentation.kind === 'tool') {
     return (
       <WorkflowToolRow
         title={`Workflow ${workflow.name}`}
         workflowName={workflow.name}
         status={workflow.status}
         duration={workflow.duration}
-        notice={workflow.legacyNotice}
+        notice={presentation.notice}
       />
     )
   }
@@ -48,7 +59,7 @@ export function WorkflowCard({
         className="wf-head"
         aria-expanded={open}
         aria-controls={contentId}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => setExpandedValue(!expandedValue)}
       >
         <ChevronRight className="wf-chev" size={14} aria-hidden="true" />
         <GitBranch className="wf-ico" size={12} aria-hidden="true" />

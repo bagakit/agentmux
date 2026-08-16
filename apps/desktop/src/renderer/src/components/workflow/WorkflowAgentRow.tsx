@@ -22,11 +22,6 @@ export function WorkflowAgentRow({
   const generatedId = useId()
   const detailId = `wf-detail-${safeId(agent.id)}-${safeId(generatedId)}`
   const toggle = (): void => setExpanded((value) => !value)
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    toggle()
-  }
 
   return (
     <>
@@ -41,7 +36,6 @@ export function WorkflowAgentRow({
           aria-expanded={expanded}
           aria-controls={detailId}
           onClick={toggle}
-          onKeyDown={handleKeyDown}
         >
           <span className="wf-agent__state">
             <WorkflowStatusGlyph status={agent.status} />

@@ -7,6 +7,7 @@ import { WorkflowPhase } from '../src/renderer/src/components/workflow/WorkflowP
 import { WorkflowToolRow } from '../src/renderer/src/components/workflow/WorkflowToolRow.js'
 import { largeWorkflow, legacyDaemonWorkflow, runningWorkflow } from '../src/renderer/src/components/workflow/fixtures.js'
 import { visibleWorkflowAgents, type WorkflowAgent } from '../src/renderer/src/components/workflow/types.js'
+import { workflowPresentation } from '../src/renderer/src/components/workflow/presentation.js'
 import { allStyleRules } from './helpers/styles.js'
 
 describe('Workflow reusable surface components', () => {
@@ -54,6 +55,19 @@ describe('Workflow reusable surface components', () => {
     expect(markup).toContain('aria-label="关闭 Workflow 进度"')
     expect(markup).toContain('wf-card--dock')
     expect(markup).toContain('data-workflow-id="review-changes-running"')
+  })
+
+  it('separates legacy capability policy and supports controlled disclosure', () => {
+    expect(workflowPresentation(legacyDaemonWorkflow)).toEqual({ kind: 'tool', notice: 'daemon 版本较旧，暂无阶段明细' })
+    expect(workflowPresentation(runningWorkflow)).toEqual({ kind: 'card', defaultExpanded: true })
+    let expanded = false
+    const markup = renderToStaticMarkup(createElement(WorkflowCard, {
+      workflow: runningWorkflow,
+      expanded,
+      onExpandedChange: (next: boolean) => { expanded = next }
+    }))
+    expect(markup).toContain('aria-expanded="false"')
+    expect(expanded).toBe(false)
   })
 
   it('keeps the tool-row fallback in the same low-noise state language', () => {

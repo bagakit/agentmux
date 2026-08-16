@@ -18,12 +18,20 @@ describe('Workflow component gallery production reachability', () => {
     expect(markup).toContain('aria-label="主题切换"')
   })
 
-  it('keeps the gallery query entry explicit and separate from chat/Runtime state', () => {
+  it('keeps the desktop query preview and standalone deployment entry explicit', () => {
     const appPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'renderer', 'src', 'App.tsx')
     const source = readFileSync(appPath, 'utf8')
     expect(source).toContain('agentmux-component-gallery')
     expect(source).toContain('<WorkflowComponentGallery />')
-    expect(source).toContain("import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'")
+    const htmlPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'renderer', 'gallery.html')
+    expect(readFileSync(htmlPath, 'utf8')).toContain('src/gallery-main.tsx')
+  })
+
+  it('keeps the standalone gallery as the deployment entry while the desktop query remains a local preview', () => {
+    const htmlPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'renderer', 'gallery.html')
+    const entryPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'renderer', 'src', 'gallery-main.tsx')
+    expect(readFileSync(htmlPath, 'utf8')).toContain('src/gallery-main.tsx')
+    expect(readFileSync(entryPath, 'utf8')).toContain('<WorkflowComponentGallery />')
   })
 
   it('records real production consumers for existing chat primitives and keeps Activity internals private', () => {
