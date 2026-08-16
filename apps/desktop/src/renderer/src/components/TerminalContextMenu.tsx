@@ -10,8 +10,10 @@ import {
   UnfoldVertical
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { Fragment } from 'react'
 import { terminalMenuChords } from '../lib/terminal-menu-chords'
 import { isMacPlatform } from '../lib/host-platform'
+import type { TerminalIdentityMenuAction } from '../lib/terminal-identity-menu'
 import {
   terminalSelectionSuppressionHint,
   type MouseTrackingMode
@@ -20,6 +22,7 @@ import {
 export function TerminalContextMenu({
   children,
   hasSelection,
+  identityActions,
   mouseTrackingMode,
   onClear,
   onCopy,
@@ -32,6 +35,17 @@ export function TerminalContextMenu({
 }: {
   children: ReactNode
   hasSelection: boolean
+  /**
+   * 这一格 Agent 的身份动作（发消息 / 复制 Session 地址），由 `terminalIdentityMenuActions` 算出。
+   *
+   * **必填且不给默认值**，理由与下面的 `mouseTrackingMode` 完全一样：可选在这里买到的只是 tsc 的
+   * 沉默——删掉 JSX 上那行属性、或写成 `{undefined && …}`，整条能力静默消失而编译照过
+   * （记忆 optional-prop-only-buys-silence）。
+   *
+   * 组件不判「这一格是不是 Agent」：那个判定在 lib 里（非 Agent 返回空数组），这里只渲染结果。
+   * 两处各判一次就是同一个决定做了两遍，而漂移的那天不会有断言变红。
+   */
+  identityActions: TerminalIdentityMenuAction[]
   // xterm 此刻的鼠标上报模式（`terminal.modes.mouseTrackingMode`）。**这是复制三合一失效的根因入口**：
   // TUI 一开鼠标上报，xterm 就停用选区服务，平白左拖不再建选区，于是 getSelection() 恒空、右键
   // Copy 变灰、Ctrl/Cmd+C 全部落空（机制见 lib/terminal-selection-mode.ts）。菜单把这个模式喂给那个
@@ -101,6 +115,25 @@ export function TerminalContextMenu({
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onSelectAll}>
             <TextSelect size={14} /><span>Select all</span>
           </ContextMenu.Item>
+          {/* 身份那一簇：**回答的不是同一个问题**。上面五项答「画面上有什么」（选区/可视区/回滚/粘贴/全选），
+              这一簇答「这是谁」——所以隔一条分隔线，不混进复制文本那一簇，否则用户会以为它复制的是
+              终端内容。
+              非 Agent 的那一格 `identityActions` 是空数组，此时**连分隔线一起不挂**：一条分隔线下面
+              什么都没有，读起来像有项没渲染出来。 */}
+          {identityActions.length > 0 ? (
+            <Fragment>
+              <ContextMenu.Separator className="tab-context-menu__separator" />
+              {identityActions.map((action) => (
+                <ContextMenu.Item
+                  className="tab-context-menu__item"
+                  key={action.key}
+                  onSelect={() => void action.onSelect()}
+                >
+                  <action.icon size={14} /><span>{action.label}</span>
+                </ContextMenu.Item>
+              ))}
+            </Fragment>
+          ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onSearch}>
             <Search size={14} /><span>Find</span><kbd>{chords.search}</kbd>

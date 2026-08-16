@@ -3647,6 +3647,27 @@ export class AgentMuxClient {
     requestedSession: AgentMuxAgentSession,
     data: AgentMuxRunInputData
   ): Promise<AgentMuxRunInputAck> {
+    // 空载荷在这里就地收掉，不下到 ctxmux。daemon 的 RecoverableInput 校验会拒绝空载荷
+    // （`recoverable native Input must not be empty`），而「按了键但没有字节要发」是**正常**的终端
+    // 事件：IME 组字途中的 onData('')、旧式鼠标上报越界时的零长字节。把它当失败上报，等于用户在
+    // TUI 里正常打字就吃到一个 unexpected error——Agent 好得很，是我们的传输层把一个无操作
+    // 当成了故障（AGENTS.md 原则 11 的第 2 类，只是这一类连提醒都不需要：它不是降级，是无事发生）。
+    //
+    // 收在 Core 而不只是在某个 client：Core 是可独立发布的包，每个 client 都会撞上同一条校验。
+    //
+    // 走 serializeAgentInput 而不是在它外面直接返回：会话/Run 身份的校验（换了 Run、Run 已退出）
+    // 只有一个事实源，空载荷不该自己再问一遍「run 还活着吗」——那会是第二份判定，且绕过串行闸。
+    // 里面什么都不做：没有字节被接受，游标不推进，也不占一次 operationId。
+    if (data.length === 0) {
+      return await this.serializeAgentInput(requestedSession, async (session, run) => {
+        const cursor = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes ?? 0
+        return {
+          runId: session.run.runId,
+          appliedByteRange: { startByte: cursor, endByte: cursor },
+          acceptedThroughByte: cursor
+        }
+      })
+    }
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       if (session.pendingInteraction) {
         throw new AgentMuxError(

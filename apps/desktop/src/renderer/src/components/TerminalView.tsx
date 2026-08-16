@@ -81,6 +81,7 @@ import {
 } from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
+import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
@@ -1025,6 +1026,14 @@ export function TerminalView({
     <Fragment>
       <TerminalContextMenu
         hasSelection={hasSelection}
+        identityActions={terminalIdentityMenuActions({
+          // 身份取**这一格自己的** session，不从 store 读当前活跃会话：用户右键的那一格往往
+          // 恰恰不是聚焦的那一格（分屏下尤其），从 store 取会复制出邻座的身份。
+          sessionId: session.id,
+          sessionKind: session.kind,
+          // 复用全 renderer 唯一那个写剪贴板的出口（clipboard-copy.ts），与上面三条 Copy 同一条路。
+          writeClipboardText: async (text) => { await copyTextToClipboard(text, reportError) }
+        })}
         mouseTrackingMode={mouseTrackingMode}
         onCopy={copySelection}
         onCopyScrollback={copyScrollback}

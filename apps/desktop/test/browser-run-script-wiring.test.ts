@@ -23,7 +23,12 @@ const fakeElectron = vi.hoisted(() => {
     readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
     /** 被踢掉的原因；测试用它模拟"用户中途打开了 DevTools"。 */
     sendCommandImpl: (method: string) => Promise<unknown> = async () => ({})
-    attach(): void { this.attached = true }
+    /** 置成 true 就让 attach 抛——模拟"用户此刻开着 DevTools"，Electron 的真实行为。 */
+    attachThrows = false
+    attach(): void {
+      if (this.attachThrows) throw new Error('Another debugger is already attached to this target')
+      this.attached = true
+    }
     isAttached(): boolean { return this.attached }
     detach(): void { this.attached = false }
     on(event: string, listener: (...args: unknown[]) => void): this {
@@ -105,12 +110,20 @@ vi.mock('electron', () => ({
 
 // 只替换派发层。CDP 会话用真的——`endedReason` 那条判据要的就是它真实的记账行为。
 // 走 vi.hoisted 是因为 vi.mock 的工厂会被提到文件顶部，直接引用下面的 const 会撞到 TDZ。
+//
+// 返回类型**显式写成 `Promise<unknown>`**，与 `createBrowserPageDispatch` 的真实签名一致。不写的话
+// TS 会从默认实现体推断出 `Promise<string>`——比生产窄，于是每个返回快照对象（`{ nodes: [...] }`）
+// 或 `null` 的 `mockImplementationOnce` 都报 TS2322。假件的类型比被替换的真件窄，是在用测试替身
+// 伪造一个生产不存在的约束，而 vitest 运行时照样放行，所以这族错误只有 tsc 看得见。
 const dispatchSpy = vi.hoisted(() => {
   const calls: { name: string; args: unknown[] }[] = []
-  const create = vi.fn((_context: BrowserPageContext) => async (name: string, args: unknown[]) => {
-    calls.push({ name, args })
-    return `dispatched:${name}`
-  })
+  const create = vi.fn(
+    (_context: BrowserPageContext): ((name: string, args: unknown[]) => Promise<unknown>) =>
+      async (name: string, args: unknown[]) => {
+        calls.push({ name, args })
+        return `dispatched:${name}`
+      }
+  )
   return { calls, create }
 })
 const dispatchCalls = dispatchSpy.calls
@@ -230,6 +243,22 @@ describe('runScript 把页面调用交给派发层', () => {
     const report = await manager.runScript('b1', 'throw new Error("my bug")')
 
     expect(report.outcome.kind).toBe('script-failed')
+  }, 30_000)
+
+  it('attach 失败之后这个 Browser 还能再跑——失败不许把它锁死', async () => {
+    // 用户开着 DevTools 时 attach 必抛，这是**常规路径**（那句错误自己就说了"关掉 DevTools 再跑"）。
+    // 而 `runInFlight` 在 attach 之前就被置了 true：抛在 try 外面，这一位永远回不去，此后每次
+    // run 都报"另一个操作正在运行"——可 `activeRun` 是空的，连个能停的东西都没有，只有销毁重建
+    // 这个 view 才能恢复。一次可恢复的失败被变成了不可恢复的。
+    const { manager, contents } = await managerWithBrowser()
+    contents.debugger.attachThrows = true
+
+    await expect(manager.runScript('b1', 'return 1')).rejects.toThrow(/DevTools/)
+
+    // 人照着提示关掉了 DevTools，下一次必须真的能跑。
+    contents.debugger.attachThrows = false
+    const report = await manager.runScript('b1', 'return await snapshot()')
+    expect(report.outcome.kind, 'attach 失败把 Browser 锁死了：此后再也跑不起来').toBe('completed')
   }, 30_000)
 
   it('会话中途没了，即便程序自己吞掉了错误也要报 indeterminate', async () => {
@@ -480,6 +509,24 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     return { path, journal: new BrowserOperationJournal(new BrowserOperationFileStore(path)) }
   }
 
+  it('子进程崩了：收据和 history 必须给出同一个结论，不能一个说别重试、一个说改完重跑', async () => {
+    // 这是一次**真的**崩溃：脚本让自己的进程直接退出，不走结果帧那条路。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+
+    const report = await manager.runScript('b1', 'process.exit(7)')
+
+    // 收据这一侧早就对了：崩溃意味着"做到哪一步不知道"——页面上可能已经点过一次了。
+    expect(report.outcome.kind).toBe('indeterminate')
+    // journal 这一侧曾经把它折进 `failed`（写的是 `stopped ? stopped : failed`）。于是同一次崩溃，
+    // Agent 读到"先看一眼页面、别重试"，人在历史里读到"失败了，改完重跑"——两个相反的下一步。
+    // phase 枚举里本来就有 `indeterminate`，所以这不是缺词，是映射错了。
+    expect(report.runOperation?.phase, '收据说 indeterminate，operation 却记成别的——同一次崩溃两个结论')
+      .toBe('indeterminate')
+    const history = await manager.listOperationHistory()
+    expect(history.at(-1)?.phase, 'history 里的 phase 和收据不一致').toBe('indeterminate')
+  }, 30_000)
+
   it('同一 operation identity 经 receipt、实时事件与重启后的 history 保留语义目标', async () => {
     const { path, journal } = fileJournal()
     const { manager, sentEvents } = await managerWithBrowser(journal)
@@ -508,7 +555,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
       Array(updates.length).fill(operationId)
     )
     expect(updates.length).toBeGreaterThan(2)
-    expect(updates.some((event) => event.browser.activity.operation.steps.some((step) => step.status === 'running'))).toBe(true)
+    expect(updates.some((event) => event.browser.activity.operation.steps.some((step: { status: string }) => step.status === 'running'))).toBe(true)
     expect(updates.at(-1).browser.activity.operation).toMatchObject({ id: operationId, phase: 'completed' })
 
     const history = await manager.listOperationHistory()
@@ -582,6 +629,49 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
       { id: original.runOperation!.id, replayOf: undefined },
       { id: replay.runOperation!.id, replayOf: original.runOperation!.id }
     ])
+  }, 30_000)
+
+  it('回放打在同名元素上不报 completed——按外观命中就得说出来', async () => {
+    // 回放的目标身份只有 role+name+序号+总数。同名元素多于一个时，这组条件挡不住"列表多一行、
+    // 少一行"：总数仍是 3、序号仍是 2，闸门放行，点下去的却是另一个 Delete。而
+    // browser-ref-resolve.ts 刻意不做 role/name 回退，理由正是"静默改打同名元素还照常报成功"。
+    // 所以这条路必须和 ref 自愈同一个出口：`indeterminate` + 一句说清下一步的话。
+    //
+    // 上一条用 `count: 1` 判的正是这条的反面：只有一个同名元素时认不错，报 completed 是诚实的。
+    // 两条一起才是判据——少了任何一条，"一律降级"和"一律不降级"都能全绿。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const crowded = { role: 'button', name: 'Delete', ordinal: 2, count: 3 }
+    createDispatch.mockImplementationOnce((context) => async () => {
+      context.recordTarget?.(crowded)
+      return null
+    })
+    const original = await manager.runScript('b1', 'await click("@e2")')
+    const plan = await manager.replayPlan(original.runOperation!.id)
+
+    createDispatch.mockImplementationOnce((context) => async (name) => {
+      if (name === 'pageInfo') return { url: 'https://example.invalid/' }
+      if (name === 'snapshot') {
+        return {
+          nodes: [
+            { ref: '@a', role: 'button', name: 'Delete' },
+            { ref: '@b', role: 'button', name: 'Delete' },
+            { ref: '@c', role: 'button', name: 'Delete' }
+          ]
+        }
+      }
+      if (name === 'click') context.recordTarget?.(crowded)
+      return null
+    })
+    const replay = await manager.runReplay('b1', plan!)
+
+    expect(replay.outcome.kind, '按外观命中同名元素却报成一次干净的成功').toBe('indeterminate')
+    expect(
+      replay.outcome.kind === 'indeterminate' ? replay.outcome.message : '',
+      '没说清命中是按外观的，也没说下一步去看页面'
+    ).toMatch(/appearance/i)
+    expect(replay.runOperation?.phase).toBe('indeterminate')
+    expect(replay.runOperation?.replayOf).toBe(original.runOperation!.id)
   }, 30_000)
 
   it('journal 写入失败不阻断健康 Browser，降级告示到达 receipt 和实际 renderer 事件', async () => {

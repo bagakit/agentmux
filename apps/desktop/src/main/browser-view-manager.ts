@@ -21,7 +21,7 @@ import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
-import { browserRunOutcomeFromFailure } from './browser-run-outcome.js'
+import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import {
   appLinkOutcome,
@@ -622,7 +622,17 @@ export class BrowserViewManager {
       throw new Error('Another Browser operation is already running. Wait for it to finish or stop it before starting another program.')
     }
     entry.runInFlight = true
-    const session = BrowserCdpSession.attach(entry.view.webContents)
+    // attach 抛是**常规路径**，不是意外：用户开着 DevTools 就必然抛（见 browser-cdp-session.ts）。
+    // 所以这个 flag 的复位不能只挂在成功之后——attach 在 try 外面抛一次，flag 就永久卡住，
+    // 此后每次 run 都报"另一个操作正在运行"，而 `activeRun` 是空的、连能停的东西都没有，
+    // 只有销毁重建这个 view 才能恢复。失败自己是可恢复的，别把它变成不可恢复的。
+    let session: BrowserCdpSession
+    try {
+      session = BrowserCdpSession.attach(entry.view.webContents)
+    } catch (error) {
+      entry.runInFlight = false
+      throw error
+    }
     // 本轮自愈过的 ref 都记在这里。自愈按外观匹配，可能落在一个长得一样的**另一个**元素上，
     // 所以它不能只活在主进程的日志里——必须跟着结局回到 Agent 手上。
     const notes: string[] = []
@@ -765,13 +775,36 @@ export class BrowserViewManager {
         }
       }
       if (run.completed) {
+        // 回放命中的目标是**按外观**认回来的，和 ref 自愈是同一件事，所以走同一个出口。
+        //
+        // 计划里存下来的身份只有 role+name+ordinal+count——快照本身就不含更稳的东西
+        // （backendNodeId 随 CDP 会话消亡，见 browser-ref-ledger.ts）。
+        //
+        // **只有同名元素多于一个时才降级**，这条边界是承重的：`count === 1` 时那个总数判据恰恰
+        // 证明了不存在第二个同名元素可以认错，此时它和按身份命中一样确定，报 `completed` 是诚实的。
+        // 而 `count > 1` 时闸门挡不住一类很常见的页面变化：列表里多一行、少一行，总数仍是 3、
+        // 序号仍是 2，闸门放行，点下去的却是**另一个** Delete。browser-ref-resolve.ts 刻意不做
+        // role/name 回退，理由正是"它会静默改打一个同名元素，还照常报成功"——回放不能自己破那条规矩。
+        //
+        // 挡不住就不许装作挡住了：降级成 `indeterminate`（先看一眼页面，别盲目重试），返回值照带。
+        // 反过来，把 `count === 1` 也一律降级，等于每一次回放都喊一声狼来了——那种警告会被学会忽略，
+        // 于是真正该看的那一次也没人看（AGENTS.md:32-52 要的是可分辨，不是一律保守）。
+        if (replayOf && operation.steps.some((step) => step.target && step.target.count > 1)) {
+          notes.push(
+            'This run replayed recorded steps onto elements that share their role and name with ' +
+              'others on the page. Replay re-finds those targets by name and position in a fresh ' +
+              'snapshot — a match by appearance, not identity — so a page whose contents shifted can ' +
+              'put the action on a different element of the same name. Look at the page before ' +
+              'treating this as done.'
+          )
+        }
         // 自愈过就不是 `completed`。程序确实跑完了，但**它作用在什么上不确定**——role+name+nth
         // 能匹配到一个长得一样的邻居。这正是 `indeterminate` 的含义（先看一眼页面，别盲目重试），
         // 也是 `completed` 这一支承载不了的：它连一个放警告的字段都没有。返回值照常带回去——
         // 那是程序真算出来的东西，丢掉它只会逼 Agent 再跑一遍。
         if (notes.length > 0) {
           operation.phase = 'indeterminate'
-          operation.summary = 'Completed with semantic ref healing'
+          operation.summary = replayOf ? 'Replay completed by appearance match' : 'Completed with semantic ref healing'
           operation.finishedAt = Date.now()
           operation.warning = notes.join('\n')
           entry.activity = { operation, control: 'agent', warning: operation.warning }
@@ -789,7 +822,11 @@ export class BrowserViewManager {
         return { result: run.value, logs: run.logs, outcome: { kind: 'completed' }, runOperation: operation }
       }
       const outcome = browserRunOutcomeFromFailure(run.failure)
-      operation.phase = outcome.kind === 'stopped' ? 'stopped' : 'failed'
+      // 结局四支 → phase 四支，**逐支对上**。原来写的是 `stopped ? stopped : failed`，于是
+      // `indeterminate` 被折进 `failed`：同一次崩溃，Agent 收到的收据说"做到哪一步不知道，先看
+      // 一眼页面别重试"，而人在历史里看到的是"失败了，改完重跑"——两个相反的结论。phase 枚举里
+      // 本来就有 `indeterminate`，这不是缺词，是映射错了。崩溃恰恰意味着页面动作可能做了一半。
+      operation.phase = browserOperationPhaseFromOutcome(outcome.kind)
       operation.summary = 'message' in outcome ? outcome.message : 'Browser program failed'
       operation.finishedAt = Date.now()
       if ('message' in outcome) operation.warning = outcome.message

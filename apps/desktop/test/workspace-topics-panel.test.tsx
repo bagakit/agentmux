@@ -20,6 +20,11 @@ const fixture = vi.hoisted(() => ({
     tabs: {} as Record<string, unknown>,
     workspaceFileRevisions: {} as Record<string, number>,
     sessions: [] as unknown[],
+    // 这两片是显示名链的高档输入。手搭的 store 替身必须覆盖组件真读的**每一个** slice：少一个，
+    // 组件里的 `agentNames[id]` 会在 undefined 上取下标抛 TypeError，而栈指向生产文件，看起来像
+    // 组件回归（记忆 hand-rolled-store-fake-must-cover-every-slice）。
+    agentNames: {} as Record<string, string>,
+    timelines: {} as Record<string, unknown>,
     scratchTopicOrder: [] as string[],
     pinnedItems: {} as Record<string, string[]>,
     createScratchTopic: vi.fn(),
@@ -121,6 +126,10 @@ afterEach(async () => {
   fixture.state.sessions = []
   fixture.state.tabs = {}
   fixture.state.layouts = {}
+  // 显示名链的两个高档输入也要复位，否则一条测试的改名/首条 prompt 会漏进下一条，
+  // 把恒真断言伪装成通过（记忆 weak-assertion-patterns）。
+  fixture.state.agentNames = {}
+  fixture.state.timelines = {}
   fixture.state.selectSession.mockReset()
   fixture.state.togglePinnedItem.mockReset()
 })
