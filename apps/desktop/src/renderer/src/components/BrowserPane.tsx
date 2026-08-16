@@ -574,6 +574,12 @@ export function BrowserPane({
           </DropdownMenu.Root>
         ) : null}
       </form>
+      {tab.driving ? (
+        <div className="browser-control-status browser-control-status--agent" role="status" aria-live="polite">
+          <span className="browser-control-status__signal" aria-hidden="true"><LoaderCircle size={12} /></span>
+          <span><strong>Agent is operating this page</strong><small>Interact with the page to take control back.</small></span>
+        </div>
+      ) : null}
       <div className="browser-stage" ref={stageRef}>
         {screenshot ? (
           <ScreenshotEditor

@@ -156,7 +156,7 @@ export async function registerIpc(args: {
       })
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
-    openExternal: (target) => { void shell.openExternal(target) }
+    openExternal: (target) => shell.openExternal(target)
   })
   const notifier = createAgentNotifier({
     window: args.window,

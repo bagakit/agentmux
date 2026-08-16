@@ -100,6 +100,12 @@
 .browser-menu__item[data-highlighted] { color: var(--text); background: var(--surface-2); }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.browser-control-status { min-width: 0; min-height: 30px; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--text-2); }
+.browser-control-status__signal { display: inline-flex; color: var(--green-2); }
+.browser-control-status__signal svg { animation: none; }
+.browser-control-status span:last-child { min-width: 0; display: grid; gap: 1px; }
+.browser-control-status strong { font-size: var(--fs-micro); font-weight: 700; }
+.browser-control-status small { color: var(--text-3); font-size: var(--fs-micro); }
 .browser-stage { min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--surface-0); }
 .browser-empty, .browser-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-3); padding: var(--sp-8); color: var(--text-3); text-align: center; }
 .browser-empty > svg, .browser-preview > svg { color: var(--green); }
