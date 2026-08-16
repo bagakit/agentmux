@@ -138,9 +138,9 @@ async function managerWith(host: ReturnType<typeof appLinkHost>) {
 }
 
 /** 跑一次 `will-navigate`，返回它有没有被拦下。 */
-function navigateTo(view: { webContents: { emit(event: string, ...args: unknown[]): void } }, url: string, isMainFrame = true) {
+function navigateTo(view: { webContents: { emit(event: string, ...args: unknown[]): void } }, url: string, isMainFrame = true, event = 'will-navigate') {
   const preventDefault = vi.fn()
-  view.webContents.emit('will-navigate', { url, isMainFrame, preventDefault })
+  view.webContents.emit(event, { url, isMainFrame, preventDefault })
   return { prevented: preventDefault.mock.calls.length > 0 }
 }
 
@@ -216,7 +216,7 @@ describe('嵌入 frame 的应用链接', () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
 
-    const { prevented } = navigateTo(view, 'lark://applink.feishu.cn/client/security/bind_device', false)
+    const { prevented } = navigateTo(view, 'lark://applink.feishu.cn/client/security/bind_device', false, 'will-frame-navigate')
     await Promise.resolve()
     await Promise.resolve()
 
