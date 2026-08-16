@@ -23,7 +23,7 @@ describe('Composer 静息即一行（诉求 1）', () => {
       loadSkills: async () => [],
       onChooseSkill: vi.fn(),
       onCommand: vi.fn(),
-      reportError: vi.fn()
+      runAction: async (action: () => void | Promise<void>) => { await action() }
     }))
     expect(markup, '静息态不是 collapsed：输入框一上来就是两行').toContain('data-mode="collapsed"')
     // 反面锚点：collapsed 档下工具排隐藏，这两个只在展开档才渲染。缺了它们证明确实收起了。
@@ -35,13 +35,12 @@ describe('Composer 静息即一行（诉求 1）', () => {
 describe('切换键的位置与密度（诉求 2）', () => {
   const rules = allStyleRules()
 
-  it('两行态里切换键靠 order 重排，不沿用默认落点（诉求 2a）', () => {
+  it('切换键不再排到工具末尾，三档保持在左边', () => {
     const base = [...rules.matchAll(/([^{}\n]*)\{([^{}]*)\}/g)]
       .filter(([, selector]) => /^\s*\.composer-tool--mode\s*$/.test(selector!))
     // 扫描有收获：基础规则恰好一条，否则下面按 [0] 取值会认错对象。
     expect(base.length, '.composer-tool--mode 的基础规则不是恰好一条').toBe(1)
-    expect(base[0]![2]!, '切换键没有 order 重排：两行态里它仍挤在工具中间那个「很奇怪」的落点')
-      .toMatch(/order:/)
+    expect(base[0]![2]!).not.toMatch(/order:/)
   })
 
   it('一行态里切换键更矮更淡——最安静的形态里控件也最安静（诉求 2b）', () => {

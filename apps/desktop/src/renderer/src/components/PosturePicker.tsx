@@ -36,7 +36,7 @@ export function PosturePicker({
           title={`Set ${control.label.toLowerCase()} for this session`}
           aria-label={control.label}
         >
-          <ShieldCheck size={14} /> {control.label}
+          <ShieldCheck size={14} /> <span className="composer-tool__label">{control.label}</span>
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

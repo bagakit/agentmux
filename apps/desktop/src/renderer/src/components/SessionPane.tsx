@@ -10,8 +10,6 @@ import {
 } from '../lib/open-destination'
 import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
-import { regionDisplayName, regionSurfaceLabel } from '../lib/region-display-name'
-import { regionIds } from '@agentmux/layout'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
@@ -78,22 +76,7 @@ export function SessionPane({
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
-  // 这一格叫什么——喂给 composer 右上角的水印。名字取决于兄弟格（"Terminal" 只有在另一格也叫
-  // "Terminal" 时才成 "Terminal 2"），所以这里按 WorkspaceWorkbench 喂换位子菜单的同一形状装配：
-  // regionIds(layout.root) 给视觉顺序（左→右/上→下）、regionSurfaceLabel 给每格短名，再交给
-  // regionDisplayName 做唯一那份去重编号。两个消费者（水印、换位菜单）由此共用同一次派生，不会分家。
-  // linkOrigin 缺 tabId/regionId（无 Region 上下文的宿主）时返回 undefined，水印随之整段缺席——这与
-  // canSplit 读的是同一对真相。选择器返回原始字符串，zustand 默认 Object.is 比较即可，无引用抖动。
-  const regionName = useAppStore((state) => {
-    if (!linkOrigin.tabId || !linkOrigin.regionId) return undefined
-    const tab = state.tabs?.[linkOrigin.tabId]
-    if (!tab) return undefined
-    const regions = regionIds(tab.layout.root).flatMap((regionId) => {
-      const region = tab.regions[regionId]
-      return region ? [{ regionId, label: regionSurfaceLabel(region, state.sessions) }] : []
-    })
-    return regionDisplayName(regions, linkOrigin.regionId)
-  })
+  const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
@@ -240,7 +223,7 @@ export function SessionPane({
           <strong>Connecting to this session…</strong>
           <span>Waiting for the Core client to publish this Runtime View.</span>
         </div>
-        {surfaceKind === 'agent' ? <AgentSessionComposer sessionId={sessionId} disabled {...(regionName ? { regionName } : {})} /> : null}
+        {surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -396,7 +379,7 @@ export function SessionPane({
               onRespond={async (response) => await respondInteraction(session.id, response)}
             />
           ) : null}
-          <AgentSessionComposer sessionId={session.id} {...(regionName ? { regionName } : {})} />
+          <AgentSessionComposer key={sessionId} sessionId={session.id} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

@@ -23,13 +23,11 @@
    border-box（base.css 的 `*`）让 min-height 含 padding，所以要把 padding 的上下两档加回来。
    max-height 是**生长上限**，回答的是另一个问题（最多长到多高），刻意仍用 px。 */
 
-/* Region 名水印：右上角，一个 Region 唯一的名字露出。位置刻意避开另外两处文字——placeholder 从
-   左上起、Send 在右下——所以贴右上角谁都不压。比 placeholder 更小（--fs-micro vs textarea 的
-   --fs-meta）、更淡、且不随光标闪动，于是不会被误读成 placeholder 或可编辑文本。定宽 + 省略号收口：
-   一个浏览器标题或长文件名到顶就截断，绝不推动布局；absolute 定位不参与流，也压不到 Send。
-   pointer-events:none 让点击与文本选择照旧穿透到下面的输入框。父级 overflow:hidden 会裁掉盒外的东西，
-   所以它必须落在盒内——右上角正好在盒内的空白处。 */
-.composer__region { position: absolute; top: var(--sp-4); right: var(--sp-5); z-index: 1; max-width: 38%; overflow: hidden; color: var(--text-3); opacity: .55; font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
+/* Identity participates in the existing control row; it never floats over editable text. */
+.composer__identity { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; max-width: 160px; color: var(--text-3); font-size: var(--fs-micro); }
+.composer__identity > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer__identity .agent-avatar { flex-shrink: 0; }
+.composer, .launch-surface { container-type: inline-size; container-name: composer; }
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
 .composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
 .composer-tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
@@ -46,8 +44,8 @@
 .composer-send--secondary { color: var(--green-text); background: var(--green-bg); box-shadow: none; }
 .composer-send--secondary:hover:not(:disabled) { color: var(--green-text); background: var(--surface-3); }
 
-.composer__toolbar { flex-wrap: wrap; gap: var(--sp-2); }
-.composer__toolbar > div { flex-wrap: wrap; }
+.composer__toolbar { flex-wrap: nowrap; gap: var(--sp-2); }
+.composer__toolbar > div { flex-wrap: nowrap; align-items: center; }
 .composer-menu { max-height: min(50vh, 360px); max-width: min(90vw, 360px); overflow-y: auto; }
 .composer-menu__hint { padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
 .composer-menu__item > span { min-width: 0; }
@@ -120,9 +118,9 @@
    min-height 里的上下两档必须跟着同两个变量走：border-box 让地板含 padding，写死 --sp-4/--sp-1
    会在一行态把地板算高，于是空输入框仍按两行高画（正是这条地板当初要修的那个缺陷）。 */
 .composer { --composer-input-max: 132px; --composer-input-pad-top: var(--sp-4); --composer-input-pad-bottom: var(--sp-1); }
-.composer__editor .tiptap { width: 100%; min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer__editor .tiptap { position: relative; width: 100%; height: var(--composer-input-height, auto); min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__editor .tiptap p { margin: 0; }
-.composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; }
+.composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; max-width: calc(100% - 2 * var(--sp-5)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer__editor[data-disabled='true'] { color: var(--text-3); }
 .composer__editor .composer-semantic-token { font-size: inherit; vertical-align: baseline; border-bottom: 0; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
 .composer__editor .ProseMirror-selectednode { background: var(--surface-3); outline: 1px solid var(--focus-line); }
@@ -141,45 +139,18 @@
   text-decoration-skip-ink: none;
 }
 
-/* 两行态里切换键排在工具行**末尾**（order），不再挤在 Files 与 Capture 之间那个「很奇怪」的落点
-   （interaction SSOT「切换键在两行态重新安排位置」）。一行态它是 .composer-tools 里唯一可见的子元素
-   （其余工具 mode='collapsed' 时不渲染），order 不影响它——于是两种形态的落点天然不同，满足「不得
-   沿用一行态那个落点」。 */
-.composer-tool--mode { min-width: 28px; order: 1; }
+.composer-tool--mode { min-width: 28px; }
 .composer__editor-fallback { display: none; }
 
-/*
- * 三态：一行 / 两行常态 / 大输入框。改变的是**输入区自身的形态**——这枚键此前的语义是「露出更多
- * 工具」，用户明确否掉了（interaction SSOT「Message Tools 三态」）。档位由 AgentComposerTools 报在
- * `.composer-tools[data-mode]` 上，而要变形的是它的**祖先**，所以两条都走 `:has()`（仓内先例
- * base.css:42、surfaces.css:178）。
- *
- * 两行常态不写规则：它就是上面那些基础规则本身。给它补一条「恢复默认值」的规则等于把同一个几何
- * 写两遍，而这两处必然漂移。
- *
- * 只动 max-height，绝不碰 min-height：静息地板在全表**只许有一处**（agent-composer.test.tsx
- * 「这个元素上只有一处 min-height」），第二条更特异的规则会按级联赢回去，把静息高度抬成两行。
- */
-/* 收起成一行：输入行与主动作同排。grid 让工具条落到编辑区右侧而不是它下面一行——此前那个
-   绝对定位的做法要给工具行留一段左内边距避让，工具行一折行就整体错位，已废止。
-   同一条规则里还把编辑区上下留白压掉：两行态那份 padding 是为了让水印与 placeholder 各有其位，
-   一行态两者都不在上方，留着就把输入文字压到偏下、与右侧按钮的基线错开。改变量而不是再写一条
-   `.composer__editor .tiptap { padding }`，理由见上方 --composer-input-max 那条注释。
-   这几件事必须合在**一条**规则里：根元素上按 collapsed 命中的规则全表只许有一条
-   （message-tools-three-state.test.tsx 按选择器形状把那一条摘出来单判，多一条即红——它这么判是
-   因为按并集计数已被实测证明会被同族里带 `display: none` 的旁证满足）。 */
-.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
+/* One-line mode keeps the tool trigger, editor and primary action in separate columns.
+   display:contents on the toolbar exposes its two groups to this grid without cloning controls. */
+.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__suggestions { grid-column: 1 / -1; }
-/* 一行态里 Region 名水印必须收掉。它是 `position: absolute; top; right`——不参与流，所以两行态下它
-   待在输入框上方那片空白里谁都不压；而收成一行之后，右上角正好是工具条与 Send 的位置，于是水印
-   直接叠在按钮上（用户报的「叠在一起」）。这不是 z-index 能解决的事：它压着的是可点击的控件，
-   而它自己 pointer-events:none，压出来的是视觉糊成一团。一行态本来就没有能安放它的空白，
-   所以这里不是挪位置而是不显示——Region 名在标签页上仍然看得到。 */
-.composer:has(.composer-tools[data-mode='collapsed']) .composer__region { display: none; }
-/* 工具条与主动作在一行态里贴着输入行的基线排，而不是继承两行态那份为「独立一行」准备的上下 padding
-   与 wrap。`flex-wrap: wrap` 在这里是有害的：一行态的右列宽度由内容决定（`auto`），一旦允许折行，
-   按钮会在窄宽度下叠成两层，正是「叠在一起」的第二个来源。 */
-.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { flex-wrap: nowrap; padding: var(--sp-2); align-items: center; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 2; grid-row: 1; min-width: 0; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: contents; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 1; align-self: end; padding: var(--sp-2); }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child { grid-column: 1; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 3; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { flex-wrap: nowrap; }
 /* 工具整排隐藏，但队列徽标留下：它报的是待发消息这一**状态**，不是一个入口。把它一并藏掉等于
    让用户在最窄的形态下看不见自己排了几条。恢复入口（这枚三态键）在 .composer-tools 里，是孙元素，
@@ -191,11 +162,25 @@
    它降到「有就好、别抢戏」——只在这一档覆写，两行/大输入框档位仍走基础那份更强的存在感。 */
 .composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode { padding: 0 var(--sp-2); opacity: .5; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode:hover:not(:disabled) { opacity: 1; background: transparent; }
-/* 大输入框：放高供长文编辑，工具排仍在。改的是 --composer-input-max 而不是就地再写一条
-   `.composer__editor .tiptap { max-height }`——后者会让那个选择器在全表出现两次，而
-   agent-composer.test.tsx 的地板判据按「基础规则恰好一条」取值，第二条会让它认错对象。
-   高度预算因此只有一个家：基础规则读这个变量，档位只改变量。 */
-.composer:has(.composer-tools[data-mode='expanded']) { --composer-input-max: 40vh; }
+/* A larger ceiling alone cannot grow an empty editor. Explicit height makes the long-text
+   mode visible immediately; the shared one-line minimum and scroll budget still apply. */
+.composer:has(.composer-tools[data-mode='expanded']) { --composer-input-height: min(240px, 40vh); --composer-input-max: 40vh; }
 
 
 .composer__queue-notice { grid-column: 1 / -1; padding: 0 var(--sp-3) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+
+/* Collapse text before controls, using the Region width rather than the application viewport. */
+@container composer (max-width: 560px) {
+  .composer-tool__label { display: none; }
+  .composer__identity { max-width: 72px; }
+  .composer-tool { padding-inline: var(--sp-2); gap: 0; flex-shrink: 0; }
+}
+.composer__toolbar > div:first-child { overflow-x: auto; scrollbar-width: none; }
+.composer__toolbar > div:last-child { flex-shrink: 0; }
+.composer-feedback { display: flex; align-items: baseline; gap: var(--sp-2); grid-column: 1 / -1; padding: var(--sp-2) var(--sp-3); color: var(--amber); font-size: var(--fs-micro); }
+.composer-feedback > span { min-width: 0; overflow-wrap: anywhere; }
+.composer-feedback > button { flex-shrink: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; }
+
+@container composer (max-width: 360px) {
+  .composer__identity > span:last-child { display: none; }
+}
