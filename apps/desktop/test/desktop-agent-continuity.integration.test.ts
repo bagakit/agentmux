@@ -32,6 +32,7 @@ const fakeCodexFixture = fileURLToPath(
 const ctxmuxDaemon = fileURLToPath(
   new URL('../../../packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)
 )
+const terminalSizeRestartWorker = fileURLToPath(new URL('./fixtures/terminal-size-restart-worker.mjs', import.meta.url))
 
 const roots: string[] = []
 const runtimeDirectories: string[] = []
@@ -188,6 +189,56 @@ afterEach(async () => {
 })
 
 describe('Desktop and Renderer Agent exact run continuity integration', () => {
+  it('keeps authoritative geometry after the attaching Node process exits and a new process reattaches', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amux-size-'))
+    roots.push(root)
+    const runtimeDirectory = join(root, 'runtime')
+    runtimeDirectories.push(runtimeDirectory)
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    const storePath = join(root, 'sessions.json')
+    const runWorker = async (mode: string, runId?: string) => {
+      const result = await execFileAsync(process.execPath, [
+        terminalSizeRestartWorker, mode, root, storePath, ...(runId ? [runId] : [])
+      ], { env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory }, timeout: 15_000 })
+      return JSON.parse(result.stdout.trim()) as {
+        clientPid: number; daemonInstance: string
+        run: { runId: string; pid: number; cols: number; rows: number; state: string }
+      }
+    }
+    const created = await runWorker('create')
+    activePid = created.run.pid
+    expect(isProcessAlive(created.clientPid)).toBe(false)
+    expect(created.run).toMatchObject({ cols: 132, rows: 45, state: 'running' })
+    const restarted = await runWorker('attach', created.run.runId)
+    expect(isProcessAlive(restarted.clientPid)).toBe(false)
+    expect(restarted.clientPid).not.toBe(created.clientPid)
+    expect(restarted.daemonInstance).toBe(created.daemonInstance)
+    expect(restarted.run).toMatchObject({
+      runId: created.run.runId, pid: created.run.pid, cols: 132, rows: 45, state: 'running'
+    })
+
+    const config: AppConfig = {
+      version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {},
+      workspaces: [{ id: 'test', name: 'Test', hostId: 'local', path: root, kind: 'folder' }],
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
+    }
+    const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(storePath))
+    runtime.commit(await runtime.prepare(config))
+    activeRuntime = runtime
+    const renderer = createFakeWebContents(3)
+    const detach = runtime.attach(renderer as any)
+    const control: SessionControl = {
+      kind: 'terminal', hostId: 'local', runId: created.run.runId, run: { runId: created.run.runId }
+    }
+    activeSessionControl = control
+    const attached = await runtime.attachSession(renderer.id, control, 0, config)
+    expect(attached.currentSize).toEqual({ cols: 132, rows: 45 })
+    expect(attached.session.control).toEqual(control)
+    await runtime.detachSession(renderer.id, attached.attachmentId)
+    detach()
+  }, 30_000)
+
   it('preserves exact Run attachment, replay, live I/O, and suppresses recovery overlay across Renderer reload and Desktop restart without provider handle', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-desktop-continuity-'))
     roots.push(root)
@@ -418,6 +469,9 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     // Snapshot reflects running session, daemonInstanceId/runId/PID match,
     // exact reattachment succeeds with full replay, live I/O works, and clean exit occurs.
     // ---------------------------------------------------------------------------------------------
+    await expect(runtime1.resizeSessionAttachment(
+      webContents1.id, reloadedAttachment.attachmentId, 132, 45
+    )).resolves.toEqual({ cols: 132, rows: 45 })
     await runtime1.detachSession(webContents1.id, reloadedAttachment.attachmentId)
     detachClient1()
     await runtime1.dispose()
@@ -471,6 +525,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     expect(restartedAttachment.session.id).toBe(initialSessionId)
     expect(restartedAttachment.session.control.run.runId).toBe(initialRunId)
     expect(restartedAttachment.session.processState).toBe('running')
+    expect(restartedAttachment.currentSize).toEqual({ cols: 132, rows: 45 })
 
     const restartedReplayText = restartedAttachment.replay
       .map((frame) => ('data' in frame ? frame.data : ''))
@@ -524,7 +579,8 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     activeSessionControl = undefined
 
     // Wait for child process PID to exit
-    await waitFor('child process PID exit', () => !isProcessAlive(initialPid), 5_000)
+    expect(initialPid).not.toBeNull()
+    await waitFor('child process PID exit', () => !isProcessAlive(initialPid!), 5_000)
     activePid = undefined
 
     await runtime2.detachSession(webContents2.id, restartedAttachment.attachmentId)
