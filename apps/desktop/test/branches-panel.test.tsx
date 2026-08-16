@@ -1,7 +1,11 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // api 在模块加载时判断跑在哪个宿主里；不先立起这个全局，import 阶段就炸。
 vi.hoisted(() => {
@@ -14,7 +18,7 @@ import type {
   WorkspaceRecord
 } from '../src/shared/contracts.js'
 import type { GitAheadBehind } from '../src/shared/git-contracts.js'
-import { allStyles } from './helpers/styles.js'
+import { allStyles, allStyleRules } from './helpers/styles.js'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as WorkspaceBranchesSnapshot | null,
@@ -23,7 +27,9 @@ const fixture = vi.hoisted(() => ({
     activateWorkspaceSelection: vi.fn(),
     runFanOut: vi.fn(),
     config: { projects: [], executors: [] },
-    sessions: [] as unknown[]
+    sessions: [] as unknown[],
+    pinnedItems: {} as Record<string, string[]>,
+    togglePinnedItem: vi.fn()
   }
 }))
 
@@ -59,6 +65,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 
 import { BranchesPanel } from '../src/renderer/src/components/BranchesPanel.js'
 import { gitSyncBadge } from '../src/renderer/src/lib/git-sync-badge.js'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 
 const workspace: WorkspaceRecord = {
   id: 'ws-1',
@@ -115,6 +122,8 @@ afterEach(() => {
   fixture.aheadBehind = null
   fixture.state.activateWorkspaceSelection.mockReset()
   fixture.state.runFanOut.mockReset()
+  fixture.state.togglePinnedItem.mockReset()
+  fixture.state.pinnedItems = {}
 })
 
 /**
@@ -227,8 +236,10 @@ describe('Branches 面板', () => {
    * 形状，并且先自检这个形状真能匹配到东西，免得写错正则后这道门恒绿。
    */
   it('面板里不许再手写第二处 worktreePath 判定', () => {
+    // happy-dom 环境下 Vite 会把 `new URL('…', import.meta.url)` 改写成 http: 资源 URL，node:fs 当场
+    // 抛「The URL must be of scheme file」（见 helpers/styles.ts 的同一坑）。用 fileURLToPath+join 拼路径。
     const source = readFileSync(
-      new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
+      join(dirname(fileURLToPath(import.meta.url)), '../src/renderer/src/components/BranchesPanel.tsx'),
       'utf8'
     )
     const fieldReads = source.match(/\bbranch(?:es)?[A-Za-z]*\.worktreePath\b/g) ?? []
@@ -368,5 +379,165 @@ describe('Branches 面板的同步计数徽标', () => {
         `.branch-row__sync--${kind} {`
       )
     }
+  })
+})
+
+/**
+ * 分支 pin。
+ *
+ * 三处各自能静默烂掉的地方，一条判据钉一处：
+ *   1. **scope 派生**：一个分支名只在其 repo 内唯一——两个项目都能有 `main`。scope 若写成常量，
+ *      单项目测试全绿，真实使用里跨项目串 pin。所以用两个不同 repoPath 的项目，pin 只落在其中一个。
+ *   2. **组内分区**：pin 是组**内**的一次分区，不是重新分组。把一个没有 worktree 的分支 pin 起来，
+ *      它必须留在「Without worktree」组里（且排到该组最前），绝不被提进「Worktrees」——那会让标题说谎。
+ *   3. **stopPropagation**：`.branch-row` 自己是个 <button>，pin 键嵌在里面。不 stopPropagation，
+ *      点 pin 会连带触发这一行的打开。这条要真点一下（renderToStaticMarkup 不跑点击），走 happy-dom。
+ */
+describe('Branches 面板的 pin', () => {
+  const projectB: WorkspaceRecord = { id: 'ws-b', name: 'other', hostId: 'local', path: '/other', kind: 'folder' }
+
+  function renderProject(ws: WorkspaceRecord, repoPath: string, branches: WorkspaceBranchRecord[]): string {
+    fixture.snapshot = { kind: 'git-repository', hostId: ws.hostId, repoPath, branches }
+    return renderToStaticMarkup(createElement(BranchesPanel, { workspace: ws }))
+  }
+
+  /** 一行的 pin 键是「已 pin」还是「未 pin」——从它的 aria-label 读，Unpin=已 pin。 */
+  function pinned(markup: string, branchName: string): boolean {
+    const row = trailingOf(markup, branchName)
+    const isUnpin = row.includes(`aria-label="Unpin ${branchName}"`)
+    const isPin = row.includes(`aria-label="Pin ${branchName}"`)
+    // 自检：这一行必须恰好有一枚 pin 键。两个都没有 = 判据落空（下面断言会恒真）。
+    expect(isUnpin !== isPin, `分支「${branchName}」的 pin 键状态读不出来`).toBe(true)
+    return isUnpin
+  }
+
+  it('pin scope 按项目派生：一个项目的 pin 不串到另一个同名分支的项目', () => {
+    // main 只在项目 A 的 scope 下被 pin。两个项目都有一条叫 main 的分支。
+    fixture.state.pinnedItems = { [workspaceProjectId(workspace)]: ['main'] }
+
+    const a = renderProject(workspace, '/repo', [
+      branch('main', { worktreePath: '/repo', workspaceId: 'ws-1', isCurrent: true }),
+      branch('feature/a', { worktreePath: '/wt/a', workspaceId: 'ws-2' })
+    ])
+    // 项目 A：main 已 pin。scope 若写成常量、读到的是空桶，这里就会是「未 pin」而红。
+    expect(pinned(a, 'main'), '项目 A 里 main 应当已 pin').toBe(true)
+
+    const b = renderProject(projectB, '/other', [
+      branch('main', { worktreePath: '/other', workspaceId: 'ws-b', isCurrent: true })
+    ])
+    // 项目 B 是另一个 repoPath（另一个 scope），它的 main 绝不能因为 A pin 过而显示成已 pin。
+    expect(pinned(b, 'main'), '项目 B 的同名 main 串上了 A 的 pin——scope 没有派生').toBe(false)
+  })
+
+  it('置顶是组内分区：pin 一个没有 worktree 的分支不会把它提进 Worktrees 组', () => {
+    fixture.state.pinnedItems = { [workspaceProjectId(workspace)]: ['loose-b'] }
+    const markup = renderProject(workspace, '/repo', [
+      branch('wt-1', { worktreePath: '/wt/1', workspaceId: 'ws-2' }),
+      branch('loose-a'),
+      branch('loose-b')
+    ])
+
+    const withWorktree = group(markup, 'Worktrees')
+    const without = group(markup, 'Without worktree')
+
+    // 被 pin 的 loose-b 留在自己的组里，绝不出现在 Worktrees 组——提进去就是让标题说谎。
+    expect(withWorktree, 'pin 把一个没有 worktree 的分支提进了 Worktrees 组').not.toContain('loose-b')
+    expect(without).toContain('loose-b')
+    // 且它在组**内**排到最前：分区只重排段内次序，不跨组。
+    expect(without.indexOf('>loose-b<')).toBeLessThan(without.indexOf('>loose-a<'))
+    // 它已 pin，同组未 pin 的 loose-a 仍未 pin。
+    expect(pinned(markup, 'loose-b')).toBe(true)
+    expect(pinned(markup, 'loose-a')).toBe(false)
+  })
+
+  describe('点 pin 键（happy-dom）', () => {
+    let container: HTMLDivElement
+    let root: Root
+
+    beforeEach(() => {
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+      container = document.createElement('div')
+      document.body.append(container)
+      root = createRoot(container)
+    })
+
+    afterEach(async () => {
+      await act(async () => root.unmount())
+      container.remove()
+    })
+
+    it('只切换 pin，不触发这一行的打开', async () => {
+      fixture.snapshot = {
+        kind: 'git-repository',
+        hostId: 'local',
+        repoPath: '/repo',
+        branches: [branch('feature/x')]
+      }
+      await act(async () => root.render(createElement(BranchesPanel, { workspace })))
+
+      const pin = container.querySelector<HTMLButtonElement>('.branch-row__pin')
+      expect(pin, '没渲染出 pin 键').not.toBeNull()
+      await act(async () => pin!.click())
+
+      // pin 被切换……
+      expect(fixture.state.togglePinnedItem).toHaveBeenCalledWith(
+        workspaceProjectId(workspace),
+        'feature/x'
+      )
+      // ……而这一行**没有**被打开：openBranch 会同步把这条设为选中（aria-pressed=true）。
+      // 少了 stopPropagation，点击冒泡到外层 .branch-row，这里就会冒出一个选中的行而红。
+      expect(
+        container.querySelector('.branch-row[aria-pressed="true"]'),
+        '点 pin 连带打开了这一行——stopPropagation 丢了'
+      ).toBeNull()
+    })
+
+    /**
+     * 守的缺陷：**键盘能到达、但到达了看不见**。
+     *
+     * 未 pin 的 pin 键静息态是 `opacity: 0`，整行 hover 才浮起来。透明度不影响可聚焦性——Tab 照样停在
+     * 这枚键上，而 base.css 那圈全局焦点环画在按钮自己身上，于是连同按钮一起被透明度吃掉。结果是
+     * 焦点消失在列表里某处：比没有这枚键更糟，因为用户不知道自己站在哪。
+     *
+     * 判据是**真选择器匹配**，不是 `toContain('focus-visible')` 那种文本在场判据（换个等价拼法就绕过，
+     * 而注释里往往逐字写着那个选择器——见 helpers/styles.ts 里 #409 的记录）。做法同
+     * avatar-affordance-scope：把交互伪类从选择器上摘掉，再问真实样式表里每条规则「你选不选得中这枚键」。
+     * 摘掉之后 `.branch-row__pin:focus-visible` 变回 `.branch-row__pin`（命中→合规），
+     * 而 `.branch-row:hover .branch-row__pin` 变回一条后代选择器（这枚键不在 hover 的行里→不命中）。
+     */
+    it('未 pin 的 pin 键在键盘聚焦时显形，而不是停在一个看不见的控件上', async () => {
+      fixture.snapshot = {
+        kind: 'git-repository',
+        hostId: 'local',
+        repoPath: '/repo',
+        branches: [branch('feature/x')]
+      }
+      await act(async () => root.render(createElement(BranchesPanel, { workspace })))
+      const pin = container.querySelector<HTMLButtonElement>('.branch-row__pin')
+      expect(pin, '没渲染出 pin 键').not.toBeNull()
+
+      // 先证前提成立：它静息态确实是透明的。哪天改成常驻可见，这条会红，提醒下面那套理由要重判。
+      const rules = [...allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+        .map(([, selector, body]) => ({
+          selector: selector!.replace(/\s+/gu, ' ').trim(),
+          body: body!.replace(/\s+/gu, ' ').trim()
+        }))
+        .filter((rule) => rule.selector.includes('branch-row__pin'))
+      expect(rules.length, '样式表里一条 .branch-row__pin 规则都没有——判据落空').toBeGreaterThan(0)
+      const restsHidden = rules.some(
+        (rule) => !/:(?:hover|focus-visible|focus|active)/u.test(rule.selector) && /opacity:\s*0\b/u.test(rule.body)
+      )
+      expect(restsHidden, '这枚键静息态已经可见了，本条守的那个缺陷不再存在').toBe(true)
+
+      // 真正的判据：存在一条**由 :focus-visible 触发**、且选得中这枚键、且把它变回可见的规则。
+      const revealedOnFocus = rules.some((rule) => {
+        if (!/:focus-visible/u.test(rule.selector)) return false
+        if (!/opacity:\s*(?:1|\.\d+|0?\.\d+)/u.test(rule.body)) return false
+        return rule.selector
+          .split(',')
+          .some((one) => pin!.matches(one.replace(/:(?:focus-within|focus-visible|hover|active|focus)/gu, '').trim()))
+      })
+      expect(revealedOnFocus, 'Tab 停在这枚键上时它仍然是透明的——焦点落在看不见的控件上').toBe(true)
+    })
   })
 })
