@@ -1,0 +1,167 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { beforeEach, expect, it, vi } from 'vitest'
+vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
+import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+
+const dom = composerDOM()
+const session = () => ({ ...composerSession(), terminalPromptDelivery: {
+  state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
+  submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: 1
+} })
+beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipts: {} }))
+const trigger = () => dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
+const mailbox = () => dom.container.querySelector<HTMLDivElement>('.composer-mailbox')!
+const unread = () => trigger().getAttribute('data-unread')
+// happy-dom has no native popover toggle. Dispatch the browser's state event, not React internals.
+async function toggle(state: 'open' | 'closed') {
+  const event = new Event('toggle')
+  Object.defineProperty(event, 'newState', { value: state })
+  await act(async () => mailbox().dispatchEvent(event))
+}
+async function folder(name: 'inbox' | 'outbox') {
+  await dom.click(`[role="tab"][id$="-${name}-tab"]`)
+}
+
+it('uses one right Session mailbox, opens incoming notices to clear the red dot, and keeps the Core fact', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(dom.container.querySelectorAll('.composer__mailbox')).toHaveLength(1)
+  expect(dom.container.querySelector('.composer__toolbar > div:first-child')?.contains(trigger())).toBe(false)
+  expect(dom.container.querySelector('.composer__toolbar > div:last-child')?.contains(trigger())).toBe(true)
+  expect(dom.container.querySelectorAll('.composer__notices, .composer__queued')).toHaveLength(0)
+  expect(unread()).toBe('true')
+  expect(trigger().querySelector('.composer-mailbox__dot')).not.toBeNull()
+  expect(document.getElementById(trigger().getAttribute('popovertarget')!)).toBe(mailbox())
+  await toggle('open')
+  expect(unread()).toBe('false')
+  expect(trigger().querySelector('.composer-mailbox__dot')).toBeNull()
+  expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
+  expect(mailbox().textContent).toContain('screen confirmation')
+  expect(useAppStore.getState().sessions[0]).toMatchObject({ terminalPromptDelivery: session().terminalPromptDelivery })
+  const persisted = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
+  expect(persisted.noticeReadReceipts['agent-1'].delivery).toBeTruthy()
+  await dom.render(null)
+  await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(unread()).toBe('false')
+  expect(mailbox().textContent).toContain('screen confirmation')
+})
+
+it('only reads the visible inbox; opening and closing the outbox leaves incoming notifications unread', async () => {
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await folder('outbox')
+  await toggle('open')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('No pending messages.')
+  expect(unread()).toBe('true')
+  await toggle('closed')
+  expect(unread()).toBe('true')
+  await toggle('open')
+  await folder('inbox')
+  expect(unread()).toBe('false')
+  expect(send).not.toHaveBeenCalled()
+})
+
+it('coalesces repetitions but marks changed causes and a recurrence after recovery as unread', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  await toggle('closed')
+  const repeated = session()
+  repeated.terminalPromptDelivery.submissionId = 'submission-2'
+  repeated.terminalPromptDelivery.observedAt = 2
+  await act(async () => useAppStore.setState({ sessions: [repeated] }))
+  expect(unread()).toBe('false')
+  await act(async () => useAppStore.setState({ sessions: [{ ...repeated,
+    terminalPromptDelivery: { ...repeated.terminalPromptDelivery, reason: 'prompt-render-timeout' } }] }))
+  expect(unread()).toBe('true')
+  await toggle('open')
+  await toggle('closed')
+  await act(async () => useAppStore.setState({ sessions: [composerSession()] }))
+  expect(mailbox().textContent).toContain('No current notices.')
+  expect(useAppStore.getState().noticeReadReceipts['agent-1']).toBeUndefined()
+  await act(async () => useAppStore.setState({ sessions: [session()] }))
+  expect(unread()).toBe('true')
+})
+
+it('remains accessible in every mode with input disabled and scopes read receipts by Session', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" disabled />)
+  for (const mode of ['collapsed', 'current', 'expanded']) {
+    expect(dom.container.querySelector('.composer-tools')?.getAttribute('data-mode')).toBe(mode)
+    expect(trigger().disabled).toBe(false)
+    expect(dom.container.querySelectorAll('.composer__mailbox')).toHaveLength(1)
+    await dom.click('.composer-tool--mode')
+  }
+  await toggle('open')
+  await act(async () => useAppStore.setState({ sessions: [session(), { ...session(), id: 'other' }] }))
+  await dom.render(<AgentSessionComposer key="other" sessionId="other" />)
+  expect(unread()).toBe('true')
+  expect(useAppStore.getState().noticeReadReceipts['agent-1']?.delivery).toBeTruthy()
+})
+
+it('shows ordered outgoing messages and wires retry, copy and removal without sending on read', async () => {
+  const queued = [{ operationId: 'queued-1', runId: 'run-agent-1', text: 'First exact words',
+    status: 'deferred' as const, error: 'Input confirmation pending. Diagnostic: private-cursor=123' },
+  { operationId: 'queued-2', runId: 'run-agent-1', text: 'Second exact words', status: 'queued' as const }]
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': queued } })
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  vi.spyOn(useAppStore.getState(), 'flushAgentSteerQueue').mockResolvedValue()
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  expect(unread()).toBe('false')
+  expect(send).not.toHaveBeenCalled()
+  expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(2)
+  expect(mailbox().textContent).not.toContain('private-cursor')
+  await dom.click('.composer-notice__body button') // View outbox
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('First exact words')
+  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map((item) => item.textContent))
+    .toEqual(['First exact words', 'Second exact words'])
+  const action = async (text: string) => {
+    const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find((item) => item.textContent?.trim() === text)
+    expect(button).toBeDefined()
+    await act(async () => button!.click())
+  }
+  await action('Retry queue')
+  expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', 'queued-1')
+  await action('Copy all')
+  expect(copy).toHaveBeenCalledExactlyOnceWith('First exact words\n\nSecond exact words')
+  await action('Remove')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued[1]])
+  expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
+  expect(trigger().textContent).toBe('1')
+})
+
+it('does not confuse a healthy pending count with unread notices and supports keyboard folder switching', async () => {
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
+    { operationId: 'q1', runId: 'run-agent-1', text: 'Pending', status: 'queued' }
+  ] } })
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(unread()).toBe('false')
+  expect(trigger().textContent).toBe('1')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Outbox (1)')
+  await toggle('open')
+  await act(async () => mailbox().querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
+  expect(document.activeElement?.textContent).toBe('Inbox (0)')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toBe('No current notices.')
+})
+
+it('retains receipts through empty startup snapshots but alerts for a new Run', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  const receipt = useAppStore.getState().noticeReadReceipts['agent-1']
+  await dom.render(null)
+  await act(async () => useAppStore.setState({ sessions: [] }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(mailbox().textContent).toContain('Waiting for Session status.')
+  expect(useAppStore.getState().noticeReadReceipts['agent-1']).toEqual(receipt)
+  await act(async () => useAppStore.setState({ sessions: [session()] }))
+  expect(unread()).toBe('false')
+  const resumed = session()
+  resumed.control = { ...resumed.control, run: { runId: 'new-run' } }
+  resumed.terminalPromptDelivery.run = { runId: 'new-run' }
+  await act(async () => useAppStore.setState({ sessions: [resumed] }))
+  expect(unread()).toBe('true')
+})

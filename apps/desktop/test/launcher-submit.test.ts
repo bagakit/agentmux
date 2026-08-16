@@ -4,7 +4,6 @@ import { resolve } from 'node:path'
 import ts from 'typescript'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../src/renderer/src/lib/launcher-submit.js'
 import { SHORTCUT_BINDINGS, type ShortcutEvent } from '../src/renderer/src/lib/shortcut-registry.js'
-import { resolveHostElement } from './helpers/component-host-element.js'
 
 // 起点页原本一个键都按不出来：五个动作全是鼠标。用户敲完 prompt 必须去摸鼠标才能发车，而下游每个
 // agent 面都吃同一个 Cmd+Enter。这一族守的是两层，各自能独立变红：
@@ -177,50 +176,19 @@ describe('launcherKeydownLaunches', () => {
 describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
   const relative = 'components/NewTabSurface.tsx'
 
-  it('onKeyDown 挂在 prompt textarea 上，不在外层容器上', () => {
-    // 为什么要钉「挂在哪」：section 里嵌着热终端预览（TerminalView），keydown 会从它冒泡上来。
-    // 挂在外层就会把用户敲进那个终端的 Cmd+Enter 抢掉——这一格是 prompt 唯一被输入的地方。
-    //
-    // 判据为什么要**跟着间接走**而不是比对标签名（#736）：#609/#622 把 8 个受控 textarea 收进了
-    // `ComposerTextarea` 那层认识 IME 组字的壳，于是这里的标签名合法地从 `textarea` 变成了
-    // `ComposerTextarea`——旧判据 `toEqual(['textarea'])` 因此对**正确代码**打红，而本仓 #731 记过：
-    // 对正确代码打红的守卫会被下一个作者整条删掉。
-    //
-    // 而「把 ComposerTextarea 也加进允许的名字」是错的修法：那是接受名字。名字一个字不改，根元素
-    // 就能在某次重构里变成 `<div>` 包着的富文本框，而这里的 onKeyDown 从此落在一个 div 上。所以
-    // 解析到那个组件自己的根元素，并要求它是 textarea、且真的接住了调用方给的属性。
+  it('onKeyDown belongs only to the rich prompt input, not the containing surface', () => {
     const source = parse(relative)
     const owners: string[] = []
     const walk = (node: ts.Node): void => {
       if (ts.isJsxAttribute(node) && node.name.getText() === 'onKeyDown') {
-        // 属性 → JsxAttributes → 开标签/自闭合标签，取标签名。
         const tag = node.parent.parent
         owners.push(ts.isJsxSelfClosingElement(tag) || ts.isJsxOpeningElement(tag) ? tag.tagName.getText() : '<unknown>')
       }
       ts.forEachChild(node, walk)
     }
     walk(source)
-    // 提取器自检：一个都没找到时下面的断言会退化成 `[] toEqual []` 恒真。
-    expect(owners.length, 'no onKeyDown attribute found — 提取器写错了或者接线被整段删掉').toBeGreaterThan(0)
-    // 今天每个 owner 都是大写开头的组件壳（ComposerTextarea），解析器跟着它走到 DOM 根元素。原本这里
-    // 还有一条 else 分支为「onKeyDown 直接挂在原生 DOM 元素上」兜底（`{ tag: owner, viaComponent:
-    // undefined, forwardsCallerProps: true }`），但组件从不这么写，那条分支今天一次都执行不到——实测
-    // 把它的 `tag: owner` 改成 `'WRONG'`、或把 `forwardsCallerProps` 翻成 false，都在 13 条全绿下存活。
-    // 本仓「变异存活也可能是多余条件」：先判它能不能改变结果，不能就删掉那段代码，而不是给死分支编测试。
-    // 删掉后若将来有人把 onKeyDown 挪到原生 `<textarea>` 上，resolveHostElement 对小写标签本就 fail、
-    // 会**响亮抛错**，逼着作者回来教这个判据那种形状——不静默兜底，也不假装覆盖了它。
-    const hosts = owners.map((owner) => resolveHostElement(resolve(SOURCE_ROOT, relative), owner))
-    expect(hosts.map((host) => host.tag), 'onKeyDown 最终落在的元素不是恰好一个 textarea').toEqual([
-      'textarea'
-    ])
-    // 还要证明调用方给的属性真的到得了那个 textarea：壳漏掉 `{...rest}` 时上面那条断言照旧全绿
-    // （根元素确实是 textarea），而这个 onKeyDown 被静默丢掉，一个键都发不出车。
-    for (const host of hosts) {
-      expect(
-        host.forwardsCallerProps,
-        `${host.viaComponent} 没有把调用方的其余属性转发到根元素：这个 onKeyDown 会被静默吞掉`
-      ).toBe(true)
-    }
+    expect(owners).toEqual(['InlineComposer'])
+    // Real editor key dispatch and IME protection are exercised by composer-image-preview/DOM tests.
   })
 
   it('那个处理器把判定交给 launcherKeydownLaunches，且壳里没有自己的条件', () => {

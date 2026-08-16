@@ -1,12 +1,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentComposer, type ComposerQueuedMessage } from '../src/renderer/src/components/AgentComposer.js'
+import { ComposerOutbox, type ComposerQueuedMessage } from '../src/renderer/src/components/ComposerOutbox.js'
 
 function render(queued: ComposerQueuedMessage[], copy = true): string {
-  return renderToStaticMarkup(createElement(AgentComposer, {
-    value: '', disabled: false, placeholder: '', queued, onChange: () => {},
-    onSendQueued: () => {}, onRemoveQueued: () => {}, ...(copy ? { onCopyQueued: () => {} } : {})
+  return renderToStaticMarkup(createElement(ComposerOutbox, {
+    queued,
+    onSend: () => {}, onRemove: () => {}, ...(copy ? { onCopy: () => {} } : {})
   }))
 }
 const entry = (overrides: Partial<ComposerQueuedMessage> = {}): ComposerQueuedMessage => ({

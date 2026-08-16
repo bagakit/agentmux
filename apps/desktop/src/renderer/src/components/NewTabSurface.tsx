@@ -9,12 +9,13 @@ import { presentError } from '../lib/error-presentation'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
 import { appendFileReferences } from '../lib/composer-file-reference'
+import { expandSemanticReferences } from '../lib/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { formatRelativeAge } from '../lib/relative-age'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
-import { ComposerTextarea } from './ComposerTextarea'
+import { InlineComposer } from './InlineComposer'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
@@ -84,7 +85,6 @@ export function NewTabSurface({
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showUnavailable, setShowUnavailable] = useState(false)
-  const promptRef = useRef<HTMLTextAreaElement>(null)
   const config = useAppStore((state) => state.config)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -160,10 +160,6 @@ export function NewTabSurface({
   }, [launchOptions])
 
   useEffect(() => {
-    if (visible) promptRef.current?.focus()
-  }, [visible])
-
-  useEffect(() => {
     // The create page owns the prewarm trigger.
     //
     // 依赖里带上 `warmSlotHeld`（而不是只有 workspace 与 visible）：promote 会把槽清空，若只依赖后
@@ -214,7 +210,7 @@ export function NewTabSurface({
   function launchFromLauncher(): void {
     void run('agent', () => launchAgent(
       executorId,
-      prompt,
+      expandSemanticReferences(prompt),
       tabGroupId,
       launcherRef,
       launchOptionSelection,
@@ -224,7 +220,7 @@ export function NewTabSurface({
   }
 
   function appendReference(path: string): void {
-    setPrompt(appendFileReferences(latestPrompt.current, [path], workspace?.path))
+    setPrompt(appendFileReferences(latestPrompt.current, [path]))
   }
 
   async function captureComposerScreenshot(): Promise<void> {
@@ -328,11 +324,15 @@ export function NewTabSurface({
         ) : null}
       </div>
 
-      <ComposerTextarea
-        ref={promptRef}
+      <div className="launcher-composer composer"><InlineComposer
+        aria-label="Agent prompt"
+        disabled={false}
+        readPastedImage={(path) => api.ui.readPastedImage(path)}
+        onPasteImage={(image) => { void feedback.run(async () => appendReference(await api.ui.savePastedImage(image))) }}
+        autoFocus={visible}
         value={prompt}
         onValueChange={setPrompt}
-        // Cmd/Ctrl+Enter 从这里发车。挂在 textarea 上而不是整个 section 上：section 里还嵌着热终端的
+        // Cmd/Ctrl+Enter 从这里发车。挂在富文本输入上而不是整个 section 上：section 里还嵌着热终端的
         // 预览（TerminalView），keydown 会从它冒泡上来，挂在外层就会把用户敲进那个终端的 Cmd+Enter
         // 抢掉。这一格是 prompt 唯一被输入的地方，也正是注册表里 `launcher.submit` 不带 gate 的理由。
         //
@@ -344,8 +344,7 @@ export function NewTabSurface({
           launchFromLauncher()
         }}
         placeholder="Describe the outcome. You can steer the agent after launch."
-        rows={4}
-      />
+      /></div>
       {/*
         工具条的直接子元素必须是**一簇**（这里全是左侧工具，没有右侧发送键）。`.composer__toolbar`
         的 `space-between` 是一份「有几簇」的契约，而 AgentComposerTools 渲染的是 fragment：

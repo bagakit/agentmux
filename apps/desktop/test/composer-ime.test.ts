@@ -326,16 +326,16 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
     // 消费者侧的在场证明：至少要有若干文件在用这层壳。写成 `toBeGreaterThan(0)` 不够——那在
     // 「只剩某一个消费者、其余格被改回裸 textarea」时也成立，而上面那条会把它们逮到；
     // 这里要的是「这层壳真的被广泛用着」，所以地板取自实测值。改动接线时这个数要跟着改，且改的
-    // 时候必须说明为什么某一格不再需要壳。AgentComposer 改用 ProseMirror 后，实际仍有 7 个
+    // 时候必须说明为什么某一格不再需要壳。AgentComposer 改用 ProseMirror 后，Session 与 Launcher 都改用 ProseMirror 后，实际仍有 6 个
     // 消费文件（包括 Gallery 的普通文本示例），所以保留这个地板。
     const consumers = files.filter(
       (file) => file !== SOLE_RAW_TEXTAREA && tagNamesIn(`${RENDERER_SRC}/${file}`).includes('ComposerTextarea')
     )
     expect(
       consumers.length,
-      `用壳的文件只剩 ${consumers.length} 个（${consumers.join(', ')}），少于实测的 7 个：` +
+      `用壳的文件只剩 ${consumers.length} 个（${consumers.join(', ')}），少于实测的 6 个：` +
         '要么某一格被删掉了，要么它绕回了别的写法（若是裸 textarea 则上面那条也会红）'
-    ).toBeGreaterThanOrEqual(7)
+    ).toBeGreaterThanOrEqual(6)
   })
 })
 
