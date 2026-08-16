@@ -9,7 +9,8 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   projectPersistedWorkbench,
-  restorePersistedWorkbench
+  restorePersistedWorkbench,
+  type PersistedWorkbench
 } from '../src/renderer/src/lib/workbench-persistence.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
@@ -335,6 +336,60 @@ describe('durable Workbench file/browser projection', () => {
     expect(serialized).not.toContain('nav-secret')
     expect(serialized).not.toContain('navigationId')
     expect(serialized).not.toContain('profileId')
+  })
+
+  it('G7b: a browser Region survives the same JSON round trip and comes back hydrated with its url', () => {
+    // 端到端那一条：project → JSON.stringify/parse → restore。只测 reduce/hydrate 函数本身证明不了
+    // 它们**被调用了**——闸门没放行时两个函数都是死代码，单元测试照样绿（这正是本轮真实发生过的事）。
+    // 这条从活体 tab 出发、过一遍真的磁盘形态、再读回活体，任何一环断掉都会红。
+    const viewId = 'view:browser-round-trip'
+    const left = initialWorkbenchRegionId(viewId)
+    let tab = createWorkbenchTab(viewId, agentSurface(left, 'brt-agent'))
+    tab = addWorkbenchRegion(tab, left, 'right', {
+      regionId: 'brt-browser',
+      kind: 'browser',
+      workspaceId: 'workspace',
+      browserId: 'brt-browser',
+      id: 'brt-browser',
+      navigationId: 'nav-transient',
+      profileId: 'profile-transient',
+      url: 'https://example.com/keep-me',
+      title: 'Keep me',
+      loading: true,
+      canGoBack: true,
+      canGoForward: false,
+      viewport: 'desktop',
+      error: null,
+      driving: true,
+      appLinkPrompt: null
+    })
+    const onDisk = JSON.parse(JSON.stringify(projectPersistedWorkbench({
+      tabs: { [tab.id]: tab },
+      layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
+    }))) as PersistedWorkbench
+    const restored = restorePersistedWorkbench({
+      config,
+      sessions: [session('brt-agent')],
+      persisted: onDisk,
+      createTabGroupId: () => 'new-group'
+    })
+    const restoredTab = restored.tabs[viewId]!
+    expect(restoredTab).toBeDefined()
+    expect(workbenchSurfaces(restoredTab)).toHaveLength(2)
+    const browser = restoredTab.regions['brt-browser']!
+    expect(browser.kind).toBe('browser')
+    if (browser.kind !== 'browser') throw new Error('expected a browser surface')
+    // 可再实例化的那一档回来了 —— 冷启动的 `api.browser.create(browserId, url)` 就吃这两个字段。
+    expect(browser.browserId).toBe('brt-browser')
+    expect(browser.url).toBe('https://example.com/keep-me')
+    expect(browser.title).toBe('Keep me')
+    // 瞬时位回到中性默认，等 create 之后的真快照覆盖；绝不能把上一次运行的 driving/loading 带回来，
+    // 那会让 UI 一启动就显示「Agent 正在操作」而底下根本没有 WebContentsView。
+    expect(browser.navigationId).toBe('')
+    expect(browser.driving).toBe(false)
+    expect(browser.loading).toBe(false)
+    // 分屏结构原样 —— browser 活下来但 tab 塌成单叶，等于只修好了一半。
+    expect(restoredTab.layout).toEqual(tab.layout)
   })
 
   it('G4: restores a file Region (workspace still configured) with path and split intact', () => {
