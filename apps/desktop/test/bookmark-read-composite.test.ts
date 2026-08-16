@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runProcess } from '@agentmux/core'
-import { emitUrlShortcut, emitWebloc, isBinaryContent } from '../src/shared/bookmark-file.js'
+import { emitWebloc, isBinaryContent } from '../src/shared/bookmark-file.js'
 import { readBookmark } from '../src/main/bookmark-file.js'
 
 /**
@@ -48,7 +48,9 @@ describe('readBookmark 复合返回 {url, binary} 两件事各自独立算', () 
 
   it('.url 文本：取得出 url 但 binary=false，且从不 shell 出去（种类分派 + binary≠f(url)）', async () => {
     const url = 'https://example.com/win'
-    const bytes = new TextEncoder().encode(emitUrlShortcut(url))
+    // 字面量而不是 `emitUrlShortcut(url)`：喂给解析器的样本要独立于我们自己的发射器，否则两边
+    // 一起写错（比如都用 CRLF）这条照样绿。这个形状对着本机真实 `.url` 样本：纯 LF、无 BOM。
+    const bytes = new TextEncoder().encode(`[InternetShortcut]\nURL=${url}\n`)
     let called = false
     const runner = (async () => {
       called = true
