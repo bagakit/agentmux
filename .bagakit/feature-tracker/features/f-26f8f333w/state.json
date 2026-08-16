@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-26f8f333w",
+  "title": "CLI error-code reachability: derive the scan surface from the call graph",
+  "slug": "cli-error-code-scan-surface",
+  "goal": "The CLI_ERROR_CODES guard scans only directly-imported modules plus one hand-listed depth-2 hop. A derived closure (method-level transitive closure over client.ts plus collaborator fields resolved by declared type) surfaces 56 candidate codes; each must be individually proven CLI-reachable by a real command, registered or exempted with a verifiable reason. Prototype exists at /tmp/amx-wide-closure.ts.",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}
