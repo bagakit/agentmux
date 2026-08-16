@@ -4,7 +4,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
-import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
+import { appendSemanticReference, encodeSemanticReference, COMPOSER_PROMPT_PRESETS, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
   caretAtFirstLine,
@@ -38,7 +38,6 @@ const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 // store.ts change; see the report. Upgrade path: move both maps behind a store slice + partialize entry.
 const historyBySession = new Map<string, HistoryState>()
 const lastSubmitBySession = new Map<string, LastSubmit>()
-const semanticReferencesBySession = new Map<string, ComposerSemanticReference[]>()
 
 
 export function agentComposerAvailability(
@@ -116,7 +115,7 @@ export function AgentSessionComposer({
 
   async function submit(): Promise<void> {
     if (!submitMode.canSubmit || !text.trim()) return
-    const value = expandSemanticReferences(text, semanticReferencesBySession.get(sessionId) ?? [])
+    const value = expandSemanticReferences(text)
     // 防抖 = identical-submit suppression. Mashing Send with the same text within a short window is an
     // accidental double-tap; drop the second silently. This checks the last SUCCEEDED submit only, and we
     // record below only after send() does NOT throw — so a real "readiness epoch already consumed" failure
@@ -125,7 +124,7 @@ export function AgentSessionComposer({
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
     try {
       await send(sessionId, value)
-      clearAgentComposerDraftIfUnchanged(sessionId, value)
+      clearAgentComposerDraftIfUnchanged(sessionId, text)
       // Only reached when send() resolved: record for history recall and the resubmit guard.
       lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
       historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
@@ -143,7 +142,7 @@ export function AgentSessionComposer({
   // an observed event. Same resubmit guard (a double-tap Enter would otherwise queue two identical steers)
   // and the same history recording as the send path.
   function queue(): void {
-    const value = expandSemanticReferences(text, semanticReferencesBySession.get(sessionId) ?? [])
+    const value = expandSemanticReferences(text)
     if (!value.trim()) return
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
@@ -221,17 +220,16 @@ export function AgentSessionComposer({
       kind,
       reference: kind === 'subcommand' ? reference.path : `@${reference.path}`
     }
-    const current = semanticReferencesBySession.get(sessionId) ?? []
-    semanticReferencesBySession.set(sessionId, [...current.filter((entry) => entry.token !== token), item])
-    setAgentComposerDraft(sessionId, appendSemanticReference(useAppStore.getState().agentComposerDrafts[sessionId] ?? '', token))
+    setAgentComposerDraft(sessionId, appendSemanticReference(useAppStore.getState().agentComposerDrafts[sessionId] ?? '', item))
   }
+
   async function capture(): Promise<void> {
     const path = await api.ui.captureScreenshot()
     if (path) insertReference(path)
   }
 
   return (
-    <AgentComposer
+    <AgentComposer key={sessionId}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       queued={queuedEntries.map((entry) => ({
         id: entry.operationId,
@@ -239,15 +237,9 @@ export function AgentSessionComposer({
         status: entry.status,
         ...(entry.error ? { error: entry.error } : {})
       }))}
-      semanticReferences={(semanticReferencesBySession.get(sessionId) ?? []).filter((reference) => text.includes(reference.token))}
       onActivateSemanticReference={(reference) => {
-        if (reference.kind === 'subcommand') {
-          const rest = text.replace(reference.token, '').trim()
-          setAgentComposerDraft(sessionId, `${reference.reference}${rest ? ` ${rest}` : ' '}`)
-          return
-        }
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
-        if (workspace) void api.files.reveal(workspace.id, path).catch(reportError)
+        if (workspace) void useAppStore.getState().openFile(workspace.id, path).catch(reportError)
       }}
       onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
       onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
@@ -269,11 +261,18 @@ export function AgentSessionComposer({
       onCopyQueued={(text) => void copyTextToClipboard(text, reportError)}
       commands={composerOptions?.commands ?? []}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
-      onSelectSuggestion={(item, kind) => { if (kind === 'reference' && activeFile) addFileReference() }}
+      onSelectSuggestion={(item, kind) => {
+        if (kind === 'reference' && activeFile) return appendFileReferences('', [activeFile]).trim()
+        const preset = COMPOSER_PROMPT_PRESETS.find((entry) => entry.text === item)
+        if (kind === 'command' && preset) return encodeSemanticReference({ token: item, label: preset.label, kind: 'subcommand', reference: preset.prompt })
+        return item
+      }}
       tools={<AgentComposerTools disabled={!submitMode.canType} commands={composerOptions?.commands ?? []}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={insertSemanticReference}
+        onPromptPreset={(preset) => setAgentComposerDraft(sessionId, `${useAppStore.getState().agentComposerDrafts[sessionId] ?? ''}${useAppStore.getState().agentComposerDrafts[sessionId] ? ' ' : ''}${preset.prompt} `)}
         onCommand={(command) => {
-          insertSemanticReference({ name: command, path: command })
+          const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+          setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
         }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} reportError={reportError} />}
       value={text}
       disabled={!submitMode.canType}

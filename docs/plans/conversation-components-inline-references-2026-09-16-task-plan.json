@@ -1,0 +1,91 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/conversation-components-inline-references-2026-09-16.md"
+  },
+  "source_refs": [
+    "docs/reviews/conversation-components-inline-references-2026-09-16.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "完成行内引用与预置 prompt",
+      "objective": "在真实 Agent Composer 完成可恢复的行内引用、原位预置展开和真实发送载荷。",
+      "outcome": "在真实 Agent Composer 完成可恢复的行内引用、原位预置展开和真实发送载荷。",
+      "acceptance": [
+        "skill/component 在输入正文中显示可交互短 token；中文组字、选择、粘贴和撤销可用。",
+        "引用映射随草稿持久恢复，发送载荷目标准确且不发生前缀误替换。",
+        "Provider 命令保持原意；明确的本地 prompt preset 点击原位展开且不发送。",
+        "变异测试变红且真实 AgentSessionComposer 调用新输入能力。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/composer-semantic-reference.test.tsx test/inline-composer.test.tsx test/agent-session-composer.test.tsx",
+          "proves": "在真实 Agent Composer 完成可恢复的行内引用、原位预置展开和真实发送载荷。"
+        }
+      ],
+      "depends_on": [],
+      "source_refs": [
+        "docs/reviews/conversation-components-inline-references-2026-09-16.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/InlineComposer.tsx"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "真实对话复用消息组件",
+      "objective": "抽取有真实双消费者的对话展示组件，接入 ActivityView 与 Gallery。",
+      "outcome": "抽取有真实双消费者的对话展示组件，接入 ActivityView 与 Gallery。",
+      "acceptance": [
+        "ActivityView 和 Gallery 调用同一消息组件，身份、正文、时间、streaming/failed 状态真实可见。",
+        "保留 Markdown、图片、文件动作及 Continue 回调，不虚构 Workflow 进度。",
+        "关键渲染变异变红，定义文件外两处真实消费者可查。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-message.test.tsx test/activity-view.test.tsx test/reusable-component-gallery.test.tsx",
+          "proves": "抽取有真实双消费者的对话展示组件，接入 ActivityView 与 Gallery。"
+        }
+      ],
+      "depends_on": [],
+      "source_refs": [
+        "docs/reviews/conversation-components-inline-references-2026-09-16.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "整合验收与补证",
+      "objective": "验证新对话和输入在同一候选中的交互、恢复与前轮状态/队列/导航验收。",
+      "outcome": "验证新对话和输入在同一候选中的交互、恢复与前轮状态/队列/导航验收。",
+      "acceptance": [
+        "浏览器宽窄布局与行内操作通过，保留截图和可复查执行记录。",
+        "关键 token、队列失败停止、三态、导航 predicate 变异确实变红，调用者证据齐全。",
+        "草稿重载后引用目标保留；已有布局恢复回归通过；类型检查与 Gallery 构建通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build:gallery",
+          "proves": "验证新对话和输入在同一候选中的交互、恢复与前轮状态/队列/导航验收。"
+        }
+      ],
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "source_refs": [
+        "docs/reviews/conversation-components-inline-references-2026-09-16.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

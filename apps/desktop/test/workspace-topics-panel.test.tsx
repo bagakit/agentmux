@@ -8,7 +8,9 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { AgentSessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
 const fixture = vi.hoisted(() => ({
@@ -116,7 +118,50 @@ afterEach(async () => {
   fixture.snapshot = []
   fixture.state.scratchTopicOrder = []
   fixture.state.pinnedItems = {}
+  fixture.state.sessions = []
+  fixture.state.tabs = {}
+  fixture.state.layouts = {}
+  fixture.state.selectSession.mockReset()
   fixture.state.togglePinnedItem.mockReset()
+})
+
+describe('Topic live Agent presence', () => {
+  it('renders only live Agents in layout tab order and opens the selected Session', async () => {
+    const shared = topic('view:shared', 'Shared Topic')
+    shared.collaborators = [
+      { fileName: 'codex.offline.identity.md', sessionId: 'offline', providerId: 'codex' }
+    ]
+    fixture.snapshot = [shared]
+    const sessions: AgentSessionSnapshot[] = ['alpha', 'beta'].map((id) => ({
+      id, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      capabilities: {
+        terminal: true, timeline: 'complete-events', permission: 'observe',
+        providerResume: true, replyCorrelation: 'none'
+      },
+      hostId: 'local', workspacePath: shared.directoryPath, label: id,
+      createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+      status: { state: 'working', source: 'run-process', observedAt: 1 },
+      control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
+    }))
+    fixture.state.sessions = sessions
+    fixture.state.tabs = Object.fromEntries(sessions.map(({ id }) => {
+      const tabId = `tab-${id}`
+      return [tabId, createWorkbenchTab(tabId, {
+        regionId: `region-${id}`, kind: 'agent', phase: 'attached',
+        workspaceId: workspace.id, sessionId: id
+      })]
+    }))
+    // Input order deliberately opposes the user's tab order. Removing the sort must fail.
+    fixture.state.layouts = { [workspace.id]: createWorkspaceLayout('main', ['tab-beta', 'tab-alpha']) }
+
+    await mount()
+
+    const avatars = [...rowByTitle('Shared Topic').querySelectorAll<HTMLButtonElement>('.agent-avatar')]
+    // Exact nonempty roster also rejects "render nothing" and the durable offline collaborator.
+    expect(avatars.map((avatar) => avatar.getAttribute('aria-label'))).toEqual(['beta · working', 'alpha · working'])
+    await act(async () => avatars[0]!.click())
+    expect(fixture.state.selectSession).toHaveBeenCalledWith('beta')
+  })
 })
 
 /**

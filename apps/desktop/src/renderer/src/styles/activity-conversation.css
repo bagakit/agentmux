@@ -14,7 +14,7 @@
   position: relative;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   column-gap:var(--sp-4);
   padding:var(--sp-4) var(--sp-5) var(--sp-4);
   margin:var(--sp-3) 0;
@@ -39,20 +39,25 @@
   grid-column: 2;
   grid-row: 1;
   display: flex;
-  align-items: baseline;
-  gap:var(--sp-4);
+  align-items: center;
+  flex-wrap: wrap;
+  gap:var(--sp-2) var(--sp-3);
+  min-width: 0;
   min-height: 20px;
 }
-.log-turn__who { color: var(--text-3); font-size: var(--fs-meta); letter-spacing: .04em; text-transform: uppercase; }
+.log-turn__who { min-width: 0; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-meta); font-weight: 620; }
+.log-turn__head .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .log-turn__time {
   margin-left:auto;
   color: var(--text-3);
   font: 11px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .log-turn__body {
   grid-column: 2;
   grid-row: 2;
+  min-width: 0;
   margin:var(--sp-1) 0 0;
   color: var(--text);
   font-size: var(--fs-prose);
@@ -60,10 +65,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* "Continue from here" 是一个开在回合体上方的小控件——不是正文，所以从 --text-3 起，hover 才升到
+/* "Continue from here" 是一个开在回合体下方的小控件——不是正文，所以从 --text-3 起，hover 才升到
    强调色。无底色无描边：它坐在 turn 自己的地上，一条底色会在密集的对话流里读成一个多余的盒子。 */
 .log-turn__continue {
   grid-column: 2;
+  grid-row: 3;
   justify-self: start;
   padding:0;
   border: 0;
@@ -72,8 +78,10 @@
   font-size: var(--fs-meta);
   cursor: pointer;
   transition: color var(--dur-fast) ease;
+  margin-top: var(--sp-3);
 }
 .log-turn__continue:hover { color: var(--green); }
+.log-turn__continue:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* Markdown inside a turn. The turn body already sets 13px/1.6 and every element below INHERITS it —
    including headings, deliberately. Heading levels differ by weight, colour and the space above them,
    never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
@@ -289,3 +297,5 @@
 }
 /* 块内的 spine 洞会露出块的底色而不是 feed 的底色，所以头像的托底跟着走。 */
 .log-turn[data-speaker-role='human'] .log-turn__node { background: var(--surface-1); }
+
+.observation-sample--conversation, .observation-sample--full { min-width: 0; }

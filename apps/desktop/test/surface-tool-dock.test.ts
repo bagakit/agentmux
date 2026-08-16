@@ -494,7 +494,7 @@ describe('shared surface tool dock resize', () => {
     // 打开中的 spinner——所以那一段是**条件渲染**的，不是一个常驻的图标槽。
     const topicRow = topicsPanelSource.slice(
       topicsPanelSource.indexOf('className="workspace-topic-entry"'),
-      topicsPanelSource.indexOf('</button>', topicsPanelSource.indexOf('className="workspace-topic-entry"'))
+      topicsPanelSource.indexOf('</div>', topicsPanelSource.indexOf('className="workspace-topic-entry"'))
     )
     expect(topicRow).not.toContain('<NotebookText')
     expect(topicRow).toContain('<LoaderCircle')

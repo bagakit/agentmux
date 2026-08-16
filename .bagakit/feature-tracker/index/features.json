@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 152
+    "next_cursor": 154
   },
   "features": [
     {
@@ -1538,6 +1538,26 @@
     {
       "feat_id": "f-26w8fzgyq",
       "title": "Agent status queue and Message Tools refinement",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26x8fz858",
+      "title": "真实对话组件与可恢复行内引用",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26y8fh6az",
+      "title": "对话组件最终运行期验收",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

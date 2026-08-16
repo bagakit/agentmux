@@ -523,3 +523,8 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 - 超过 8 个 Agent 才进入双列 grid；超过 12 行且尾部连续安静项才显示“还有 n 个”。失败项与当前运行项始终优先可见。≤560px 隐藏模型与最近工具，头部数字换行到第二行；触屏控件最小命中区 44px。
 - 同一 Workflow 组件通过 `dock` 变体复用结构，仅收紧模型和行高并限制 `max-height: 220px`；不得为 dock 维护另一套状态投影。旧 daemon 用 flat tool 行样式，无箭头、无空卡片。
 - Gallery 是组件的唯一观察表面：它可以切换 light/dark/system，集中展示 running/completed/failed/killed/paused、窄屏和旧 daemon；展示数据是静态 fixture，不引入 Runtime 或 Chat Store。未来聊天页只消费组件公开 props。
+
+### 真实对话与行内引用（2026-09-16）
+
+- 对话与 Gallery 使用同一消息组件：身份、安静时间戳与语义状态组成摘要，用户正文保留轻量 surface，Agent 正文保持开放阅读面；沿用 Workflow 的层级、间距和状态字形，不给每句话另套卡片。
+- 引用短名在输入正文中原位呈现，下划线提供可操作暗示，类型由字形和名称共同表达；焦点可见，窄窗不横向撑宽。功能与恢复约束见 interaction「对话接入新组件与输入引用闭环」。

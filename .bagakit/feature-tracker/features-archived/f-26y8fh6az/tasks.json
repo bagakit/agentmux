@@ -1,0 +1,102 @@
+{
+  "version": 2,
+  "feat_id": "f-26y8fh6az",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md",
+  "source_refs": [
+    "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md",
+      "source_refs": [
+        "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "最终候选运行期验收",
+      "objective": "验证对话共享组件、稳定行内编辑器、提示词草稿、既有队列和导航在最新候选中协同工作。",
+      "outcome": "最终候选可构建、无运行时更新循环且保留恢复边界。",
+      "acceptance": [
+        "最新候选浏览器可加载；对话消息、行内引用、失败队列和提示词按钮可见。",
+        "点击提示词后草稿仍在编辑器中且页面不崩溃；组件调用者与恢复测试通过。",
+        "类型检查、Gallery 构建、定向测试和变异证据可复核。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build:gallery",
+          "proves": "最新候选类型和生产构建。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/composer-semantic-reference.test.tsx test/inline-composer.test.tsx test/composer-ime.test.ts test/conversation-message.test.tsx test/activity-view.test.tsx test/agent-composer.test.tsx test/agent-session-composer.test.tsx test/reusable-component-gallery.test.tsx test/message-tools-three-state.test.tsx test/agent-steer-queue.test.ts test/workspace-topics-panel.test.tsx test/surface-tool-dock.test.ts",
+          "proves": "对话、Composer、队列、三态和导航回归。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md",
+        "apps/desktop/src/renderer/src/components/InlineComposer.tsx",
+        "apps/desktop/src/renderer/src/components/ConversationMessage.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build:gallery",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/composer-semantic-reference.test.tsx test/inline-composer.test.tsx test/composer-ime.test.ts test/conversation-message.test.tsx test/activity-view.test.tsx test/agent-composer.test.tsx test/agent-session-composer.test.tsx test/reusable-component-gallery.test.tsx test/message-tools-three-state.test.tsx test/agent-steer-queue.test.ts test/workspace-topics-panel.test.tsx test/surface-tool-dock.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "Final runtime proof is recorded against the existing interaction and surface-density SSOT.",
+      "refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "The browser run caught and then verified removal of an editor/ref callback update loop; mutation and caller evidence remain in the review artifacts.",
+      "refs": [
+        "docs/reviews/conversation-components-inline-references-evidence-2026-09-16.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "routed_for_review",
+      "rationale": "Runtime-proof and editor stability evidence belongs with existing reusable component review.",
+      "refs": [
+        "docs/reviews/conversation-components-final-runtime-proof-2026-09-17.md"
+      ]
+    }
+  }
+}
