@@ -22,7 +22,6 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from './AgentComposer'
-import { AgentAvatar } from './AgentAvatar'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useComposerFeedback } from './ComposerFeedback'
@@ -94,6 +93,7 @@ export function AgentSessionComposer({
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
+  const timeline = useAppStore((state) => state.timelines?.[sessionId])
   const firstPrompt = useAppStore((state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
   const displayName = session?.kind === 'agent' ? agentDisplayName({
     userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
@@ -259,11 +259,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      mailbox={<SessionMailbox inbox={inbox}
-        {...(session?.kind === 'agent' && displayName ? { identity: {
-          name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
-          ...(tabName && tabName !== displayName ? { context: tabName } : {})
-        } } : {})}
+      mailbox={<SessionMailbox system={inbox} timeline={timeline}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,

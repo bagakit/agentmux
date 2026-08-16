@@ -897,6 +897,8 @@ export type AgentTimelineItem = {
   createdAt: number
   updatedAt: number
   title: string
+  /** Input supplied by another Agent, attributed by the trusted host (not a credential). */
+  authorAgentSessionId?: string
   content?: string
   toolName?: string
   toolInput?: string

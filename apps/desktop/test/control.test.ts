@@ -220,9 +220,9 @@ describe('Desktop Control owner', () => {
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
     await useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue'
+      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', caller: { agentSessionId: 'caller' }
     }))
-    expect(submit).toHaveBeenCalledOnce()
+    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String), 'caller')
 
     tab = addWorkbenchRegion(tab, 'region-caller-2', 'down', {
       regionId: 'region-reviewer', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'reviewer'

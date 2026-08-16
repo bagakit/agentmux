@@ -144,6 +144,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     updatedAt,
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
+    ...optionalField(source, 'authorAgentSessionId'),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),
     ...optionalField(source, 'toolOutput'),
