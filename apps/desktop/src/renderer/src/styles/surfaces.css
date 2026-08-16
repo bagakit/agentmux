@@ -178,6 +178,20 @@
 .notification-sound-toggle:has(input:disabled) { cursor: default; opacity: .55; }
 .browser-automation-toggle code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
 
+/* 记住的应用链接选择。一节说明 + 一张「scheme / 当前选择 / 忘掉」的表。
+   说明取 --fs-micro/--text-3 这一档（脚注），与上面 .settings-lead 的导语拉开，规则同那条注释。 */
+.settings-group-note { margin:0; padding:var(--sp-5) var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.settings-group-note code,
+.app-link-scheme-list code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
+.app-link-scheme-list { display: grid; gap:var(--sp-2); margin:0; padding:var(--sp-4) var(--sp-5) var(--sp-5); list-style: none; }
+.app-link-scheme-list li { display: flex; align-items: center; gap:var(--sp-4); }
+/* scheme 名占住左列，于是几行之间「选择」与「忘掉」竖着对齐——参差的按钮列读起来像一堆碎片。 */
+.app-link-scheme-list li > code { flex: 0 0 auto; min-width: 72px; }
+.app-link-scheme-choice { flex: 1 1 auto; color: var(--text-3); font-size: var(--fs-micro); }
+/* 「会开」是一个有后果的状态（点一下就离开本应用），所以它取状态语汇里的绿；
+   「不开」是安静的那一档，留在中性色——两档都上色会让这张表变成一排彩灯。 */
+.app-link-scheme-choice--allow { color: var(--green); }
+
 /* 通知预览——本屏的"手艺时刻"，对标终端主题预览那格 mini 终端。
    它不是装饰：把系统通知长什么样如实画出来（状态点 + "Agent — 状态"标题行 + 回看行 + 停留计量条），
    让用户在拨动停留时长时看到自己在配置什么。所有取色来自 token，绿只落在状态点与停留计量上（＝状态语汇）。 */

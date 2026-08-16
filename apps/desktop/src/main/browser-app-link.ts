@@ -139,13 +139,17 @@ export function browserWindowOpenOutcome(
 
 /**
  * 被拒绝时显示的那句话。说到下一步为止——房规是「文案点名的动作要从当前状态真能走通」，
- * 所以点名的是 Settings › Browser 里那份记住的清单（用户当初就是在这个面板上回答的），
- * 不是一个需要去别处找的开关。
+ * 所以点名的是 Settings › Browser 里那份「记住的答案」表（用户当初就是在这个面板上回答的，
+ * 而那张表上有一个 Forget 按钮真能把这一档撤回去），不是一个需要去别处找的开关。
+ *
+ * 这句话点名的位置由 `browser-app-link-reachable.test.ts` 证明真的到得了——有节无控件同样是
+ * 到不了，本仓在 `agentAutomation` 那次已经吃过一遍（记忆
+ * copy-must-name-an-action-reachable-from-this-state）。
  */
 export function appLinkRefusedMessage(scheme: string): string {
   return (
     `You chose not to let this page open ${scheme}: links in another app. ` +
     `Nothing was opened and the page did not navigate. ` +
-    `Change that choice in Settings › Browser if you want ${scheme}: links handed to your system again.`
+    `To be asked again, forget that choice under "App links you answered" in Settings › Browser.`
   )
 }
