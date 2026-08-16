@@ -13,7 +13,8 @@ import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../.
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentAvatar } from './AgentAvatar'
 import { AgentComposerTools } from './AgentComposerTools'
-import { SessionMailbox, useSessionNotices } from './SessionMailbox'
+import { SessionMailbox } from './SessionMailbox'
+import { useServiceNotices } from '../lib/use-service-notices'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
 // 画廊里那条示例 prompt。它是**一份 fixture**，不是第二套注册表：画廊要画出「用户自己的 prompt
@@ -43,7 +44,7 @@ const degradedNotice: RenderableServiceNotice = {
 
 export function ObservationSurfaceGallery() {
   const feedback = useComposerFeedback('gallery')
-  const inbox = useSessionNotices('gallery', [{ id: 'delivery', notice: degradedNotice }])
+  const inbox = useServiceNotices('gallery', [{ id: 'delivery', notice: degradedNotice }])
   const [draft, setDraft] = useState(() => `${appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' })}@/gallery/.agentmux/pasted/capture.png `)
   const [queued, setQueued] = useState<ComposerQueuedMessage[]>([
     { id: 'gallery-q-1', text: 'Run the focused tests', status: 'deferred', deliverable: true, error: 'The Agent is not ready to accept another message yet.' },

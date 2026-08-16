@@ -28,7 +28,8 @@ import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs
 import { useComposerFeedback } from './ComposerFeedback'
 import { errorIdentity } from '../lib/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
-import { SessionMailbox, useSessionNotices, type ComposerNotice } from './SessionMailbox'
+import { SessionMailbox } from './SessionMailbox'
+import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 
 export type AgentComposerAvailability = {
   disabled: boolean
@@ -230,7 +231,7 @@ export function AgentSessionComposer({
     }, { separate: true })
   }
 
-  const notices: ComposerNotice[] = []
+  const notices: ServiceNoticeItem[] = []
   for (const [id, outcome] of [
     ['connection', agentSessionServiceOutcome(session)],
     ['delivery', agentPromptDeliveryServiceOutcome(session)]
@@ -250,7 +251,7 @@ export function AgentSessionComposer({
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
-  const inbox = useSessionNotices(sessionId, notices.map((item) => ({ ...item,
+  const inbox = useServiceNotices(sessionId, notices.map((item) => ({ ...item,
     ...(session?.kind === 'agent' ? { occurrence: session.control.run.runId } : {})
   })), session?.kind === 'agent')
 
