@@ -233,7 +233,7 @@ export function AgentTreePanel({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
-          className="agent-status-bar__segment--action agent-tree__disclose"
+          className="agent-status-bar__segment agent-status-bar__segment--action agent-tree__disclose"
           type="button"
           aria-label={label}
           title={label}

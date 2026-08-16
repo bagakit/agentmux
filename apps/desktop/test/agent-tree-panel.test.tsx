@@ -1,6 +1,8 @@
 import { createElement, type ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Window } from 'happy-dom'
+import { allStyleRules } from './helpers/styles.js'
 
 // 状态栏挂着资源面板，资源面板 import 阶段要判宿主。不先立这个全局，一条断言都跑不到。
 vi.hoisted(() => {
@@ -126,6 +128,33 @@ describe('AgentStatusBar — counts disclose without losing the jump', () => {
     const markup = renderToStaticMarkup(createElement(AgentStatusBar))
     // Three classes populated -> three disclosure chevrons.
     expect((markup.match(/agent-tree__disclose/gu) ?? []).length).toBe(3)
+  })
+
+  it('groups every count with its own reset, compact disclosure button', () => {
+    fixture.state.sessions = [agent('go', 'working'), agent('w', 'waiting'), agent('e', 'error')]
+    fixture.state.config = { workspaces: [workspace('w1', 'One', '/repo/one')] }
+    const document = new Window().document
+    document.body.innerHTML = renderToStaticMarkup(createElement(AgentStatusBar))
+    const groups = [...document.querySelectorAll('.agent-status-bar__group')]
+    expect(groups).toHaveLength(3)
+    expect(groups.map((group) => group.querySelector('.agent-status-bar__label')?.textContent))
+      .toEqual(['working', 'needs you', 'error'])
+    expect(groups.map((group) => group.querySelectorAll('.agent-tree__disclose').length)).toEqual([1, 1, 1])
+    const buttons = groups.map((group) => group.querySelector('.agent-tree__disclose')!)
+    expect(buttons.map((button) => button.classList.contains('agent-status-bar__segment'))).toEqual([true, true, true])
+    expect(buttons.map((button) => button.getAttribute('type'))).toEqual(['button', 'button', 'button'])
+    const css = allStyleRules()
+    const reset = css.match(/\.agent-status-bar__segment\s*\{([^}]+)\}/)?.[1]
+    expect(reset).toBeDefined()
+    expect(reset).toMatch(/border:\s*0;/)
+    expect(reset).toMatch(/padding:\s*0;/)
+    expect(reset).toMatch(/background:\s*transparent;/)
+    const compact = css.match(/\.agent-tree__disclose\s*\{([^}]+)\}/)?.[1]
+    expect(compact).toBeDefined()
+    expect(compact).toMatch(/width:\s*16px;/)
+    expect(compact).toMatch(/height:\s*16px;/)
+    expect(compact).toContain('justify-content: center')
+    expect(css).toMatch(/\.agent-tree__disclose:hover,\s*\.agent-tree__disclose:focus-visible,\s*\.agent-tree__disclose\[data-state='open'\]\s*\{[^}]*background:/)
   })
 
   it('a zero class shows no chevron — consistent across all three counts', () => {
