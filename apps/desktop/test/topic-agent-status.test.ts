@@ -1,3 +1,6 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
@@ -131,8 +134,8 @@ describe('状态到颜色的映射只有一处定义', () => {
     expect(styles.length).toBeGreaterThan(10_000)
     expect(styles).toContain('.status--waiting')
     // dock.css 那段理由注释里的字（它逐字引用了 `.status__dot` 与 `data-attention`）不许留下。
-    expect(styles).not.toContain('这一格是 Topic 行里')
-    expect(allStyles()).toContain('这一格是 Topic 行里')
+    expect(styles).not.toContain('The Provider alpha owns the contour')
+    expect(allStyles()).toContain('The Provider alpha owns the contour')
   })
 
   /** 每条给 `--status-ink` 赋值的规则，连同它覆盖的状态和赋的那个值。 */
@@ -242,14 +245,19 @@ describe('状态到颜色的映射只有一处定义', () => {
     expect(consumers.some((selector) => selector.includes('.agent-avatar'))).toBe(true)
   })
 
-  it('头像的边框颜色不是自己写的一份状态表', () => {
-    expect(styles).toContain('border: 0')
-    expect(styles).not.toContain('border: 1px solid var(--status-ink)')
-    expect(styles).toContain('.agent-avatar.status--working')
-    expect(styles).toContain('.agent-avatar.status--running')
-    expect(styles).toContain('outline: 1px solid var(--status-ink)')
+  it('头像以图形透明轮廓读共享状态色，不给矩形容器画状态框', () => {
+    const contour = styles.match(/(?:^|\n)\.agent-avatar__contour\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(contour.length).toBeGreaterThan(0)
+    expect(contour).toContain('drop-shadow(')
+    expect(contour).toContain('var(--status-ink)')
     const avatarBase = styles.match(/(?:^|\n)\.agent-avatar\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(avatarBase).toContain('filter: grayscale(1)')
+    expect(avatarBase.length).toBeGreaterThan(0)
+    expect(avatarBase).toContain('border: 0')
+    expect(avatarBase).not.toMatch(/outline:|box-shadow:|filter: grayscale/)
+    const corner = styles.match(/\.agent-avatar \.agent-avatar__status\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(corner.length).toBeGreaterThan(0)
+    // The avatar positions the pip; it must not erase the shared running/disconnected hollow ring.
+    expect(corner).not.toMatch(/background:|box-shadow:/)
   })
 })
 
@@ -299,67 +307,26 @@ describe('#409 头像的注意力取值必须画得出来', () => {
     }
   })
 
-  it('每个会到达 DOM 的取值都有一条读 --status-ink 的头像规则，并带一枚字形', () => {
-    // 判据是**可达性**，不是"选择器名字在场"：#397 那次事故的形状正是"类被样式了、属性在别处被
-    // 样式了、这一对没人样式"。所以要求同一条选择器里既点名 `.agent-avatar` 又点名这个取值。
-    for (const category of URGENT_ATTENTION_CATEGORIES) {
+  it('头像每个需注意状态都有共享状态点，颜色与字形从同一套规则到达 DOM', () => {
+    const urgent = AGENT_DISPLAY_STATES.filter((state) => projected(state) !== null)
+    expect(urgent.length).toBeGreaterThan(1)
+    const glyphs = new Map<string, string>()
+    for (const state of urgent) {
+      const markup = renderToStaticMarkup(createElement(AgentAvatar, { label: 'Agent', providerId: 'codex', state }))
+      expect(markup).toContain(`status--${state}`)
+      expect(markup).toContain('agent-avatar__status status__dot')
       const rules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-        .map(([, selector, body]) => ({ selector: selector.trim().replace(/\s+/g, ' '), body: body! }))
-        .filter(({ selector }) =>
-          new RegExp(`\\.agent-avatar[^,{]*\\[data-attention=['"]${category}['"]\\]`, 'u').test(selector)
-        )
-      expect(rules.length, `${category} 到达头像却没有任何规则选中它`).toBeGreaterThan(0)
-      // 颜色仍然只能来自状态语汇段那一处。自己挑一个 `--amber` 就是第二份状态色表（#420 那族）。
-      const ink = rules.filter(({ body }) => body.includes('var(--status-ink)'))
-      expect(ink.length, `${category} 的头像规则必须读 --status-ink，不许自己挑色`).toBeGreaterThan(0)
-      // 上面那条只问"有没有一条读了 token"，而这一族有两条规则各画一处（描边与角标）。实测过：
-      // 把角标背景从 `var(--status-ink)` 换成 `#ffb020`，描边那条照旧满足上面那条断言，45 条全绿——
-      // 角标就此成了第二份状态色表，而 #420 正是这个形状。所以按**全族**判：这些规则里一处颜色
-      // 字面量都不许有，颜色只能来自 token。
-      for (const { selector, body } of rules) {
-        expect(
-          colourLiterals(body),
-          `${selector} 自己挑了颜色，状态色只能来自 --status-ink`
-        ).toEqual([])
-      }
-      // 颜色之外还要一个形状：一摞 18px 方块里只靠描边色分辨琥珀与红，快速一扫和色盲下都不成立。
-      const glyph = rules.filter(({ body }) => /content:\s*'[^']+'/u.test(body))
-      expect(glyph.length, `${category} 只有颜色没有字形，色盲与快速扫视下读不出来`).toBeGreaterThan(0)
+        .filter(([, selector]) => selector!.split(',').some((part) => part.trim() === `.status--${state} .status__dot::after`))
+      expect(rules.length, `${state}: no shared glyph rule`).toBeGreaterThan(0)
+      const glyph = rules.map(([, , body]) => /content:\s*["']([^"']+)["']/u.exec(body!)?.[1]).find(Boolean)
+      expect(glyph, `${state}: missing shared glyph`).toBeTruthy()
+      glyphs.set(projected(state)!, glyph!)
     }
-  })
-
-  it('提取器真的会对"这一对没人样式"报红（防恒绿）', () => {    // 上面那条断言一旦正则失配就会静默全绿，所以在合成输入上把两个方向都钉住。
-    const pair = /\.agent-avatar[^,{]*\[data-attention=['"]needs-you['"]\]/u
-    expect(pair.test(".agent-avatar[data-attention='needs-you'] { outline: 1px solid var(--status-ink); }"))
-      .toBe(true)
-    // 这就是 #397 的形状：类被样式了，属性在别的元素上被样式了，这一对没人样式。
-    expect(pair.test(".agent-avatar { filter: grayscale(1); }\n.lane[data-attention='needs-you'] { color: red; }"))
-      .toBe(false)
-  })
-
-  it('头像用不同字形区分等待回复和错误；项目栏用带文字的语义图标', () => {
-    const glyphByCategory = (surface: string): Map<string, string> => {
-      const out = new Map<string, string>()
-      for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const glyph = /content:\s*'([^']+)'/u.exec(body!)?.[1]
-        if (glyph === undefined) continue
-        // 一条规则可以同时给多个 category 定字形（`[a='x'], [a='y'] { content: '?' }`），所以逐成员拆。
-        for (const member of selector!.split(',')) {
-          if (!member.includes(surface)) continue
-          const category = /\[data-attention=['"]([^'"]+)['"]\]/u.exec(member)?.[1]
-          if (category === undefined) continue
-          // 后面的规则覆盖前面的（`error::after { content: '!' }` 就是这样改写上一条的）。
-          out.set(category, glyph)
-        }
-      }
-      return out
-    }
-    const avatar = glyphByCategory('.agent-avatar')
-    // 自检：任一侧扫成空集都会让下面的逐 category 循环空转。
-    expect(avatar.size, '头像一侧扫不到字形——判据会变成恒真').toBeGreaterThan(1)
-    // 而两枚字形本身必须不同：都写成 `?` 时下面的逐 category 相等仍然成立，却什么也没区分。
-    expect(new Set(avatar.values()).size, '两个 category 用了同一枚字形，等于没区分').toBe(avatar.size)
-
+    expect([...glyphs]).toEqual([['needs-you', '?'], ['error', '!']])
+    const dot = styles.match(/(?:^|\n)\.status__dot\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(dot.length).toBeGreaterThan(0)
+    expect(dot).toContain('var(--status-ink)')
+    expect(colourLiterals(dot)).toEqual([])
   })
 
   /**
@@ -497,7 +464,9 @@ describe('Agent 头像：身份看图标，点击到人', () => {
 
   it('键盘可达：它是 button，Enter 天然等价于点击，并有 aria-label 与 tooltip', () => {
     expect(avatar).toContain("const Element = onOpen ? 'button' : 'span'")
-    expect(avatar).toContain('aria-label={`${label} · ${state}`}')
+    const markup = renderToStaticMarkup(createElement(AgentAvatar, { label: 'Agent', providerId: 'codex', state: 'running', onOpen: () => {} }))
+    expect(markup).toContain('aria-label="Agent · running"')
+    expect(markup).toContain('<button')
     expect(avatar).toContain('title={`${label} · ${state}`}')
   })
 

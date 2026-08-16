@@ -22,6 +22,7 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from './AgentComposer'
+import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useComposerFeedback } from './ComposerFeedback'
@@ -91,6 +92,8 @@ export function AgentSessionComposer({
   // real render below, not inside the selector, so it does not defeat that reference check.
   const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
+  const avatarAppearances = useAppStore((state) => state.config?.appearance?.agentAvatars)
+  const executors = useAppStore((state) => state.config?.executors)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
   const timeline = useAppStore((state) => state.timelines?.[sessionId])
@@ -272,6 +275,9 @@ export function AgentSessionComposer({
         onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
         onCopyQueued={(text) => { void feedback.run(async () => { await copyTextToClipboard(text, feedback.report) }) }}
       />}
+      identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
+        executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
+        appearance={avatarAppearances?.[session.executorId]} /> : null}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference

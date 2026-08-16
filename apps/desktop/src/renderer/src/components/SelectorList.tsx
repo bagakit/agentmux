@@ -1,3 +1,4 @@
+import type { AgentAvatarAppearance } from '../../../shared/contracts'
 import type { ReactNode } from 'react'
 import { AgentAvatar } from './AgentAvatar'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
@@ -18,9 +19,10 @@ import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
  */
 
 export type SelectorPresenceAgent = {
-  /** 用于 React key 与点击定位；Branch 侧按 provider 归并，Topic 侧是 sessionId。 */
+  /** 用于 React key 与点击定位；Branch 侧按 executor 归并，Topic 侧是 sessionId。 */
   key: string
   providerId: AgentProviderId
+  appearance?: AgentAvatarAppearance | undefined
   /** tooltip 与可访问名里的人话。 */
   label: string
   // 头像现在只收 `state` 这一个权威输入，注意力口径由它在内部派生（见 AgentAvatar）——所以这里
@@ -34,7 +36,7 @@ export type SelectorPresenceAgent = {
   // 消费者」：组件读不到它，它只是一坨死数据。真正把「不许再写」钉住的是 selector-presence-shape
   // 的 AST 守卫（按属性名扫每个构造点），不是类型系统。
   state: AgentDisplayState
-  /** 同一个 provider 归并了几个 Session；1 时不显示角标。 */
+  /** 同一个 executor 归并了几个 Session；1 时不显示角标。 */
   count?: number
   onOpen?: () => void
 }
@@ -70,8 +72,9 @@ export function SelectorPresence({
             onOpen={agent.onOpen}
             providerId={agent.providerId}
             state={agent.state}
+            appearance={agent.appearance}
+            count={agent.count}
           />
-          {agent.count && agent.count > 1 ? <small>{agent.count}</small> : null}
         </span>
       ))}
       {hidden > 0 ? <em>+{hidden}</em> : null}

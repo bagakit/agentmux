@@ -1,36 +1,49 @@
 import { Palette, SquareTerminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppearanceConfig, AppAppearanceId, TerminalThemeId } from '../../../../shared/contracts'
+import type { AppearanceConfig, AppAppearanceId, TerminalThemeId, AgentExecutorConfig, AgentAvatarAppearance } from '../../../../shared/contracts'
 import {
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN
 } from '../../../../shared/contracts'
+import { AgentAvatar } from '../AgentAvatar'
+import { presentError } from '../../lib/error-presentation'
 import { TERMINAL_THEME_CATALOG } from '../../lib/terminal-theme'
 
-export function AppearanceSettingsPane({ appearance, onSave }: {
+export function AppearanceSettingsPane({ appearance, executors, onSave }: {
   appearance: AppearanceConfig
+  executors: Record<string, AgentExecutorConfig>
   onSave: (appearance: AppearanceConfig) => Promise<void>
 }) {
   const [appAppearance, setAppAppearance] = useState<AppAppearanceId>(appearance.appAppearance ?? 'dark')
   const [terminalTheme, setTerminalTheme] = useState<TerminalThemeId>(appearance.terminalTheme)
   const savedFontSize = appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   const [fontSize, setFontSize] = useState<number>(savedFontSize)
+  const [avatars, setAvatars] = useState(appearance.agentAvatars ?? {})
+  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => setAvatars(appearance.agentAvatars ?? {}), [appearance.agentAvatars])
   useEffect(() => setAppAppearance(appearance.appAppearance ?? 'dark'), [appearance.appAppearance])
   useEffect(() => setTerminalTheme(appearance.terminalTheme), [appearance.terminalTheme])
   useEffect(() => setFontSize(savedFontSize), [savedFontSize])
 
-  const dirty = appAppearance !== (appearance.appAppearance ?? 'dark') || terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize
+  const dirty = appAppearance !== (appearance.appAppearance ?? 'dark') || terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize || JSON.stringify(avatars) !== JSON.stringify(appearance.agentAvatars ?? {})
 
   async function save(): Promise<void> {
     setSaving(true)
+    setError(null)
     try {
-      await onSave({ appAppearance, terminalTheme, terminalFontSize: fontSize })
+      await onSave({ ...appearance, appAppearance, terminalTheme, terminalFontSize: fontSize, agentAvatars: avatars })
+    } catch (cause) {
+      setError(presentError(cause))
     } finally {
       setSaving(false)
     }
+  }
+
+  function updateAvatar(id: string, patch: AgentAvatarAppearance): void {
+    setAvatars((current) => ({ ...current, [id]: { ...current[id], ...patch } }))
   }
 
   return (
@@ -115,6 +128,24 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
         </div>
         <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
       </section>
+      <section className="settings-group">
+        <header><span>Agent avatars</span><small>Per executor</small></header>
+        <p className="settings-hint">Keep the Provider mark; add a tint and a small corner badge to distinguish your executors.</p>
+        <div className="agent-avatar-settings">
+          {Object.entries(executors).map(([id, executor]) => <div className="agent-avatar-settings__row" key={id}>
+            <AgentAvatar label={executor.label} providerId={executor.providerId} state="running" appearance={avatars[id]} />
+            <span className="agent-avatar-settings__name"><strong>{executor.label}</strong><small>{id}</small></span>
+            <label>Tint{avatars[id]?.tint ? null : ' · off'}<input type="color" aria-label={`${executor.label} avatar tint`} value={avatars[id]?.tint ?? '#8ab4f8'}
+              onChange={(event) => updateAvatar(id, { tint: event.target.value })} /></label>
+            <label>Badge<input type="text" aria-label={`${executor.label} avatar badge`} maxLength={4} placeholder="A"
+              value={avatars[id]?.badge ?? ''} onChange={(event) => updateAvatar(id, { badge: event.target.value })} /></label>
+            <button type="button" className="small-button" aria-label={`Reset ${executor.label} avatar`} disabled={!avatars[id]} onClick={() => setAvatars((current) => {
+              const next = { ...current }; delete next[id]; return next
+            })}>Reset</button>
+          </div>)}
+        </div>
+      </section>
+      {error ? <p className="settings-inline-error" role="alert">{error}</p> : null}
       <div className="settings-pane-actions">
         <span>The preview keeps the TUI input surface distinct from its work area.</span>
         <button className="primary-button" disabled={saving || !dirty} onClick={() => void save()}>
