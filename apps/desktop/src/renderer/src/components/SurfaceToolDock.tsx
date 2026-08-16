@@ -4,6 +4,8 @@ import {
   BellRing,
   Bot,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Columns3,
   FolderGit2,
   Globe2,
@@ -33,6 +35,7 @@ import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import type { MainSurface } from '../store'
 import {
   contentSlotPresentation,
+  resolveExplorerCollapsed,
   resolveWorkspaceTools,
   boardListSegments,
   workspaceAgentGroups,
@@ -249,6 +252,11 @@ function WorkspaceFilesTool({
   isScratch: boolean
 }) {
   const presentation = contentSlotPresentation(isScratch)
+  const explorerCollapsedOverride = useAppStore((state) => state.explorerCollapsed[workspace.id])
+  const setExplorerCollapsed = useAppStore((state) => state.setExplorerCollapsed)
+  // 解析一次、读写复用：折叠态既决定渲染哪一支（读），又是 toggle 写入的取反基准（写）。分开算两次
+  // 就是本仓踩过的「读的 key 与写的 key 漂移」——所以这里只有这一个 const，写入点直接取反它。
+  const collapsed = resolveExplorerCollapsed(explorerCollapsedOverride, presentation.explorerCollapsedByDefault)
   const [explorerRevealRequest, setExplorerRevealRequest] = useState<FileExplorerRevealRequest>()
   const explorerRevealRequestId = useRef(0)
   // The content slot's bottom half is Branches by default (unchanged behavior); a real project can
@@ -264,9 +272,57 @@ function WorkspaceFilesTool({
     })
   }
 
+  const bottomHalf = presentation.showTopics ? (
+    <WorkspaceTopicsPanel
+      workspace={workspace}
+      onRevealDirectory={revealDirectoryInExplorer}
+    />
+  ) : (
+    <div className="content-slot-source-control">
+      <div className="source-control-switch" role="tablist" aria-label="Source control view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={bottomView === 'branches'}
+          className={bottomView === 'branches' ? 'selected' : ''}
+          onClick={() => setBottomView('branches')}
+        >
+          Branches
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={bottomView === 'changes'}
+          className={bottomView === 'changes' ? 'selected' : ''}
+          onClick={() => setBottomView('changes')}
+        >
+          Changes
+        </button>
+      </div>
+      {bottomView === 'branches' ? (
+        <BranchesPanel workspace={workspace} />
+      ) : (
+        <ChangesPanel workspace={workspace} />
+      )}
+    </div>
+  )
+
   return (
     <div className="workspace-tool-explorer">
-      <div className="workspace-tool-context">
+      <div className="workspace-tool-context workspace-tool-context--collapsible">
+        <button
+          type="button"
+          className="workspace-tool-context__toggle"
+          // Explorer 的折叠总归一个 chevron 控件，沿用左栏分组头那套（chevron 朝下＝展开、朝右＝收起，
+          // aria-expanded 跟着真实状态）。它常驻在这条 context bar 上而不是塞进 FileExplorer 自己的
+          // header：折叠后 FileExplorer 根本不渲染，把 toggle 放进它就再也收不回来。
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Show file tree' : 'Hide file tree'}
+          title={collapsed ? 'Show file tree' : 'Hide file tree'}
+          onClick={() => setExplorerCollapsed(workspace.id, !collapsed)}
+        >
+          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        </button>
         <span>
           <strong>{workspace.name}</strong>
           <small>{isScratch ? 'Topic wiki' : (workspace.branch ?? workspace.path)}</small>
@@ -275,52 +331,26 @@ function WorkspaceFilesTool({
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
       </div>
-      <PanelGroup
-        direction="vertical"
-        className="workspace-tools-split"
-        key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
-      >
-        <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-          <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} />
-        </Panel>
-        <PanelResizeHandle className="workspace-tools-resize-handle" />
-        <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
-          {presentation.showTopics ? (
-            <WorkspaceTopicsPanel
-              workspace={workspace}
-              onRevealDirectory={revealDirectoryInExplorer}
-            />
-          ) : (
-            <div className="content-slot-source-control">
-              <div className="source-control-switch" role="tablist" aria-label="Source control view">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={bottomView === 'branches'}
-                  className={bottomView === 'branches' ? 'selected' : ''}
-                  onClick={() => setBottomView('branches')}
-                >
-                  Branches
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={bottomView === 'changes'}
-                  className={bottomView === 'changes' ? 'selected' : ''}
-                  onClick={() => setBottomView('changes')}
-                >
-                  Changes
-                </button>
-              </div>
-              {bottomView === 'branches' ? (
-                <BranchesPanel workspace={workspace} />
-              ) : (
-                <ChangesPanel workspace={workspace} />
-              )}
-            </div>
-          )}
-        </Panel>
-      </PanelGroup>
+      {collapsed ? (
+        // 折叠＝没有可切分的第二块，所以整块直接由 bottomHalf 占满，不渲染 PanelGroup / 把手（见评审
+        // §2.3.1：折叠态不进 react-resizable-panels，否则折叠状态会有 store 与库两个源）。「可拖但无意义
+        // 的死把手」因此不可能存在——把手根本没被渲染。
+        <div className="workspace-tools-collapsed">{bottomHalf}</div>
+      ) : (
+        <PanelGroup
+          direction="vertical"
+          className="workspace-tools-split"
+          key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
+        >
+          <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
+            <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} />
+          </Panel>
+          <PanelResizeHandle className="workspace-tools-resize-handle" />
+          <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
+            {bottomHalf}
+          </Panel>
+        </PanelGroup>
+      )}
     </div>
   )
 }
