@@ -1388,24 +1388,22 @@ describe('Session and Launcher lifecycle ownership', () => {
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
   })
 
-  it('reports prompt submission failure without claiming the Composer draft was accepted', async () => {
+  it('accepts queue ownership and retains delivery refusal on that entry', async () => {
     const session = agentSession('agent-run')
     useAppStore.setState({ sessions: [session], error: null })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('agent input is not ready'))
 
-    // send() rejects so the Composer refuses to treat a retained queue item as a successful send and
-    // keeps the user's draft; the rejection carries the retain-for-retry outcome, while the banner must
-    // still surface the real cause so the original failure is never swallowed.
-    await expect(useAppStore.getState().send(session.id, 'keep this draft')).rejects.toThrow(
-      'retained for retry'
-    )
-    expect(useAppStore.getState().error).toBe('agent input is not ready')
+    expect(useAppStore.getState().send(session.id, 'keep this message')).toBe(true)
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([
+      expect.objectContaining({ text: 'keep this message', status: 'deferred', error: 'agent input is not ready' })
+    ]))
+    expect(useAppStore.getState().error).toBeNull()
   })
 
-  it('strips Electron IPC transport framing from the error banner', async () => {
+  it('strips Electron IPC transport framing from the retained delivery reason', async () => {
     // Everything the main process throws crosses ipcRenderer.invoke, which Electron re-wraps as
     // `Error invoking remote method '<channel>': <name>: <message>` (and drops the original `.code`). The
-    // user reported seeing exactly this raw string when steering codex mid-turn. The banner must show the
+    // user reported seeing exactly this raw string when steering codex mid-turn. The retained entry must show the
     // message the main process actually raised, not the transport envelope.
     const session = agentSession('agent-run')
     useAppStore.setState({ sessions: [session], error: null })
@@ -1417,8 +1415,10 @@ describe('Session and Launcher lifecycle ownership', () => {
       'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
     ))
 
-    await expect(useAppStore.getState().send(session.id, 'steer mid-turn')).rejects.toThrow()
-    expect(useAppStore.getState().error).toBe(
+    expect(useAppStore.getState().send(session.id, 'steer mid-turn')).toBe(true)
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.status).toBe('deferred'))
+    expect(useAppStore.getState().error).toBeNull()
+    expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.error).toBe(
       'The prompt was not sent because this Run has no consumable composer readiness yet. ' +
       'The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. ' +
       'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +

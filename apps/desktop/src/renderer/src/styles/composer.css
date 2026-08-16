@@ -197,3 +197,5 @@
    高度预算因此只有一个家：基础规则读这个变量，档位只改变量。 */
 .composer:has(.composer-tools[data-mode='expanded']) { --composer-input-max: 40vh; }
 
+
+.composer__queue-notice { grid-column: 1 / -1; padding: 0 var(--sp-3) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }

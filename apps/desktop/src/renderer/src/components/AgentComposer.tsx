@@ -1,3 +1,4 @@
+import { errorIdentity } from '../lib/error-presentation'
 import type { ReactNode } from 'react'
 import { useId } from 'react'
 import { AtSign, ArrowUp, Copy, Paperclip, Square } from 'lucide-react'
@@ -25,6 +26,8 @@ export type ComposerQueuedMessage = {
   // 否则角标会照 healthy 路径念「queued for delivery」，把一次降级静默放行（store.ts 的
   // AgentSteerQueueEntry 记了为什么这一档要在模型里有名字）。
   status: 'queued' | 'deferred' | 'failed'
+  deliverable: boolean
+  sending?: boolean
   error?: string
 }
 
@@ -41,14 +44,6 @@ export type AgentComposerProps = {
   onRemoveQueued?: (id: string) => void
   onSendQueued?: (id: string) => void
   onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
-  // Whether the queue can still drain. The store's flush requires `processState === 'running'`
-  // (store.ts flushAgentSteerQueue), so once the run exits the entries stay put forever — but the badge
-  // went on promising "queued for delivery" over them, which is the one thing that can no longer happen.
-  // A pending interaction is NOT this case: that flush also early-returns, yet `respondInteraction`
-  // re-flushes the moment the user answers, so those really are still on their way. The distinction is
-  // "will this ever drain" and it does not line up with `canSubmit` — hence its own prop rather than
-  // reusing the submit axis.
-  queueDeliverable?: boolean
   // Copy the undeliverable queue out. Absence hides the button rather than rendering a dead one: the
   // clipboard exit (lib/clipboard-copy) requires an error reporter by design, and a shell that has no
   // reporter to give must not offer an action that could fail silently. The card only names copying as
@@ -99,7 +94,6 @@ export function AgentComposer({
   onRemoveQueued,
   onSendQueued,
   onActivateSemanticReference,
-  queueDeliverable = true,
   onCopyQueued,
   commands = [],
   skills = [],
@@ -209,17 +203,10 @@ export function AgentComposer({
             return
           }
           // 两个 Enter 意图，绝不能互相退化（interaction SSOT「Cmd+Enter 直接 steer」）：
-          //   · 裸 Enter = 按常规发送——忙时排进队列等下一轮（默认不 steer，正是用户报的现状）；
-          //   · Cmd/Ctrl+Enter = 插进**当前这一轮**立刻发。
-          // 两者唯一会撞车的地方是 QUEUE 分支，所以只在这里排除 meta/ctrl：于是忙时的 Cmd+Enter 跳过排队、
-          // 落到下面的 submit 分支——也就是「立刻 steer」而不是等下一轮。submit 分支**不**排除 meta：
-          //   · 忙时 canSubmit 为真，Cmd+Enter 在此 onSubmit → send() 送进当前 turn（交付/mid-turn 拒绝是
-          //     Core 的判断，与裸 Enter 提交共用同一个 canSubmit 门）；
-          //   · Agent 闲着时没有"当前 turn"可插，Cmd+Enter 的确定含义就是照常提交（send() 开一轮新的），
-          //     而不是 no-op——设计约束点名要它「闲着时也有确定含义」。
-          // 这道 QUEUE 分支的 `!metaKey && !ctrlKey` 是承重的：删掉它，忙时的 Cmd+Enter 会被排队接走，
-          // 退化成裸 Enter 的意图。IME 组字确认（#609）先让位。
-          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !isImeOwnedKeyboardEvent(event) && primaryAction === 'stop' && onQueue && value.trim()) {
+          // Bare Enter follows the parent's queue intent, including a pending interaction. Stop is
+          // a separate action and must not decide whether a waiting/blocked Agent can retain a draft.
+          // Cmd/Ctrl+Enter follows immediate submission when available; Shift+Enter and IME stay editing.
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !isImeOwnedKeyboardEvent(event) && onQueue && value.trim()) {
             event.preventDefault()
             onQueue()
             return
@@ -280,7 +267,7 @@ export function AgentComposer({
               themselves have to be reachable. Same native `popover` as the context chip, for the same
               reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
           {queued.length > 0 ? (
-              <QueuedMessages queued={queued} deliverable={queueDeliverable}
+              <QueuedMessages queued={queued}
               {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
               {...(onSendQueued ? { onSend: onSendQueued } : {})}
               {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
@@ -332,6 +319,7 @@ export function AgentComposer({
           )}
         </div>
       </div>
+      <QueueDeliveryNotice queued={queued} canCopy={Boolean(onCopyQueued)} />
       {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
         {/* 按 group 分段并给每段一个标题。分组只在**确实有两个以上来源**时出现：单一来源时加一个
             标题等于给一份列表起个多余的名字。段序由候选自身的顺序决定（先出现的 group 先排），
@@ -350,96 +338,63 @@ export function AgentComposer({
   )
 }
 
-/**
- * The queue badge: count on the chip, the actual queued prompts in a click-opened card.
- *
- * The count alone was the defect — "2" beside a working Agent is indistinguishable from a counter that
- * got stuck, so it reads as a bug even when it is correct. Seeing the text you queued is what makes it
- * legible as pending work.
- *
- * Order is delivery order (the store appends), and it is labelled as such, because "which one goes
- * next" is the actual question when you queue more than one. Each entry is clamped to a few lines by
- * CSS rather than truncated here: the full text stays in the DOM for screen readers and for select-copy.
- *
- * `deliverable` splits one label into two, because the promise "queued for delivery" has a precondition
- * this component used to assert unconditionally. The store only drains while the run is `running`, so
- * after it exits these entries are stranded — and the old copy went on telling the user they were on
- * their way, which is the worst moment to be wrong: the words the user typed are still in there, and
- * nothing else on screen says they will not arrive. Undeliverable is a plain statement plus where the
- * text still is, NOT an error — the entries are intact and copyable, which is the honest remedy while
- * the run is gone. We do not offer to resend: this component cannot know whether a next run is the same
- * Agent, and silently replaying a stale steer into a fresh session is worse than saying nothing.
- */
-function QueuedMessages({ queued, deliverable, onCopy, onRemove, onSend }: {
+function QueuedMessages({ queued, onCopy, onRemove, onSend }: {
   queued: readonly ComposerQueuedMessage[]
-  deliverable: boolean
   onCopy?: (text: string) => void
   onRemove?: (id: string) => void
   onSend?: (id: string) => void
 }) {
   const cardId = useId()
-  const failed = queued.filter((entry) => entry.status === 'failed').length
-  // 一次投递被推迟是**驻留状态**，所以它必须出现在默认就能看见的那一层——角标。此前只有两档
-  // （failed / 一切正常），于是「我们没投出去但 Agent 好着」只能借 healthy 那档的文案，角标会
-  // 肯定地说「N messages queued for delivery」，而真相是它此刻投不出去。原因文字虽然挂在条目上，
-  // 但那段 `<small>` 在 `popover="auto"` 里、默认收起，用户不点开根本看不到——不算「停在旁边」。
-  //
-  // 三档的顺序就是严重性：真失败 > 投递受阻 > 一切正常。deferred 不复用 failed 的 amber/CircleX：
-  // 那会把「Agent 好着，我们在重试」说成「出错了」，是往第 1 类那边说谎；用既有的 `paused` 语汇
-  // （不新造图标），说的正是「这一档停着，但还会继续」。
-  const deferred = queued.filter((entry) => entry.status === 'deferred').length
-  const label = failed > 0
-    ? `${failed} of ${queued.length} message${queued.length === 1 ? '' : 's'} failed to send`
-    : deferred > 0
-    // 三段话对齐服务窗的三件事：哪一步没走通（couldn't be delivered yet）、现在按什么状态在跑
-    // （still queued）、要恢复完整能力该做什么（retries automatically——用户不必做任何事）。
-    ? `${deferred} of ${queued.length} message${queued.length === 1 ? '' : 's'} not delivered yet — still queued, retries automatically`
-    : deliverable
-    ? `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
-    : `${queued.length} message${queued.length === 1 ? '' : 's'} not sent`
-  const state = failed > 0 ? 'failed' : deferred > 0 ? 'deferred' : 'queued'
+  const retryEntry = queued.find((entry) => entry.deliverable)
+  const { unavailable, deferred, sending, label, state } = summarizeQueue(queued, Boolean(onCopy))
   return (
     <>
       <button type="button" className="composer__queued" data-state={state} aria-label={label}
         popoverTarget={cardId} popoverTargetAction="toggle">
-        <SemanticIcon name={failed > 0 ? 'failed' : deferred > 0 ? 'paused' : 'message-queue'} size={12} /> {queued.length}
+        <SemanticIcon name={unavailable > 0 ? 'failed' : deferred.length > 0 ? 'paused' : 'message-queue'} size={12} /> {queued.length}
       </button>
       <div id={cardId} popover="auto" className="composer__queued-card" aria-label="Queued messages">
         <h3>{label}</h3>
         <ol>
-          {/* Index key: the queue is an append-and-drain list of plain strings with no identity of its
-              own, and two identical prompts are a legitimate queue state — so text is not a key. */}
-          {queued.map((entry) => <li key={entry.id} data-state={entry.status}><span>{entry.text}</span>{entry.error ? <small>{entry.error}</small> : null}<span className="composer__queued-actions">{onSend ? <button type="button" className="composer-tool" onClick={() => onSend(entry.id)}>Send now</button> : null}{onRemove ? <button type="button" className="composer-tool" onClick={() => onRemove(entry.id)}>Remove</button> : null}</span></li>)}
+          {queued.map((entry) => <li key={entry.id} data-state={entry.status}>
+            <span>{entry.text}</span>
+            {entry.sending ? <small>Sending. Waiting for delivery confirmation.</small>
+              : !entry.deliverable ? <small>Not sent: this message targets a Run that is no longer available here.</small>
+              : entry.error ? <small>{entry.error}</small> : null}
+            <span className="composer__queued-actions">
+              {onRemove ? <button type="button" className="composer-tool" disabled={entry.sending} onClick={() => onRemove(entry.id)}>Remove</button> : null}
+            </span>
+          </li>)}
         </ol>
-        {deliverable ? (
-          // 受阻时不能再说这句无条件的「按序在本轮结束后投递」——那是 healthy 路径的承诺，而此刻
-          // 至少有一条正卡着。改口说清同样三件事，并明确「不用你做什么」：把一个自动会重试的状态
-          // 写成要用户动手，会让人去点「Send now」，而那次点击撞上的还是同一个未就绪的 readiness。
-          deferred > 0 ? (
-            <p>Some of these could not be delivered yet — the Agent is still running, so they stay queued and go out automatically at the next opportunity. Nothing to do.</p>
-          ) : (
-            <p>Delivered in this order when the Agent finishes its current turn.</p>
-          )
-        ) : (
-          <>
-            {/* The sentence only names copying as the remedy when the button is actually here. Naming
-                an action and leaving the user to select-drag inside a `popover="auto"` (which closes on
-                any outside click) is the same defect as the badge's old promise: copy that describes an
-                affordance the surface does not provide. Blank-line separated so pasting a multi-entry
-                queue back into the composer keeps the entries apart. */}
-            <p>
-              {onCopy
-                ? 'That Agent run ended before these were sent. They are kept here so you can copy them.'
-                : 'That Agent run ended before these were sent. They are kept here, not sent.'}
-            </p>
-            {onCopy ? (
-              <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
-                <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
-              </button>
-            ) : null}
-          </>
-        )}
+        {onSend && retryEntry ? <button type="button" className="composer-tool" disabled={sending} onClick={() => onSend(retryEntry.id)}>Retry queue</button> : null}
+        <p>Messages for the current Run are sent in order as soon as the Agent can accept them.</p>
+        {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
+          <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
+        </button> : null}
       </div>
     </>
   )
+}
+
+function summarizeQueue(queued: readonly ComposerQueuedMessage[], canCopy: boolean) {
+  const unavailable = queued.filter((entry) => !entry.deliverable && !entry.sending).length
+  const deferred = queued.filter((entry) => entry.deliverable && entry.status === 'deferred')
+  const sending = queued.some((entry) => entry.sending)
+  const label = unavailable > 0
+    ? `${unavailable} of ${queued.length} messages cannot be sent to the current Run`
+    : deferred.length > 0
+    ? `${deferred.length} of ${queued.length} messages not delivered yet - still queued`
+    : sending ? `Sending - ${queued.length} queued` : `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
+  const state = unavailable > 0 ? 'failed' : deferred.length > 0 ? 'deferred' : 'queued'
+  // Delivery limitations remain visible beside the badge, even while the detail popover is closed.
+  const notice = [
+    unavailable > 0 ? `Some messages cannot be sent to this Run. They are kept here.${canCopy ? ' Open the queue to copy them.' : ''}` : '',
+    deferred.length > 0 ? `${errorIdentity(deferred[0]?.error ?? 'Delivery is waiting.')} Kept in the queue; retries when the Agent or connection becomes ready. You can also retry from the queue.` : ''
+  ].filter(Boolean).join(' ')
+  return { unavailable, deferred, sending, label, state, notice }
+}
+
+function QueueDeliveryNotice({ queued, canCopy }: { queued: readonly ComposerQueuedMessage[]; canCopy: boolean }) {
+  const { notice } = summarizeQueue(queued, canCopy)
+  return notice ? <div className="composer__queue-notice" role="status">{notice}</div> : null
 }

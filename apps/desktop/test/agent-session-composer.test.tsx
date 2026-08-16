@@ -15,7 +15,7 @@ const fixture = vi.hoisted(() => ({
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
-    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'failed'; error?: string }>>,
+    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     // Returns true = "the queue took it". The composer clears the draft only on true, so a mock that
@@ -23,7 +23,8 @@ const fixture = vi.hoisted(() => ({
     enqueueAgentSteer: vi.fn(() => true),
     // Typed to the real store signature (`send(sessionId, text)`, store.ts:627) so `mock.calls[n][1]`
     // is the text argument rather than an index into an inferred empty tuple.
-    send: vi.fn(async (_sessionId: string, _text: string) => {}),
+    send: vi.fn((_sessionId: string, _text: string) => true),
+    flushAgentSteerQueue: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     setPosture: vi.fn(async () => {}),
     reportError: vi.fn()
@@ -183,7 +184,7 @@ describe('AgentSessionComposer adapter', () => {
   it('keeps the shared draft when prompt submission fails', async () => {
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Retry this context' }
-    fixture.state.send.mockRejectedValueOnce(new Error('submit failed'))
+    fixture.state.send.mockReturnValueOnce(false)
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit(): void }
     }
@@ -212,7 +213,7 @@ describe('AgentSessionComposer adapter', () => {
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
-    expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', '')
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
   })
 
   it('keeps the draft when the queue refuses the message', () => {
@@ -226,6 +227,30 @@ describe('AgentSessionComposer adapter', () => {
     composer.props.onQueue?.()
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue')
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
+  })
+
+  it('keeps a refused draft even when an older queued entry has identical text', () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'same words, distinct intent' }
+    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'old', runId: 'run-1', text: 'same words, distinct intent', status: 'queued' }] }
+    fixture.state.send.mockReturnValueOnce(false)
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit(): void } }
+    composer.props.onSubmit()
+    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent')
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
+  })
+
+  it('clears the draft on queue admission without waiting for delivery', async () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'keep exactly one copy' }
+    fixture.state.agentSteerQueues = {
+      'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'keep exactly one copy', status: 'deferred', error: 'readiness not observed' }]
+    }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as { props: { onSubmit?: () => void } }
+
+    composer.props.onSubmit?.()
+
+    await vi.waitFor(() => expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('agent-1', 'keep exactly one copy'))
   })
 
   it('suppresses an accidental identical re-queue but records the first', () => {
@@ -270,7 +295,7 @@ describe('AgentSessionComposer adapter', () => {
     // 纯 lib 的用例证不到这一点：它测的是判别函数本身，而缺陷在于**外壳何时调用它**。
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'retry me' }
-    fixture.state.send.mockRejectedValueOnce(new Error('The prompt was not sent.'))
+    fixture.state.send.mockReturnValueOnce(false)
 
     const submit = () => (AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void }
@@ -296,15 +321,10 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onInterrupt).toBeTypeOf('function')
   })
 
-  it('honours a codex mid-turn refusal: draft stays and no user turn is claimed', async () => {
-    // codex is the one render-then-submit Provider; a mid-turn steer is fail-closed by Core
-    // (AGENT_PROMPT_NOT_READY / _READINESS_CONFLICT). That is a FIRST-CLASS expected outcome, not a bug:
-    // send() rejects, so the draft must survive (the honest "not sent" signal) and compare-clear must not
-    // run. We deliberately do NOT assert "working always delivers" — that is false for codex and would
-    // pressure someone to weaken its sealed readiness gate.
+  it('keeps the draft when admission is refused while working', async () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Steer while codex is mid-turn' }
-    fixture.state.send.mockRejectedValueOnce(new Error('AGENT_PROMPT_NOT_READY'))
+    fixture.state.send.mockReturnValueOnce(false)
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { onSubmit?: () => void }
     }
@@ -630,9 +650,9 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
     fixture.state.sessions = [session]
     fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me', status: 'queued' }] }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
-      props: { queueDeliverable?: boolean }
+      props: { queued: Array<{ deliverable: boolean }> }
     }
-    return composer.props.queueDeliverable
+    return composer.props.queued[0]?.deliverable
   }
 
   it('running 时为 true', () => {
@@ -671,9 +691,9 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
       'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run', status: 'queued' }]
     }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
-      props: { queueDeliverable?: boolean }
+      props: { queued: Array<{ deliverable: boolean }> }
     }
-    expect(composer.props.queueDeliverable).toBe(false)
+    expect(composer.props.queued[0]?.deliverable).toBe(false)
   })
 })
 
