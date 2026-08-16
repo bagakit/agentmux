@@ -70,8 +70,6 @@ export async function readPastedImage(home: string, path: string): Promise<Paste
     return null
   }
   return {
-    mimeType,
-    dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`,
-    byteLength: bytes.byteLength
+    dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`
   }
 }

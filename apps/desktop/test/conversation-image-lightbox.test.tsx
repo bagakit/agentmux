@@ -12,7 +12,7 @@ import type { PastedImage } from '../src/shared/contracts.js'
 //   - the enlarged image shows the same bytes.
 
 const DATA_URL = 'data:image/png;base64,aGVsbG8='
-const IMAGE: PastedImage = { mimeType: 'image/png', dataUrl: DATA_URL, byteLength: 5 }
+const IMAGE: PastedImage = { dataUrl: DATA_URL }
 const TOKEN = '@/Users/dev/.agentmux/pasted/paste-1.png'
 
 let container: HTMLDivElement
