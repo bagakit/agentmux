@@ -93,9 +93,20 @@
       "heavy": true,
       "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -f packages/core/test/provider-observation-contract.test.ts && pnpm --filter @agentmux/core exec vitest run test/provider-observation-contract.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -f apps/desktop/test/provider-observation-consumer.test.tsx && pnpm --filter @agentmux/desktop exec vitest run test/provider-observation-consumer.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -257,9 +268,20 @@
       "heavy": true,
       "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -f apps/desktop/test/provider-identity-restart.integration.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/provider-identity-restart.integration.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-session-continuity.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {

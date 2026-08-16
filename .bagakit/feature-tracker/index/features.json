@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 145
+    "next_cursor": 146
   },
   "features": [
     {
@@ -1127,7 +1127,7 @@
     {
       "feat_id": "f-25k8f8m9k",
       "title": "Provider 与人机交互分层收敛",
-      "status": "in_progress",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1470,6 +1470,16 @@
       "title": "破坏性浏览器操作要收窄作用域并经人批准",
       "status": "proposal",
       "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26q8f7nwj",
+      "title": "Reusable conversation and Workflow surface components",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
