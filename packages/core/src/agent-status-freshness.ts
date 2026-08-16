@@ -235,28 +235,6 @@ export type AgentObservation = {
 }
 
 /**
- * 迟到/过期/异源的读数是否**有资格**覆盖当前 Run 的观察。
- *
- * 这是「不能用一条陈旧或不属于当前 Run 的事件改写当前状态」这条不变量的收口判定，做成纯函数让它能被
- * 直接断言，而不是埋在某个 reducer 的 `&&` 链里各写一遍（session-state 的 agent-status/agent-session
- * 两条 arm 就各自手抄过 `observedAt >= …` 与 run 比对）。
- *
- * 两道门，缺一不可：
- *   1. **同一个 Run**：`incoming.runId` 必须等于 `current.runId`。一条属于旧 Run 的迟到事件绝不作用于
- *      新 Run（Resume 后 runId 变、agentSessionId 不变，正是这条要挡的场景）。`current.runId` 缺席读作
- *      「还没绑定到任何 Run」——此时无从比对，拒绝采纳。
- *   2. **不更旧**：`incoming.observedAt >= current.observedAt`。严格更旧的读数一律不采纳；正好同刻放行，
- *      与既有门禁的 `>=` 同口径（同刻重发是常态，不该被判为过期）。
- */
-export function observationSupersedes(
-  current: { runId?: string; observedAt: number },
-  incoming: { runId: string; observedAt: number }
-): boolean {
-  if (current.runId === undefined || current.runId !== incoming.runId) return false
-  return incoming.observedAt >= current.observedAt
-}
-
-/**
  * 把「Session 现在的三条事实」收敛成一份 {@link AgentObservation}——**唯一**的观察合同投影。
  *
  * 输入刻意收成「三条轴各自的原始事实」而不是某个具名 Session 类型：Core 侧的

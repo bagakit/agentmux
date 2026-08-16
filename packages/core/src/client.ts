@@ -2060,6 +2060,7 @@ export class AgentMuxClient {
       delete next.terminalHandshake
       delete next.terminalCapability
       delete next.terminalPromptReadiness
+      delete next.promptCompletionAdmission
       delete next.terminalPromptSubmission
       delete next.terminalPromptDelivery
       delete next.terminalOutputChannel

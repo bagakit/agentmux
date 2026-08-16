@@ -227,7 +227,7 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
     expect(submit).toContain('composeOutboundMessage({ user: content })')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
     expect(submit).toContain('planPromptInput(outbound)')
-    expect(submit).toContain('this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan)')
+    expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*plan(?:,|\))/)
     expect(submit).not.toContain('planPromptInput(content)')
   })
 
