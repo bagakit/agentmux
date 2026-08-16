@@ -23,9 +23,9 @@ import { describe, expect, it } from 'vitest'
  */
 describe('通往 sessionRecentActivity 的每条路都带上仓根', () => {
   const SOURCES = [
-    'apps/desktop/src/renderer/src/components/ProjectActivity.tsx',
-    'apps/desktop/src/renderer/src/lib/project-activity-row.ts',
-    'apps/desktop/src/renderer/src/lib/resource-usage-panel.ts'
+    new URL('../src/renderer/src/components/ProjectActivity.tsx', import.meta.url),
+    new URL('../src/renderer/src/lib/project-activity-row.ts', import.meta.url),
+    new URL('../src/renderer/src/lib/resource-usage-panel.ts', import.meta.url)
   ]
 
   /** 一次调用的实参文本——从 `<name>(` 起按括号配平读到闭括号。 */
@@ -86,7 +86,7 @@ describe('通往 sessionRecentActivity 的每条路都带上仓根', () => {
   it('自检 2：转发包装这一层真的被识别出来了——它是第一版漏掉的那一层', () => {
     // 这条钉住的是上面注释讲的那次失手：若 forwarderNames 因为改名/改形状而识别不到任何包装，
     // 主断言就退化回第一版，而第一版是放过真 bug 的。
-    const source = readFileSync('apps/desktop/src/renderer/src/components/ProjectActivity.tsx', 'utf8')
+    const source = readFileSync(new URL('../src/renderer/src/components/ProjectActivity.tsx', import.meta.url), 'utf8')
     expect(forwarderNames(source), 'ProjectActivity 里那个私有转发包装没被识别到').toContain('sessionReason')
   })
 
