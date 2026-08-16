@@ -107,6 +107,12 @@ it('Composer tools select actual skill and command references without submitting
   await act(async () => root.render(<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Session status' }]}
     loadSkills={async () => [skill]} onChooseSkill={onChooseSkill} onCommand={onCommand} onCapture={onCapture} reportError={vi.fn()} />))
   const find = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes(label))!
+  // Composer 现在静息在一行态（工具收起），所以先按真实产品路径点一下那枚三态键切到工具可见的一档。
+  // 这条测试断言的是「能力可达」而不是「默认停在哪一档」——默认档由 composer-form-actions.test.tsx
+  // 钉着。不绕过控件直接设 state：那会让这里在切档坏掉时照样绿。
+  const toggle = container.querySelector<HTMLButtonElement>('.composer-tool--mode')!
+  await act(async () => toggle.click())
+  expect(find('Skills'), 'toggling the dock must reveal the tool row').toBeTruthy()
   await pointer(find('Skills'), 'pointerover')
   expect(menu()?.textContent).toContain('review')
   await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click())

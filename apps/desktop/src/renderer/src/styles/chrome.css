@@ -20,6 +20,13 @@
   background: linear-gradient(180deg, var(--surface-1), var(--surface-0));
   box-shadow: inset -1px 0 var(--line-soft);
 }
+/* Project Rail 密度：三个拨盘（每层缩进 / 行图标 / 行高）是一档 CSS 自定义属性，由容器上的一个
+   `data-rail-density` 重定义——它们因此不可能各自漂开半档（DEN「Project Rail 与 Topic 行密度」）。
+   缺省档已比 2026-09-19 之前更紧（那时 16px 缩进 / 20px 图标框 / 28px 行高）。这三个属性只由 rail 行
+   消费，px 值不落在任何被尺度合同扫描的属性上（它扫 font-size/间距/颜色/圆角，不扫 width/height/
+   min-height 与自定义属性声明）。 */
+.project-rail { --rail-indent: var(--sp-4); --rail-icon: 16px; --rail-row-min: 26px; }
+.project-rail[data-rail-density='compact'] { --rail-indent: var(--sp-3); --rail-icon: 14px; --rail-row-min: 22px; }
 .project-rail-titlebar {
   height: 36px;
   flex: 0 0 36px;
@@ -127,8 +134,8 @@
 }
 /* 折叠后的角标与项目行的角标同形，因为它答的是同一个问题（里面有没有人在等你）。它复用
    .project-rail-row__count 的 attention 配色，见下面那组 [data-attention] 规则。 */
-.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--sp-6)); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
-.project-rail-row-shell { display: flex; align-items: center; min-width: 0; padding-left: calc(var(--sp-4) + var(--rail-depth, 0) * var(--sp-6)); }
+.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: var(--rail-row-min, 26px); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--rail-indent, var(--sp-4))); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.project-rail-row-shell { display: flex; align-items: center; min-width: 0; padding-left: calc(var(--sp-4) + var(--rail-depth, 0) * var(--rail-indent, var(--sp-4))); }
 .project-rail-row-shell > .project-rail-row { flex: 1; padding-left: var(--sp-2); }
 .project-rail-row__collapse, .project-rail-row__collapse-spacer { flex: 0 0 18px; width: 18px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); border: 0; background: transparent; border-radius: var(--radius-sm); }
 .project-rail-row__collapse { cursor: pointer; }
@@ -136,7 +143,7 @@
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
-.project-rail-row__icon { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
+.project-rail-row__icon { width: var(--rail-icon, 16px); height: var(--rail-icon, 16px); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
 /* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
    小字跟在标题之后而不是它下面，且只有真的有话说时才在场——本机 host 不占位。 */
 .project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
@@ -331,7 +338,7 @@
 .project-rail-entry { display: flex; align-items: center; min-width: 0; gap: var(--sp-1); }
 .project-rail-entry > .project-rail-row, .project-rail-entry > .project-rail-group__header { flex: 1; min-width: 0; }
 .project-rail-group__header { gap: var(--sp-2); }
-.project-rail-row__icon img { width: 16px; height: 16px; object-fit: contain; }
+.project-rail-row__icon img { width: 100%; height: 100%; object-fit: contain; }
 
 .project-activity { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp-1); border: 0; padding: var(--sp-1); border-radius: var(--radius-sm); color: var(--green); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .project-activity__count { min-width: 1.1em; font-variant-numeric: tabular-nums; text-align: center; }

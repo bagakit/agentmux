@@ -1,4 +1,5 @@
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
+import type { BrowserReplayTarget } from '../shared/browser-operation.js'
 import type { BrowserCdpSession } from './browser-cdp-session.js'
 import { captureBrowserPageSnapshot } from './browser-page-snapshot.js'
 import { healRef, ledgerFromSnapshot, type BrowserRefLedger } from './browser-ref-ledger.js'
@@ -41,6 +42,8 @@ export type BrowserPageContext = {
    * 是我们的中间步骤没跟上，属第 2 类，不许阻断。
    */
   note(text: string): void
+  /** Receives the semantic identity of the ref that is about to be acted on. */
+  recordTarget?(target: BrowserReplayTarget): void
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
@@ -233,6 +236,11 @@ export function createBrowserPageDispatch(
   /** 在一个句柄上跑一小段函数。动作全部走这条路——不是坐标，不是键鼠合成。 */
   async function callOn(ref: string, declaration: string, ...extra: unknown[]): Promise<unknown> {
     const { objectId, send } = await handleFor(ref)
+    const node = current?.nodes.find((candidate) => candidate.ref === ref)
+    if (node) {
+      const same = current?.nodes.filter((candidate) => candidate.role === node.role && candidate.name === node.name) ?? []
+      context.recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === ref) + 1, count: same.length })
+    }
     const response = (await send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: declaration,

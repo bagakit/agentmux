@@ -205,7 +205,18 @@ export function AgentComposer({
             }
             return
           }
-          if (event.key === 'Enter' && !event.shiftKey && !isImeOwnedKeyboardEvent(event) && primaryAction === 'stop' && onQueue && value.trim()) {
+          // 两个 Enter 意图，绝不能互相退化（interaction SSOT「Cmd+Enter 直接 steer」）：
+          //   · 裸 Enter = 按常规发送——忙时排进队列等下一轮（默认不 steer，正是用户报的现状）；
+          //   · Cmd/Ctrl+Enter = 插进**当前这一轮**立刻发。
+          // 两者唯一会撞车的地方是 QUEUE 分支，所以只在这里排除 meta/ctrl：于是忙时的 Cmd+Enter 跳过排队、
+          // 落到下面的 submit 分支——也就是「立刻 steer」而不是等下一轮。submit 分支**不**排除 meta：
+          //   · 忙时 canSubmit 为真，Cmd+Enter 在此 onSubmit → send() 送进当前 turn（交付/mid-turn 拒绝是
+          //     Core 的判断，与裸 Enter 提交共用同一个 canSubmit 门）；
+          //   · Agent 闲着时没有"当前 turn"可插，Cmd+Enter 的确定含义就是照常提交（send() 开一轮新的），
+          //     而不是 no-op——设计约束点名要它「闲着时也有确定含义」。
+          // 这道 QUEUE 分支的 `!metaKey && !ctrlKey` 是承重的：删掉它，忙时的 Cmd+Enter 会被排队接走，
+          // 退化成裸 Enter 的意图。IME 组字确认（#609）先让位。
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !isImeOwnedKeyboardEvent(event) && primaryAction === 'stop' && onQueue && value.trim()) {
             event.preventDefault()
             onQueue()
             return
@@ -275,10 +286,13 @@ export function AgentComposer({
         <div>
           {contextUsage}
           {primaryAction === 'stop' ? (
-            // ■ interrupts THIS turn (onInterrupt → Core semantic interrupt); it does not end the Run.
-            // Terminating the whole session is a separate action that lives in the Tabbar, so the mark and
-            // its accessible name/tooltip say "current turn" to keep the two objects distinct. Behaviour is
-            // unchanged — this is a mark-and-wording fix, so onInterrupt, position and weight stay put.
+            // Send 与 Interrupt 收成图标（interaction SSOT「Send 与 Interrupt 收成图标」）。两者仍
+            // 必须可区分：破坏性动作收成图标 ≠ 收掉这个区分。区分靠两处，都不是文字——
+            //   · 图形：↑（推进/steer）对 ■（停/破坏性），本就是两个不同符号；
+            //   · 颜色语汇（Design Control Language：绿=推进、红=破坏性）：steer 走 --secondary 的绿，
+            //     Interrupt 走 --working 的红。
+            // ■ 中断的是**这一轮**（onInterrupt → Core semantic interrupt），不结束整个 Run；结束会话是
+            // Tabbar 里另一个动作，故它的可访问名/tooltip 说「current turn」，把两个对象分开。
             <span className="composer-send-group">
             <button
               type="button"
@@ -288,7 +302,7 @@ export function AgentComposer({
               aria-label="Send steer"
               title="Send this steer while the current turn continues"
             >
-              Send <ArrowUp size={13} />
+              <ArrowUp size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -298,7 +312,7 @@ export function AgentComposer({
               aria-label="Interrupt the current turn"
               title="Interrupt the current turn — the session keeps running"
             >
-              <Square size={11} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Interrupt
+              <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
             </button>
             </span>
           ) : (
@@ -308,8 +322,9 @@ export function AgentComposer({
               disabled={!canSubmit}
               onClick={onSubmit}
               aria-label="Send"
+              title="Send"
             >
-              Send <ArrowUp size={13} />
+              <ArrowUp size={15} aria-hidden="true" />
             </button>
           )}
         </div>

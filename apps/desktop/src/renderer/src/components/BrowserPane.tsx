@@ -24,8 +24,11 @@ import {
   type BrowserScreenshotCapture,
   type BrowserElementSelection,
   type BrowserSnapshot,
-  type BrowserViewport
+  type BrowserViewport,
+  type BrowserReplayPlan,
+  type BrowserScriptRunReport
 } from '../../../shared/contracts'
+import type { BrowserOperation } from '../../../shared/browser-operation'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
@@ -36,6 +39,7 @@ import {
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
+import { BrowserOperationHistory, BrowserOperationRail, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import {
   ScreenshotEditor,
   type ScreenshotCompleteInput
@@ -128,12 +132,31 @@ export function BrowserPane({
   )
   const lifecycleTokenRef = useRef(0)
   const [annotationNote, setAnnotationNote] = useState('')
+  const [replayPlan, setReplayPlan] = useState<BrowserReplayPlan | null>(null)
+  const [replayBusy, setReplayBusy] = useState(false)
+  const [replayOutcome, setReplayOutcome] = useState<BrowserScriptRunReport['outcome'] | undefined>()
+  const [timelineOpen, setTimelineOpen] = useState(false)
+  const [operationHistory, setOperationHistory] = useState<BrowserOperation[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
   useEffect(() => {
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
   }, [tab.url])
+
+  // History and replay belong to the Browser identity. A Region can reuse this pane while switching
+  // tabs, so never leave a previous Browser's selected operation or replay plan attached to the new page.
+  useEffect(() => {
+    setTimelineOpen(false)
+    setOperationHistory([])
+    setSelectedOperationId(null)
+    setHistoryError(null)
+    setReplayPlan(null)
+    setReplayOutcome(undefined)
+  }, [tab.browserId])
 
   // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
   // restoring uses its URL/Profile/Viewport and publishes a fresh navigation identity through the
@@ -319,6 +342,18 @@ export function BrowserPane({
     }
   }
 
+  // Stopping an Agent operation is a control handoff, not another toolbar action. It must remain
+  // available while a navigation or reload is busy so the page never traps the person behind a stale
+  // busy guard.
+  async function stopBrowserOperation(): Promise<void> {
+    try {
+      const browser = await api.browser.stopOperation(tab.browserId)
+      applyBrowserEvent({ type: 'updated', browser })
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
   async function beginScreenshot(): Promise<void> {
     if (elementSelection || selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
     const token = ++screenshotToken.current
@@ -415,6 +450,67 @@ export function BrowserPane({
       if (screenshotToken.current === token) setScreenshotBusy(false)
     }
   }
+
+  async function loadOperationHistory(): Promise<void> {
+    setHistoryLoading(true)
+    setHistoryError(null)
+    try {
+      const operations = await api.browser.listOperationHistory()
+      setOperationHistory(operations.filter((operation) => operation.browserId === tab.browserId))
+    } catch (error) {
+      setHistoryError('Operation history is unavailable. Retry to restore the record view.')
+      reportError(error)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  function openOperationTimeline(): void {
+    setTimelineOpen(true)
+    void loadOperationHistory()
+  }
+
+  function operationForTimeline(): BrowserOperation | null {
+    if (selectedOperationId) {
+      return operationHistory.find((operation) => operation.id === selectedOperationId) ?? tab.activity?.operation ?? null
+    }
+    return tab.activity?.operation ?? operationHistory[0] ?? null
+  }
+
+  async function runReplayStep(sequence: number): Promise<void> {
+    if (!replayPlan || replayBusy) return
+    const step = replayPlan.steps[sequence - 1]
+    if (!step || step.blockedReason) return
+    setReplayBusy(true)
+    setReplayOutcome(undefined)
+    try {
+      const report = await api.browser.runReplay(tab.browserId, { ...replayPlan, steps: [step] })
+      setReplayOutcome(report.outcome)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setReplayBusy(false)
+    }
+  }
+
+  async function runReplay(): Promise<void> {
+    if (!replayPlan || replayBusy || replayPlan.steps.some((step) => step.blockedReason)) return
+    setReplayBusy(true)
+    setReplayOutcome(undefined)
+    try {
+      const report = await api.browser.runReplay(tab.browserId, replayPlan)
+      setReplayOutcome(report.outcome)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setReplayBusy(false)
+    }
+  }
+
+  const timelineOperation = operationForTimeline()
+  // A persistence warning belongs to the current live projection. Do not attach it to a historical
+  // operation after the user selects another record; the timeline and warning must share one identity.
+  const timelineWarning = timelineOperation?.id === tab.activity?.operation?.id ? tab.activity?.warning : undefined
 
   if (released || restoring) {
     return (
@@ -574,12 +670,13 @@ export function BrowserPane({
           </DropdownMenu.Root>
         ) : null}
       </form>
-      {tab.driving ? (
-        <div className="browser-control-status browser-control-status--agent" role="status" aria-live="polite">
-          <span className="browser-control-status__signal" aria-hidden="true"><LoaderCircle size={12} /></span>
-          <span><strong>Agent is operating this page</strong><small>Interact with the page to take control back.</small></span>
-        </div>
-      ) : null}
+      <BrowserOperationRail
+        activity={tab.activity ?? { operation: null, control: tab.driving ? 'agent' : 'human' }}
+        onTakeControl={() => void stopBrowserOperation()}
+        onStop={() => void stopBrowserOperation()}
+        onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
+        onOpenTimeline={openOperationTimeline}
+      />
       <div className="browser-stage" ref={stageRef}>
         {screenshot ? (
           <ScreenshotEditor
@@ -655,6 +752,44 @@ export function BrowserPane({
           <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
         ) : null}
       </div>
+      {timelineOpen ? (
+        <>
+          <BrowserOperationHistory
+            operations={[
+              ...(tab.activity?.operation && !operationHistory.some((operation) => operation.id === tab.activity?.operation?.id) ? [tab.activity.operation] : []),
+              ...operationHistory
+            ]}
+            selectedOperationId={selectedOperationId ?? tab.activity?.operation?.id ?? null}
+            loading={historyLoading}
+            error={historyError}
+            onRetry={() => void loadOperationHistory()}
+            onClose={() => setTimelineOpen(false)}
+            onSelect={(operation) => {
+              setSelectedOperationId(operation.id)
+              setReplayPlan(null)
+              setReplayOutcome(undefined)
+            }}
+          />
+          <BrowserOperationTimeline
+            operation={timelineOperation}
+            {...(timelineWarning ? { warning: timelineWarning } : {})}
+            onReplay={(operation) => {
+              setReplayOutcome(undefined)
+              void api.browser.replayPlan(operation.id).then(setReplayPlan).catch(reportError)
+            }}
+          />
+          {replayPlan ? (
+            <BrowserReplayPreview
+              plan={replayPlan}
+              busy={replayBusy}
+              {...(replayOutcome ? { outcome: replayOutcome } : {})}
+              onClose={() => setReplayPlan(null)}
+              onStep={(sequence) => void runReplayStep(sequence)}
+              onRun={() => void runReplay()}
+            />
+          ) : null}
+        </>
+      ) : null}
     </section>
   )
 }

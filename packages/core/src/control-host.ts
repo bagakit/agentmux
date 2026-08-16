@@ -12,6 +12,8 @@ import {
   type AgentMuxArrangeMode,
   type AgentMuxBrowserRegion,
   type AgentMuxControlBrowserRunOutcome,
+  type AgentMuxControlBrowserOperation,
+  type AgentMuxControlBrowserReplayPlan,
   type AgentMuxControlHost,
   type AgentMuxControlErrorReceipt,
   type AgentMuxControlErrorCode,
@@ -63,6 +65,11 @@ function text(value: unknown, label: string, code = 'INVALID_CONTROL_REQUEST'): 
   if (typeof value !== 'string' || Buffer.byteLength(value) > MAX_MESSAGE_BYTES) {
     throw new AgentMuxError(`${label} is invalid.`, code)
   }
+  return value
+}
+
+function finiteNumber(value: unknown, message: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new AgentMuxError(message, 'CONTROL_PROTOCOL_ERROR')
   return value
 }
 
@@ -257,6 +264,40 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(owner ? { caller: owner } : {})
     }
   }
+  if (source.operation === 'browser.history') {
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      ...(source.browserId === undefined ? {} : { browserId: identity(source.browserId, 'Browser target is invalid.', 'INVALID_CONTROL_REQUEST') })
+    }
+  }
+  if (source.operation === 'browser.replay') {
+    const owner = optionalCaller(source.caller)
+    const mode = source.mode === undefined ? 'run' : source.mode
+    if (mode !== 'preview' && mode !== 'step' && mode !== 'run') {
+      throw new AgentMuxError('Browser replay mode is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+    const step = source.step === undefined
+      ? undefined
+      : finiteNumber(source.step, 'Browser replay step is invalid.')
+    if (step !== undefined && (!Number.isInteger(step) || step < 1)) {
+      throw new AgentMuxError('Browser replay step is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+    if (mode === 'step' && step === undefined) {
+      throw new AgentMuxError('Browser replay step is required for step mode.', 'INVALID_CONTROL_REQUEST')
+    }
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      browserId: identity(source.browserId, 'Browser target is invalid.', 'INVALID_CONTROL_REQUEST'),
+      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      mode,
+      ...(step === undefined ? {} : { step }),
+      ...(owner ? { caller: owner } : {})
+    }
+  }
   // 穷尽出口。此前 focus 是这条 if 链**没有条件的尾巴**，于是第 14 个操作（已过 membership 闸，因为它
   // 在联合里）会一路落到这里，被当成 focus 解析——回执里的 operation 被静默改写成 'focus'，调用方收到
   // 一份它没请求过的操作的回执。实测过：临时加一个 `probe.fake`（类型 + 联合臂 + 预算键，不加解析臂），
@@ -410,10 +451,75 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       operation,
       // result 是程序的返回值，**故意不校验形状**——它是 Agent 自己那段程序 return 的东西，我们没有
       // 立场说它该长什么样。缺席（程序什么都没 return）是合法的，收成 undefined。
-      result: { result: result.result, logs: scriptLogs(result.logs), outcome: browserRunOutcome(result.outcome) }
+      result: {
+        result: result.result,
+        logs: scriptLogs(result.logs),
+        outcome: browserRunOutcome(result.outcome),
+        runOperation: browserOperation(result.runOperation)
+      }
+    }
+  }
+  if (operation === 'browser.history') {
+    if (!Array.isArray(result.operations) || result.operations.length > 10_000) throw new AgentMuxError('Control browser history is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { operations: result.operations.map(browserOperation) } }
+  }
+  if (operation === 'browser.replay') {
+    if (result.mode === 'preview') {
+      return {
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId,
+        ok: true,
+        operation,
+        result: { mode: 'preview', plan: browserReplayPlan(result.plan) }
+      }
+    }
+    const mode = result.mode === 'step' ? 'step' : 'run'
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      ok: true,
+      operation,
+      result: { mode, result: result.result, logs: scriptLogs(result.logs), outcome: browserRunOutcome(result.outcome), runOperation: browserOperation(result.runOperation) }
     }
   }
   return assertUnhandledReceipt(operation)
+}
+
+function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
+  const source = object(value, 'Control browser operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const operator = object(source.operator, 'Control browser operation operator is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(source.steps) || source.steps.length > 10_000) {
+    throw new AgentMuxError('Control browser operation steps are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return {
+    id: identity(source.id, 'Control browser operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    browserId: identity(source.browserId, 'Control browser operation browser id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    operator: {
+      id: identity(operator.id, 'Control browser operation operator id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      name: text(operator.name, 'Control browser operation operator name is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      ...(operator.providerId === undefined ? {} : { providerId: identity(operator.providerId, 'Control browser operation provider id is invalid.', 'CONTROL_PROTOCOL_ERROR') })
+    },
+    startedAt: finiteNumber(source.startedAt, 'Control browser operation start is invalid.'),
+    ...(source.finishedAt === undefined ? {} : { finishedAt: finiteNumber(source.finishedAt, 'Control browser operation finish is invalid.') }),
+    phase: text(source.phase, 'Control browser operation phase is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    summary: text(source.summary, 'Control browser operation summary is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    url: text(source.url, 'Control browser operation url is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    steps: source.steps,
+    ...(source.replayOf === undefined ? {} : { replayOf: identity(source.replayOf, 'Control browser operation replay id is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
+    ...(source.warning === undefined ? {} : { warning: text(source.warning, 'Control browser operation warning is invalid.', 'CONTROL_PROTOCOL_ERROR') })
+  }
+}
+
+function browserReplayPlan(value: unknown): AgentMuxControlBrowserReplayPlan {
+  const source = object(value, 'Control browser replay plan is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.schema !== 'agentmux.browser-replay.v1') throw new AgentMuxError('Control browser replay plan schema is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(source.steps) || source.steps.length > 10_000) throw new AgentMuxError('Control browser replay plan steps are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return {
+    schema: 'agentmux.browser-replay.v1',
+    operationId: identity(source.operationId, 'Control browser replay plan operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    url: text(source.url, 'Control browser replay plan url is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    steps: source.steps
+  }
 }
 
 const MAX_SCRIPT_LOG_LINES = 10_000

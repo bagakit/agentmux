@@ -12,8 +12,11 @@ import {
   type BrowserScreenshotCapture,
   type BrowserScriptRunReport,
   type BrowserSnapshot,
-  type BrowserViewport
+  type BrowserViewport,
+  type BrowserOperator,
+  type BrowserActivityState
 } from '../shared/contracts.js'
+import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { browserPngFromNativeImage } from './browser-image.js'
@@ -28,6 +31,7 @@ import {
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
 import { runBrowserScript } from './browser-script-runner.js'
+import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -64,10 +68,87 @@ type BrowserEntry = {
   driving: boolean
   /** 这一页上待答的那个应用链接提问。回答掉或换页就清。 */
   appLinkPrompt: { url: string; scheme: string } | null
+  activity: BrowserActivityState
+  humanControl: boolean
+  activeRun: { operationId: string; stop: () => void } | undefined
+  runInFlight: boolean
 }
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
 type BrowserTakeover = { at: number | null; kind: string }
+
+function summarizeBrowserValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return `array(${value.length})`
+  if (typeof value === 'object') return 'object'
+  return typeof value
+}
+
+function safeBrowserUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return 'about:blank'
+  }
+}
+
+function startBrowserOperationStep(operation: BrowserOperation, method: string, args: unknown[]): BrowserOperationStep {
+  const sensitive = method === 'fillInput' || method === 'typeText' || method === 'js' || method === 'cdp'
+  const replay: BrowserReplayStep = {
+    method,
+    url: safeBrowserUrl(operation.url),
+    args: sensitive
+      ? []
+      : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
+          .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
+    ...(method === 'fillInput' || method === 'typeText' ? { inputKey: 'value', blockedReason: 'Sensitive input is requested again at replay time.' } : {}),
+    ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {})
+  }
+  const step: BrowserOperationStep = {
+    sequence: operation.steps.length + 1,
+    method,
+    label: method,
+    startedAt: Date.now(),
+    status: 'running',
+    ...(typeof args[0] === 'string' && args[0].startsWith('@') ? { ref: args[0] } : {}),
+    replay
+  }
+  operation.steps.push(step)
+  operation.summary = `Running ${method}`
+  return step
+}
+
+export function buildReplayScript(plan: BrowserReplayPlan): string {
+  const expectedUrl = JSON.stringify(safeBrowserUrl(plan.url))
+  const steps = plan.steps.map((step) => {
+    if (step.blockedReason) return `throw new Error(${JSON.stringify(step.blockedReason)})`
+    if (step.target) {
+      const target = JSON.stringify(step.target)
+      const args = JSON.stringify(step.args)
+      return `{
+        const page = await snapshot();
+        const expected = ${target};
+        const matches = page.nodes.filter((node) => node.role === expected.role && node.name === expected.name);
+        const targetNode = matches[expected.ordinal - 1];
+        if (!targetNode || matches.length !== expected.count) throw new Error('Replay target changed; inspect the page before retrying.');
+        await ${step.method}(targetNode.ref${step.method === 'click' || step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});
+      }`
+    }
+    const args = JSON.stringify(step.args)
+    return `await ${step.method}(...${args})`
+  }).join('\n')
+  return `const pageIdentity = await pageInfo();
+  if (${expectedUrl} !== 'about:blank' && pageIdentity.url.split('?')[0].split('#')[0] !== ${expectedUrl}.split('?')[0].split('#')[0]) {
+  throw new Error('Replay page identity changed; inspect the current page before retrying.')
+}
+${steps}
+return { replayOf: ${JSON.stringify(plan.operationId)}, steps: ${plan.steps.length} }`
+}
 
 /**
  * 哪些 `input-event` 算「人伸手了」。
@@ -226,7 +307,8 @@ export class BrowserViewManager {
      * `openExternal` 必须由调用方以箭头包一层或 `.bind(shell)` 传入——直接摘方法会丢掉原生 receiver
      * （本仓吃过这个亏）。
      */
-    private readonly appLinks: AppLinkHost
+    private readonly appLinks: AppLinkHost,
+    private readonly operationJournal?: BrowserOperationJournal
   ) {}
 
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
@@ -317,7 +399,11 @@ export class BrowserViewManager {
       viewport,
       error: null,
       driving: false,
-      appLinkPrompt: null
+      appLinkPrompt: null,
+      activity: { operation: null, control: 'human' },
+      humanControl: false,
+      activeRun: undefined,
+      runInFlight: false
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -527,34 +613,117 @@ export class BrowserViewManager {
    * 特别是 `crashed` → `indeterminate`——进程死了意味着**做到哪一步不知道**，页面上可能已经点过
    * 一次了。把它报成普通失败，调用方就会重试，而那正是"下单被点两次"的来源。
    */
-  async runScript(id: string, code: string): Promise<BrowserScriptRunReport> {
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
+    if (entry.humanControl) {
+      throw new Error('Human control is still active for this Browser. Explicitly return control before running another Agent program.')
+    }
+    if (entry.runInFlight || entry.activeRun) {
+      throw new Error('Another Browser operation is already running. Wait for it to finish or stop it before starting another program.')
+    }
+    entry.runInFlight = true
     const session = BrowserCdpSession.attach(entry.view.webContents)
     // 本轮自愈过的 ref 都记在这里。自愈按外观匹配，可能落在一个长得一样的**另一个**元素上，
     // 所以它不能只活在主进程的日志里——必须跟着结局回到 Agent 手上。
     const notes: string[] = []
     const takeover: BrowserTakeover = { at: null, kind: '' }
+    const stopController = new AbortController()
+    let stopRequested = false
+    const localOperation: BrowserOperation = {
+      id: randomUUID(),
+      browserId: id,
+      operator: operator ?? { id: 'agent:unknown', name: 'Agent' },
+      startedAt: Date.now(),
+      phase: 'preparing',
+      summary: 'Preparing browser program',
+      url: entry.requestedUrl,
+      steps: [],
+      ...(replayOf ? { replayOf } : {})
+    }
+    let operation: BrowserOperation
+    try {
+      operation = this.operationJournal
+        ? await this.operationJournal.start({
+            id: localOperation.id,
+            browserId: id,
+            operator: localOperation.operator,
+            summary: localOperation.summary,
+            url: localOperation.url,
+            ...(localOperation.replayOf ? { replayOf: localOperation.replayOf } : {})
+          })
+        : localOperation
+    } catch (error) {
+      entry.runInFlight = false
+      throw error
+    }
+    entry.activity = { operation, control: 'agent' }
     const contents = entry.view.webContents
     const onInput = (_event: unknown, input: { type: string }): void => {
       // 只记第一次：要报的是「什么时候被接管的」，后来的每一下都不改变这个答案。
       if (takeover.at !== null || !HUMAN_INPUT_EVENT_TYPES.has(input.type)) return
       takeover.at = Date.now()
       takeover.kind = input.type
+      entry.humanControl = true
+      operation.phase = 'human'
+      operation.summary = 'Human took control of the Browser'
+      operation.warning = takeoverMessage(takeover)
+      entry.driving = false
+      entry.activity = { operation, control: 'human', warning: operation.warning }
+      void this.operationJournal?.setPhase(operation.id, 'human', { summary: operation.summary, warning: operation.warning })
+      this.emit(entry)
     }
     contents.on('input-event', onInput)
     entry.driving = true
+    entry.activeRun = {
+      operationId: operation.id,
+      stop: () => {
+        if (stopRequested) return
+        stopRequested = true
+        entry.humanControl = true
+        entry.driving = false
+        operation.phase = 'stopped'
+        operation.summary = 'Stopped by the person using the Browser'
+        operation.finishedAt = Date.now()
+        operation.warning = 'The Browser operation was stopped. Review the page before running another program.'
+        entry.activity = { operation, control: 'human', warning: operation.warning }
+        stopController.abort()
+        void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
+        this.emit(entry)
+      }
+    }
+    operation.phase = 'running'
+    operation.summary = 'Agent is operating the Browser'
+    void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
     // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
     // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
     this.emit(entry)
     void this.showDriveBadge(entry, entry.view)
     try {
-      const run = await runBrowserScript({ code, onPageCall: this.pageCallHandler(entry, session, notes, takeover) })
+      const run = await runBrowserScript({ code, signal: stopController.signal, onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation) })
       // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
       // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
       // 而 `completed` 连个放警告的字段都没有。判在这一层，程序catch 不catch 都盖不住。
       const ended = session.endedReason
+      if (stopRequested) {
+        operation.phase = 'stopped'
+        operation.summary = 'Stopped by the person using the Browser'
+        operation.finishedAt = operation.finishedAt ?? Date.now()
+        operation.warning = operation.warning ?? 'The Browser operation was stopped. Review the page before running another program.'
+        entry.activity = { operation, control: 'human', warning: operation.warning }
+        return {
+          result: undefined,
+          logs: run.logs,
+          outcome: { kind: 'stopped', message: operation.warning },
+          runOperation: operation
+        }
+      }
       if (ended !== null) {
+        operation.phase = 'indeterminate'
+        operation.summary = 'Browser session ended before the result was known'
+        operation.finishedAt = Date.now()
+        operation.warning = String(ended)
+        entry.activity = { operation, control: 'agent', warning: operation.warning }
         return {
           result: undefined,
           logs: run.logs,
@@ -563,7 +732,8 @@ export class BrowserViewManager {
             message:
               `The debugging session ended mid-run (${ended}) — opening DevTools on the page does that. ` +
               'An action may have half-completed. Look at the page before running anything again.'
-          }
+          },
+          runOperation: operation
         }
       }
       // 被人接管过，同样压过程序自己的结局，而且**判在 `run.completed` 分叉之前**。
@@ -578,6 +748,11 @@ export class BrowserViewManager {
       // 哪一步不知道"，而这里知道——报错了会让 Agent 以为页面处于未知状态，其实它 snapshot
       // 一下就看得清楚。
       if (takeover.at !== null) {
+        operation.phase = 'stopped'
+        operation.summary = 'Stopped after human takeover'
+        operation.finishedAt = Date.now()
+        operation.warning = takeoverMessage(takeover)
+        entry.activity = { operation, control: 'human', warning: operation.warning }
         // 返回值照常带回去，与自愈那一支同理：程序如果吞掉拒绝、拿观察看清了页面再 return，
         // 那份东西正是这次运行**唯一**还有价值的产出。丢掉它就是在逼 Agent 再跑一遍——而"再跑
         // 一遍"恰恰是我们刚刚告诉它现在不要做的事。程序没跑完时 `run.value` 不存在，这里就是
@@ -585,7 +760,8 @@ export class BrowserViewManager {
         return {
           result: run.completed ? run.value : undefined,
           logs: run.logs,
-          outcome: { kind: 'stopped', message: takeoverMessage(takeover) }
+          outcome: { kind: 'stopped', message: takeoverMessage(takeover) },
+          runOperation: operation
         }
       }
       if (run.completed) {
@@ -594,24 +770,93 @@ export class BrowserViewManager {
         // 也是 `completed` 这一支承载不了的：它连一个放警告的字段都没有。返回值照常带回去——
         // 那是程序真算出来的东西，丢掉它只会逼 Agent 再跑一遍。
         if (notes.length > 0) {
+          operation.phase = 'indeterminate'
+          operation.summary = 'Completed with semantic ref healing'
+          operation.finishedAt = Date.now()
+          operation.warning = notes.join('\n')
+          entry.activity = { operation, control: 'agent', warning: operation.warning }
           return {
             result: run.value,
             logs: run.logs,
-            outcome: { kind: 'indeterminate', message: notes.join('\n') }
+            outcome: { kind: 'indeterminate', message: notes.join('\n') },
+            runOperation: operation
           }
         }
-        return { result: run.value, logs: run.logs, outcome: { kind: 'completed' } }
+        operation.phase = 'completed'
+        operation.summary = 'Browser program completed'
+        operation.finishedAt = Date.now()
+        entry.activity = { operation, control: 'agent' }
+        return { result: run.value, logs: run.logs, outcome: { kind: 'completed' }, runOperation: operation }
       }
-      return { result: undefined, logs: run.logs, outcome: browserRunOutcomeFromFailure(run.failure) }
+      const outcome = browserRunOutcomeFromFailure(run.failure)
+      operation.phase = outcome.kind === 'stopped' ? 'stopped' : 'failed'
+      operation.summary = 'message' in outcome ? outcome.message : 'Browser program failed'
+      operation.finishedAt = Date.now()
+      if ('message' in outcome) operation.warning = outcome.message
+      entry.activity = { operation, control: 'agent', ...('message' in outcome ? { warning: outcome.message } : {}) }
+      return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
+      session.detach()
       // 监听器跟着这一次运行走，不跟着 entry 走。挂在整个 entry 生命周期上的话，人平时正常
       // 用这个浏览器就一直在写 `takeover`，下一次 run 一启动就以为自己被接管了。
       contents.removeListener('input-event', onInput)
       entry.driving = false
+      if (entry.activeRun?.operationId === operation.id) entry.activeRun = undefined
+      entry.runInFlight = false
+      if (this.operationJournal) {
+        const finalPhase = operation.phase === 'completed' || operation.phase === 'failed' || operation.phase === 'indeterminate' || operation.phase === 'stopped'
+          ? operation.phase
+          : 'indeterminate'
+        void this.operationJournal.finish(operation.id, finalPhase, {
+          summary: operation.summary,
+          ...(operation.warning ? { warning: operation.warning } : {})
+        })
+        const persistenceWarning = this.operationJournal.getPersistenceWarning()
+        if (persistenceWarning) {
+          operation.warning ??= persistenceWarning
+          entry.activity = { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }
+        }
+      }
       this.emit(entry)
       void this.hideDriveBadge(entry.view)
-      session.detach()
     }
+  }
+
+  async listOperationHistory(): Promise<BrowserOperation[]> {
+    return this.operationJournal ? await this.operationJournal.list() : []
+  }
+
+  async runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport> {
+    if (plan.schema !== 'agentmux.browser-replay.v1' || !plan.operationId || !Array.isArray(plan.steps)) {
+      throw new Error('Invalid Browser replay plan')
+    }
+    const blocked = plan.steps.find((step) => step.blockedReason)
+    if (blocked?.blockedReason) {
+      throw new Error(`Replay requires review before any action: ${blocked.blockedReason}`)
+    }
+    const script = buildReplayScript(plan)
+    return await this.runScript(id, script, operator, plan.operationId)
+  }
+
+  stopOperation(id: string): BrowserSnapshot {
+    const entry = this.require(id)
+    entry.activeRun?.stop()
+    return this.snapshot(entry)
+  }
+
+  returnControl(id: string): BrowserSnapshot {
+    const entry = this.require(id)
+    entry.humanControl = false
+    if (entry.activity.operation) {
+      const { warning: _warning, ...activity } = entry.activity
+      entry.activity = { ...activity, control: 'agent' }
+    }
+    this.emit(entry)
+    return this.snapshot(entry)
+  }
+
+  async replayPlan(operationId: string) {
+    return this.operationJournal ? await this.operationJournal.replayPlan(operationId) : null
   }
 
   /**
@@ -659,8 +904,10 @@ export class BrowserViewManager {
     entry: BrowserEntry,
     session: BrowserCdpSession,
     notes: string[],
-    takeover: BrowserTakeover
+    takeover: BrowserTakeover,
+    operation: BrowserOperation
   ): (name: string, args: unknown[]) => Promise<unknown> {
+    let activeStep: BrowserOperationStep | null = null
     const requireLive = (): WebContentsView => {
       const view = entry.view
       if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
@@ -686,7 +933,22 @@ export class BrowserViewManager {
       writeLedger: async (ledger) => {
         await this.refLedgers.write(entry.id, ledger)
       },
-      note: (text) => notes.push(text)
+      note: (text) => notes.push(text),
+      recordTarget: (target) => {
+        if (!activeStep) return
+        activeStep.target = target
+        if (activeStep.replay) {
+          activeStep.replay.target = target
+          if (activeStep.method === 'fillInput' || activeStep.method === 'typeText') {
+            activeStep.replay.args = []
+            activeStep.replay.inputKey = 'value'
+            activeStep.replay.blockedReason = 'Sensitive input is requested again at replay time.'
+          } else if (activeStep.method === 'js' || activeStep.method === 'cdp') {
+            activeStep.replay.args = []
+            activeStep.replay.blockedReason = 'Opaque page code or protocol input requires explicit review.'
+          }
+        }
+      }
     })
     return async (name, args) => {
       requireLive()
@@ -695,7 +957,45 @@ export class BrowserViewManager {
       if (takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)) {
         throw new Error(takeoverMessage(takeover, name))
       }
-      return await dispatch(name, args)
+      const step = startBrowserOperationStep(operation, name, args)
+      activeStep = step
+      this.emit(entry)
+      if (this.operationJournal) {
+        await this.operationJournal.startStep(operation.id, {
+          method: step.method,
+          label: step.label,
+          ...(step.ref ? { ref: step.ref } : {}),
+          ...(step.replay ? { replay: step.replay } : {})
+        })
+      }
+      try {
+        const value = await dispatch(name, args)
+        step.status = 'completed'
+        step.finishedAt = Date.now()
+        step.summary = summarizeBrowserValue(value)
+        if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {
+          status: 'completed',
+          summary: step.summary,
+          ...(step.target ? { target: step.target } : {}),
+          ...(step.replay ? { replay: step.replay } : {})
+        })
+        this.emit(entry)
+        return value
+      } catch (error) {
+        step.status = takeover.at !== null ? 'stopped' : 'failed'
+        step.finishedAt = Date.now()
+        step.summary = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+        if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {
+          status: step.status,
+          summary: step.summary,
+          ...(step.target ? { target: step.target } : {}),
+          ...(step.replay ? { replay: step.replay } : {})
+        })
+        this.emit(entry)
+        throw error
+      } finally {
+        activeStep = null
+      }
     }
   }
 
@@ -1133,6 +1433,7 @@ export class BrowserViewManager {
 
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
+    const persistenceWarning = this.operationJournal?.getPersistenceWarning()
     return {
       id: entry.id,
       navigationId: entry.navigationId,
@@ -1145,7 +1446,10 @@ export class BrowserViewManager {
       viewport: entry.viewport,
       error: entry.error,
       driving: entry.driving,
-      appLinkPrompt: entry.appLinkPrompt
+      appLinkPrompt: entry.appLinkPrompt,
+      activity: persistenceWarning
+        ? { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }
+        : entry.activity
     }
   }
 

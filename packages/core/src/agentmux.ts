@@ -511,6 +511,32 @@ async function sessionMutation(operation: 'interrupt' | 'resume' | 'stop', args:
  * 参数意味着每一层 shell 都要再转义一次，写的人和读的人都会错。stdin 是原样的字节。
  */
 async function browserCommand(args: readonly string[]): Promise<number> {
+  if (args[0] === 'history') {
+    const flags = parseFlags(args.slice(1), { '--browser': 'value' })
+    const browserId = flags.values.get('--browser')
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(),
+      operation: 'browser.history',
+      ...(browserId ? { browserId: explicitSelectorId(browserId, 'Browser id') } : {})
+    })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (args[0] === 'replay') {
+    const flags = parseFlags(args.slice(1), { '--browser': 'value', '--operation': 'value', '--preview': 'boolean', '--step': 'value', '--run': 'boolean' })
+    const browserId = explicitSelectorId(flags.values.get('--browser'), 'Browser id')
+    const operationId = identifier(flags.values.get('--operation'), 'Browser operation id')
+    if (flags.booleans.has('--preview') && flags.booleans.has('--run')) throw cliError('Choose one replay mode: --preview or --run.')
+    const step = flags.values.get('--step')
+    if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1)) throw cliError('Replay --step must be a positive integer.')
+    const mode = flags.booleans.has('--preview') ? 'preview' : step !== undefined ? 'step' : 'run'
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(), operation: 'browser.replay', browserId, operationId, mode,
+      ...(step === undefined ? {} : { step: Number(step) }),
+    })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
   if (args[0] !== 'run') throw cliError('Unknown browser command. Run agentmux browser --help.')
   const flags = parseFlags(args.slice(1), { '--browser': 'value' })
   const browserId = explicitSelectorId(flags.values.get('--browser'), 'Browser id')

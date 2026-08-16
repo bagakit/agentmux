@@ -200,6 +200,42 @@ describe('页面自己抛了，不许读成成功', () => {
   })
 })
 
+describe('CDP 逃生口必须把协议结果交回 Agent', () => {
+  it('原样转发 method/params，并返回 sendCommand 的成功结果', async () => {
+    const calls: { method: string; params: Record<string, unknown> }[] = []
+    const result = { result: { value: 4 }, metadata: { source: 'cdp' } }
+    const session = {
+      sendCommand: async (method: string, params: Record<string, unknown>) => {
+        calls.push({ method, params })
+        return result
+      },
+      frames: new Map(),
+      endedReason: null,
+      frameDiscoveryFailure: null,
+      observe: () => () => {},
+      detach: () => {}
+    } as unknown as BrowserCdpSession
+
+    await expect(dispatchOn(session)('cdp', ['Runtime.evaluate', { expression: '2 + 2' }]))
+      .resolves.toBe(result)
+    expect(calls).toEqual([{ method: 'Runtime.evaluate', params: { expression: '2 + 2' } }])
+  })
+
+  it('协议异常继续浮现，不被逃生口吞掉', async () => {
+    const session = {
+      sendCommand: async () => { throw new Error('Target closed') },
+      frames: new Map(),
+      endedReason: null,
+      frameDiscoveryFailure: null,
+      observe: () => () => {},
+      detach: () => {}
+    } as unknown as BrowserCdpSession
+
+    await expect(dispatchOn(session)('cdp', ['Target.activateTarget', { targetId: 'target-1' }]))
+      .rejects.toThrow('Target closed')
+  })
+})
+
 describe('导航之后旧快照必须被丢掉', () => {
   it('gotoUrl 之后，上一张快照的 ref 不再被拿来解', async () => {
     // 不丢的话，下一次 click 会拿旧地图去解——backendNodeId 可能还解得开，只是解到了新页面上

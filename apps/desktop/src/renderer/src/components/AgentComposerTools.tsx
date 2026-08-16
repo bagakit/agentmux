@@ -43,11 +43,13 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   reportError(error: unknown): void
 }) {
   const [skills, setSkills] = useState<AgentSkill[]>([])
-  const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState('')
-  const [phase, setPhase] = useState<ToolDockPhase>('current')
+  // 静息即一行（interaction SSOT「Composer 静息形态与主操作」：用户「一上来是一行」）。默认档位就是
+  // collapsed——两行与大输入框是用户主动点出来的档位，不是默认。`current`（两行常态）从此不再是初始档位，
+  // 循环 collapsed→restored→expanded→collapsed 会经由 restored 回到两行常态，两者视觉同为 mode='current'。
+  const [phase, setPhase] = useState<ToolDockPhase>('collapsed')
   const mode = phase === 'collapsed' ? 'collapsed' : phase === 'expanded' ? 'expanded' : 'current'
   return <span className="composer-tools" data-mode={mode}>
     <button type="button" className="composer-tool composer-tool--mode" disabled={disabled}
@@ -61,11 +63,14 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         void onCapture().catch(reportError).finally(() => setCapturing(false))
       }}>{capturing ? <LoaderCircle size={14} className="spin" /> : <Camera size={14} />} Capture</button> : null}
     <DropdownMenu.Root onOpenChange={(open) => {
-      // Opening the menu is not evidence the skill folders changed (design SSOT: 同一份结果不得反复重算).
-      // Discover once per mount; a workspace/provider switch remounts this via a fresh loadSkills closure.
-      if (!open || loaded) return
+      // Opening the menu triggers discovery; discoverAgentSkills memoizes on the skill roots' mtimes, so
+      // a re-open with unchanged folders is served from cache — the "同一份结果不得反复重算" constraint
+      // (design SSOT) is met at the discovery layer, which is the only layer that can tell whether the
+      // folders actually changed. This component cannot: its inputs (workspace/provider) mutate in place
+      // in the launcher without a remount, so per-open caching here would show a stale set after a switch.
+      if (!open) return
       setLoading(true); setError('')
-      void loadSkills().then((found) => { setSkills(found); setLoaded(true) }).catch((cause) => {
+      void loadSkills().then(setSkills).catch((cause) => {
         setError(presentError(cause))
       }).finally(() => setLoading(false))
     }}>

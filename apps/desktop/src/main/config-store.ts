@@ -9,6 +9,7 @@ import {
   APP_APPEARANCE_IDS,
   APP_LINK_SCHEME_CHOICES,
   CONFIG_VERSION,
+  PROJECT_RAIL_DENSITY_IDS,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
   TERMINAL_THEME_IDS,
@@ -177,7 +178,11 @@ const configSchema = z
     // 显式 `[]` 原样通过。这条路与同文件 `toolbar.saveBookmark` 完全同形——那一项也比
     // CONFIG_VERSION=9 晚到，磁盘上已有写于它之前的 v9 配置，也是用 `.default()` 收口的。
     // 版本号因此不必 +1（+1 会走 retiredConfigReplacement 那条退休路径，代价大得多）。
-    composerShortcuts: z.array(composerShortcutSchema).default(() => structuredClone(DEFAULT_COMPOSER_SHORTCUTS))
+    composerShortcuts: z.array(composerShortcutSchema).default(() => structuredClone(DEFAULT_COMPOSER_SHORTCUTS)),
+    // 用户就地选的 Project Rail 密度档。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
+    // 没有它，写成必需会让整块判失败）——且同样**不回填**：缺席即默认档，读处一律 `?? 'default'`，
+    // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
+    projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional()
   })
   .strict()
   .superRefine((config, context) => {
