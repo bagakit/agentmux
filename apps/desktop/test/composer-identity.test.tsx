@@ -12,7 +12,9 @@ it('shows and updates the actual Session identity, including same-provider sibli
     agentNames: { a: 'Review queue', b: 'Fix sizing', c: 'Investigate' } })
   await dom.render(<AgentSessionComposer key="a" sessionId="a" tabName="Release" />)
   const identity = () => dom.container.querySelector('.composer__identity')!
-  expect(identity().textContent).toBe('Review queue')
+  expect(identity().textContent).toBe('')
+  expect(identity().parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
+  expect(identity()).toBe(identity().parentElement?.lastElementChild)
   expect(identity().getAttribute('title')).toBe('Review queue · Release')
   const codex = identity().querySelector('.agent-avatar')!.innerHTML
   for (const mode of ['collapsed', 'current', 'expanded']) {
@@ -21,19 +23,19 @@ it('shows and updates the actual Session identity, including same-provider sibli
     await dom.click('.composer-tool--mode')
   }
   await dom.render(<AgentSessionComposer key="b" sessionId="b" tabName="Release" />)
-  expect(identity().textContent).toBe('Fix sizing')
+  expect(identity().getAttribute('title')).toBe('Fix sizing · Release')
   expect(identity().querySelector('.agent-avatar')!.innerHTML).toBe(codex)
   await dom.render(<AgentSessionComposer key="c" sessionId="c" tabName="Release" />)
-  expect(identity().textContent).toBe('Investigate')
+  expect(identity().getAttribute('title')).toBe('Investigate · Release')
   expect(identity().querySelector('.agent-avatar')!.innerHTML).not.toBe(codex)
   await act(async () => useAppStore.setState({ agentNames: { c: 'Renamed investigation' } }))
-  expect(identity().textContent).toBe('Renamed investigation')
+  expect(identity().getAttribute('title')).toBe('Renamed investigation · Release')
   expect(identity().querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Renamed investigation · running')
 })
 
 it('uses the authored Tab as fallback without manufacturing a numbered terminal identity', async () => {
   await dom.render(<AgentSessionComposer sessionId="agent-1" tabName="Release review" />)
-  expect(dom.container.querySelector('.composer__identity')?.textContent).toBe('Release review')
+  expect(dom.container.querySelector('.composer__identity')?.getAttribute('title')).toBe('Release review')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  expect(dom.container.querySelector('.composer__identity')?.textContent).toBe('codex')
+  expect(dom.container.querySelector('.composer__identity')?.getAttribute('title')).toBe('codex')
 })

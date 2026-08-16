@@ -7,6 +7,8 @@ export type ContinuousProgressLoop = {
   prompt: string
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
+  pendingCompletion?: { id: string; operationId: string }
+  lastCompletionId?: string
   lastTickId?: string
   lastOutcome?: 'sent' | 'skipped' | 'unknown'
   lastTickAt?: number

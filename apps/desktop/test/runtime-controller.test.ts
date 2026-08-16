@@ -819,30 +819,33 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
+  it('carries completion and cancellation through the Core boundary', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
+    const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
+    const signal = new AbortController().signal
+    await controller.submitPrompt(control, 'next', 'original', { completionId: '["run-1",1]', isCurrent: () => true, signal })
+    expect(client.submitAgentPrompt).toHaveBeenCalledWith({ agentSessionId: 'agent-1', operationId: 'original', prompt: 'next',
+      expectedCompletionId: '["run-1",1]', signal })
+    await expect(controller.submitPrompt(control, 'next', 'stopped', { completionId: '["run-1",1]', isCurrent: () => false, signal }))
+      .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+    expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
-    {
-      code: 'AGENT_PROMPT_NOT_READY',
-      coreMessage: 'Agent prompt requires a ready composer epoch for this exact Run.',
-      detail: 'runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending',
-      expected: /no consumable composer readiness.*still running.*send again/i
-    },
-    {
-      code: 'AGENT_PROMPT_READINESS_CONSUMED',
-      coreMessage: 'The current composer readiness epoch was already consumed by another prompt.',
-      detail: 'runId=run-1 readinessId=readiness-1 consumedBySubmissionId=submission-1 readyThroughByte=42',
-      expected: /readiness epoch was already consumed.*still running.*next readiness epoch/i
-    },
     {
       code: 'AGENT_PROMPT_SUBMISSION_BUSY',
       coreMessage: 'Another Agent prompt operation is incomplete for this Run.',
       detail: 'runId=run-1 activeSubmissionId=submission-1 payloadAcknowledged=true submitAcknowledged=false',
-      expected: /another submission.*still completing.*keep this draft/i
+      expected: /Another message is still being delivered.*retry after that delivery completes/i
     },
     {
       code: 'AGENT_PROMPT_READINESS_CONFLICT',
       coreMessage: 'Prompt readiness changed or was consumed by another Client.',
       detail: 'expectedRunId=run-1 canonicalRunId=run-2 reason=session-cas-rejected-after-refresh',
-      expected: /readiness changed.*refresh the canonical Session.*current Run/i
+      expected: /Session changed.*refresh the Session/i
     }
   ] as const)('classifies $code into an actionable message and preserves diagnostics', async ({
     code,
@@ -890,7 +893,7 @@ describe('RuntimeController configuration transaction', () => {
       .mockResolvedValueOnce({ ...running, run: { ...running.run, state: 'exited' as const } })
     client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(
       'Agent prompt requires a ready composer epoch for this exact Run.',
-      'AGENT_PROMPT_NOT_READY',
+      'AGENT_PROMPT_SUBMISSION_BUSY',
       'runId=run-1 readinessId=readiness-1 readyThroughByte=pending reason=observation-pending'
     ))
     const control = {
@@ -900,10 +903,10 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Run has ended; resume or restart/i)
+    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Run has ended.*resume the Agent/i)
   })
 
-  it('does not call a semantically completed turn a still-running Run when process is alive', async () => {
+  it('keeps delivery conflict independent of semantic turn completion', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const running = agentStatusFixture()
@@ -919,7 +922,7 @@ describe('RuntimeController configuration transaction', () => {
       })
     client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(
       'Agent prompt requires a ready composer epoch for this exact Run.',
-      'AGENT_PROMPT_NOT_READY',
+      'AGENT_PROMPT_SUBMISSION_BUSY',
       'runId=run-1 readinessId=readiness-1 readyThroughByte=pending reason=observation-pending'
     ))
     const control = {
@@ -929,7 +932,7 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Agent turn is complete/i)
+    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Another message is still being delivered/i)
   })
 
   it('forwards a typed interaction response with the exact Session Run fence', async () => {

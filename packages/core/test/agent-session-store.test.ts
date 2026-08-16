@@ -43,10 +43,7 @@ function storedSession() {
       run: { runId: 'daemon-1' },
       submissionId: 'prompt-submit-1',
       promptDigest: 'prompt-digest-1',
-      readinessSource: 'native-stop' as const,
-      readinessId: 'stop-receipt-1',
-      readinessOutputCursorBytes: 8,
-      readyThroughByte: 12,
+      readinessEvidence: { source: 'native-stop' as const, id: 'stop-receipt-1', outputCursorBytes: 8, readyThroughByte: 12 },
       outputCursorBytes: 12,
       payload: {
         operationId: 'prompt-payload-1',
@@ -286,7 +283,7 @@ describe('semantic session persistence boundary', () => {
     // readyThroughByte 落在 readiness 光标之前 = 「我提交所依据的准备点比准备本身还早」。
     expect(() => normalizeStoredAgentSession({
       ...base,
-      terminalPromptSubmission: { ...submission, readyThroughByte: 7 },
+      terminalPromptSubmission: { ...submission, readinessEvidence: { ...submission.readinessEvidence, readyThroughByte: 7 } },
       terminalPromptReadiness: undefined
     })).toThrow('does not preserve its readiness boundary')
     // initial-composer 这一档要求严格前进：等于光标意味着「一个字节都没渲染出来就提交」。
@@ -295,34 +292,25 @@ describe('semantic session persistence boundary', () => {
       ...base,
       terminalPromptSubmission: {
         ...submission,
-        readinessSource: 'initial-composer' as const,
-        readinessId: 'composer-epoch-1',
-        readyThroughByte: submission.readinessOutputCursorBytes
+        readinessEvidence: { ...submission.readinessEvidence, source: 'initial-composer' as const,
+          id: 'composer-epoch-1', readyThroughByte: submission.readinessEvidence.outputCursorBytes }
       },
       terminalPromptReadiness: undefined
     })).toThrow('does not preserve its readiness boundary')
     // 输出光标退到准备点之前 = 快照声称「已读到的字节」比「已准备好的字节」还少。
     expect(() => normalizeStoredAgentSession({
       ...base,
-      terminalPromptSubmission: { ...submission, outputCursorBytes: submission.readyThroughByte - 1 }
+      terminalPromptSubmission: { ...submission, outputCursorBytes: submission.readinessEvidence.readyThroughByte - 1 }
     })).toThrow('does not preserve its readiness boundary')
 
-    // 界二：被认领的 epoch 必须指得出认领者（三项）。
-    // 完全没有 submission：epoch 说自己被认领了，认领者却不存在。
-    expect(() => normalizeStoredAgentSession({
-      ...base,
-      terminalPromptSubmission: undefined
-    })).toThrow('does not identify its prompt submission')
-    // 认领的 submissionId 指向另一次提交。
-    expect(() => normalizeStoredAgentSession({
-      ...base,
+    // Historical consumed observations can outlive their original completed submission.
+    expect(normalizeStoredAgentSession({ ...base, terminalPromptSubmission: undefined }).terminalPromptReadiness).toEqual(readiness)
+    expect(normalizeStoredAgentSession({ ...base,
+      terminalPromptSubmission: { ...submission, submissionId: 'new-submission', readinessEvidence: undefined }
+    }).terminalPromptSubmission?.readinessEvidence).toBeUndefined()
+    expect(() => normalizeStoredAgentSession({ ...base,
       terminalPromptReadiness: { ...readiness, consumedBySubmissionId: 'another-submission' }
-    })).toThrow('does not identify its prompt submission')
-    // submission 说自己依据的是另一个 epoch——于是这个 epoch 的认领者查无此人。
-    expect(() => normalizeStoredAgentSession({
-      ...base,
-      terminalPromptSubmission: { ...submission, readinessId: 'another-epoch' }
-    })).toThrow('does not identify its prompt submission')
+    })).toThrow('did not atomically consume its readiness epoch')
 
     // 界三：同一个 epoch 的四个取值必须在两侧逐字一致（四项）。
     // 这四句都保持 readinessId 相同（否则会掉进界二），只让一个取值发散。
@@ -542,7 +530,7 @@ describe('semantic session persistence boundary', () => {
         ...storedSession().terminalPromptReadiness,
         consumedBySubmissionId: 'another-submission'
       }
-    })).toThrow('does not identify')
+    })).toThrow('did not atomically consume')
 
     expect(() => normalizeStoredAgentSession({
       ...storedSession(),

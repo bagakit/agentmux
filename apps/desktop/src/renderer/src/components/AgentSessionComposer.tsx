@@ -23,7 +23,10 @@ import { AgentComposer } from './AgentComposer'
 import { AgentAvatar } from './AgentAvatar'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
-import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
+import { useComposerFeedback } from './ComposerFeedback'
+import { errorIdentity } from '../lib/error-presentation'
+import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { SessionNoticeInbox, SessionNoticeBanners, useSessionNoticeInbox, type ComposerNotice } from './SessionNoticeInbox'
 
 export type AgentComposerAvailability = {
   disabled: boolean
@@ -227,8 +230,33 @@ export function AgentSessionComposer({
     if (path) insertReference(path)
   }
 
+  const notices: ComposerNotice[] = []
+  for (const [id, outcome] of [
+    ['connection', agentSessionServiceOutcome(session)],
+    ['delivery', agentPromptDeliveryServiceOutcome(session)]
+  ] as const) {
+    const notice = serviceNoticeToRender(classifyServiceNotice(outcome))
+    if (notice) notices.push({ id, notice })
+  }
+
+  const queueProblem = queuedEntries.find((entry) => entry.status === 'deferred' || entry.status === 'failed' ||
+    session?.kind === 'agent' && (!steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState)))
+  if (queueProblem) notices.push({ id: 'queue', notice: { kind: 'process-degraded', notice: {
+    step: 'A queued message has not been sent',
+    mode: errorIdentity(queueProblem.error ?? 'The message targets a Run that is no longer available.'),
+    restore: 'Your message is kept. Open the queue to inspect, retry, copy or remove it.'
+  } } })
+  if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
+    step: 'A message tool action did not complete', mode: feedback.failure.message,
+    restore: 'Your draft is kept. You can try the action again.'
+  } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
+  const inbox = useSessionNoticeInbox(sessionId, notices.map((item) => ({ ...item,
+    ...(session?.kind === 'agent' ? { occurrence: session.control.run.runId } : {})
+  })), session?.kind === 'agent')
+
   return (
     <AgentComposer key={sessionId}
+      feedback={<SessionNoticeBanners inbox={inbox} />}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       queued={queuedEntries.map((entry) => ({
         id: entry.operationId,
@@ -261,12 +289,12 @@ export function AgentSessionComposer({
         if (mine) return encodeSemanticReference({ token: item, label: mine.label, kind: 'subcommand', reference: mine.body })
         return item
       }}
-      tools={<AgentComposerTools disabled={!submitMode.canType} commands={commandCandidates}
+      tools={<><AgentComposerTools disabled={!submitMode.canType} commands={commandCandidates}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={insertSemanticReference}
         onCommand={(command) => {
           const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
           setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
-        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} />}
+        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} /><SessionNoticeInbox inbox={inbox} /></>}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
@@ -276,7 +304,7 @@ export function AgentSessionComposer({
         name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
         ...(tabName && tabName !== displayName ? { context: tabName } : {})
       } } : {})}
-      feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
+
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}

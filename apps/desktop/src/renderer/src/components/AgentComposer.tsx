@@ -1,4 +1,3 @@
-import { errorIdentity } from '../lib/error-presentation'
 import type { ReactNode } from 'react'
 import { useId } from 'react'
 import { AtSign, ArrowUp, Copy, Paperclip, Square } from 'lucide-react'
@@ -221,9 +220,6 @@ export function AgentComposer({
       <div className="composer__toolbar">
         <div>
           {tools}
-          {identity ? <span className="composer__identity" title={identity.context ? `${identity.name} · ${identity.context}` : identity.name}>
-            {identity.avatar}<span>{identity.name}</span>
-          </span> : null}
           <button
             type="button"
             className="composer-tool"
@@ -307,10 +303,12 @@ export function AgentComposer({
               <ArrowUp size={15} aria-hidden="true" />
             </button>
           )}
+          {identity ? <span className="composer__identity" title={identity.context ? `${identity.name} · ${identity.context}` : identity.name}>
+            {identity.avatar}
+          </span> : null}
         </div>
       </div>
       {feedback}
-      <QueueDeliveryNotice queued={queued} canCopy={Boolean(onCopyQueued)} />
       {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
         {/* 按 group 分段并给每段一个标题。分组只在**确实有两个以上来源**时出现：单一来源时加一个
             标题等于给一份列表起个多余的名字。段序由候选自身的顺序决定（先出现的 group 先排），
@@ -337,7 +335,7 @@ function QueuedMessages({ queued, onCopy, onRemove, onSend }: {
 }) {
   const cardId = useId()
   const retryEntry = queued.find((entry) => entry.deliverable)
-  const { unavailable, deferred, sending, label, state } = summarizeQueue(queued, Boolean(onCopy))
+  const { unavailable, deferred, sending, label, state } = summarizeQueue(queued)
   return (
     <>
       <button type="button" className="composer__queued" data-state={state} aria-label={label}
@@ -367,7 +365,7 @@ function QueuedMessages({ queued, onCopy, onRemove, onSend }: {
   )
 }
 
-function summarizeQueue(queued: readonly ComposerQueuedMessage[], canCopy: boolean) {
+function summarizeQueue(queued: readonly ComposerQueuedMessage[]) {
   const unavailable = queued.filter((entry) => !entry.deliverable && !entry.sending).length
   const deferred = queued.filter((entry) => entry.deliverable && entry.status === 'deferred')
   const sending = queued.some((entry) => entry.sending)
@@ -377,15 +375,5 @@ function summarizeQueue(queued: readonly ComposerQueuedMessage[], canCopy: boole
     ? `${deferred.length} of ${queued.length} messages not delivered yet - still queued`
     : sending ? `Sending - ${queued.length} queued` : `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
   const state = unavailable > 0 ? 'failed' : deferred.length > 0 ? 'deferred' : 'queued'
-  // Delivery limitations remain visible beside the badge, even while the detail popover is closed.
-  const notice = [
-    unavailable > 0 ? `Some messages cannot be sent to this Run. They are kept here.${canCopy ? ' Open the queue to copy them.' : ''}` : '',
-    deferred.length > 0 ? `${errorIdentity(deferred[0]?.error ?? 'Delivery is waiting.')} Kept in the queue; retries when the Agent or connection becomes ready. You can also retry from the queue.` : ''
-  ].filter(Boolean).join(' ')
-  return { unavailable, deferred, sending, label, state, notice }
-}
-
-function QueueDeliveryNotice({ queued, canCopy }: { queued: readonly ComposerQueuedMessage[]; canCopy: boolean }) {
-  const { notice } = summarizeQueue(queued, canCopy)
-  return notice ? <div className="composer__queue-notice" role="status">{notice}</div> : null
+  return { unavailable, deferred, sending, label, state }
 }

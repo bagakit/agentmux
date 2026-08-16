@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "feat_id": "f-27g8f3x7n",
+  "title": "Message Tools 通知收件箱",
+  "slug": "message-tools-notice-inbox",
+  "goal": "服务提醒可关闭、可重看、同一问题不反复打扰，已读不伪装恢复",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 4
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-002",
+    "last_check_commands": [
+      {
+        "command": "python3 /tmp/verify-inbox-candidate.py && pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/session-notice-inbox.test.tsx apps/desktop/test/composer-identity.test.tsx apps/desktop/test/service-window-notice.test.ts --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "python3 /tmp/verify-inbox-candidate.py && rg -n \"useSessionNoticeInbox|SessionNoticeInbox\" apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-27g8f3x7n/artifacts/gate-T-002-r4-0001.log",
+    "last_context": {
+      "candidate_sha": "a91f46c037ca30c2a2926151c8bc9524a052bef2",
+      "worktree_digest": "f1bf741219e2e016958372dd93d60a91a6733ececf68117a8d083f313f2f378c",
+      "verification_digest": "none",
+      "dedup_key": "82a1f6b37daa876b5ed95e7667baf533d03c38976cf242678f971aaf2ccdc5c4",
+      "source_key": "276fc1626009e4a760faa18e3941feaec9afe760ba1f05b9424a45ac0c35aacc",
+      "artifact_digests": {},
+      "plan_revision": 4
+    }
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => fail"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=4; supersedes_revision=3"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

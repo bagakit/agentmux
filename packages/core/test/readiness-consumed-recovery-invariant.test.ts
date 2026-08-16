@@ -64,10 +64,7 @@ function storedSession(): AgentMuxStoredAgentSession {
       run: { runId: RUN_ID },
       submissionId: 'submission-turn-0',
       promptDigest: 'a'.repeat(43),
-      readinessSource: 'initial-composer',
-      readinessId: 'epoch-turn-0',
-      readinessOutputCursorBytes: 0,
-      readyThroughByte: 100,
+      readinessEvidence: { source: 'initial-composer', id: 'epoch-turn-0', outputCursorBytes: 0, readyThroughByte: 100 },
       outputCursorBytes: 100,
       payload: {
         operationId: 'payload-turn-0',

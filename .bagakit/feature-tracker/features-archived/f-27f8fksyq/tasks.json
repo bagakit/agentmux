@@ -1,0 +1,114 @@
+{
+  "version": 2,
+  "feat_id": "f-27f8fksyq",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md",
+  "source_refs": [
+    "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      },
+      "command_corrections": [
+        "T-001"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "终端历史截断后的投递确认可恢复且提示说清原因",
+      "objective": "消除用户频繁遇到的终端历史确认告示根因及不可理解的提示",
+      "outcome": "健康 Agent 持续可用，当前证据可恢复，真实未确认状态不谎报成功",
+      "acceptance": [
+        "复现历史逐出后的确认失败并修复对应权威证据路径，不能取消真实缺口检查。",
+        "当前 Run 后续有效证据可自动收敛；原因、提交现状和恢复方式准确可读。",
+        "屏幕、提交、降级与恢复回归通过，关键生产变异变红，公开 Client 的调用链真实可达。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "python3 /tmp/verify-inbox-candidate.py && pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run packages/core/test/agent-terminal-screen.test.ts packages/core/test/prompt-submission-diagnostics.test.ts packages/core/test/agent-session-continuity.test.ts apps/desktop/test/service-window-notice.test.ts --maxWorkers=1",
+          "proves": "屏幕确认、提交降级与提示收敛"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.5,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "python3 /tmp/verify-inbox-candidate.py && pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run packages/core/test/agent-terminal-screen.test.ts packages/core/test/prompt-submission-diagnostics.test.ts packages/core/test/agent-session-continuity.test.ts apps/desktop/test/service-window-notice.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "a91f46c037ca30c2a2926151c8bc9524a052bef2",
+        "worktree_digest": "f1bf741219e2e016958372dd93d60a91a6733ececf68117a8d083f313f2f378c",
+        "verification_digest": "none",
+        "dedup_key": "49b652c241e356f9233223d840e24e50a160402e04f330ae7ac0158bad5c35c2",
+        "source_key": "8a765e35276ebb029ad4a27cb71f95a3d8cabc6fa445a2849da9237ef2bfc716",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "交互与密度 SSOT 已记录通知、身份与输入权威边界",
+      "refs": [
+        "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "已审查 readiness 许可证、持久已读空投影及未知事务的同一操作恢复",
+      "refs": [
+        "docs/reviews/message-tools-alignment-and-evidence-2026-09-20.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "项目现有 RED-LINES 与设计 SSOT 已持有这些规则；无须新增抽象层",
+      "refs": []
+    }
+  }
+}

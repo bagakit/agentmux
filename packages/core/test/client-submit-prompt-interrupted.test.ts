@@ -22,8 +22,7 @@ const READY_READINESS = {
   readyThroughByte: 7
 }
 
-// The pass-through fixture: an epoch present but never observed (no readyThroughByte). `claimPromptReadiness`
-// refuses it synchronously with AGENT_PROMPT_NOT_READY — a fail-closed refusal that must survive unmapped.
+// An epoch present but not yet observed must not disable healthy prompt input.
 const UNOBSERVED_READINESS = {
   source: 'initial-composer' as const,
   id: 'submit-epoch-1',
@@ -163,11 +162,40 @@ describe('submitAgentPrompt during screen replacement', () => {
     expect(fixture.client.agentSessions()[0]!.terminalPromptDelivery).toBeUndefined()
   })
 
-  it('preserves readiness refusal and its diagnostics before any input is sent', async () => {
+  it('allows repeated mid-turn steer without a Stop, including a fresh client over the persisted Session', async () => {
     const fixture = await submitClient(UNOBSERVED_READINESS)
-    await expect(fixture.client.submitAgentPrompt({
-      agentSessionId: AGENT_SESSION_ID, operationId: 'op-2', prompt: 'ship it'
-    })).rejects.toMatchObject({ code: 'AGENT_PROMPT_NOT_READY', detail: expect.stringContaining('observation-pending') })
-    expect(fixture.writes).toEqual([])
+    vi.spyOn(fixture.state.screenEvidence, 'wait').mockResolvedValue(20)
+    const first = { agentSessionId: AGENT_SESSION_ID, operationId: 'op-2', prompt: 'first steer' }
+    await fixture.client.submitAgentPrompt(first)
+    const persisted = fixture.client.agentSessions()[0]!
+    expect(persisted.terminalPromptSubmission?.submit.acknowledged).toBe(true)
+    expect(persisted.terminalPromptSubmission?.readinessEvidence).toBeUndefined()
+    await fixture.client.submitAgentPrompt({ ...first, operationId: 'op-3', prompt: 'second steer' })
+    expect(fixture.writes).toEqual(['first steer', '\r', 'second steer', '\r'])
+    const last = fixture.client.agentSessions()[0]!
+    const restored = await submitClient(UNOBSERVED_READINESS)
+    const registry = (restored.state.registry as unknown as { put(value: AgentMuxStoredAgentSession): Promise<void> })
+    await registry.put({ ...storedSession(UNOBSERVED_READINESS), ...last })
+    restored.state.kernel.status = async () => runProjection(Buffer.byteLength(fixture.writes.join('')))
+    vi.spyOn(restored.state.screenEvidence, 'wait').mockResolvedValue(30)
+    await restored.client.submitAgentPrompt({ ...first, operationId: 'op-4', prompt: 'after restart' })
+    expect(restored.writes).toEqual(['after restart', '\r'])
+    await fixture.client.dispose()
+    await restored.client.dispose()
   })
+})
+
+it('cancels a prompt queued behind another submission before Core claims new bytes', async () => {
+  const fixture = await submitClient(READY_READINESS)
+  const first = fixture.client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'first', prompt: 'first' })
+  await vi.waitFor(() => expect(fixture.observeCalls()).toBe(1))
+  const controller = new AbortController()
+  const queued = fixture.client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'queued', prompt: 'cancelled', signal: controller.signal })
+    .then(() => null, (error: unknown) => error)
+  controller.abort()
+  fixture.discardEvidence(); await first
+  expect(await queued).toMatchObject({ code: 'AGENT_PROMPT_CANCELLED' })
+  expect(fixture.writes).toEqual(['first', '\r'])
+  expect(fixture.client.agentSessions()[0]?.terminalPromptSubmission?.submissionId).toBe('first')
+  await fixture.client.dispose()
 })

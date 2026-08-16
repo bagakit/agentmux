@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 168
+    "next_cursor": 171
   },
   "features": [
     {
@@ -1668,6 +1668,36 @@
     {
       "feat_id": "f-27e8fkcsx",
       "title": "Message Tools 三档真正变形，入口清楚且保持左侧",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27f8fksyq",
+      "title": "终端历史截断后的投递确认与告示收敛",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27g8f3x7n",
+      "title": "Message Tools 通知收件箱",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27h8fguek",
+      "title": "Steer readiness 证据与输入事务分离",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

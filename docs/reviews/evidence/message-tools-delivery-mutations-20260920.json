@@ -1,0 +1,137 @@
+{
+  "candidate_base": "a91f46c0",
+  "mutations": [
+    {
+      "name": "receipt-not-recorded",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/session-notice-inbox.test.tsx > moves the real Session delivery notice into the inbox without clearing the Core fact"
+    },
+    {
+      "name": "recovery-keeps-old-receipt",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/session-notice-inbox.test.tsx > coalesces repetitions but reopens changed causes and a recurrence after recovery"
+    },
+    {
+      "name": "scope-leaks",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/session-notice-inbox.test.tsx > keeps the inbox enabled in every mode, even when prompt input is disabled, and scopes receipts"
+    },
+    {
+      "name": "identity-label-visible",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/composer-identity.test.tsx > shows and updates the actual Session identity, including same-provider siblings and renames"
+    },
+    {
+      "name": "unequal-hit-height",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/message-tools-three-state.test.tsx > Message Tools three-state interaction > gives toolbar controls a shared fixed height in all modes"
+    },
+    {
+      "name": "queue-not-wired",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/session-notice-inbox.test.tsx > collects queue problems in the same inbox, preserving messages and recovery actions"
+    },
+    {
+      "name": "consumed-is-permission",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > prompt readiness refusal diagnostics > sends a steer after acknowledged delivery without waiting for Stop"
+    },
+    {
+      "name": "pending-is-permission",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > prompt readiness refusal diagnostics > continues with missing readiness and verifies the actual payload"
+    },
+    {
+      "name": "incomplete-submission-admitted",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > prompt readiness refusal diagnostics > reports non-sensitive submission facts when another two-phase prompt is in flight"
+    },
+    {
+      "name": "gap-attachment-discarded",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/agent-terminal-screen.test.ts > retains the attachment after prefix eviction and recovers only after a real terminal reset"
+    },
+    {
+      "name": "suffix-assumed-complete",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/agent-terminal-screen.test.ts > retains the attachment after prefix eviction and recovers only after a real terminal reset"
+    },
+    {
+      "name": "reset-does-not-recover",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/agent-terminal-screen.test.ts > retains the attachment after prefix eviction and recovers only after a real terminal reset"
+    },
+    {
+      "name": "completion-not-deduplicated",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/continuous-progress-loop-manager.test.ts > ContinuousProgressLoopManager > claims a completed turn once without screen readiness, including after restart"
+    },
+    {
+      "name": "restart-forgets-receipt",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/session-notice-inbox.test.tsx > retains acknowledgement through the empty restart snapshot, but a new Run alerts again"
+    },
+    {
+      "name": "unknown-resume-mints-new-id",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/continuous-progress-loop-manager.test.ts > restores an interrupted claim as unknown and resumes using the original operation identity"
+    },
+    {
+      "name": "restart-replays-unknown",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/continuous-progress-loop-manager.test.ts > restores an interrupted claim as unknown and resumes using the original operation identity"
+    },
+    {
+      "name": "paused-still-sends",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/continuous-progress-loop-manager.test.ts > does not send after pause while observation is pending"
+    },
+    {
+      "name": "old-completion-sends",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  apps/desktop/test/continuous-progress-delivery.test.ts > abandons an old claim after new-run"
+    },
+    {
+      "name": "core-condition-ignored",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > rejects a stale automatic completion at the durable input claim, while leaving manual input available"
+    },
+    {
+      "name": "core-cancellation-ignored",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/client-submit-prompt-interrupted.test.ts > cancels a prompt queued behind another submission before Core claims new bytes"
+    },
+    {
+      "name": "receipt-recovery-blocked",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > reconciles an admitted automatic operation after its completion changes without admitting another prompt"
+    },
+    {
+      "name": "interaction-recovery-writes",
+      "caught": true,
+      "exit": 1,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > does not continue a partially accepted old transaction into a pending interaction"
+    }
+  ]
+}
