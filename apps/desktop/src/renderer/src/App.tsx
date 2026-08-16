@@ -1,3 +1,4 @@
+import { SettingsNavigation } from './components/SettingsNavigation'
 import {
   AlertTriangle,
   LoaderCircle
@@ -53,6 +54,7 @@ export function App() {
 
 function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
+  const openSettings = (section: SettingsSectionId): void => setSettingsRoute({ section })
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
@@ -223,7 +225,7 @@ function DesktopApp() {
   }
 
   return (
-    <>
+    <SettingsNavigation.Provider value={{ open: openSettings }}>
       <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
@@ -234,12 +236,12 @@ function DesktopApp() {
       >
       {projectRailOpen ? (
         <ProjectRail
-          onOpenSettings={(section) => setSettingsRoute({ section })}
+          onOpenSettings={openSettings}
         />
       ) : (
         <ProjectRailToolbar
           collapsed
-          onOpenSettings={(section) => setSettingsRoute({ section })}
+          onOpenSettings={openSettings}
         />
       )}
       <main className={`main-shell ${mergedTopRow ? 'main-shell--merged' : ''}`}>
@@ -350,6 +352,6 @@ function DesktopApp() {
           onClose={() => setSettingsRoute(null)}
         />
       ) : null}
-    </>
+    </SettingsNavigation.Provider>
   )
 }

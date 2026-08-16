@@ -179,7 +179,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
         <header><div className="eyebrow">{groupTitle}</div><h2>{section.title}</h2><p>{section.description}</p></header>
         <div className="settings-content__scroll">
           {active === 'general' ? <GeneralSettingsPane /> : null}
-          {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
+          {active === 'appearance' ? <AppearanceSettingsPane executors={config.executors} appearance={config.appearance} onSave={saveAppearance} /> : null}
           {active === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
           {active === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
           {active === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}

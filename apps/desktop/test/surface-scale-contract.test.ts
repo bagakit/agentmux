@@ -39,10 +39,6 @@ const GLYPH_PX = 7
 const FONT_SIZE_EXCEPTIONS = new Map<string, number>([
   ['.status--error .status__dot::after', GLYPH_PX],
   ['.status--waiting .status__dot::after, .status--blocked .status__dot::after', GLYPH_PX],
-  [
-    ".agent-avatar[data-attention='needs-you']::after, .agent-avatar[data-attention='error']::after",
-    GLYPH_PX
-  ]
 ])
 
 /**

@@ -43,7 +43,6 @@
 .composer-send--working:hover:not(:disabled) { background: var(--amber-bg); }
 .composer-session-controls .composer__identity { padding-inline: 0; }
 .composer-session-controls .agent-avatar { background: transparent; box-shadow: none; }
-.composer-session-controls .agent-avatar:is(.status--working, .status--running) { outline: none; color: var(--status-ink); }
 
 
 .composer__toolbar { flex-wrap: nowrap; gap: var(--sp-2); }

@@ -62,6 +62,7 @@ export function WorkspaceTopicsPanel({
   const activeTabId = layout?.groups.find((group) => group.id === layout.activeGroupId)?.activeTabId
   const topicId = useAppStore((state) => activeTabId ? state.tabs[activeTabId]?.topicId : undefined)
   const tabs = useAppStore((state) => state.tabs)
+  const avatarAppearances = useAppStore((state) => state.config?.appearance.agentAvatars)
   const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
   const sessions = useAppStore((state) => state.sessions)
   // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
@@ -320,6 +321,7 @@ export function WorkspaceTopicsPanel({
                             return {
                               key: agent.sessionId,
                               providerId: agent.providerId,
+                              appearance: agent.live ? avatarAppearances?.[agent.live.executorId] : undefined,
                               // 经命名链求值，不直接用 agent.live.label。那个 label 是 Main 建的
                               // `executorLabel · workspaceLabel`（链的最低一档），对「同 provider 多个
                               // Agent 同一目录」这个本条要解的场景逐字相同——两枚头像的 tooltip 与

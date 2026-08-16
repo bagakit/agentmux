@@ -312,16 +312,12 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               presence={
                 <SelectorPresence
                   agents={runningAgents.map((agent) => ({
-                    key: agent.providerId,
+                    key: agent.executorId,
                     providerId: agent.providerId,
-                    label: agentProviderLabel(agent.providerId),
-                    // 这一簇是按 provider 归并的运行中 Run，不是逐个 Session——它们按定义都在跑
-                    // （`runningAgentPresenceByWorktree` 只收 processState==='running'）。所以这里递的
-                    // 权威输入就是 `state: 'running'`，头像据它现算出「无 needs-you 口径」——这是真话，
-                    // 不是从前那个硬写的 `attention: null`。从前 Topic 侧递算好的 accent、这里硬写 null，
-                    // 同一个组件被两处对「需不需要你」答得相反；现在两侧都只递 state，由头像内部那一处
-                    // 唯一裁决（attentionAccentFor），不可能再答出两个答案。
-                    state: 'running',
+                    label: config?.executors[agent.executorId]?.label ?? agentProviderLabel(agent.providerId),
+                    appearance: config?.appearance.agentAvatars?.[agent.executorId],
+                    // A stack uses the same urgency order as the roster; a live process is not always ready.
+                    state: agent.state,
                     count: agent.count
                   }))}
                 />

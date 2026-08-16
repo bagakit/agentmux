@@ -74,13 +74,7 @@
 .selector-presence__slot:hover button.agent-avatar,
 .selector-presence__slot:focus-within button.agent-avatar { transform: translateY(-2px) scale(1.18); }
 /* 同一个 provider 归并了几个 Session 时的角标。 */
-.selector-presence__slot small {
-  position: absolute; right: -3px; bottom: -3px;
-  min-width: 9px; height: 9px; padding:0 var(--sp-1);
-  border-radius: var(--radius-sm);
-  color: var(--green-text); background: var(--green-line);
-  font: 10px/9px var(--font-mono); text-align: center;
-}
+
 /* 折起来的那些。它跟在最后一枚之后，不参与叠压——`+3` 被压掉一半就不成其为数字了。 */
 .selector-presence em {
   margin-left:var(--sp-2);

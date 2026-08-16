@@ -9,6 +9,7 @@ import {
 function session(input: {
   id: string
   providerId: string | null
+  executorId?: string
   hostId?: string
   workspacePath?: string
   processState?: SessionSnapshot['processState']
@@ -30,7 +31,7 @@ function session(input: {
         ...common,
         kind: 'agent',
         providerId: input.providerId,
-        executorId: input.providerId,
+        executorId: input.executorId ?? input.providerId,
         control: {} as Extract<SessionSnapshot, { kind: 'agent' }>['control']
       }
     : {
@@ -51,11 +52,11 @@ describe('runningAgentPresenceByWorktree', () => {
     ])
 
     expect(presence.get(worktreePresenceKey('local', _hygiene_fixturePath("repo")))).toEqual([
-      { providerId: 'codex', count: 2, updatedAt: 30 },
-      { providerId: 'claude', count: 1, updatedAt: 20 }
+      { providerId: 'codex', executorId: 'codex', state: 'running', count: 2, updatedAt: 30 },
+      { providerId: 'claude', executorId: 'claude', state: 'running', count: 1, updatedAt: 20 }
     ])
     expect(presence.get(worktreePresenceKey('studio', _hygiene_fixturePath("repo")))).toEqual([
-      { providerId: 'pi', count: 1, updatedAt: 40 }
+      { providerId: 'pi', executorId: 'pi', state: 'running', count: 1, updatedAt: 40 }
     ])
   })
 
