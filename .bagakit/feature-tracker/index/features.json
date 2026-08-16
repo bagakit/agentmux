@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 146
+    "next_cursor": 147
   },
   "features": [
     {
@@ -1478,6 +1478,16 @@
     {
       "feat_id": "f-26q8f7nwj",
       "title": "Reusable conversation and Workflow surface components",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26r8fkn6u",
+      "title": "Workflow observation maturity and visual language",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

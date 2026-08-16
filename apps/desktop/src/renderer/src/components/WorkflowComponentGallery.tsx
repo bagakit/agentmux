@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { WorkflowCard, WorkflowDock, WorkflowToolRow } from './workflow'
+import { ObservationSurfaceGallery } from './ObservationSurfaceGallery'
 import {
   completedWorkflow,
   failedWorkflow,
@@ -69,6 +70,7 @@ export function WorkflowComponentGallery() {
         <p className="wf-gallery__caption"><b>D · 输入框上方 dock</b>　同一 WorkflowCard 的 dock 密度变体，内部滚动不复制状态。</p>
         <WorkflowDock workflow={runningWorkflow} />
       </section>
+      <ObservationSurfaceGallery />
     </main>
   )
 }

@@ -146,6 +146,13 @@
 .log-row:focus-visible .log-row__chevron { opacity: 1; }
 .log-row:focus-visible .log-row__source { opacity: 1; }
 .log-row:hover, .log-fold:hover { background: var(--surface-1); }
+/* The selected/open signal belongs to the whole row: surface contrast and the disclosure glyph carry
+   the state together. A coloured edge is reserved for the timeline's structural spine and never acts as
+   the only selected marker. */
+.log-row[data-open], .log-fold[data-open] { color: var(--text); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-soft), var(--hl); }
+.log-row[data-open] .log-row__title { font-weight: 560; }
+.log-row[data-status='failed'] { background: color-mix(in srgb, var(--red) 5%, transparent); }
+.log-row[data-status='failed']:hover, .log-row[data-status='failed'][data-open] { background: var(--red-bg); }
 .log-row__node, .log-fold__node {
   display: inline-flex;
   align-items: center;

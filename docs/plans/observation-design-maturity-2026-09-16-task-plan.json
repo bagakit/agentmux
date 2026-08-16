@@ -1,0 +1,103 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/observation-design-maturity-2026-09-16.md"
+  },
+  "source_refs": [
+    "docs/reviews/observation-design-maturity-2026-09-16.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/package.json",
+    "apps/desktop/src/renderer/src/components/workflow",
+    "apps/desktop/src/renderer/src/components/ActivityView.tsx"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "[实现] 建立独立 Gallery 构建 spine",
+      "objective": "Owned change surface: apps/desktop 的 Gallery entry、Vite gallery config、构建脚本和 Gallery boundary test。Known shared hotspots: WorkflowComponentGallery 导出与 workflow.css；不改聊天 Store 或 Runtime。",
+      "outcome": "Gallery 能独立构建并运行，不加载 Desktop Store、Core Session、Runtime 或 Monaco；现有本地观察入口保留可用。",
+      "acceptance": [
+        "独立 gallery build 只打入 Gallery、workflow 组件、现有 tokens 和必要图标，不把 Desktop App 的 Store、Monaco、EditorPane 带入候选入口。",
+        "Gallery 在路径前缀下资源可加载，并保留 running/completed/failed/killed/paused、旧 daemon、dock 和大规模 fixture 的可观察调用者。",
+        "删除 Gallery entry、误引入 Store 或把入口变成空渲染时 boundary test 红；真实构建和资源引用检查通过。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/gallery-boundary.test.ts", "proves": "独立入口、依赖边界和 Gallery 真实调用者。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop build:gallery", "proves": "Gallery 可独立生成静态候选。"}
+      ],
+      "source_refs": ["apps/desktop/package.json", "apps/desktop/vite.web.config.ts"]
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "[实现] 按原有技术边界重整 Workflow 组件",
+      "objective": "Owned change surface: apps/desktop/src/renderer/src/components/workflow 与 workflow tests。Known shared hotspots: Gallery fixture import 和 workflow.css；不改 Activity 真实数据接线。",
+      "outcome": "Workflow 组件拥有清晰的 view-model、展示策略和渲染边界；外部可控制需要控制的状态，组件不再承载 Provider/Runtime 判断。",
+      "acceptance": [
+        "Workflow 的事实模型使用有单位、有状态和可验证边界的类型；legacy 降级、quiet tail、默认展开策略在独立 presentation policy 中判定，渲染组件只画公开 props。",
+        "WorkflowCard、WorkflowDock 和 disclosure 支持受控入口并保留默认便捷用法；Dock 可由宿主控制可见性；状态更新不会抹掉用户已展开的意图。",
+        "公共入口只暴露稳定表面与类型；running/completed/failed/killed/paused/queued、重试、大规模、旧 daemon、窄屏和 reduced-motion 行为保持可观察。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workflow-components.test.tsx", "proves": "Workflow view-model、策略、受控交互和状态表达。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "公开类型和 Renderer 依赖边界。"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/workflow", "docs/design/agentmux-desktop-interaction.md"]
+    },
+    {
+      "id": "T-003",
+      "depends_on": ["T-001"],
+      "title": "[实现] 让现有观察与聊天表面靠拢 Workflow 视觉语言",
+      "objective": "Owned change surface: Activity、持续推进/状态观察、Composer、权限卡点、服务窗及其 owning CSS 与独立 ConversationComponentGallery。Known shared hotspots: tokens.css 和 index.css；不改 Workflow 类型合同。",
+      "outcome": "现有表面保留原有行为和事实 owner，同时采用 Workflow 的低干扰行、分层详情、状态字形、密度和焦点语言，Gallery 能并排观察差异。",
+      "acceptance": [
+        "Activity 的机器步骤、对话正文、需要人决定的卡点保持不同信息层级，但共享对齐、状态和焦点语言；没有重复的第二套时间线或 Store。",
+        "样式只使用现有 token 和明确的观察组件规则；状态不只靠颜色或单边 rail；窄屏、键盘、触屏和 reduced-motion 有可验证规则。",
+        "ConversationComponentGallery 只接真实既有组件和静态输入，不把 Workflow fixture 接入聊天；原有 Activity、Composer、Interaction、ServiceWindow 测试行为不退化。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/activity-view.test.tsx test/agent-composer.test.tsx test/agent-interaction-card.test.tsx test/reusable-component-gallery.test.tsx", "proves": "既有组件行为和新的视觉调用者。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "表面改版没有越过既有技术边界。"}
+      ],
+      "source_refs": ["docs/design/agentmux-surface-density.md", "apps/desktop/src/renderer/src/styles/activity.css"]
+    },
+    {
+      "id": "T-004",
+      "depends_on": ["T-001"],
+      "title": "[实现] 收敛设计规范并完成前端技术栈评审",
+      "objective": "Owned change surface: 两份设计 SSOT、技术栈评审 artifact、从 package/build/source 派生的 stack review test。Known shared hotspots: docs/design files 和 package.json；不在无证据情况下替换框架或依赖。",
+      "outcome": "设计规范从追加条款收敛成全局基础、观察组件、聊天表面三层；技术栈评审明确保留、补充、暂不引入的选择及依据。",
+      "acceptance": [
+        "Desktop interaction 和 Surface density 对 Workflow/聊天/观察的对象、状态、密度、焦点、响应式、语义经济和降级规则各有唯一归属，重复条款有引用关系。",
+        "技术栈评审覆盖 React 19、TypeScript、Vite/electron-vite、Zustand、Radix、dnd-kit、Monaco、xterm、Vitest/Happy DOM，并从当前 package.json 和源码消费者派生证据；结论不能只写偏好。",
+        "stack review test 扫描到真实依赖和调用者且非空；依赖删除、替换为未登记方案或文档链接漂移时测试红。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/frontend-stack-review.test.ts", "proves": "技术栈来源、真实消费者与 review artifact 的一致性。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "规范收敛没有破坏类型边界。"}
+      ],
+      "source_refs": ["apps/desktop/package.json", "package.json", "docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+    },
+    {
+      "id": "T-005",
+      "depends_on": ["T-002", "T-003", "T-004"],
+      "title": "[验收] 汇合候选并完成真实浏览器观察验收",
+      "objective": "Owned change surface: Feature workspace 的 join evidence、Farm 浏览器验收与变异/调用者证据。Known shared hotspots: 所有已完成分支的最终候选；不新增产品行为。",
+      "outcome": "同一候选同时通过 Workflow、既有聊天表面、设计规范和技术栈证据；Gallery 与真实工作面在 Farm 浏览器中清晰可用。",
+      "acceptance": [
+        "构建、定向测试、全量 Desktop typecheck 通过；对 Workflow quiet-tail、Gallery entry 和样式选择器各完成一次块级变异并确认测试变红后恢复。",
+        "排除定义文件后，Workflow 与既有组件均有真实调用者；扫描集合非空且不依赖 vacuous every/some。",
+        "Farm 浏览器验证深浅主题、Gallery、Activity/Composer/Interaction/ServiceWindow、窄屏、键盘折叠、失败/暂停/旧 daemon 和 reduced-motion，保存可复核证据。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build", "proves": "最终 Renderer 候选可构建。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workflow-components.test.tsx test/gallery-boundary.test.ts test/activity-view.test.tsx test/frontend-stack-review.test.ts", "proves": "最终候选行为、边界、调用者和技术栈证据。"},
+        {"kind": "command", "ref": "python3 /Users/bytedance/workspace/farm/ops/frontend-testing/cli.py --help", "proves": "Farm 前端验收入口存在并按项目手册执行。"}
+      ],
+      "source_refs": ["docs/reviews/observation-design-maturity-2026-09-16.md", "ops/frontend-testing/AGENT-WORKFLOW.md"]
+    }
+  ]
+}
