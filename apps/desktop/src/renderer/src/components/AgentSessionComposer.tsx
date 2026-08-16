@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -74,6 +76,7 @@ export function AgentSessionComposer({
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
 }) {
+  const insertionRef = useRef<ComposerInsertionHandle>(null)
   const feedback = useComposerFeedback(sessionId)
   const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
@@ -188,28 +191,24 @@ export function AgentSessionComposer({
 
   function addFileReference(): void {
     if (!activeFile || !submitMode.canType) return
-    setAgentComposerDraft(sessionId, appendFileReferences(text, [activeFile]))
+    void feedback.run(() => insertionRef.current?.insert(() => appendFileReferences('', [activeFile]), { separate: true }))
   }
 
   async function attachFiles(): Promise<void> {
     if (!submitMode.canType) return
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
-    if (!chosen?.length) return
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    setAgentComposerDraft(sessionId, appendFileReferences(current, chosen, workspacePath))
+    await insertionRef.current?.insert(async () => {
+      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
+      return chosen?.length ? appendFileReferences('', chosen, workspacePath) : null
+    }, { separate: true })
   }
 
-  async function pasteImage(image: { bytes: Uint8Array; extension: string }): Promise<void> {
+  async function pasteImage(file: File, insert: ComposerInsert): Promise<void> {
     if (!submitMode.canType) return
-    const path = await api.ui.savePastedImage(image)
-    insertReference(path)
-  }
-
-  function insertReference(path: string): void {
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    // App-owned images remain absolute even when the workspace contains the pasted directory.
-    setAgentComposerDraft(sessionId, appendFileReferences(current, [path]))
+    await insert(async () => {
+      const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
+      return appendFileReferences('', [path])
+    }, { separate: true })
   }
 
   function insertSemanticReference(reference: { name: string; path: string }): void {
@@ -225,8 +224,10 @@ export function AgentSessionComposer({
   }
 
   async function capture(): Promise<void> {
-    const path = await api.ui.captureScreenshot()
-    if (path) insertReference(path)
+    await insertionRef.current?.insert(async () => {
+      const path = await api.ui.captureScreenshot()
+      return path ? appendFileReferences('', [path]) : null
+    }, { separate: true })
   }
 
   const notices: ComposerNotice[] = []
@@ -256,6 +257,7 @@ export function AgentSessionComposer({
   return (
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
+      insertionRef={insertionRef}
       mailbox={<SessionMailbox inbox={inbox}
         {...(session?.kind === 'agent' && displayName ? { identity: {
           name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
@@ -329,7 +331,7 @@ export function AgentSessionComposer({
       // irrelevant to them.
       {...(submitMode.canType ? {
         onAttach: () => { void feedback.run(attachFiles) },
-        onPasteImage: (image: { bytes: Uint8Array; extension: string }) => { void feedback.run(() => pasteImage(image)) },
+        onPasteImage: (file: File, insert: ComposerInsert) => { void feedback.run(() => pasteImage(file, insert)) },
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
       // Posture and submit share one gate because they are literally the same write.
