@@ -38,6 +38,15 @@ import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 
+/**
+ * 一个 selector 的返回值就是 `useSyncExternalStore` 的快照，React 用 `Object.is` 比较它。所以缺省值必须是
+ * 这个**常量**，不能是就地写的 `?? []` —— 那个字面量每次调用都新建一个数组，快照永远「变了」，组件立刻
+ * 进入无限重渲染（React error #185，控制台先报 "The result of getSnapshot should be cached"）。
+ * `togglePinnedItem` 在清空时会 delete 掉整个 key（store.ts 的 `pinnedItems` 分支），所以「缺 key」是常态
+ * 而不是边角：没 pin 过任何东西的全新 userData 一进来就撞上，日常用的 profile 反而因为 key 在而正常。
+ */
+const NO_PINNED_TOPICS: readonly string[] = []
+
 export function WorkspaceTopicsPanel({
   workspace,
   onRevealDirectory
@@ -76,7 +85,7 @@ export function WorkspaceTopicsPanel({
   // SCRATCH_WORKSPACE_ID **派生**、绝不在这里手写字面量：Topic id 只在唯一那个 Scratch workspace
   // 内唯一，所以这就是它的 scope（见 store.ts pinnedItems 的注释）。左栏那些 pinned 子行读的也是
   // 这一桶，投影与它必须同源，否则「列表里靠前」和「挂在 Scratch 下」会各说各话。
-  const pinnedTopics = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID] ?? [])
+  const pinnedTopics = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID] ?? NO_PINNED_TOPICS)
   const togglePinnedItem = useAppStore((state) => state.togglePinnedItem)
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
