@@ -102,7 +102,12 @@ const browserSchema = z.object({
     screenshot: z.boolean(),
     devTools: z.boolean(),
     viewport: z.boolean(),
-    saveBookmark: z.boolean(),
+    // 这一项比另外五个晚到,而 CONFIG_VERSION 仍是 9 —— 磁盘上已经存在写于它之前的 v9 配置
+    // (本机 dev.agentmux.desktop 那份就是:toolbar 只有五个键)。v9 不小于 CONFIG_VERSION,
+    // 走不到 retiredConfigReplacement 那条退休路径,直接进 configSchema.parse;写成必需就抛
+    // invalid_type,而这里抛出去等于 get() 抛、应用起不来。`.default(true)` 让缺席读成「开着」,
+    // 与 DEFAULT_CONFIG 同值,也与另外五个既有项的表现一致。
+    saveBookmark: z.boolean().default(true),
     more: z.boolean()
   }).strict()
 }).strict()
