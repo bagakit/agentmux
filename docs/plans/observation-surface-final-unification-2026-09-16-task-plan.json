@@ -1,0 +1,47 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status":"approved", "evidence_ref":"docs/reviews/observation-surface-final-unification-2026-09-16.md"},
+  "source_refs":["docs/reviews/observation-surface-final-unification-2026-09-16.md","docs/design/agentmux-desktop-interaction.md","docs/design/agentmux-surface-density.md"],
+  "tasks":[
+    {
+      "id":"T-001",
+      "depends_on":[],
+      "title":"统一观察 surface 的视觉骨架",
+      "objective":"让 Activity、Workflow、服务窗、权限卡和 Composer 共享时间线、surface、状态轨道、焦点和动势语言。",
+      "outcome":"聊天观察区形成一套清晰、成熟、可维护的视觉骨架，不复制第二套聊天组件。",
+      "acceptance":["现有生产组件共享明确的观察 surface class/token，不靠页面级覆盖堆叠。","状态、焦点、hover、reduced-motion 和窄屏行为有统一规则。","视觉增强不引入新的 UI 框架或无事实装饰。"],
+      "verification":[{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/activity-view.test.tsx test/agent-interaction-card.test.tsx test/agent-composer.test.tsx","proves":"聊天观察与交互行为不退化。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck","proves":"组件边界和样式引用完整。"}],
+      "source_refs":["apps/desktop/src/renderer/src/styles/activity.css","apps/desktop/src/renderer/src/styles/workflow.css"]
+    },
+    {
+      "id":"T-002",
+      "depends_on":["T-001"],
+      "title":"把真实聊天观察接入最终 Workflow surface",
+      "objective":"在聊天宿主中使用最终 Workflow/semantic icon surface，适配真实 Activity/Run/Agent 事实，不把 Gallery fixture 带入生产。",
+      "outcome":"聊天页与 Gallery 使用同一套公开组件，生产状态和恢复路径完整可读。",
+      "acceptance":["数据适配发生在宿主层，组件不读 Store/Provider/Runtime。","真实状态缺失时显示 unknown/服务窗，不用 fixture 补齐。","失败、暂停、权限和 degraded 状态始终可见且可恢复。"],
+      "verification":[{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/activity-view.test.tsx test/reusable-component-gallery.test.tsx test/semantic-icons.test.tsx","proves":"生产调用者、状态表达和组件边界。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck","proves":"聊天接线的类型安全。"}],
+      "source_refs":["apps/desktop/src/renderer/src/components/SessionPane.tsx","apps/desktop/src/renderer/src/components/ActivityView.tsx"]
+    },
+    {
+      "id":"T-003",
+      "depends_on":["T-001","T-002"],
+      "title":"更新 Gallery 为最终视觉验收入口",
+      "objective":"Gallery 展示最终生产组件、关键状态、真实公开 props 和视觉结构，让用户可以快速检查最终效果。",
+      "outcome":"Gallery 与聊天页一一对应，成为稳定的 UI 回归入口。",
+      "acceptance":["Gallery 结构对应聊天观察区，展示运行/终态/失败/degraded/权限/Composer 等状态。","图标、动效、主题、窄屏和 reduced-motion 通过真实组件体现。","独立入口边界和构建继续成立。"],
+      "verification":[{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/gallery-boundary.test.ts test/reusable-component-gallery.test.tsx test/semantic-icons.test.tsx","proves":"Gallery 的生产调用者和边界。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop build:gallery","proves":"最终 Gallery 可独立部署。"}] ,
+      "source_refs":["apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx","apps/desktop/src/renderer/src/components/ObservationSurfaceGallery.tsx"]
+    },
+    {
+      "id":"T-004",
+      "depends_on":["T-003"],
+      "title":"最终质量与视觉验收",
+      "objective":"对最终候选执行定向测试、构建、变异和浏览器观察，确认视觉完成度与架构边界。",
+      "outcome":"同一候选通过行为、类型、构建、Gallery 和真实聊天观察证据。",
+      "acceptance":["关键 selector/semantic mapping/quiet-tail 变异能让对应测试变红后恢复。","定义文件之外的 Workflow、semantic icon 和聊天 surface 都有真实调用者。","Gallery 和聊天页的深浅主题、窄屏、键盘、失败/暂停/reduced-motion 可观察。"],
+      "verification":[{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build && pnpm --filter @agentmux/desktop build:gallery","proves":"最终候选可构建。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/activity-view.test.tsx test/agent-interaction-card.test.tsx test/agent-composer.test.tsx test/workflow-components.test.tsx test/gallery-boundary.test.ts test/reusable-component-gallery.test.tsx test/semantic-icons.test.tsx","proves":"最终行为和调用者证据。"}],
+      "source_refs":["docs/reviews/observation-surface-final-unification-2026-09-16.md"]
+    }
+  ]
+}

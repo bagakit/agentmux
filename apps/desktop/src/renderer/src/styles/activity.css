@@ -5,7 +5,7 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.activity-feed { height: 100%; overflow: auto; padding:0 0 var(--sp-6); background: var(--surface-0); }
+.activity-feed { height: 100%; overflow: auto; padding:0 0 var(--sp-6); background: radial-gradient(80% 24% at 50% 0, color-mix(in oklab, var(--blue) 7%, transparent), transparent 72%), var(--surface-0); }
 .activity-feed__empty { padding-top:70px; color: var(--text-3); font-size: var(--fs-meta); text-align: center; }
 /* The ruler is an honest temporal axis: ticks sit at their real elapsed fraction, so a burst of
    machine steps clusters and a long think opens a gap. It reads the shape of the run at a glance. */
@@ -18,7 +18,8 @@
   gap:var(--sp-4);
   padding:var(--sp-3) var(--sp-5) var(--sp-3);
   background: var(--surface-0);
-  box-shadow: inset 0 -1px var(--line-soft);
+  box-shadow: inset 0 -1px var(--line-soft), 0 8px 28px color-mix(in oklab, var(--bg) 24%, transparent);
+  backdrop-filter: blur(14px);
 }
 .activity-ruler__track { position: relative; flex: 1; height: 18px; }
 .activity-ruler__rail { position: absolute; top: 50%; left: 0; right: 0; height: 2px; border-radius: 1px; background: var(--line-soft); }
@@ -145,7 +146,7 @@
 .log-row:focus-visible, .log-fold:focus-visible { border-radius: var(--radius-sm); }
 .log-row:focus-visible .log-row__chevron { opacity: 1; }
 .log-row:focus-visible .log-row__source { opacity: 1; }
-.log-row:hover, .log-fold:hover { background: var(--surface-1); }
+.log-row:hover, .log-fold:hover { background: color-mix(in oklab, var(--surface-1) 82%, var(--blue) 18%); }
 /* The selected/open signal belongs to the whole row: surface contrast and the disclosure glyph carry
    the state together. A coloured edge is reserved for the timeline's structural spine and never acts as
    the only selected marker. */
@@ -153,6 +154,7 @@
 .log-row[data-open] .log-row__title { font-weight: 560; }
 .log-row[data-status='failed'] { background: color-mix(in srgb, var(--red) 5%, transparent); }
 .log-row[data-status='failed']:hover, .log-row[data-status='failed'][data-open] { background: var(--red-bg); }
+.log-row--assistant_message .log-row__title { font-weight: 560; }
 .log-row__node, .log-fold__node {
   display: inline-flex;
   align-items: center;

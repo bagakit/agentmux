@@ -4,6 +4,7 @@ import { AgentMarkdown } from './AgentMarkdown'
 import { ComposerTextarea } from './ComposerTextarea'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
+import { SemanticIcon } from './semantic-icons'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
 const workingStatus: SessionSnapshot['status'] = {
@@ -27,7 +28,7 @@ export function ObservationSurfaceGallery() {
     <section className="observation-gallery" aria-label="Existing observation surfaces">
       <header className="observation-gallery__heading">
         <span className="observation-gallery__eyebrow">Existing surface language</span>
-        <h2>对话、状态和服务窗</h2>
+        <h2><SemanticIcon name="context" size={16} />对话、状态和服务窗</h2>
         <p>复用原有组件的事实边界，用 Workflow 的层级、密度和观察节奏呈现。</p>
       </header>
       <div className="observation-gallery__grid">

@@ -1,0 +1,50 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/chat-observation-production-surface-2026-09-16.md"
+  },
+  "source_refs": [
+    "docs/reviews/chat-observation-production-surface-2026-09-16.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx",
+    "apps/desktop/src/renderer/src/components/workflow"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "收敛 Gallery 的图标与内容结构",
+      "objective": "让 Gallery 使用 AgentMux 现有语义图标和清晰的 section 阅读路径，同时保持公开 props 与独立入口不变。",
+      "outcome": "Gallery 的图标、标题层级、section 导航和状态表达与现有产品语言一致。",
+      "acceptance": [
+        "Gallery section 使用 lucide-react/现有状态 glyph，不以 emoji 或颜色作为唯一状态信号。",
+        "页面结构明确表达上下文、主体工作流、终态恢复、规模与旧 daemon、dock、聊天表面六个阅读区。",
+        "Gallery boundary 与组件测试在图标/结构误删时变红。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/gallery-boundary.test.ts test/workflow-components.test.tsx test/reusable-component-gallery.test.tsx", "proves": "Gallery 入口、结构调用者和组件行为。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop build:gallery", "proves": "独立 Gallery 可构建。"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx", "apps/desktop/src/renderer/src/styles/workflow.css"]
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "把聊天观察区替换为同一套 production surface",
+      "objective": "在聊天页面使用已验收 Workflow surface，保留真实聊天事实 owner 和现有输入/权限/服务窗行为。",
+      "outcome": "聊天观察区与 Gallery 共用组件、图标、密度和状态表达，不接入 Gallery fixture。",
+      "acceptance": [
+        "聊天宿主通过公开 props 映射真实 Activity/Run/Agent 事实，组件不直接读取 Store、Provider 或 Runtime。",
+        "消息正文、状态、服务窗、权限交互和 Composer 原有行为测试不退化。",
+        "生产聊天页面和 Gallery 使用同一套 Workflow surface，没有复制的 chat-only 实现。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/activity-view.test.tsx test/agent-composer.test.tsx test/agent-interaction-card.test.tsx test/reusable-component-gallery.test.tsx", "proves": "聊天观察与输入交互行为。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "生产接线与公开类型边界。"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/ActivityView.tsx", "apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx"]
+    }
+  ]
+}

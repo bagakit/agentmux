@@ -1,19 +1,24 @@
 /* Workflow observation surfaces. This file deliberately consumes the existing token table: the
    component family should feel native to Activity, not like an embedded reference-page theme. */
 .wf-gallery { min-height: 100%; overflow: auto; padding: var(--sp-7) var(--sp-6) var(--sp-8); background: var(--bg); color: var(--text); font-size: var(--fs-body); line-height: 1.5; }
-.wf-gallery__bar, .wf-gallery__section, .wf-gallery__intro { width: min(880px, 100%); margin-inline: auto; }
+.wf-gallery__bar, .wf-gallery__section, .wf-gallery__intro, .wf-gallery__map { width: min(880px, 100%); margin-inline: auto; }
 .wf-gallery__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-7); }
 .wf-gallery__brand { font-size: var(--fs-title); font-weight: 620; }
 .wf-gallery__brand span { color: var(--text-3); font-weight: 400; }
 .wf-gallery__theme { display: inline-flex; gap: var(--sp-1); margin-left: auto; padding: var(--sp-1); border: 1px solid var(--line-soft); border-radius: 999px; background: var(--surface-1); }
 .wf-gallery__theme button { border: 0; border-radius: 999px; padding: var(--sp-2) var(--sp-4); color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; }
 .wf-gallery__theme button[aria-pressed='true'] { color: var(--text); background: var(--surface-3); }
-.wf-gallery__intro { margin-bottom: var(--sp-8); }
+.wf-gallery__intro { position: relative; margin-bottom: var(--sp-5); padding-left: 32px; }
+.wf-gallery__intro-mark { position: absolute; top: 4px; left: 0; display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--blue); background: var(--surface-1); }
 .wf-gallery__intro h1 { margin: 0 0 var(--sp-2); font-size: var(--fs-display); font-weight: 620; }
 .wf-gallery__intro p { max-width: 70ch; margin: 0; color: var(--text-2); }
-.wf-gallery__section { margin-top: var(--sp-7); }
-.wf-gallery__caption { margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.wf-gallery__map { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-8); }
+.wf-gallery__map a { display: inline-flex; align-items: center; gap: var(--sp-2); border: 1px solid var(--line-soft); border-radius: 999px; padding: var(--sp-2) var(--sp-3); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-meta); text-decoration: none; }
+.wf-gallery__map a:hover, .wf-gallery__map a:focus-visible { color: var(--text); background: var(--surface-3); }
+.wf-gallery__section { scroll-margin-top: var(--sp-5); margin-top: var(--sp-7); }
+.wf-gallery__caption { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
 .wf-gallery__caption b { color: var(--text-2); font-weight: 620; }
+.wf-gallery__caption span { min-width: 0; }
 .wf-gallery__timeline, .wf-gallery__stack { display: grid; gap: var(--sp-2); }
 .wf-gallery__timeline { padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-0); }
 .wf-gallery__message { padding: var(--sp-2) 0 var(--sp-3); color: var(--text); font-size: var(--fs-prose); }
@@ -24,7 +29,7 @@
 .wf-card[data-status='paused'] { --wf-accent: var(--amber); }
 .wf-head, .wf-phase__head, .wf-phase-toggle { width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); border: 0; border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-1); color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .wf-head:hover, .wf-phase__head:hover, .wf-phase-toggle:hover { color: var(--text); background: var(--surface-1); }
-.wf-head:focus-visible, .wf-phase__head:focus-visible, .wf-phase-toggle:focus-visible, .wf-agent__button:focus-visible, .wf-more button:focus-visible, .wf-dock__close:focus-visible, .wf-gallery__theme button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.wf-head:focus-visible, .wf-phase__head:focus-visible, .wf-phase-toggle:focus-visible, .wf-agent__button:focus-visible, .wf-more button:focus-visible, .wf-dock__close:focus-visible, .wf-gallery__theme button:focus-visible, .wf-gallery__map a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .wf-head__name { min-width: 0; overflow: hidden; color: var(--text-2); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .wf-head__name em { color: var(--text-3); font-style: normal; font-weight: 400; }
 .wf-head__meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0 var(--sp-4); margin-left: auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
@@ -98,7 +103,7 @@
 .observation-gallery { margin-top: var(--sp-8); padding-top: var(--sp-7); border-top: 1px solid var(--line-soft); }
 .observation-gallery__heading { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-5); }
 .observation-gallery__eyebrow, .observation-sample__label { color: var(--text-3); font-size: var(--fs-micro); font-weight: 620; letter-spacing: .06em; text-transform: uppercase; }
-.observation-gallery__heading h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 620; }
+.observation-gallery__heading h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 620; }
 .observation-gallery__heading p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .observation-gallery__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
 .observation-sample { min-width: 0; display: grid; align-content: start; gap: var(--sp-3); padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--hl); }

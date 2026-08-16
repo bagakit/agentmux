@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/semantic-icon-system-2026-09-16.md"},
+  "source_refs": ["docs/reviews/semantic-icon-system-2026-09-16.md", "docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立项目级 semantic icon contract",
+      "objective": "把状态、对象、动作、导航、层级语义和静态/动态/组合 renderer 统一成稳定 TypeScript API。",
+      "outcome": "业务组件传语义名和受控状态，不直接依赖具体 lucide glyph；动态与 reduced-motion 行为有唯一 owner。",
+      "acceptance": ["语义分类使用 literal union，映射表模块级稳定且有非空扫描测试。", "动画状态、静态状态、组合图标和 reduced-motion 共享 renderer contract。", "组件不读 Store、不测量布局、不在渲染中创建新的映射对象。"],
+      "verification": [{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/semantic-icons.test.tsx","proves":"语义映射、动态/reduced-motion 和无障碍 contract。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck","proves":"公开类型和 renderer 边界。"}],
+      "source_refs": ["apps/desktop/src/renderer/src/components/semantic-icons"]
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "迁移 Workflow、Gallery 与聊天观察调用者",
+      "objective": "把具有产品语义的现有图标调用迁移到 semantic icon 层，保留编辑器/终端第三方图标边界。",
+      "outcome": "Workflow、Gallery、Activity 和聊天观察相关图标使用统一语义入口，迁移范围由扫描证据确认。",
+      "acceptance": ["目标目录中业务 JSX 不再直接选择状态 glyph；定义文件之外存在真实调用者。", "迁移不改变现有状态、键盘、焦点和 reduced-motion 行为。", "迁移后长列表不产生额外 Store 订阅或重复映射实例。"],
+      "verification": [{"kind":"command","ref":"pnpm --filter @agentmux/desktop exec vitest run test/semantic-icons.test.tsx test/workflow-components.test.tsx test/gallery-boundary.test.ts","proves":"迁移后的调用者和状态行为。"},{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build:gallery","proves":"完整类型和独立 Gallery 构建。"}],
+      "source_refs": ["apps/desktop/src/renderer/src/components/workflow", "apps/desktop/src/renderer/src/components/ActivityView.tsx"]
+    }
+  ]
+}
