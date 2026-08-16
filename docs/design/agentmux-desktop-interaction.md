@@ -964,3 +964,7 @@ Readiness 是 Provider 输入框的观测证据，不是健康 Run 的永久发�
 ### Branch Pin 的层级与操作位（2026-09-20）
 
 用户反馈「branch 被 pin 了以后，它的缩进不对」，且 Pin 按钮不应在没有 hover 时占用名称空间。固定分支仍归属原 Project；导航、组内顺序、折叠语义不变。Pin 操作只切换固定，不打开分支；鼠标悬停与键盘聚焦时均可发现和操作。视觉约束见 surface-density 的同名小节。
+
+## Topic 行的 Region 与 Agent 在场状态（2026-09-20）
+
+用户要求「topic 的 region 表示和 agent 图标融合到一起」「已经关闭的 agents 就不要再显示在那边」。Topic 行在 Region 缩略格内显示属于该 Region 的小 Agent 图标，不再将同一 Agent 另列一枚重复头像。没有打开 Region 的后台健康 Agent 仍应可见可达；关闭 Tab 不等于结束 Agent。已明确结束的进程不再占 Topic 行头像位，未知/断连不伪装成关闭；历史 Session 与协作者文件保持原状。视觉约束见 surface-density 的同名段。

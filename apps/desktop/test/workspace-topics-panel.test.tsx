@@ -9,7 +9,7 @@ vi.hoisted(() => {
 })
 
 import type { AgentSessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
@@ -131,6 +131,7 @@ afterEach(async () => {
   fixture.state.agentNames = {}
   fixture.state.timelines = {}
   fixture.state.selectSession.mockReset()
+  fixture.state.openScratchTopic.mockReset()
   fixture.state.togglePinnedItem.mockReset()
 })
 
@@ -171,6 +172,46 @@ describe('Topic live Agent presence', () => {
     await act(async () => avatars[0]!.click())
     expect(fixture.state.selectSession).toHaveBeenCalledWith('beta')
   })
+  it('puts active avatars inside their own Region, retains background/unknown, and omits ended Agents', async () => {
+    const shared = topic('view:shared', 'Shared Topic')
+    fixture.snapshot = [shared]
+    const sessions = ['left', 'right', 'background', 'unknown', 'ended', 'interrupted'].map((id) => ({
+      id, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      hostId: 'local', workspacePath: shared.directoryPath, label: id,
+      createdAt: 1, updatedAt: 1,
+      processState: id === 'ended' ? 'exited' : id === 'interrupted' ? 'interrupted' : 'running',
+      status: { state: id === 'unknown' ? 'disconnected' : 'working', source: 'run-process', observedAt: 1 }
+    }))
+    fixture.state.sessions = sessions
+    const tab = createWorkbenchTab('split', {
+      regionId: 'left-cell', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'left'
+    })
+    tab.topicId = shared.id
+    tab.layout = splitWorkbenchRegion(tab.layout, 'left-cell', 'right', 'right-cell')
+    tab.regions['right-cell'] = { regionId: 'right-cell', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'right' }
+    fixture.state.tabs = { split: tab }
+    fixture.state.layouts = { [workspace.id]: createWorkspaceLayout('main', ['split']) }
+    await mount()
+    const row = rowByTitle('Shared Topic')
+    const cells = [...row.querySelectorAll<HTMLElement>('.topic-region-mosaic__cell')]
+    expect(cells.map((cell) => [cell.dataset.regionId, cell.querySelector('.agent-avatar')?.getAttribute('aria-label')]))
+      .toEqual([['left-cell', 'left · working'], ['right-cell', 'right · working']])
+    const avatars = [...row.querySelectorAll<HTMLButtonElement>('.agent-avatar')]
+    expect(avatars.map((avatar) => avatar.getAttribute('aria-label')))
+      .toEqual(['left · working', 'right · working', 'background · working', 'unknown · disconnected'])
+    await act(async () => cells[1]!.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
+    await act(async () => (cells[1]!.querySelector('button') as HTMLButtonElement).click())
+    expect(fixture.state.selectSession).toHaveBeenCalledWith('right')
+    expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
+    // Serializing and reloading the durable layout retains the same geometry/identity projection.
+    fixture.state.tabs = JSON.parse(JSON.stringify(fixture.state.tabs))
+    fixture.state.layouts = JSON.parse(JSON.stringify(fixture.state.layouts))
+    await mount()
+    expect([...rowByTitle('Shared Topic').querySelectorAll('.agent-avatar')].map((avatar) => avatar.getAttribute('aria-label')))
+      .toEqual(['left · working', 'right · working', 'background · working', 'unknown · disconnected'])
+  })
+
 })
 
 /**

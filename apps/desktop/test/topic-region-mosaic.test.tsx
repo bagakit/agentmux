@@ -6,7 +6,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import { RegionMosaic } from '../src/renderer/src/components/WorkspaceTopicsPanel.js'
+import { RegionMosaic } from '../src/renderer/src/components/TopicPresence.js'
 import { workbenchRegionBounds, createWorkbenchViewLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { readFileSync } from 'node:fs'
 
@@ -59,11 +59,7 @@ describe('行尾 Region 缩略图的渲染', () => {
     expect(branchesSource, 'Branch 面板引用了 Region 缩略图——它只该出现在 Topic 行')
       .not.toContain('RegionMosaic')
     expect(branchesSource).not.toContain('topic-region-mosaic')
-    // Topic 行侧：缩略图必须挂在 openMosaics 门禁后面（三元），不是无条件塞进 trailing。
-    // 「禁止形状不在场」是弱判据，所以这里正面钉住那次条件构造的确切形状。
-    expect(dockSource).toContain('openMosaics.has(topic.id)')
-    expect(dockSource).toMatch(/openMosaics\.has\(topic\.id\)\s*\?\s*<RegionMosaic cells=\{openMosaics\.get\(topic\.id\)!\}/)
-    // 门禁本身来自那份唯一投影，不是各行自己扫 tabs。
+    expect(dockSource).toContain('cells={openMosaics.get(topic.id)}')
     expect(dockSource).toContain('openTopicRegionMosaics(layout, tabs)')
   })
 })

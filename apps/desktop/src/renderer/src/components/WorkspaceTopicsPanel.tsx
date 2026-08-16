@@ -35,11 +35,11 @@ import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, partitionPinned, reorderTopics } from '../lib/topic-order'
 import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
 import { presentError } from '../lib/error-presentation'
-import type { RegionGeometry } from '@agentmux/layout'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
-import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
+import { TopicPresence } from './TopicPresence'
+import { SelectorListHeader, SelectorRow } from './SelectorList'
 
 /**
  * 一个 selector 的返回值就是 `useSyncExternalStore` 的快照，React 用 `Object.is` 比较它。所以缺省值必须是
@@ -294,7 +294,7 @@ export function WorkspaceTopicsPanel({
                     tabIndex={pending !== null ? -1 : 0}
                     aria-disabled={pending !== null}
                     onClick={() => { if (pending === null) void openTopic(topic.id) }}
-                    onKeyDown={(event) => { if (pending === null && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openTopic(topic.id) } }}
+                    onKeyDown={(event) => { if (event.target === event.currentTarget && pending === null && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openTopic(topic.id) } }}
                   >
                     {/* 已 pin 的静息态标记：一枚小 Pin，扫一眼列表就分辨得出哪些被钉住了，不必 hover。
                         它**不是**第二个常驻图标按钮（那会跟标题抢宽度、也会撞 surface-tool-dock 那条
@@ -307,16 +307,12 @@ export function WorkspaceTopicsPanel({
                       leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={topic.summary || topic.directoryPath}
-                      /* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
-                         这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。
-                         簇是行里独立的一段（`.selector-row__meta`），右缘对齐的是行，与本行摘要
-                         多长无关——这条性质由共享层的 flex 兑现，不靠本容器的轨道表。此前这里
-                         写的是"网格里的尾列"，而 `leading` 可空：只来两段时簇被摆进摘要那一列，
-                         直接压在文字上（#467）。 */
+                      /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
-                        <SelectorPresence
+                        <TopicPresence
+                          cells={openMosaics.get(topic.id)}
                           agents={topic.agents
-                            .filter((agent) => agent.live !== null)
+                            .filter((agent) => agent.live !== null && agent.live.processState === 'running')
                             .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))
                             .map((agent) => {
                             const shown = topicAgentPresentation(agent)
@@ -338,14 +334,6 @@ export function WorkspaceTopicsPanel({
                             }
                           })}
                         />
-                      }
-                      /* 行尾那枚 Region 缩略图：只在这个 Topic 真的开着一张 Tab 时出现（门禁来自
-                         openTopicRegionMosaics —— tab.topicId 是唯一绑定真相），画的是那张 Tab 的
-                         Region 分屏缩影。Branch 行不传 trailing 缩略图，保留它自己的头像簇/状态胶囊。 */
-                      trailing={
-                        openMosaics.has(topic.id)
-                          ? <RegionMosaic cells={openMosaics.get(topic.id)!} />
-                          : null
                       }
                     />
                   </div>
@@ -373,32 +361,6 @@ export function WorkspaceTopicsPanel({
       ) : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
     </section>
-  )
-}
-
-/**
- * 一张 Tab 的 Region 分屏缩影：34×22px 的行尾小方块，按真实归一化几何铺出每个 Region。
- *
- * 几何来自 `workbenchRegionBounds`（0–1 归一化），这里只把它乘进小方块的百分比坐标——不发明第二套
- * 布局模型，Tab 里怎么分屏，这枚缩略图就怎么分。它是一枚一眼可辨的提示（"这个 Topic 开着，且长这样"），
- * 不是可交互的实时镜像，所以不挂点击、不读 Session 状态。
- */
-export function RegionMosaic({ cells }: { cells: readonly RegionGeometry[] }) {
-  return (
-    <span className="topic-region-mosaic" aria-hidden="true">
-      {cells.map((cell) => (
-        <span
-          key={cell.regionId}
-          className="topic-region-mosaic__cell"
-          style={{
-            left: `${cell.bounds.x * 100}%`,
-            top: `${cell.bounds.y * 100}%`,
-            width: `${cell.bounds.width * 100}%`,
-            height: `${cell.bounds.height * 100}%`
-          }}
-        />
-      ))}
-    </span>
   )
 }
 
