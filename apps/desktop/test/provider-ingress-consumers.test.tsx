@@ -48,40 +48,48 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('a rejected send becomes a stable failed item and send() reports the retention (draft must be kept)', async () => {
+  it('a rejected send keeps the item queued (deferred) and send() reports the retention (draft must be kept)', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
-    vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('link dropped'))
 
     // send() must THROW so the Composer keeps the draft; the entry must remain queued for the next flush.
     // MUTATION: make flushAgentSteerQueue delete the entry on catch (store.ts:4537-4547) — send() no longer
     // throws and the entry vanishes → both assertions red.
+    //
+    // `deferred`, not `failed`: the fixture agent is processState 'running', so Core refused while the
+    // Agent is alive — our step, not its failure. send()'s retention check counts OCCURRENCES of the text
+    // rather than statuses, so it still throws for a deferred entry and the draft is still kept.
     await expect(useAppStore.getState().send('s', 'retry me')).rejects.toThrow()
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'failed', error: 'link dropped' }
+      { operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'deferred', error: 'link dropped' }
     ])
   })
 
-  it('does not auto-retry a failed item; explicit Send now reuses the SAME operationId', async () => {
+  it('auto-retries a deferred item and an explicit Send now reuses the SAME operationId', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
-    vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     const ids: string[] = []
     const submit = vi.spyOn(api.sessions, 'submitPrompt')
+    submit.mockImplementationOnce(async (_c, _p, operationId) => { ids.push(operationId!); throw new Error('busy') })
     submit.mockImplementationOnce(async (_c, _p, operationId) => { ids.push(operationId!); throw new Error('busy') })
     submit.mockImplementationOnce(async (_c, _p, operationId) => { ids.push(operationId!) })
 
     useAppStore.getState().enqueueAgentSteer('s', 'once')
-    await useAppStore.getState().flushAgentSteerQueue('s') // fails, retains
-    await useAppStore.getState().flushAgentSteerQueue('s') // terminal failed state: no retry
-    expect(ids).toHaveLength(1)
+    await useAppStore.getState().flushAgentSteerQueue('s') // refused, retained as deferred
+    // The auto-flush MUST try again against a live Agent. This assertion used to read
+    // `expect(ids).toHaveLength(1)` — it pinned the queue refusing to retry, i.e. the head-of-line block
+    // that froze every entry behind a live-Agent refusal.
+    await useAppStore.getState().flushAgentSteerQueue('s')
+    expect(ids).toHaveLength(2)
+
+    // Explicit "Send now" still reuses the id — the T-002 property this case exists for.
     const operationId = useAppStore.getState().agentSteerQueues.s![0]!.operationId
     await useAppStore.getState().sendQueuedAgentSteer('s', operationId)
 
-    expect(ids).toHaveLength(2)
-    // Same id → Core recognizes the idempotent replay instead of writing twice. MUTATION: mint a fresh id
-    // per attempt in enqueueAgentSteer/flush (e.g. crypto.randomUUID() at flush time instead of using
-    // entry.operationId, store.ts:4528) — the two ids differ → red.
-    expect(ids[0]).toBe(ids[1])
+    expect(ids).toHaveLength(3)
+    // Same id every attempt → Core recognizes the idempotent replay instead of writing three times.
+    // MUTATION: mint a fresh id per attempt in enqueueAgentSteer/flush (e.g. crypto.randomUUID() at flush
+    // time instead of using entry.operationId, store.ts:4528) — the ids differ → red.
+    expect(new Set(ids).size).toBe(1)
   })
 
   it('two concurrent clients’ distinct prompts each get their own operationId and both are sent', async () => {

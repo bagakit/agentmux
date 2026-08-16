@@ -93,6 +93,11 @@ const PERSISTED_PREFERENCES = {
   explorerCollapsed: { 'workspace-alpha': true },
   pinnedItems: { 'workspace-alpha': ['topic-9', 'topic-3'] },
   agentComposerDrafts: { 'sess-1': 'unfinished prompt' },
+  // 排队的消息与草稿同一档：都是用户亲手敲下的字，跨一次版本升级都不许丢。
+  // 条目整份进来（含 operationId / runId / status），因为恢复后的可投递性就是靠 runId 判的。
+  agentSteerQueues: {
+    'sess-1': [{ operationId: 'op-1', runId: 'run-1', text: 'queued before the upgrade', status: 'queued' }]
+  },
   documents: { 'dirty-file': { path: 'a.ts', revision: 'base', content: 'unsaved edit' } },
   dirtyDocuments: { 'dirty-file': true }
 } as const
@@ -179,6 +184,14 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.scratchTopicOrder, 'Topic 顺序丢了').toEqual(PERSISTED_PREFERENCES.scratchTopicOrder)
     expect(state.collapsedProjectGroups, '折叠状态丢了').toEqual(
       PERSISTED_PREFERENCES.collapsedProjectGroups
+    )
+    // 用户亲手敲下的字这两项：草稿与排着的消息。只把键放进 fixture 而不判值的话，
+    // 上面那条键集自检是绿的、这条也不红——字照样可以在升级路径上悄悄丢掉。
+    expect(state.agentComposerDrafts, '没写完的草稿丢了').toEqual(
+      PERSISTED_PREFERENCES.agentComposerDrafts
+    )
+    expect(state.agentSteerQueues, '排着的消息丢了——用户重启后发现自己写的字没了').toEqual(
+      PERSISTED_PREFERENCES.agentSteerQueues
     )
   })
 

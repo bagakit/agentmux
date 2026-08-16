@@ -17,15 +17,17 @@ describe('queued steer delivery', () => {
     expect(calls).toEqual(['response', 'first', 'second'])
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
-  it('keeps the failed prompt queued for retry', async () => {
+  it('keeps the undelivered prompt queued for retry, not marked dead', async () => {
     const session = { id: 's', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId: 'r' } }, status: { state: 'working', observedAt: 1 }, processState: 'running' }
     useAppStore.setState({ sessions: [session as never] })
     vi.spyOn(api.sessions, 'respondInteraction').mockResolvedValue(undefined)
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('busy'))
-    vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     useAppStore.getState().enqueueAgentSteer('s', 'retry me')
     await useAppStore.getState().respondInteraction('s', { requestId: 'q', response: { kind: 'permission', decision: 'allow' } } as never)
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'failed', error: expect.any(String) }])
+    // `deferred`, not `failed`: the session's processState is 'running', so the Agent is alive and this
+    // rejection is our own step not completing. Asserting `failed` here pinned the inverse — a live
+    // Agent's message judged terminal, which also head-of-line-blocked everything behind it.
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'deferred', error: expect.any(String) }])
   })
 })
 

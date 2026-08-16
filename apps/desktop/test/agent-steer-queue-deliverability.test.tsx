@@ -55,6 +55,69 @@ describe('AgentComposer 队列徽标的可投递性', () => {
   })
 
   /**
+   * 第三档：run 活着，但我们这次没投出去。
+   *
+   * 这一档存在的理由与上面那条假承诺同源，方向相反。此前 status 只有两个成员，于是「投不出去但
+   * Agent 好着」只能借 `queued` 那档的文案，徽标会**肯定地**说「2 messages queued for delivery」，
+   * 而真相是其中一条此刻投不出去；原因文字虽然挂在条目上，但那段 `<small>` 在 `popover="auto"` 里、
+   * 默认收起，用户不点开根本看不到——那就是 AGENTS.md 第 11 条禁止的「静默放行」。
+   *
+   * 判据同样**两侧都点名**：既要求这一档说出自己的状态，也要求它**不**冒充另外两档。
+   * 只守一侧的话，把三个分支都改成同一句「说不清」能全绿，而那会在正常路径上造假警报。
+   */
+  it('投递受阻时，徽标不许再说「queued for delivery」，要说清状态且不冒充失败', () => {
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '', disabled: false, placeholder: '',
+      queued: [
+        { id: 'q-1', text: 'steer one', status: 'deferred' as const, error: 'composer readiness not observed yet' },
+        { id: 'q-2', text: 'steer two', status: 'queued' as const }
+      ],
+      // run 活着——这是这一档与「not sent」那档的全部差别，也是它必须存在的理由。
+      queueDeliverable: true,
+      onChange: () => {}
+    }))
+
+    // 决定性的一句：healthy 那句承诺必须缺席。它在场就等于把一次降级说成一切正常。
+    expect(markup).not.toContain('queued for delivery')
+    // 三件事都要说到：哪一步没走通、现在什么状态、要不要用户动手。
+    expect(markup).toContain('1 of 2 messages not delivered yet')
+    expect(markup).toContain('still queued, retries automatically')
+    expect(markup).toContain('Nothing to do.')
+    // 不许冒充第 1 类：Agent 好着，说「failed」是往「坏了」那边说谎。
+    expect(markup).not.toContain('failed to send')
+    // 文案之外，**看得见的那一层**也要分得开：徽标的 data-state 与图标决定用户扫一眼的印象。
+    // 只判文案时，把 data-state/图标一起复用 failed 那档照样全绿（实测），而屏幕上就是一个报错样子
+    // 的徽标配一句「会自动重试」——自相矛盾，且把第 2 类画成了第 1 类。
+    expect(markup).toContain('data-state="deferred"')
+    expect(markup).not.toContain('data-state="failed"')
+    // amber 的 CircleX 是失败语汇；这一档用既有的 paused（PauseCircle），说的是「停着，但还会继续」。
+    expect(markup).toContain('lucide-circle-pause')
+    expect(markup).not.toContain('lucide-circle-x')
+    // 也不许冒充「run 已退出」那档——那句会让用户以为这些字永远到不了。
+    expect(markup).not.toContain('not sent')
+    // 原因必须真的在卡片里，而不是只存在于 store。
+    expect(markup).toContain('composer readiness not observed yet')
+  })
+
+  it('真失败仍然盖过受阻——严重性顺序不许被新档位打乱', () => {
+    // 一条真终局（对着已被换掉的 run）与一条受阻同时在场时，徽标要说那条真失败的。
+    // 反面：受阻的文案不许在场，否则用户会以为「会自动重试」，而那条 failed 不会。
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '', disabled: false, placeholder: '',
+      queued: [
+        { id: 'q-1', text: 'steer one', status: 'deferred' as const, error: 'not ready' },
+        { id: 'q-2', text: 'steer two', status: 'failed' as const, error: 'belongs to an earlier run' }
+      ],
+      queueDeliverable: true,
+      onChange: () => {}
+    }))
+
+    expect(markup).toContain('1 of 2 messages failed to send')
+    expect(markup).not.toContain('not delivered yet')
+    expect(markup).not.toContain('queued for delivery')
+  })
+
+  /**
    * 文案点名的动作必须当场做得到。
    *
    * 这一档的正文原本写着「copy them」，而卡片是个 `popover="auto"`——点卡片外任何地方它就关掉，

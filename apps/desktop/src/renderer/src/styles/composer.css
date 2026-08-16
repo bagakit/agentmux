@@ -86,6 +86,9 @@
 .composer__queued:hover { background: var(--surface-3); }
 .composer__queued:focus-visible { outline: var(--focus-line) solid 1px; }
 .composer__queued[data-state='failed'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+/* deferred 刻意**不用** amber：amber 说的是「出错了」，而这一档的事实是「Agent 好着，我们在重试」。
+   用中性的 --text-3 把它和 healthy 的 --blue 区分开——降级要看得出来，但不冒充故障。 */
+.composer__queued[data-state='deferred'] { color: var(--text-3); background: var(--surface-3); }
 /* The queued-message list. Same top-layer escape as the breakdown card, anchored to its own badge.
    Entries are clamped to 3 lines each so a long prompt cannot push the rest off screen; the full text
    stays in the DOM (screen readers and select-copy get all of it), and the list itself scrolls once it
@@ -96,6 +99,8 @@
 .composer__queued-card li { margin: 0 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__queued-card li > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .composer__queued-card li[data-state='failed'] { color: var(--amber); }
+.composer__queued-card li[data-state='deferred'] { color: var(--text-2); }
+.composer__queued-card li[data-state='deferred'] > small { color: var(--text-3); }
 .composer__queued-card li > small { display: block; margin-top: var(--sp-1); color: var(--amber); }
 .composer__queued-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 .composer__queued-card li:last-child { margin-bottom: 0; }

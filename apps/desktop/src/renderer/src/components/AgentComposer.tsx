@@ -21,7 +21,10 @@ export type ComposerSuggestion = { text: string; description: string; group?: st
 export type ComposerQueuedMessage = {
   id: string
   text: string
-  status: 'queued' | 'failed'
+  // `deferred` 是「我们这次没投出去，Agent 还好着，还在等下一次机会」。它必须与 `queued` 分开，
+  // 否则角标会照 healthy 路径念「queued for delivery」，把一次降级静默放行（store.ts 的
+  // AgentSteerQueueEntry 记了为什么这一档要在模型里有名字）。
+  status: 'queued' | 'deferred' | 'failed'
   error?: string
 }
 
@@ -376,16 +379,30 @@ function QueuedMessages({ queued, deliverable, onCopy, onRemove, onSend }: {
 }) {
   const cardId = useId()
   const failed = queued.filter((entry) => entry.status === 'failed').length
+  // 一次投递被推迟是**驻留状态**，所以它必须出现在默认就能看见的那一层——角标。此前只有两档
+  // （failed / 一切正常），于是「我们没投出去但 Agent 好着」只能借 healthy 那档的文案，角标会
+  // 肯定地说「N messages queued for delivery」，而真相是它此刻投不出去。原因文字虽然挂在条目上，
+  // 但那段 `<small>` 在 `popover="auto"` 里、默认收起，用户不点开根本看不到——不算「停在旁边」。
+  //
+  // 三档的顺序就是严重性：真失败 > 投递受阻 > 一切正常。deferred 不复用 failed 的 amber/CircleX：
+  // 那会把「Agent 好着，我们在重试」说成「出错了」，是往第 1 类那边说谎；用既有的 `paused` 语汇
+  // （不新造图标），说的正是「这一档停着，但还会继续」。
+  const deferred = queued.filter((entry) => entry.status === 'deferred').length
   const label = failed > 0
     ? `${failed} of ${queued.length} message${queued.length === 1 ? '' : 's'} failed to send`
+    : deferred > 0
+    // 三段话对齐服务窗的三件事：哪一步没走通（couldn't be delivered yet）、现在按什么状态在跑
+    // （still queued）、要恢复完整能力该做什么（retries automatically——用户不必做任何事）。
+    ? `${deferred} of ${queued.length} message${queued.length === 1 ? '' : 's'} not delivered yet — still queued, retries automatically`
     : deliverable
     ? `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
     : `${queued.length} message${queued.length === 1 ? '' : 's'} not sent`
+  const state = failed > 0 ? 'failed' : deferred > 0 ? 'deferred' : 'queued'
   return (
     <>
-      <button type="button" className="composer__queued" data-state={failed > 0 ? 'failed' : 'queued'} aria-label={label}
+      <button type="button" className="composer__queued" data-state={state} aria-label={label}
         popoverTarget={cardId} popoverTargetAction="toggle">
-        <SemanticIcon name={failed > 0 ? 'failed' : 'message-queue'} size={12} /> {queued.length}
+        <SemanticIcon name={failed > 0 ? 'failed' : deferred > 0 ? 'paused' : 'message-queue'} size={12} /> {queued.length}
       </button>
       <div id={cardId} popover="auto" className="composer__queued-card" aria-label="Queued messages">
         <h3>{label}</h3>
@@ -395,7 +412,14 @@ function QueuedMessages({ queued, deliverable, onCopy, onRemove, onSend }: {
           {queued.map((entry) => <li key={entry.id} data-state={entry.status}><span>{entry.text}</span>{entry.error ? <small>{entry.error}</small> : null}<span className="composer__queued-actions">{onSend ? <button type="button" className="composer-tool" onClick={() => onSend(entry.id)}>Send now</button> : null}{onRemove ? <button type="button" className="composer-tool" onClick={() => onRemove(entry.id)}>Remove</button> : null}</span></li>)}
         </ol>
         {deliverable ? (
-          <p>Delivered in this order when the Agent finishes its current turn.</p>
+          // 受阻时不能再说这句无条件的「按序在本轮结束后投递」——那是 healthy 路径的承诺，而此刻
+          // 至少有一条正卡着。改口说清同样三件事，并明确「不用你做什么」：把一个自动会重试的状态
+          // 写成要用户动手，会让人去点「Send now」，而那次点击撞上的还是同一个未就绪的 readiness。
+          deferred > 0 ? (
+            <p>Some of these could not be delivered yet — the Agent is still running, so they stay queued and go out automatically at the next opportunity. Nothing to do.</p>
+          ) : (
+            <p>Delivered in this order when the Agent finishes its current turn.</p>
+          )
         ) : (
           <>
             {/* The sentence only names copying as the remedy when the button is actually here. Naming

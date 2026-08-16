@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '@agentmux/core'
-import { describeError, presentError } from '../src/renderer/src/lib/error-presentation'
+import { describeError, errorIdentity, presentError } from '../src/renderer/src/lib/error-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 
 const initialStore = useAppStore.getState()
@@ -105,5 +107,97 @@ describe('transient error lifecycle', () => {
       error: 'Readiness observation is still pending',
       errorDismissed: false
     })
+  })
+
+  // The case above feeds a CONSTANT message, so it is blind to the defect users actually hit: it never
+  // constructs "same cause, diagnostic changed", which is the only input whole-string dedup fails on.
+  // These three do. The field report (2026-09-19) is verbatim: the readiness refusal below differs
+  // between reports ONLY in `latestOutputBytes`, which grows with every byte the Agent prints.
+  const readinessRefusal = (latestOutputBytes: number) =>
+    new Error(
+      "Error invoking remote method 'agents:sendPrompt': AgentMuxError: The prompt was not sent because"
+      + ' this Run has no consumable composer readiness yet. The Agent Run is still running; wait for the'
+      + ' Stop/screen readiness observation to finish, then send again.'
+      + ' Diagnostic: runId=f652d14b readinessId=none readinessSource=none readyThroughByte=pending'
+      + ` latestOutputBytes=${latestOutputBytes} reason=epoch-missing`
+    )
+
+  it('keeps a dismissal when the same failure re-reports with a grown diagnostic cursor', () => {
+    useAppStore.getState().reportError(readinessRefusal(549373))
+    useAppStore.getState().dismissError()
+
+    // Same refusal, Agent printed more output meanwhile. The user dismissed THIS FAILURE; the only thing
+    // that changed is a byte counter in the machine detail. Reverting reportError to whole-string equality
+    // makes `errorDismissed` flip back to false here — that is the mutation criterion for this test.
+    useAppStore.getState().reportError(readinessRefusal(549512))
+    expect(useAppStore.getState().errorDismissed, '关掉的错又回来了：去重键把易变诊断算进了身份').toBe(true)
+
+    // Dismissal suppresses the banner but must not rewrite history: reopen still yields a diagnostic the
+    // user can paste. Probed rather than assumed — it is the FIRST report's cursor (549373, not 549512),
+    // because a suppressed report writes nothing. That is deliberate: refreshing the remembered text would
+    // mean a store write per replayed event, and the stale part is only the byte counter — runId,
+    // readinessId and `reason=epoch-missing` are identical across the two, so nothing diagnosable is lost.
+    // The exact number is pinned rather than `toContain('latestOutputBytes=')`, which passed under BOTH
+    // behaviours and so recorded nothing.
+    useAppStore.getState().reopenError()
+    expect(useAppStore.getState().error).toContain('latestOutputBytes=549373')
+  })
+
+  it('still surfaces a genuinely different failure after a dismissal', () => {
+    useAppStore.getState().reportError(readinessRefusal(549373))
+    useAppStore.getState().dismissError()
+
+    // The other half of the ratchet. Stripping the diagnostic must not collapse distinct failures into
+    // one — over-dedup would silently swallow a NEW problem, which is worse than showing one twice.
+    // Mutation: make errorIdentity return a constant and this reds.
+    useAppStore.getState().reportError(new Error('The workspace folder is no longer readable'))
+    expect(useAppStore.getState()).toMatchObject({
+      error: 'The workspace folder is no longer readable',
+      errorDismissed: false
+    })
+  })
+
+  it('suppresses a repeat only while it is dismissed, not after the user reopens it', () => {
+    useAppStore.getState().reportError(readinessRefusal(1))
+    useAppStore.getState().dismissError()
+    useAppStore.getState().reopenError()
+
+    // Reopening is the user asking to watch this failure again; a later report of it must update the
+    // shown text rather than be swallowed by the identity check.
+    useAppStore.getState().reportError(readinessRefusal(2))
+    expect(useAppStore.getState().error).toContain('latestOutputBytes=2')
+    expect(useAppStore.getState().errorDismissed).toBe(false)
+  })
+})
+
+// Fixing the one dedup site is not enough on its own, but the guard has to state a property that is
+// actually TRUE, and my first attempt did not. I tried "every label appended after a complete message
+// must be stripped from identity" — and the scan refuted it: `${primary.message} Cleanup failed:
+// ${presentError(cleanupError)}` (store.ts) appends a *cause*, and two different cleanup failures are
+// genuinely two failures. Stripping that would OVER-dedup, silently swallowing a new problem. Source text
+// cannot tell `${diagnostic}` (a volatile cursor) from `${presentError(e)}` (a stable cause) apart.
+//
+// So the guard is the narrow thing that can actually break in silence: the label is authored in the MAIN
+// process and stripped in the RENDERER, two files with no shared constant between them. Rename it on one
+// side and today nothing reds — the dismissed banner just starts resurrecting again.
+describe('the machine-detail label main appends is the one the renderer strips', () => {
+  it('reads the label out of its construction site and proves errorIdentity removes it', () => {
+    const site = fileURLToPath(new URL('../src/main/prompt-readiness-diagnostics.ts', import.meta.url))
+    const source = readFileSync(site, 'utf8')
+    // Both ends proven present: an empty read, or a regex that no longer recognizes the current writing,
+    // would make every assertion below vacuously true (this repo's 扫到空内容 false-green family).
+    expect(source.length, '读到空文件——路径写错了，下面的断言会恒真').toBeGreaterThan(500)
+    const appended = source.match(/\$\{message\}\s+([A-Z][A-Za-z ]*):\s*\$\{/u)
+    expect(appended, `${site} 里没扫到「消息后面追加机器细节」的写法——写法变了，本守卫已失明`).not.toBeNull()
+
+    // The property: two reports differing ONLY inside that appended segment are the same failure.
+    const label = appended![1]
+    const message = 'The prompt was not sent because this Run has no consumable composer readiness yet.'
+    expect(
+      errorIdentity(`${message} ${label}: latestOutputBytes=549373 reason=epoch-missing`),
+      `main 追加的是 "${label}:"，而 errorIdentity 不剥它——按它去重的错误会在游标一变时复活`
+    ).toBe(errorIdentity(`${message} ${label}: latestOutputBytes=549512 reason=epoch-missing`))
+    // …and identity still keeps the sentence, so it has not collapsed to a constant.
+    expect(errorIdentity(`${message} ${label}: x=1`)).toBe(message)
   })
 })
