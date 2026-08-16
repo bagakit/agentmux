@@ -98,7 +98,7 @@ describe('Message Tools three-state interaction', () => {
     expect(shared[0]!.body).toContain('padding-block: 0')
     expect(shared[0]!.selector).toContain('.composer-tool')
     expect(shared[0]!.selector).toContain('.composer-send')
-    expect(shared[0]!.selector).toContain('.composer__inbox')
+    expect(shared[0]!.selector).toContain('.composer__mailbox')
   })
 
   it('keeps identity in the control flow instead of overlaying the editor', () => {
@@ -112,7 +112,12 @@ describe('Message Tools three-state interaction', () => {
       .filter(({ selector, body }) => selector.startsWith('.composer') && !selector.startsWith(COLLAPSED))
       .filter(({ body }) => /position:\s*absolute/.test(body) && /(?:^|;)\s*(?:top|right|bottom|left):/.test(body))
       .map(({ selector }) => selector)
-    expect(decorations).toEqual([])
+    // The unread dot is anchored to its own relatively positioned button, never the editor.
+    expect(decorations).toEqual(['.composer__mailbox > .composer-mailbox__dot'])
+    const mailbox = ruleList.find(({ selector }) => selector === '.composer__mailbox')
+    expect(mailbox?.body).toContain('position: relative')
+    const dot = ruleList.find(({ selector }) => selector === '.composer-mailbox__dot')
+    expect(dot?.body).toContain('background: var(--red)')
 
   })
 

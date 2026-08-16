@@ -5,13 +5,14 @@ import { ComposerTextarea } from './ComposerTextarea'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
 import { SemanticIcon } from './semantic-icons'
-import { AgentComposer, type ComposerQueuedMessage } from './AgentComposer'
+import { AgentComposer } from './AgentComposer'
+import type { ComposerQueuedMessage } from './ComposerOutbox'
 import { appendSemanticReference, expandSemanticReferences, encodeSemanticReference } from '../lib/composer-semantic-reference'
 import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../../shared/composer-shortcut-library'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentAvatar } from './AgentAvatar'
 import { AgentComposerTools } from './AgentComposerTools'
-import { SessionNoticeInbox, SessionNoticeBanners, useSessionNoticeInbox } from './SessionNoticeInbox'
+import { SessionMailbox, useSessionNotices } from './SessionMailbox'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
 // 画廊里那条示例 prompt。它是**一份 fixture**，不是第二套注册表：画廊要画出「用户自己的 prompt
@@ -41,8 +42,8 @@ const degradedNotice: RenderableServiceNotice = {
 
 export function ObservationSurfaceGallery() {
   const feedback = useComposerFeedback('gallery')
-  const inbox = useSessionNoticeInbox('gallery', [{ id: 'delivery', notice: degradedNotice }])
-  const [draft, setDraft] = useState(() => appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' }))
+  const inbox = useSessionNotices('gallery', [{ id: 'delivery', notice: degradedNotice }])
+  const [draft, setDraft] = useState(() => `${appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' })}@/gallery/.agentmux/pasted/capture.png `)
   const [queued, setQueued] = useState<ComposerQueuedMessage[]>([
     { id: 'gallery-q-1', text: 'Run the focused tests', status: 'deferred', deliverable: true, error: 'The Agent is not ready to accept another message yet.' },
     { id: 'gallery-q-2', text: 'Summarize the remaining risk', status: 'failed', deliverable: false, error: 'Previous run ended before delivery' }
@@ -106,21 +107,22 @@ export function ObservationSurfaceGallery() {
       <article id="composer-details" className="observation-sample observation-sample--composer observation-sample--full">
         <div className="observation-sample__label">Agent workspace composer</div>
         <AgentComposer
-          feedback={<><SessionNoticeBanners inbox={inbox} /><ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} /></>}
-          identity={{ name: 'Review agent', avatar: <AgentAvatar providerId="codex" state="running" label="Review agent" /> }}
+          readPastedImage={async () => ({ dataUrl: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" fill="#e9edf4"/><rect x="12" y="12" width="216" height="20" rx="4" fill="#7586ab"/><rect x="12" y="44" width="60" height="102" rx="4" fill="#bbc8de"/><rect x="84" y="44" width="144" height="62" rx="4" fill="#8ba9dd"/><rect x="84" y="118" width="108" height="8" rx="4" fill="#7586ab"/></svg>')}` })}
+          feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
           onAttach={() => setComposerAction('Example file picker requested')}
           value={draft}
           disabled={false}
           placeholder="Ask, steer, or paste a command…"
           onChange={setDraft}
-          queued={queued}
+          mailbox={<SessionMailbox inbox={inbox} queued={queued}
+          identity={{ name: 'Review agent', avatar: <AgentAvatar providerId="codex" state="running" label="Review agent" /> }}
           onRemoveQueued={(id) => setQueued((items) => items.filter((item) => item.id !== id))}
-          onSendQueued={(id) => { setComposerAction(`Example send: ${queued.find((item) => item.id === id)?.text}`); setQueued((items) => items.filter((item) => item.id !== id)) }}
+          onSendQueued={(id) => { setComposerAction(`Example send: ${queued.find((item) => item.id === id)?.text}`); setQueued((items) => items.filter((item) => item.id !== id)) }} />}
           onSubmit={() => { setComposerAction(`Example payload: ${expandSemanticReferences(draft)}`); setDraft('') }}
           commands={[{ text: '/status', description: 'Provider command' }, composerShortcutSuggestion(GALLERY_PROMPT)]}
           onSelectSuggestion={(text) => { const mine = composerShortcutForBareWord([GALLERY_PROMPT], text.replace(/^\//, '')); return mine ? encodeSemanticReference({ token: text, label: mine.label, kind: 'subcommand', reference: mine.body }) : text }}
           onActivateSemanticReference={(reference) => setComposerAction(`Open reference: ${reference.reference}`)}
-          tools={<><AgentComposerTools onCapture={async () => { setComposerAction('Example screen capture requested') }} disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} runAction={feedback.run} /><SessionNoticeInbox inbox={inbox} /></>}
+          tools={<><AgentComposerTools onCapture={async () => { setComposerAction('Example screen capture requested') }} disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} runAction={feedback.run} /></>}
         />
         {composerAction ? <p role="status">{composerAction}</p> : null}
         <small>队列保留未投递消息和原因；旧 Run 条目不阻塞当前消息。引用以短 token 展示。</small>

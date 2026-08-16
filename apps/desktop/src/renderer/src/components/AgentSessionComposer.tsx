@@ -26,7 +26,7 @@ import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs
 import { useComposerFeedback } from './ComposerFeedback'
 import { errorIdentity } from '../lib/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
-import { SessionNoticeInbox, SessionNoticeBanners, useSessionNoticeInbox, type ComposerNotice } from './SessionNoticeInbox'
+import { SessionMailbox, useSessionNotices, type ComposerNotice } from './SessionMailbox'
 
 export type AgentComposerAvailability = {
   disabled: boolean
@@ -203,16 +203,15 @@ export function AgentSessionComposer({
   async function pasteImage(image: { bytes: Uint8Array; extension: string }): Promise<void> {
     if (!submitMode.canType) return
     const path = await api.ui.savePastedImage(image)
-    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
+    insertReference(path)
   }
 
   function insertReference(path: string): void {
     const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
+    // App-owned images remain absolute even when the workspace contains the pasted directory.
+    setAgentComposerDraft(sessionId, appendFileReferences(current, [path]))
   }
+
   function insertSemanticReference(reference: { name: string; path: string }): void {
     const kind = semanticReferenceKind(reference.path)
     const token = kind === 'subcommand' ? reference.path : `$${reference.name.replace(/[^A-Za-z0-9._-]+/g, '-')}`
@@ -244,35 +243,41 @@ export function AgentSessionComposer({
   if (queueProblem) notices.push({ id: 'queue', notice: { kind: 'process-degraded', notice: {
     step: 'A queued message has not been sent',
     mode: errorIdentity(queueProblem.error ?? 'The message targets a Run that is no longer available.'),
-    restore: 'Your message is kept. Open the queue to inspect, retry, copy or remove it.'
+    restore: 'Your message is kept. Open the outbox to inspect, retry, copy or remove it.'
   } } })
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
-  const inbox = useSessionNoticeInbox(sessionId, notices.map((item) => ({ ...item,
+  const inbox = useSessionNotices(sessionId, notices.map((item) => ({ ...item,
     ...(session?.kind === 'agent' ? { occurrence: session.control.run.runId } : {})
   })), session?.kind === 'agent')
 
   return (
     <AgentComposer key={sessionId}
-      feedback={<SessionNoticeBanners inbox={inbox} />}
+      readPastedImage={(path) => api.ui.readPastedImage(path)}
+      mailbox={<SessionMailbox inbox={inbox}
+        {...(session?.kind === 'agent' && displayName ? { identity: {
+          name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
+          ...(tabName && tabName !== displayName ? { context: tabName } : {})
+        } } : {})}
+        queued={queuedEntries.map((entry) => ({
+          id: entry.operationId,
+          text: entry.text,
+          status: entry.status,
+          sending: entry.operationId === sendingId,
+          deliverable: session?.kind === 'agent' && steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId),
+          ...(entry.error ? { error: errorIdentity(entry.error) } : {})
+        }))}
+        onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
+        onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
+        onCopyQueued={(text) => void copyTextToClipboard(text, reportError)}
+      />}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
-      queued={queuedEntries.map((entry) => ({
-        id: entry.operationId,
-        text: entry.text,
-        status: entry.status,
-        sending: entry.operationId === sendingId,
-        deliverable: session?.kind === 'agent' && steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId),
-        ...(entry.error ? { error: entry.error } : {})
-      }))}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
         if (workspace) void useAppStore.getState().openFile(workspace.id, path).catch(reportError)
       }}
-      onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
-      onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
-      onCopyQueued={(text) => void copyTextToClipboard(text, reportError)}
       commands={commandCandidates}
       promptKeywords={keywordCandidates}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
@@ -294,17 +299,12 @@ export function AgentSessionComposer({
         onCommand={(command) => {
           const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
           setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
-        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} /><SessionNoticeInbox inbox={inbox} /></>}
+        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} /></>}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
       onHistoryRecall={historyRecall}
-      {...(session?.kind === 'agent' && displayName ? { identity: {
-        name: displayName, avatar: <AgentAvatar providerId={session.providerId} state={session.status.state} label={displayName} />,
-        ...(tabName && tabName !== displayName ? { context: tabName } : {})
-      } } : {})}
-
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}

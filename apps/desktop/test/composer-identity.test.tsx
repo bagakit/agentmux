@@ -13,8 +13,9 @@ it('shows and updates the actual Session identity, including same-provider sibli
   await dom.render(<AgentSessionComposer key="a" sessionId="a" tabName="Release" />)
   const identity = () => dom.container.querySelector('.composer__identity')!
   expect(identity().textContent).toBe('')
-  expect(identity().parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
-  expect(identity()).toBe(identity().parentElement?.lastElementChild)
+  expect(identity().parentElement).toBe(dom.container.querySelector('.composer__mailbox'))
+  expect(identity().parentElement?.parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
+  expect(identity().parentElement?.querySelectorAll('.agent-avatar')).toHaveLength(1)
   expect(identity().getAttribute('title')).toBe('Review queue · Release')
   const codex = identity().querySelector('.agent-avatar')!.innerHTML
   for (const mode of ['collapsed', 'current', 'expanded']) {
