@@ -91,6 +91,16 @@ describe('Message Tools three-state interaction', () => {
     collapsedOverrides.set(target, `${collapsedOverrides.get(target) ?? ''}${body}`)
   }
 
+  it('gives toolbar controls a shared fixed height in all modes', () => {
+    const shared = ruleList.filter(({ selector }) => selector.includes('.composer__toolbar :is('))
+    expect(shared).toHaveLength(1)
+    expect(shared[0]!.body).toContain('height: var(--sp-7)')
+    expect(shared[0]!.body).toContain('padding-block: 0')
+    expect(shared[0]!.selector).toContain('.composer-tool')
+    expect(shared[0]!.selector).toContain('.composer-send')
+    expect(shared[0]!.selector).toContain('.composer__inbox')
+  })
+
   it('keeps identity in the control flow instead of overlaying the editor', () => {
     // 形状：`position: absolute` **且**钉了边距。钉边距才会脱离静态位置跑到盒子角上，而一行态里
     // 右上角与右下角都被控件占着，于是装饰直接压在按钮上（用户原话「叠在一起」）。

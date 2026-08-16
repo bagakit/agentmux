@@ -938,22 +938,15 @@ function terminalPromptSubmission(
     run,
     submissionId: string(source.submissionId, 'terminalPromptSubmission.submissionId'),
     promptDigest: string(source.promptDigest, 'terminalPromptSubmission.promptDigest'),
-    readinessSource: terminalPromptReadinessSource(
-      source.readinessSource,
-      'terminalPromptSubmission.readinessSource'
-    ),
-    readinessId: string(
-      source.readinessId,
-      'terminalPromptSubmission.readinessId'
-    ),
-    readinessOutputCursorBytes: timestamp(
-      source.readinessOutputCursorBytes,
-      'terminalPromptSubmission.readinessOutputCursorBytes'
-    ),
-    readyThroughByte: timestamp(
-      source.readyThroughByte,
-      'terminalPromptSubmission.readyThroughByte'
-    ),
+    ...(source.readinessEvidence === undefined ? {} : { readinessEvidence: (() => {
+      const evidence = record(source.readinessEvidence, 'terminalPromptSubmission.readinessEvidence')
+      return {
+        source: terminalPromptReadinessSource(evidence.source, 'readinessEvidence.source'),
+        id: string(evidence.id, 'readinessEvidence.id'),
+        outputCursorBytes: timestamp(evidence.outputCursorBytes, 'readinessEvidence.outputCursorBytes'),
+        readyThroughByte: timestamp(evidence.readyThroughByte, 'readinessEvidence.readyThroughByte')
+      }
+    })() }),
     outputCursorBytes,
     payload,
     submit
@@ -1070,54 +1063,24 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     throw new AgentMuxError('Pending interaction does not match the Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   const submission = session.terminalPromptSubmission
-  if (
-    submission &&
-    (
-      submission.readyThroughByte < submission.readinessOutputCursorBytes ||
-      (
-        submission.readinessSource === 'initial-composer' &&
-        submission.readyThroughByte === submission.readinessOutputCursorBytes
-      ) ||
-      submission.outputCursorBytes < submission.readyThroughByte
-    )
-  ) {
-    throw new AgentMuxError(
-      'Terminal prompt submission does not preserve its readiness boundary.',
-      'INVALID_AGENT_SESSION_STORE'
-    )
+  const evidence = submission?.readinessEvidence
+  if (submission && evidence && (
+    evidence.readyThroughByte < evidence.outputCursorBytes ||
+    (evidence.source === 'initial-composer' && evidence.readyThroughByte === evidence.outputCursorBytes) ||
+    submission.outputCursorBytes < evidence.readyThroughByte
+  )) {
+    throw new AgentMuxError('Terminal prompt submission does not preserve its readiness boundary.', 'INVALID_AGENT_SESSION_STORE')
   }
   const readiness = session.terminalPromptReadiness
-  // 被认领过的 readiness epoch 必须指得出认领它的那次 submission。
-  // 注意这里**没有** `readiness.readyThroughByte === undefined` 那一项：`terminalPromptReadiness()`
-  // 的归一化已经先拦下「有 consumedBySubmissionId 却没有 readyThroughByte」这个组合，所以那一项在
-  // 这里永远为假、不可能改变结果。它曾经在场，是一条不可达的条件（把它删掉不会让任何测试变红）。
-  if (
-    readiness?.consumedBySubmissionId !== undefined &&
-    (
-      !submission ||
-      submission.submissionId !== readiness.consumedBySubmissionId ||
-      submission.readinessId !== readiness.id
-    )
-  ) {
-    throw new AgentMuxError(
-      'Consumed terminal prompt readiness does not identify its prompt submission.',
-      'INVALID_AGENT_SESSION_STORE'
-    )
-  }
-  if (
-    submission &&
-    readiness?.id === submission.readinessId &&
-    (
-      readiness.source !== submission.readinessSource ||
-      readiness.outputCursorBytes !== submission.readinessOutputCursorBytes ||
-      readiness.readyThroughByte !== submission.readyThroughByte ||
-      readiness.consumedBySubmissionId !== submission.submissionId
-    )
-  ) {
-    throw new AgentMuxError(
-      'Terminal prompt submission did not atomically consume its readiness epoch.',
-      'INVALID_AGENT_SESSION_STORE'
-    )
+  // A consumed observation may describe an older, completed submission. Only evidence
+  // actually associated with this transaction must match its atomic consumption receipt.
+  if (submission && evidence && readiness?.id === evidence.id && (
+    readiness.source !== evidence.source ||
+    readiness.outputCursorBytes !== evidence.outputCursorBytes ||
+    readiness.readyThroughByte !== evidence.readyThroughByte ||
+    readiness.consumedBySubmissionId !== submission.submissionId
+  )) {
+    throw new AgentMuxError('Terminal prompt submission did not atomically consume its readiness epoch.', 'INVALID_AGENT_SESSION_STORE')
   }
   return session
 }

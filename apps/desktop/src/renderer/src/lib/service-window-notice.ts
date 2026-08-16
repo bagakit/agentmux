@@ -271,7 +271,7 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
 export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent' || !session.terminalPromptDelivery) return { completed: true }
   const steps: Record<NonNullable<typeof session.terminalPromptDelivery>['reason'], string> = {
-    'screen-evidence-gap': 'Reading the terminal output history',
+    'screen-evidence-gap': 'Screen confirmation from retained terminal output',
     'prompt-render-timeout': 'Confirming the prompt on screen',
     'screen-evidence-replaced': 'Confirming the prompt while the terminal refreshed'
   }
@@ -279,8 +279,10 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
     completed: false,
     step: {
       label: steps[session.terminalPromptDelivery.reason],
-      degradedMode: 'Prompt delivery continued without full screen confirmation',
-      restore: 'Check the Agent’s response; the next fully verified prompt clears this notice'
+      degradedMode: session.terminalPromptDelivery.reason === 'screen-evidence-gap'
+        ? 'Earlier terminal output is no longer retained. Prompt input continued without full screen confirmation.'
+        : 'Prompt input continued without full screen confirmation.',
+      restore: 'Check the Agent’s response. You can move this notice to the inbox; a verified prompt clears it.'
     },
     agentViability: agentViabilityFromProcessState(session.processState)
   }

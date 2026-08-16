@@ -349,6 +349,7 @@ type AppState = {
    * 展示字符串，改它不动任何地址。Tab 手改名不在这里——它是 WorkbenchTab.name，与 Tab 同生命周期。
    */
   agentNames: Record<string, string>
+  noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   projectRailOpen: boolean
   /**
@@ -1434,6 +1435,7 @@ type PersistedAppState = {
   restoredWorkbench: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
+  noticeReadReceipts?: Record<string, Record<string, string>>
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
@@ -1687,6 +1689,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentSteerQueues: {},
   agentSteerInFlight: {},
   launcherNameDrafts: {},
+  noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
   projectRailOpen: true,
@@ -5003,6 +5006,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
     agentNames: state.agentNames,
+    noticeReadReceipts: state.noticeReadReceipts,
     // These are Renderer presentation facts. They are deliberately persisted beside Workbench
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { AgentProviderRegistry } from './agent-provider.js'
-import { cloneSession, sameRun } from './agent-session-identity.js'
+import { agentTurnCompletionIdentity, cloneSession, sameRun } from './agent-session-identity.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import {
@@ -20,18 +20,7 @@ import type {
 
 const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 
-/**
- * 等空 composer 的上界。比 {@link TERMINAL_PROMPT_RENDER_TIMEOUT_MS} 宽得多，因为这条等待横跨的是
- * **Agent 冷启动**：进程刚起、TUI 还在画首帧、模型还没连上，都算在里面。渲染那条等待是「字已经送进去了，
- * 屏幕该回显了」，量级完全不同，所以两个预算不共用一个常量（记忆 two-budgets-guard-one-thing：短的那个
- * 只会贡献假阴性）。
- *
- * 为什么必须有上界：这条等待此前**根本没有定时器**——`AgentTerminalScreenEvidence.wait()` 只在
- * `options.timeoutMs !== undefined` 时才 arm 一个 timer，而这里没传。于是任何「屏幕永不再变」的情形
- * （断线丢流、TUI 卡在别的界面、provider 的 composer 匹配器认不出这一版布局）都让 readiness 永久停在
- * pending，此后每条 prompt 被 `AGENT_PROMPT_NOT_READY` 拒掉且**没有任何出路**（#628/#238）。超时把
- * 「永久静默」换成一条响亮的 agent-error，用户至少知道该重开会话。
- */
+/** Bound the optional initial-composer observation; expiry never disables prompt input. */
 const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
 
 /**
@@ -109,9 +98,24 @@ export class AgentPromptSubmissionCoordinator {
     run: CtxmuxAdapterRun,
     submissionId: string,
     prompt: string,
-    plan: AgentPromptInputPlan
+    plan: AgentPromptInputPlan,
+    expectedCompletionId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
+    const assertInteraction = (current: AgentMuxAgentSession): void => {
+      if (current.pendingInteraction) throw new AgentMuxError(
+        'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
+    }
+    const assertAdmission = (current: AgentMuxAgentSession): void => {
+      if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
+      assertInteraction(current)
+      if (expectedCompletionId === undefined) return
+      if (agentTurnCompletionIdentity(current) !== expectedCompletionId) {
+        throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
+      }
+    }
     if (plan.kind === 'single-phase') {
+      assertAdmission(session)
       const expectedByte = this.deps.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
@@ -161,8 +165,8 @@ export class AgentPromptSubmissionCoordinator {
         value.run.runId !== session.run.runId ||
         value.submissionId !== submissionId ||
         value.promptDigest !== promptDigest ||
-        value.readyThroughByte < value.readinessOutputCursorBytes ||
-        value.outputCursorBytes < value.readyThroughByte ||
+        (value.readinessEvidence !== undefined && value.readinessEvidence.readyThroughByte < value.readinessEvidence.outputCursorBytes) ||
+        (value.readinessEvidence !== undefined && value.outputCursorBytes < value.readinessEvidence.readyThroughByte) ||
         value.payload.operationId !== payloadOperationId ||
         value.submit.operationId !== submitOperationId ||
         value.payload.inputByteRange.endByte - value.payload.inputByteRange.startByte !== payloadBytes ||
@@ -185,8 +189,11 @@ export class AgentPromptSubmissionCoordinator {
       const existing = stored.terminalPromptSubmission
       if (existing?.submissionId === submissionId) {
         assertSubmission(existing)
+        // A pending interaction permits receipt recovery only, never additional input bytes.
+        if (run.acceptedInputBytes === null || run.acceptedInputBytes < existing.submit.inputByteRange.endByte) assertInteraction(stored)
         return stored
       }
+      assertAdmission(stored)
       if (existing && !existing.submit.acknowledged) {
         throw new AgentMuxError(
           'Another Agent prompt operation is incomplete for this Run.',
@@ -204,50 +211,25 @@ export class AgentPromptSubmissionCoordinator {
         )
       }
       const readiness = stored.terminalPromptReadiness
-      if (!readiness || readiness.readyThroughByte === undefined) {
-        throw new AgentMuxError(
-          'Agent prompt requires a ready composer epoch for this exact Run.',
-          'AGENT_PROMPT_NOT_READY',
-          promptReadinessDetail({
-            runId: session.run.runId,
-            readinessId: readiness?.id ?? 'none',
-            readinessSource: readiness?.source ?? 'none',
-            readinessOutputCursorBytes: readiness?.outputCursorBytes,
-            readyThroughByte: readiness?.readyThroughByte ?? 'pending',
-            latestOutputBytes: run.latestOutputBytes,
-            reason: readiness ? 'observation-pending' : 'epoch-missing'
-          })
-        )
-      }
-      if (readiness.consumedBySubmissionId !== undefined) {
-        throw new AgentMuxError(
-          'The current composer readiness epoch was already consumed by another prompt.',
-          'AGENT_PROMPT_READINESS_CONSUMED',
-          promptReadinessDetail({
-            runId: session.run.runId,
-            readinessId: readiness.id,
-            readinessSource: readiness.source,
-            readinessOutputCursorBytes: readiness.outputCursorBytes,
-            readyThroughByte: readiness.readyThroughByte,
-            consumedBySubmissionId: readiness.consumedBySubmissionId
-          })
-        )
-      }
-      const outputCursorBytes = Math.max(run.latestOutputBytes, readiness.readyThroughByte)
+      const readinessEvidence = readiness && readiness.run.runId === session.run.runId &&
+        readiness.readyThroughByte !== undefined && readiness.consumedBySubmissionId === undefined
+        ? { source: readiness.source, id: readiness.id, outputCursorBytes: readiness.outputCursorBytes,
+            readyThroughByte: readiness.readyThroughByte }
+        : undefined
+      // Readiness is an observation, not a one-use permission to send. The acknowledged
+      // transaction above and CtxMux's byte cursor serialize input; stale/missing observations
+      // must not lock a healthy Agent out. Payload rendering below still verifies or degrades.
+      const outputCursorBytes = Math.max(run.latestOutputBytes, readinessEvidence?.readyThroughByte ?? 0)
       return {
         ...stored,
-        terminalPromptReadiness: {
-          ...readiness,
-          consumedBySubmissionId: submissionId
-        },
+        ...(readinessEvidence ? { terminalPromptReadiness: {
+          ...readiness!, consumedBySubmissionId: submissionId
+        } } : {}),
         terminalPromptSubmission: {
           run: { ...stored.run },
           submissionId,
           promptDigest,
-          readinessSource: readiness.source,
-          readinessId: readiness.id,
-          readinessOutputCursorBytes: readiness.outputCursorBytes,
-          readyThroughByte: readiness.readyThroughByte,
+          ...(readinessEvidence ? { readinessEvidence } : {}),
           outputCursorBytes,
           payload: {
             operationId: payloadOperationId,
@@ -277,8 +259,6 @@ export class AgentPromptSubmissionCoordinator {
       )
     )
     const promptReadinessMayBeStale = (error: AgentMuxError): boolean => (
-      error.code === 'AGENT_PROMPT_NOT_READY' ||
-      error.code === 'AGENT_PROMPT_READINESS_CONSUMED' ||
       error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
     )
     let current: AgentMuxStoredAgentSession

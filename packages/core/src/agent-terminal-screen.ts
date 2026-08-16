@@ -29,9 +29,11 @@ function lineText(line: AgentTerminalLine, end?: number): string {
 export class AgentTerminalScreen {
   private readonly terminal: HeadlessTerminal
   private nextByte = 0
+  private trusted: boolean
 
   constructor(cols: number, rows: number, initialByte = 0) {
     this.nextByte = initialByte
+    this.trusted = initialByte === 0
     this.terminal = new Terminal({
       cols,
       rows,
@@ -39,7 +41,16 @@ export class AgentTerminalScreen {
       allowProposedApi: true,
       logLevel: 'off'
     })
+    // A retained suffix does not contain the terminal's earlier modes or cursor state.
+    // Only a real terminal reset restores that authority; a synchronized update/clear
+    // alone is not a full reset. Use xterm's parser so split control sequences work.
+    this.terminal.parser.registerEscHandler({ final: 'c' }, () => {
+      this.trusted = true
+      return false
+    })
   }
+
+  get authoritative(): boolean { return this.trusted }
 
   get throughByte(): number {
     return this.nextByte
@@ -202,8 +213,10 @@ export class AgentTerminalScreenEvidence {
   }
 
   async wait(options: AgentTerminalScreenWait): Promise<number> {
+    const pendingWrites = this.tail
     return await new Promise<number>((resolve, reject) => {
       let settled = false
+      let replayFlushed = false
       let timer: ReturnType<typeof setTimeout> | null = null
       let unsubscribe: () => void = () => {}
       const abort = (): void => fail(new AgentMuxError(
@@ -225,6 +238,11 @@ export class AgentTerminalScreenEvidence {
         if (settled) return
         if (this.failure) return fail(this.failureError(this.failure, options))
         if (this.disposed) return abort()
+        if (!replayFlushed) return
+        if (!this.screen.authoritative) return fail(new AgentMuxError(
+          'Earlier terminal output is no longer retained; the current screen cannot be fully reconstructed yet.',
+          'OUTPUT_GAP'
+        ))
         const crossedBoundary = options.requireOutputAfterBoundary
           ? this.screen.throughByte > options.boundaryByte
           : this.screen.throughByte >= options.boundaryByte
@@ -247,6 +265,7 @@ export class AgentTerminalScreenEvidence {
         )), options.timeoutMs)
       }
       inspect()
+      void pendingWrites.finally(() => { replayFlushed = true; inspect() }).catch(() => {})
     })
   }
 

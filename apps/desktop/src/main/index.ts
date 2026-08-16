@@ -27,6 +27,7 @@ import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './sing
 import { singleFlight } from './single-flight.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
+import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
@@ -78,13 +79,7 @@ function startPrimaryInstance(): void {
   )
   const progressLoops = new ContinuousProgressLoopManager(
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
-    async (loop) => {
-      const observation = await runtime.observeContinuousProgress(loop, 'delivery', Date.now())
-      // Each tick is a NEW prompt, not a retry of the last one, so it must mint a fresh operationId here.
-      // A stable id would make every tick look to Core like an idempotent replay of the first delivery.
-      await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId, hostId: observation.session.hostId, run: observation.session.run }, loop.prompt, randomUUID())
-      return 'sent'
-    },
+    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined,
     (loop, tickId, now) => runtime.observeContinuousProgress(loop, tickId, now)
   )

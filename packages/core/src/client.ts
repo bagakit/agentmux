@@ -181,6 +181,10 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 }
 
 export type AgentMuxAgentPromptInput = {
+  /** Conditional automation: abandon if this Run/turn completion no longer applies. */
+  expectedCompletionId?: string
+  /** Cancellation before admission; an already claimed input transaction finishes or reconciles. */
+  signal?: AbortSignal
   agentSessionId: string
   operationId: string
   prompt: string
@@ -2333,13 +2337,7 @@ export class AgentMuxClient {
     const session = this.requireAgentSession(input.agentSessionId)
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     await this.serializeAgentInput(session, async (current, run) => {
-      if (current.pendingInteraction) {
-        throw new AgentMuxError(
-          'Answer the pending Agent interaction before submitting another prompt.',
-          'AGENT_INTERACTION_PENDING'
-        )
-      }
-      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan)
+      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal)
     })
     await this.recordPromptAfterSideEffect(
       this.requireAgentSession(input.agentSessionId),

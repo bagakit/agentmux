@@ -145,13 +145,6 @@ export class AgentScreenEvidenceStore {
         'AGENT_PROMPT_READINESS_CANCELLED'
       )
     }
-    if (observation.gap) {
-      await observation.close().catch(() => {})
-      throw new AgentMuxError(
-        'Terminal screen evidence was evicted from CtxMux replay.',
-        'OUTPUT_GAP'
-      )
-    }
     if (observation.run.cols === null || observation.run.rows === null) {
       await observation.close().catch(() => {})
       throw new AgentMuxError(
@@ -163,7 +156,7 @@ export class AgentScreenEvidenceStore {
       observation.run.cols,
       observation.run.rows,
       matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null,
-      startByte
+      observation.gap?.firstAvailableByte ?? startByte
     )
     for (const event of observation.replay) built.accept(event)
     pending.sort((left, right) => (

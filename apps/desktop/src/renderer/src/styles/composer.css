@@ -24,8 +24,7 @@
    max-height 是**生长上限**，回答的是另一个问题（最多长到多高），刻意仍用 px。 */
 
 /* Identity participates in the existing control row; it never floats over editable text. */
-.composer__identity { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; max-width: 160px; color: var(--text-3); font-size: var(--fs-micro); }
-.composer__identity > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer__identity { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding-inline: var(--sp-2); }
 .composer__identity .agent-avatar { flex-shrink: 0; }
 .composer, .launch-surface { container-type: inline-size; container-name: composer; }
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
@@ -160,19 +159,17 @@
    用户原话「存在感太强…高度稍微再窄一些…不要那么强的边框」）：压掉纵向 padding 让它更矮、
    在静息态调淡、并把 hover 的实心底也收成透明。基础 .composer-tool 本就 border:0，这里进一步把
    它降到「有就好、别抢戏」——只在这一档覆写，两行/大输入框档位仍走基础那份更强的存在感。 */
-.composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode { padding: 0 var(--sp-2); opacity: .5; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode { opacity: .5; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode:hover:not(:disabled) { opacity: 1; background: transparent; }
 /* A larger ceiling alone cannot grow an empty editor. Explicit height makes the long-text
    mode visible immediately; the shared one-line minimum and scroll budget still apply. */
 .composer:has(.composer-tools[data-mode='expanded']) { --composer-input-height: min(240px, 40vh); --composer-input-max: 40vh; }
 
 
-.composer__queue-notice { grid-column: 1 / -1; padding: 0 var(--sp-3) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 
 /* Collapse text before controls, using the Region width rather than the application viewport. */
 @container composer (max-width: 560px) {
   .composer-tool__label { display: none; }
-  .composer__identity { max-width: 72px; }
   .composer-tool { padding-inline: var(--sp-2); gap: 0; flex-shrink: 0; }
 }
 .composer__toolbar > div:first-child { overflow-x: auto; scrollbar-width: none; }
@@ -181,6 +178,20 @@
 .composer-feedback > span { min-width: 0; overflow-wrap: anywhere; }
 .composer-feedback > button { flex-shrink: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; }
 
-@container composer (max-width: 360px) {
-  .composer__identity > span:last-child { display: none; }
-}
+
+
+/* The hit area is constant across modes; collapsed controls are quieter, never shorter. */
+.composer__toolbar :is(.composer-tool, .composer-send, .composer__identity, .composer__queued, .composer__context, .composer__inbox) { height: var(--sp-7); padding-block: 0; flex-shrink: 0; }
+.composer__inbox { display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --composer-inbox; }
+.composer__inbox[data-unread='true'] { color: var(--amber); background: var(--surface-3); }
+.composer__inbox:hover { background: var(--surface-3); }
+.composer__inbox:focus-visible { outline: 1px solid var(--focus-line); }
+.composer__inbox-card { position: fixed; position-anchor: --composer-inbox; position-area: top span-right; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow-y: auto; padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.composer__inbox-card h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
+.composer__notices { grid-column: 1 / -1; min-width: 0; }
+.composer-notice { display: flex; align-items: start; gap: var(--sp-2); padding: var(--sp-3); overflow-wrap: anywhere; }
+.composer-notice__body { flex: 1; min-width: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-micro); color: var(--text-3); }
+.composer-notice__body strong { color: var(--text-2); font-weight: 500; }
+.composer-notice__close { flex-shrink: 0; }
+
+.composer { anchor-scope: --composer-inbox; }
