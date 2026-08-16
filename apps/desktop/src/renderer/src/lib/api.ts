@@ -891,7 +891,8 @@ const mockApi: AgentMuxDesktopApi = {
         error: null,
         // 预览里没有子进程，`runScript` 直接抛（见下面那条注释），所以这一位永远是 false——
         // 不是省事，是预览里确实没有任何东西能驱动它。
-        driving: false
+        driving: false,
+        appLinkPrompt: null
       }
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
@@ -989,6 +990,9 @@ const mockApi: AgentMuxDesktopApi = {
     // 执行过了。与上面 captureScreenshot 抛"requires the desktop app"同一条理由。
     runScript: async () => { throw new Error('Driving a Browser requires the desktop app.') },
     selectElement: async () => null,
+    // Web 预览里没有主进程，也就没有真的 shell.openExternal 可走。抛而不是默默返回：
+    // 悄悄什么都不做，看起来和「点了 Open 但那个 app 没装」一模一样。
+    answerAppLink: async () => { throw new Error('App links are not available in Web Preview') },
     cancelElementSelection: async () => {},
     setAnnotationMarkers: async () => {},
     setBounds: async () => {},
@@ -1011,7 +1015,8 @@ const mockApi: AgentMuxDesktopApi = {
           canGoForward: false,
           viewport: input.viewport,
           error: null,
-          driving: false
+          driving: false,
+          appLinkPrompt: null
         }
         mockBrowsers.set(id, browser)
         browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))

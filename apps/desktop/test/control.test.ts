@@ -134,7 +134,8 @@ describe('Desktop Control owner', () => {
       regionId: 'region-browser', kind: 'browser', workspaceId: 'workspace', browserId: 'browser-1',
       id: 'browser-1', url: 'https://example.com', title: 'Example', canGoBack: false, canGoForward: false,
       loading: false, profileId: 'default', viewport: 'responsive', navigationId: 'navigation-1', error: null,
-      driving: false
+      driving: false,
+      appLinkPrompt: null
     })
     tab = addWorkbenchRegion(tab, 'region-caller', 'down', {
       regionId: 'region-file', kind: 'file', workspaceId: 'workspace', path: _hygiene_fixturePath("repo/a.ts")
@@ -286,7 +287,8 @@ describe('Desktop Control owner', () => {
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminal('terminal-created'))
     const createBrowser = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => ({
       id, url, title: '', canGoBack: false, canGoForward: false, loading: false, profileId: 'default',
-      viewport: 'responsive', navigationId: 'navigation-created', error: null, driving: false
+      viewport: 'responsive', navigationId: 'navigation-created', error: null, driving: false,
+      appLinkPrompt: null
     }))
 
     const openedAgent = await useAppStore.getState().executeControl(request({
@@ -659,7 +661,8 @@ describe('Desktop Control owner', () => {
     controller.abort(Object.assign(new Error('timed out'), { code: 'CONTROL_TIMEOUT' }))
     release({
       id: requestedBrowserId, url: 'https://example.com', title: '', canGoBack: false, canGoForward: false,
-      loading: false, profileId: 'default', viewport: 'responsive', navigationId: 'nav', error: null, driving: false
+      loading: false, profileId: 'default', viewport: 'responsive', navigationId: 'nav', error: null, driving: false,
+      appLinkPrompt: null
     })
 
     await expect(pending).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })

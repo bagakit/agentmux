@@ -40,7 +40,8 @@ function browserSnapshot(id: string, url: string): BrowserSnapshot {
     canGoForward: false,
     viewport: 'responsive',
     error: null,
-    driving: false
+    driving: false,
+    appLinkPrompt: null
   }
 }
 

@@ -55,7 +55,8 @@ function browserSurface(regionId: string, driving = false): WorkbenchSurface {
     loading: false,
     viewport: 'desktop',
     error: null,
-    driving
+    driving,
+    appLinkPrompt: null
   }
 }
 

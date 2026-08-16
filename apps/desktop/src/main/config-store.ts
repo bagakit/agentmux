@@ -90,6 +90,12 @@ const browserSchema = z.object({
    * （同 :284 withNotificationDefault），不是 migration。
    */
   agentAutomation: z.boolean().optional(),
+  /**
+   * 用户对每个 scheme 记住的答案。`.optional()` 同 `agentAutomation`（既有磁盘 config 没有这个字段，
+   * 写成必需会让 browser 整块判失败）——但这一个**不**回填：空对象与缺席语义完全一样（都是「一个
+   * 都没记过」），补一次盘只是白写。`z.record` 的值域收死成两档，别的字符串一律判失败。
+   */
+  appLinkSchemes: z.record(z.string(), z.enum(['allow', 'deny'])).optional(),
   toolbar: z.object({
     selectElement: z.boolean(),
     screenshot: z.boolean(),

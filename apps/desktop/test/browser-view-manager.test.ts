@@ -189,7 +189,26 @@ function browserManager(window: ReturnType<typeof fakeWindow>['window']): Browse
   // 往用户的 userData 里写文件。
   return new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(
     join(mkdtempSync(join(tmpdir(), 'agentmux-bvm-')), 'ref-ledger.json')
-  ))
+  ), appLinkHost())
+}
+
+/**
+ * 一个记账的应用链接宿主。`openExternal` **必须**是假的——真的 `shell.openExternal` 会在跑测试的
+ * 人脸上弹出飞书。记下来而不是只数次数：判据要能说出交出去的是**哪个** URL。
+ */
+function appLinkHost(remembered: Record<string, 'allow' | 'deny'> = {}) {
+  const opened: string[] = []
+  const saved: Array<{ scheme: string; choice: 'allow' | 'deny' }> = []
+  return {
+    opened,
+    saved,
+    rememberedSchemes: async () => remembered,
+    rememberScheme: async (scheme: string, choice: 'allow' | 'deny') => {
+      saved.push({ scheme, choice })
+      remembered[scheme] = choice
+    },
+    openExternal: (target: string) => { opened.push(target) }
+  }
 }
 
 function fakeWindow() {
