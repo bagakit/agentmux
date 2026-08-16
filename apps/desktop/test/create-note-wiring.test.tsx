@@ -524,7 +524,11 @@ describe('launcher Workspace 判定只有一处', () => {
     // 没有这一条，`requestedWorkspaceId ??` 就是一句可以被任何人借用的免检咒语。
     const source = readSource('store.ts')
     // 那个名字只在 openFile 的实现里出现，且是它的第四个形参。
-    expect(source).toMatch(/async openFile\(path, tabGroupId, location, requestedWorkspaceId\)/)
+    //
+    // 判据钉到「第四个形参」为止，**不钉签名到此结束**：T-004 在后面追加了 `openAsText`，
+    // 而追加一个形参并不动摇这条自检要证的性质（那个名字是声明出来的形参，不是随手取的变量）。
+    // 原来那版把右括号也钉死了，于是加参数就红——红的是判据的写法，不是被判的性质。
+    expect(source).toMatch(/async openFile\(path, tabGroupId, location, requestedWorkspaceId[,)]/)
     expect(source.match(/requestedWorkspaceId/g) ?? []).toHaveLength(2)
   })
 
