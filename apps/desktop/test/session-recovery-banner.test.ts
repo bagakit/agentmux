@@ -21,13 +21,14 @@ import { allStyleRules } from './helpers/styles.js'
 const COMPONENT = new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url)
 
 describe('恢复横幅的状态只判一次', () => {
-  it('三个可达取值各自对上，且优先级是 disconnected > exited > error', () => {
-    expect(sessionRecoveryState({ disconnected: true, exited: false })).toBe('disconnected')
-    expect(sessionRecoveryState({ disconnected: false, exited: true })).toBe('exited')
-    expect(sessionRecoveryState({ disconnected: false, exited: false })).toBe('error')
+  it('已证实失败才报error，其余按断开与结束事实呈现', () => {
+    expect(sessionRecoveryState({ failed: false, disconnected: true, exited: false })).toBe('disconnected')
+    expect(sessionRecoveryState({ failed: false, disconnected: false, exited: true })).toBe('exited')
+    expect(sessionRecoveryState({ failed: false, disconnected: false, exited: false })).toBe('disconnected')
+    expect(sessionRecoveryState({ failed: true, disconnected: false, exited: true })).toBe('error')
     // 两个事实同时为真时（进程退了、同时这条链路也断了）先说掉线：链路一恢复，退出原因还能如实取到，
     // 反过来则会把「重连中」写成终局。这条断言就是那个优先级本身，不是复述上面三条。
-    expect(sessionRecoveryState({ disconnected: true, exited: true })).toBe('disconnected')
+    expect(sessionRecoveryState({ failed: false, disconnected: true, exited: true })).toBe('disconnected')
   })
 
   it('版式类与颜色类同源：两个后缀恒等，且不带 .status 本体', () => {

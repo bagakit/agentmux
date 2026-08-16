@@ -172,57 +172,9 @@ export function attentionAccentFor(state: AgentDisplayState): AttentionCategory 
   return isUrgentAttention(category) ? category : null
 }
 
-/**
- * The `status--<tier>` a single row's dot renders, or null for the neutral resting dot.
- *
- * ONE definition, because there were two and they had already gone wrong in the same way. The roster
- * row (`AgentRoster.tsx`) and the fan-out lane (`FanOutStrip.tsx`) each carried their own four lines,
- * both ending in `state === 'working' ? 'working' : null`. That final clause is the bug: it collapses
- * `running` — an Agent that is alive and between turns — into the same answer as "no state at all",
- * so the dot painted `--neutral-3`, the resting grey.
- *
- * That was visible, not theoretical. The status-bar counts and the project→Agent tree both bucket with
- * `sessionBoardColumn`, which counts `starting`/`running`/`working` as working. So the tree's heading
- * said "working agents" while rows inside it rendered idle grey dots. `chrome.css` has had
- * `.status--running` — green, and deliberately NOT pulsing — since the vocabulary was written; both
- * copies simply never emitted it.
- *
- * Why `running` is green-but-still rather than folded into `working`: the pulse means "a turn is in
- * flight right now". An Agent waiting for your next message is alive, not mid-turn, and pulsing it
- * would spend the one moving thing on screen on a row that needs nothing. `starting` stays null on
- * purpose too — it is transient, and flashing a tier for a few hundred milliseconds during launch is
- * noise, not information.
- *
- * 只收一个 state，不再并收一个 attention。两个调用点传的 attention 都恰好是 `categoryFor(state)`
- * （agent-roster.ts、fanout-group.ts 各一处），所以第二个入参不是第二个事实，只是同一个事实的另一条
- * 到达路径——而两条路径就是有一天答得不一样的前提。少了那个入参，「等你」和「在跑」也就不可能同时
- * 成立：一个状态只落一档，档位的优先级由这里的顺序一次定死。
- *
- * `exited` 与 `disconnected` 也各有一档，理由和 `running` 那次一模一样，只是慢了一轮才被看见。
- * 这个函数最初只把「在跑」那一侧补齐，终结与失联那一侧仍旧落到 null——于是同一个 Agent，Board 的卡
- * （board-run-card.ts）、标签页角标、切换器、Agents dock 都走 `status--<state>`：`exited` 是红的
- * （chrome.css 与 `error` 同组）、`disconnected` 是空心环；而名册行与 fan-out lane 画的是静止的中性灰。
- * 最要紧的是 `disconnected`：它在 `sessionBoardColumn` 里属于 **needs-you** 列，也就是说 Board 说
- * 「这条要你处理」，名册同一行却说「闲着」——正是本函数当初为 `running` 修掉的那个分岔，只不过发生
- * 在隔壁一列。`exited` 则可能带 `exitReason: 'crashed'`（client.ts 的退出分类），一个崩掉的 Agent 在
- * 扫一眼名册时读成 idle。
- *
- * `done` 仍然是 null，而且是**判断**不是疏漏：蓝色是「完成了」，它值一条通知但不值一个持续占着注意力
- * 的彩点——这与 {@link attentionAccentFor} 里「done 不吃墨」同一条理由，也与 ATTENTION_SORT_RANK 让
- * done 与 idle 同档一致。`starting` 同样刻意留空（瞬态，见上）。所以这个函数的 null 有两种成员：
- * 「没有状态」和「有状态但刻意不画」，后者只有 done 与 starting 两个，各自都在上面写明了理由。
- *
- * 返回值就是**状态名本身**，因为 CSS 的类名就是按状态命名的（`.status--<state>`，chrome.css 的
- * 状态词汇表一节）。所以 `blocked` 得到 `.status--blocked` 而不是被折进 `waiting`：样式表给这两个
- * 类完全相同的琥珀色与 `?` 角标，画面一模一样，但判定层不必替样式表做一次多余的归并。
- * needs-you 那一档经 {@link isNeedsYouState} 取得，而不是在这里把状态名再抄一遍——抄一遍今天正确，
- * 只在联合新增成员那天出错，而那天没人会看这个文件（attention-vocabulary.test.ts 守这条）。
- *
- * 穷举 switch、无 default，和 `categoryFor` / `attentionSortClass` / `sessionBoardColumn` / `statusLabel`
- * 同一个形状。这一段此前是一条 if 链、以 `return null` 收尾，于是这一族里**只剩它**对第十个状态静默：
- * 四个兄弟一起报 TS2366 的那一刻，它安静地把新状态判成中性灰。严重度本来就不高（作者被兄弟们逼进
- * 同一个文件，多半顺手就看见了），但代价是零——`state === null` 先收窄掉空值，`isNeedsYouState` 再
- * 收窄掉 needs-you 两支，残差恰好是剩下七支，少列一支就是「缺少结尾 return」。
+/** Shared row-dot tier. Running is blue and hollow; working is green and active.
+ * Disconnected and exited remain visible neutral facts. Only error earns red; a normal
+ * completion stays quiet because the completion notification already carries that result.
  */
 export function statusDotTier(
   state: AgentDisplayState | null

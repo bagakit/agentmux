@@ -819,8 +819,8 @@ type SessionSnapshotBase = {
 /**
  * 「PTY 为什么消失」那一条事实，从任何带着它的形状里取出来。
  *
- * 这是 `runExitFacts`（Core 侧，管 exitCode / exitSignal / exitReason 那三条）的第四条同族事实，
- * 只是它落在 Session 本体而不是 `status` 里，所以不能塞进那个函数。为什么也要收成一处：这一段
+ * Core 的 `runExitFacts` 将此事实交给状态投影以解释原因；这里另负责 Session 本体上的字段，
+ * 且只有 interrupted 时保留。为什么这个落点也收成一处：这一段
  * `...(state === 'interrupted' && reason ? { interruptionReason: reason } : {})` 此前在三个地方
  * 各抄了一份——主进程的 agent 快照、主进程的 terminal 快照、renderer 的实时事件路径。
  *

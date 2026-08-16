@@ -111,8 +111,8 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
     const withPip = new Set<string>()
     for (const rule of rules) {
       const content = declValue(rule.body, 'content')
-      // 空 content（`''` / `""` / none）不是一枚角标，是抹除。
-      if (!content || content === 'none' || content === "''" || content === '""') continue
+      // `!` 是error字形；这里只发现needs-you问号。空 content（`''` / `""` / none）不是一枚角标，是抹除。
+      if (content !== '"?"' && content !== "'?'" ) continue
       for (const member of rule.members) {
         if (!/\.status__dot::after/u.test(member)) continue
         for (const state of statesIn(member)) withPip.add(state)
