@@ -956,6 +956,9 @@ export class BrowserViewManager {
       }
     }
     contents.on('will-navigate', guardNavigation)
+    // Chromium reports cross-origin child-frame src changes through this event;
+    // Feishu's device-authorize iframe uses exactly that path.
+    contents.on('will-frame-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
     // 弹窗那条路。`649df3a2` 把整个 handler 删掉是为了保住原生 popup 语义，而缺席的代价是应用链接的
     // `window.open` 会真的开出一个装着 `lark:` 的窗口，没人管。这里回装，但只截应用链接——回调体就是
