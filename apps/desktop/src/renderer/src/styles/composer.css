@@ -24,6 +24,13 @@
    max-height 是**生长上限**，回答的是另一个问题（最多长到多高），刻意仍用 px。 */
 .composer textarea { width: 100%; min-height: calc(1lh + var(--sp-4) + var(--sp-1)); max-height: 132px; field-sizing: content; display: block; resize: none; padding:var(--sp-4) var(--sp-5) var(--sp-1); border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--fs-meta); line-height: 1.45; }
 .composer textarea::placeholder { color: var(--neutral-2); }
+/* Region 名水印：右上角，一个 Region 唯一的名字露出。位置刻意避开另外两处文字——placeholder 从
+   左上起、Send 在右下——所以贴右上角谁都不压。比 placeholder 更小（--fs-micro vs textarea 的
+   --fs-meta）、更淡、且不随光标闪动，于是不会被误读成 placeholder 或可编辑文本。定宽 + 省略号收口：
+   一个浏览器标题或长文件名到顶就截断，绝不推动布局；absolute 定位不参与流，也压不到 Send。
+   pointer-events:none 让点击与文本选择照旧穿透到下面的输入框。父级 overflow:hidden 会裁掉盒外的东西，
+   所以它必须落在盒内——右上角正好在盒内的空白处。 */
+.composer__region { position: absolute; top: var(--sp-4); right: var(--sp-5); z-index: 1; max-width: 38%; overflow: hidden; color: var(--text-3); opacity: .55; font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
 .composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
 .composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
@@ -36,6 +43,9 @@
 .composer-send:disabled { opacity: .35; cursor: default; }
 .composer-send--working { color: var(--red-text); background: var(--red-bg); border: 0; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
+.composer-send-group { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.composer-send--secondary { color: var(--green-text); background: var(--green-bg); box-shadow: none; }
+.composer-send--secondary:hover:not(:disabled) { color: var(--green-text); background: var(--surface-3); }
 
 .composer__toolbar { flex-wrap: wrap; gap: var(--sp-2); }
 .composer__toolbar > div { flex-wrap: wrap; }

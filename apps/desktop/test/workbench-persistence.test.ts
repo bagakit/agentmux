@@ -285,7 +285,7 @@ describe('durable Workbench file/browser projection', () => {
     }
   })
 
-  it('G3: strips a browser Region whole (no url/title/navigationId, Region gone)', () => {
+  it('G3: persists a browser Region as its re-instantiable subset only (url yes, transient runtime no)', () => {
     const viewId = 'view:agent-browser'
     const left = initialWorkbenchRegionId(viewId)
     let tab = createWorkbenchTab(viewId, agentSurface(left, 'ab-agent'))
@@ -312,15 +312,29 @@ describe('durable Workbench file/browser projection', () => {
       layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
     })
     const projectedTab = projected.tabs[viewId]!
-    expect(workbenchSurfaces(projectedTab)).toHaveLength(1)
-    expect(projectedTab.regions['ab-browser']).toBeUndefined()
-    // Two-sided guard: the browser's page content is stripped AND the agent sibling of the same split
-    // structurally survives. A one-sided "browser Region gone" check would still pass if the WHOLE tab
-    // had collapsed — which is exactly the「分屏没了」half of the bug. Assert the agent slot is still here.
+    // 三侧守卫，缺一条都会放过一种真实回退：
+    //  1. browser 面**活下来**且带着 url —— 冷启动要靠它 `api.browser.create` 复活成原页；
+    //  2. 瞬时运行时位**不进盘** —— 直接断言 navigationId/profileId 这两个字段名不在产物里，
+    //     所以「有人把整个活体 BrowserSnapshot 存回去」会立刻变红，而不是只要 url 在就放行；
+    //  3. 同一分屏里的 agent 兄弟结构上存活 —— 只判 browser 那一侧的话，整张 tab 塌掉也照样过，
+    //     而那正是「分屏没了」那半个 bug。
+    expect(workbenchSurfaces(projectedTab)).toHaveLength(2)
+    const persistedBrowser = projectedTab.regions['ab-browser']!
+    expect(persistedBrowser.kind).toBe('browser')
+    expect(persistedBrowser).toEqual({
+      regionId: 'ab-browser',
+      kind: 'browser',
+      workspaceId: 'workspace',
+      browserId: 'ab-browser',
+      url: 'https://secret.example.com/x',
+      title: 'Secret'
+    })
     expect(projectedTab.regions[left]!.kind).toBe('agent')
     const serialized = JSON.stringify(projected)
-    expect(serialized).not.toContain('secret.example.com')
+    expect(serialized).toContain('secret.example.com')
     expect(serialized).not.toContain('nav-secret')
+    expect(serialized).not.toContain('navigationId')
+    expect(serialized).not.toContain('profileId')
   })
 
   it('G4: restores a file Region (workspace still configured) with path and split intact', () => {

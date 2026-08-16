@@ -171,8 +171,8 @@ describe('AgentComposer reusable surface', () => {
     // The mark carries it: a filled ■ glyph, no word that could be read as ending the session.
     expect(markup).toContain('lucide-square')
     expect(markup).not.toContain('>Stop')
-    // Exactly one primary action — Send is not also present while a turn is in flight.
-    expect(markup).not.toContain('aria-label="Send"')
+    // Stop remains the primary action, while a visible secondary Send makes steer discoverable.
+    expect(markup).toContain('aria-label="Send steer"')
   })
 
   it('submits on Enter whether the primary action is Send or Stop — a working Agent can be steered', () => {
@@ -678,5 +678,54 @@ describe('AgentComposer reusable surface', () => {
     }))
 
     expect(markup, 'textarea 没有 rows="1"：固有高度回到 2 行，地板压不住它').toMatch(/<textarea[^>]*rows="1"/)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Region 名水印（#—— 用户诉求：Terminal 里没处看 Region 名）。
+//
+// AgentComposer 只透传这个字符串——「名字取决于兄弟格」的算法住在 SessionPane（见
+// region-name-watermark.test.tsx）。这一组只钉住组件这层的两条契约：给了名字就渲染、没给就整段
+// 缺席（占位符会把「没有可信名字」谎报成「有个东西」），外加水印的 CSS 归位。
+// -----------------------------------------------------------------------------
+describe('AgentComposer Region 名水印', () => {
+  it('给了 regionName 就把它渲染出来', () => {
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      regionName: 'Terminal 2',
+      onChange: vi.fn()
+    }))
+    expect(markup, '水印没渲染：Region 名依然无处可见').toContain('composer__region')
+    expect(markup).toContain('Terminal 2')
+    // 装饰性身份复述：对 SR 隐藏，否则每次聚焦输入框都多读一遍冗余身份。
+    expect(markup, '水印没有 aria-hidden：会向屏幕阅读器重复朗读身份').toMatch(/class="composer__region"[^>]*aria-hidden="true"/)
+  })
+
+  it('没给 regionName 时整段缺席——不是占位符、不是 Unknown', () => {
+    // 缺席即诚实的答案。无 Region 上下文的宿主（launcher / PR / board）此路不该有名字，
+    // 而一个 "Unknown" 水印比空白更糟：它把「没有可信名字」谎报成一个真名。
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn()
+    }))
+    expect(markup, '没有 regionName 却渲染了水印容器').not.toContain('composer__region')
+    expect(markup).not.toContain('Unknown')
+  })
+
+  it('水印靠既有 token 定位在右上、不参与流、对指针透明', () => {
+    // 复用 --text-3 与既有间距 token（不发明新颜色），absolute 定位避开 placeholder（左上）与
+    // Send（右下），pointer-events:none 让点击穿透回输入框，overflow+ellipsis 收口长名。
+    const rule = allStyleRules().match(/\.composer__region \{([^}]*)\}/)?.[1] ?? ''
+    expect(rule, '水印规则不在样式表里').not.toBe('')
+    expect(rule).toContain('position: absolute')
+    expect(rule).toContain('pointer-events: none')
+    expect(rule).toContain('text-overflow: ellipsis')
+    expect(rule).toContain('var(--text-3)')
+    // 绝不发明颜色字面量——只准用 token。
+    expect(rule, '水印用了字面量颜色而不是 token').not.toMatch(/#[0-9a-f]{3,}/i)
   })
 })
