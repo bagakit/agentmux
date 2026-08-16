@@ -92,7 +92,7 @@ import {
 import {
   describePersistedTabRepairs,
   projectPersistedWorkbench,
-  persistedAgentSessionIds,
+  persistedSessionSurfaceIds,
   restorePersistedWorkbench,
   type PersistedWorkbench
 } from './lib/workbench-persistence'
@@ -1822,27 +1822,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return null
         }
       }
-      const persistedAgentIds = persistedAgentSessionIds(get().restoredWorkbench)
+      const persistedSessionIds = persistedSessionSurfaceIds(get().restoredWorkbench)
       // An empty Runtime snapshot cannot distinguish "there are no Sessions" from a freshly
-      // connected/incorrectly rooted store. If the persisted Workbench still names Agent Regions,
-      // keep those Regions as pending projections until Core returns a candidate or an explicit
-      // retirement. Treating this one response as authoritative is what made a restart erase the
-      // user's layout when the GUI and Runtime addressed different userData roots.
+      // connected/incorrectly rooted store. If the persisted Workbench still names Session Regions
+      // (Agent OR Terminal), keep those Regions as pending projections until Core returns a candidate
+      // or an explicit retirement. Treating this one response as authoritative is what made a restart
+      // erase the user's layout when the GUI and Runtime addressed different userData roots — and a
+      // pure-Terminal View was hit worst, because the ctxmux daemon outlives the app, so its runs
+      // reappear a beat later, but this guard would already have judged the empty snapshot final.
       if (
         snapshotVerified &&
-        persistedAgentIds.size > 0 &&
+        persistedSessionIds.size > 0 &&
         snapshot.sessions.length === 0 &&
         snapshot.recoveryCandidates.length === 0
       ) {
         retainUnknownSessionViews = true
         startupWarnings.push(
-          'Runtime Session snapshot returned no Session facts. The saved Agent Regions remain visible until a canonical snapshot confirms their identity.'
+          'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
         )
       }
       const recoveryFailures: SessionSnapshot[] = []
       let recovered = false
       for (const candidate of snapshotVerified ? snapshot.recoveryCandidates : []) {
-        if (!persistedAgentIds.has(candidate.agentSessionId)) continue
+        if (!persistedSessionIds.has(candidate.agentSessionId)) continue
         try {
           const recovery = await api.sessions.recover({
             kind: 'agent',
