@@ -194,7 +194,7 @@ function browserManager(window: ReturnType<typeof fakeWindow>['window']): Browse
 
 /**
  * 一个记账的应用链接宿主。`openExternal` **必须**是假的——真的 `shell.openExternal` 会在跑测试的
- * 人脸上弹出飞书。记下来而不是只数次数：判据要能说出交出去的是**哪个** URL。
+ * 人脸上弹出外部应用。记下来而不是只数次数：判据要能说出交出去的是**哪个** URL。
  */
 function appLinkHost(remembered: Record<string, 'allow' | 'deny'> = {}) {
   const opened: string[] = []
@@ -684,10 +684,10 @@ describe('BrowserViewManager', () => {
     expect(host.opened, '普通弹窗被甩给了系统浏览器').toEqual([])
 
     // 正向：应用链接才归我们，且走的是和导航路同一条问答路（这里没记过，所以挂出提问、不开）。
-    expect(handler!({ url: 'lark://open?token=9' })).toEqual({ action: 'deny' })
+    expect(handler!({ url: 'customapp://open?token=9' })).toEqual({ action: 'deny' })
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(manager.setViewport('browser-native-window-open', 'responsive').appLinkPrompt)
-      .toEqual({ url: 'lark://open?token=9', scheme: 'lark' })
+      .toEqual({ url: 'customapp://open?token=9', scheme: 'customapp' })
     expect(host.opened, '还没问就交出去了').toEqual([])
   })
 

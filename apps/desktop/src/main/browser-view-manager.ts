@@ -934,7 +934,7 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
     const guardNavigation = (event: { url: string; isMainFrame: boolean; preventDefault(): void }): void => {
-      // 应用链接在闸门**之前**分流。闸门本身逐字不变：`lark://` 装不进 WebContentsView，它要的不是
+      // 应用链接在闸门**之前**分流。闸门本身逐字不变：`customapp://` 装不进 WebContentsView，它要的不是
       // 放行进视图，是改道给系统。两件事分开之后，`javascript:` 一类仍然原地死在闸门上。
       const target = classifyBrowserTarget(event.url)
       if (target.kind === 'hand-off') {
@@ -957,7 +957,7 @@ export class BrowserViewManager {
     }
     contents.on('will-navigate', guardNavigation)
     // Chromium reports cross-origin child-frame src changes through this event;
-    // Feishu's device-authorize iframe uses exactly that path.
+    // An external app's device-authorize iframe uses exactly that path.
     contents.on('will-frame-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
     // 弹窗那条路。`649df3a2` 把整个 handler 删掉是为了保住原生 popup 语义，而缺席的代价是应用链接的

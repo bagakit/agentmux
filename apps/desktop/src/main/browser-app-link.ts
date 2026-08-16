@@ -12,7 +12,7 @@ import type { AppLinkSchemeChoice } from '../shared/contracts.js'
 /**
  * 视图真的装得下的那些。
  *
- * 与 `assertAllowedBrowserUrl` 的关系：那道闸门**逐字不变**，分流发生在它之前。`lark://` 装不进
+ * 与 `assertAllowedBrowserUrl` 的关系：那道闸门**逐字不变**，分流发生在它之前。`customapp://` 装不进
  * `WebContentsView`，所以应用链接要的不是「放行进视图」，是改道给系统。
  */
 const EMBEDDABLE_PROTOCOLS = new Set(['http:', 'https:', 'file:'])
