@@ -24,7 +24,7 @@ it('smoke startup allows real Project Rail selection in both directions', async 
     const config: AppConfig = {
       version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {},
       workspaces: [], appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
     useAppStore.setState({
       loading: false, initialize: async () => () => {}, mainSurface: 'workbench',

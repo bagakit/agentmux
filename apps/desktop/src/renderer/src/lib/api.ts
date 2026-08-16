@@ -24,6 +24,7 @@ import {
   scratchTopicDirectoryName,
   scratchTopicIdFromDirectoryName
 } from '../../../shared/scratch-topics'
+import { bookmarkKindForPath, isBinaryContent, parseBookmarkUrl } from '../../../shared/bookmark-file'
 
 const now = Date.now()
 const MOCK_SCREENSHOT_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg=='
@@ -100,6 +101,7 @@ let mockConfig: AppConfig = {
       screenshot: true,
       devTools: true,
       viewport: true,
+      saveBookmark: true,
       more: true
     }
   }
@@ -417,6 +419,13 @@ const mockApi: AgentMuxDesktopApi = {
         status: 'read',
         document: { path, content, revision: mockFileRevisions.get(path) ?? `mock:${++mockRevisionSequence}` }
       }
+    },
+    readBookmark: async (_workspaceId, path) => {
+      const kind = bookmarkKindForPath(path)
+      if (!kind) return null
+      const content = mockFiles.get(path)
+      if (typeof content !== 'string') return { url: null, binary: false }
+      return { url: parseBookmarkUrl(kind, content), binary: isBinaryContent(content) }
     },
     write: async (workspaceId, input) => {
       const observedRevision = mockFileRevisions.get(input.path) ?? null

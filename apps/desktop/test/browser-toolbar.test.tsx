@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
@@ -14,6 +17,8 @@ const fixture = vi.hoisted(() => {
       applyBrowserEvent: vi.fn(),
       reportError: vi.fn(),
       setConfig: vi.fn(),
+      saveBrowserBookmark: vi.fn(async () => 'Example.webloc'),
+      openFile: vi.fn(async () => {}),
       browserAnnotationsByBrowserId: {},
       addBrowserAnnotation: vi.fn(),
       toolsOpen: false,
@@ -48,6 +53,7 @@ const config: AppConfig = {
       screenshot: true,
       devTools: true,
       viewport: true,
+      saveBookmark: true,
       more: true
     }
   }
@@ -60,12 +66,17 @@ const tab = {
   regionId: 'region-1',
   workspaceId: 'workspace-1',
   kind: 'browser' as const,
+  // BrowserSnapshot 的必填位。这份替身早先只被当结构字面量用，缺它不报；T-004 的用例把它 spread
+  // 进标注了 BrowserWorkbenchSurface 的位置，缺席才显形——缺的一直是这份替身，不是那几条用例。
+  profileId: 'profile-1',
   url: 'https://example.com/',
   title: 'Example',
   loading: false,
   canGoBack: true,
   canGoForward: true,
   viewport: 'responsive' as const,
+  driving: false,
+  appLinkPrompt: null,
   error: null
 }
 
@@ -154,6 +165,7 @@ describe('Browser bar contract', () => {
       'Screenshot',
       'Open DevTools',
       'Viewport',
+      'Save this page as a bookmark',
       'More browser tools'
     ]
 
@@ -168,6 +180,7 @@ describe('Browser bar contract', () => {
       'screenshot',
       'devTools',
       'viewport',
+      'saveBookmark',
       'more'
     ])
   })
@@ -184,6 +197,7 @@ describe('Browser bar contract', () => {
     expect(markup).not.toContain('aria-label="Screenshot"')
     expect(markup).not.toContain('aria-label="Open DevTools"')
     expect(markup).not.toContain('aria-label="Viewport"')
+    expect(markup).not.toContain('aria-label="Save this page as a bookmark"')
     expect(markup).not.toContain('aria-label="More browser tools"')
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
@@ -234,5 +248,63 @@ describe('Browser bar contract', () => {
     expect(markup).toContain('value="ready-agent"')
     expect(markup).not.toContain('value="offline-agent"')
     expect(markup).toContain('Add to Composer')
+  })
+
+  // T-004「查看源码」按钮。它是**上下文按钮**（只在从书签开的 Browser 上出现），不进 toolbar 配置——
+  // 普通网页没有源可看。二进制 plist 那一档按用户原话「按钮灰掉，hover 告知」（§2.7）。
+  it('普通网页（非书签来历）不显示查看源码按钮', () => {
+    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
+    expect(markup).not.toContain('aria-label="View bookmark source"')
+  })
+
+  it('文本书签：查看源码按钮在场且可用，hover 说明看的是这份书签的源码', () => {
+    const fromText = { ...tab, bookmarkOrigin: { path: 'links/Example.webloc', binary: false } }
+    const markup = renderToStaticMarkup(<BrowserPane tab={fromText} visible />)
+    expect(markup).toContain('aria-label="View bookmark source"')
+    expect(markup).toContain("View this bookmark's source")
+    // 可用：这个按钮没有 disabled 属性。renderToStaticMarkup 只在 disabled=true 时才输出该属性。
+    const button = markup.slice(markup.indexOf('aria-label="View bookmark source"'))
+    expect(button.slice(0, button.indexOf('>'))).not.toContain('disabled')
+  })
+
+  it('二进制书签：查看源码按钮在场但灰掉，hover 只说清为什么这一个不行（不弹框不 toast 不警告条）', () => {
+    const fromBinary = { ...tab, bookmarkOrigin: { path: 'links/Binary.webloc', binary: true } }
+    const markup = renderToStaticMarkup(<BrowserPane tab={fromBinary} visible />)
+    expect(markup).toContain('aria-label="View bookmark source"')
+    const button = markup.slice(markup.indexOf('aria-label="View bookmark source"'))
+    expect(button.slice(0, button.indexOf('>'))).toContain('disabled')
+    expect(markup).toContain("This bookmark is a binary file")
+    // 极简表达：没有对话框/toast/警告条这些更重的形态混进来。
+    expect(markup).not.toContain('role="alert"')
+    expect(markup).not.toContain('role="dialog"')
+  })
+
+  // 承重的接线：点按钮真的调 openFile(path, …, openAsText=true)——回到文本路径看源码。
+  // 本仓栽过「onClick 那行被删也没人变红」的跟头（activity-view-wiring），所以这条真挂真点。
+  it('点文本书签的查看源码按钮：以 openAsText=true 调 openFile 打开那份书签文件', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const fromText = { ...tab, bookmarkOrigin: { path: 'links/Example.webloc', binary: false } }
+    await act(async () => {
+      root.render(<BrowserPane tab={fromText} visible />)
+    })
+
+    const button = container.querySelector('button[aria-label="View bookmark source"]')
+    expect(button).not.toBeNull()
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(fixture.state.openFile).toHaveBeenCalledWith(
+      'links/Example.webloc',
+      undefined,
+      undefined,
+      'workspace-1',
+      true
+    )
+
+    await act(async () => root.unmount())
+    container.remove()
   })
 })

@@ -13,7 +13,7 @@ const config: AppConfig = {
     { id: 'other', name: 'Other', hostId: 'local', path: '/other', kind: 'folder' }
   ],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 describe('Workspace path recovery', () => {

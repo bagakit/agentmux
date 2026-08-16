@@ -54,7 +54,7 @@ function prepare(): void {
     },
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' },
-    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   }
   useAppStore.setState({
     config,
@@ -208,7 +208,7 @@ describe('Scratch Topic 的落点', () => {
         executors: {},
         workspaces: [scratch],
         appearance: { terminalTheme: 'graphite' },
-        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
       },
       sessions: [],
       activeWorkspaceId: scratch.id,

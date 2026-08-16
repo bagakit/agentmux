@@ -47,7 +47,7 @@ const config: AppConfig = {
   executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 function agent(id: string, label = id): Extract<SessionSnapshot, { kind: 'agent' }> {

@@ -27,7 +27,7 @@ const config: AppConfig = {
     { id: 'workspace-b', name: 'B', hostId: 'local', path: '/repo/b', kind: 'folder' }
   ],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 function deferred<T>() {

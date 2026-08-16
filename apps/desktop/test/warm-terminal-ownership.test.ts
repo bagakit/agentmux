@@ -156,7 +156,7 @@ describe('store：同 key 再请求转移归属，不重开 PTY', () => {
     executors: {},
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' },
-    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   }
 
   it('归属转给后来的 launcher，且 ready / session 原样保留', () => {

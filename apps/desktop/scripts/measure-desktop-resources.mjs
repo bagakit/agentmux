@@ -242,7 +242,7 @@ async function main() {
         kind: 'folder'
       })),
       appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }, null, 2)}\n`, { mode: 0o600 })
 
     child = spawn(electron, [`--user-data-dir=${userData}`, '--js-flags=--expose-gc', entry], {

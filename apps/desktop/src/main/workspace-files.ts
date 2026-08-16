@@ -1,4 +1,5 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
+import { isBinaryContent } from '../shared/bookmark-file.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
@@ -1047,6 +1048,50 @@ export class WorkspaceFiles {
         return { status: 'deleted' }
       }
       return resultError(error)
+    }
+  }
+
+  /**
+   * 读一份文件的**原始字节**，给书签打开这条窄路径用。`read()` 把字节过 `toString('utf8')` 返回
+   * string——二进制 `.webloc`（`bplist00`）过这一步会被破坏，取不回 URL。这里不走那步，直接把 Buffer
+   * 交出去，让 `main/bookmark-file.ts` 拿真字节喂 `plutil`。
+   *
+   * **刻意不扩 `WorkspaceFileReadResult`**：那是全仓共用的读路径，为书签一个用例给它加一档字节返回会让
+   * 每个消费者多分一次叉。这条只被 `files:readBookmark` 一个 handler 调，是一条窄路径。realpath
+   * 根内约束仍走 `read()` 用的同一对 `localReadablePath`/`remoteReadablePath`——安全边界不复制，只复用。
+   *
+   * 目录、读失败、文件已删一律返回 `null`：调用方（`openFile` 书签分支）取不到 URL 就退回把文件当文本
+   * 打开，不该因为一次读失败就崩。远端 host 的 `run` 只给 utf8 解码后的字符串 stdout（与 `read()` 今天
+   * 一致），二进制经它往返必坏，所以**远端只支持文本形态的书签**（`.url` 恒是、`.webloc` 的 XML 形态）；
+   * 远端读到含 NUL 的字节显式返回 `null`（诚实地说「取不回」），不交出一份已损坏的 `Uint8Array`。
+   * 本地路径（常态）走 worker 拿真 Buffer，二进制保真。
+   */
+  async readBookmarkBytes(workspace: WorkspaceRecord, requestedPath: string): Promise<Uint8Array | null> {
+    try {
+      const host = this.hostFor(workspace.hostId)
+      if (host.kind === 'local') {
+        const resolved = await localReadablePath(workspace.path, requestedPath)
+        if ((await stat(resolved.target)).isDirectory()) return null
+        return await runLocalWorker(dirname(resolved.target), resolved.root, {
+          action: 'read',
+          name: basename(resolved.target)
+        })
+      }
+      const path = await remoteReadablePath(host, workspace.path, requestedPath)
+      const result = await host.run(
+        'sh',
+        ['-c', 'if [ -d "$1" ]; then exit 3; fi; exec cat -- "$1"', 'agentmux-read', path],
+        { timeoutMs: 15_000, maxOutputBytes: 4 * 1024 * 1024 }
+      )
+      if (result.exitCode !== 0) return null
+      // 远端 host 的 `run` 只给 utf8 解码后的 string（`process-runner.ts:16/78`），二进制 plist 经它
+      // 往返必坏（实测 74→76 字节、`plutil` 报 `Unexpected character b`）。这里宁可诚实地说「取不回」，
+      // 也不要交出一份类型合法、内容已坏的 `Uint8Array`——那会让下游白跑一次 `plutil`，并把通路缺陷
+      // 伪装成坏文件。文本书签（`.url` 恒是、`.webloc` 的 XML 形态）不含 NUL，远端照常可用。
+      if (isBinaryContent(result.stdout)) return null
+      return Buffer.from(result.stdout, 'utf8')
+    } catch {
+      return null
     }
   }
 

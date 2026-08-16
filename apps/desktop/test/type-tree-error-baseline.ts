@@ -39,7 +39,6 @@ export const DESKTOP_TEST_TYPE_ERROR_BASELINE: Readonly<Record<string, number>> 
   "test/agent-usage-display.test.ts": 2,
   "test/attention-notifier.test.ts": 8,
   "test/branch-agent-presence.test.ts": 2,
-  "test/browser-toolbar.test.tsx": 3,
   "test/browser-view-manager.test.ts": 2,
   "test/bundle-id-user-data.test.ts": 3,
   "test/changes-panel.test.tsx": 1,

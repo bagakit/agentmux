@@ -102,6 +102,7 @@ const browserSchema = z.object({
     screenshot: z.boolean(),
     devTools: z.boolean(),
     viewport: z.boolean(),
+    saveBookmark: z.boolean(),
     more: z.boolean()
   }).strict()
 }).strict()
@@ -253,6 +254,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       screenshot: true,
       devTools: true,
       viewport: true,
+      saveBookmark: true,
       more: true
     }
   },

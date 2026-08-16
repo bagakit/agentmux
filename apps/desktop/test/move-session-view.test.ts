@@ -237,7 +237,7 @@ const twoWorkspaceConfig: AppConfig = {
     { id: 'workspace-b', name: 'Feature Worktree', hostId: 'local', path: '/repo/.wt/feature', kind: 'worktree', repoPath: '/repo', branch: 'feature' }
   ],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 // The Agent's real cwd is /repo — it was launched from Main and never moved, even though its View is
