@@ -270,8 +270,8 @@ export function AgentSessionComposer({
           ...(entry.error ? { error: errorIdentity(entry.error) } : {})
         }))}
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
-        onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
-        onCopyQueued={(text) => void copyTextToClipboard(text, reportError)}
+        onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
+        onCopyQueued={(text) => { void feedback.run(async () => { await copyTextToClipboard(text, feedback.report) }) }}
       />}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
