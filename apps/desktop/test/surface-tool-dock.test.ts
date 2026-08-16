@@ -336,6 +336,13 @@ describe('shared surface tool dock resize', () => {
     expect(scratch.fileTreeDefaultSize).toBeLessThan(project.fileTreeDefaultSize)
   })
 
+  it('collapses the Explorer by default only for Scratch (Topics is its primary view)', () => {
+    // 两个方向都断言：单向断言会被把常量写死满足，而这条测试存在的意义就是抓那种写死。
+    // Scratch 折叠只看 Topics；Project 展开因为 Branches 是它的次级视图。
+    expect(contentSlotPresentation(true).explorerCollapsedByDefault).toBe(true)
+    expect(contentSlotPresentation(false).explorerCollapsedByDefault).toBe(false)
+  })
+
   it('把 Topic 目录定位到自家文件面板，而不是打开系统文件管理器', () => {
     expect(surfaceToolDockSource).toContain('onRevealDirectory(topic.directoryPath)')
     // 图标要表达「聚焦定位」而不是「打开文件夹」——它把自家那棵树滚到这个目录，
