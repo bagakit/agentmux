@@ -80,8 +80,10 @@ export function AgentStatusBar() {
           is no longer a dead number. needs-you/error keep their one-click JUMP button unchanged beside
           it; the tree is added, never substituted (principle 11). An empty class renders no chevron, so
           a zero count is not a dead click. */}
-      <span className="agent-status-bar__segment" data-attention="working">
-        <StatusCount state={rollup.working > 0 ? 'working' : null} count={rollup.working} label="working" />
+      <span className="agent-status-bar__group">
+        <span className="agent-status-bar__segment" data-attention="working">
+          <StatusCount state={rollup.working > 0 ? 'working' : null} count={rollup.working} label="working" />
+        </span>
         <AgentTreePanel
           filter="working"
           heading="Working · by project"
@@ -89,7 +91,7 @@ export function AgentStatusBar() {
         />
       </span>
       {rollup.needsYouSessionId ? (
-        <>
+        <span className="agent-status-bar__group">
           <button
             className="agent-status-bar__segment agent-status-bar__segment--action"
             type="button"
@@ -105,14 +107,14 @@ export function AgentStatusBar() {
             heading="Needs you · by project"
             label={`Show the ${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent' : 'agents'} needing you by project`}
           />
-        </>
+        </span>
       ) : (
         <span className="agent-status-bar__segment" data-attention="needs-you">
           <StatusCount state={null} count={rollup.needsYou} label="needs you" />
         </span>
       )}
       {rollup.errorSessionId ? (
-        <>
+        <span className="agent-status-bar__group">
           <button
             className="agent-status-bar__segment agent-status-bar__segment--action"
             type="button"
@@ -128,7 +130,7 @@ export function AgentStatusBar() {
             heading="Error · by project"
             label={`Show the ${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error by project`}
           />
-        </>
+        </span>
       ) : (
         <span className="agent-status-bar__segment" data-attention="error">
           <StatusCount state={null} count={rollup.error} label="error" />
