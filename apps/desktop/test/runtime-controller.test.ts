@@ -811,11 +811,12 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await controller.submitPrompt(control, 'hello', localConfig)
+    await controller.submitPrompt(control, 'hello', 'message-op', undefined, 'reviewer')
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
     expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({
       agentSessionId: 'agent-1',
-      prompt: 'hello'
+      prompt: 'hello',
+      authorAgentSessionId: 'reviewer'
     }))
   })
 

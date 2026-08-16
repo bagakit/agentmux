@@ -192,3 +192,11 @@
 .composer-image .md-conversation-image { vertical-align: middle; }
 .composer-image .md-conversation-image__thumb { width: auto; height: auto; max-height: 1lh; max-width: min(10em, 100%); object-fit: contain; }
 .launcher-composer .composer__editor { min-height: 6em; }
+
+.composer-mailbox__heading, .composer-mailbox__messages header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.composer-mailbox__heading { margin-bottom: var(--sp-2); }
+.composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
+.composer-mailbox__messages li { padding: var(--sp-3); border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.composer-mailbox__messages strong { font-weight: 500; }
+.composer-mailbox__messages time { color: var(--text-3); font-size: var(--fs-micro); }
+.composer-mailbox__messages p { white-space: pre-wrap; margin: var(--sp-2) 0; }

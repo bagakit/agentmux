@@ -2380,7 +2380,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       requireActive()
       // One-shot manual submit: the id is born and dies with this single call. There is no store-held
       // retry here (unlike the steer queue), so a fresh id per invocation is the correct lifetime.
-      await api.sessions.submitPrompt(session.control, request.text, crypto.randomUUID())
+      await api.sessions.submitPrompt(session.control, request.text, crypto.randomUUID(), request.caller?.agentSessionId)
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {

@@ -15,9 +15,8 @@ function fingerprint(item: ServiceNoticeItem): string {
 }
 
 /** Only acknowledgement is persisted. Current problems remain projections of their owners. */
-export function useServiceNotices(scope: string, notices: readonly ServiceNoticeItem[], available = true) {
+export function useReadReceipts(scope: string, current: Readonly<Record<string, string>>, available = true) {
   const receipts = useAppStore((state) => state.noticeReadReceipts[scope] ?? EMPTY_RECEIPTS)
-  const current = Object.fromEntries(notices.map((item) => [item.id, fingerprint(item)]))
   const signature = JSON.stringify(current)
   useEffect(() => {
     if (!available) return
@@ -32,12 +31,19 @@ export function useServiceNotices(scope: string, notices: readonly ServiceNotice
       return { noticeReadReceipts: next }
     })
   }, [scope, signature, available])
-  function acknowledge(items: readonly ServiceNoticeItem[]) {
+  function acknowledge(ids: readonly string[]) {
     useAppStore.setState((state) => ({ noticeReadReceipts: {
       ...state.noticeReadReceipts,
-      [scope]: { ...state.noticeReadReceipts[scope], ...Object.fromEntries(items.map((item) => [item.id, fingerprint(item)])) }
+      [scope]: { ...state.noticeReadReceipts[scope], ...Object.fromEntries(ids.map((id) => [id, current[id]!])) }
     } }))
   }
-  return { available, notices, unread: notices.filter((item) => receipts[item.id] !== fingerprint(item)), acknowledge }
+  return { unread: Object.keys(current).filter((id) => receipts[id] !== current[id]), acknowledge }
 }
 
+
+export function useServiceNotices(scope: string, notices: readonly ServiceNoticeItem[], available = true) {
+  const current = Object.fromEntries(notices.map((item) => [item.id, fingerprint(item)]))
+  const receipts = useReadReceipts(scope, current, available)
+  return { available, notices, unread: notices.filter((item) => receipts.unread.includes(item.id)),
+    acknowledge: (items: readonly ServiceNoticeItem[]) => receipts.acknowledge(items.map((item) => item.id)) }
+}

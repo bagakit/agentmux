@@ -607,8 +607,8 @@ export async function registerIpc(args: {
   handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData) => {
     await args.runtime.write(session, data)
   })
-  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId?: string) => {
-    await args.runtime.submitPrompt(session, prompt, operationId)
+  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string) => {
+    await args.runtime.submitPrompt(session, prompt, operationId, undefined, authorAgentSessionId)
   })
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,

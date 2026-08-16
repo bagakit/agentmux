@@ -832,7 +832,8 @@ export class RuntimeController {
     // (only test callers) — it is never a STABLE default, so a caller that omits it can never make two
     // distinct attempts collide on one id.
     operationId?: string,
-    automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal }
+    automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal },
+    authorAgentSessionId?: string
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -851,7 +852,8 @@ export class RuntimeController {
           agentSessionId: control.agentSessionId,
           operationId: operationId ?? randomUUID(),
           ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
-          prompt
+          prompt,
+          ...(authorAgentSessionId ? { authorAgentSessionId } : {})
         })
       } catch (error) {
         // A process can exit in the small window after the first status check. Re-read the same

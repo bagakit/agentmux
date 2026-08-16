@@ -1,65 +1,102 @@
-import { useEffect, useId, useState, type ReactNode } from 'react'
-import { Mail } from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
+import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
+import { Mail, X } from 'lucide-react'
 import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
-import { useServiceNotices } from '../lib/use-service-notices'
+import { useAppStore } from '../store'
+import { useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 
-type NoticeInbox = ReturnType<typeof useServiceNotices>
+type Folder = 'inbox' | 'outbox' | 'system'
+const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
 
-export function SessionMailbox({ inbox, queued, identity, onRemoveQueued, onSendQueued, onCopyQueued }: {
-  identity?: { name: string; avatar: ReactNode; context?: string }
-  inbox: NoticeInbox
+function MessageHistory({ items, incoming }: { items: readonly AgentTimelineItem[]; incoming: boolean }) {
+  const sessions = useAppStore((state) => state.sessions)
+  const names = useAppStore((state) => state.agentNames)
+  const authorLabel = (id: string) => names?.[id] || sessions.find((session) => session.id === id)?.label || `Agent ${id.slice(0, 8)}`
+  return items.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Agent messages' : 'Sent messages'}>
+    {items.map((item) => <li key={item.id}>
+      <header><strong>{incoming ? authorLabel(item.authorAgentSessionId!) : 'Sent'}</strong>
+        <time dateTime={new Date(item.createdAt).toISOString()}>{new Date(item.createdAt).toLocaleString()}</time></header>
+      <p>{item.content}</p>
+    </li>)}
+  </ol> : incoming ? <p>No Agent messages.</p> : null
+}
+
+/** Folders project durable delivery facts; read receipts never advance delivery state. */
+export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSendQueued, onCopyQueued }: {
+  system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
+  timeline?: AgentTimelineSnapshot | undefined
   onRemoveQueued?: (id: string) => void
   onSendQueued?: (id: string) => void
   onCopyQueued?: (text: string) => void
 }) {
   const id = useId()
   const [open, setOpen] = useState(false)
-  const [folder, setFolder] = useState<'inbox' | 'outbox'>(() => inbox.notices.length === 0 && queued.length > 0 ? 'outbox' : 'inbox')
-  // Only visible incoming notices are read. Opening the outbox never acknowledges unseen notices.
+  const [folder, setFolder] = useState<Folder>('inbox')
+  const delivered = timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
+    item.kind === 'user_message' && item.status === 'complete') ?? []
+  const incoming = delivered.filter((item) => item.authorAgentSessionId !== undefined)
+  const sent = delivered.filter((item) => item.authorAgentSessionId === undefined)
+  const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`,
+    Object.fromEntries(incoming.map((item) => [item.id, JSON.stringify([item.authorAgentSessionId, item.content, item.createdAt])])),
+    timeline !== undefined)
+  const unread = receipts.unread.length + system.unread.length
+  const deliveredIds = new Set(delivered.map((item) => item.id))
+  const pending = queued.filter((item) => !deliveredIds.has(`prompt:${item.id}`))
+  const counts = { inbox: incoming.length, outbox: pending.length + sent.length, system: system.notices.length }
+  // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
+  function openFolder(): Folder {
+    return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : counts.outbox ? 'outbox' : 'inbox'
+  }
   useEffect(() => {
-    if (open && folder === 'inbox' && inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, folder, inbox])
+    if (!open) return
+    if (folder === 'inbox' && receipts.unread.length) receipts.acknowledge(receipts.unread)
+    if (folder === 'system' && system.unread.length) system.acknowledge(system.unread)
+  }, [open, folder, receipts, system])
   return <>
-    <button type="button" className="composer__mailbox" data-unread={inbox.unread.length > 0}
-      aria-label={`${identity ? `${identity.name} · ` : ''}Mailbox: ${inbox.unread.length} unread, ${inbox.notices.length} notices, ${queued.length} pending`}
-      title={identity ? `${identity.context ? `${identity.name} · ${identity.context}` : identity.name} · Mailbox` : 'Mailbox'} popoverTarget={id} popoverTargetAction="toggle">
+    <button type="button" className="composer__mailbox" data-unread={unread > 0}
+      aria-label={`Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending`}
+      title="Mailbox" popoverTarget={id} popoverTargetAction="toggle">
       <Mail size={14} aria-hidden="true" />
-      {queued.length ? <span aria-hidden="true">{queued.length}</span> : null}
-      {identity ? <span className="composer__identity" title={identity.context ? `${identity.name} · ${identity.context}` : identity.name}>{identity.avatar}</span> : null}
-      {inbox.unread.length ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
+      {pending.length ? <span aria-hidden="true">{pending.length}</span> : null}
+      {unread ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
     </button>
     <div id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
-      onToggle={(event) => setOpen(event.newState === 'open')}>
+      onToggle={(event) => { const opening = event.newState === 'open'; if (opening) setFolder(openFolder()); setOpen(opening) }}>
+      <div className="composer-mailbox__heading"><strong>Mailbox</strong>
+        <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"><X size={14} /></button></div>
       <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
-        {(['inbox', 'outbox'] as const).map((name) => <button key={name} type="button"
+        {FOLDERS.map((name, index) => <button key={name} type="button"
           id={`${id}-${name}-tab`} role="tab" aria-controls={`${id}-${name}`} aria-selected={folder === name}
           tabIndex={folder === name ? 0 : -1} onClick={() => setFolder(name)}
           onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
             event.preventDefault()
-            const next = event.key === 'Home' ? 'inbox' : event.key === 'End' ? 'outbox' : name === 'inbox' ? 'outbox' : 'inbox'
+            const next = FOLDERS[event.key === 'Home' ? 0 : event.key === 'End' ? FOLDERS.length - 1 :
+              (index + (event.key === 'ArrowRight' ? 1 : FOLDERS.length - 1)) % FOLDERS.length]!
             setFolder(next)
             document.getElementById(`${id}-${next}-tab`)?.focus()
           }}>
-          {name === 'inbox' ? `Inbox (${inbox.notices.length})` : `Outbox (${queued.length})`}
-          {name === 'inbox' && inbox.unread.length ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
+          {`${name[0]!.toUpperCase()}${name.slice(1)} (${counts[name]})`}
+          {(name === 'inbox' && receipts.unread.length || name === 'system' && system.unread.length) ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
         </button>)}
       </div>
       <div id={`${id}-inbox`} role="tabpanel" aria-labelledby={`${id}-inbox-tab`} hidden={folder !== 'inbox'}>
-        {inbox.notices.length ? inbox.notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
+        {timeline ? <MessageHistory items={incoming} incoming /> : <p>Waiting for message history.</p>}
+      </div>
+      <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
+        <ComposerOutbox queued={pending} {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
+          {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
+        <MessageHistory items={sent} incoming={false} />
+      </div>
+      <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
+        {system.notices.length ? system.notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
           <div className="composer-notice__body">
-            <strong>{item.notice.notice.step}</strong>
-            <span>{item.notice.notice.mode}</span>
-            <span>{item.notice.notice.restore}</span>
+            <strong>{item.notice.notice.step}</strong><span>{item.notice.notice.mode}</span><span>{item.notice.notice.restore}</span>
             {item.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => setFolder('outbox')}>View outbox</button> : null}
             {item.action ? <button type="button" className="composer-tool" onClick={item.action.run}>{item.action.label}</button> : null}
           </div>
-        </div>) : <p>{inbox.available ? 'No current notices.' : 'Waiting for Session status.'}</p>}
-      </div>
-      <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
-        <ComposerOutbox queued={queued} {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
-          {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
+        </div>) : <p>{system.available ? 'No current notices.' : 'Waiting for Session status.'}</p>}
       </div>
     </div>
   </>
