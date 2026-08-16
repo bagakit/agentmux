@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { workingAgentCount } from '../src/renderer/src/lib/project-board.js'
-import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey } from '../src/renderer/src/lib/workspace-projects.js'
+import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -23,6 +24,7 @@ const fixture = vi.hoisted(() => ({
     mainSurface: 'workbench' as const,
     projectRailOpen: true,
     collapsedProjectGroups: {} as Record<string, true>,
+    pinnedItems: {} as Record<string, string[]>,
     toolsOpen: false,
     selectWorkspace: vi.fn(async () => {}),
     setMainSurface: vi.fn(),
@@ -129,6 +131,7 @@ afterEach(() => {
   fixture.state.sessions = []
   fixture.state.activeWorkspaceId = 'project-a'
   fixture.state.collapsedProjectGroups = {}
+  fixture.state.pinnedItems = {}
 })
 
 describe('workingAgentCount', () => {
@@ -527,5 +530,116 @@ describe('Project Rail 的分组与嵌套', () => {
     const header = markup.match(/<div class="project-rail-group[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ''
     expect(header, '分组容器缺失').not.toBe('')
     expect(header).not.toContain('project-rail-group--expanded')
+  })
+})
+
+describe('Pinned Topics / Branches as child nodes in the rail', () => {
+  /** 一个 pinned 子行的完整 <button>，按 aria-label 定位。断言恰好一行——「零不显示」与「显示重复」是两件事。 */
+  function pinnedChildFor(markup: string, label: string): string {
+    const rows = [...markup.matchAll(/<button[^>]*class="[^"]*project-rail-row--pinned-child[^"]*"[\s\S]*?<\/button>/g)]
+      .map((match) => match[0])
+      .filter((row) => new RegExp(`aria-label="${label}"`).test(row))
+    expect(`${label}: ${rows.length} 行`).toBe(`${label}: 1 行`)
+    return rows[0]!
+  }
+
+  function depthOf(row: string): number {
+    return Number(row.match(/--rail-depth:\s*(\d+)/)?.[1] ?? 0)
+  }
+
+  /** Alpha 项目的 pin scope key。它是 `workspaceProjectId(workspace)`（= `[hostId, repoPath]`），
+      **不是** workspace 的 id——两者只在这里分岔，手写 'project-a' 会静默地 pin 到一个不存在的 scope。 */
+  const alphaScope = workspaceProjectId(config.workspaces.find((workspace) => workspace.id === 'project-a')!)
+  const betaScope = workspaceProjectId(config.workspaces.find((workspace) => workspace.id === 'project-b')!)
+
+  it('零 pin 时什么都不渲染——不留空容器、不留标题', () => {
+    // 需求逐字：「Zero pinned items renders nothing at all」。守的是「零 pin 时冒出一个空容器」
+    // 这个变异：把 pinnedChildRows 的 `ids.length === 0 → null` 改成返回一个空的
+    // `<div class="project-rail-entry" />`，rail 的 entry 数就会从 4 涨上去，本条红。
+    fixture.state.config = structuredClone(config)
+    fixture.state.pinnedItems = {}
+    const markup = renderRail()
+    expect(markup).not.toContain('project-rail-row--pinned-child')
+    // 基线：Scratch 槽 1 个 entry + 三个项目行各 1 个 = 4。空容器变异会让它变多。
+    expect((markup.match(/class="project-rail-entry"/g) ?? []).length).toBe(4)
+  })
+
+  it('把 pinned Branch 挂在它自己的 Project 下，而不是 Scratch 或别的项目', () => {
+    // scope 必须是 workspaceProjectId(workspace)（见 store.ts pinnedItems 的注释）：一个分支名只在
+    // 其 repo 内唯一，两个项目都能有 `main`。守的是「忽略 scope、把每个 pin 都挂到 Scratch 下」
+    // 这个变异——把分支侧的 pinnedChildRows(project.id, …) 改成读 SCRATCH_WORKSPACE_ID，`feat-x`
+    // 就从 Alpha 下消失（Scratch scope 里没有它），本条红。
+    fixture.state.config = structuredClone(config)
+    fixture.state.pinnedItems = { [alphaScope]: ['feat-x'], [betaScope]: ['feat-y'] }
+    const markup = renderRail()
+    const child = pinnedChildFor(markup, 'feat-x')
+    // 子节点比父项目行深一层：Alpha 在扁平 fixture 里是 depth 0，子节点是 1。
+    expect(depthOf(child)).toBe(1)
+    // 位置证明归属：feat-x 紧跟在 Alpha 之后、Beta 之前；feat-y 跟在 Beta 之后。
+    const alphaAt = markup.indexOf('aria-label="Alpha"')
+    const betaAt = markup.indexOf('aria-label="Beta"')
+    const featXAt = markup.indexOf('aria-label="feat-x"')
+    const featYAt = markup.indexOf('aria-label="feat-y"')
+    expect(alphaAt).toBeLessThan(featXAt)
+    expect(featXAt).toBeLessThan(betaAt)
+    expect(betaAt).toBeLessThan(featYAt)
+  })
+
+  it('把 pinned Topic 挂在 Scratch 下；快照缺失时回落到 id 而不是消失', () => {
+    // 需求：pinned Topic 从 pin 列表单独就能渲染——快照没加载（SSR 下 useScratchTopics 恒返回
+    // topics=null）时用 id 兜底，绝不因为「查不到标题」而让这一行消失。
+    fixture.state.config = structuredClone(config)
+    fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
+    const markup = renderRail()
+    const child = pinnedChildFor(markup, 'view:launcher-abc')
+    expect(depthOf(child)).toBe(1)
+    // 挂在 Scratch 下：它出现在 Scratch 行之后、Projects 段第一行（Alpha）之前。
+    const scratchAt = markup.indexOf('aria-label="Scratch"')
+    const topicAt = markup.indexOf('aria-label="view:launcher-abc"')
+    const alphaAt = markup.indexOf('aria-label="Alpha"')
+    expect(scratchAt).toBeLessThan(topicAt)
+    expect(topicAt).toBeLessThan(alphaAt)
+  })
+
+  it('不与 Scratch 行的静态 <Pin> 徽章相混——那是「此 workspace 被 pin」的另一个概念', () => {
+    // 两个陷阱之一（见 review §2.7 / 任务）：Scratch 行本来就有一枚 <Pin> 徽章，含义是
+    // 「这个 workspace 被 pin 了」。pinned Topic 子节点不能借用那套呈现读成同一个东西——它们走
+    // --pinned-child + 更小字号，与 scratch-workspace-row__meta 里的徽章是不同的 DOM。
+    fixture.state.config = structuredClone(config)
+    fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
+    const markup = renderRail()
+    const child = pinnedChildFor(markup, 'view:launcher-abc')
+    expect(child).not.toContain('scratch-workspace-row__meta')
+    expect(child).not.toContain('lucide-pin')
+  })
+
+  it('折叠的分组不泄漏成员的 pinned 子节点', () => {
+    // pinned 子节点在 projectRow / Scratch 槽内部渲染，而折叠分组根本不调用 projectRow
+    // （`collapsed ? null : group.nodes.map(projectRow)`）。守的是「把 pinned 子节点提到折叠守卫
+    // 之外渲染」这个变异：那样折叠后 `feat` 仍会冒出来，本条红。
+    fixture.state.config = {
+      ...structuredClone(config),
+      workspaces: [
+        { id: '__scratch__', name: 'Scratch', hostId: 'local', path: '/scratch', kind: 'folder' },
+        { id: 'one', name: 'one', hostId: 'local', path: '/proj/kit/one', kind: 'folder' },
+        { id: 'two', name: 'two', hostId: 'local', path: '/proj/kit/two', kind: 'folder' }
+      ]
+    }
+    fixture.state.activeWorkspaceId = '__scratch__'
+    const oneScope = workspaceProjectId({ id: 'one', name: 'one', hostId: 'local', path: '/proj/kit/one', kind: 'folder' })
+    fixture.state.pinnedItems = { [oneScope]: ['feat'] }
+
+    // 展开时子节点在场。
+    const expanded = renderRail()
+    expect(expanded).toContain('project-rail-row--pinned-child')
+    expect(expanded).toMatch(/aria-label="feat"/)
+
+    // 折叠该分组后，成员行与它的 pinned 子节点一起消失。
+    const key = projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })!
+    fixture.state.collapsedProjectGroups = { [key]: true }
+    const collapsed = renderRail()
+    expect(collapsed).not.toMatch(/aria-label="one"/)
+    expect(collapsed).not.toMatch(/aria-label="feat"/)
+    expect(collapsed).not.toContain('project-rail-row--pinned-child')
   })
 })
