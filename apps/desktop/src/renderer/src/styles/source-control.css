@@ -20,7 +20,8 @@
 .branches-scroll { min-height: 0; flex: 1; padding:var(--sp-1) var(--sp-2) var(--sp-2); overflow: auto; }
 .branch-group { display: grid; gap:1px; margin-bottom:var(--sp-2); }
 .branch-group > span { padding:var(--sp-1) var(--sp-2) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
-.branch-row { width: 100%; min-width: 0; display: flex; align-items: center; min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.branch-row { position: relative; gap: var(--sp-2); width: 100%; min-width: 0; display: flex; align-items: center; min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.branch-row__open { flex: 1; min-width: 0; display: flex; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .branch-row:hover { color: var(--text-2); background: var(--surface-2); }
 .branch-row--selected, .branch-row--selected:hover { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
 /* 行内三段的排布走共享层（selector.css 的 `.selector-row`）。这里只留 Branch 侧真正不同的：
@@ -44,18 +45,14 @@
 .branch-row__sync--ahead { color: var(--blue); background: color-mix(in srgb, var(--blue) 13%, var(--surface-0)); }
 .branch-row__sync--behind { color: var(--amber-text); background: var(--amber-bg); }
 .branch-row__sync--diverged { color: var(--red-text); background: var(--red-bg); }
-/* 每行尾部的 pin 键。走共享的 .icon-button 底子（base.css），这里只收窄尺寸并管它的可见性。
-   未 pin 时压暗、整行 hover 才浮起来——常驻但不与分支名抢注意力，同 .change-row__stage 那一档。 */
-.branch-row__pin { width: 22px; height: 22px; opacity: 0; transition: opacity .12s ease, color .12s ease, background .12s ease; }
-.branch-row:hover .branch-row__pin { opacity: .55; }
-.branch-row__pin:hover:not(:disabled) { opacity: 1; }
-/* 键盘到达时也要显形。`opacity: 0` 不影响可聚焦性——Tab 照样停在这枚键上，而 base.css 那圈焦点环
-   连同按钮一起被透明度吃掉：焦点落在一个看不见的控件上，比没有这个控件更糟。同 .log-row 用
-   `:focus-visible` 把 hover 才显形的部件提上来的做法（activity.css）。 */
+/* The idle action is out of flow; the leading glyph carries pinned state without a new slot.
+   Hover or keyboard focus returns the compact action to flow, preserving a visible focus target. */
+.branch-row__pin { position: absolute; right: var(--sp-2); width: 18px; height: 18px; padding: 0; opacity: 0; pointer-events: none; transition: opacity .12s ease, color .12s ease, background .12s ease; }
+.branch-row:hover .branch-row__pin,
+.branch-row:focus-within .branch-row__pin { position: static; opacity: .65; pointer-events: auto; }
+.branch-row__pin:hover:not(:disabled),
 .branch-row__pin:focus-visible { opacity: 1; }
-/* 已 pin：在**不 hover 时**也看得出来——扫一眼列表就该分辨哪些被 pin 了，而不是把它藏进指针位置。
-   用品牌绿实心表达「钉住了」，和右键那枚装饰性 Pin 徽标（表示 workspace 被 pin）语义不同但同族配色。 */
-.branch-row__pin--pinned, .branch-row:hover .branch-row__pin--pinned { opacity: 1; color: var(--green); }
+.branch-row__pin--pinned { color: var(--green); }
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
 .branches-empty--error span { max-width: 230px; line-height: 1.4; }

@@ -632,6 +632,18 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     expect(betaAt).toBeLessThan(featYAt)
   })
 
+  it('pinned branch titles share their parent collapse and icon slots before applying depth', () => {
+    fixture.state.config = structuredClone(config)
+    fixture.state.pinnedItems = { [alphaScope]: ['feat-x'] }
+    const markup = renderRail()
+    const child = pinnedChildFor(markup, 'feat-x')
+    expect(child).toContain('class="project-rail-row__icon" aria-hidden="true"')
+    const at = markup.indexOf(child)
+    expect(at).toBeGreaterThan(0)
+    const prefix = markup.slice(0, at)
+    expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:1"><span class="project-rail-row__collapse-spacer" aria-hidden="true"><\/span>$/)
+  })
+
   it('把 pinned Topic 挂在 Scratch 下；快照缺失时回落到 id 而不是消失', () => {
     // 需求：pinned Topic 从 pin 列表单独就能渲染——快照没加载（SSR 下 useScratchTopics 恒返回
     // topics=null）时用 id 兜底，绝不因为「查不到标题」而让这一行消失。

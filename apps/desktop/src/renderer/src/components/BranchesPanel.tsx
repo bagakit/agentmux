@@ -293,70 +293,69 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             .catch((cause) => setActionError(message(cause)))
         }}
       >
-        <button
-          type="button"
+        <div
           className={`branch-row ${selectedRow ? 'branch-row--selected' : ''}`}
-          aria-pressed={selectedRow}
-          onClick={() => void openBranch(branch)}
           onContextMenu={() => setSelectedBranch(branch.name)}
         >
-          <SelectorRow
-            leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : <GitBranch size={12} />}
-            title={branch.name}
-            titleTooltip={branch.name}
-            subtitle={worktree ?? 'No worktree'}
-            subtitleTooltip={worktree ?? undefined}
-            presence={
-              <SelectorPresence
-                agents={runningAgents.map((agent) => ({
-                  key: agent.providerId,
-                  providerId: agent.providerId,
-                  label: agentProviderLabel(agent.providerId),
-                  // 这一簇是按 provider 归并的运行中 Run，不是逐个 Session——它们按定义都在跑
-                  // （`runningAgentPresenceByWorktree` 只收 processState==='running'）。所以这里递的
-                  // 权威输入就是 `state: 'running'`，头像据它现算出「无 needs-you 口径」——这是真话，
-                  // 不是从前那个硬写的 `attention: null`。从前 Topic 侧递算好的 accent、这里硬写 null，
-                  // 同一个组件被两处对「需不需要你」答得相反；现在两侧都只递 state，由头像内部那一处
-                  // 唯一裁决（attentionAccentFor），不可能再答出两个答案。
-                  state: 'running',
-                  count: agent.count
-                }))}
-              />
-            }
-            trailing={
-              <>
-                {sync && sync.label ? (
-                  <span
-                    className={`branch-row__sync branch-row__sync--${sync.kind}`}
-                    title={sync.title}
-                    data-sync-kind={sync.kind}
-                  >
-                    {sync.label}
+          <button
+            type="button"
+            className="branch-row__open"
+            aria-pressed={selectedRow}
+            onClick={() => void openBranch(branch)}
+          >
+            <SelectorRow
+              leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : pinned ? <Pin size={12} aria-label="Pinned branch" /> : <GitBranch size={12} />}
+              title={branch.name}
+              titleTooltip={branch.name}
+              subtitle={worktree ?? 'No worktree'}
+              subtitleTooltip={worktree ?? undefined}
+              presence={
+                <SelectorPresence
+                  agents={runningAgents.map((agent) => ({
+                    key: agent.providerId,
+                    providerId: agent.providerId,
+                    label: agentProviderLabel(agent.providerId),
+                    // 这一簇是按 provider 归并的运行中 Run，不是逐个 Session——它们按定义都在跑
+                    // （`runningAgentPresenceByWorktree` 只收 processState==='running'）。所以这里递的
+                    // 权威输入就是 `state: 'running'`，头像据它现算出「无 needs-you 口径」——这是真话，
+                    // 不是从前那个硬写的 `attention: null`。从前 Topic 侧递算好的 accent、这里硬写 null，
+                    // 同一个组件被两处对「需不需要你」答得相反；现在两侧都只递 state，由头像内部那一处
+                    // 唯一裁决（attentionAccentFor），不可能再答出两个答案。
+                    state: 'running',
+                    count: agent.count
+                  }))}
+                />
+              }
+              trailing={
+                <>
+                  {sync && sync.label ? (
+                    <span
+                      className={`branch-row__sync branch-row__sync--${sync.kind}`}
+                      title={sync.title}
+                      data-sync-kind={sync.kind}
+                    >
+                      {sync.label}
+                    </span>
+                  ) : null}
+                  <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
+                    {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
                   </span>
-                ) : null}
-                <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
-                  {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
-                </span>
-                {/* `.branch-row` 本身是个 <button>：这枚嵌套控件必须 stopPropagation，否则点它会连带
-                    触发外层的 openBranch——「pin 一下」变成「pin 并打开」。pinned 态是持久的类，不靠
-                    hover：扫一眼列表就该看出哪些分支被 pin 了（见 CSS 里 --pinned 那条）。 */}
-                <button
-                  type="button"
-                  className={`icon-button branch-row__pin ${pinned ? 'branch-row__pin--pinned' : ''}`}
-                  aria-pressed={pinned}
-                  aria-label={pinned ? `Unpin ${branch.name}` : `Pin ${branch.name}`}
-                  title={pinned ? 'Unpin branch' : 'Pin branch'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    togglePinnedItem(pinScope, branch.name)
-                  }}
-                >
-                  <Pin size={11} />
-                </button>
-              </>
-            }
-          />
-        </button>
+                </>
+              }
+            />
+          </button>
+          {/* Pin status uses the existing leading slot; this action reveals on hover/focus. */}
+          <button
+            type="button"
+            className={`icon-button branch-row__pin ${pinned ? 'branch-row__pin--pinned' : ''}`}
+            aria-pressed={pinned}
+            aria-label={pinned ? `Unpin ${branch.name}` : `Pin ${branch.name}`}
+            title={pinned ? 'Unpin branch' : 'Pin branch'}
+            onClick={() => togglePinnedItem(pinScope, branch.name)}
+          >
+            <Pin size={11} />
+          </button>
+        </div>
       </BranchContextMenu>
     )
   }
