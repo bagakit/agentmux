@@ -47,8 +47,8 @@ import {
 // literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
 // vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
 // runtime with no compile error. Binding two consumers to this one validated source is the fix.
-export const CTXMUX_COMMIT = 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7'
-const CTXMUX_TREE = 'c43e3992e2e127d4b4e65e447fd23b9037be7f9c'
+export const CTXMUX_COMMIT = 'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02'
+const CTXMUX_TREE = '1d97495e717cce1c3ac588a3c0712d9555b5c871'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -122,6 +122,11 @@ export type CtxmuxAdapterRun = {
   /**
    * Owner-confirmed live PTY size, or `null` when no owner can confirm one.
    * This is `RunInfo.current_size`, never `RunSpec.size`.
+   *
+   * `null` is a real answer, not a missing one: a tmux-backed Run whose pane ctxmux only observes, or
+   * a historical Run recovered without a live PTY. Consumers that compare a rendered screen for strict
+   * equality must refuse to run on `null` rather than substitute a guess — see `screen-evidence.ts`,
+   * where it becomes `TERMINAL_SIZE_UNKNOWN`.
    */
   cols: number | null
   rows: number | null
@@ -573,32 +578,26 @@ function decodeChunk(
 type OwnerConfirmedSize = { cols: number; rows: number }
 
 /**
- * `RunInfo.current_size` is the snapshot authority. `undefined` means this snapshot
- * predates the field (vendored types/daemon have not carried it yet); `null` is the
- * protocol's explicit unknown and must not be replaced by `RunSpec.size`.
+ * `RunInfo.current_size` is the snapshot authority: the size an owner confirmed for the PTY as it is
+ * now. `null` is the protocol's explicit unknown and must NOT be replaced by `RunSpec.size` — that one
+ * is the size requested at launch and stops being the current value the moment anything resizes.
  *
- * TODAY THIS ALWAYS RETURNS `undefined`, and {@link liveResizedSize} always returns
- * `null`: the vendored artifact is ctxmux `c13ab114`, protocol 14, whose SDK declares
- * neither `RunInfo.current_size` nor a `resized` Run event — the strings do not appear
- * in the vendored `ctxmuxd` binary either. That is why both read through casts rather
- * than typed fields. So the live size actually in use is the one recorded from each
- * resize receipt's `applied_size` (see {@link CtxmuxRunAdapter.confirmedSizes}), which
- * covers resizes WE issue but not one issued by another client.
- *
- * These two paths are written ahead of the runtime on purpose: re-vendoring to
- * protocol 16 activates them with no code change. Until then, do not read a green
- * test over a synthetic `resized` event as evidence that the daemon emits one.
+ * Since protocol 16 the field is REQUIRED on every snapshot (no `skip_serializing_if` on the Rust
+ * struct), so every projection has a real answer and there is no "field absent" case to fall back
+ * from. There used to be a local ledger of resizes we issued, standing in while the field did not
+ * exist; it is gone, because the daemon's own answer now arrives ahead of it on every path — the
+ * resize response snapshots `current_size` strictly after committing `applied_size` (both read the
+ * one native-control mutex, on the one thread), so the ledger could only ever have restated what the
+ * snapshot already said.
  */
-function snapshotCurrentSize(run: RunInfo): OwnerConfirmedSize | null | undefined {
-  if (!('current_size' in run)) return undefined
-  return (run as RunInfo & { current_size: OwnerConfirmedSize | null }).current_size
+function snapshotCurrentSize(run: RunInfo): OwnerConfirmedSize | null {
+  return run.current_size
 }
 
 function liveResizedSize(event: RunEvent): OwnerConfirmedSize | null {
-  if ((event as { type: string }).type !== 'resized') return null
-  const size = (event as { size?: OwnerConfirmedSize }).size
+  if (event.type !== 'resized') return null
+  const size = event.size
   if (
-    !size ||
     !Number.isInteger(size.cols) ||
     size.cols <= 0 ||
     !Number.isInteger(size.rows) ||
@@ -625,55 +624,13 @@ export class CtxmuxRunAdapter {
   /** Compatibility is independent of whether this process owns daemon cleanup rights. */
   runtimeOwnership: 'owned' | 'unverified' | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
-  /**
-   * Live owner-confirmed sizes observed on this connection: resize `applied_size`
-   * and `RunEvent::Resized`. Used only when a snapshot omits `current_size`.
-   * An explicit `current_size: null` stays unknown and does not fall back here
-   * or to `RunSpec.size`.
-   *
-   * NOTHING EVER REMOVES AN ENTRY — not `disconnect()`, not `markConnectionLost()`.
-   * That is deliberate, and it is correct only because no second writer of this
-   * Run's geometry exists. Three facts make that true, and each is an AgentMux
-   * DEPLOYMENT fact, not a ctxmux guarantee — ctxmux's interface is the socket,
-   * and its CLI is a client like any other:
-   *
-   *   1. One app instance. `apps/desktop/src/main/index.ts` takes Electron's
-   *      single-instance lock before constructing any runtime owner; the second
-   *      instance quits. Pinned by `main-window-setup.test.ts`.
-   *   2. We never launch the vendored CLI. {@link verifyArtifacts} checksums it
-   *      and then drops it: `cli` flows into `verifyArtifact` and nowhere else,
-   *      and only `daemon.path` is joined into a path that outlives that call.
-   *      Pinned by `ctxmux-second-writer-premise.test.ts` — note the precise
-   *      property is "the CLI path never escapes the checksummer", not "it is
-   *      never built"; the checksummer necessarily builds one to stat and hash.
-   *   3. Protocol 14 has no inbound geometry channel at all: `ClientFrame` carries
-   *      an outbound `resize`, but no `ServerFrame` or `RunEvent` variant reports
-   *      someone else's. Pinned by `PROTOCOL_VERSION` in
-   *      `ctxmux-run-current-size.test.ts`.
-   *
-   * WHAT VOIDS THIS: anyone attaching a second client to the same socket — most
-   * plausibly a human running the vendored `ctxmux` CLI by hand to debug a stuck
-   * Run, then resizing their window. Fact 3 keeps us from being *told*, so we
-   * would project a stale size with no signal. Facts 1 and 2 are guarded; this
-   * one is not guardable from inside the process.
-   *
-   * WHAT NOT TO DO ABOUT IT: do not add "re-send geometry on reconnect". Today it
-   * is a no-op (the size never changed, and `requestResize` short-circuits the
-   * same grid key); once a second client is real it becomes a BAD policy, turning
-   * every network flap into a last-writer-wins stomp of somebody else's view —
-   * worse than staleness. The fix when the premise dies is protocol 16's
-   * `RunEvent::Resized`, which {@link CtxmuxRunAdapter.translateLiveEvent} already
-   * consumes; it arrives with no new code here.
-   */
-  private readonly confirmedSizes = new Map<string, OwnerConfirmedSize>()
 
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
   private connectionLostListener: (() => void) | null = null
 
   private projectRun(run: RunInfo): CtxmuxAdapterRun {
-    const snapshot = snapshotCurrentSize(run)
-    const size = snapshot === undefined ? (this.confirmedSizes.get(run.id) ?? null) : snapshot
+    const size = snapshotCurrentSize(run)
     return {
       runId: run.id,
       lifecycleOperationId: run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID ?? null,
@@ -876,9 +833,35 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  /**
+   * Protocol 16 thinned `list()` to {@link RunSummary} — id/backend/pid/state/bytes/attachments, no
+   * `spec`. Two consumers here need what the summary dropped: `assertAgentRun` compares
+   * `run.workspacePath` against the Session's (that comparison IS the Run-identity guard), and
+   * `projectRunWith` publishes it. The SDK's own answer is to read the full `RunInfo` with `status`,
+   * so that is what this does.
+   *
+   * ponytail: N summaries ⇒ N `status` round trips, issued concurrently. Ceiling: a fleet with hundreds
+   * of retained Runs pays hundreds of requests on every list. Upgrade path if that shows up in a trace:
+   * hand the two consumers a summary-shaped type and let each fetch the one Run it actually inspects —
+   * `assertAgentRun` only ever looks at Runs that have a Session, which is a small subset. Not built now;
+   * the call sites are cold-start and reconnect, not a hot loop.
+   *
+   * A Run that ends between the list and its `status` is dropped rather than failed: `list` is already a
+   * best-effort snapshot (the SDK pages it non-atomically), so a Run disappearing mid-walk is a normal
+   * outcome of the walk, not an error to propagate. Every other failure still throws.
+   */
   async list(): Promise<CtxmuxAdapterRun[]> {
     try {
-      return (await this.requireClient().list()).map((run) => this.projectRun(run))
+      const summaries = await this.requireClient().list()
+      const runs = await Promise.all(summaries.map(async (summary) => {
+        try {
+          return await this.requireClient().status(summary.id)
+        } catch (error) {
+          if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null
+          throw error
+        }
+      }))
+      return runs.flatMap((run) => (run === null ? [] : [this.projectRun(run)]))
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -1086,11 +1069,11 @@ export class CtxmuxRunAdapter {
   async resize(runId: string, cols: number, rows: number): Promise<{ run: CtxmuxAdapterRun; cols: number; rows: number }> {
     try {
       const accepted = await this.requireClient().resize(runId, { cols, rows })
-      // Receipt `applied_size` is the size the PTY confirmed for this command. Record it
-      // before projecting so a snapshot that still omits `current_size` does not fall back
-      // to `RunSpec.size`.
+      // `applied_size` is the size the PTY confirmed for THIS command, and the snapshot beside it was
+      // taken strictly after that value was committed (both go through the one native-control mutex on
+      // the one thread), so `accepted.run.current_size` already carries it. Report `applied_size` as the
+      // command's own answer and let `projectRun` read the snapshot — they agree by construction.
       const applied = accepted.receipt.applied_size
-      this.confirmedSizes.set(runId, { cols: applied.cols, rows: applied.rows })
       return {
         run: this.projectRun(accepted.run),
         cols: applied.cols,
@@ -1180,15 +1163,17 @@ export class CtxmuxRunAdapter {
   ): CtxmuxAdapterObservationEvent {
     const resized = liveResizedSize(event)
     if (resized) {
-      this.confirmedSizes.set(runId, resized)
       return { type: 'resized', runId, cols: resized.cols, rows: resized.rows }
     }
-    if ((event as { type: string }).type === 'resized') {
+    if (event.type === 'resized') {
+      // `size` is a required field since protocol 16, so reaching here means it carried a size that is
+      // not a usable grid (non-integer, zero or negative). Refuse it rather than record it: this value
+      // feeds the strict screen comparison, where a wrong grid is silent non-submission.
       return {
         type: 'error',
         runId,
         error: new AgentMuxError(
-          'A native AgentMux Run received a resized event without an owner-confirmed size.',
+          'A native AgentMux Run received a resized event whose size is not a usable terminal grid.',
           'CTXMUX_EVENT_INVALID'
         )
       }

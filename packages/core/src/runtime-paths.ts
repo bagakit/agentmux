@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 // imports it to verify the packed manifest bytes and the owner receipt; the
 // endpoint id below derives from it so each artifact version claims its own
 // socket/state root.
-export const CTXMUX_MANIFEST_SHA256 = '7da18fea240abf0b7160cf460a99b6547ef101d020186858c03c01a99b3e1c1a'
+export const CTXMUX_MANIFEST_SHA256 = 'dc0e1add7a2607fa47b26292841c53151190c38752b1363d47599b9fa1fb0109'
 
 // Derive the endpoint identity from the pinned manifest so an artifact upgrade
 // lands on a fresh socket/state root instead of colliding with a stale detached
@@ -18,7 +18,7 @@ export const CTXMUX_MANIFEST_SHA256 = '7da18fea240abf0b7160cf460a99b6547ef101d02
 // app.exit(1). In-flight sessions do not transfer across an artifact version.
 // Historical Runtime namespace remains the original release identity.
 // Normalized manifest bytes change the verification checksum, not this address.
-const CTXMUX_RUNTIME_ID = '037937530b7b82d5ee47f20d'
+const CTXMUX_RUNTIME_ID = '560cbd9a0d37d5606f9d1112'
 
 export function defaultAgentMuxRuntimeDirectory(): string {
   const override = process.env.AGENTMUX_RUNTIME_DIRECTORY?.trim()

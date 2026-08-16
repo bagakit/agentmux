@@ -92,10 +92,10 @@ describe('Daemon cutover benchmark protocol', () => {
       'stopCleanup'
     ])
     expect(CTXMUX_ARTIFACT).toMatchObject({
-      commit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7',
-      tree: 'c43e3992e2e127d4b4e65e447fd23b9037be7f9c',
-      protocol: 14,
-      manifestSha256: '7da18fea240abf0b7160cf460a99b6547ef101d020186858c03c01a99b3e1c1a'
+      commit: 'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02',
+      tree: '1d97495e717cce1c3ac588a3c0712d9555b5c871',
+      protocol: 16,
+      manifestSha256: 'dc0e1add7a2607fa47b26292841c53151190c38752b1363d47599b9fa1fb0109'
     })
     expect(parseBenchmarkArguments(['--', '--round', '2'])).toEqual({
       help: false,
