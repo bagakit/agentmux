@@ -2,11 +2,10 @@ import type { ReactNode } from 'react'
 import { useId } from 'react'
 import { AtSign, ArrowUp, ChevronDown, Copy, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
-import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
-import { ComposerTextarea } from './ComposerTextarea'
+import { InlineComposer } from './InlineComposer'
 import { SemanticIcon } from './semantic-icons'
-import { ComposerSemanticTokens } from './ComposerSemanticTokens'
 import type { ComposerSemanticReference } from '../lib/composer-semantic-reference'
 
 export type ComposerQueuedMessage = {
@@ -28,7 +27,6 @@ export type AgentComposerProps = {
   queued?: readonly ComposerQueuedMessage[]
   onRemoveQueued?: (id: string) => void
   onSendQueued?: (id: string) => void
-  semanticReferences?: readonly ComposerSemanticReference[]
   onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
   // Whether the queue can still drain. The store's flush requires `processState === 'running'`
   // (store.ts flushAgentSteerQueue), so once the run exits the entries stay put forever — but the badge
@@ -47,7 +45,7 @@ export type AgentComposerProps = {
   commands?: Array<{ text: string; description: string }>
   skills?: Array<{ text: string; description: string }>
   references?: Array<{ text: string; description: string }>
-  onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => void
+  onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => string | void
   // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
@@ -84,7 +82,6 @@ export function AgentComposer({
   queued = [],
   onRemoveQueued,
   onSendQueued,
-  semanticReferences = [],
   onActivateSemanticReference,
   queueDeliverable = true,
   onCopyQueued,
@@ -113,14 +110,13 @@ export function AgentComposer({
   const suggestions = source.filter((item) => item.text.startsWith(trigger) && item.text !== trigger)
   return (
     <details open className="composer" data-agent-composer="true">
-      {/* 受控 + 认识 IME 组字：为什么这一格不能是裸 <textarea>，见 ComposerTextarea 与
-          lib/composer-composition.ts（#609）。 */}
-      <ComposerTextarea
+      {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
+      <InlineComposer
         aria-label="Message Agent"
         disabled={disabled}
         value={value}
         onValueChange={onChange}
-        onKeyDown={(event) => {
+        onKeyDown={(event, caret) => {
           // No !isWorking guard: a running Agent can be steered. Enter submits whenever the surface allows
           // a submit and there is text; delivery (and codex's mid-turn refusal) is Core's call, not the
           // renderer's. Stop stays a click on the button, so mid-turn Enter never risks an accidental stop.
@@ -129,17 +125,17 @@ export function AgentComposer({
           // the Agent conversation (#609). 判据必须走 SSOT 的四路谓词：此前这里手抄了两路
           // (`nativeEvent?.isComposing || keyCode === 229`)，漏掉顶层 `isComposing` 与
           // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
-          if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length && !isImeCompositionKeyDown(event)) {
+          if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length && !isImeOwnedKeyboardEvent(event)) {
             event.preventDefault()
-            const buttons = [...(event.currentTarget.closest('.composer')?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
+            const buttons = [...((event.target as HTMLElement).closest('.composer')?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
             const current = document.activeElement instanceof HTMLButtonElement ? buttons.indexOf(document.activeElement) : -1
             const next = event.key === 'ArrowDown' ? (current + 1) % buttons.length : (current - 1 + buttons.length) % buttons.length
             buttons[next]?.focus()
             return
           }
           if (event.key === 'Escape' && suggestions.length) {
-            event.preventDefault()
-            event.currentTarget.focus()
+            event.preventDefault();
+            (event.target as HTMLElement).focus()
             return
           }
           // Shell-style history recall. Suggestions win the arrows (their block above returns first), so
@@ -147,41 +143,28 @@ export function AgentComposer({
           // the recall reducer — and returns the value to place, or null to let the arrow move the caret
           // normally (the multiline resolution: bare ArrowUp only recalls when the caret is on the first
           // line, ArrowDown only on the last line; otherwise the caret just moves). #609 IME guard applies.
-          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !suggestions.length && onHistoryRecall && !isImeCompositionKeyDown(event)) {
-            const recalled = onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, event.currentTarget.selectionStart)
+          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !suggestions.length && onHistoryRecall && !isImeOwnedKeyboardEvent(event)) {
+            const recalled = onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, caret)
             if (recalled !== null) {
               event.preventDefault()
               onChange(recalled)
             }
             return
           }
-          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && primaryAction === 'stop' && onQueue && value.trim()) {
+          if (event.key === 'Enter' && !event.shiftKey && !isImeOwnedKeyboardEvent(event) && primaryAction === 'stop' && onQueue && value.trim()) {
             event.preventDefault()
             onQueue()
             return
           }
-          if (event.key === 'Enter'  && !event.shiftKey && !isImeCompositionKeyDown(event) && canSubmit) {
+          if (event.key === 'Enter'  && !event.shiftKey && !isImeOwnedKeyboardEvent(event) && canSubmit) {
             event.preventDefault()
             onSubmit?.()
           }
         }}
-        onPaste={(event) => {
-          if (disabled || !onPasteImage) return
-          const file = [...event.clipboardData.items]
-            .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
-            ?.getAsFile()
-          if (!file) return
-          // Claim the paste before the textarea inserts the image's filename as text.
-          event.preventDefault()
-          const extension = file.type.slice('image/'.length).split('+')[0] ?? 'png'
-          void file.arrayBuffer().then((buffer) => {
-            onPasteImage({ bytes: new Uint8Array(buffer), extension })
-          })
-        }}
+        {...(onPasteImage ? { onPasteImage } : {})}
+        {...(onActivateSemanticReference ? { onActivateReference: onActivateSemanticReference } : {})}
         placeholder={placeholder}
-        rows={1}
       />
-      <ComposerSemanticTokens references={semanticReferences} {...(onActivateSemanticReference ? { onActivate: onActivateSemanticReference } : {})} />
       {/* Region 名水印：右上角，一个 Region 唯一的名字露出（Tab 有名字位，Region 没有）。缺席即整段
           不渲染——占位符或 "Unknown" 会把「这格没有可信名字」谎报成「有个叫 Unknown 的东西」。
           aria-hidden：这是装饰性的身份复述，SR 用户是**导航进**这一格的、已有其上下文，把它挂进
@@ -278,7 +261,7 @@ export function AgentComposer({
       </div>
       {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
         {suggestions.map((command) => <button type="button" role="option" aria-selected="false" key={command.text}
-          onClick={() => { onSelectSuggestion?.(command.text, suggestionKind!); onChange(`${command.text} `) }}>{command.text}<small>{command.description}</small></button>)}
+          onClick={() => { const replacement = onSelectSuggestion?.(command.text, suggestionKind!) ?? command.text; onChange(`${value.slice(0, value.length - trigger.length)}${replacement} `) }}>{command.text}<small>{command.description}</small></button>)}
       </div> : null}
       <summary className="composer__disclosure" title="Collapse or expand message tools">
         <SemanticIcon name="message-tools" size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />

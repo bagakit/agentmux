@@ -20,12 +20,12 @@ describe('AgentComposer reusable surface', () => {
     }))
 
     expect(markup).toContain('data-agent-composer="true"')
-    expect(markup).toContain('aria-label="Message Agent"')
+    expect(markup).toContain('class="composer__editor"')
     expect(markup).toContain('Review this file')
     expect(markup).toContain('review.ts')
     expect(markup).toContain('Send')
     expect(markup).not.toContain('composer-send--working')
-    expect(markup).not.toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).not.toMatch(/data-disabled="true"/)
   })
 
   it('keeps the whole rich-input surface visible while disabled', () => {
@@ -38,7 +38,7 @@ describe('AgentComposer reusable surface', () => {
 
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Agent is not running"')
-    expect(markup).toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).toMatch(/data-disabled="true"/)
     expect(markup).toContain('Files')
     expect(markup).toContain('Send')
   })
@@ -497,7 +497,7 @@ describe('AgentComposer reusable surface', () => {
   }
 
   /**
-   * 「这条 `.composer textarea` 规则的地板是不是恰好由一行 + 纵向 padding 相加构成」——返回问题
+   * 「这条 `.composer__editor .tiptap` 规则的地板是不是恰好由一行 + 纵向 padding 相加构成」——返回问题
    * 清单，空数组表示通过。写成纯函数是为了让合成规则也能过同一组判据。
    */
   function floorDerivationProblems(rule: string): string[] {
@@ -532,7 +532,7 @@ describe('AgentComposer reusable surface', () => {
    * 全表里所有「选择器同时提到 `.composer` 与 `textarea`、且声明了 `min-height`」的规则。
    *
    * 为什么需要它：上面那条判据只看**基础规则内部**的取值关系，于是审计实测出第二个存活形态
-   * （#627 FINDING 2）——在任意样式文件里追加 `.composer textarea:enabled { min-height: 34px }`，
+   * （#627 FINDING 2）——在任意样式文件里追加 `.composer__editor .tiptap:enabled { min-height: 34px }`，
    * 特异度更高、按级联赢，两行高原样回来，而 16 条照旧全绿。判据因此要补一条：这个元素上的
    * `min-height` **只能有一处**。
    *
@@ -565,7 +565,7 @@ describe('AgentComposer reusable surface', () => {
       return out
     }
     return leafRules(css)
-      .filter(({ selector }) => selector.includes('.composer') && selector.includes('textarea'))
+      .filter(({ selector }) => selector.includes('.composer') && selector.includes('.tiptap'))
       .flatMap(({ selector, body }) => {
         const value = body.match(/(?:^|;)\s*min-height:\s*([^;]+)/)?.[1]?.trim()
         return value === undefined ? [] : [{ selector, value }]
@@ -573,7 +573,7 @@ describe('AgentComposer reusable surface', () => {
   }
 
   /**
-   * 取出那条 `.composer textarea` 基础规则的声明块。
+   * 取出那条 `.composer__editor .tiptap` 基础规则的声明块。
    *
    * 主判据与下面的自检**共用这一个取值口**，是实测出来的必要：第一版让自检自己拼一段带选择器的
    * 文本，而判据收到的是**已经剥掉选择器的声明块**——两种形状不同，于是自检报的是「min-height
@@ -584,8 +584,8 @@ describe('AgentComposer reusable surface', () => {
    * （本仓 #586「presence-assertion-blind-when-shape-repeats」）。
    */
   function composerTextareaRule(css: string): string {
-    const matches = [...css.matchAll(/\.composer textarea \{([^}]*)\}/g)]
-    expect(matches.length, '`.composer textarea` 的基础规则不是恰好一条，按第一条取值会认错对象').toBe(1)
+    const matches = [...css.matchAll(/\.composer__editor .tiptap \{([^}]*)\}/g)]
+    expect(matches.length, '`.composer__editor .tiptap` 的基础规则不是恰好一条，按第一条取值会认错对象').toBe(1)
     return matches[0][1]
   }
 
@@ -596,7 +596,7 @@ describe('AgentComposer reusable surface', () => {
 
     // `field-sizing: content` 是「按内容长高」的那一半。没有它，rows={1} 把高度定死在一行
     // **而且长不高**，多行输入会退化成框内滚动——那是另一个毛病，不是这条规则想要的。
-    expect(rule, 'field-sizing 不在场：输入框会被 rows={1} 定死在一行且长不高').toContain('field-sizing: content')
+    expect(rule).toContain('overflow-y: auto')
 
     expect(floorDerivationProblems(rule).join('\n')).toBe('')
   })
@@ -617,7 +617,7 @@ describe('AgentComposer reusable surface', () => {
     ]
     for (const { label, minHeight } of survivors) {
       const problems = floorDerivationProblems(
-        composerTextareaRule(`.composer textarea { min-height: ${minHeight}; padding:var(--sp-4) var(--sp-5) var(--sp-1); }`)
+        composerTextareaRule(`.composer__editor .tiptap { min-height: ${minHeight}; padding:var(--sp-4) var(--sp-5) var(--sp-1); }`)
       )
       expect(problems.length, `${label}（${minHeight}）喂回去，判据一条问题都没报——它守不住这一族`).toBeGreaterThan(0)
       // 报的必须是「加法项不对」这件事，不是碰巧因为解析失败而红：解析失败会走前面那几条
@@ -628,14 +628,14 @@ describe('AgentComposer reusable surface', () => {
     // 反向：正确的那份必须**不**报问题，否则上面三条只是「判据恒红」而不是「判据有区分力」。
     expect(
       floorDerivationProblems(
-        composerTextareaRule('.composer textarea { min-height: calc(1lh + var(--sp-4) + var(--sp-1)); padding:var(--sp-4) var(--sp-5) var(--sp-1); }')
+        composerTextareaRule('.composer__editor .tiptap { min-height: calc(1lh + var(--sp-4) + var(--sp-1)); padding:var(--sp-4) var(--sp-5) var(--sp-1); }')
       ),
       '正确的取值也被判成有问题：判据恒红，上面三条自检因此不证明任何区分力'
     ).toEqual([])
   })
 
   it('这个元素上只有一处 min-height——第二条更特异的规则会按级联赢回两行高', () => {
-    // #627 FINDING 2 实测：追加 `.composer textarea:enabled { min-height: 34px }`（放 composer.css
+    // #627 FINDING 2 实测：追加 `.composer__editor .tiptap:enabled { min-height: 34px }`（放 composer.css
     // 或任何后加载的文件都一样）特异度更高、按级联赢，两行高原样回来，而上面那条判据只读基础规则
     // 的内部取值，16 条全绿。所以「地板派生正确」还不够，得同时是**唯一**的地板。
     const declarations = composerTextareaMinHeightRules(allStyleRules())
@@ -648,7 +648,7 @@ describe('AgentComposer reusable surface', () => {
     // 自检：这个取值口真的认得出追加进来的那一条，否则上面那条 `toHaveLength(1)` 只是碰巧成立
     // （选择器过滤写错、容器块没穿透，都会让它恒为 1）。
     const withOverride = composerTextareaMinHeightRules(
-      `${allStyleRules()}\n.composer textarea:enabled { min-height: 34px; }`
+      `${allStyleRules()}\n.composer__editor .tiptap:enabled { min-height: 34px; }`
     )
     expect(
       withOverride.map(({ value }) => value),
@@ -657,7 +657,7 @@ describe('AgentComposer reusable surface', () => {
 
     // 同一条自检的另一半：藏在 `@media` 里的覆写也必须被看见（叶子规则要穿过容器块）。
     const inMedia = composerTextareaMinHeightRules(
-      `${allStyleRules()}\n@media (min-width: 100px) { .composer textarea { min-height: 34px; } }`
+      `${allStyleRules()}\n@media (min-width: 100px) { .composer__editor .tiptap { min-height: 34px; } }`
     )
     expect(
       inMedia.map(({ value }) => value),
@@ -665,20 +665,11 @@ describe('AgentComposer reusable surface', () => {
     ).toEqual([declarations[0]!.value, '34px'])
   })
 
-  it('rows={1} 在场：HTML 的固有高度也是一行', () => {
-    // CSS 那条门管地板，这条管另一半——`rows` 缺省是 2，光有 min-height 压不住它，因为
-    // field-sizing: content 之下固有高度会跟着 rows 走。判在渲染结果上而不是源码文本上。
-    const markup = renderToStaticMarkup(createElement(AgentComposer, {
-      value: '',
-      disabled: false,
-      placeholder: 'Ask the Agent…',
-      onChange: vi.fn(),
-      onSubmit: vi.fn(),
-      onInterrupt: vi.fn(),
-      onReferenceActiveFile: vi.fn()
-    }))
-
-    expect(markup, 'textarea 没有 rows="1"：固有高度回到 2 行，地板压不住它').toMatch(/<textarea[^>]*rows="1"/)
+  it('uses the inline editor with the actual controlled draft', () => {
+    const tree = AgentComposer({ value: 'draft', disabled: false, placeholder: 'Ask', onChange: vi.fn() })
+    const editor = tree.props.children[0]
+    expect(editor.type.name).toBe('InlineComposer')
+    expect(editor.props.value).toBe('draft')
   })
 })
 

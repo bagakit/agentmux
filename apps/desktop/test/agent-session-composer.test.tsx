@@ -149,7 +149,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Ask, steer, or paste a command…"')
     expect(markup).toContain('index.ts')
-    expect(markup).not.toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).not.toMatch(/data-disabled="true"/)
   })
 
   it('projects a Browser context handoff from the shared per-session draft', () => {
@@ -158,8 +158,8 @@ describe('AgentSessionComposer adapter', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
-    expect(markup).toContain('Browser element context')
-    expect(markup).toContain('Selector: main &gt; button')
+    expect(AgentSessionComposer({ sessionId: 'agent-1' }).props.value).toContain('Browser element context')
+    expect(AgentSessionComposer({ sessionId: 'agent-1' }).props.value).toContain('Selector: main > button')
   })
 
   it('submits and compare-clears the exact shared draft snapshot', async () => {
@@ -475,7 +475,7 @@ describe('AgentSessionComposer adapter', () => {
       placeholder: 'Agent is disconnected'
     })
     expect(markup).toContain('placeholder="Agent is disconnected"')
-    expect(markup).toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).toMatch(/data-disabled="true"/)
   })
 
   it('stays visible and disabled before the Agent snapshot exists', () => {
@@ -483,7 +483,7 @@ describe('AgentSessionComposer adapter', () => {
 
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Agent is connecting…"')
-    expect(markup).toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).toMatch(/data-disabled="true"/)
   })
 
   it('stays visible and disabled after the Agent Run exits', () => {
@@ -500,7 +500,7 @@ describe('AgentSessionComposer adapter', () => {
       placeholder: 'Agent is not running'
     })
     expect(markup).toContain('placeholder="Agent is not running"')
-    expect(markup).toMatch(/<textarea[^>]*disabled=""/)
+    expect(markup).toMatch(/data-disabled="true"/)
   })
 
   it('renders a Provider-declared posture control on the composer, drawn from its catalog declaration', () => {

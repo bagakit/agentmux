@@ -41,9 +41,11 @@ describe('Workflow component gallery production reachability', () => {
     const sessionPane = read('components/SessionPane.tsx')
     const consumers = [
       ['ConversationAxis', activity],
-      ['AgentMarkdown', activity],
+      ['ConversationMessage', activity],
+      ['ConversationMessage', read('components/ObservationSurfaceGallery.tsx')],
+      ['AgentMarkdown', read('components/ConversationMessage.tsx')],
       ['AgentInteractionCard', sessionPane],
-      ['ComposerTextarea', read('components/AgentComposer.tsx')],
+      ['InlineComposer', read('components/AgentComposer.tsx')],
       ['StatusDot', read('components/SurfaceToolDock.tsx')],
       ['ServiceWindowNotice', sessionPane]
     ]
@@ -51,7 +53,6 @@ describe('Workflow component gallery production reachability', () => {
     for (const [name, text] of consumers) expect(text, `${name} has no production consumer`).toContain(`<${name}`)
     expect(activity).toContain('function Row(')
     expect(activity).toContain('function Run(')
-    expect(activity).toContain('function Turn(')
     expect(activity).toContain('export function Ruler(')
     expect(read('components/workflow/index.ts')).toContain('WorkflowCard')
     expect(read('components/WorkflowComponentGallery.tsx')).toContain('<WorkflowCard')
