@@ -51,7 +51,7 @@ export function ObservationSurfaceGallery() {
           <small>{draft ? '草稿已输入，交付仍由宿主负责。' : '受控输入与 IME 处理仍由原有组件负责。'}</small>
         </article>
       </div>
-      <article className="observation-sample observation-sample--composer observation-sample--full">
+      <article id="composer-details" className="observation-sample observation-sample--composer observation-sample--full">
         <div className="observation-sample__label">Agent workspace composer</div>
         <AgentComposer
           value={draft}
