@@ -12,8 +12,8 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
-const failure = () => dom.container.querySelector('.composer__notices, .composer-feedback')
-const retry = '.composer__notices .composer-notice__body button, .composer-feedback button:first-of-type'
+const failure = () => dom.container.querySelector('.composer-mailbox .composer-notice, .composer-feedback')
+const retry = '.composer-mailbox .composer-notice__body button, .composer-feedback button:first-of-type'
 
 it('keeps file errors next to the Session draft, retries, and appends every chosen file to the latest draft', async () => {
   const choose = vi.spyOn(api.ui, 'chooseFiles').mockRejectedValueOnce(new Error('Picker unavailable')).mockResolvedValueOnce(['/repo/a.ts', '/repo/b.ts'])
@@ -45,7 +45,7 @@ it('pasted-image failures are visible locally and retry the same image without l
   await dom.click(retry)
   expect(save).toHaveBeenCalledTimes(2)
   expect(save.mock.calls[1]).toEqual(save.mock.calls[0])
-  expect(dom.draft()).toContain('@pasted.png')
+  expect(dom.draft()).toContain('@/repo/pasted.png')
   expect(failure()).toBeNull()
 })
 
@@ -89,8 +89,13 @@ it.each(['oversized', 'full queue'] as const)('reports %s admission locally and 
   expect(failure()?.textContent).toMatch(reason === 'oversized' ? /too large/ : /queue is full/)
   expect(dom.draft()).toBe(draft)
   expect(useAppStore.getState().error).toBeNull()
-  await dom.click('[aria-label="Move notice to inbox"], [aria-label="Dismiss message tool error"]')
-  expect(failure()).toBeNull()
+  expect(dom.container.querySelector('.composer__mailbox')?.getAttribute('data-unread')).toBe('true')
+  const event = new Event('toggle')
+  Object.defineProperty(event, 'newState', { value: 'open' })
+  await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
+  await dom.click('[role="tab"][id$="-inbox-tab"]')
+  expect(dom.container.querySelector('.composer__mailbox')?.getAttribute('data-unread')).toBe('false')
+  expect(failure()?.textContent).toMatch(reason === 'oversized' ? /too large/ : /queue is full/)
   expect(dom.draft()).toBe(draft)
 })
 
@@ -132,7 +137,7 @@ it('success from the original Capture button clears the previous error', async (
   expect(failure()?.textContent).toContain('First capture failed')
   await dom.click('[aria-label="Capture a screen region"]')
   expect(failure()).toBeNull()
-  expect(dom.draft()).toContain('@capture.png')
+  expect(dom.draft()).toContain('@/repo/capture.png')
 })
 async function openSkills() {
   await act(async () => dom.container.querySelector('[aria-label="Choose a skill"]')!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, buttons: 0, button: 0, pointerType: 'mouse' })))
@@ -163,7 +168,7 @@ it('two tool results in one React batch both append to the Launcher draft', asyn
   expect(dom.draft('region')).toContain('Launch draft')
   expect(dom.draft('region')).toContain('@a.ts')
   expect(dom.draft('region')).toContain('@b.ts')
-  expect(dom.draft('region')).toContain('@screen.png')
+  expect(dom.draft('region')).toContain('@/repo/screen.png')
 })
 async function twoProviderLauncher() {
   const config = useAppStore.getState().config!

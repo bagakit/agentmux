@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "feat_id": "f-27m8f5n9n",
+  "title": "Message Tools 统一邮箱",
+  "slug": "message-tools-unified-mailbox",
+  "goal": "新通知红点看过消失，收件通知与排队发件共用一个邮箱",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/session-mailbox.test.tsx apps/desktop/test/agent-steer-queue-deliverability.test.tsx apps/desktop/test/agent-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-identity.test.tsx apps/desktop/test/message-tools-three-state.test.tsx apps/desktop/test/agent-session-composer.test.tsx --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-27m8f5n9n/artifacts/gate-T-001-r1-0001.log",
+    "last_context": {
+      "candidate_sha": "05c088104c82c580b226ea0dfbe0a55ded7302d1",
+      "worktree_digest": "fad3c8930f40ce7c67cb1c3a709a3092685ab9b39201467693e70e7d3db59bc9",
+      "verification_digest": "none",
+      "dedup_key": "23ed47125550b072b704656131b037489d32f465913c240001da94046b32dacd",
+      "source_key": "7bdd4217ed083849e5754b3f888da51a77689d2e0a4b10e83b7eab00852323f3",
+      "artifact_digests": {},
+      "plan_revision": 1
+    }
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

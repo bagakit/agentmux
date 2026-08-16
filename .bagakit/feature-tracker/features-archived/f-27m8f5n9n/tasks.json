@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "feat_id": "f-27m8f5n9n",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/message-tools-mailbox-2026-09-20.md",
+  "source_refs": [
+    "docs/reviews/message-tools-mailbox-2026-09-20.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/message-tools-mailbox-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/message-tools-mailbox-2026-09-20.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Message Tools 统一邮箱与读后红点",
+      "objective": "收件通知与待发消息收进单入口，读过通知自动消红点",
+      "outcome": "输入区不被持久报错占据，消息和恢复动作可从一个邮箱找到",
+      "acceptance": [
+        "三种形态与输入禁用时均只有一个邮箱入口；收件通知打开后消除红点且通知可回看，单看发件不标已读；新原因/新 Run/恢复后复发重新未读。",
+        "发件列表保序保文，重试、复制、移除接到真实队列；已读动作不触发发送；发送中保护和旧 Run 绑定仍成立。",
+        "真实组件行为测试、关键变异变红、排除定义文件的产品调用者检查通过；窄屏及等高控件在浏览器验证。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/session-mailbox.test.tsx apps/desktop/test/agent-steer-queue-deliverability.test.tsx apps/desktop/test/agent-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-identity.test.tsx apps/desktop/test/message-tools-three-state.test.tsx apps/desktop/test/agent-session-composer.test.tsx --maxWorkers=1",
+          "proves": "真实组件邮箱阅读语义、队列能力与输入交互不回归"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/message-tools-mailbox-2026-09-20.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.5,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/session-mailbox.test.tsx apps/desktop/test/agent-steer-queue-deliverability.test.tsx apps/desktop/test/agent-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-identity.test.tsx apps/desktop/test/message-tools-three-state.test.tsx apps/desktop/test/agent-session-composer.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "05c088104c82c580b226ea0dfbe0a55ded7302d1",
+        "worktree_digest": "fad3c8930f40ce7c67cb1c3a709a3092685ab9b39201467693e70e7d3db59bc9",
+        "verification_digest": "none",
+        "dedup_key": "23ed47125550b072b704656131b037489d32f465913c240001da94046b32dacd",
+        "source_key": "7bdd4217ed083849e5754b3f888da51a77689d2e0a4b10e83b7eab00852323f3",
+        "artifact_digests": {},
+        "plan_revision": 1
+      }
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "按用户追加要求更新单一邮箱、右侧头像组合与读后红点约束",
+      "refs": [
+        "docs/reviews/message-tools-mailbox-2026-09-20.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "统一展示而保留队列与运行时事实各自的 owner，已读只持久化回执",
+      "refs": [
+        "docs/reviews/message-tools-mailbox-2026-09-20.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "项目设计 SSOT 已更新，不新增通用通知框架",
+      "refs": []
+    }
+  }
+}

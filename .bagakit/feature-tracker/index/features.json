@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 172
+    "next_cursor": 175
   },
   "features": [
     {
@@ -1708,6 +1708,26 @@
     {
       "feat_id": "f-27j8f7etf",
       "title": "完成事实与人工输入的原子准入",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27m8f5n9n",
+      "title": "Message Tools 统一邮箱",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27n8fk8vq",
+      "title": "输入框截图缩略图",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

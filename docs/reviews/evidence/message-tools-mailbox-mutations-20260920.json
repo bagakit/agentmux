@@ -1,0 +1,138 @@
+[
+  {
+    "mutation": "read-open",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-read-open.log"
+  },
+  {
+    "mutation": "read-folder",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-read-folder.log"
+  },
+  {
+    "mutation": "read-not-recorded",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-read-not-recorded.log"
+  },
+  {
+    "mutation": "red-dot-missing",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-red-dot-missing.log"
+  },
+  {
+    "mutation": "unwired-product",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-unwired-product.log"
+  },
+  {
+    "mutation": "remove-disconnected",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-remove-disconnected.log"
+  },
+  {
+    "mutation": "retry-wrong-id",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-retry-wrong-id.log"
+  },
+  {
+    "mutation": "copy-wrong-text",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-copy-wrong-text.log"
+  },
+  {
+    "mutation": "inflight-remove",
+    "source": "apps/desktop/src/renderer/src/components/ComposerOutbox.tsx",
+    "test": "apps/desktop/test/agent-steer-queue-deliverability.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-inflight-remove.log"
+  },
+  {
+    "mutation": "restore-read-lost",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-mutation-restore-read-lost.log"
+  },
+  {
+    "mutation": "image-node-not-created",
+    "source": "apps/desktop/src/renderer/src/components/InlineComposer.tsx",
+    "test": "apps/desktop/test/composer-image-preview.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/image-node-not-created.log"
+  },
+  {
+    "mutation": "image-reference-lost",
+    "source": "apps/desktop/src/renderer/src/components/InlineComposer.tsx",
+    "test": "apps/desktop/test/composer-image-preview.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/image-reference-lost.log"
+  },
+  {
+    "mutation": "image-load-unwired",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/composer-image-preview.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/image-load-unwired.log"
+  },
+  {
+    "mutation": "launcher-image-load-unwired",
+    "source": "apps/desktop/src/renderer/src/components/NewTabSurface.tsx",
+    "test": "apps/desktop/test/composer-image-preview.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/launcher-image-load-unwired.log"
+  },
+  {
+    "mutation": "image-reader-wrong-path",
+    "source": "apps/desktop/src/renderer/src/components/InlineComposer.tsx",
+    "test": "apps/desktop/test/composer-image-preview.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/image-reader-wrong-path.log"
+  },
+  {
+    "mutation": "mailbox-avatar-disconnected",
+    "source": "apps/desktop/src/renderer/src/components/SessionMailbox.tsx",
+    "test": "apps/desktop/test/composer-identity.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-avatar-disconnected.log"
+  },
+  {
+    "mutation": "mailbox-product-disconnected-final",
+    "source": "apps/desktop/src/renderer/src/components/AgentComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/mailbox-moved-left.log"
+  }
+]

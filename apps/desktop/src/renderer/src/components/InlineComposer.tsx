@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Decoration, Extension, Node, type JSONContent } from '@tiptap/core'
-import { EditorContent, useEditor } from '@tiptap/react'
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { ConversationImage, type ReadPastedImage } from './ConversationImage'
+import { splitPastedImageReferences } from '../lib/pasted-image-reference'
 import { composerKeywordMatches } from '../../../shared/composer-shortcut-library'
 import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
 
 export function draftDocument(value: string): JSONContent {
   return { type: 'doc', content: value.split('\n').map((line) => ({
-    type: 'paragraph', content: parseComposerDraft(line).map((part) => 'text' in part
-      ? { type: 'text', text: part.text }
-      : { type: 'toolReference', attrs: part.reference })
+    type: 'paragraph', content: parseComposerDraft(line).flatMap((part): JSONContent[] => 'text' in part
+      ? splitPastedImageReferences(part.text).map((segment) => segment.kind === 'image'
+        ? { type: 'pastedImage', attrs: { text: segment.text, path: segment.path } }
+        : { type: 'text', text: segment.text })
+      : [{ type: 'toolReference', attrs: part.reference }])
   })) }
 }
 
 export function documentDraft(doc: JSONContent): string {
   if (doc.type === 'text') return doc.text ?? ''
+  if (doc.type === 'pastedImage') return doc.attrs?.text ?? ''
   if (doc.type === 'toolReference') return encodeSemanticReference(doc.attrs as ComposerSemanticReference)
   if (doc.type === 'hardBreak') return '\n'
   return (doc.content ?? []).map(documentDraft).join(doc.type === 'doc' ? '\n' : '')
@@ -58,7 +63,8 @@ export function keywordUnderlineExtension(keywords: () => readonly string[]) {
 /** ProseMirror owns selection, composition and undo. Only our draft codec and reference node are custom. */
 export function composerExtensions(
   onActivate?: (reference: ComposerSemanticReference) => void,
-  keywords: () => readonly string[] = () => []
+  keywords: () => readonly string[] = () => [],
+  readPastedImage: ReadPastedImage = async () => null
 ) {
   return [StarterKit.configure({
     blockquote: false, bold: false, bulletList: false, code: false, codeBlock: false,
@@ -90,10 +96,22 @@ export function composerExtensions(
         return { dom, stopEvent: (event) => event.type === 'click' }
       }
     }
+  }), Node.create({
+    name: 'pastedImage', group: 'inline', inline: true, atom: true, selectable: true,
+    addAttributes() { return { text: { default: '' }, path: { default: '' } } },
+    renderHTML({ node }) { return ['span', { 'data-pasted-image': node.attrs.path }, node.attrs.text] },
+    renderText({ node }) { return node.attrs.text },
+    addNodeView() {
+      return ReactNodeViewRenderer(({ node }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
+        <ConversationImage text={node.attrs.text} path={node.attrs.path} readPastedImage={readPastedImage} />
+      </NodeViewWrapper>)
+    }
   }), keywordUnderlineExtension(keywords)]
 }
 
 export type InlineComposerProps = {
+  autoFocus?: boolean
+  readPastedImage?: ReadPastedImage
   value: string
   onValueChange(value: string): void
   disabled: boolean
@@ -112,7 +130,8 @@ export function InlineComposer(props: InlineComposerProps) {
   latest.current = props
   const extensions = useMemo(() => composerExtensions(
     (reference) => latest.current.onActivateReference?.(reference),
-    () => latest.current.keywords ?? []
+    () => latest.current.keywords ?? [],
+    (path) => latest.current.readPastedImage?.(path) ?? Promise.resolve(null)
   ), [])
   const editorProps = useMemo(() => ({
     attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': latest.current['aria-label'], 'data-placeholder': latest.current.placeholder },
@@ -142,8 +161,18 @@ export function InlineComposer(props: InlineComposerProps) {
     editorProps
   })
   useEffect(() => {
+    if (props.autoFocus && editor && !editor.isDestroyed) editor.commands.focus()
+  }, [editor, props.autoFocus])
+  useEffect(() => {
     if (!editor || editor.isDestroyed) return
-    if (documentDraft(editor.getJSON()) !== props.value && !editor.view.composing) editor.commands.setContent(draftDocument(props.value), { emitUpdate: false })
+    // React node views flush synchronously. Apply external drafts after this effect has committed.
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled && !editor.isDestroyed && documentDraft(editor.getJSON()) !== props.value && !editor.view.composing) {
+        editor.commands.setContent(draftDocument(props.value), { emitUpdate: false })
+      }
+    })
+    return () => { cancelled = true }
   }, [editor, props.value])
   // 改了设置页的 keyword 之后重算装饰。默认的 `update: 'document'` 只在**文档**变化时重跑，而这里变的
   // 是配置：不推这一下，用户新加的 keyword 要等到下次打字才划线，看起来就是"加了没用"。

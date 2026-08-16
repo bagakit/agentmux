@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "feat_id": "f-27n8fk8vq",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/composer-image-preview-2026-09-20.md",
+  "source_refs": [
+    "docs/reviews/composer-image-preview-2026-09-20.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/composer-image-preview-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/composer-image-preview-2026-09-20.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "截图和粘贴图片在草稿里显示缩略图",
+      "objective": "发送前可看到截图内容且发送同一图片引用",
+      "outcome": "Session 和 Launcher 共用图片节点，持久化与发送语义不变",
+      "acceptance": [
+        "截图/粘贴完成后真实输入框显示对应缩略图并可放大，读取失败保留原文路径。",
+        "图片节点序列化保持原引用；重挂载可恢复，删除和撤销不损坏周围文本；Session 与 Launcher 接线非零。",
+        "针对缩略图渲染与引用往返的变异变红，类型检查和已有输入测试通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/composer-image-preview.test.tsx apps/desktop/test/inline-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-semantic-reference.test.tsx --maxWorkers=1",
+          "proves": "真实图片草稿显示与输入序列化保真"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/composer-image-preview-2026-09-20.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.5,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/composer-image-preview.test.tsx apps/desktop/test/inline-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-semantic-reference.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "05c088104c82c580b226ea0dfbe0a55ded7302d1",
+        "worktree_digest": "64947d494893d41a780533cc5200f0e7bfc1456e986954360fa000efb6fa1279",
+        "verification_digest": "none",
+        "dedup_key": "b239876079342b58f834a6d7976e8774e85eaa5256b3de903d864eb55edc55ec",
+        "source_key": "310081da0aa066dbc78cb9d3ae3728b8389ad989aebc2c1873fd5a1412465d1a",
+        "artifact_digests": {},
+        "plan_revision": 1
+      }
+    }
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "记录输入框截图缩略图与同一路径保真约束",
+      "refs": [
+        "docs/reviews/composer-image-preview-2026-09-20.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "复用已有图片读取和展示；图片节点只持有原始引用，不复制附件状态",
+      "refs": [
+        "docs/reviews/composer-image-preview-2026-09-20.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "设计约束与回归已在项目内，无额外知识层",
+      "refs": []
+    }
+  }
+}

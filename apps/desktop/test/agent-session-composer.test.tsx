@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => ({
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
+    noticeReadReceipts: {},
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
@@ -55,6 +56,7 @@ import {
   AgentSessionComposer,
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
+import type { ComposerSuggestion } from '../src/renderer/src/components/AgentComposer.js'
 import { parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
 
 // Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
@@ -650,9 +652,9 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
     fixture.state.sessions = [session]
     fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me', status: 'queued' }] }
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { queued: Array<{ deliverable: boolean }> }
+      props: { mailbox: { props: { queued: Array<{ deliverable: boolean }> } } }
     }
-    return composer.props.queued[0]?.deliverable
+    return composer.props.mailbox.props.queued[0]?.deliverable
   }
 
   it('running 时为 true', () => {
@@ -691,9 +693,9 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
       'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run', status: 'queued' }]
     }
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { queued: Array<{ deliverable: boolean }> }
+      props: { mailbox: { props: { queued: Array<{ deliverable: boolean }> } } }
     }
-    expect(composer.props.queued[0]?.deliverable).toBe(false)
+    expect(composer.props.mailbox.props.queued[0]?.deliverable).toBe(false)
   })
 })
 
@@ -710,9 +712,9 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
  * state，静态渲染改不到。
  */
 describe('AgentSessionComposer 的 / 候选是命令与我的 prompt 的并集', () => {
-  function candidates(): Array<{ text: string; description: string }> {
+  function candidates(): ComposerSuggestion[] {
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { commands?: Array<{ text: string; description: string }> }
+      props: { commands?: ComposerSuggestion[] }
     }
     return composer.props.commands ?? []
   }

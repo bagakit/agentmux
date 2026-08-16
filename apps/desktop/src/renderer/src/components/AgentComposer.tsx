@@ -1,12 +1,11 @@
 import type { ReactNode } from 'react'
-import { useId } from 'react'
-import { AtSign, ArrowUp, Copy, Paperclip, Square } from 'lucide-react'
+import { AtSign, ArrowUp, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
 import { InlineComposer } from './InlineComposer'
-import { SemanticIcon } from './semantic-icons'
+import type { ReadPastedImage } from './ConversationImage'
 import type { ComposerSemanticReference } from '../lib/composer-semantic-reference'
 
 /**
@@ -18,36 +17,15 @@ import type { ComposerSemanticReference } from '../lib/composer-semantic-referen
  */
 export type ComposerSuggestion = { text: string; description: string; group?: string }
 
-export type ComposerQueuedMessage = {
-  id: string
-  text: string
-  // `deferred` 是「我们这次没投出去，Agent 还好着，还在等下一次机会」。它必须与 `queued` 分开，
-  // 否则角标会照 healthy 路径念「queued for delivery」，把一次降级静默放行（store.ts 的
-  // AgentSteerQueueEntry 记了为什么这一档要在模型里有名字）。
-  status: 'queued' | 'deferred' | 'failed'
-  deliverable: boolean
-  sending?: boolean
-  error?: string
-}
-
 export type AgentComposerProps = {
   value: string
+  readPastedImage?: ReadPastedImage
   disabled: boolean
   placeholder: string
   activeFile?: string
   contextUsage?: ReactNode
-  // The queued prompts themselves, not a count. A bare number reads as a bug — you cannot tell a real
-  // pending queue from a stuck counter without seeing what is in it. Count is derived (`.length`), so
-  // the badge and the list can never disagree.
-  queued?: readonly ComposerQueuedMessage[]
-  onRemoveQueued?: (id: string) => void
-  onSendQueued?: (id: string) => void
+  mailbox?: ReactNode
   onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
-  // Copy the undeliverable queue out. Absence hides the button rather than rendering a dead one: the
-  // clipboard exit (lib/clipboard-copy) requires an error reporter by design, and a shell that has no
-  // reporter to give must not offer an action that could fail silently. The card only names copying as
-  // the remedy when this is wired.
-  onCopyQueued?: (text: string) => void
   tools?: ReactNode
   commands?: ComposerSuggestion[]
   skills?: ComposerSuggestion[]
@@ -60,7 +38,6 @@ export type AgentComposerProps = {
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
   primaryAction?: 'send' | 'stop'
-  identity?: { name: string; avatar: ReactNode; context?: string }
   feedback?: ReactNode
   postureControl?: AgentPostureControl
   // Shell-style history recall on the up/down arrows. The shell owns the keys; the semantics (line
@@ -80,22 +57,19 @@ export type AgentComposerProps = {
 
 export function AgentComposer({
   value,
+  readPastedImage,
   disabled,
   placeholder,
   activeFile,
   tools,
   contextUsage,
-  queued = [],
-  onRemoveQueued,
-  onSendQueued,
+  mailbox,
   onActivateSemanticReference,
-  onCopyQueued,
   commands = [],
   skills = [],
   references = [],
   onSelectSuggestion,
   primaryAction = 'send',
-  identity,
   feedback,
   postureControl,
   onChange,
@@ -212,6 +186,7 @@ export function AgentComposer({
             onSubmit?.()
           }
         }}
+        {...(readPastedImage ? { readPastedImage } : {})}
         keywords={keywordTexts}
         {...(onPasteImage ? { onPasteImage } : {})}
         {...(onActivateSemanticReference ? { onActivateReference: onActivateSemanticReference } : {})}
@@ -246,17 +221,6 @@ export function AgentComposer({
               and only while the composer can write to the live process. */}
           {onSetPosture ? (
             <PosturePicker control={postureControl} disabled={disabled} onSet={onSetPosture} />
-          ) : null}
-          {/* The queue indicator lives with the bottom-left affordance cluster, not beside the primary
-              action — it is a status of the pending work, kin to the tools, not a second send button.
-              It opens: a bare count is indistinguishable from a stuck counter, so the messages
-              themselves have to be reachable. Same native `popover` as the context chip, for the same
-              reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
-          {queued.length > 0 ? (
-              <QueuedMessages queued={queued}
-              {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
-              {...(onSendQueued ? { onSend: onSendQueued } : {})}
-              {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
           ) : null}
         </div>
         <div>
@@ -303,9 +267,7 @@ export function AgentComposer({
               <ArrowUp size={15} aria-hidden="true" />
             </button>
           )}
-          {identity ? <span className="composer__identity" title={identity.context ? `${identity.name} · ${identity.context}` : identity.name}>
-            {identity.avatar}
-          </span> : null}
+          {mailbox}
         </div>
       </div>
       {feedback}
@@ -325,55 +287,4 @@ export function AgentComposer({
       </div> : null}
     </div>
   )
-}
-
-function QueuedMessages({ queued, onCopy, onRemove, onSend }: {
-  queued: readonly ComposerQueuedMessage[]
-  onCopy?: (text: string) => void
-  onRemove?: (id: string) => void
-  onSend?: (id: string) => void
-}) {
-  const cardId = useId()
-  const retryEntry = queued.find((entry) => entry.deliverable)
-  const { unavailable, deferred, sending, label, state } = summarizeQueue(queued)
-  return (
-    <>
-      <button type="button" className="composer__queued" data-state={state} aria-label={label}
-        popoverTarget={cardId} popoverTargetAction="toggle">
-        <SemanticIcon name={unavailable > 0 ? 'failed' : deferred.length > 0 ? 'paused' : 'message-queue'} size={12} /> {queued.length}
-      </button>
-      <div id={cardId} popover="auto" className="composer__queued-card" aria-label="Queued messages">
-        <h3>{label}</h3>
-        <ol>
-          {queued.map((entry) => <li key={entry.id} data-state={entry.status}>
-            <span>{entry.text}</span>
-            {entry.sending ? <small>Sending. Waiting for delivery confirmation.</small>
-              : !entry.deliverable ? <small>Not sent: this message targets a Run that is no longer available here.</small>
-              : entry.error ? <small>{entry.error}</small> : null}
-            <span className="composer__queued-actions">
-              {onRemove ? <button type="button" className="composer-tool" disabled={entry.sending} onClick={() => onRemove(entry.id)}>Remove</button> : null}
-            </span>
-          </li>)}
-        </ol>
-        {onSend && retryEntry ? <button type="button" className="composer-tool" disabled={sending} onClick={() => onSend(retryEntry.id)}>Retry queue</button> : null}
-        <p>Messages for the current Run are sent in order as soon as the Agent can accept them.</p>
-        {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
-          <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
-        </button> : null}
-      </div>
-    </>
-  )
-}
-
-function summarizeQueue(queued: readonly ComposerQueuedMessage[]) {
-  const unavailable = queued.filter((entry) => !entry.deliverable && !entry.sending).length
-  const deferred = queued.filter((entry) => entry.deliverable && entry.status === 'deferred')
-  const sending = queued.some((entry) => entry.sending)
-  const label = unavailable > 0
-    ? `${unavailable} of ${queued.length} messages cannot be sent to the current Run`
-    : deferred.length > 0
-    ? `${deferred.length} of ${queued.length} messages not delivered yet - still queued`
-    : sending ? `Sending - ${queued.length} queued` : `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
-  const state = unavailable > 0 ? 'failed' : deferred.length > 0 ? 'deferred' : 'queued'
-  return { unavailable, deferred, sending, label, state }
 }

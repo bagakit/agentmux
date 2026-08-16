@@ -76,32 +76,15 @@
 .composer__context { display: inline-flex; align-items: center; gap: var(--sp-1); border: 0; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); color: var(--text-3); background: transparent; font-size: var(--fs-micro); white-space: nowrap; cursor: pointer; anchor-name: --composer-context; }
 .composer__context:hover { color: var(--text); background: var(--surface-3); }
 .composer__context:focus-visible { outline: var(--focus-line) solid 1px; }
-/* The queue badge. Now a real button (it opens the list), so it takes the same hover/focus treatment as
-   the other tools — but it keeps its blue fill: it reports pending state, it is not an affordance at
-   rest. It anchors its own card, so it carries its own anchor-name. */
-.composer__queued { display:inline-flex; align-items:center; gap:var(--sp-1); border:0; color:var(--blue); font-size:var(--fs-micro); padding:var(--sp-1) var(--sp-2); border-radius:var(--radius-sm); background:var(--surface-2); cursor:pointer; anchor-name: --composer-queued; }
-.composer__queued:hover { background: var(--surface-3); }
-.composer__queued:focus-visible { outline: var(--focus-line) solid 1px; }
-.composer__queued[data-state='failed'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
-/* deferred 刻意**不用** amber：amber 说的是「出错了」，而这一档的事实是「Agent 好着，我们在重试」。
-   用中性的 --text-3 把它和 healthy 的 --blue 区分开——降级要看得出来，但不冒充故障。 */
-.composer__queued[data-state='deferred'] { color: var(--text-3); background: var(--surface-3); }
-/* The queued-message list. Same top-layer escape as the breakdown card, anchored to its own badge.
-   Entries are clamped to 3 lines each so a long prompt cannot push the rest off screen; the full text
-   stays in the DOM (screen readers and select-copy get all of it), and the list itself scrolls once it
-   outgrows the viewport allowance. */
-.composer__queued-card { position: fixed; position-anchor: --composer-queued; position-area: top span-right; margin: 0 0 var(--sp-2) 0; width: max-content; max-width: min(380px, 90vw); padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
-.composer__queued-card h3 { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.composer__queued-card ol { margin: 0; padding: 0 0 0 var(--sp-5); max-height: min(320px, 40vh); overflow-y: auto; color: var(--text); }
-.composer__queued-card li { margin: 0 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.composer__queued-card li > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.composer__queued-card li[data-state='failed'] { color: var(--amber); }
-.composer__queued-card li[data-state='deferred'] { color: var(--text-2); }
-.composer__queued-card li[data-state='deferred'] > small { color: var(--text-3); }
-.composer__queued-card li > small { display: block; margin-top: var(--sp-1); color: var(--amber); }
-.composer__queued-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
-.composer__queued-card li:last-child { margin-bottom: 0; }
-.composer__queued-card p { margin: var(--sp-3) 0 0; color: var(--text-3); }
+/* The outbox shares the mailbox popover; no second trigger or overlay. */
+.composer-outbox h3 { margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.composer-outbox ol { margin: 0; padding: 0 0 0 var(--sp-5); color: var(--text); }
+.composer-outbox li { margin: 0 0 var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer-outbox li[data-state='failed'] { color: var(--amber); }
+.composer-outbox li > small { display: block; margin-top: var(--sp-1); color: var(--text-3); }
+.composer-outbox__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.composer-outbox li:last-child { margin-bottom: 0; }
+.composer-outbox p { margin: var(--sp-3) 0; color: var(--text-3); }
 /* The breakdown card. `popover` puts it in the top layer, so it escapes the composer's overflow:hidden
    instead of being clipped. Flat by contract: an elevated fill + top highlight, no resting border. */
 .composer__context-card { position: fixed; position-anchor: --composer-context; position-area: top span-left; margin: 0 0 var(--sp-2) 0; width: max-content; max-width: min(260px, 90vw); padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
@@ -181,17 +164,29 @@
 
 
 /* The hit area is constant across modes; collapsed controls are quieter, never shorter. */
-.composer__toolbar :is(.composer-tool, .composer-send, .composer__identity, .composer__queued, .composer__context, .composer__inbox) { height: var(--sp-7); padding-block: 0; flex-shrink: 0; }
-.composer__inbox { display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --composer-inbox; }
-.composer__inbox[data-unread='true'] { color: var(--amber); background: var(--surface-3); }
-.composer__inbox:hover { background: var(--surface-3); }
-.composer__inbox:focus-visible { outline: 1px solid var(--focus-line); }
-.composer__inbox-card { position: fixed; position-anchor: --composer-inbox; position-area: top span-right; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow-y: auto; padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
-.composer__inbox-card h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
-.composer__notices { grid-column: 1 / -1; min-width: 0; }
+.composer__toolbar :is(.composer-tool, .composer-send, .composer__identity, .composer__context, .composer__mailbox) { height: var(--sp-7); padding-block: 0; flex-shrink: 0; }
+.composer__mailbox { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --composer-mailbox; }
+.composer__mailbox:hover { background: var(--surface-3); }
+.composer__mailbox:focus-visible { outline: 1px solid var(--focus-line); }
+.composer-mailbox { position: fixed; position-anchor: --composer-mailbox; position-area: top span-left; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow-y: auto; padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.composer-mailbox h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
 .composer-notice { display: flex; align-items: start; gap: var(--sp-2); padding: var(--sp-3); overflow-wrap: anywhere; }
 .composer-notice__body { flex: 1; min-width: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-micro); color: var(--text-3); }
 .composer-notice__body strong { color: var(--text-2); font-weight: 500; }
-.composer-notice__close { flex-shrink: 0; }
 
-.composer { anchor-scope: --composer-inbox; }
+.composer { anchor-scope: --composer-mailbox; }
+
+.composer-mailbox__dot { display: inline-block; width: var(--sp-2); height: var(--sp-2); flex-shrink: 0; border-radius: 50%; background: var(--red); }
+.composer__mailbox > .composer-mailbox__dot { position: absolute; top: var(--sp-1); right: 0; }
+.composer-mailbox__folders { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.composer-mailbox__folders > button { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-7); padding: 0 var(--sp-3); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
+.composer-mailbox__folders > button[aria-selected='true'] { background: var(--surface-3); color: var(--text); }
+.composer-mailbox__folders > button:focus-visible { outline: 1px solid var(--focus-line); }
+.composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
+
+/* The image is the same durable @path token, rendered by the shared conversation image viewer. */
+.composer-image { display: inline-block; vertical-align: middle; line-height: 1; }
+.composer-image .md-conversation-image { vertical-align: middle; }
+.composer-image .md-conversation-image__thumb { width: calc(var(--sp-7) * 2); height: calc(var(--sp-7) * 2); object-fit: contain; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer-image .md-conversation-image__thumb { width: var(--sp-7); height: var(--sp-6); }
+.launcher-composer .composer__editor { min-height: 6em; }

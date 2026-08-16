@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "feat_id": "f-27n8fk8vq",
+  "title": "输入框截图缩略图",
+  "slug": "composer-image-preview",
+  "goal": "截图和粘贴图片在输入框内展示缩略图，发送引用保持同一图片",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 3
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/composer-image-preview.test.tsx apps/desktop/test/inline-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-semantic-reference.test.tsx --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-27n8fk8vq/artifacts/gate-T-001-r3-0001.log",
+    "last_context": {
+      "candidate_sha": "05c088104c82c580b226ea0dfbe0a55ded7302d1",
+      "worktree_digest": "64947d494893d41a780533cc5200f0e7bfc1456e986954360fa000efb6fa1279",
+      "verification_digest": "none",
+      "dedup_key": "b239876079342b58f834a6d7976e8774e85eaa5256b3de903d864eb55edc55ec",
+      "source_key": "310081da0aa066dbc78cb9d3ae3728b8389ad989aebc2c1873fd5a1412465d1a",
+      "artifact_digests": {},
+      "plan_revision": 1
+    }
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

@@ -1,0 +1,11 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+candidate_sha=05c088104c82c580b226ea0dfbe0a55ded7302d1
+worktree_digest=64947d494893d41a780533cc5200f0e7bfc1456e986954360fa000efb6fa1279
+verification_digest=none
+dedup_key=b239876079342b58f834a6d7976e8774e85eaa5256b3de903d864eb55edc55ec
+commands:
+- pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/composer-image-preview.test.tsx apps/desktop/test/inline-composer.test.tsx apps/desktop/test/composer-local-feedback.test.tsx apps/desktop/test/composer-semantic-reference.test.tsx --maxWorkers=1 => pass (0)
