@@ -653,13 +653,42 @@ describe('BrowserViewManager', () => {
     expect(fixture.sent).not.toContainEqual({ type: 'closed', id: 'browser-profile-fence' })
   })
 
-  it('leaves popup and opener behavior to Chromium', async () => {
+  /**
+   * 这条断言原本叫 'leaves popup and opener behavior to Chromium'，钉的是 `windowOpenHandler === null`
+   * ——`649df3a2` 删掉整个 handler 时立的。**现在正面推翻它**：handler 装回来了，但 649df3a2 修的那件事
+   * 仍然成立，而判据从「有没有 handler」换成了「handler 对 http(s) 怎么答」。
+   *
+   * 为什么必须改而不能删：那条断言是一次决定的唯一记录。删掉它，下一个人只会看到「这里本来就该有个
+   * handler」，而 649df3a2 修的 bug（每一个 window-open 都被压进同一个 view、弹窗语义全没了）会悄悄
+   * 回来，没有任何东西拦得住。
+   */
+  it('hands app-link popups off and leaves every other window.open to Chromium', async () => {
     const fixture = fakeWindow()
-    const manager = browserManager(fixture.window)
+    const host = appLinkHost()
+    const manager = new BrowserViewManager(fixture.window as never, profiles, new BrowserRefLedgerStore(
+      join(mkdtempSync(join(tmpdir(), 'agentmux-bvm-')), 'ref-ledger.json')
+    ), host)
 
     await manager.create('browser-native-window-open', 'https://example.com')
+    const contents = fixture.children[0]!.webContents
+    const handler = contents.windowOpenHandler
+    expect(handler, 'handler 没装上——应用链接的弹窗会开出一个没人管的窗口').not.toBeNull()
 
-    expect(fixture.children[0]!.webContents.windowOpenHandler).toBeNull()
+    // 承重的反向一半。`649df3a2` 删掉的那段正是把**每一个** window-open 都 `this.navigate(...)` 再
+    // deny；回到那个形状就是把它修的 bug 重新引入。'allow' 就是「没有 handler」时的默认动作。
+    for (const url of ['https://example.com/popup', 'http://localhost:4173/x', 'about:blank']) {
+      expect(handler!({ url }), `${url} 的弹窗被截走了`).toEqual({ action: 'allow' })
+    }
+    // 改道的另一个形状是偷偷把当前 view 导过去。它不会体现在返回值上，所以单独判一次。
+    expect(contents.getURL(), '普通弹窗把当前页改道了').toBe('https://example.com/')
+    expect(host.opened, '普通弹窗被甩给了系统浏览器').toEqual([])
+
+    // 正向：应用链接才归我们，且走的是和导航路同一条问答路（这里没记过，所以挂出提问、不开）。
+    expect(handler!({ url: 'lark://open?token=9' })).toEqual({ action: 'deny' })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(manager.setViewport('browser-native-window-open', 'responsive').appLinkPrompt)
+      .toEqual({ url: 'lark://open?token=9', scheme: 'lark' })
+    expect(host.opened, '还没问就交出去了').toEqual([])
   })
 
   it('allows controlled local files but blocks unsupported page navigation and redirects', async () => {
