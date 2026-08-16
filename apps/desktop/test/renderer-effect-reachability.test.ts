@@ -14,7 +14,7 @@ import {
  * 五条 renderer effect 的**可达性**守卫，全部走 test/helpers/effect-reachability.ts。
  *
  * 为什么要有这一整个文件（本仓反复记录的同族洞，见 MEMORY「grep 守卫看不见早退」「renderToStaticMarkup
- * 对 effect 完全失明」）：desktop 包没有 DOM 测试环境，effect 从不执行；这些 effect 此前**只**被文本断言
+ * 对 effect 完全失明」）：当初 desktop 包没有 DOM 测试环境，SSR 不执行 effect；这些 effect 此前**只**被文本断言
  * （`readFileSync` + `toContain`）守着。文本断言不执行代码——在 effect 第一行插一句 `return`（或
  * `if (someNonEmptyString) return`，保留 tsc 收窄使其沉默），整条 effect 塌成 no-op，而被 `toContain` 的
  * 那行字面量原封不动地留着，套件照旧全绿。下面每条都实测过：以「保留收窄的无条件早退」变异后，其原有
@@ -26,21 +26,20 @@ import {
  *     等于白名单——另插一句早退（多一项）红，删掉一句合法守护（少一项）也红。
  *
  * 这些断言**只**证明「若 effect 体被执行，那句调用可达 / 早退守护与声明一致」。它们证明不了 effect 会被
- * 挂载、会以正确依赖重跑（那要真正的 DOM 测试环境，本仓没有）。别当行为测试用。
+ * 挂载、会以正确依赖重跑（另由 DOM 测试验证）。别当行为测试用。
  */
 
 const componentUrl = (name: string): string =>
   new URL(`../src/renderer/src/components/${name}`, import.meta.url).pathname
 
 describe('renderer effect 可达性（插一句早退让 effect 变 no-op → 这里红）', () => {
-  it('NewTabSurface：可见时聚焦输入框那条 effect 里，focus() 之前没有早退', () => {
-    // 变异（实测存活于 workspace-workbench-registry.test.ts 的 toContain）：
-    //   useEffect(() => { return; if (visible) promptRef.current?.focus() }, [visible])
-    // 那行字面量还在，文本断言照旧命中；这里的可达性断言认得出 focus() 已不可达。
-    const { sourceFile } = readAndParse(componentUrl('NewTabSurface.tsx'))
-    const calls = findCallsToMember(sourceFile, 'focus')
-    expect(calls, 'promptRef.current?.focus() 应恰有一处').toHaveLength(1)
-    assertReachable(calls[0]!, 'NewTabSurface visible→focus effect')
+  it('InlineComposer：可见时聚焦输入框那条 effect 里，focus() 之前没有早退', () => {
+    // The rich editor owns focus. Its actual visibility behavior is exercised by
+    // composer-input-ownership.test.tsx; this guard still rejects an early-return no-op.
+    const { sourceFile } = readAndParse(componentUrl('InlineComposer.tsx'))
+    const calls = findCallsToMember(sourceFile, 'focus').filter((call) => call.expression.getText() === 'editor.commands.focus')
+    expect(calls, 'editor.commands.focus() 应恰有一处').toHaveLength(1)
+    assertReachable(calls[0]!, 'InlineComposer autoFocus effect')
   })
 
   it('TerminalView：可见性 layout effect 里，rememberTerminalViewport 之前没有早退', () => {
