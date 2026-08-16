@@ -325,6 +325,7 @@ styles/
   conversation-axis.css      说话人轴与 this-agent 轴（标尺之上的身份轨）
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
   agent-panels.css  Agent 的 Portal 面板（花名册、计数树、资源用量）——紧跟 overlays
+  agent-avatar.css  执行器头像的 Provider 轮廓、角标、状态、计数与设置预览
 ```
 
 这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`

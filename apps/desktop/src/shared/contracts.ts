@@ -342,7 +342,11 @@ void _appLinkSchemeChoicesAreExactlyTheUnion
 export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 
+/** Desktop identity styling belongs to the executor, not the Provider or Runtime. */
+export type AgentAvatarAppearance = { tint?: string; badge?: string }
+
 export type AppearanceConfig = {
+  agentAvatars?: Record<string, AgentAvatarAppearance>
   appAppearance?: AppAppearanceId
   terminalTheme: TerminalThemeId
   /**

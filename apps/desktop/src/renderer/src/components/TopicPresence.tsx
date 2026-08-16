@@ -32,7 +32,7 @@ export function RegionMosaic({ cells, agents = [] }: {
             width: `${cell.bounds.width * 100}%`,
             height: `${cell.bounds.height * 100}%`
           }}
-        >{agent ? <AgentAvatar label={agent.label} providerId={agent.providerId} state={agent.state} onOpen={agent.onOpen} /> : null}</span>
+        >{agent ? <AgentAvatar label={agent.label} providerId={agent.providerId} state={agent.state} appearance={agent.appearance} count={agent.count} onOpen={agent.onOpen} /> : null}</span>
       })}
     </span>
   )

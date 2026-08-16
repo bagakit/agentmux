@@ -67,69 +67,16 @@ function visualSignals(markup: string): { statusClass: string; attention: string
   return { statusClass, attention }
 }
 
-// 一枚头像真正**画出来**的样子，从真实样式表反推——而不是拿那个每状态都唯一的 `status--<state>`
-// 当签名。后者对每个状态天然不同，用它判「各有可辨外观」是恒真的假绿（本仓明令禁止的那种）：
-// 状态类改成常量、把描边规则删掉，它照样九个各不相同。
-//
-// 头像的像素只由三样东西决定，全部在 dock.css 的 `.agent-avatar*` 段：
-//   1. 有没有一条 `.agent-avatar.status--<state>` 专属规则（只有 working/running/disconnected 有；
-//      working 与 running 共用一条实线描边+glow，disconnected 是虚线描边）；
-//   2. `data-attention` 的取值（needs-you / error → 实线描边 + 去灰度 + 一枚角标）；
-//   3. 那枚角标 `::after` 的 `content`（needs-you 是 `?`，error 是 `!`）。
-// 把这三样拼成「外观类」。故意共享外观的状态会落进同一个外观类——那是设计（见 attention-vocabulary.ts
-// 的裁决表：done/exited/starting 都走基础灰度收敛，是「结束/未开始」而非「在等你」）。
+// Read the actual shared status rules selected by the rendered Avatar; class names alone are not evidence.
 function paintedAppearance(state: AgentDisplayState, styles: string): string {
-  const { attention } = visualSignals(avatarMarkup(state))
-  // 该状态是否有一条 `.agent-avatar.status--<state> { ... }` 专属规则，及其规则体。
-  const ruleBody = (): string => {
-    for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
-      if (
-        selector!
-          .split(',')
-          .some((one) => one.trim() === `.agent-avatar.status--${state}`)
-      ) {
-        return body!.replace(/\s+/gu, ' ').trim()
-      }
-    }
-    return ''
-  }
-  // data-attention 那枚角标的字形（needs-you=?, error=!），从真实规则里取，不手抄。
-  const glyph = (): string => {
-    if (attention === null) return ''
-    let content = ''
-    for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
-      // 后写的覆盖先写的（error 那条 `content:'!'` 就是这样改写掉基础的 `?`）。
-      if (new RegExp(`\\.agent-avatar\\[data-attention=['"]${attention}['"]\\]::after`, 'u').test(selector!)) {
-        const c = /content:\s*'([^']*)'/u.exec(body!)?.[1]
-        if (c !== undefined) content = c
-      }
-    }
-    return content
-  }
-  // 载体本体（非 ::after）那条 `.agent-avatar[data-attention=X] { filter/outline }` 规则的规则体——
-  // 它把等你/出错的头像从灰度里拉出来并加实线描边。删掉它，等你/出错的头像会退回基础灰度块（与
-  // neutral 族同款），所以它必须进签名：没有它，M3c 那种「删掉去灰度规则」不改变签名而存活。
-  const accentBody = (): string => {
-    if (attention === null) return ''
-    let body = ''
-    for (const [, selector, ruleBody] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
-      const members = selector!.split(',').map((one) => one.trim())
-      // 只认非 ::after、且点名了这个 attention 的载体规则。
-      if (
-        members.some((one) =>
-          new RegExp(`^\\.agent-avatar\\[data-attention=['"]${attention}['"]\\]$`, 'u').test(one)
-        )
-      ) {
-        body += ruleBody!.replace(/\s+/gu, ' ').trim()
-      }
-    }
-    return body
-  }
-  // 注意：不把 `--status-ink` 折进头像外观签名。头像的**基础**态（done/exited/starting）根本不读 ink
-  // （只有 working/running/disconnected 的专属规则和 [data-attention] 那两条读它），所以 exited 与 done
-  // 虽然 ink 一红一蓝，画在头像上却是同一个基础灰度块——它们本就该在头像上同款。ink 的正确性由下面
-  // 专门那条「颜色锚在字面量色相上」按 `.status--<state>` 直接质询，不混进这里。
-  return `own-rule=${ruleBody()}|accent=${attention !== null}|accent-body=${accentBody()}|glyph=${glyph()}`
+  const markup = avatarMarkup(state)
+  expect(markup).toContain('agent-avatar__status status__dot')
+  const { statusClass } = visualSignals(markup)
+  const dot = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+    .filter(([, selector]) => selector!.split(',').some((member) =>
+      member.trim() === `.${statusClass} .status__dot` || member.trim() === `.${statusClass} .status__dot::after`))
+    .map(([, , body]) => body!.replace(/\s+/g, ' ').trim()).join('|')
+  return `${statusInk(statusClass.replace('status--', '') as AgentDisplayState, styles)}|${dot}`
 }
 
 /**
@@ -159,16 +106,10 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
     const appearance = new Map<AgentDisplayState, string>()
     for (const state of AGENT_DISPLAY_STATES) appearance.set(state, paintedAppearance(state, styles))
 
-    // 头像的外观按设计分成这些**互不相同**的族。这份分组是需求（哪些状态该长一样），不是实现常量的
-    // 副本：working/running 都「在场且活跃」共用实线描边+glow；waiting/blocked 都「在等你」共用琥珀
-    // 描边+`?`；done/exited/starting 都「结束或未开始」走基础灰度收敛；disconnected 是「曾在」虚线；
-    // error 是「坏了」红描边+`!`。
+    // Only waiting/blocked intentionally share a presentation. Ready and working have different ink/shape.
     const FAMILIES: Record<string, readonly AgentDisplayState[]> = {
-      active: ['working', 'running'],
-      'needs-you': ['waiting', 'blocked'],
-      neutral: ['done', 'exited', 'starting'],
-      disconnected: ['disconnected'],
-      error: ['error']
+      working: ['working'], running: ['running'], 'needs-you': ['waiting', 'blocked'],
+      done: ['done'], exited: ['exited'], starting: ['starting'], disconnected: ['disconnected'], error: ['error']
     }
     // 分组必须覆盖整个联合——漏一个状态，它的外观就无人质询。
     expect([...Object.values(FAMILIES)].flat().sort()).toEqual([...AGENT_DISPLAY_STATES].sort())
@@ -223,8 +164,8 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
     const glyphOf = (attention: string): string => {
       let content = ''
       for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
-        if (new RegExp(`\\.agent-avatar\\[data-attention=['"]${attention}['"]\\]::after`, 'u').test(selector!)) {
-          const c = /content:\s*'([^']*)'/u.exec(body!)?.[1]
+        if (selector!.split(',').some((member) => member.trim() === `.status--${attention === 'needs-you' ? 'waiting' : attention} .status__dot::after`)) {
+          const c = /content:\s*["']([^"']*)["']/u.exec(body!)?.[1]
           if (c !== undefined) content = c
         }
       }
@@ -238,26 +179,17 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
     expect(error, 'error 与 needs-you 用了同一枚字形，色盲下读不出区别').not.toBe(needsYou)
   })
 
-  it('needs-you / error 的头像被拉出灰度并加实线描边——不只是挂个角标（症状 1 的载体规则）', () => {
-    // #409 那条载体规则（`.agent-avatar[data-attention='needs-you'], [data-attention='error']`）负责把
-    // 等你/出错的头像 `filter: none; opacity: 1` 从灰度里拉出来、并加一圈实线 outline。删掉它，等你/
-    // 出错的头像退回灰度块——角标还在，但整枚方块灰蒙蒙，「有人在等你」这唯一提示被灰掉了。可达性
-    // 判据：同一条选择器里既点名 `.agent-avatar` 又点名这个取值（#397 的形状是「类被样式、属性在别处
-    // 被样式、这一对没人样式」）。
+  it('所有头像保持身份颜色，注意状态用 alpha 轮廓与共享角标表达', () => {
     const styles = allStyleRules()
-    for (const attention of ['needs-you', 'error'] as const) {
-      const rules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
-        .map(([, selector, body]) => ({ selector: selector!.replace(/\s+/gu, ' ').trim(), body: body! }))
-        .filter(({ selector }) =>
-          // 非 ::after 的载体规则：点名 .agent-avatar 与这个取值，且不是伪元素。
-          new RegExp(`\\.agent-avatar\\[data-attention=['"]${attention}['"]\\](?!::)`, 'u').test(selector) &&
-          !selector.includes('::after')
-        )
-      expect(rules.length, `${attention} 没有载体规则把头像拉出灰度`).toBeGreaterThan(0)
-      const pulled = rules.some(({ body }) => /filter:\s*none/u.test(body))
-      const outlined = rules.some(({ body }) => /outline:[^;]*solid/u.test(body))
-      expect(pulled, `${attention} 的头像没有 filter:none——仍是灰度块`).toBe(true)
-      expect(outlined, `${attention} 的头像没有实线描边`).toBe(true)
+    const base = styles.match(/(?:^|\n)\.agent-avatar\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(base.length).toBeGreaterThan(0)
+    expect(base).not.toMatch(/grayscale|opacity:\s*\./)
+    const contours = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+      .filter(([, selector, body]) => selector!.includes('.agent-avatar__contour') && body!.includes('filter:'))
+    expect(contours.length).toBeGreaterThan(0)
+    for (const [, , body] of contours) {
+      expect(body).toContain('drop-shadow(')
+      expect(body).toContain('var(--status-ink)')
     }
   })
 
