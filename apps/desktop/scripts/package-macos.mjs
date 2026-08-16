@@ -456,7 +456,19 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   const ctxmuxVersion = ctxmuxManifest.product.version
   const ctxmuxProtocol = ctxmuxManifest.product.protocol
   assert(cli.stdout.trim() === `ctxmux ${ctxmuxVersion} (protocol ${ctxmuxProtocol})`, 'Packaged ctxmux identity is wrong.')
-  assert(daemon.stdout.trim() === `ctxmuxd ${ctxmuxVersion} (protocol ${ctxmuxProtocol})`, 'Packaged ctxmuxd identity is wrong.')
+  // ctxmuxd states one fact more than the CLI: the handoff schema it can adopt across an
+  // exec-in-place upgrade. That is why the daemon's parenthesis is open-ended and the CLI's is not
+  // — an upgrade target that cannot declare its schema is refused before the exec, so the daemon
+  // has to publish it somewhere a not-yet-running binary can be asked, and `--version` is that
+  // channel. Requiring `,` or `)` after the protocol keeps this from degrading into a prefix match,
+  // which would accept `protocol 170` as `protocol 17`.
+  const daemonIdentity = daemon.stdout.trim()
+  const daemonPrefix = `ctxmuxd ${ctxmuxVersion} (protocol ${ctxmuxProtocol}`
+  const daemonDelimiter = daemonIdentity.slice(daemonPrefix.length, daemonPrefix.length + 1)
+  assert(
+    daemonIdentity.startsWith(daemonPrefix) && (daemonDelimiter === ',' || daemonDelimiter === ')'),
+    'Packaged ctxmuxd identity is wrong.'
+  )
   assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
