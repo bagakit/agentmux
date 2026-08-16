@@ -34,6 +34,8 @@
 .composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
 .composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
+.composer-tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.composer-tools[data-mode='expanded'] { flex: 1 1 100%; flex-wrap: wrap; padding-top: var(--sp-1); }
 .composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
 .composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .composer-tool--danger:hover:not(:disabled) { color: var(--red); }
@@ -65,6 +67,12 @@
 .composer__suggestions button { display: flex; gap: var(--sp-3); border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
 .composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
 .composer__suggestions small { color: var(--text-3); }
+.composer__semantic-tokens { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 0 var(--sp-4) var(--sp-2); }
+.composer-semantic-token { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); border: 0; border-bottom: 1px solid currentColor; color: var(--blue); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.composer-semantic-token--component { color: var(--purple); }
+.composer-semantic-token--subcommand { color: var(--green); }
+.composer-semantic-token:hover { background: var(--surface-2); }
+.composer-semantic-token:focus-visible { outline: var(--focus-line) solid 1px; outline-offset: 2px; }
 
 /* The context chip: always shows used% — never width-clipped. The number is the whole point of the
    indicator, so no max-width/ellipsis (a prior 7ch clamp hid it entirely). It is the trigger for the
@@ -78,6 +86,7 @@
 .composer__queued { display:inline-flex; align-items:center; gap:var(--sp-1); border:0; color:var(--blue); font-size:var(--fs-micro); padding:var(--sp-1) var(--sp-2); border-radius:var(--radius-sm); background:var(--surface-2); cursor:pointer; anchor-name: --composer-queued; }
 .composer__queued:hover { background: var(--surface-3); }
 .composer__queued:focus-visible { outline: var(--focus-line) solid 1px; }
+.composer__queued[data-state='failed'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
 /* The queued-message list. Same top-layer escape as the breakdown card, anchored to its own badge.
    Entries are clamped to 3 lines each so a long prompt cannot push the rest off screen; the full text
    stays in the DOM (screen readers and select-copy get all of it), and the list itself scrolls once it
@@ -85,7 +94,11 @@
 .composer__queued-card { position: fixed; position-anchor: --composer-queued; position-area: top span-right; margin: 0 0 var(--sp-2) 0; width: max-content; max-width: min(380px, 90vw); padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
 .composer__queued-card h3 { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .composer__queued-card ol { margin: 0; padding: 0 0 0 var(--sp-5); max-height: min(320px, 40vh); overflow-y: auto; color: var(--text); }
-.composer__queued-card li { margin: 0 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.composer__queued-card li { margin: 0 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer__queued-card li > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.composer__queued-card li[data-state='failed'] { color: var(--amber); }
+.composer__queued-card li > small { display: block; margin-top: var(--sp-1); color: var(--amber); }
+.composer__queued-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 .composer__queued-card li:last-child { margin-bottom: 0; }
 .composer__queued-card p { margin: var(--sp-3) 0 0; color: var(--text-3); }
 /* The breakdown card. `popover` puts it in the top layer, so it escapes the composer's overflow:hidden

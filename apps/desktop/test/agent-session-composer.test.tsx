@@ -14,7 +14,7 @@ const fixture = vi.hoisted(() => ({
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
-    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string }>>,
+    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     // Returns true = "the queue took it". The composer clears the draft only on true, so a mock that
@@ -625,7 +625,7 @@ it('shows the context observation owned by this session in the Composer toolbar'
 describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
   function deliverable(session: Extract<SessionSnapshot, { kind: 'agent' }>): unknown {
     fixture.state.sessions = [session]
-    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me' }] }
+    fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me', status: 'queued' }] }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { queueDeliverable?: boolean }
     }
@@ -665,7 +665,7 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
     // flush 会按 runId 跳过它们，所以角标不能说「在路上」。只看 processState 的实现在这里红。
     fixture.state.sessions = [agentSession({ processState: 'running' })]
     fixture.state.agentSteerQueues = {
-      'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run' }]
+      'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run', status: 'queued' }]
     }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { queueDeliverable?: boolean }

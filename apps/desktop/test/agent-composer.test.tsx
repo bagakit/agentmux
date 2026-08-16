@@ -52,7 +52,7 @@ describe('AgentComposer reusable surface', () => {
       value: 'steer me',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      queued: ['first', 'second', 'third'],
+      queued: ['first', 'second', 'third'].map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const })),
       primaryAction: 'stop',
       onChange: vi.fn(),
       onSubmit: vi.fn(),
@@ -71,7 +71,8 @@ describe('AgentComposer reusable surface', () => {
   it('shows the queued messages themselves, not only how many there are', () => {
     // A bare "2" beside a working Agent is indistinguishable from a stuck counter — it reads as a bug.
     // The badge therefore opens a card carrying the actual queued prompts, in delivery order.
-    const queued = ['check the fifth level for a bug', 'move the hint clear of the mechanism']
+    const prompts = ['check the fifth level for a bug', 'move the hint clear of the mechanism']
+    const queued = prompts.map((text, index) => ({ id: `q-${index}`, text, status: 'queued' as const }))
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: '',
       disabled: false,
@@ -82,10 +83,10 @@ describe('AgentComposer reusable surface', () => {
     }))
 
     // Each queued prompt is real DOM text. Deleting the <ol> reds here; keeping only the count does too.
-    for (const prompt of queued) expect(markup, `queued prompt is not shown: ${prompt}`).toContain(prompt)
+    for (const prompt of prompts) expect(markup, `queued prompt is not shown: ${prompt}`).toContain(prompt)
     // In delivery order — "which goes next" is the question once there is more than one.
-    expect(markup.indexOf(queued[0]!), 'queued prompts are not in delivery order')
-      .toBeLessThan(markup.indexOf(queued[1]!))
+    expect(markup.indexOf(prompts[0]!), 'queued prompts are not in delivery order')
+      .toBeLessThan(markup.indexOf(prompts[1]!))
     // Still openable: the badge is the trigger and the card is its target. A mismatch between the two
     // makes the card permanently unreachable — which the presence of the text alone would not catch,
     // since the card renders either way (this is exactly the gap the d4573364 audit found on the

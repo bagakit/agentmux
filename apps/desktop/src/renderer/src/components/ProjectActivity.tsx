@@ -16,6 +16,7 @@ import {
 import { useAppStore } from '../store'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { AgentProviderIcon } from './AgentProviderIcon'
+import { SemanticIcon } from './semantic-icons'
 
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
 const NO_TIMELINE: readonly AgentTimelineItem[] = []
@@ -89,6 +90,7 @@ export function ProjectActivity({
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const config = useAppStore((state) => state.config)
   const timelines = useAppStore((state) => state.timelines)
+  const agentNames = useAppStore((state) => state.agentNames)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
   const running = workingAgentCount(sessions)
@@ -134,7 +136,7 @@ export function ProjectActivity({
               {meta ? <em>{meta}</em> : null}
             </span>
             <span className="project-activity-group__avatars" aria-label={`${group.sessions.length} Agents in ${contextLabel(group)}`}>
-              {rosterRows.slice(0, 3).map((row) => <span key={row.sessionId} title={`${row.label} · ${row.state}`}><AgentProviderIcon providerId={row.providerId} size={14} /></span>)}
+              {rosterRows.slice(0, 3).map((row) => <span key={row.sessionId} title={`${agentNames[row.sessionId] ?? row.label} · ${row.state}`}><AgentProviderIcon providerId={row.providerId} size={14} /></span>)}
               {rosterRows.length > 3 ? <em>+{rosterRows.length - 3}</em> : null}
             </span>
             </DropdownMenu.Item>
@@ -169,7 +171,7 @@ export function ProjectActivity({
               )
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
                 data-attention={activity.attention ?? undefined}
-                onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{project} · {row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}</small></span></DropdownMenu.Item>
+                onSelect={() => selectSession(row.sessionId)}><SemanticIcon name={session.status.state === 'working' ? 'working' : session.status.state === 'running' ? 'running' : 'neutral'} size={13} /><span><strong>{agentNames[row.sessionId] ?? row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}<span className="project-activity-menu__meta">{project} · {row.providerId}</span></small></span></DropdownMenu.Item>
             })}
           </div> : null}
         </div>

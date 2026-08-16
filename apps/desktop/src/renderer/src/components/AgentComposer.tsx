@@ -1,10 +1,20 @@
 import type { ReactNode } from 'react'
 import { useId } from 'react'
-import { AtSign, ArrowUp, ChevronDown, Copy, MessageSquare, Paperclip, Square } from 'lucide-react'
+import { AtSign, ArrowUp, ChevronDown, Copy, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
 import { ComposerTextarea } from './ComposerTextarea'
+import { SemanticIcon } from './semantic-icons'
+import { ComposerSemanticTokens } from './ComposerSemanticTokens'
+import type { ComposerSemanticReference } from '../lib/composer-semantic-reference'
+
+export type ComposerQueuedMessage = {
+  id: string
+  text: string
+  status: 'queued' | 'failed'
+  error?: string
+}
 
 export type AgentComposerProps = {
   value: string
@@ -15,10 +25,11 @@ export type AgentComposerProps = {
   // The queued prompts themselves, not a count. A bare number reads as a bug — you cannot tell a real
   // pending queue from a stuck counter without seeing what is in it. Count is derived (`.length`), so
   // the badge and the list can never disagree.
-  queued?: readonly string[]
-  queuedIds?: readonly string[]
+  queued?: readonly ComposerQueuedMessage[]
   onRemoveQueued?: (id: string) => void
   onSendQueued?: (id: string) => void
+  semanticReferences?: readonly ComposerSemanticReference[]
+  onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
   // Whether the queue can still drain. The store's flush requires `processState === 'running'`
   // (store.ts flushAgentSteerQueue), so once the run exits the entries stay put forever — but the badge
   // went on promising "queued for delivery" over them, which is the one thing that can no longer happen.
@@ -71,9 +82,10 @@ export function AgentComposer({
   tools,
   contextUsage,
   queued = [],
-  queuedIds = [],
   onRemoveQueued,
   onSendQueued,
+  semanticReferences = [],
+  onActivateSemanticReference,
   queueDeliverable = true,
   onCopyQueued,
   commands = [],
@@ -169,6 +181,7 @@ export function AgentComposer({
         placeholder={placeholder}
         rows={1}
       />
+      <ComposerSemanticTokens references={semanticReferences} {...(onActivateSemanticReference ? { onActivate: onActivateSemanticReference } : {})} />
       {/* Region 名水印：右上角，一个 Region 唯一的名字露出（Tab 有名字位，Region 没有）。缺席即整段
           不渲染——占位符或 "Unknown" 会把「这格没有可信名字」谎报成「有个叫 Unknown 的东西」。
           aria-hidden：这是装饰性的身份复述，SR 用户是**导航进**这一格的、已有其上下文，把它挂进
@@ -215,7 +228,7 @@ export function AgentComposer({
               themselves have to be reachable. Same native `popover` as the context chip, for the same
               reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
           {queued.length > 0 ? (
-              <QueuedMessages queued={queued} queuedIds={queuedIds} deliverable={queueDeliverable}
+              <QueuedMessages queued={queued} deliverable={queueDeliverable}
               {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
               {...(onSendQueued ? { onSend: onSendQueued } : {})}
               {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
@@ -268,7 +281,7 @@ export function AgentComposer({
           onClick={() => { onSelectSuggestion?.(command.text, suggestionKind!); onChange(`${command.text} `) }}>{command.text}<small>{command.description}</small></button>)}
       </div> : null}
       <summary className="composer__disclosure" title="Collapse or expand message tools">
-        <MessageSquare size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />
+        <SemanticIcon name="message-tools" size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />
       </summary>
     </details>
   )
@@ -294,30 +307,32 @@ export function AgentComposer({
  * the run is gone. We do not offer to resend: this component cannot know whether a next run is the same
  * Agent, and silently replaying a stale steer into a fresh session is worse than saying nothing.
  */
-function QueuedMessages({ queued, queuedIds, deliverable, onCopy, onRemove, onSend }: {
-  queued: readonly string[]
-  queuedIds: readonly string[]
+function QueuedMessages({ queued, deliverable, onCopy, onRemove, onSend }: {
+  queued: readonly ComposerQueuedMessage[]
   deliverable: boolean
   onCopy?: (text: string) => void
   onRemove?: (id: string) => void
   onSend?: (id: string) => void
 }) {
   const cardId = useId()
-  const label = deliverable
+  const failed = queued.filter((entry) => entry.status === 'failed').length
+  const label = failed > 0
+    ? `${failed} of ${queued.length} message${queued.length === 1 ? '' : 's'} failed to send`
+    : deliverable
     ? `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
     : `${queued.length} message${queued.length === 1 ? '' : 's'} not sent`
   return (
     <>
-      <button type="button" className="composer__queued" aria-label={label}
+      <button type="button" className="composer__queued" data-state={failed > 0 ? 'failed' : 'queued'} aria-label={label}
         popoverTarget={cardId} popoverTargetAction="toggle">
-        <MessageSquare size={12} aria-hidden="true" /> {queued.length}
+        <SemanticIcon name={failed > 0 ? 'failed' : 'message-queue'} size={12} /> {queued.length}
       </button>
       <div id={cardId} popover="auto" className="composer__queued-card" aria-label="Queued messages">
         <h3>{label}</h3>
         <ol>
           {/* Index key: the queue is an append-and-drain list of plain strings with no identity of its
               own, and two identical prompts are a legitimate queue state — so text is not a key. */}
-          {queued.map((prompt, index) => <li key={queuedIds[index] ?? index}><span>{prompt}</span><span className="composer__queued-actions">{onSend && queuedIds[index] ? <button type="button" className="composer-tool" onClick={() => onSend(queuedIds[index]!)}>Send now</button> : null}{onRemove && queuedIds[index] ? <button type="button" className="composer-tool" onClick={() => onRemove(queuedIds[index]!)}>Remove</button> : null}</span></li>)}
+          {queued.map((entry) => <li key={entry.id} data-state={entry.status}><span>{entry.text}</span>{entry.error ? <small>{entry.error}</small> : null}<span className="composer__queued-actions">{onSend ? <button type="button" className="composer-tool" onClick={() => onSend(entry.id)}>Send now</button> : null}{onRemove ? <button type="button" className="composer-tool" onClick={() => onRemove(entry.id)}>Remove</button> : null}</span></li>)}
         </ol>
         {deliverable ? (
           <p>Delivered in this order when the Agent finishes its current turn.</p>
@@ -334,7 +349,7 @@ function QueuedMessages({ queued, queuedIds, deliverable, onCopy, onRemove, onSe
                 : 'That Agent run ended before these were sent. They are kept here, not sent.'}
             </p>
             {onCopy ? (
-              <button type="button" className="composer-tool" onClick={() => onCopy(queued.join('\n\n'))}>
+              <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
                 <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
               </button>
             ) : null}
