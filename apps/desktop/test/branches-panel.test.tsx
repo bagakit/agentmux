@@ -100,7 +100,7 @@ function trailingOf(markup: string, branchName: string): string {
   const rest = markup.slice(at)
   // 右界必须是**下一行的开头**而不是文档末尾：切到末尾会让下一行的徽标顶上来，于是
   // 「这一行没有徽标」永远判不出（本仓 section-slice-without-right-bound 那一族）。
-  const next = rest.slice(anchor.length).indexOf('<button type="button" class="branch-row')
+  const next = rest.slice(anchor.length).indexOf('<div class="branch-row ')
   return next < 0 ? rest : rest.slice(0, anchor.length + next)
 }
 
@@ -390,8 +390,8 @@ describe('Branches 面板的同步计数徽标', () => {
  *      单项目测试全绿，真实使用里跨项目串 pin。所以用两个不同 repoPath 的项目，pin 只落在其中一个。
  *   2. **组内分区**：pin 是组**内**的一次分区，不是重新分组。把一个没有 worktree 的分支 pin 起来，
  *      它必须留在「Without worktree」组里（且排到该组最前），绝不被提进「Worktrees」——那会让标题说谎。
- *   3. **stopPropagation**：`.branch-row` 自己是个 <button>，pin 键嵌在里面。不 stopPropagation，
- *      点 pin 会连带触发这一行的打开。这条要真点一下（renderToStaticMarkup 不跑点击），走 happy-dom。
+ *   3. **独立动作**：打开与 Pin 是同一行内的兄弟按钮，Pin 不能触发打开。
+ *      这条要真点一下（renderToStaticMarkup 不跑点击），走 happy-dom。
  */
 describe('Branches 面板的 pin', () => {
   const projectB: WorkspaceRecord = { id: 'ws-b', name: 'other', hostId: 'local', path: '/other', kind: 'folder' }
@@ -450,6 +450,12 @@ describe('Branches 面板的 pin', () => {
     expect(pinned(markup, 'loose-a')).toBe(false)
   })
 
+  it('pinned status reuses the leading glyph instead of a permanent trailing action', () => {
+    fixture.state.pinnedItems = { [workspaceProjectId(workspace)]: ['feature/x'] }
+    const markup = renderProject(workspace, '/repo', [branch('feature/x')])
+    expect(markup).toMatch(/selector-row__leading[^>]*><svg[^>]*aria-label="Pinned branch"/)
+  })
+
   describe('点 pin 键（happy-dom）', () => {
     let container: HTMLDivElement
     let root: Root
@@ -477,6 +483,7 @@ describe('Branches 面板的 pin', () => {
 
       const pin = container.querySelector<HTMLButtonElement>('.branch-row__pin')
       expect(pin, '没渲染出 pin 键').not.toBeNull()
+      expect(pin!.parentElement?.closest('button')).toBeNull()
       await act(async () => pin!.click())
 
       // pin 被切换……
@@ -488,7 +495,7 @@ describe('Branches 面板的 pin', () => {
       // 少了 stopPropagation，点击冒泡到外层 .branch-row，这里就会冒出一个选中的行而红。
       expect(
         container.querySelector('.branch-row[aria-pressed="true"]'),
-        '点 pin 连带打开了这一行——stopPropagation 丢了'
+        '点 pin 连带打开了这一行'
       ).toBeNull()
     })
 
