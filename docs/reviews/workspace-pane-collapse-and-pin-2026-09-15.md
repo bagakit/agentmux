@@ -47,6 +47,24 @@ already answers "how does this slot present in Scratch vs a Project" and is unit
 rendering. The collapse default belongs there as one more field, not as a second `isScratch`
 test somewhere in the component. One question, one place that answers it.
 
+### 2.3.1 Collapsed means no split, not a collapsed panel
+
+`react-resizable-panels` offers `collapsible` / `collapsedSize`, which would put the collapse
+state inside the panel library as well as in the store — two sources for one fact, and the
+library's copy is the one that survives a remount with its own persistence.
+
+With the Explorer collapsed there is nothing left to split: one pane occupies the whole slot.
+So the collapsed branch renders the Explorer header plus a full-height Topics / Branches
+directly, with no `PanelGroup` at all. The store stays the only place that knows, and the dead
+draggable handle the acceptance criterion warns about cannot exist because the handle is not
+rendered.
+
+`FileExplorer` has exactly one render site, and it is `WorkspaceFilesTool` — the same component
+that will own the collapse state. The toggle therefore lives in `WorkspaceFilesTool`, which
+simply does not render `<FileExplorer>` when collapsed and shows a header stub in its place. No
+collapse prop is threaded into `FileExplorer`, which has ~20 dependent modules and no business
+knowing whether something outside it decided to hide it.
+
 ### 2.4 Pin scope differs between the two item types, and getting it wrong is silent
 
 - A Topic id (`<kind>:<slug>`) is unique inside the one Scratch workspace.

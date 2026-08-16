@@ -15,13 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 0
+    "round_count": 3
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-005",
+    "last_check_commands": [
+      {
+        "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-26h8fybpz/artifacts/gate-T-005-r3-0001.log"
   },
   "history": [
     {
@@ -47,6 +53,46 @@
     {
       "action": "task_started",
       "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
     }
   ]
 }

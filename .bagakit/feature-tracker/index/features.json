@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 140
+    "next_cursor": 145
   },
   "features": [
     {
@@ -1127,7 +1127,7 @@
     {
       "feat_id": "f-25k8f8m9k",
       "title": "Provider 与人机交互分层收敛",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1420,6 +1420,56 @@
       "title": "Pin a Topic or Branch; pinned items surface in the sidebar",
       "status": "in_progress",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26j8ff79e",
+      "title": "Four not.toContain guards in the Board panel test assert absent tokens",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26k8fk52b",
+      "title": "The branch-retention note is computed at two sites and discarded at the only consumer",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26m8fqews",
+      "title": "人机之间的双向交接：Agent 主动交还控制权，人处理完再还回去",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26n8fwmd3",
+      "title": "站点专用知识：按域名给 Agent 加载这个站怎么用",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26p8fsvg4",
+      "title": "破坏性浏览器操作要收窄作用域并经人批准",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

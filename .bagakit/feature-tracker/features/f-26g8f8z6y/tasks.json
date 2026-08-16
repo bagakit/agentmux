@@ -52,9 +52,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -81,9 +87,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -114,7 +126,7 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []

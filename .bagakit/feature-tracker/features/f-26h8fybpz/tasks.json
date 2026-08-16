@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-26h8fybpz",
   "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
+  "plan_revision": 3,
+  "supersedes_revision": 2,
   "review_ref": "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
   "source_refs": [
     "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
@@ -65,6 +65,29 @@
           }
         ]
       }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+      "source_refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+        "apps/desktop/src/renderer/src/lib/workspace-projects.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -93,9 +116,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -122,9 +151,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/topic-order.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -141,21 +176,21 @@
         "已 pin 在静息态就看得出来，不能只在 hover 时出现。",
         "拖拽重排仍可用，且不与 pin 分区打架（拖一个未 pin 的行，不该看起来跳到 pin 的上面去）。",
         "新增类名要有对应 CSS 规则。",
-        "注意：WorkspaceTopicsPanel 正在被一个并行改动抽到独立文件；开工时以它当时所在的文件为准，动手前再确认一次。"
+        "WorkspaceTopicsPanel 已抽成独立文件（64bb962c）。新断言写进新建的 workspace-topics-panel.test.tsx，不要动 surface-tool-dock.test.ts——那份正被折叠功能并发编辑。"
       ],
       "verification": [
         {
           "kind": "command",
-          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/topic-rename.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/workspace-topics-panel.test.tsx apps/desktop/test/topic-rename.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
           "proves": "Topic 行可 pin、pin 后排前，且既有行内动作与重命名未回归。"
         }
       ],
       "source_refs": [
-        "apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx"
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx"
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
@@ -187,7 +222,7 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
@@ -219,9 +254,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
