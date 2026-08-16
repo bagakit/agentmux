@@ -24,6 +24,30 @@ export function orderTopics(
 }
 
 /**
+ * 把置顶项提到前面——一次**分区**，不是一次排序。
+ *
+ * 置顶是一份**偏好**，磁盘上那份 `ids` 才是真相来源：pin 里有、`ids` 里没有的 id 被丢掉，
+ * 绝不凭空复活（一个 Topic 可以在磁盘上被删掉，而它的 pin 还留在持久化状态里——和 `orderTopics`
+ * 丢掉已消失 Topic 是同一条规则）。
+ *
+ * 未置顶那一段**彼此之间**的相对次序原样保留，这样置顶不会破坏它底下承载的顺序：Topic 侧是用户
+ * 的拖拽序，Branch 侧是服务器给的分支序。置顶段则按 `pinned` 的次序，而不是它在 `ids` 里的次序。
+ * 因此本函数与 `orderTopics` **组合**使用（先 `orderTopics` 定拖拽序，再 `partitionPinned` 提置顶），
+ * 而不是取代它。
+ */
+export function partitionPinned(
+  ids: readonly string[],
+  pinned: readonly string[]
+): string[] {
+  if (pinned.length === 0) return [...ids]
+  const present = new Set(ids)
+  // pin 里已从磁盘消失的 id 被丢掉：pin 是偏好，不是真相来源。
+  const pinnedPresent = pinned.filter((id) => present.has(id))
+  const pinnedSet = new Set(pinnedPresent)
+  return [...pinnedPresent, ...ids.filter((id) => !pinnedSet.has(id))]
+}
+
+/**
  * 一次拖拽产生的新顺序。
  *
  * 输入的是**当前展示序**（即 `orderTopics` 的输出），输出可直接存回用户顺序——

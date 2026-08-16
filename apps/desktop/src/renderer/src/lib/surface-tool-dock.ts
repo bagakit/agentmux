@@ -63,6 +63,14 @@ export type ContentSlotPresentation = {
   fileTreeDefaultSize: number
   /** Vertical split: the file tree's minimum percentage. */
   fileTreeMinSize: number
+  /**
+   * Whether the Explorer starts fully collapsed, leaving only the bottom-half list. Scratch is
+   * wiki-first — Topics is the view the user came for — so it collapses to show Topics alone; a
+   * real Project keeps the file tree open because Branches is the secondary view there. This is
+   * the single place that answers the per-kind default: a second `isScratch` test in the
+   * component would be the defect (one question, one answering site).
+   */
+  explorerCollapsedByDefault: boolean
 }
 
 export function contentSlotPresentation(isScratch: boolean): ContentSlotPresentation {
@@ -70,9 +78,9 @@ export function contentSlotPresentation(isScratch: boolean): ContentSlotPresenta
     // Topics (the wiki) is the primary view in Scratch, so the file tree shrinks to the smaller
     // share and Topics takes the larger remainder — wiki-first: filesystem is the substrate,
     // the topic is the first-class view.
-    return { label: 'Files + Topics', showTopics: true, fileTreeDefaultSize: 38, fileTreeMinSize: 20 }
+    return { label: 'Files + Topics', showTopics: true, fileTreeDefaultSize: 38, fileTreeMinSize: 20, explorerCollapsedByDefault: true }
   }
-  return { label: 'Files + Branches', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34 }
+  return { label: 'Files + Branches', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
 }
 
 export const WORKSPACE_AGENT_GROUP_IDS = ['working', 'needs-you', 'recent'] as const
