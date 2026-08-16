@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-25k8f8m9k",
   "plan_status": "reviewed",
-  "plan_revision": 1,
-  "supersedes_revision": null,
+  "plan_revision": 2,
+  "supersedes_revision": 1,
   "review_ref": "docs/reviews/provider-human-interaction-refactor-2026-09-13.md",
   "source_refs": [
     "docs/design/agentmux-desktop-interaction.md",
@@ -31,6 +31,31 @@
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/provider-human-interaction-refactor-2026-09-13.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -68,7 +93,7 @@
       "heavy": true,
       "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
@@ -232,7 +257,7 @@
       "heavy": true,
       "heavy_reason": "跨 owner 的同一行为竖切需要共同闭合；不能只完成独立类型或纯函数后宣称交付。",
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
@@ -293,7 +318,8 @@
         "收集 T-001 至 T-006 的逐项 mutation/调用者和重启证据，不以源码在场扫描替代行为。",
         "运行前检查资源和独立 Runtime；结束确认自己启动的子进程全部退出，不影响用户 Agent。",
         "按已支持能力核对 Codex/Claude 与 registry 其他 Provider，不从一家的测试推断全量支持。",
-        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。"
+        "记录 mutation 破坏点、红/恢复绿输出和排除定义文件后的生产调用者证据；无真实消费者不得标 done。",
+        "独立 reviewer 从根 README、Core README 和公开 exports 定位观察、输入、typed request、队列、loop、恢复的唯一 owner、真实消费者与测试；记录发现路径和误判，修正入口/命名/边界后复核，不把分析遗漏自动归责架构。"
       ],
       "verification": [
         {
@@ -310,6 +336,11 @@
           "kind": "command",
           "ref": "pnpm --filter @agentmux/core exec vitest run test/provider-conformance.test.ts test/agent-provider-protocol.test.ts test/package-consumer.integration.test.ts --maxWorkers=1",
           "proves": "既有受影响行为回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-25k8f8m9k/artifacts/discoverability-review.md",
+          "proves": "待实施的独立发现记录，含初次判断、导航路径、生产调用证据和复核；与已有行为命令共同验收，非已完成证据。"
         }
       ],
       "source_refs": [

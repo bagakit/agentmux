@@ -756,10 +756,10 @@
     {
       "feat_id": "f-24d8fcuhy",
       "title": "对话里的图片：贴图为缩略图而非链接",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
-      "branch": "",
-      "worktree_name": "",
+      "status": "ready",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-24d8fcuhy",
+      "worktree_name": "wt-f-24d8fcuhy",
       "runtime_role": "standalone",
       "runtime_relations": []
     },
@@ -1388,10 +1388,10 @@
     {
       "feat_id": "f-26e8f6h4z",
       "title": "书签文件：把当前页存成 .webloc，以及打开一个存着链接的文件",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
-      "branch": "",
-      "worktree_name": "",
+      "status": "ready",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-26e8f6h4z",
+      "worktree_name": "wt-f-26e8f6h4z",
       "runtime_role": "standalone",
       "runtime_relations": []
     },
@@ -1408,7 +1408,7 @@
     {
       "feat_id": "f-26g8f8z6y",
       "title": "Explorer collapses fully, per-kind default",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1418,7 +1418,7 @@
     {
       "feat_id": "f-26h8fybpz",
       "title": "Pin a Topic or Branch; pinned items surface in the sidebar",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

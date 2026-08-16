@@ -190,9 +190,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/workspace-topics-panel.test.tsx apps/desktop/test/topic-rename.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -222,9 +228,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/branches-panel.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -292,10 +304,38 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/topic-order.test.ts apps/desktop/test/branches-panel.test.tsx apps/desktop/test/project-rail.test.tsx apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 4 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     }
-  ]
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "verified_current",
+      "rationale": "设计合同（pin 的 scope 语义、分区坐在拖拽序之上、静息态可辨识）在实现前已写定并逐字落地，实现未偏离，故无需改动；本轮没有产生新的公开行为或契约需要另找 SSOT 记录。",
+      "refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "三条：(1) scope 是这套东西的真要害——分支名只在仓内唯一，两个 project 都能有 main，去掉 scope 的变异同时打红三条断言，且 scope 活在组件/store/左栏三个消费方，任一处漏写都串味；(2) 遇到挡路的断言先问它守的是什么——Topic 行那条「只留一个常驻图标按钮」的计数断言把 pin 动作逼进右键菜单、静息态改用非按钮 svg，结果比放宽断言好；(3) 新类名要写成 BEM 才真的被 rendered-class-has-rule 覆盖，扁平名会从那个守卫的过滤器里溜过去，留下一个看着满足验收、实则无人守的类名。",
+      "refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "三条教训都已由测试本身钉死（scope 独立性、分区保序、类名有规则各有具名断言，且都经变异验证会红），不需要再往原则层加一条靠人记的规矩；仓库原则层也没有需要废止的条目。",
+      "refs": []
+    }
+  }
 }

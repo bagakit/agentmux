@@ -4,7 +4,7 @@
   "title": "Explorer collapses fully, per-kind default",
   "slug": "explorer-collapse-per-kind",
   "goal": "The file Explorer under a workspace can be collapsed away entirely so only the Topic (Scratch) / Branches (Project) list remains. Default state differs by workspace kind: Scratch collapses by default, Project expands by default. The user's own toggle persists per workspace and outranks the default.",
-  "status": "in_progress",
+  "status": "archived",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 2
+    "round_count": 5
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-002",
+    "last_task_id": "T-004",
     "last_check_commands": [
       {
-        "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 1 passed",
+        "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/store-persistence.test.ts apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-26g8f8z6y/artifacts/gate-T-002-r2-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-26g8f8z6y/artifacts/gate-T-004-r5-0001.log"
   },
   "history": [
     {
@@ -69,6 +69,35 @@
     {
       "action": "task_started",
       "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
     }
-  ]
+  ],
+  "closed_from_status": "done"
 }

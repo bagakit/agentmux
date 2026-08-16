@@ -4,7 +4,7 @@
   "title": "Pin a Topic or Branch; pinned items surface in the sidebar",
   "slug": "pin-topic-branch",
   "goal": "One-click pin on a Topic or Branch row. A pinned item sorts first in its own Topics/Branches list, and additionally appears as a child node under its Scratch/Project entry in the left sidebar, rendered at a smaller font than the parent.",
-  "status": "in_progress",
+  "status": "archived",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 3
+    "round_count": 6
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-005",
+    "last_task_id": "T-006",
     "last_check_commands": [
       {
-        "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+        "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/topic-order.test.ts apps/desktop/test/branches-panel.test.tsx apps/desktop/test/project-rail.test.tsx apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 4 passed",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-26h8fybpz/artifacts/gate-T-005-r3-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-26h8fybpz/artifacts/gate-T-006-r6-0001.log"
   },
   "history": [
     {
@@ -93,6 +93,39 @@
     {
       "action": "task_started",
       "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
     }
-  ]
+  ],
+  "closed_from_status": "done"
 }

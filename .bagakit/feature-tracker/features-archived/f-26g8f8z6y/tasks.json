@@ -126,9 +126,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -156,10 +162,38 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/store-persistence.test.ts apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     }
-  ]
+  ],
+  "closeout_review": {
+    "schema": "bagakit.feature-closeout-review.v1",
+    "documentation": {
+      "disposition": "updated",
+      "rationale": "设计合同 §2.3.1（折叠态不进 PanelGroup）在实现前已写定并逐字落地，无需改动；本轮实际更新的是 styles/ 清单——折叠把 dock.css 推过 400 行上限，拆出 file-explorer.css 后同步了清单（那份清单自身有守卫）。",
+      "refs": [
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    "learning": {
+      "disposition": "candidates_reviewed",
+      "rationale": "两条可复用教训：(1) indexOf 落空返回 -1 时 slice(start,-1) 不是切出空串而是扩张到文件末尾，源码扫描类断言必须先断言两个锚点都命中，否则改名后哑掉而非变红；(2) 400 行守卫红在 HEAD 时要先 git log 归属再分工，本轮 peer 把两处越界中的一处误判成他人文件，那种记账方式会把红灯停在一个永远不会来修的人身上。",
+      "refs": [
+        "docs/design/workspace-pane-collapse-and-pin-2026-09-15.md"
+      ]
+    },
+    "promotion": {
+      "disposition": "not_needed",
+      "rationale": "两条教训都已落进本会话的持久记忆（indexof-anchor-gone / moving-code-silently-guts-source-scanning-tests 一族），且守卫本身已在测试里钉死；仓库原则层没有需要新增或废止的条目。",
+      "refs": []
+    }
+  }
 }

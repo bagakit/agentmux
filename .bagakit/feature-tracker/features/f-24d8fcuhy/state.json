@@ -4,12 +4,12 @@
   "title": "对话里的图片：贴图为缩略图而非链接",
   "slug": "conversation-images",
   "goal": "往对话里贴图片后，界面上只出现一个文件链接按钮，看不到图。已诊断清全链路：AgentComposer 拿到了字节，AgentSessionComposer 把它写到盘上只留一个路径，ipc 返回路径，composer-file-reference 把它变成 @path 记号，AgentMarkdown 把这个记号渲染成 md-link--file 按钮——时间轴的类型里根本没有'图片'这个概念。路径这个表示必须保留（agent 要靠它读图），所以做法是让渲染侧认出图片扩展名、取字节做成 data URI 显示缩略图、点击在应用内放大。注意 index.html:9 的 CSP 是 img-src 'self' data:，file: 被挡，所以必须走 data URI（浏览器截图那条路已经证明这条通）。附带一个次要缺陷：terminal-path-link.ts:37 把 @ 当成路径字符，解析出来的路径带着 @ 前缀。",
-  "status": "proposal",
-  "workspace_mode": "proposal_only",
+  "status": "ready",
+  "workspace_mode": "worktree",
   "base_ref": "main",
-  "branch": "",
-  "worktree_name": "",
-  "worktree_path": "",
+  "branch": "feat/f-24d8fcuhy",
+  "worktree_name": "wt-f-24d8fcuhy",
+  "worktree_path": ".worktrees/wt-f-24d8fcuhy",
   "runtime_role": "standalone",
   "runtime_relations": [],
   "counters": {
@@ -27,6 +27,14 @@
     {
       "action": "feat_created",
       "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> worktree; root_branch=main"
     }
   ]
 }
