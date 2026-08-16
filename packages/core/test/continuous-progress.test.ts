@@ -23,3 +23,10 @@ describe('decideContinuousProgress', () => {
     expect(decideContinuousProgress({ session: base, tickId: 't2', userInputRevision: 2, submittedInputRevision: 1, now: 2000 })).toEqual({ kind: 'skip', reason: 'user-input-changed' })
   })
 })
+
+it('does not reuse done while a manual admission is waiting for its native start event', () => {
+  const session = { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w', run: { runId: 'r' },
+    semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 },
+    promptCompletionAdmission: { completionId: '["r",1]', operationId: 'manual-input', startByte: 0, endByte: 5 } }
+  expect(decideContinuousProgress({ session, tickId: 't', now: 1 })).toEqual({ kind: 'skip', reason: 'completion-consumed' })
+})

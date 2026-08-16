@@ -610,3 +610,37 @@ it('does not continue a partially accepted old transaction into a pending intera
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
 })
+
+it.each(['single-phase', 'two-phase'] as const)('consumes done atomically for manual %s input before a delayed native start', async (kind) => {
+  const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
+  const fixture = await coordinatorFixture(stored)
+  const plan = kind === 'single-phase' ? { kind: 'single-phase' as const, data: 'next\r' }
+    : new AgentProviderRegistry().get('codex').planPromptInput('next')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'manual-1', 'next', plan)
+  const afterManual = fixture.registry.get(stored.agentSessionId)
+  expect(afterManual.semanticStatus?.state).toBe('done')
+  expect(afterManual.promptCompletionAdmission).toMatchObject({ completionId: '["run-1",1]', startByte: 0, endByte: 5 })
+  const writes = fixture.kernel.input.mock.calls.length
+  expect(writes).toBe(kind === 'single-phase' ? 1 : 2)
+  await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, '["run-1",1]'))
+    .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(fixture.kernel.input).toHaveBeenCalledTimes(writes)
+  await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan)
+  expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 2)
+  await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(10), 'auto-new', 'next', plan, '["run-1",2]')
+  expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 3)
+})
+it('reuses the original single-phase operation and byte range after an unknown outcome', async () => {
+  const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
+  const fixture = await coordinatorFixture(stored)
+  const plan = { kind: 'single-phase' as const, data: 'next\r' }
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')
+  const first = fixture.kernel.input.mock.calls[0]!
+  await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, '["run-1",1]')
+  expect(fixture.kernel.input.mock.calls).toEqual([first, first])
+  expect(fixture.registry.get(stored.agentSessionId).promptCompletionAdmission).toMatchObject({ startByte: 0, endByte: 5 })
+})

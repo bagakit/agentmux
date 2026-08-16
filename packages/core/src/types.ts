@@ -474,6 +474,8 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
+  /** A completed turn consumed by input, independently of delayed Provider activity events. */
+  promptCompletionAdmission?: { completionId: string; operationId: string; startByte: number; endByte: number }
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
   terminalOutputChannel?: AgentTerminalOutputChannelState

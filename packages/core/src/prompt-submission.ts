@@ -110,25 +110,34 @@ export class AgentPromptSubmissionCoordinator {
       if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
       assertInteraction(current)
       if (expectedCompletionId === undefined) return
-      if (agentTurnCompletionIdentity(current) !== expectedCompletionId) {
+      if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }
     }
+    const consumeCompletion = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number): AgentMuxStoredAgentSession => {
+      const completionId = agentTurnCompletionIdentity(current)
+      return completionId ? { ...current, promptCompletionAdmission: { completionId, operationId, startByte, endByte } } : current
+    }
     if (plan.kind === 'single-phase') {
-      assertAdmission(session)
+      const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'payload', plan.data)
       const expectedByte = this.deps.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      const current = await this.deps.registry.update(session.agentSessionId, session.run, (stored) => {
+        const admitted = stored.promptCompletionAdmission
+        if (admitted?.operationId === operationId) {
+          if (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte) assertInteraction(stored)
+          return stored
+        }
+        assertAdmission(stored)
+        return consumeCompletion(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data))
+      })
+      const admitted = current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
       const accepted = await this.deps.kernel.input(session.run.runId, {
         ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
-        operationId: terminalPromptPhaseOperationIdentity(
-          session,
-          submissionId,
-          'payload',
-          plan.data
-        ),
-        expectedByte,
+        operationId,
+        expectedByte: admitted?.startByte ?? expectedByte,
         data: plan.data
       })
       if (accepted.run.acceptedInputBytes === null) {
@@ -221,7 +230,7 @@ export class AgentPromptSubmissionCoordinator {
       // must not lock a healthy Agent out. Payload rendering below still verifies or degrades.
       const outputCursorBytes = Math.max(run.latestOutputBytes, readinessEvidence?.readyThroughByte ?? 0)
       return {
-        ...stored,
+        ...consumeCompletion(stored, payloadOperationId, expectedByte, expectedByte + payloadBytes + submitBytes),
         ...(readinessEvidence ? { terminalPromptReadiness: {
           ...readiness!, consumedBySubmissionId: submissionId
         } } : {}),
