@@ -42,7 +42,9 @@ function stateFor(row: RosterRow): ReturnType<typeof statusDotTier> {
  * 刻意不写「即将压缩」或任何时间预测：各家 Provider 在什么阈值压缩我们不知道，也不猜
  * （`AgentContextUsage` 的正文已明说这条）。这里说的是**我们的提醒时机**，不是对 Provider 行为的预报。
  */
-const CONTEXT_PRESSURE_HINT = {
+// 导出而不是各写一份：Agents dock 的行也要念同一句「下一步该做什么」。两处若各抄一份，
+// 哪天改了措辞就有一处漏改，用户在两个面上读到两种建议。见 SurfaceToolDock 的 WorkspaceAgentsTool。
+export const CONTEXT_PRESSURE_HINT = {
   caution: 'plan to wrap up or start a fresh session',
   danger: 'wrap up now or start a fresh session'
 } as const
