@@ -2,6 +2,7 @@ import {
   Crosshair,
   LoaderCircle,
   NotebookText,
+  Pin,
   Plus
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -9,7 +10,7 @@ import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
-import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '../../../shared/scratch-topics'
+import { SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -28,7 +29,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { orderTopics, reorderTopics } from '../lib/topic-order'
+import { orderTopics, partitionPinned, reorderTopics } from '../lib/topic-order'
 import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
 import { presentError } from '../lib/error-presentation'
 import type { RegionGeometry } from '@agentmux/layout'
@@ -71,11 +72,20 @@ export function WorkspaceTopicsPanel({
   )
   const topicOrder = useAppStore((state) => state.scratchTopicOrder)
   const setTopicOrder = useAppStore((state) => state.setScratchTopicOrder)
+  // Topic pin 与 Branch pin 是同一个概念的两次实例化——一个 scope 内的一组 id。scope key 从
+  // SCRATCH_WORKSPACE_ID **派生**、绝不在这里手写字面量：Topic id 只在唯一那个 Scratch workspace
+  // 内唯一，所以这就是它的 scope（见 store.ts pinnedItems 的注释）。左栏那些 pinned 子行读的也是
+  // 这一桶，投影与它必须同源，否则「列表里靠前」和「挂在 Scratch 下」会各说各话。
+  const pinnedTopics = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID] ?? [])
+  const togglePinnedItem = useAppStore((state) => state.togglePinnedItem)
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
+  // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
+  // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
   const projected = topics
     ? (() => {
         const withAgents = topicsWithAgents(topics, sessions, workspace)
-        const shown = orderTopics(withAgents.map((topic) => topic.id), topicOrder)
+        const dragOrder = orderTopics(withAgents.map((topic) => topic.id), topicOrder)
+        const shown = partitionPinned(dragOrder, pinnedTopics)
         return shown.flatMap((id) => withAgents.filter((topic) => topic.id === id))
       })()
     : null
@@ -220,14 +230,17 @@ export function WorkspaceTopicsPanel({
           {projected.map((topic) => {
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
+            const pinned = pinnedTopics.includes(topic.id)
             return (
               <SortableTopicItem
                 topicId={topic.id}
                 isCurrent={isCurrent}
+                pinned={pinned}
                 key={topic.id}
                 onCopyPath={() => void copyTextToClipboard(topic.directoryPath, reportError)}
                 onRename={() => beginRename(topic)}
                 onReveal={() => onRevealDirectory(topic.directoryPath)}
+                onTogglePin={() => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id)}
               >
                 {editing ? (
                   <form
@@ -257,6 +270,12 @@ export function WorkspaceTopicsPanel({
                     disabled={pending !== null}
                     onClick={() => void openTopic(topic.id)}
                   >
+                    {/* 已 pin 的静息态标记：一枚小 Pin，扫一眼列表就分辨得出哪些被钉住了，不必 hover。
+                        它**不是**第二个常驻图标按钮（那会跟标题抢宽度、也会撞 surface-tool-dock 那条
+                        「行上只留一个常驻动作」的断言）——pin/unpin 这个**动作**收在右键菜单里，与改名
+                        同一处。这里只画一个 aria-hidden 的状态记号，且只在 pinned 时占位，同 leading
+                        spinner「只在有话说时才占用」的规矩。 */}
+                    {pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}
                     {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
                         这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
                     <SelectorRow
@@ -355,23 +374,33 @@ export function RegionMosaic({ cells }: { cells: readonly RegionGeometry[] }) {
 function SortableTopicItem({
   topicId,
   isCurrent,
+  pinned,
   children,
   onCopyPath,
   onRename,
-  onReveal
+  onReveal,
+  onTogglePin
 }: {
   topicId: string
   isCurrent: boolean
+  pinned: boolean
   children: ReactNode
   onCopyPath(): void
   onRename(): void
   onReveal(): void
+  onTogglePin(): void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: topicId
   })
   return (
-    <TopicContextMenu onCopyPath={onCopyPath} onRename={onRename} onReveal={onReveal}>
+    <TopicContextMenu
+      pinned={pinned}
+      onCopyPath={onCopyPath}
+      onRename={onRename}
+      onReveal={onReveal}
+      onTogglePin={onTogglePin}
+    >
       <div
         ref={setNodeRef}
         className={`workspace-topic-item${isCurrent ? ' current' : ''}${isDragging ? ' dragging' : ''}`}
