@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { Decoration, Extension, Node, type JSONContent } from '@tiptap/core'
+import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion'
+import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
+import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage'
@@ -118,7 +119,8 @@ export type InlineComposerProps = {
   placeholder: string
   'aria-label': string
   onKeyDown(event: KeyboardEvent, caret: number): void
-  onPasteImage?: (image: { bytes: Uint8Array; extension: string }) => void
+  onPasteImage?: ComposerPasteImage
+  insertionRef?: Ref<ComposerInsertionHandle>
   onActivateReference?: (reference: ComposerSemanticReference) => void
   // 要在正文里加下划线的识别词。每次渲染都可能是新数组，而扩展只装一次——所以下面读的是
   // `latest.current`，绝不把它捕进闭包（否则改了设置编辑器不跟着变）。
@@ -126,6 +128,7 @@ export type InlineComposerProps = {
 }
 
 export function InlineComposer(props: InlineComposerProps) {
+  const editorRef = useRef<Editor | null>(null)
   const latest = useRef(props)
   latest.current = props
   const extensions = useMemo(() => composerExtensions(
@@ -142,11 +145,22 @@ export function InlineComposer(props: InlineComposerProps) {
       return event.defaultPrevented
     },
     handlePaste: (_view: any, event: ClipboardEvent) => {
+      const editor = editorRef.current
+      if (!editor || latest.current.disabled) return false
+      const insert: ComposerInsertionHandle['insert'] = (resolve, options) => insertComposerContent(editor, resolve, draftDocument, options)
       const callback = latest.current.onPasteImage
       const file = [...(event.clipboardData?.items ?? [])].find((item) => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile()
-      if (file && callback) { event.preventDefault(); void file.arrayBuffer().then((buffer) => callback({ bytes: new Uint8Array(buffer), extension: file.type.slice(6).split('+')[0] ?? 'png' })); return true }
+      if (file && callback) {
+        event.preventDefault()
+        callback(file, insert)
+        return true
+      }
       const text = event.clipboardData?.getData('text/plain')
-      if (text !== undefined) { latest.current.onValueChange(text); return true }
+      if (text) {
+        event.preventDefault()
+        replaceComposerRange(editor, draftDocument(text))
+        return true
+      }
       return false
     },
     clipboardTextSerializer: (slice: any) => documentDraft({ type: 'doc', content: slice.content.toJSON() })
@@ -160,6 +174,12 @@ export function InlineComposer(props: InlineComposerProps) {
     onUpdate,
     editorProps
   })
+  editorRef.current = editor
+  useImperativeHandle(props.insertionRef, () => ({
+    insert: async (resolve, options) => {
+      if (editor && !editor.isDestroyed) await insertComposerContent(editor, resolve, draftDocument, options)
+    }
+  }), [editor])
   useEffect(() => {
     if (props.autoFocus && editor && !editor.isDestroyed) editor.commands.focus()
   }, [editor, props.autoFocus])
@@ -169,7 +189,9 @@ export function InlineComposer(props: InlineComposerProps) {
     let cancelled = false
     queueMicrotask(() => {
       if (!cancelled && !editor.isDestroyed && documentDraft(editor.getJSON()) !== props.value && !editor.view.composing) {
-        editor.commands.setContent(draftDocument(props.value), { emitUpdate: false })
+        const wasEmpty = editor.isEmpty
+        editor.chain().setMeta('addToHistory', false).setContent(draftDocument(props.value), { emitUpdate: false }).run()
+        if (wasEmpty) editor.commands.setTextSelection(editor.state.doc.content.size - 1)
       }
     })
     return () => { cancelled = true }
