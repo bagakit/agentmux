@@ -17,7 +17,7 @@ import {
  *
  * ─── 这一族**不能**用真 DOM 行为测试守到底，必须明说（与 composer-ime.test.ts 同一课）───
  *
- * desktop 包没有 DOM/IME 测试环境：无 jsdom / happy-dom / @testing-library / renderHook。
+ * 真实输入法仍需系统验证；富文本编辑器的 DOM 事件链另由 composer-input-ownership.test.tsx 验证。
  * 于是：
  *   谓词层（part a）—— isImeOwnedKeyboardEvent 是纯函数，直接调用并逐个析取项断言。
  *   手势钩子层（part b）—— useImeEnterGestureOwnership 的返回是一组闭包，其内部状态挂在 useRef 上、
@@ -271,8 +271,10 @@ describe('useImeEnterGestureOwnership', () => {
 // ---------------------------------------------------------------------------
 const RENDERER = resolve(__dirname, '../src/renderer/src')
 const GUARD = 'isImeCompositionKeyDown'
+// React wrapper and native predicate share one implementation; both must inspect this handler's event.
+const GUARDS = new Set([GUARD, 'isImeOwnedKeyboardEvent'])
 // 造锚点时要跳过的「噪声 callee」：它们出现在几乎每个 handler 里，不能用来标识 handler。
-const CALLEE_NOISE = new Set(['preventDefault', 'stopPropagation', GUARD])
+const CALLEE_NOISE = new Set(['preventDefault', 'stopPropagation', ...GUARDS])
 
 function parse(path: string): ts.SourceFile {
   return ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -345,7 +347,7 @@ function unconditionalExitBeforeGuard(stmt: ts.Statement, paramName: string): bo
 
 /** call 的被调是否就是裸标识符 GUARD、且唯一实参恰好是 `paramName`（结构判等，不认字面量 'event'）。 */
 function callIsGuardOnParam(call: ts.CallExpression, paramName: string): boolean {
-  if (!ts.isIdentifier(call.expression) || call.expression.text !== GUARD) return false
+  if (!ts.isIdentifier(call.expression) || !GUARDS.has(call.expression.text)) return false
   const args = call.arguments
   const arg = args[0]
   return args.length === 1 && arg !== undefined && ts.isIdentifier(arg) && arg.text === paramName
@@ -671,10 +673,17 @@ describe('part c：发现式接线层——每个 commit-on-Enter 的 onKeyDown 
     // AgentComposer / FileExplorer / QuickSwitcher / ScreenshotEditor 四个文件承载那 5 个已守 handler。
     expect(guardedFiles.length, '一个已守文件都没有？发现逻辑坏了').toBeGreaterThanOrEqual(4)
     for (const file of guardedFiles) {
-      expect(
-        readFileSync(`${RENDERER}/${file}`, 'utf8'),
-        `${file}: 用了 ${GUARD} 却没 import 它`
-      ).toMatch(/import \{ isImeCompositionKeyDown \} from ['"].*ime-composition-keyboard-event['"]/u)
+      const sourceFile = parse(`${RENDERER}/${file}`)
+      const used = collectCallees(sourceFile).filter((name) => GUARDS.has(name))
+      expect(used.length, `${file}: no guard calls found`).toBeGreaterThan(0)
+      const imported = sourceFile.statements.flatMap((statement) => {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+            !statement.moduleSpecifier.text.endsWith('ime-composition-keyboard-event')) return []
+        const bindings = statement.importClause?.namedBindings
+        return bindings && ts.isNamedImports(bindings)
+          ? bindings.elements.filter((item) => !item.propertyName || item.propertyName.text === item.name.text).map((item) => item.name.text) : []
+      })
+      for (const name of used) expect(imported, `${file}: ${name} must be imported from the SSOT`).toContain(name)
     }
   })
 })
@@ -713,6 +722,12 @@ function classifySnippet(handlerArrow: string): boolean {
 }
 
 describe('part c 分类器自检：isHandlerGuarded 的四个判据都非空转', () => {
+  it.each([...GUARDS])('%s preserves argument identity and reachability', (guard) => {
+    expect(classifySnippet(`{(event) => { if (event.key === 'Enter' && !${guard}(event)) submit() }}`)).toBe(true)
+    expect(classifySnippet(`{(event) => { if (event.key === 'Enter' && !${guard}(other)) submit() }}`)).toBe(false)
+    expect(classifySnippet(`{(event) => { return; if (event.key === 'Enter' && !${guard}(event)) submit() }}`)).toBe(false)
+  })
+
   it('独立式：if(GUARD(形参)) return 在 Enter 之前 → 守住', () => {
     expect(
       classifySnippet(`{(event) => {
