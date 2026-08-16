@@ -1,6 +1,7 @@
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import type { WorkbenchSurface } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
+import { regionDisplayNames } from './region-display-name'
 import {
   workbenchRegionPresetSize,
   type SplitDirection,
@@ -196,33 +197,20 @@ export type RegionSwapMenuEntry = {
  * 那会是第二份判据。
  *
  * 同名多格要编号，否则菜单里两条一模一样的项（两个终端都是「Swap with Terminal」、两个同名文件、
- * 两个 New Tab）根本无从区分——而分辨「和哪一格换」正是这份 label 唯一的用处。编号按出现次序
- * （即调用方给的视觉顺序）算，且**覆盖全体、含自己**：这样不管右键点中哪一格，某一格的编号都稳定
- * （右键中间那个终端时，目标仍是「Terminal 1」「Terminal 3」而非被重新数成 1、2）。标签唯一时保持
- * 裸名，不无谓地加「1」。
+ * 两个 New Tab）根本无从区分——而分辨「和哪一格换」正是这份 label 唯一的用处。编号规则本身不在这里：
+ * 它是 `regionDisplayNames` 的唯一实现（覆盖全体含自己、按视觉顺序、唯一名保持裸名），与即将出现的
+ * 水印消费者共用同一份，不各抄一遍。本函数拿到编好号的名字后只做「排除自己 + 拼 Swap with」。
  */
 export function regionSwapMenuEntries(input: {
   regionId: string
   regions: ReadonlyArray<{ regionId: string; label: string }>
   swap: (regionIdA: string, regionIdB: string) => void
 }): readonly RegionSwapMenuEntry[] {
-  const labelTotals = new Map<string, number>()
-  for (const region of input.regions) {
-    labelTotals.set(region.label, (labelTotals.get(region.label) ?? 0) + 1)
-  }
-  const seen = new Map<string, number>()
-  return input.regions
-    .map((region) => {
-      const ordinal = (seen.get(region.label) ?? 0) + 1
-      seen.set(region.label, ordinal)
-      const display =
-        (labelTotals.get(region.label) ?? 0) > 1 ? `${region.label} ${ordinal}` : region.label
-      return { regionId: region.regionId, display }
-    })
+  return regionDisplayNames(input.regions)
     .filter((region) => region.regionId !== input.regionId)
     .map((region) => ({
       targetRegionId: region.regionId,
-      label: `Swap with ${region.display}`,
+      label: `Swap with ${region.name}`,
       onSelect: () => input.swap(input.regionId, region.regionId)
     }))
 }

@@ -1,6 +1,7 @@
 import { useAppStore } from '../store'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../lib/agent-attention'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { AgentTreePanel } from './AgentRoster'
 import { ResourceUsagePanel } from './ResourceUsagePanel'
 import { CirclePlay, CircleAlert, CircleHelp } from 'lucide-react'
 
@@ -74,38 +75,60 @@ export function AgentStatusBar() {
     // role="group" makes the aria-label a real accessible name; a bare div is a generic node many
     // screen readers skip, so the window's only attention rollup would announce as nothing.
     <div className="agent-status-bar" role="group" aria-label="Agent attention across this window">
-      {/* The total segment now discloses the roster. It already owned "how many Agents exist", so the
-          enumerable list belongs to it rather than to a second control competing for the same fact. */}
+      {/* The total segment stays a compact cross-window summary. Each count below now also DISCLOSES its
+          project→Agent tree via a separate chevron (AgentTreePanel) — hover/click/keyboard — so a count
+          is no longer a dead number. needs-you/error keep their one-click JUMP button unchanged beside
+          it; the tree is added, never substituted (principle 11). An empty class renders no chevron, so
+          a zero count is not a dead click. */}
       <span className="agent-status-bar__segment" data-attention="working">
         <StatusCount state={rollup.working > 0 ? 'working' : null} count={rollup.working} label="working" />
+        <AgentTreePanel
+          filter="working"
+          heading="Working · by project"
+          label={`Show the ${rollup.working} working ${rollup.working === 1 ? 'agent' : 'agents'} by project`}
+        />
       </span>
       {rollup.needsYouSessionId ? (
-        <button
-          className="agent-status-bar__segment agent-status-bar__segment--action"
-          type="button"
-          data-attention="needs-you"
-          aria-label={`${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent needs' : 'agents need'} you. Jump to the one waiting longest.`}
-          title="Jump to the agent that has been waiting longest"
-          onClick={() => selectSession(rollup.needsYouSessionId!)}
-        >
-          <StatusCount state="waiting" count={rollup.needsYou} label="needs you" />
-        </button>
+        <>
+          <button
+            className="agent-status-bar__segment agent-status-bar__segment--action"
+            type="button"
+            data-attention="needs-you"
+            aria-label={`${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent needs' : 'agents need'} you. Jump to the one waiting longest.`}
+            title="Jump to the agent that has been waiting longest"
+            onClick={() => selectSession(rollup.needsYouSessionId!)}
+          >
+            <StatusCount state="waiting" count={rollup.needsYou} label="needs you" />
+          </button>
+          <AgentTreePanel
+            filter="needs-you"
+            heading="Needs you · by project"
+            label={`Show the ${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent' : 'agents'} needing you by project`}
+          />
+        </>
       ) : (
         <span className="agent-status-bar__segment" data-attention="needs-you">
           <StatusCount state={null} count={rollup.needsYou} label="needs you" />
         </span>
       )}
       {rollup.errorSessionId ? (
-        <button
-          className="agent-status-bar__segment agent-status-bar__segment--action"
-          type="button"
-          data-attention="error"
-          aria-label={`${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error. Jump to the earliest.`}
-          title="Jump to the earliest agent in error"
-          onClick={() => selectSession(rollup.errorSessionId!)}
-        >
-          <StatusCount state="error" count={rollup.error} label="error" />
-        </button>
+        <>
+          <button
+            className="agent-status-bar__segment agent-status-bar__segment--action"
+            type="button"
+            data-attention="error"
+            aria-label={`${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error. Jump to the earliest.`}
+            title="Jump to the earliest agent in error"
+            onClick={() => selectSession(rollup.errorSessionId!)}
+          >
+            <StatusCount state="error" count={rollup.error} label="error" />
+          </button>
+          <AgentTreePanel
+            filter="error"
+            heading="Error · by project"
+            label={`Show the ${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error by project`}
+          />
+        </>
       ) : (
         <span className="agent-status-bar__segment" data-attention="error">
           <StatusCount state={null} count={rollup.error} label="error" />

@@ -19,7 +19,9 @@ import {
   removeWorkbenchRegion,
   workbenchSurfaces,
   type AgentWorkbenchSurface,
+  type BrowserWorkbenchSurface,
   type FileWorkbenchSurface,
+  type LauncherWorkbenchSurface,
   type TerminalWorkbenchSurface,
   type WorkbenchSurface,
   type WorkbenchTab
@@ -27,9 +29,113 @@ import {
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 
+/**
+ * 一个 browser 面**存到盘上的**最小可再实例化子集。只有这几位：browserId + url（+ title 供加载完成前
+ * 先画个标签）。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
+ * driving/appLinkPrompt/profileId/viewport/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
+ * 重建 WebContentsView 那一刻的真快照补回（见 store 启动路径的 browser 复活循环 + `reduceBrowserEvent`）。
+ *
+ * 为什么是这个形状而不是整面剥离：旧决定「browser 面整面剥离」的顾虑本身是对的——硬存整个活体结构
+ * 会 ship 一个没有后端 WebContentsView 的死面板。但被推翻的不是顾虑，而是它的**前提**「没有一条能把
+ * 持久 browser 复活成可用页的生命周期」。现在补上了 store 启动路径的 `api.browser.create` 接缝，那个
+ * 前提不再成立，于是用户的显式决定「存完整 URL、恢复到原页」得以落地。浏览历史这一档敏感度按用户
+ * 决定接受（与逐字持久化的 file path 同一档：collapsedProjectGroups/pinnedItems 也都存目录路径）。
+ */
+export type PersistedBrowserSurface = {
+  regionId: string
+  kind: 'browser'
+  workspaceId: string
+  browserId: string
+  url: string
+  title: string
+}
+
+/** 存盘形态的 Region：只有 browser 与活体不同（缩成 {@link PersistedBrowserSurface}），其余原样。 */
+export type PersistedWorkbenchSurface =
+  | AgentWorkbenchSurface
+  | TerminalWorkbenchSurface
+  | FileWorkbenchSurface
+  | LauncherWorkbenchSurface
+  | PersistedBrowserSurface
+
+export type PersistedWorkbenchTab = Omit<WorkbenchTab, 'regions'> & {
+  regions: Record<string, PersistedWorkbenchSurface>
+}
+
 export type PersistedWorkbench = {
+  tabs: Record<string, PersistedWorkbenchTab>
+  layouts: Record<string, WorkspaceLayout>
+}
+
+/**
+ * 载入路径的产物：与存盘形态同构，但 browser 面是**活体** surface（`hydratePersistedBrowserSurface`
+ * 补齐了瞬时位的默认值）。它直接灌进 `state.tabs`（都是活体 `WorkbenchTab`），冷启动的 browser 复活
+ * 循环随后为每个 browser 面 `api.browser.create` 出真 WebContentsView，用真快照覆盖那些默认位。
+ */
+export type RestoredWorkbench = {
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
+}
+
+/** 把一个存盘 browser 复活成活体 surface：url/title/browserId 保留，其余瞬时位填默认，等待真快照覆盖。 */
+function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): BrowserWorkbenchSurface {
+  return {
+    regionId: surface.regionId,
+    kind: 'browser',
+    workspaceId: surface.workspaceId,
+    browserId: surface.browserId,
+    id: surface.browserId,
+    url: surface.url,
+    title: surface.title,
+    // 瞬时位：由 store 启动路径 create 出真 WebContentsView 后的快照经 applyBrowserEvent 覆盖。
+    navigationId: '',
+    profileId: '',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    viewport: 'responsive',
+    error: null,
+    driving: false,
+    appLinkPrompt: null
+  }
+}
+
+/** 存盘时把一个 browser 活体 surface 缩成最小可再实例化子集，剥掉全部瞬时/敏感运行时位。 */
+function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
+  return {
+    regionId: surface.regionId,
+    kind: 'browser',
+    workspaceId: surface.workspaceId,
+    browserId: surface.browserId,
+    url: surface.url,
+    title: surface.title
+  }
+}
+
+/** 一整张存盘 Tab 的 browser 面全部复活成活体，其余 Region 原样。载入路径在 reconcile 之前调它。 */
+export function hydratePersistedTab(tab: PersistedWorkbenchTab): WorkbenchTab {
+  return {
+    ...tab,
+    regions: Object.fromEntries(
+      Object.entries(tab.regions).map(([regionId, surface]) => [
+        regionId,
+        surface.kind === 'browser' ? hydratePersistedBrowserSurface(surface) : surface
+      ])
+    )
+  }
+}
+
+/** 一整张活体 Tab 的 browser 面全部缩成存盘子集，其余 Region 原样。存盘路径在投影之后调它。 */
+function reducePersistedTab(tab: WorkbenchTab): PersistedWorkbenchTab {
+  return {
+    ...tab,
+    regions: Object.fromEntries(
+      Object.entries(tab.regions).map(([regionId, surface]) => [
+        regionId,
+        surface.kind === 'browser' ? reduceBrowserSurfaceForPersistence(surface) : surface
+      ])
+    )
+  }
 }
 
 /**
@@ -313,7 +419,7 @@ export function persistedSessionSurfaceIds(
   persisted: PersistedWorkbench | null
 ): Set<string> {
   return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
-    workbenchSurfaces(tab).flatMap((surface) => (
+    workbenchSurfaces(hydratePersistedTab(tab)).flatMap((surface) => (
       sessionSurface(surface) ? [surface.sessionId] : []
     ))
   )) : [])
@@ -358,11 +464,15 @@ function persistedSurfaceSurvives(
     case 'file':
       return ctx.fileSurvives(surface)
     case 'browser':
-      // browser 面内嵌整个活体 BrowserSnapshot（url/title/navigationId… 全是 required 运行时快照），
-      // 浏览历史与文件路径是两类敏感度；且冷启动没有一条能把持久 browser 结构复活成可用空白页的生命周期
-      // （BrowserPane 的 restore 只在 released 态触发，冷启动可见 browser 是 released=false，restore/
-      // create 都不发），硬存结构标识只会 ship 一个死面板。故 browser 面整面剥离。
-      return false
+      // browser 面活过重启（用户显式决定「存完整 URL、恢复到原页」，推翻了旧的「整面剥离」）。
+      // 旧决定的顾虑本身是对的——硬存整个活体 `BrowserSnapshot`（navigationId/loading/driving… 全是
+      // 瞬时运行时位）会 ship 一个没有后端 WebContentsView 的死面板。被推翻的不是那个顾虑，而是它的
+      // **前提**「冷启动没有一条能把持久 browser 复活成可用页的生命周期」：现在 store 启动路径补上了
+      // `api.browser.create` 接缝（见其 browser 复活循环），前提不再成立。故这里放行 browser 面，但
+      // 存盘只留最小可再实例化子集（`reduceBrowserSurfaceForPersistence`：browserId+url+title），瞬时/
+      // 敏感位一律不进盘。浏览历史这一档敏感度按用户决定接受，与逐字持久化的 file path 同一档。
+      // create 失败不留死壳：那条由 store 复活循环删 Region + 报错兜住（旧顾虑在那里被真正回答）。
+      return true
     default:
       return assertUnreachableSurface(surface)
   }
@@ -416,12 +526,16 @@ function addTabWithoutStealingFocus(
 
 export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedWorkbench {
   const tabs = Object.fromEntries(
-    Object.values(input.tabs).flatMap((tab) => {
+    Object.values(input.tabs).flatMap((persistedTab) => {
+      // 存盘路径也先复活成活体：本函数的两个调用方喂进来的形态不同——`partialize` 喂的是活体
+      // `state.tabs`（对它 hydrate 是恒等），启动侧的 re-project（如有）喂的是存盘子集。统一 hydrate 一次，
+      // 下面的抢救/投影就只面对活体形态。抢救与投影后再 reduce 回存盘子集（剥掉 browser 瞬时/敏感位）。
+      const tab = hydratePersistedTab(persistedTab)
       // 先抢救再投影：`sessionOnlyTab` 会调 `removeWorkbenchRegion`，而它尾部那条无条件断言
       // 对一张已漂移的 Tab 会抛——这里是 zustand 的 `partialize`，抛出即让**每一次写入**变成崩溃。
       const reconciled = reconcilePersistedTab(tab).tab
       const projected = reconciled ? sessionOnlyTab(normalizePersistedTab(reconciled)) : null
-      return projected ? [[projected.id, projected]] : []
+      return projected ? [[projected.id, reducePersistedTab(projected)]] : []
     })
   )
   const tabIds = new Set(Object.keys(tabs))
@@ -510,7 +624,7 @@ export function restorePersistedWorkbench(input: {
    * set it only for an explicitly rejected snapshot and let the next canonical snapshot reconcile it.
    */
   preserveUnknownSessionViews?: boolean
-}): PersistedWorkbench & { repairs: PersistedTabRepair[] } {
+}): RestoredWorkbench & { repairs: PersistedTabRepair[] } {
   if (!input.persisted) {
     return {
       tabs: {},
@@ -525,7 +639,10 @@ export function restorePersistedWorkbench(input: {
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
   const repairs: PersistedTabRepair[] = []
   const tabs = Object.fromEntries(
-    Object.values(input.persisted.tabs).flatMap((tab) => {
+    Object.values(input.persisted.tabs).flatMap((persistedTab) => {
+      // 先把存盘 browser 面复活成活体（补齐瞬时位默认值），再进抢救/恢复——这两步都在活体形态上
+      // 判 kind 与调 removeWorkbenchRegion。真正的 WebContentsView 由 store 启动路径的复活循环建。
+      const tab = hydratePersistedTab(persistedTab)
       // 抢救先于恢复：`restoreTab` 会调 `removeWorkbenchRegion`，其尾部无条件断言对一张已漂移的
       // Tab 会抛，而这里在启动路径上——抛出即整个 Workbench 落回空白（正是 #59/#60 那个 bug 的形状）。
       const { tab: reconciled, repair } = reconcilePersistedTab(tab)

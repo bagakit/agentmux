@@ -91,6 +91,7 @@ import {
 } from '@agentmux/layout'
 import {
   describePersistedTabRepairs,
+  hydratePersistedTab,
   projectPersistedWorkbench,
   persistedSessionSurfaceIds,
   restorePersistedWorkbench,
@@ -1961,6 +1962,41 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
+      // Cold-start browser rehydration. `restoreTab` is a pure presentation projection that emits a
+      // neutral browser shell (url/title from disk, transient fields defaulted); the WebContentsView
+      // that makes it live must be created here, where side effects legitimately live — the same seam
+      // the Agent recovery loop above uses. `api.browser.restore` cannot help on a cold start (it
+      // throws "Unknown released browser" — Main has no released entry after a process exit), so this
+      // goes through `create`, then `applyBrowserEvent` overwrites the defaulted transient fields with
+      // the real snapshot (navigationId etc.). This reverses the old "browser 面整面剥离" decision: the
+      // old comment's worry — that persisting a browser structure without a rebuild lifecycle ships a
+      // dead panel — was correct; what changed is that the lifecycle now exists (this loop).
+      //
+      // ponytail: serial `for...of` + `await`, one create at a time. Ceiling: N saved browsers ⇒ N
+      // sequential loadURLs, not N concurrent. Upgrade path if a user routinely keeps 10+ browser tabs
+      // and startup visibly drags: give BrowserPane a "create on first became-visible" seam so hidden
+      // tabs defer their create. Not built now — no measured need (YAGNI).
+      const browserRebuildFailures: string[] = []
+      for (const tab of Object.values(get().tabs)) {
+        for (const surface of workbenchSurfaces(tab)) {
+          if (surface.kind !== 'browser') continue
+          try {
+            const browser = await api.browser.create(surface.browserId, surface.url)
+            get().applyBrowserEvent({ type: 'updated', browser })
+          } catch (error) {
+            // A browser that cannot be recreated must NOT ship as a dead shell (the old decision's real
+            // concern). Remove its Region through the ordinary `closed` reducer — it collapses the split
+            // or drops a solo browser tab, exactly as a live close would — and tell the user why.
+            get().applyBrowserEvent({ type: 'closed', id: surface.browserId })
+            browserRebuildFailures.push(`${surface.title || surface.url} (${presentError(error)})`)
+          }
+        }
+      }
+      if (browserRebuildFailures.length > 0) {
+        get().reportError(new Error(
+          `Some saved browser panes could not be reopened and were closed: ${browserRebuildFailures.join('; ')}.`
+        ))
+      }
       // A rejected initial snapshot used the saved Workbench as a temporary projection. Retry one
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
@@ -1976,8 +2012,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A failure after hydration (for example a malformed Runtime snapshot or a repair assertion)
       // must not turn the saved Workbench into the in-memory empty default. Keep the durable
       // topology visible while the service-window error explains which startup step failed.
+      // Hydrate persisted browser Regions back to live surfaces here too — the raw persisted subset is
+      // not a live WorkbenchSurface; the browsers stay as neutral shells (no create is safe on the
+      // error path) until a later successful startup rebuilds them.
+      const persistedTabs = persisted
+        ? Object.fromEntries(Object.values(persisted.tabs).map((tab) => [tab.id, hydratePersistedTab(tab)]))
+        : null
       set({
-        ...(persisted ? { tabs: persisted.tabs, layouts: persisted.layouts } : {}),
+        ...(persisted && persistedTabs ? { tabs: persistedTabs, layouts: persisted.layouts } : {}),
         loading: false,
         error: presentError(error),
         lastError: presentError(error),

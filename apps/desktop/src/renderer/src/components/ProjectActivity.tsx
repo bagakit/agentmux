@@ -60,8 +60,7 @@ function groupSummary(
 
 function groupState(group: ActivityGroup): string {
   const attention = rowAttention(group.sessions)
-  if (attention.category === 'needs-you') return 'Needs you'
-  if (attention.category === 'error') return 'Error'
+  if (attention.category === 'needs-you' || attention.category === 'error') return ''
   const running = workingAgentCount(group.sessions)
   if (running > 0) return `${running} running`
   return group.sessions[0]?.status.state ?? 'idle'
@@ -116,6 +115,8 @@ export function ProjectActivity({
         // dead disclosure affordance.
         const canExpand = group.sessions.length > 1 || Boolean(first.pendingInteraction || first.status.detail)
         const meta = contextMeta(group)
+        const summary = groupSummary(group, timelines, config ?? null)
+        const state = groupState(group)
         return <div key={group.key} className={`project-activity-group${expanded ? ' project-activity-group--expanded' : ''}`}>
           <div className="project-activity-group__header">
             <DropdownMenu.Item className="project-activity-group__summary"
@@ -123,7 +124,7 @@ export function ProjectActivity({
               onSelect={() => selectSession(first.id)}>
             <span className="project-activity-group__identity">
               <strong>{contextLabel(group)}</strong>
-              <small>{groupSummary(group, timelines, config ?? null)} · {groupState(group)}</small>
+              <small>{summary}{state ? ` · ${state}` : ''}</small>
               {meta ? <em>{meta}</em> : null}
             </span>
             <span className="project-activity-group__avatars" aria-label={`${group.sessions.length} Agents in ${contextLabel(group)}`}>

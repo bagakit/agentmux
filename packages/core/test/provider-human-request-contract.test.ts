@@ -168,8 +168,7 @@ describe('Provider human-interaction request contract (T-003)', () => {
       kind: 'question',
       id: 'rcpt-union-q',
       agentSessionId: 'agent-1',
-      title: 'Pick one',
-      questions: [{ id: 'q1', prompt: 'Which?', options: [{ id: 'o1', label: 'One' }] }],
+      questions: [{ id: 'q1', title: 'Pick one', prompt: 'Which?', options: [{ id: 'o1', label: 'One' }] }],
       evidence: { source: 'native-hook', observedAt: 0 }
     }
     const requestFor: Record<AgentMuxInteractionRequest['kind'], AgentMuxInteractionRequest> = {

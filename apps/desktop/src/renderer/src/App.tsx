@@ -42,8 +42,16 @@ import {
   SurfaceMemoryBudgetProvider,
   useSurfaceMemoryBudget
 } from './lib/surface-memory-budget-coordinator'
+import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 
 export function App() {
+  const workflowComponentGallery = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
+  if (workflowComponentGallery) return <WorkflowComponentGallery />
+  return <DesktopApp />
+}
+
+function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)

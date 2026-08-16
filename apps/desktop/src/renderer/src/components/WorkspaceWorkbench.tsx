@@ -47,6 +47,7 @@ import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
+import { regionSurfaceLabel } from '../lib/region-display-name'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import {
@@ -114,33 +115,6 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
     case 'terminal': {
       // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once
       // in Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
-      const session = sessions.find((item) => item.id === surface.sessionId)
-      return session?.label ?? surface.sessionId
-    }
-    default:
-      return assertUnreachableSurface(surface)
-  }
-}
-
-/**
- * 一格在换位菜单里显示的名字（#471）。按表面种类给一个人能认出的短名——文件名（basename）/ 会话
- * label（Agent 与终端都用 `session.label`，即 Provider·Workspace 那条兜底层，不是解析后的显示名；
- * 终端另有常量 "Terminal"）/ 浏览器标题，无标题时退回完整 URL / "New Tab"。这只是给用户指认「和哪一格
- * 换」用的标签，不进任何寻址 key，所以不必是 SSOT 显示名链的产物；与 `tabSurfaceFallback` 取名口径一致
- * 即可。同名多格的区分（编号）由 `regionSwapMenuEntries` 统一做，不在这里。
- */
-function regionSurfaceLabel(surface: WorkbenchSurface, sessions: readonly SessionSnapshot[]): string {
-  switch (surface.kind) {
-    case 'file':
-      return surface.path.split('/').at(-1) ?? surface.path
-    case 'launcher':
-      return 'New Tab'
-    case 'browser':
-      if (surface.title && surface.title !== 'about:blank') return surface.title
-      return surface.url === 'about:blank' ? 'New Tab' : surface.url
-    case 'terminal':
-      return 'Terminal'
-    case 'agent': {
       const session = sessions.find((item) => item.id === surface.sessionId)
       return session?.label ?? surface.sessionId
     }
