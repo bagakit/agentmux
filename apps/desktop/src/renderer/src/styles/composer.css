@@ -12,7 +12,7 @@
    hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
    Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
    whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
-.composer { position: relative; margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: var(--surface-1); box-shadow: none; }
+.composer { position: relative; margin:var(--sp-3) var(--sp-4); overflow: hidden; border: 1px solid color-mix(in oklab, var(--line-soft) 72%, var(--blue) 28%); border-radius: var(--radius); background: var(--surface-1); background-image: radial-gradient(100% 140% at 100% 0, color-mix(in oklab, var(--blue) 8%, transparent), transparent 58%); box-shadow: none; }
 /* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
    --focus-line take over the boundary the removed stroke used to draw only while focused. */
 .composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
