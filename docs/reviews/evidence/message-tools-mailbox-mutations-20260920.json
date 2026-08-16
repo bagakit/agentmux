@@ -134,5 +134,21 @@
     "caught": true,
     "exit_code": 1,
     "log": "/tmp/mailbox-moved-left.log"
+  },
+  {
+    "mutation": "outbox-copy-global-error",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/outbox-copy-global-error.log"
+  },
+  {
+    "mutation": "outbox-retry-global-error",
+    "source": "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+    "test": "apps/desktop/test/session-mailbox.test.tsx",
+    "caught": true,
+    "exit_code": 1,
+    "log": "/tmp/outbox-retry-global-error.log"
   }
 ]
