@@ -180,7 +180,7 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     ['components/BranchesPanel.tsx', ['BranchesPanel > copyText']],
     // `jsx:onCopyPath` 这一段是 #619 换成限定路径后才拿到的粒度：它与紧邻的 onRename/onReveal
     // 形状完全一样，只有点名到 handler 才拦得住「复制被搬到另一个菜单项」。
-    ['components/SurfaceToolDock.tsx', ['WorkspaceTopicsPanel > jsx:onCopyPath']],
+    ['components/WorkspaceTopicsPanel.tsx', ['WorkspaceTopicsPanel > jsx:onCopyPath']],
     // 五处各自承重，缺一不可，且不共用代码：
     //   · 前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口；
     //   · `copySelection` 是**右键菜单**里走选区的那条复制；

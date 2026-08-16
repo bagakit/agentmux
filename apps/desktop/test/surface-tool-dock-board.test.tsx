@@ -121,20 +121,24 @@ describe('Board 工具面板是工作清单', () => {
   })
 
   it('状态点复用共享 StatusDot，不发明第二套颜色或形状', () => {
-    const list = dockSource.slice(
-      dockSource.indexOf('function BoardToolList'),
-      dockSource.indexOf('function SortableTopicItem')
-    )
+    const start = dockSource.indexOf('function BoardToolList')
+    const end = dockSource.indexOf('function SurfaceToolDock')
+    // 两个锚点都要真的找到，否则 slice 会静默扩张/坍缩成扫错范围（RegionMosaic/SortableTopicItem
+    // 搬走后旧的 `function SortableTopicItem` 止锚不复存在，会让 slice 一路扫到文件末尾）。
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const list = dockSource.slice(start, end)
     expect(list).toContain('<StatusDot status={session.status} />')
     // 自己按状态挑颜色就是第二套语汇。
     expect(list).not.toContain('status--')
   })
 
   it('静态说明只在零行时作为空态出现，不再是默认视图', () => {
-    const list = dockSource.slice(
-      dockSource.indexOf('function BoardToolList'),
-      dockSource.indexOf('function SortableTopicItem')
-    )
+    const start = dockSource.indexOf('function BoardToolList')
+    const end = dockSource.indexOf('function SurfaceToolDock')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const list = dockSource.slice(start, end)
     // 图例在 rows.length === 0 的分支里，且那个分支先于清单返回。
     const emptyBranch = list.indexOf('if (rows.length === 0)')
     const legend = list.indexOf('board-tool-legend')

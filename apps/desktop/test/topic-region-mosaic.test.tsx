@@ -6,12 +6,12 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import { RegionMosaic } from '../src/renderer/src/components/SurfaceToolDock.js'
+import { RegionMosaic } from '../src/renderer/src/components/WorkspaceTopicsPanel.js'
 import { workbenchRegionBounds, createWorkbenchViewLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { readFileSync } from 'node:fs'
 
 const dockSource = readFileSync(
-  new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+  new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
   'utf8'
 )
 const branchesSource = readFileSync(
