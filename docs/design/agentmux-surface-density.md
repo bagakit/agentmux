@@ -403,6 +403,7 @@ styles/
 ### Composer 状态与队列密度（2026-09-12）
 - Context 使用紧凑徽标，不在输入区占据独立大行；hover 提供精确 token 与更新时间。
 - Send、Interrupt 和 queued 数量共用一排工具控件，主动作保持清晰但不重复占据输入区。
+- 工作中的 Composer 仍在同一排提供紧凑的 Send steer 与 Interrupt 两个动作；Activity 聚合行不重复打印同一状态，常态高度保持在 28–32px。
 - 队列只显示短摘要与数量，展开后显示状态、顺序、失败原因和删除操作。
 
 ## 持续推进观察界面
@@ -473,3 +474,13 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 ### 分层人机交互的呈现
 
 交互行为以 [Provider 与人机交互的分层收敛](agentmux-desktop-interaction.md#provider-与人机交互的分层收敛) 为唯一约束来源。输入结果、待答请求、服务窗和注意力摘要复用现有控件语言：紧凑图标、对象、原因和可执行动作；只在有信息时展开详情。持续问题不遮住可用终端或占据重复全局弹窗；提示与原对象可互相定位，并保留键盘操作、IME 和无障碍名称。
+
+### 可复用对话与 Workflow 组件密度（2026-09-15）
+
+- Workflow 时间线沿用聊天 Activity 的低干扰行语言：普通 tool 行与 Workflow 卡片共用时间线缩进和折叠箭头，不额外套一层装饰性外框；只有输入框上方 dock 作为独立浮层保留 surface、圆角与内部滚动。
+- 组件密度固定在 `--fs-micro` / `--fs-meta` / `--fs-body` 三档与 2/4/6/8/12/16px 间距刻度内。状态徽标、模型短名、最近工具、耗时、token 和调用次数使用 `tabular-nums`，数字不因状态切换跳位。
+- Workflow 头部的 progress rail 是结构性进度，不是选中指示；选中阶段或 Agent 使用整行轻量 surface、`aria-expanded` 和焦点环表达，不使用重复的单边竖条。状态颜色只承担语义，失败/终止/暂停仍需字形或文案。
+- Agent 行默认一行：状态字形、label、模型短名、最近工具、耗时、token；打开后才显示阶段、尝试、排队/开始/最近活动、工具调用等新增信息。展开面板用两列 `dl`，不重复标题和状态。
+- 超过 8 个 Agent 才进入双列 grid；超过 12 行且尾部连续安静项才显示“还有 n 个”。失败项与当前运行项始终优先可见。≤560px 隐藏模型与最近工具，头部数字换行到第二行；触屏控件最小命中区 44px。
+- 同一 Workflow 组件通过 `dock` 变体复用结构，仅收紧模型和行高并限制 `max-height: 220px`；不得为 dock 维护另一套状态投影。旧 daemon 用 flat tool 行样式，无箭头、无空卡片。
+- Gallery 是组件的唯一观察表面：它可以切换 light/dark/system，集中展示 running/completed/failed/killed/paused、窄屏和旧 daemon；展示数据是静态 fixture，不引入 Runtime 或 Chat Store。未来聊天页只消费组件公开 props。

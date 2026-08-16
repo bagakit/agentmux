@@ -113,16 +113,17 @@ describe('Renderer persistence boundary', () => {
     expect(persisted.documents).toEqual({})
   })
 
-  it('persists the file path verbatim while stripping browser page content (url/title/nav)', () => {
+  it('persists the file path and a browser url verbatim, while stripping the browser runtime snapshot', () => {
     // The Workbench projection persisted under `restoredWorkbench` must carry back the file Regions a
     // user had open — a file Region is only {regionId,kind,workspaceId,path}, has no runtime content,
     // and its very tab id is `file:${workspaceId}:${path}`, so persisting the Region and persisting
     // the path are the same act. This is the fix for「重启后 tab 和分屏没了」: stripping file Regions is
-    // what erased whole tabs and collapsed splits. A browser Region is different — it embeds the live
-    // BrowserSnapshot (url/title/navigationId), browsing history is a different sensitivity class, and
-    // there is no cold-start lifecycle that revives a persisted browser into a usable blank page — so
-    // the whole browser Region stays stripped. This guard must redden if a future change re-strips the
-    // file path, or starts leaking a browser's url/title/navigationId.
+    // what erased whole tabs and collapsed splits. A browser Region now survives too, but only as its
+    // re-instantiable subset {browserId,url,title} — the cold-start `api.browser.create` loop in the
+    // store rebuilds the WebContentsView from exactly those fields. The live BrowserSnapshot's
+    // transient positions (navigationId/profileId/loading/driving…) are per-run facts and must never
+    // reach disk. This guard must redden if a future change re-strips the file path or the browser
+    // url, AND equally if someone persists the whole live snapshot again.
     const viewId = 'view:leaky'
     const agentRegionId = initialWorkbenchRegionId(viewId)
     let tab = createWorkbenchTab(viewId, {
@@ -167,20 +168,24 @@ describe('Renderer persistence boundary', () => {
       restoredWorkbench: { tabs: Record<string, { regions: Record<string, { kind: string }> }> }
     }
     const serialized = JSON.stringify(persisted.restoredWorkbench)
-    // Browser page content must NOT leak — the browser Region is stripped whole.
-    expect(serialized).not.toContain('https://secret.example.com/private-path')
-    expect(serialized).not.toContain('Secret internal dashboard')
+    // 可再实例化的那一档要在：url 与 title 是冷启动 create 的唯一输入。
+    expect(serialized).toContain('https://secret.example.com/private-path')
+    expect(serialized).toContain('Secret internal dashboard')
+    // 瞬时运行时位一律不进盘。按**字段名**断言，而不是按某个值——值可以碰巧不同，字段名不会：
+    // 有人把整个活体 BrowserSnapshot 存回去时，这三条会立刻红。
     expect(serialized).not.toContain('nav-1')
+    expect(serialized).not.toContain('navigationId')
+    expect(serialized).not.toContain('profileId')
+    expect(serialized).not.toContain('appLinkPrompt')
     // The file path is now persisted verbatim (this is the reversed decision).
     expect(serialized).toContain('/repo/a/secret/credentials.env')
     // The attached Agent skeleton it legitimately keeps proves the projection ran (rather than the
     // file path surviving from an empty projection): sessionId identity is display state, not content.
     expect(serialized).toContain('agent-keep')
-    // Strongest guard: the browser Region is gone entirely, not merely emptied of some fields. Any
-    // change that reintroduces a persisted browser Region (with or without its snapshot) reddens here.
+    // 结构侧：三个 Region 都在，分屏没塌。只判「browser 在」会放过整张 tab 少了一块的情况。
     const projectedTab = persisted.restoredWorkbench.tabs[tab.id]!
     const persistedKinds = Object.values(projectedTab.regions).map((region) => region.kind).sort()
-    expect(persistedKinds).toEqual(['agent', 'file'])
+    expect(persistedKinds).toEqual(['agent', 'browser', 'file'])
   })
 
   it('validates persisted presentation values against current configured Workspaces and enums', () => {

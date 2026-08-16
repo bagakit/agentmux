@@ -748,3 +748,16 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - 此次收敛以现有状态、interaction、delivery queue、continuous-progress scheduler 与持久化接口为起点；消除重复 owner 和重复判断，不要求将所有状态改成事件溯源，不新增自演化引擎、通用 Job/Workflow/插件平台或平行兼容实现。已有 loop 复用统一观察与投递边界，任务完成真值仍归任务来源。
 
 - 架构可发现性也是本次分层收敛的约束：公共文档与 API 入口应能引导维护者找到既有能力的唯一 owner、真实消费者与行为证据，区分已有实现、可选 Provider 能力和待实现需求；分析遗漏须先核对来源，不以未经查证的“能力缺失”新增平行实现。
+
+### 可复用对话与 Workflow 表面组件（2026-09-15）
+
+- 参考页里的 Workflow 时间线不是一张只能复制的样稿，而是一组可以被不同 Client 消费的受控组件：普通 tool 行、Workflow 摘要头、阶段折叠、Agent 行、Agent 元信息、安静项折叠、旧 daemon 降级行、dock 压缩态和输入框上方提示条都必须有稳定的类型化输入与可访问状态。
+- 这些组件先形成独立的 Renderer 组件层和只读展示 Gallery，暂不接入现有聊天时间线；Gallery 只是验证真实生产调用者、响应式密度和状态切换，不成为第二个聊天数据源。后续聊天接入时，数据适配发生在宿主层，组件不读 Store、不猜 Provider/Run 状态。
+- Workflow 组件只表达观察事实：`running`、`completed`、`failed`、`killed`、`paused`、`queued` 的视觉与中文文案一一对应；只有真实拥有阶段明细时才提供折叠箭头，旧 daemon 退化成普通 tool 行并持续说明“daemon 版本较旧，暂无阶段明细”，不留空壳。
+- 折叠是统一的 disclosure 语义：按钮通过 `aria-expanded`/`aria-controls` 管理卡片、阶段和“还有 n 个”；Agent 行点击、Enter、Space 都能打开同一份元信息，失败行永不被安静折叠吞掉。运行中保持展开，终态默认摘要化；用户展开后状态更新不能把焦点或展开意图抹掉。
+- 大规模列表超过 8 个 Agent 时自动分栏；分栏后尾部连续的 queued/completed 安静项可以收进可反复展开的“还有 n 个”，失败项不能进入该折叠。窄屏隐藏模型与最近工具，并把头部统计放到第二行；dock 使用同一组件的紧凑变体并限制内部滚动高度。
+
+- 工作中的 Composer 同时保留“发送 steer”和“中断当轮”两个可见动作；发送只提交补充指令，不改变当前 Run 的生命周期。Enter 仍是发送快捷键，按钮文案必须让两者可区分。
+- Activity 聚合行的状态只出现一次；等待、错误和阻塞等摘要不得再追加同义状态标签。路径与 Host 只作为次级元信息，不得把工作线行撑成多行卡片。
+- 聊天页已有的 ConversationAxis、AgentMarkdown、AgentInteractionCard、ComposerTextarea、StatusDot 和 ServiceWindowNotice 是同一组件体系的既有成员；它们继续各自拥有身份轴、正文、请求回答、IME 输入、状态点和服务窗事实，不复制一份“聊天版”实现。Activity 内部的 Row/Run/Turn/Ruler 在后续接入时也沿用同一边界。
+- 组件的可访问名称、键盘操作、焦点环、减少动画和非颜色状态提示是组件契约，不由 Gallery 或未来聊天宿主补丁式添加。颜色与侧边细条不得成为唯一选中/状态信号；状态必须同时有字形、文案或结构变化。

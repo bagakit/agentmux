@@ -32,3 +32,16 @@ T-001 首先关闭观察到真实消费者的竖切。T-002 输入和 T-003 type
 每项 implementation task 必须记录一次具体 mutation 的红/恢复绿、非定义文件生产调用者及真实行为测试。新验收测试路径是待实现的 gate，不是已存在证据；命令先 test -f，禁止空 filter 假绿。测试仅证明所断言行为，不能将一个 unit suite 的绿扩成整条链路已交付。源扫描必须证明扫描非空，并从实际来源派生。所有有损测试使用独立临时工作区/Runtime，单 worker，不运行用户真实权限请求，不留 Electron/ctxmuxd 子进程。
 
 交付标准：删除被替代的判断和 owner、现有消费者全部接线、所有受影响 Provider 能力逐项准确、进程重启仍可见可恢复、Core 独立 consumer 可用。此 Feature 的完成不依赖引入自演化、通用 Job/DAG 或新 UI 需求。仅创建计划时不运行未来 gate，不把计划标 done。
+
+
+## 可发现性信号复盘（用户确认补充）
+
+用户指出：好的架构应该让人很快意识到已有能力；此前分析为何漏看，本身也应成为重构信号。
+
+已证实的分析失误：在未核对 AgentMux 的 index.ts、Core README 与生产消费者之前，把 DSH 目录清单映射为 AgentMux 的缺失能力，错误声称 scheduler/typed interaction 不存在。Core 的公开导出本来就包含 agent-interaction、agent-delivery-queue、continuous-progress-scheduler，README 也解释了 typed request。因此不能把此次遗漏全部归责架构，更不能因此重复造一套。
+
+结构层待验证假设：根 README 侧重早期 ctxmux/Codex 纵切、index.ts 平铺导出，而持续推进跨 Core scheduler 与 Desktop manager/store；从 API 名称不一定能直接识别时钟、决策、投递、消费确认的不同 owner。这是导航成本信号，不直接证明该拆新包。T-007 必须通过从公共入口到实际调用链的发现记录验证；不能用多写一个目录或新接口代替验证。
+
+验收动作：让未参与对应模块实现的 reviewer 仅从 README、Core README 和公共 exports 出发，定位观察、输入、typed request、队列、loop、恢复各自的唯一 owner、生产消费者与行为测试；记录所走路径、首次错误推断及修正。找不到或误判时修正文档入口、命名或实际模块边界，再复核。时间可作为描述数据，不设武断的分钟数门禁。审阅记录与运行测试共同构成证据，扫描字符串不能证明“容易理解”。
+
+修复后的公开文档必须区分已实现、仅声明、宿主编排与 Provider 可选能力；不维护第二份能力真值。现有接口有能力即可链接其权威声明与例子。涉及拒绝/禁用的重构同时遵循 RED-LINES.md，不把理解不全补成过度防御。

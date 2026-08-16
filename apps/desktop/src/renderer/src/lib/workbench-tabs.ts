@@ -143,7 +143,12 @@ export function titleWorkbenchSurface(tab: WorkbenchTab): WorkbenchSurface {
   return tab.regions[tab.titleRegionId] ?? activeWorkbenchSurface(tab)
 }
 
-export function workbenchSurfaces(tab: WorkbenchTab): WorkbenchSurface[] {
+// Generic over the Region value type so it reads BOTH a live `WorkbenchTab`
+// (S = WorkbenchSurface) and a persisted-subset tab (S = PersistedWorkbenchSurface) without a cast.
+// It is a pure accessor — `Object.values(tab.regions)` — so widening the parameter cannot weaken any
+// guard; every live caller still infers `WorkbenchSurface[]`. Kept structural (not importing the
+// persisted type) to avoid a workbench-tabs ↔ workbench-persistence import cycle.
+export function workbenchSurfaces<S>(tab: { regions: Record<string, S> }): S[] {
   return Object.values(tab.regions)
 }
 
@@ -243,7 +248,9 @@ export function replaceWorkbenchRegion(
  * 共用一份：两边此前各自手抄一份比较，而且**曾经判得不一样**——那一份用 `Set` 差集，对重复完全失明
  * （#571）。判据只有一处，两条断言就不可能再分家；本函数留下的只有「取哪两个清单」与错误消息。
  */
-export function assertRegionInvariant(tab: WorkbenchTab): void {
+export function assertRegionInvariant(
+  tab: { id: string; layout: WorkbenchViewLayout; regions: Record<string, unknown> }
+): void {
   const tree = regionIds(tab.layout.root)
   const map = Object.keys(tab.regions)
   if (!leafIdsMatchRecords(tree, map)) {

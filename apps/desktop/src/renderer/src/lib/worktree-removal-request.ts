@@ -93,8 +93,7 @@ export function worktreeRemovalPrompt(request: WorktreeRemovalRequest): Worktree
     // 没拿到就不说：宁可少一句，也不能因为「还没问到」而默认说一句安心话。真正查不出来的那一档有它
     // 自己的措辞（`branchRetentionNote(branch, null)`），会作为一个正常的 note 送进来。
     description:
-      `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.` +
-      (request.note ? ` ${request.note}` : ''),
+      `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.`,
     subject: request.path,
     confirmLabel: 'Remove',
     discardChanges: false

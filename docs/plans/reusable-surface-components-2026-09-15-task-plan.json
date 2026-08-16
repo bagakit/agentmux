@@ -1,0 +1,116 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/reusable-surface-components-2026-09-15.md"
+  },
+  "source_refs": [
+    "docs/reviews/reusable-surface-components-2026-09-15.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/ActivityView.tsx",
+    "apps/desktop/src/renderer/src/components/ConversationAxis.tsx",
+    "apps/desktop/src/renderer/src/components/AgentInteractionCard.tsx",
+    "apps/desktop/src/renderer/src/components/ComposerTextarea.tsx"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "炼化 Workflow 状态、阶段与 Agent 组件",
+      "objective": "把参考页的 Workflow 摘要头、进度、阶段折叠、Agent 行/明细、大规模安静项折叠和旧 daemon flat 行实现为无 Store 的类型化 React 组件。",
+      "outcome": "同一套公开 props 能表达 running/completed/failed/killed/paused/queued、重试、双列、明细和旧 daemon 降级，不复制聊天数据或 Runtime 状态。",
+      "acceptance": [
+        "组件目录只依赖 React、lucide-react 与本组件类型；Workflow/Phase/Agent 的输入事实由调用方提供，组件不读 Store、不启动 Runtime、不猜状态。",
+        "卡片、阶段和 Agent 明细使用 aria-expanded/aria-controls；Agent 行可用 click、Enter、Space 展开；终态默认摘要，运行中默认展开；失败项不会进入尾部安静项折叠。",
+        "超过 8 个 Agent 时保持 index 顺序进入双列，超过 12 行时只折叠尾部连续 queued/completed；≤560px 的视觉契约由 class/data 属性表达。",
+        "没有阶段明细的旧 daemon 渲染为普通 tool 行并显示 daemon 版本旧的说明，不出现可点空卡片。",
+        "对应行为做一次块级变异后定向测试变红并恢复；定义文件之外至少存在一个生产调用者，零调用扫描结果断言非空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workflow-components.test.tsx",
+          "proves": "Workflow 状态、折叠、重试、规模分栏、安静项保留和旧 daemon 降级的公开行为。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "组件公开类型与 Renderer 依赖边界完整。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '(<WorkflowCard|<WorkflowDock|<WorkflowToolRow)' apps/desktop/src/renderer/src --glob '*.tsx' | grep -v 'components/workflow/' )\"",
+          "proves": "排除定义目录后仍有真实生产组件调用者。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/reusable-surface-components-2026-09-15.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "建立组件 Gallery 与密度样式接线",
+      "objective": "提供只读组件 Gallery 作为可复用组件的真实生产调用者和视觉回归 surface，覆盖参考页的状态与 dock 变体，但不接入聊天页面。",
+      "outcome": "打开 `?agentmux-component-gallery=1` 能看到可操作的组件族；样式沿用现有 token、状态色、焦点和 reduced-motion 语言，窄屏规则可验证。",
+      "acceptance": [
+        "Gallery 只消费 Workflow 公开 props 与静态 fixture，不引入 Chat Store、Core Session 或 Runtime；App 仅增加显式 query 入口。",
+        "Gallery 至少展示 running/completed/failed/killed/paused、旧 daemon、dock 和 53-agent 大规模场景；每个状态的文案、字形和 data-status 可读。",
+        "样式使用现有 --fs-*、--sp-*、surface 和状态 token，不以重复单边竖条表达 selected/active；≤560px、触屏命中区、reduced-motion 有 CSS 规则。",
+        "组件 Gallery 的调用链和样式扫描有非空断言；删除 query 接线或把组件替换为空渲染时对应测试变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workflow-components.test.tsx test/reusable-component-gallery.test.tsx",
+          "proves": "Gallery 的 query 入口、fixture 状态覆盖、组件调用和样式契约。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build",
+          "proves": "Gallery 作为真实 Renderer surface 可构建。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/reusable-surface-components-2026-09-15.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": ["T-002"],
+      "title": "完成聊天组件架构审计与可发现性回归",
+      "objective": "把当前聊天页已有可复用原语、Activity 内部待拆边界和 Workflow 新组件的 owner/消费者写清，并以测试确认没有第二套聊天实现。",
+      "outcome": "维护者能从文档和 Gallery 找到组件入口；聊天接入仍是后续独立任务，不把本次 Gallery 当作聊天数据源。",
+      "acceptance": [
+        "审计明确列出 ConversationAxis、AgentMarkdown、AgentInteractionCard、ComposerTextarea、StatusDot、ServiceWindowNotice 的 owner 与生产调用者，并指出 Activity Row/Run/Turn/Ruler 的下一步拆分边界。",
+        "Workflow 组件只在 Gallery 被调用，聊天组件仍由既有 Activity/Session composer 调用；不存在第二份 Provider/Runtime/Chat Store 真相。",
+        "全量定向测试与 Desktop typecheck 通过；变异红绿和定义文件之外 zero-caller 证据已记录。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workflow-components.test.tsx test/reusable-component-gallery.test.tsx test/activity-view.test.tsx",
+          "proves": "新组件与既有聊天 Activity 公共边界同时通过。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "最终组件层没有跨 Core/Runtime 依赖。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/reusable-surface-components-2026-09-15.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}
