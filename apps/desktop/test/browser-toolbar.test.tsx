@@ -261,7 +261,9 @@ describe('Browser bar contract', () => {
     const fromText = { ...tab, bookmarkOrigin: { path: 'links/Example.webloc', binary: false } }
     const markup = renderToStaticMarkup(<BrowserPane tab={fromText} visible />)
     expect(markup).toContain('aria-label="View bookmark source"')
-    expect(markup).toContain("View this bookmark's source")
+    // `renderToStaticMarkup` 会把 `'` 转义成 `&#x27;`，所以断言要写成属性在产物里的真实样子。
+    // 照着源码里的原文写（`View this bookmark's source`）会红，而红的是断言不是按钮。
+    expect(markup).toContain('title="View this bookmark&#x27;s source"')
     // 可用：这个按钮没有 disabled 属性。renderToStaticMarkup 只在 disabled=true 时才输出该属性。
     const button = markup.slice(markup.indexOf('aria-label="View bookmark source"'))
     expect(button.slice(0, button.indexOf('>'))).not.toContain('disabled')
