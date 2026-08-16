@@ -268,14 +268,29 @@ export function AgentSessionComposer({
       // (attachFiles/pasteImage/addFileReference each return early on `!canType`). Gating them on
       // canSubmit contradicted those guards: while a card is pending the placeholder invites "Draft a
       // steer…" yet attach/paste/@-file were withheld from the draft the user is allowed to type.
-      // Posture is a live capability too — client.setAgentPosture does not depend on submit readiness.
+      // These three only edit the local draft — nothing leaves the renderer — so a pending card is
+      // irrelevant to them.
       {...(submitMode.canType ? {
         onAttach: () => void attachFiles(),
         onPasteImage: (image: { bytes: Uint8Array; extension: string }) => void pasteImage(image),
-        ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
-      {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
+      // Posture and submit share one gate because they are literally the same write.
+      // `client.setAgentPosture` resolves the Provider's keystroke and then calls `writeAgentInput` —
+      // the very function that throws AGENT_INTERACTION_PENDING while a card is up. So this is 原则 11
+      // 第 1 类 (the capability is genuinely gone), not 第 2 类: "绕过我这段代码，这条路还能不能通？→
+      // 不能". Withholding it is the honest surface; offering it would render a picker whose every
+      // click earns an error banner.
+      //
+      // An earlier pass grouped posture with the draft helpers on the claim that "setAgentPosture does
+      // not depend on submit readiness". That was wrong — it never read past the keystroke lookup to
+      // the write. `canSubmit` is not a coincidental proxy here: canSubmit ≡ canType && no pending
+      // card ≡ exactly writeAgentInput's own precondition. The test pins that equivalence, so the day
+      // canSubmit grows a condition writeAgentInput does not share, it reds instead of drifting.
+      {...(submitMode.canSubmit ? {
+        onSubmit: () => void submit(),
+        ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {})
+      } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
         onQueue: () => queue()
       } : {})}
