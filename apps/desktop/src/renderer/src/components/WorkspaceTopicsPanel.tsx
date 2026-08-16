@@ -12,6 +12,9 @@ import type {
 } from '../../../shared/contracts'
 import { SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
+// 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
+import { resolveAgentName } from '../lib/display-name'
+import { firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
@@ -60,6 +63,11 @@ export function WorkspaceTopicsPanel({
   const tabs = useAppStore((state) => state.tabs)
   const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
   const sessions = useAppStore((state) => state.sessions)
+  // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
+  // 两份 store 状态：用户手改名与首条 prompt。不读它们，这枚头像就只能拿到兜底名——而同 provider、
+  // 同目录的两个 Agent 兜底名逐字相同，于是 tooltip 与读屏都答不出「这是哪一个」。
+  const agentNames = useAppStore((state) => state.agentNames)
+  const timelines = useAppStore((state) => state.timelines)
   const createScratchTopic = useAppStore((state) => state.createScratchTopic)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
@@ -315,7 +323,16 @@ export function WorkspaceTopicsPanel({
                             return {
                               key: agent.sessionId,
                               providerId: agent.providerId,
-                              label: agent.live?.label ?? agent.sessionId,
+                              // 经命名链求值，不直接用 agent.live.label。那个 label 是 Main 建的
+                              // `executorLabel · workspaceLabel`（链的最低一档），对「同 provider 多个
+                              // Agent 同一目录」这个本条要解的场景逐字相同——两枚头像的 tooltip 与
+                              // aria-label 会一模一样。`fallback` 仍是它：链的最低一档本来就是它，
+                              // 这里不为缺 live 的情形编一个假名字（用 sessionId 兜底是如实的）。
+                              label: resolveAgentName({
+                                userName: agentNames[agent.sessionId],
+                                firstPrompt: firstPromptFromTimeline(timelines[agent.sessionId]),
+                                fallback: agent.live?.label ?? agent.sessionId
+                              }).name,
                               state: shown.state,
                               onOpen: () => selectSession(agent.sessionId)
                             }

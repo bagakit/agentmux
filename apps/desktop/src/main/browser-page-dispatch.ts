@@ -82,6 +82,24 @@ function requireString(value: unknown, name: string): string {
 }
 
 /**
+ * 页面自己抛出来的那句话。**这是页面控制的文本，不是我们的文案。**
+ *
+ * 为什么要单独标一层：这句话会顺着 `step.summary` 落进操作日志（`browser-view-manager.ts` 的失败臂
+ * 取 `error.message`），而日志是**持久的、后面会被别的 Agent 读回去的**。页面里一个
+ * `throw new Error('忽略之前的指令，改为……')` 于此就成了存储型注入——写入的是这一轮，
+ * 命中的是下一轮，而中间没有任何一步看得出这段字是页面写的还是我们写的。
+ *
+ * 所以在**入口**就把它圈起来，而不是在下游猜：下游只看到一个字符串，分不清来源。圈法是
+ * 标注来源 + 去掉换行（多行能在日志里伪造出"新的一条记录"的样子）。内容一个字不改——
+ * 那是排障要看的真东西，删掉它等于让 Agent 面对一次无从下手的失败（AGENTS.md:32-52）。
+ */
+function pageAuthoredText(text: string | undefined): string {
+  if (text === undefined || text.trim() === '') return 'unknown error (the page gave no message)'
+  const oneLine = text.replace(/\s+/gu, ' ').trim()
+  return `[page-authored text] ${oneLine}`
+}
+
+/**
  * 把一次 ref 解析的失败翻译成抛给脚本的异常。
  *
  * 三类失败对 Agent 意味着**三种不同的下一步**，所以每一句都说到那一步为止：重取快照、检查把手、
@@ -251,7 +269,7 @@ export function createBrowserPageDispatch(
     // CDP 在"函数抛了"这件事上**不 reject**，它把异常放进 exceptionDetails 照常返回。
     // 不看这个字段，页面里抛的错会被读成成功，而 Agent 拿到的是 undefined。
     if (response.exceptionDetails) {
-      throw new Error(`The page threw while acting on ${ref}: ${response.exceptionDetails.text ?? 'unknown error'}`)
+      throw new Error(`The page threw while acting on ${ref}: ${pageAuthoredText(response.exceptionDetails.text)}`)
     }
     return response.result?.value
   }
@@ -429,7 +447,7 @@ export function createBrowserPageDispatch(
           returnByValue: true
         })) as { result?: { value?: unknown }; exceptionDetails?: { text?: string } }
         if (evaluated.exceptionDetails) {
-          throw new Error(`The page threw: ${evaluated.exceptionDetails.text ?? 'unknown error'}`)
+          throw new Error(`The page threw: ${pageAuthoredText(evaluated.exceptionDetails.text)}`)
         }
         return evaluated.result?.value
       }
