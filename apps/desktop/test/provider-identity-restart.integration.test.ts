@@ -34,7 +34,10 @@ import {
   initialWorkbenchRegionId,
   workbenchSurfaces
 } from '../src/renderer/src/lib/workbench-tabs.js'
-import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
+import {
+  reduceAgentMembershipSnapshot,
+  reduceTerminalMembershipSnapshot
+} from '../src/renderer/src/lib/session-state.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
@@ -90,6 +93,36 @@ function agentTab(sessionId: string) {
     sessionId
   })
   return { tabId, tab }
+}
+
+function terminalTab(sessionId: string) {
+  const tabId = `session:${sessionId}`
+  const tab = createWorkbenchTab(tabId, {
+    regionId: initialWorkbenchRegionId(tabId),
+    kind: 'terminal',
+    phase: 'attached',
+    workspaceId: 'workspace-a',
+    sessionId
+  })
+  return { tabId, tab }
+}
+
+function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
+  const runId = `run-${id}`
+  return {
+    id,
+    kind: 'terminal',
+    providerId: null,
+    hostId: 'local',
+    workspacePath: '/repo/a',
+    label: 'Shell',
+    createdAt: 1,
+    updatedAt: 2,
+    processState: 'running',
+    status: { state: 'running', source: 'run-process', observedAt: 2 },
+    latestOutputBytes: 0,
+    control: { kind: 'terminal', hostId: 'local', runId, run: { runId } }
+  }
 }
 
 afterEach(() => {
@@ -149,6 +182,38 @@ describe('空快照与流程故障不清工作面（T-005 性质 1）', () => {
 
     // 承重：不可逆的删除面前 fail-open——整份 state 原样返回。把 session-state.ts:343 的空快照守卫
     // 删掉（让它继续走 removeSessionProjection），这一格连 tab 带 layout 会被摘掉，这三条变红。
+    expect(next).toBe(state)
+    expect(next.tabs[tabId]).toBeDefined()
+    expect(next.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tabId])
+  })
+
+  it('运行时成员对齐：空快照不退役仍在跑的 Terminal（原样返回）', () => {
+    const sessionId = 'terminal-empty-resync'
+    const { tabId, tab } = terminalTab(sessionId)
+    const state = {
+      sessions: [terminalSession(sessionId)],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: { [tabId]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('pane', [tabId]) },
+      viewModes: {}
+    }
+    const empty: RuntimeSnapshot = { sessions: [], timelines: {}, recoveryCandidates: [] }
+
+    // 非空快照先立一个对照：这个 reducer 确实会摘掉快照里没有的 terminal。没有这一半，下面
+    // 「空快照原样返回」就可能只是因为它对 terminal 从来什么都不做——那种绿是恒真的。
+    const authoritative: RuntimeSnapshot = {
+      sessions: [terminalSession('terminal-somebody-else')],
+      timelines: {},
+      recoveryCandidates: []
+    }
+    expect(reduceTerminalMembershipSnapshot(state, authoritative).tabs[tabId]).toBeUndefined()
+
+    const next = reduceTerminalMembershipSnapshot(state, empty)
+
+    // 承重：同一条 fail-open 规则的第二个出口。reduceTerminalMembershipSnapshot 的 docstring 明写
+    // 「An empty snapshot is deliberately fail-open」，但在此之前**只有 agent 那一侧被钉住**——实测
+    // 把 session-state.ts:384 的空快照守卫删掉，整份 desktop 测试面全绿。把它删掉，这三条会红。
     expect(next).toBe(state)
     expect(next.tabs[tabId]).toBeDefined()
     expect(next.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tabId])
