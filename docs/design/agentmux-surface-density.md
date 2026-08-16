@@ -298,7 +298,8 @@ styles/
   base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
   chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
   selector.css    同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
-  dock.css        Tool Dock 及其面板（Explorer、Topics、Agents）
+  dock.css        Tool Dock 这个容器本身及其 Topics / Agents 面板
+  file-explorer.css   被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
   source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
   workbench.css   Pane、Region、分屏、拖放
   terminal.css    终端表面与它的状态覆盖层
