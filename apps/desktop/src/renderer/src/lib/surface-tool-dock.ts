@@ -73,6 +73,17 @@ export type ContentSlotPresentation = {
   explorerCollapsedByDefault: boolean
 }
 
+/**
+ * 解析 Explorer 的折叠态：显式覆盖优先，缺席才回落到本 workspace 的 kind 默认（见 store 的
+ * `explorerCollapsed` 与本文件的 `explorerCollapsedByDefault`）。缺席在这里**绝不**读成「展开」——
+ * `?? false` 会把默认折叠的 Scratch 又弹回展开，把「按 kind 默认」这一档抹掉。抽成纯函数是为了
+ * 让「读与写同一次解析」有一个可复用、可单测、可变异的落点：组件算一次 const 复用，写入点直接
+ * 取反它，不另算一遍。
+ */
+export function resolveExplorerCollapsed(override: boolean | undefined, defaultCollapsed: boolean): boolean {
+  return override ?? defaultCollapsed
+}
+
 export function contentSlotPresentation(isScratch: boolean): ContentSlotPresentation {
   if (isScratch) {
     // Topics (the wiki) is the primary view in Scratch, so the file tree shrinks to the smaller

@@ -28,6 +28,7 @@ import {
   contentSlotPresentation,
   getRenderedToolDockWidth,
   getToolDockMinimumWidth,
+  resolveExplorerCollapsed,
   resolveWorkspaceTools,
   workspaceAgentGroups
 } from '../src/renderer/src/lib/surface-tool-dock.js'
@@ -50,6 +51,10 @@ const branchesPanelSource = readFileSync(
 )
 const selectorListSource = readFileSync(
   new URL('../src/renderer/src/components/SelectorList.tsx', import.meta.url),
+  'utf8'
+)
+const surfaceToolDockSource = readFileSync(
+  new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
   'utf8'
 )
 const stylesSource = allStyles()
@@ -341,6 +346,48 @@ describe('shared surface tool dock resize', () => {
     // Scratch 折叠只看 Topics；Project 展开因为 Branches 是它的次级视图。
     expect(contentSlotPresentation(true).explorerCollapsedByDefault).toBe(true)
     expect(contentSlotPresentation(false).explorerCollapsedByDefault).toBe(false)
+  })
+
+  it('resolves the Explorer collapse: explicit override wins, absence falls back to the kind default', () => {
+    // 读写复用的那次解析。缺席（override === undefined）必须回落到 kind 默认，**绝不**读成展开——
+    // 把它写成 `?? false` 会让默认折叠的 Scratch 又弹回展开，抹掉「按 kind 默认」这一档。
+    // 四个方向全断言：缺席 × 两种 kind 默认，加上显式覆盖压过两种默认。单向断言会被写死常量满足。
+    expect(resolveExplorerCollapsed(undefined, true)).toBe(true)   // 缺席 → Scratch 默认折叠
+    expect(resolveExplorerCollapsed(undefined, false)).toBe(false) // 缺席 → Project 默认展开
+    expect(resolveExplorerCollapsed(false, true)).toBe(false)      // 显式展开压过折叠默认
+    expect(resolveExplorerCollapsed(true, false)).toBe(true)       // 显式折叠压过展开默认
+  })
+
+  it('drives the collapse from one resolved value read and written through the same key', () => {
+    // §2.3.1 / 验收：读与写同一个 key、同一次解析。组件把 resolveExplorerCollapsed 的结果算成一个
+    // 局部 const，读（渲染哪一支）与写（toggle 取反）都用它，绝不在写入点另算一遍。
+    expect(surfaceToolDockSource).toContain(
+      'resolveExplorerCollapsed(explorerCollapsedOverride, presentation.explorerCollapsedByDefault)'
+    )
+    // override 与写入都按 workspace.id 这一个 key，读写不漂移。
+    expect(surfaceToolDockSource).toContain('state.explorerCollapsed[workspace.id]')
+    expect(surfaceToolDockSource).toContain('setExplorerCollapsed(workspace.id, !collapsed)')
+    // chevron 朝向与 aria-expanded 两个方向都跟真实状态：折叠 → 朝右 + aria-expanded=false。
+    expect(surfaceToolDockSource).toContain('aria-expanded={!collapsed}')
+    expect(surfaceToolDockSource).toMatch(/collapsed \? <ChevronRight size=\{13\} \/> : <ChevronDown size=\{13\} \/>/)
+  })
+
+  it('renders no PanelGroup when collapsed so no dead resize handle survives', () => {
+    // §2.3.1：折叠态整块交给 workspace-tools-collapsed，不进 PanelGroup——「可拖但无意义的死把手」
+    // 因此不可能存在（把手根本没被渲染）。展开态仍走 PanelGroup + 把手。
+    const start = surfaceToolDockSource.indexOf('{collapsed ? (')
+    const end = surfaceToolDockSource.indexOf('<PanelGroup')
+    // 两个锚点都得真的找到。`indexOf` 落空返回 -1 时 `slice(start, -1)` **不是切出空串，而是扩张到
+    // 倒数第一个字符**——于是这段扫描会从「只看折叠支」悄悄变成「扫整个文件」，而下面那条
+    // `not.toContain('PanelResizeHandle')` 会因为扫到了展开支里的把手而变红……或者更糟，
+    // start 落空时整段偏移，断言在错误的范围上恒真。两条前置断言让下一次改名**响**而不是哑。
+    expect(start, '找不到折叠分支的起点——判据落空，下面的断言扫的不是这一支').toBeGreaterThan(-1)
+    expect(end, '找不到 PanelGroup 止锚——slice 会扩张到文件末尾').toBeGreaterThan(start)
+    const collapsedBranch = surfaceToolDockSource.slice(start, end)
+    expect(collapsedBranch).toContain('workspace-tools-collapsed')
+    expect(collapsedBranch).not.toContain('PanelResizeHandle')
+    // 展开支才有把手：折叠支不渲染它，是这条特性的全部意义。
+    expect(surfaceToolDockSource).toContain('<PanelResizeHandle className="workspace-tools-resize-handle" />')
   })
 
   it('把 Topic 目录定位到自家文件面板，而不是打开系统文件管理器', () => {
