@@ -548,6 +548,10 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     count: 2,
     why: 'SemanticIconName union 的成员名 + SemanticIcon 里 `name === "working"` 挂动势类（2026-09-19）：问"这个字形要不要带节奏"，不问"有几个在干活"。它拿的是**图标名**而不是 session state，所以上面那条 stateEqualsWorkingSites 的检测器看不见它——这条豁免守的是本表的次数轴，不是那一轴'
   },
+  '/components/BrowserOperationSurface.tsx': {
+    count: 1,
+    why: 'Browser operation phase=running 的 SemanticIcon name=working：展示这次浏览器操作正在执行的字形，不读取或统计 Agent Session 状态。'
+  },
   '/components/ConversationMessage.tsx': {
     count: 1,
     why: 'Streaming 提示片里写死的 `name="working"`：这条回合正在产出，取的是"正在产出"这个字形，与 session state 无关（它没有 state 可读）'

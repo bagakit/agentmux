@@ -8,10 +8,12 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AgentSessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+
+type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
 
 const fixture = vi.hoisted(() => ({
   snapshot: [] as ScratchTopicSnapshot[],

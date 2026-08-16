@@ -37,6 +37,10 @@ const topicsPanelSource = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
   'utf8'
 )
+const topicPresenceSource = readFileSync(
+  new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
+  'utf8'
+)
 const fileExplorerSource = readFileSync(
   new URL('../src/renderer/src/components/FileExplorer.tsx', import.meta.url),
   'utf8'
@@ -600,8 +604,13 @@ describe('shared surface tool dock resize', () => {
       expect(source).toContain("from './SelectorList'")
       expect(source).toContain('<SelectorListHeader')
       expect(source).toContain('<SelectorRow')
-      expect(source).toContain('<SelectorPresence')
     }
+    expect(branchesPanelSource).toContain('<SelectorPresence')
+    expect(topicsPanelSource).toContain("import { TopicPresence } from './TopicPresence'")
+    expect(topicsPanelSource).toContain('<TopicPresence')
+    expect(topicPresenceSource).toContain("from './SelectorList'")
+    expect(topicPresenceSource).toContain('<SelectorPresence agents=')
+    expect(topicPresenceSource).toContain('<AgentAvatar')
     // 反向：两侧都不得再留一份自己的写法。
     expect(branchesPanelSource).not.toContain('branch-row__agents')
     expect(branchesPanelSource).not.toContain('branch-row__identity')

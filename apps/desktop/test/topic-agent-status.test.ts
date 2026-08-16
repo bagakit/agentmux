@@ -103,7 +103,7 @@ describe('Topic 行的视觉收敛', () => {
     expect(end, '行的止锚点不见了').toBeGreaterThan(start)
     const row = source.slice(start, end)
     // 扫描面自检：证明这一段真的是那一行，而不是恰好非空的别处。
-    expect(row, '扫到的这段里没有头像簇，锚点指错了地方').toContain('<SelectorPresence')
+    expect(row, '扫到的这段里没有 Region/Agent 呈现，锚点指错了地方').toContain('<TopicPresence')
     expect(row).not.toContain('agents in ')
     expect(row).not.toContain('.length} agent')
   })
@@ -456,6 +456,10 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     new URL('../src/renderer/src/components/SelectorList.tsx', import.meta.url),
     'utf8'
   )
+  const topicPresence = readFileSync(
+    new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
+    'utf8'
+  )
   const branches = readFileSync(
     new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
     'utf8'
@@ -499,7 +503,11 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     // 或者退回成"两处长得像的写法"。
     expect(selector).toContain("import { AgentAvatar } from './AgentAvatar'")
     expect(selector).toContain('<AgentAvatar')
-    expect(dock).toContain('<SelectorPresence')
+    expect(dock).toContain("import { TopicPresence } from './TopicPresence'")
+    expect(dock).toContain('<TopicPresence')
+    expect(topicPresence).toContain("import { AgentAvatar } from './AgentAvatar'")
+    expect(topicPresence).toContain('<AgentAvatar')
+    expect(topicPresence).toContain('<SelectorPresence agents=')
     expect(branches).toContain('<SelectorPresence')
   })
 })
