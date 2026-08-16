@@ -16,6 +16,9 @@ export type AgentComposerProps = {
   // pending queue from a stuck counter without seeing what is in it. Count is derived (`.length`), so
   // the badge and the list can never disagree.
   queued?: readonly string[]
+  queuedIds?: readonly string[]
+  onRemoveQueued?: (id: string) => void
+  onSendQueued?: (id: string) => void
   // Whether the queue can still drain. The store's flush requires `processState === 'running'`
   // (store.ts flushAgentSteerQueue), so once the run exits the entries stay put forever — but the badge
   // went on promising "queued for delivery" over them, which is the one thing that can no longer happen.
@@ -68,6 +71,9 @@ export function AgentComposer({
   tools,
   contextUsage,
   queued = [],
+  queuedIds = [],
+  onRemoveQueued,
+  onSendQueued,
   queueDeliverable = true,
   onCopyQueued,
   commands = [],
@@ -209,7 +215,9 @@ export function AgentComposer({
               themselves have to be reachable. Same native `popover` as the context chip, for the same
               reason — the composer clips `overflow: hidden`, and the top layer escapes it. */}
           {queued.length > 0 ? (
-            <QueuedMessages queued={queued} deliverable={queueDeliverable}
+              <QueuedMessages queued={queued} queuedIds={queuedIds} deliverable={queueDeliverable}
+              {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
+              {...(onSendQueued ? { onSend: onSendQueued } : {})}
               {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
           ) : null}
         </div>
@@ -286,10 +294,13 @@ export function AgentComposer({
  * the run is gone. We do not offer to resend: this component cannot know whether a next run is the same
  * Agent, and silently replaying a stale steer into a fresh session is worse than saying nothing.
  */
-function QueuedMessages({ queued, deliverable, onCopy }: {
+function QueuedMessages({ queued, queuedIds, deliverable, onCopy, onRemove, onSend }: {
   queued: readonly string[]
+  queuedIds: readonly string[]
   deliverable: boolean
   onCopy?: (text: string) => void
+  onRemove?: (id: string) => void
+  onSend?: (id: string) => void
 }) {
   const cardId = useId()
   const label = deliverable
@@ -306,7 +317,7 @@ function QueuedMessages({ queued, deliverable, onCopy }: {
         <ol>
           {/* Index key: the queue is an append-and-drain list of plain strings with no identity of its
               own, and two identical prompts are a legitimate queue state — so text is not a key. */}
-          {queued.map((prompt, index) => <li key={index}>{prompt}</li>)}
+          {queued.map((prompt, index) => <li key={queuedIds[index] ?? index}><span>{prompt}</span><span className="composer__queued-actions">{onSend && queuedIds[index] ? <button type="button" className="composer-tool" onClick={() => onSend(queuedIds[index]!)}>Send now</button> : null}{onRemove && queuedIds[index] ? <button type="button" className="composer-tool" onClick={() => onRemove(queuedIds[index]!)}>Remove</button> : null}</span></li>)}
         </ol>
         {deliverable ? (
           <p>Delivered in this order when the Agent finishes its current turn.</p>
