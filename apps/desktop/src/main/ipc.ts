@@ -7,9 +7,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
-/** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. */
-const MAX_PASTED_IMAGE_BYTES = 16 * 1024 * 1024
-const PASTED_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
+/** The paste write and the pasted-image read share ONE extension whitelist and ONE byte cap
+ *  (`PASTED_IMAGE_*` in contracts). A `Set` is derived here for the `.has()` membership test; the
+ *  tuple itself stays the SSOT so the read side cannot drift from what the write accepted. */
+const PASTED_IMAGE_EXTENSION_SET = new Set<string>(PASTED_IMAGE_EXTENSIONS)
 
 import {
   app,
@@ -69,6 +70,8 @@ import {
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
+  PASTED_IMAGE_EXTENSIONS,
+  PASTED_IMAGE_MAX_BYTES,
   RESOURCE_USAGE_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
@@ -78,6 +81,8 @@ import { BrowserViewManager } from './browser-view-manager.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
+import { pastedDirectory } from './pasted-directory.js'
+import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
@@ -531,14 +536,15 @@ export async function registerIpc(args: {
     // bytes only — never a destination — so it cannot aim this write anywhere.
     const bytes = Buffer.from(input.bytes)
     if (bytes.byteLength === 0) throw new Error('Pasted image is empty.')
-    if (bytes.byteLength > MAX_PASTED_IMAGE_BYTES) throw new Error('Pasted image exceeds the size limit.')
-    const extension = PASTED_IMAGE_EXTENSIONS.has(input.extension) ? input.extension : 'png'
-    const directory = join(app.getPath('home'), '.agentmux', 'pasted')
+    if (bytes.byteLength > PASTED_IMAGE_MAX_BYTES) throw new Error('Pasted image exceeds the size limit.')
+    const extension = PASTED_IMAGE_EXTENSION_SET.has(input.extension) ? input.extension : 'png'
+    const directory = pastedDirectory(app.getPath('home'))
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const path = join(directory, `paste-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`)
     await writeFile(path, bytes, { mode: 0o600 })
     return path
   })
+  handle('ui:readPastedImage', (path: string) => readPastedImage(app.getPath('home'), path))
   handleWithEvent('ui:revealCrashLog', async (event) => {
     requireTrustedSender('ui:revealCrashLog', event)
     // 崩溃证据一直在写，却从来没有读者——没人知道路径就等于没有。这里只做「在文件管理器里点出来」，

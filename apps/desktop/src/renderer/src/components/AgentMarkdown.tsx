@@ -11,6 +11,8 @@ import {
   splitMarkdownFileReferences,
   type MarkdownFileReference
 } from '../lib/markdown-file-reference'
+import { splitPastedImageReferences } from '../lib/pasted-image-reference'
+import { ConversationImage, type ReadPastedImage } from './ConversationImage'
 import { parseHttpLinkUrl } from '../lib/open-destination'
 
 // Rendering an agent's answer as prose.
@@ -63,6 +65,8 @@ function defaultOpenHttpLink(): void {
 type InlineContext = {
   openHttpLink: OpenHttpLink
   openWorkspaceFile?: OpenWorkspaceFile
+  /** Reads a pasted image's bytes. Absent means pasted references stay plain text. */
+  readPastedImage?: ReadPastedImage
   workspaceRoot: string
   /** Host home directory, for expanding a leading `~/` in a cited path. See the component prop. */
   homeDir: string
@@ -91,7 +95,14 @@ function FileReference({
 }
 
 /**
- * Render one run of plain text, turning any workspace file references inside it into buttons.
+ * Render one run of plain text, turning any workspace file references inside it into buttons and any
+ * pasted-image references into thumbnails.
+ *
+ * Pasted images are detected FIRST and by their own narrow, app-owned shape — not through
+ * `splitMarkdownFileReferences`, whose contract is workspace-relative paths and which (correctly, after
+ * the `@` fix) refuses an out-of-workspace pasted path. One judgement claims the token, the other never
+ * sees it: no double-claim. A pasted token only becomes a thumbnail when the read seam is present;
+ * otherwise it flows on to ordinary file-reference handling (and, failing that, plain text).
  *
  * This is why detection walks text rather than only `href`: agents write paths in prose and in inline
  * code, and almost never as markdown links.
@@ -103,22 +114,36 @@ function TextWithFileReferences({
   text: string
   context: InlineContext
 }) {
-  const { openWorkspaceFile, workspaceRoot, homeDir } = context
-  if (!openWorkspaceFile) return <>{text}</>
-  const segments = splitMarkdownFileReferences(text, workspaceRoot, homeDir)
-  if (segments.length === 1 && segments[0]?.kind === 'text') return <>{text}</>
+  const { openWorkspaceFile, readPastedImage, workspaceRoot, homeDir } = context
+  const imageSegments = readPastedImage ? splitPastedImageReferences(text) : [{ kind: 'text' as const, text }]
+  const renderTextRun = (run: string, keyPrefix: string) => {
+    if (!openWorkspaceFile) return <Fragment key={keyPrefix}>{run}</Fragment>
+    const segments = splitMarkdownFileReferences(run, workspaceRoot, homeDir)
+    if (segments.length === 1 && segments[0]?.kind === 'text') return <Fragment key={keyPrefix}>{run}</Fragment>
+    return (
+      <Fragment key={keyPrefix}>
+        {segments.map((segment, index) =>
+          segment.kind === 'text' ? (
+            <Fragment key={index}>{segment.text}</Fragment>
+          ) : (
+            <FileReference
+              key={index}
+              text={segment.text}
+              reference={segment.reference}
+              openWorkspaceFile={openWorkspaceFile}
+            />
+          )
+        )}
+      </Fragment>
+    )
+  }
   return (
     <>
-      {segments.map((segment, index) =>
-        segment.kind === 'text' ? (
-          <Fragment key={index}>{segment.text}</Fragment>
+      {imageSegments.map((segment, index) =>
+        segment.kind === 'image' && readPastedImage ? (
+          <ConversationImage key={index} text={segment.text} path={segment.path} readPastedImage={readPastedImage} />
         ) : (
-          <FileReference
-            key={index}
-            text={segment.text}
-            reference={segment.reference}
-            openWorkspaceFile={openWorkspaceFile}
-          />
+          renderTextRun(segment.text, `t-${index}`)
         )
       )}
     </>
@@ -294,6 +319,7 @@ export function AgentMarkdown({
   className,
   openHttpLink = defaultOpenHttpLink,
   openWorkspaceFile,
+  readPastedImage,
   workspaceRoot = '',
   homeDir = ''
 }: {
@@ -302,6 +328,8 @@ export function AgentMarkdown({
   openHttpLink?: OpenHttpLink
   /** Absent means file references stay plain text — see `OpenWorkspaceFile`. */
   openWorkspaceFile?: OpenWorkspaceFile
+  /** Absent means pasted-image references stay plain text — see `ReadPastedImage`. */
+  readPastedImage?: ReadPastedImage
   /** Active Workspace root, for the within-root test on absolute paths. */
   workspaceRoot?: string
   /** Host home directory. Absent (the default) means a `~/`-prefixed path stays plain text, exactly
@@ -312,7 +340,8 @@ export function AgentMarkdown({
     openHttpLink,
     workspaceRoot,
     homeDir,
-    ...(openWorkspaceFile ? { openWorkspaceFile } : {})
+    ...(openWorkspaceFile ? { openWorkspaceFile } : {}),
+    ...(readPastedImage ? { readPastedImage } : {})
   }
   // The plain-text fallback still gets reference detection. A one-line answer naming a file is prose
   // by every markdown signal, and it is also the single most common way an agent cites a path — so

@@ -588,6 +588,10 @@ const mockApi: AgentMuxDesktopApi = {
     // No native dialog outside Electron; dismissing is the honest answer.
     chooseFiles: async () => null,
     savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
+    // No main process to confine a read to the pasted directory, so null is the honest answer: the
+    // conversation renderer treats it exactly as "not a readable pasted image" and keeps the plain-text
+    // reference, the same pre-feature behaviour. Not a throw — null IS the documented fallback signal.
+    readPastedImage: async () => null,
     // No file manager to reveal into, and no crash log here either — main writes it. `false` is the
     // same answer the desktop gives for "nothing recorded", and the caller already has to say that out
     // loud, so this needs no second wording.

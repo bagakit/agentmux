@@ -94,6 +94,56 @@ describe('detectTerminalPathLinks — real tool output', () => {
   })
 })
 
+/**
+ * A leading `@` is the composer/mention sigil, not part of the path. `PATH_TOKEN` used to leave it
+ * glued to the core (`@src/foo.ts` → `@src/foo.ts`), which then resolved against the root as the
+ * never-existing `<root>/@/…` and rendered a permanently-dead link. The fix strips ONLY a leading `@`;
+ * a mid-segment `@` (scoped npm packages) must survive, because removing `@` from the segment class
+ * instead would sever `@types/`. These three states are the whole contract — assert all three, since a
+ * fix that only satisfied the first (drop `@` from the class entirely) would be wrong yet pass it.
+ */
+describe('detectTerminalPathLinks — 起头的 @ 是记号不是路径字符', () => {
+  it('strips a leading @ from a relative path, and the span excludes the @', () => {
+    const line = '@src/foo.ts'
+    const link = onlyLink(line)
+    expect(link.path).toBe('src/foo.ts')
+    // The underline starts AT the path, past the sigil — index advances by one, length shrinks.
+    expect(link.index).toBe(1)
+    expect(line.slice(link.index, link.index + link.length)).toBe('src/foo.ts')
+  })
+
+  it('sends a leading-@ absolute path down the absolute branch, so an out-of-workspace paste is rejected', () => {
+    // This is the load-bearing case for the paste feature: a pasted image lands in
+    // `<home>/.agentmux/pasted/…`, OUTSIDE the workspace, and its token is written `@/abs/path`. With
+    // the `@` stripped the core is a real absolute path, which the within-root test correctly rejects
+    // (workspace-relative detection stops claiming it, so the image renderer can take over).
+    expect(detectTerminalPathLinks('@/Users/x/.agentmux/pasted/paste-1.png', ROOT)).toEqual([])
+    // A leading-@ absolute path that DOES live inside the root still relativises, proving the `@` only
+    // routes to the absolute branch rather than being confused for a relative segment.
+    const link = onlyLink(`@${ROOT}/src/x.ts`)
+    expect(link.path).toBe('src/x.ts')
+  })
+
+  it('keeps a mid-segment @ intact — scoped packages must still resolve (the fix boundary)', () => {
+    // `node_modules/@types/node/index.d.ts` never had the bug: the `@` is preceded by `/`, which is in
+    // the lookbehind set, so it never starts a match. This asserts the fix did NOT reach into the
+    // segment class and sever it — the failure mode of the wrong fix.
+    const link = onlyLink('node_modules/@types/node/index.d.ts')
+    expect(link.path).toBe('node_modules/@types/node/index.d.ts')
+    expect(link.index).toBe(0)
+  })
+
+  it('carries a :line:col suffix through a leading-@ path without offsetting it', () => {
+    // The suffix is parsed off `match[0]` by the raw-core length, so stripping the `@` must not shift
+    // the line/column. `@path:12:3` → path `path`, line 12, col 3.
+    const link = onlyLink('@src/foo.ts:12:3')
+    expect(link.path).toBe('src/foo.ts')
+    expect(link.line).toBe(12)
+    expect(link.column).toBe(3)
+    expect(link.index).toBe(1)
+  })
+})
+
 describe('detectTerminalPathLinks — deliberate rejections', () => {
   it('rejects bare dotted words that are not paths', () => {
     for (const prose of ['e.g.', 'foo.bar', 'i.e.', 'README', 'v1.2.3', 'Node.js']) {
