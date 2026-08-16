@@ -217,7 +217,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
       },
       workspaces: [{ id: 'workspace', name: 'Test Workspace', hostId: 'local', path: workspace, kind: 'folder' }],
       appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
 
     const store1 = new AgentMuxFileAgentSessionStore(sessionStorePath)

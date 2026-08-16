@@ -5,6 +5,7 @@ export const BROWSER_TOOLBAR_ITEM_ORDER = [
   'screenshot',
   'devTools',
   'viewport',
+  'saveBookmark',
   'more'
 ] as const satisfies readonly (keyof BrowserToolbarConfig)[]
 
@@ -62,6 +63,7 @@ export const BROWSER_TOOLBAR_ITEM_LABELS: Record<BrowserToolbarItem, string> = {
   screenshot: 'Screenshot',
   devTools: 'DevTools',
   viewport: 'Viewport',
+  saveBookmark: 'Save bookmark',
   more: 'More'
 }
 

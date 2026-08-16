@@ -99,7 +99,7 @@ function seed(document: FileDocument = {
     executors: {},
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' },
-    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   }
   const tabId = fileTabId(workspace.id, document.path)
   const tab = {

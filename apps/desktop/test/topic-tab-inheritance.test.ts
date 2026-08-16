@@ -29,7 +29,7 @@ const config: AppConfig = {
   },
   workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Scratch', hostId: 'local', path: scratchPath, kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 function launcher(id: string, binding: string | undefined = topicId): WorkbenchTab {

@@ -59,7 +59,7 @@ const CONFIG: AppConfig = {
   executors: {},
   workspaces: [WORKSPACE],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 // The click's captured intent: what the user was aiming at when they pressed the button.

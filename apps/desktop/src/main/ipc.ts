@@ -1,6 +1,8 @@
 import { projectAppearance } from './project-appearance.js'
-import { discoverAgentSkills } from '@agentmux/core'
+import { discoverAgentSkills, runProcess } from '@agentmux/core'
 import { captureComposerScreenshot } from './composer-screenshot.js'
+import { readBookmark } from './bookmark-file.js'
+import { bookmarkKindForPath } from '../shared/bookmark-file.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -407,6 +409,16 @@ export async function registerIpc(args: {
     await files.readDirectory(workspace(config, workspaceId), path)
   )
   handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
+  handle('files:readBookmark', async (workspaceId: string, path: string) => {
+    // 书签读这条走字节而不是 `files.read` 的 string：二进制 `.webloc` 过 utf8 会坏。种类由路径判，
+    // 非书签返回 null。一次返回 {url, binary}：url 供 openFile 决定开 Browser 还是退回文本；binary
+    // 供「查看源码」判断（二进制那一档不给，§2.7）。读失败/坏文件 url=null，binary 照字节如实报。
+    const kind = bookmarkKindForPath(path)
+    if (!kind) return null
+    const bytes = await files.readBookmarkBytes(workspace(config, workspaceId), path)
+    if (!bytes) return { url: null, binary: false }
+    return await readBookmark(kind, bytes, runProcess)
+  })
   handle('files:write', async (workspaceId: string, input: WorkspaceFileWriteInput) =>
     await files.write(workspace(config, workspaceId), input)
   )

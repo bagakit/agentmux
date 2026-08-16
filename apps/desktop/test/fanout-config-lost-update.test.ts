@@ -36,7 +36,7 @@ const BASE: AppConfig = {
   executors: {},
   workspaces: [{ id: 'repo', name: 'Main', hostId: 'local', path: '/repo', kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 const REQUEST: RunFanOutInput = {

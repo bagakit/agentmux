@@ -34,7 +34,7 @@ const CONFIG: AppConfig = {
     }
   ],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 type Recorded = { defaultPaths: string[]; saved: AppConfig[] }

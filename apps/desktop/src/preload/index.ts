@@ -97,6 +97,8 @@ const api: AgentMuxPreloadApi = {
     readDirectory: (workspaceId: string, path: string) =>
       ipcRenderer.invoke('files:readDirectory', workspaceId, path),
     read: (workspaceId: string, path: string) => ipcRenderer.invoke('files:read', workspaceId, path),
+    readBookmark: (workspaceId: string, path: string) =>
+      ipcRenderer.invoke('files:readBookmark', workspaceId, path),
     write: (workspaceId: string, input: WorkspaceFileWriteInput) => ipcRenderer.invoke('files:write', workspaceId, input),
     observe: (workspaceId: string, path: string) => ipcRenderer.invoke('files:observe', workspaceId, path),
     unobserve: (workspaceId: string, path: string) => ipcRenderer.invoke('files:unobserve', workspaceId, path),

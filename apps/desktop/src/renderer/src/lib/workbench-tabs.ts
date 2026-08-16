@@ -65,6 +65,15 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   kind: 'browser'
   workspaceId: string
   browserId: string
+  /**
+   * 这个 Browser 是从一份书签文件打开的（`openFile` 的书签分支），记住它是哪份、以及那份文件本身是不是
+   * 二进制。只为「查看源码」服务：有它才显示那个按钮（普通网页没有源可看），`binary` 决定按钮灰不灰
+   * （二进制 plist 过 `files.read` 的 utf8 会坏，那一档不给看，§2.7）。缺省即「不是从书签开的」。
+   *
+   * **瞬时事实，不进持久化**：browser 面冷启动整面剥离（见 workbench-persistence 的说明），这一位随之而去。
+   * 页内导航（`reduceBrowserEvent` 的 `updated`）经 `...surface` 保留它——`event.browser` 是纯快照没这字段。
+   */
+  bookmarkOrigin?: { path: string; binary: boolean }
 }
 
 export type WorkbenchSurface =

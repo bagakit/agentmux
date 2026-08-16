@@ -91,6 +91,15 @@ describe('.webloc emission is real plist that plutil accepts', () => {
     expect(roundTripped.exitCode).toBe(0)
     expect(parseWeblocUrl(roundTripped.stdout)).toBe(url)
   })
+
+  // 解 escape 的**顺序**判据。unescapeXml 把 `&amp;` 放在最后解是承重的，但上面那条 URL 证明不了：
+  // 它含的是裸 `<`/`&`，两种顺序都能往返成功（实测把 `&amp;` 提到最前，上面那条依然全绿）。
+  // 判据必须是 URL 里含**字面量实体文本** `&lt;`：escape 后成 `&amp;lt;`，若先解 `&amp;` 会先得到
+  // `&lt;`，再被后面那步解成 `<` —— 凭空多解一层，用户存的地址被悄悄改写。
+  it('URL 里含字面量 &lt; 时往返仍逐字相等（钉住 &amp; 最后解）', () => {
+    const url = 'https://example.com/?q=&lt;tag&gt;&amp;x'
+    expect(parseWeblocUrl(emitWebloc(url))).toBe(url)
+  })
 })
 
 describe('.url emission matches real on-disk samples (LF, single URL= line)', () => {
@@ -127,6 +136,17 @@ describe('parsing returns null (never throws) on inputs with no URL', () => {
   it('parseBookmarkUrl extracts from valid content of each kind', () => {
     expect(parseBookmarkUrl('webloc', emitWebloc('https://x/y'))).toBe('https://x/y')
     expect(parseBookmarkUrl('url', emitUrlShortcut('https://x/y'))).toBe('https://x/y')
+  })
+
+  // 上面四条「取不出」全在**结构缺席**那一侧（没有 plist、没有 URL 键、没有 URL= 行），它们连正则/前缀
+  // 都命不中，所以证明不了「命中了但值是空」这一段。少了下面这条，把 `url.length > 0 ? url : null` 改成
+  // `return url` 依然全绿（实测存活），而那个实现会把空 `<string></string>` 当成一个有效 URL 交出去——
+  // `openFile` 于是导航到一个空地址，而不是落穿回「当文本打开」。键在场、值为空是真实存在的坏文件形态。
+  it('URL 键在场但值为空 -> 仍是 null（不是空串）', () => {
+    expect(parseWeblocUrl('<key>URL</key><string></string>')).toBeNull()
+    expect(parseWeblocUrl('<key>URL</key><string>   </string>')).toBeNull()
+    expect(parseUrlShortcutUrl('[InternetShortcut]\nURL=\n')).toBeNull()
+    expect(parseUrlShortcutUrl('[InternetShortcut]\nURL=   \n')).toBeNull()
   })
 })
 

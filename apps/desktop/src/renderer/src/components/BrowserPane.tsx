@@ -4,10 +4,12 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  Bookmark,
   Camera,
   Check,
   Copy,
   Ellipsis,
+  FileCode2,
   Globe2,
   LoaderCircle,
   Monitor,
@@ -87,6 +89,8 @@ export function BrowserPane({
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const reportError = useAppStore((state) => state.reportError)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
+  const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
+  const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -518,6 +522,38 @@ export function BrowserPane({
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
+        ) : null}
+        {toolbar?.saveBookmark ? (
+          <button
+            type="button"
+            aria-label="Save this page as a bookmark"
+            title="Save this page as a .webloc bookmark in the workspace"
+            disabled={tab.url === 'about:blank' || busy}
+            onClick={() => void runCommand(async () => {
+              await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+            })}
+          >
+            <Bookmark size={14} />
+          </button>
+        ) : null}
+        {tab.bookmarkOrigin ? (
+          <button
+            type="button"
+            aria-label="View bookmark source"
+            // 二进制 plist 过 `files.read` 的 utf8 会坏，那一档不给看源码（§2.7）。表达方式按用户原话
+            // 「按钮灰掉，hover 告知」——不弹框不 toast 不插警告条；这句只说清为什么这一个不行。
+            title={tab.bookmarkOrigin.binary
+              ? "This bookmark is a binary file — its source can't be shown as text"
+              : "View this bookmark's source"}
+            disabled={tab.bookmarkOrigin.binary || busy}
+            onClick={() => void runCommand(async () => {
+              const origin = tab.bookmarkOrigin
+              if (!origin || origin.binary) return
+              await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
+            })}
+          >
+            <FileCode2 size={14} />
+          </button>
         ) : null}
         {toolbar?.more ? (
           <DropdownMenu.Root onOpenChange={setMenuOpen}>

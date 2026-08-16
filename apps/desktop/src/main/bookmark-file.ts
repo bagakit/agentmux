@@ -11,7 +11,12 @@
  * receiver 问题，但注入点仍照既有形状收一个函数值。
  */
 import type { ProcessRunner } from '@agentmux/core'
-import { isBinaryContent, parseWeblocUrl } from '../shared/bookmark-file.js'
+import {
+  isBinaryContent,
+  parseUrlShortcutUrl,
+  parseWeblocUrl,
+  type BookmarkFileKind
+} from '../shared/bookmark-file.js'
 
 /** macOS 自带，固定绝对路径（同 `composer-screenshot.ts` 用 `/usr/sbin/screencapture` 的形状）。 */
 const PLUTIL = '/usr/bin/plutil'
@@ -48,4 +53,41 @@ export async function readWeblocUrl(
   } catch {
     return null
   }
+}
+
+/**
+ * 从一份书签文件的**原始字节**里按种类取导航 URL。只有 main 能读到字节、也只有 main 有 `plutil`
+ * （渲染侧 `files.read` 给的是 `toString('utf8')` 后的 string，二进制会被破坏）。取不出返回 `null`。
+ *
+ * `.url` 永远是文本（`[InternetShortcut]`），直接解析，不 shell 出去；`.webloc` 可能是二进制，走
+ * `readWeblocUrl`（内部按 NUL 判定是否要 `plutil`）。分派留在 main 而不在 shared，是因为它带着
+ * `runProcess`——那是 main 专属能力。仅由 `readBookmark` 调用。
+ */
+async function readBookmarkUrl(
+  kind: BookmarkFileKind,
+  rawBytes: Uint8Array,
+  runProcess: ProcessRunner
+): Promise<string | null> {
+  if (kind === 'webloc') return readWeblocUrl(rawBytes, runProcess)
+  return parseUrlShortcutUrl(new TextDecoder().decode(rawBytes))
+}
+
+/**
+ * `openFile` 的书签分支经 IPC 调这里，一次拿齐它要的两件事：
+ *  - `url`：拿去导航（取不出＝`null`，调用方退回把文件当文本打开）。
+ *  - `binary`：这份书签文件本身是不是二进制。**「查看源码」要用它**——二进制 plist 过 `files.read`
+ *    的 `toString('utf8')` 会静默破坏（§2.7），所以那一档不给「看源码」（按钮灰掉、hover 告知）。
+ *    判据是**字节里有没有 NUL**（`isBinaryContent`，与全仓同一 SSOT），不是扩展名、也不是「解析失败」。
+ *
+ * 两件事一次 IPC 返回，而不是让渲染侧为了判二进制再 `files.read` 一趟——那一趟本身就会把二进制读坏。
+ * `.url` 恒为文本，`binary` 恒 `false`。
+ */
+export async function readBookmark(
+  kind: BookmarkFileKind,
+  rawBytes: Uint8Array,
+  runProcess: ProcessRunner
+): Promise<{ url: string | null; binary: boolean }> {
+  const binary = isBinaryContent(new TextDecoder().decode(rawBytes))
+  const url = await readBookmarkUrl(kind, rawBytes, runProcess)
+  return { url, binary }
 }

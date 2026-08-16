@@ -43,7 +43,7 @@ const baseConfig: AppConfig = {
   },
   workspaces: [],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 function workspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
@@ -181,7 +181,7 @@ describe('ConfigStore workspace identity', () => {
       version: DEFAULT_CONFIG.version - 1,
       workspaces: [workspace({ id: 'ws-1' })],
       appearance: { terminalTheme: 'catppuccin-mocha' },
-      browser: { toolbar: { selectElement: false, screenshot: true, devTools: false, viewport: true, more: false } },
+      browser: { toolbar: { selectElement: false, screenshot: true, devTools: false, viewport: true, saveBookmark: false, more: false } },
       notifications: { mode: NOTIFICATION_TIERS[NOTIFICATION_TIERS.length - 1]!.id }
     }))
 
@@ -961,7 +961,7 @@ describe('ConfigStore workspace identity', () => {
     const saved = await store.save({
       ...baseConfig,
       appearance: { terminalTheme: 'catppuccin-mocha' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     })
 
     expect(saved.appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
@@ -971,7 +971,7 @@ describe('ConfigStore workspace identity', () => {
     await expect(store.save({
       ...baseConfig,
       appearance: { terminalTheme: 'retired-theme' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     } as never)).rejects.toThrow()
   })
 
@@ -1010,6 +1010,7 @@ describe('ConfigStore workspace identity', () => {
           screenshot: true,
           devTools: false,
           viewport: true,
+          saveBookmark: false,
           more: false
         }
       }
@@ -1020,6 +1021,7 @@ describe('ConfigStore workspace identity', () => {
       screenshot: true,
       devTools: false,
       viewport: true,
+      saveBookmark: false,
       more: false
     })
     // save() 存的是作者写的形状，get() 交出的是补齐过的形状——这里点名差的就是授权位那一个字段。

@@ -10,7 +10,7 @@ const config: AppConfig = {
   executors: {},
   workspaces: [],
   appearance: { terminalTheme: 'graphite' },
-  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
 // Non-interactive on two axes: GH_PROMPT_DISABLED so gh never blocks on a terminal prompt in the

@@ -342,6 +342,7 @@ export type BrowserToolbarConfig = {
   screenshot: boolean
   devTools: boolean
   viewport: boolean
+  saveBookmark: boolean
   more: boolean
 }
 
@@ -1142,6 +1143,13 @@ export type AgentMuxDesktopApi = {
   files: {
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
+    /**
+     * 读一份书签文件（`.webloc`/`.url`），一次拿齐 `openFile` 要的两件事：`url`（拿去导航，取不出＝
+     * `null`，调用方退回把文件当文本打开）和 `binary`（这份文件本身是不是二进制）。书签读走这条而不是
+     * `read`：二进制 `.webloc` 过 `read` 的 `toString('utf8')` 会被破坏，且取 URL 要 main 侧的 `plutil`。
+     * `binary` 供「查看源码」判断——二进制那一档不给（§2.7），判据是字节里有没有 NUL。非书签路径返回 `null`。
+     */
+    readBookmark(workspaceId: string, path: string): Promise<{ url: string | null; binary: boolean } | null>
     write(workspaceId: string, input: WorkspaceFileWriteInput): Promise<WorkspaceFileWriteResult>
     observe(workspaceId: string, path: string): Promise<void>
     unobserve(workspaceId: string, path: string): Promise<void>

@@ -56,7 +56,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     ],
     appearance: { terminalTheme: 'graphite' },
     browser: {
-      toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true }
+      toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true }
     },
     ...overrides
   }
