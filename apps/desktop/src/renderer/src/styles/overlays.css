@@ -49,8 +49,11 @@
   box-shadow: var(--elev-3), var(--hl-strong);
   overflow: hidden;
 }
-/* The title/description name the dialog for assistive tech without spending vertical chrome. */
-.quick-switch__title, .quick-switch__description { position: absolute; width: 1px; height: 1px; padding:0; margin:-1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Visually hidden, still read to assistive tech — one declaration for every dialog label that names
+   itself without spending visible chrome: the quick switcher's title/description and the image
+   lightbox's a11y title. Kept in one place so the pattern has a single home (the day `clip: rect()`
+   becomes `clip-path`, it moves once, not once per copy). */
+.quick-switch__title, .quick-switch__description, .md-conversation-image__a11y { position: absolute; width: 1px; height: 1px; padding:0; margin:-1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .quick-switch__input { display: flex; align-items: center; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); color: var(--text-3); box-shadow: inset 0 -1px var(--line-soft); }
 .quick-switch__input > svg { flex: none; }
 .quick-switch__input input { flex: 1; min-width: 0; border: 0; padding:0; background: transparent; color: var(--text); font-size: var(--fs-title); }
@@ -193,4 +196,30 @@
   color: var(--amber-text);
   font-size: var(--fs-micro);
   line-height: 1.35;
+}
+
+/* Conversation image lightbox — a pasted image enlarged. A Radix Dialog Portal (focus trap and Escape
+   are free from the primitive, so we do not hand-roll them); it sits above the other overlays because it
+   is raised FROM inside the conversation, on top of whatever surface is showing. The scrim darkens the
+   window and clicking it closes (Radix routes an overlay click to onOpenChange); the content is only the
+   image, sized to fit the viewport with room to breathe, so the whole point — seeing it larger — is met
+   without chrome. The a11y title names the dialog for assistive tech without spending visible height. */
+.md-conversation-image__overlay { position: fixed; z-index: 130; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.md-conversation-image__lightbox {
+  position: fixed;
+  z-index: 131;
+  top: 50%;
+  left: 50%;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  transform: translate(-50%, -50%);
+  outline: none;
+}
+.md-conversation-image__full {
+  display: block;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 30px 90px var(--scrim-3);
 }

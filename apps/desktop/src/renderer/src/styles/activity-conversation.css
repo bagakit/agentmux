@@ -230,6 +230,31 @@
 }
 .md-image-attachment:hover { color: var(--green); }
 .md-image-attachment--unavailable { color: var(--text-3); cursor: default; }
+
+/* A pasted (or captured) image cited in the conversation renders as a clickable thumbnail rather than
+   the dead text link the user reported. The button is a bare frame — no padding, no fill — so the image
+   IS the affordance; a soft stroke and radius mark it as a tile, and the pointer plus a lift on hover say
+   it opens. The thumbnail is height-capped so a large paste does not blow out the turn's density; the
+   image scales to fit and the button shrinks with it (inline-block on the image kills the descender gap).
+   Click enlarges into the lightbox (overlays.css). */
+.md-conversation-image {
+  display: inline-block;
+  max-width: 100%;
+  padding:0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  vertical-align: bottom;
+  overflow: hidden;
+}
+.md-conversation-image:hover { border-color: var(--line); }
+.md-conversation-image__thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
 .md-image-attachment--unavailable:hover { color: var(--text-3); }
 
 /* User speech gets a quiet ground so the turn has a visible start and end; the assistant reply flows

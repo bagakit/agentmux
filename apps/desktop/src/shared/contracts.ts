@@ -974,6 +974,40 @@ export type BrowserPng = {
   byteLength: number
 }
 
+// A pasted (or captured) image is written to `<home>/.agentmux/pasted/…` and cited in the message text
+// as a path the Agent reads for itself. This is the ONE list of formats that round-trips: the paste
+// write clamps an unknown clip format to `png`, and the read IPC refuses any path whose extension is not
+// here. Both sides import THIS tuple — a second hand-copied whitelist is exactly the drift that makes
+// "the write accepted it but the read shows a broken image" appear in only half the cases. Values are
+// lowercase, no leading dot.
+export const PASTED_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const
+export type PastedImageExtension = (typeof PASTED_IMAGE_EXTENSIONS)[number]
+
+/** The `<img>`-ready mime for each accepted extension. `jpg` and `jpeg` share one. */
+export const PASTED_IMAGE_MIME_TYPES: Record<PastedImageExtension, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp'
+}
+
+/** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. The
+ *  read cap equals the write cap so nothing the paste accepts is later unreadable. */
+export const PASTED_IMAGE_MAX_BYTES = 16 * 1024 * 1024
+
+/**
+ * A pasted image read back from disk as an `<img>`-ready data URI. Shape clones `BrowserPng`'s
+ * `{ mimeType, dataUrl, byteLength }` so the renderer treats both the same way (see `ScreenshotEditor`,
+ * which drops such a `dataUrl` straight into an `<img src>`). No width/height: unlike a browser
+ * screenshot these are not decoded in main, and the thumbnail sizes itself with CSS.
+ */
+export type PastedImage = {
+  mimeType: string
+  dataUrl: string
+  byteLength: number
+}
+
 export type BrowserScreenshotCapture = {
   browserId: string
   navigationId: string
@@ -1178,6 +1212,17 @@ export type AgentMuxDesktopApi = {
     chooseFiles(input?: { defaultPath?: string }): Promise<string[] | null>
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
+    /**
+     * Read one pasted/captured image back as an `<img>`-ready data URI.
+     *
+     * The trust boundary is the pasted directory, NOT a workspace root: these files live outside every
+     * workspace, so this cannot route through `files.read` (which is hard-locked inside a workspace and
+     * returns a utf8 string that would corrupt image bytes). Main confines the read to
+     * `<home>/.agentmux/pasted` and rejects anything that escapes it, a non-image extension, or an
+     * oversized file. Returns null when the path is not a readable pasted image so the caller can fall
+     * back to the plain text reference rather than render a broken thumbnail.
+     */
+    readPastedImage(path: string): Promise<PastedImage | null>
     /**
      * Reveal the local crash-evidence file in the OS file manager, or report that nothing has been
      * written yet.
