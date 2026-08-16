@@ -47,6 +47,7 @@ import {
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
+import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
 import { presentError } from './lib/error-presentation'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
@@ -560,12 +561,16 @@ type AppState = {
    * `workspaceId` 缺省时按活动 Workspace 解析——绝大多数调用方是用户当场点的，那正是他想要的。
    * 但**异步**调用方（先建文件再打开、先读 diff 再切模式）必须显式传自己开头解析出来的那一个：
    * 不传就等于在同一条路上解析两次，中间用户切了侧栏就漂移，而症状不是报错而是静默开错文件。
+   *
+   * `openAsText` 强制按文本打开，跳过书签默认开进 Browser 那条分支——这就是「查看书签源码」（§2.6）：
+   * 同一个 `openFile` 回到既有 Monaco 路径，不新造 surface kind。只有书签的「查看源码」按钮传 true。
    */
   openFile(
     path: string,
     tabGroupId?: string,
     location?: { line: number; column?: number },
-    workspaceId?: string
+    workspaceId?: string,
+    openAsText?: boolean
   ): Promise<void>
   /**
    * 给一个已在板上、但还没有文档的文件面装上它的文档。
@@ -666,9 +671,16 @@ type AppState = {
   createBrowser(
     tabGroupId: string,
     launcher?: { tabId: string; regionId: string },
-    url?: string
+    url?: string,
+    bookmarkOrigin?: { path: string; binary: boolean }
   ): Promise<void>
   openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination): Promise<void>
+  /**
+   * 把一个页面存成 `.webloc` 书签，落在 workspace 根下。文件名由标题派生并做撞名退避
+   * （`Name.webloc`、`Name 2.webloc`…），返回落地的相对路径。取消（about:blank）或全部候选都撞名
+   * 时抛，由调用方（BrowserPane 的 run）报到错误面。
+   */
+  saveBrowserBookmark(workspaceId: string, url: string, title: string): Promise<string>
   applyBrowserEvent(event: BrowserEvent): void
   addBrowserAnnotation(annotation: BrowserAnnotation): void
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
@@ -3272,13 +3284,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  async openFile(path, tabGroupId, location, requestedWorkspaceId) {
+  async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText) {
     // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
     // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     const layout = workspaceId ? get().layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
+    // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
+    // 与下面目录分支同一个「不进 Monaco」的形状，但判据是纯字符串（扩展名），所以在读之前就分叉：
+    // 二进制 `.webloc` 走 `files.read` 的 `toString('utf8')` 会被破坏，取 URL 必须走 main 侧字节 +
+    // `plutil`（`files.readBookmark`）。取不出 URL（二进制读不回、坏文件）就落穿，退回把它当文本
+    // 打开——诚实失败，不静默丢。`openAsText` 是「查看源码」入口：显式绕过这条分支回到文本路径（§2.6）。
+    const bookmarkKind = openAsText ? null : bookmarkKindForPath(path)
+    if (bookmarkKind) {
+      const bookmark = await api.files.readBookmark(workspaceId, path)
+      if (bookmark?.url) {
+        // 把书签来历带进 Browser 面：供「查看源码」按钮显示与灰不灰（binary 那档不给，§2.7）。
+        await get().createBrowser(tabGroupId ?? layout.activeGroupId, undefined, bookmark.url, {
+          path,
+          binary: bookmark.binary
+        })
+        return
+      }
+    }
     const key = documentKey(workspaceId, path)
     // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
     // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
@@ -4153,7 +4182,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     void get().refreshSession(session.id)
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank') {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -4194,7 +4223,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         regionId,
         kind: 'browser',
         workspaceId,
-        browserId: regionId
+        browserId: regionId,
+        // 从书签开的才带 origin（供「查看源码」）；普通新开不写这个键（exactOptionalPropertyTypes 下
+        // 不能塞 undefined），故条件展开而不是 `bookmarkOrigin: bookmarkOrigin`。
+        ...(bookmarkOrigin ? { bookmarkOrigin } : {})
       }
       let attached = false
       set((current) => {
@@ -4228,6 +4260,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
       throw error
     }
+  },
+  async saveBrowserBookmark(workspaceId, url, title) {
+    // about:blank 不是一个能存的地方——存了它打开也是空页。当作「没什么可存」，不写文件也不报错。
+    if (!url || url === 'about:blank') throw new Error('This page has no address to bookmark yet')
+    const content = emitWebloc(url)
+    const base = bookmarkFileNameFromTitle(title)
+    // 撞名退避：`Name.webloc`、`Name 2.webloc`……。判据是 `files.write` 带 `expectedRevision: null`——
+    // 文件已存在时它返回 conflict（不覆盖），于是我们换下一个候选，而不是默默盖掉用户已有的书签。
+    // ponytail: 上限 50 个候选；同一标题存到第 50 个还没空位是病态使用，那时如实抛错比无限试更诚实。
+    let lastReason = ''
+    for (let n = 1; n <= 50; n++) {
+      const path = n === 1 ? `${base}.webloc` : `${base} ${n}.webloc`
+      const result = await api.files.write(workspaceId, { path, content, expectedRevision: null })
+      if (result.status === 'written') {
+        // 让文件树/Topics/Board 看到新文件——与 createPath 用同一个失效计数器，不另起一套。
+        set((current) => ({
+          workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
+        }))
+        return path
+      }
+      if (result.status === 'error') throw new Error(result.message)
+      // conflict：这个名字被占了，试下一个。
+      lastReason = `${path} already exists`
+    }
+    throw new Error(`Could not save the bookmark: ${lastReason}`)
   },
   async openHttpLink(origin, rawUrl, destination) {
     const url = normalizeHttpLinkUrl(rawUrl)

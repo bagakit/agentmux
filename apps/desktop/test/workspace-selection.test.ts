@@ -45,7 +45,7 @@ describe('selected worktree workspace context', () => {
       executors: {},
       workspaces: [workspace],
       appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
     const browser: BrowserSnapshot = {
       id: 'browser-1',
@@ -189,7 +189,7 @@ describe('selected worktree workspace context', () => {
       executors: {},
       workspaces: [main],
       appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
     const selectedConfig: AppConfig = {
       ...initialConfig,
@@ -295,7 +295,7 @@ describe('selected worktree workspace context', () => {
         executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
         workspaces: [workspace],
         appearance: { terminalTheme: 'graphite' },
-        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
       },
       sessions: [session],
       activeWorkspaceId: workspace.id,
@@ -337,7 +337,7 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' },
-    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   }
   useAppStore.setState({
     config,
@@ -531,7 +531,7 @@ describe('Scratch Topic workbench binding', () => {
         },
         workspaces: [workspace],
         appearance: { terminalTheme: 'graphite' },
-        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
       },
       sessions: [],
       timelines: {},

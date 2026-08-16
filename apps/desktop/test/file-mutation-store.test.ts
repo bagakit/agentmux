@@ -240,7 +240,7 @@ describe('file mutation resource reconciliation', () => {
       executors: {},
       workspaces: [workspace],
       appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
     useAppStore.setState({
       config,
@@ -409,7 +409,7 @@ describe('file mutation resource reconciliation', () => {
         executors: {},
         workspaces: [workspace],
         appearance: { terminalTheme: 'graphite' },
-        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
       },
       activeWorkspaceId: workspace.id,
       layouts: { [workspace.id]: createWorkspaceLayout('pane') }
@@ -450,7 +450,7 @@ describe('file mutation resource reconciliation', () => {
         executors: {},
         workspaces: [workspace],
         appearance: { terminalTheme: 'graphite' },
-        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
       },
       activeWorkspaceId: workspace.id,
       layouts: { [workspace.id]: createWorkspaceLayout('pane') },

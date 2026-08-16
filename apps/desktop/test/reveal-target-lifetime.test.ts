@@ -43,7 +43,7 @@ const config: AppConfig = {
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' },
   browser: {
-    toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true }
+    toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true }
   }
 }
 
