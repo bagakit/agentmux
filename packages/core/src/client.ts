@@ -59,6 +59,8 @@ import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { cloneSession, sameRun } from './agent-session-identity.js'
+import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
+import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { AgentPromptSubmissionCoordinator } from './prompt-submission.js'
 import {
@@ -224,6 +226,12 @@ export type AgentMuxAgentRuntimeStatus = {
   session: AgentMuxAgentSession
   run: AgentMuxRun
   capabilities: AgentCapabilitySnapshot['capabilities']
+  /**
+   * 三条不折叠的观察轴（进程活性 / 语义活性 / 就绪性），从 Session 现在的三条事实经 {@link observeAgent}
+   * 收敛而来——**唯一**的观察合同投影。CLI（list.sessions / whoami）与渲染层读的是同一个函数的结果，
+   * 谁也不再各拼一份塌成 busy 的逻辑。
+   */
+  observation: AgentObservation
 }
 
 function runRef(runId: string): AgentMuxRunRef {
@@ -1271,10 +1279,28 @@ export class AgentMuxClient {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
     const run = await this.requireCurrentAgentRun(session)
+    const projectedRun = this.projectRun(run, session)
+    const capabilities = { ...this.providers.get(session.providerId).catalog.capabilities }
+    // 三条轴的观察合同：语义活性优先取 Session 自己声明的 semanticStatus（它带 native-hook/acp 来源，
+    // 以及那条声明的观察时刻）；缺席时如实退回进程投影这条中性事实（source `run-process`），绝不伪造一条
+    // 活动声明。就绪性读 pendingInteraction（卡在待答请求上）与终端能力降级（握手未确认）。
+    const status = session.semanticStatus ?? {
+      state: runDisplayState(projectedRun.state),
+      source: 'run-process' as const,
+      observedAt: projectedRun.observedAt
+    }
+    const observation = observeAgent({
+      process: projectedRun.state,
+      status,
+      timelineCapability: capabilities.timeline,
+      awaitingRequest: session.pendingInteraction !== undefined,
+      terminalCapabilityUnverified: session.terminalCapability !== undefined
+    }, Date.now())
     return {
       session: cloneSession(session),
-      run: this.projectRun(run, session),
-      capabilities: { ...this.providers.get(session.providerId).catalog.capabilities }
+      run: projectedRun,
+      capabilities,
+      observation
     }
   }
 

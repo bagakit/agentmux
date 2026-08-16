@@ -32,6 +32,7 @@ import {
   type ProjectBoardColumn
 } from '../lib/project-board'
 import { boardRunCardAttributes } from '../lib/board-run-card'
+import { observeAgentSession, observationSummary } from '../lib/agent-observation'
 import { formatRelativeAge } from '../lib/relative-age'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
@@ -89,6 +90,12 @@ const ROW_KIND_META: Record<BoardRow['kind'], {
 }
 
 function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => void }) {
+  // 三条不折叠的观察轴（进程活性 / 语义活性 / 就绪性）经 Core 的同一份合同投影而来（observeAgentSession
+  // 只做形状归一，判定住在 @agentmux/core/agent-status）。落在状态点的 title 上，让"活着但闲着"「在跑」
+  // 「活着但还没就绪」在同一格里读得出区别，而不是塌成一个 busy。终端 Session 没有语义活性这层概念。
+  const observationTitle = session.kind === 'agent'
+    ? observationSummary(observeAgentSession(session, Date.now()))
+    : undefined
   return (
     <button
       type="button"
@@ -96,7 +103,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       onClick={onOpen}
       aria-label={`Open ${session.label}`}
     >
-      <span className="board-run-card__status"><StatusDot status={session.status} /></span>
+      <span className="board-run-card__status" {...(observationTitle ? { title: observationTitle } : {})}><StatusDot status={session.status} /></span>
       <span className="board-run-card__identity">
         <strong>{session.label}</strong>
         <small>{session.providerId ? <><AgentProviderIcon providerId={session.providerId} size={11} /> {agentProviderLabel(session.providerId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
