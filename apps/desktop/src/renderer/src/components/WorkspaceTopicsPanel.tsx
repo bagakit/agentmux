@@ -103,6 +103,13 @@ export function WorkspaceTopicsPanel({
   // 一次派生「哪些 Topic 有 Tab 开着」及其 Region 分屏几何，逐行只读它，不让每行各自扫 tabs
   // （scratch-topic-layout.ts 的学说：门禁与几何是同一事实的两半，投影一次）。
   const openMosaics = openTopicRegionMosaics(layout, tabs)
+  const tabOrder = layout?.groups.flatMap((group) => group.tabOrder) ?? []
+  const sessionTabRank = new Map<string, number>()
+  tabOrder.forEach((tabId, index) => {
+    const tab = tabs[tabId]
+    const agentSurface = tab && Object.values(tab.regions).find((surface) => surface.kind === 'agent')
+    if (agentSurface?.kind === 'agent') sessionTabRank.set(agentSurface.sessionId, index)
+  })
 
   useEffect(() => {
     let active = true
@@ -284,12 +291,11 @@ export function WorkspaceTopicsPanel({
                         「行上只留一个常驻动作」的断言）——pin/unpin 这个**动作**收在右键菜单里，与改名
                         同一处。这里只画一个 aria-hidden 的状态记号，且只在 pinned 时占位，同 leading
                         spinner「只在有话说时才占用」的规矩。 */}
-                    {pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}
                     {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
                         这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
                     <SelectorRow
                       leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
-                      title={topic.title}
+                      title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={topic.summary || topic.directoryPath}
                       /* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
                          这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。
@@ -299,7 +305,10 @@ export function WorkspaceTopicsPanel({
                          直接压在文字上（#467）。 */
                       presence={
                         <SelectorPresence
-                          agents={topic.agents.map((agent) => {
+                          agents={topic.agents
+                            .filter((agent) => agent.live !== null)
+                            .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))
+                            .map((agent) => {
                             const shown = topicAgentPresentation(agent)
                             return {
                               key: agent.sessionId,

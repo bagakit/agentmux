@@ -116,6 +116,7 @@
    摘要用 micro 字号，且标题与摘要之间留一格——此前这一格是那条已删的 `> span { gap }`
    顺带给的，与共享层写明的 `gap:0` 相矛盾，删掉它就得把这个意图明写出来。 */
 .workspace-topic-entry .selector-row__identity { gap:var(--sp-1); }
+.workspace-topic-entry .selector-row__identity strong { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .workspace-topic-entry .selector-row__identity small { font-size: var(--fs-micro); }
 /* Topic 头像默认只表达身份；只有 live work 才用共享状态色产生外描边/发光。 */
 .agent-avatar {

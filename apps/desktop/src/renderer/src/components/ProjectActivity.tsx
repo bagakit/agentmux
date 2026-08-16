@@ -96,12 +96,18 @@ export function ProjectActivity({
   // 一次渲染取一次时钟，供各行算 elapsed——与旧 quietDuration 在渲染时读 Date.now() 同口径。
   const now = Date.now()
   const label = attention.category === 'needs-you' ? 'Needs you' : attention.category === 'error' ? 'Error' : `${running} running`
+  const notificationCount = attention.category === 'error'
+    ? sessions.filter((session) => session.status.state === 'error').length
+    : attention.category === 'needs-you'
+      ? sessions.filter((session) => session.kind === 'agent' && Boolean(session.pendingInteraction)).length
+      : running
   const groups = buildActivityGroups(sessions, contexts)
   const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
   return <DropdownMenu.Root>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={details} aria-label={`${label}. ${details}`}>
       {attention.category === 'needs-you' ? <MessageCircle size={13} /> : attention.category === 'error' ? <TriangleAlert size={13} /> : <span className="project-activity__pulse" aria-hidden="true"><i /><i /><i /></span>}
-      <span>{label}</span>
+      <strong className="project-activity__count" aria-hidden="true">{notificationCount}</strong>
+      <span className="project-activity__label">{label}</span>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu project-activity-menu" side="right" align="start" sideOffset={4}>
       <DropdownMenu.Label className="composer-menu__hint">Activity by work line · select a row to open</DropdownMenu.Label>
@@ -113,7 +119,7 @@ export function ProjectActivity({
         // A single-Agent work line has no additional roster information to reveal;
         // its summary already opens the exact Session. Do not spend a column on a
         // dead disclosure affordance.
-        const canExpand = group.sessions.length > 1 || Boolean(first.pendingInteraction || first.status.detail)
+        const canExpand = group.sessions.length > 1 || Boolean((first.kind === 'agent' && first.pendingInteraction) || first.status.detail)
         const meta = contextMeta(group)
         const summary = groupSummary(group, timelines, config ?? null)
         const state = groupState(group)

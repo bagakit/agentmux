@@ -501,6 +501,19 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 - 惊艳感来自层次、对比、细微动势和状态反馈，不来自大面积渐变、过重阴影或装饰性卡片堆叠。
 - Gallery 必须展示最终生产组件、真实公开 props 和全部关键状态，页面结构与聊天页保持一一对应，便于快速回归。
 
+### Project Rail 与 Topic 行密度
+
+- Project Rail 的所有树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。
+- 通知胶囊默认保持 icon+count 的窄态，hover/focus 才过渡到 icon+count+label；状态颜色只作辅助，图形和数字始终存在。
+- Topic 行的 pin、Agent presence、Region mosaic 和标题按固定轨道排列；pin 与标题相邻，Agent presence 与其对应的 Tab/Region 在同一语义组内。
+
+### Agents、队列与语义 token 密度
+
+- Agents 菜单默认一行对象 + 一行最近动作；Provider/配置/路径降为次级信息，只有事实不足时才显示状态词。
+- running 使用稳定静态 glyph，working 使用带节奏的动态 glyph；两者不能只靠颜色区分。
+- 队列默认显示短消息、状态 glyph 和数量；展开后提供明确的删除/立即发送动作，失败项使用 warning/error surface，不自动反复闪烁。
+- Message Tools 的 token 使用短名和下划线，不把完整 URL/引用文本直接塞进正文；不同 token 类型用形状/前缀/辅助色区分，完整引用只在 hover/详情中出现。
+
 ### 可复用对话与 Workflow 组件密度（2026-09-15）
 
 - Workflow 时间线沿用聊天 Activity 的低干扰行语言：普通 tool 行与 Workflow 卡片共用时间线缩进和折叠箭头，不额外套一层装饰性外框；只有输入框上方 dock 作为独立浮层保留 surface、圆角与内部滚动。

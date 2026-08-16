@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 150
+    "next_cursor": 152
   },
   "features": [
     {
@@ -1519,6 +1519,26 @@
       "feat_id": "f-26u8faq9h",
       "title": "Final observation surface unification",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26v8fkydy",
+      "title": "Project Rail and Topic presence refinement",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26w8fzgyq",
+      "title": "Agent status queue and Message Tools refinement",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
