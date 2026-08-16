@@ -7,11 +7,17 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 // 加了 `state.timelines` 与 `state.config` 两处读，替身没跟上，于是 `timelines[session.id]` 当场抛
 // TypeError——两条判据一条都没跑到，红得像组件坏了。真 store 的初值就是 `{}` 与 `null`（store.ts:1571），
 // 这里照抄的是那个初值，不是为了让测试过而编的形状。
+//
+// `agentNames` 是同一个缺陷的第二次复发（这次是手改名那条 slice，store.ts:1695 的初值同样是 `{}`）：
+// 组件读 `agentNames[row.sessionId]` 画 roster 里的名字，替身没有它，于是 `undefined['a']` 抛在
+// **生产文件**的行上，栈看起来像 ProjectActivity 回归。判别器：栈顶在生产文件、但报的是
+// `Cannot read properties of undefined`，先数替身的键够不够，再怀疑组件。
 const state = vi.hoisted(() => ({
   selectSession: vi.fn(),
   providerCatalog: [],
   timelines: {},
-  config: null
+  config: null,
+  agentNames: {}
 }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (value: typeof state) => unknown) => select(state) }))
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'

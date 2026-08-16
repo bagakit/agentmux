@@ -20,6 +20,11 @@ const fixture = vi.hoisted(() => ({
     // `timelines[session.id]` 就抛 TypeError，六条断言全红。漏一个字段的假 store 不是「测试挂了」，
     // 是**判据在替被测代码回答问题**——它逼着组件去处理一个真实状态机里到不了的形状。
     timelines: {} as Record<string, { items: unknown[] }>,
+    // 同一个缺陷的下一个 slice：ProjectActivity 的 roster 行读 `agentNames[row.sessionId]` 取手改名。
+    // 真 store 的初值也是 `{}`（store.ts:1695）。漏了它，`undefined['agent-a']` 抛在生产文件的行上，
+    // 栈读起来像组件回归——而组件没坏，是这份替身少了一个键。
+    agentNames: {} as Record<string, string>,
+    providerCatalog: [] as unknown[],
     activeWorkspaceId: 'project-a',
     mainSurface: 'workbench' as const,
     projectRailOpen: true,
@@ -186,6 +191,47 @@ describe('Project Rail selection and running signals', () => {
     expect(markup).toContain('project-rail-row--active')
   })
 
+  it('separates "producing now" from "merely live" without forking the count', () => {
+    // 两个词、一个数。`running` 不是边角状态而是主稳态（`unknown → 'running'` 的三条来路之一是
+    // 15 分钟静默衰减），所以「正在吐字」与「半小时前说过一句话」同在 Board 的 working 列里。
+    // 一个词盖住两者，用户就看不出哪个值得等。
+    //
+    // 这条同时钉住**计数不许跟着分叉**：两个项目各一个 Agent，词不同、数都必须是 1。#582 的四处
+    // 报出两组数就是从「同一个问题判两次」开始的，区分用词不该把那道收敛重新打开。
+    fixture.state.config = structuredClone(config)
+    fixture.state.sessions = [
+      session('producing', '/alpha', 'working'),
+      session('idle-live', '/beta', 'running')
+    ]
+    const markup = renderRail()
+    expect(rowFor(markup, 'Alpha')).toContain('data-running="true"')
+    expect(rowFor(markup, 'Beta')).toContain('data-running="true"')
+    // 数字在 aria-label 上（`__count` 是 aria-hidden 的字形，读屏只能听见这一份）。
+    expect(markup).toContain('1 Working')
+    expect(markup).toContain('1 Running')
+  })
+
+  it('prints the number once: the hover label carries the word only', () => {
+    // 用户原话：「running 等标记本身已经带有数字了，hover 展开是不是不用带数字了」。
+    //
+    // 判据必须取**那个可见元素的文本本身**，不能用 `toContain('1 Working')`——展开后画成
+    // 「1 1 Working」时那条断言照旧成立（实测：把数字塞回 label 的变异体让 33 条断言全绿通过）。
+    // 所以这里抠出 `__label` 的内容，断言它**一个数字都没有**：这才是「印一遍」这个性质本身。
+    fixture.state.config = structuredClone(config)
+    fixture.state.sessions = [
+      session('a1', '/alpha', 'working'),
+      session('a2', '/alpha', 'working'),
+      session('a3', '/alpha', 'running')
+    ]
+    const markup = renderRail()
+    const labels = [...markup.matchAll(/class="project-activity__label">([^<]*)</g)].map((m) => m[1]!)
+    expect(labels).toEqual(['Working'])
+    expect(labels[0]).not.toMatch(/\d/)
+    // 数字仍然在场，只是只在计数那一处（三个 Agent 里两个 working、一个 running，全在 working 列 = 3）。
+    const counts = [...markup.matchAll(/class="project-activity__count"[^>]*>([^<]*)</g)].map((m) => m[1]!)
+    expect(counts).toEqual(['3'])
+  })
+
   it('removes the repeated project icon while retaining Scratch identity', () => {
     fixture.state.config = structuredClone(config)
     const markup = renderRail()
@@ -217,7 +263,8 @@ describe('Project Rail selection and running signals', () => {
     const markup = renderRail()
     const alpha = rowFor(markup, 'Alpha')
     // 三个 worktree、两个在跑：徽章必须是 2。改回 workspaces.length 会让它变成 3。
-    expect(markup).toContain('2 running')
+    // 数字与词分居两处（`__count` 画数字、`__label` 画词），这里比的是 aria-label 上拼回的那一份。
+    expect(markup).toContain('2 Working')
     // 降级掉的事实不许消失，只许换位置。
     expect(alpha).toContain('3 worktrees')
     expect(alpha).toContain('3 sessions')
@@ -229,7 +276,7 @@ describe('Project Rail selection and running signals', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [session('agent-b', '/beta', 'working')]
     const markup = renderRail()
-    expect(markup).toContain('1 running')
+    expect(markup).toContain('1 Working')
     expect(badgeOf(rowFor(markup, 'Alpha'))).toBeNull()
     expect(badgeOf(rowFor(markup, 'Gamma'))).toBeNull()
   })
