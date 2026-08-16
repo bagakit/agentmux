@@ -32,7 +32,12 @@ const CLI_ERROR_CODES = [
   'INVALID_CLI_ARGUMENT',
   'MANAGED_AGENT_CONTEXT_REQUIRED',
   'AGENTMUX_FAILED',
-  'MAINTAINER_TARGET_UNRESOLVED'
+  'MAINTAINER_TARGET_UNRESOLVED',
+  // 角色目录读不出来。与 `MAINTAINER_TARGET_UNRESOLVED` 是**相反的两件事**，这正是它必须单独在册的
+  // 理由：后者说「这个角色没人认领」（去 register 一个），前者说「登记表我读不了」（去修那个文件）。
+  // 不在册时 `cliErrorCode` 把它折成 `AGENTMUX_FAILED`——与「命令打错了」同一个码，于是机读侧分不出
+  // 「你的文件坏了」与「你的命令错了」。人读的 message 一直是对的，机读的码此前是错的。
+  'AGENT_ROLE_DIRECTORY_UNREADABLE'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
 type FlagKind = 'boolean' | 'value' | 'data'
