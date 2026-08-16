@@ -1,5 +1,204 @@
 import { describe, expect, it, vi } from 'vitest'
+import headless from '@xterm/headless'
+import { readFileSync } from 'node:fs'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay, terminalReplayGeometryOutcome, terminalViewportSyncOutcome } from '../src/renderer/src/lib/terminal-replay'
+import { classifyServiceNotice } from '../src/renderer/src/lib/service-window-notice'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
+
+describe('attachment geometry across asynchronous replay', () => {
+  it.each([
+    { canControl: true, releaseFails: false },
+    { canControl: true, releaseFails: true },
+    { canControl: false, releaseFails: false },
+    { canControl: false, releaseFails: true }
+  ])('holds geometry through startup pending writes (control=$canControl, failure=$releaseFails)', async ({ canControl, releaseFails }) => {
+    const terminal = new headless.Terminal({ cols: 132, rows: 45, allowProposedApi: true })
+    const frames = frameHarness()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => ({ cols: 100, rows: 30 }),
+      fit: () => terminal.resize(100, 30),
+      readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      resize, requestFrame: frames.request, cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1000, height: 600 })
+    })
+    const calls: string[] = []
+    const onRecoveryError = vi.fn()
+    let releasedLine: string | undefined
+    const write = async (data: string) => await new Promise<void>((resolve) => terminal.write(data, resolve))
+    try {
+      sync.beginReplay()
+      await hydrateTerminalReplay([{ data: '\x1b[?1049hretained', endByte: 16 }], write)
+      await expect(finishTerminalReplayRecovery({
+        gap: false,
+        canControlRun: canControl,
+        releaseLiveOutput: async () => {
+          calls.push('release')
+          for (const data of ['\x1b[39;100HPENDING_A', '\x1b[40;100HPENDING_B']) {
+            await write(data)
+            sync.observeViewport()
+            frames.runNext()
+            expect([terminal.cols, terminal.rows]).toEqual([132, 45])
+          }
+          releasedLine = terminal.buffer.active.getLine(39)?.translateToString(true)
+          calls.push('drained')
+          if (releaseFails) throw new Error('startup drain failed')
+        },
+        finishReplay: () => { calls.push('finish'); sync.endReplay(true) },
+        startLiveSynchronization: async () => { calls.push('live'); await sync.startLiveSynchronization() },
+        redrawCurrentScreen: async () => { throw new Error('No gap redraw expected') },
+        onRecoveryError
+      })).resolves.toBe(false)
+      expect(releasedLine).toBe(`${' '.repeat(99)}PENDING_B`)
+      expect(calls).toEqual(canControl ? ['release', 'drained', 'finish', 'live'] : ['release', 'drained', 'finish'])
+      expect(onRecoveryError).toHaveBeenCalledTimes(releaseFails ? 1 : 0)
+      expect(frames.runNext()).toBe(true)
+      await settleResizes(resize)
+      expect([terminal.cols, terminal.rows]).toEqual([100, 30])
+      expect(resize).toHaveBeenCalledTimes(canControl ? 3 : 0)
+    } finally { sync.dispose(); terminal.dispose() }
+  })
+
+  it.each([{ cols: 132, rows: 45 }, { cols: 100, rows: 30 }])('locks replay at the owner size before fitting $cols×$rows', async (target) => {
+    const terminal = new headless.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
+    const frames = frameHarness()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => target,
+      fit: () => terminal.resize(target.cols, target.rows),
+      readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1000, height: 600 })
+    })
+    try {
+      // An already scheduled frame (or a process-state transition) must not fit during replay.
+      sync.observeViewport()
+      sync.beginReplay()
+      await sync.startLiveSynchronization()
+      terminal.resize(132, 45)
+      const replay = '\x1b[?1049h\x1b[40;100HWIDE_MARK'
+      await hydrateTerminalReplay([{ data: replay, endByte: replay.length }],
+        async (data) => await new Promise<void>((resolve) => terminal.write(data, resolve)),
+        async () => {
+          sync.observeViewport()
+          frames.runNext()
+          expect([terminal.cols, terminal.rows]).toEqual([132, 45])
+        })
+      expect(terminal.buffer.active.getLine(39)?.translateToString(true)).toBe(`${' '.repeat(99)}WIDE_MARK`)
+      expect(resize).not.toHaveBeenCalled()
+      sync.endReplay(true)
+      await sync.startLiveSynchronization()
+      expect([terminal.cols, terminal.rows]).toEqual([target.cols, target.rows])
+      expect(frames.runNext()).toBe(true)
+      await settleResizes(resize)
+      expect([terminal.cols, terminal.rows]).toEqual([target.cols, target.rows])
+      expect(resize.mock.calls.at(-1)?.[0]).toEqual(target)
+      expect(redrawRoundTrips(resize, target)).toBe(target.cols === 132 ? 0 : 1)
+    } finally { sync.dispose(); terminal.dispose() }
+  })
+
+  it('clears the pre-attach pixel baseline before restoring owner geometry', async () => {
+    const frames = frameHarness()
+    let actual = { cols: 80, rows: 24 }
+    const target = { cols: 132, rows: 45 }
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => target, fit: () => { actual = target }, readGrid: () => actual,
+      resize: async () => true, requestFrame: frames.request, cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1320, height: 900 })
+    })
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    expect(actual).toEqual(target)
+    sync.beginReplay()
+    actual = { cols: 100, rows: 30 }
+    sync.endReplay(true)
+    await sync.startLiveSynchronization()
+    expect(actual).toEqual(target)
+    sync.dispose()
+  })
+
+  it('keeps repaint pending until the first resize reaches the PTY', async () => {
+    const harness = terminalHarness({ cols: 80, rows: 24 })
+    harness.sync.markReplayLanded()
+    harness.setProposed({ cols: 132, rows: 45 })
+    harness.resize.mockResolvedValueOnce(false)
+    await harness.sync.startLiveSynchronization()
+    expect(harness.resize.mock.calls).toEqual([[{ cols: 132, rows: 45 }]])
+    expect(harness.frames.runNext()).toBe(true)
+    await settleResizes(harness.resize)
+    expect(redrawRoundTrips(harness.resize, { cols: 132, rows: 45 })).toBe(1)
+    expect(harness.resize.mock.calls.at(-1)?.[0]).toEqual({ cols: 132, rows: 45 })
+    harness.sync.dispose()
+  })
+
+  it('preserves live intent after a thrown resize, shows degradation, and converges on a later viewport event', async () => {
+    let failed = false
+    const harness = terminalHarness({ cols: 80, rows: 24 }, {
+      onResizeError: () => { failed = true },
+      onResizeSuccess: () => { failed = false }
+    })
+    harness.sync.markReplayLanded()
+    harness.setProposed({ cols: 132, rows: 45 })
+    harness.resize.mockRejectedValueOnce(new Error('runtime temporarily unavailable'))
+      .mockResolvedValueOnce(false)
+    await expect(harness.sync.startLiveSynchronization()).rejects.toThrow('runtime temporarily unavailable')
+    expect(classifyServiceNotice(terminalViewportSyncOutcome(failed, 'running'))).toMatchObject({
+      kind: 'process-degraded', notice: {
+        step: expect.stringContaining('terminal size'),
+        mode: expect.stringContaining('remains available'),
+        restore: expect.stringContaining('Resize the pane')
+      }
+    })
+    // One settling frame was already scheduled at startup. A non-delivery cannot clear the notice.
+    expect(harness.frames.runNext()).toBe(true)
+    await settleResizes(harness.resize)
+    expect(harness.resize).toHaveBeenCalledTimes(2)
+    expect(failed).toBe(true)
+    expect(harness.frames.runNext()).toBe(false)
+    // The next real observer notification retries without calling startLiveSynchronization again.
+    harness.sync.observeViewport()
+    expect(harness.frames.runNext()).toBe(true)
+    await settleResizes(harness.resize)
+    expect(harness.resize).toHaveBeenCalledTimes(5)
+    expect(redrawRoundTrips(harness.resize, { cols: 132, rows: 45 })).toBe(1)
+    expect(harness.resize.mock.calls.at(-1)?.[0]).toEqual({ cols: 132, rows: 45 })
+    expect(classifyServiceNotice(terminalViewportSyncOutcome(failed, 'running'))).toEqual({ kind: 'healthy' })
+    harness.sync.dispose()
+  })
+
+  it('connects the geometry owner to TerminalView before the first replay write', () => {
+    const source = readFileSync(new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url), 'utf8')
+    const begin = source.indexOf('viewport.beginReplay()')
+    const adopt = source.indexOf('terminal.resize(result.currentSize.cols, result.currentSize.rows)')
+    const replay = source.indexOf('cursor = await hydrateTerminalReplay(')
+    const end = source.indexOf('viewport.endReplay(hasReplay)')
+    expect(begin).toBeGreaterThan(-1)
+    expect(adopt).toBeGreaterThan(begin)
+    expect(replay).toBeGreaterThan(adopt)
+    expect(end).toBeGreaterThan(replay)
+    expect(source).toContain('finishReplay: () => viewport.endReplay(hasReplay)')
+    expect(source.match(/viewport\.endReplay\(/g)).toHaveLength(1)
+    expect(source).toContain('terminalReplayGeometryOutcome(replaySizeUnknown, session.processState)')
+    expect(source).toContain('<ServiceWindowNotice notice={replayGeometryNotice} />')
+    expect(source).toContain('if (!disposed) setViewportSyncFailed(true)')
+    expect(source).toContain('onResizeSuccess: () => { if (!disposed) setViewportSyncFailed(false) }')
+    expect(source).toContain('terminalViewportSyncOutcome(viewportSyncFailed, session.processState)')
+    expect(source).toContain('<ServiceWindowNotice notice={viewportSyncNotice} />')
+  })
+
+  it('keeps unknown geometry visible without declaring the healthy Agent broken', () => {
+    const result = classifyServiceNotice(terminalReplayGeometryOutcome(true, 'running'))
+    expect(result).toMatchObject({ kind: 'process-degraded', notice: {
+      step: expect.stringContaining('geometry'),
+      mode: expect.stringContaining('remains available'),
+      restore: expect.stringContaining('Resize the pane')
+    } })
+    expect(classifyServiceNotice(terminalReplayGeometryOutcome(false, 'running'))).toEqual({ kind: 'healthy' })
+    expect(classifyServiceNotice(terminalReplayGeometryOutcome(true, 'interrupted')).kind).toBe('indeterminate')
+  })
+})
 
 /**
  * 「按错的宽度排好的 replay 要补一次重绘」这条机制，判据锚点错过两次，所以这个文件专钉锚点，
@@ -47,7 +246,10 @@ function frameHarness() {
  * 一个跟着 fit 走的假 xterm：`fit()` 把 actual 挪到 proposed，`readGrid()` 报 actual。
  * 与被测对象的关系就是真 xterm 与 FitAddon 的关系，没有别的耦合。
  */
-function terminalHarness(initial: { cols: number; rows: number }) {
+function terminalHarness(initial: { cols: number; rows: number }, callbacks: {
+  onResizeError?(error: unknown): void
+  onResizeSuccess?(): void
+} = {}) {
   const frames = frameHarness()
   let proposed = { ...initial }
   let actual = { ...initial }
@@ -56,6 +258,7 @@ function terminalHarness(initial: { cols: number; rows: number }) {
   let measurable = true
   const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
   const sync = new TerminalViewportSynchronizer({
+    ...callbacks,
     proposeGrid: () => proposed,
     fit: () => {
       actual = { ...proposed }

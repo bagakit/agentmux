@@ -913,6 +913,8 @@ export type AgentLaunchResult = {
 export type SessionAttachResult = {
   attachmentId: string
   session: SessionSnapshot
+  /** Geometry confirmed by the Runtime snapshot that supplied this replay. */
+  currentSize: { cols: number; rows: number } | null
   replay: AgentMuxRunDataEvent[]
   gap: AgentMuxRunReplayGap | null
 }

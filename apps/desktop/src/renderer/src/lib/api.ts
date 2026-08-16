@@ -718,6 +718,7 @@ const mockApi: AgentMuxDesktopApi = {
       return {
         attachmentId: crypto.randomUUID(),
         session: structuredClone(session),
+        currentSize: null,
         replay: data ? [{
           type: 'data' as const,
           runId: control.run.runId,

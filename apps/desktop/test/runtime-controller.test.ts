@@ -55,8 +55,8 @@ const runtimeFixture = vi.hoisted(() => {
         workspacePath: '/repo',
         pid: 42,
         state: 'running' as const,
-        cols: 80,
-        rows: 24,
+        cols: 80 as number | null,
+        rows: 24 as number | null,
         observedAt: 1,
         latestOutputBytes: 12,
         acceptedInputBytes: 4
@@ -74,8 +74,8 @@ const runtimeFixture = vi.hoisted(() => {
         workspacePath: '/repo',
         pid: 42,
         state: 'running' as const,
-        cols: 80,
-        rows: 24,
+        cols: 80 as number | null,
+        rows: 24 as number | null,
         observedAt: 1,
         latestOutputBytes: 12,
         acceptedInputBytes: 4
@@ -1801,6 +1801,16 @@ describe('RuntimeController configuration transaction', () => {
   it('shares one retained Run Attachment across concurrent Desktop View leases', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
+    const attachTerminal = client.attachTerminal.getMockImplementation()!
+    client.attachTerminal.mockImplementationOnce(async (runId) => {
+      const attached = await attachTerminal(runId)
+      return { ...attached, run: { ...attached.run, cols: 132, rows: 45 } }
+    })
+    const readRunReplay = client.readRunReplay.getMockImplementation()!
+    client.readRunReplay.mockImplementationOnce(async (run) => {
+      const attached = await readRunReplay(run)
+      return { ...attached, run: { ...attached.run, cols: null, rows: null } }
+    })
     const renderer = webContentsFixture()
     const detachRenderer = controller.attach(renderer)
     client.runtimeProjection.mockResolvedValue({
@@ -1840,6 +1850,8 @@ describe('RuntimeController configuration transaction', () => {
     ])
 
     expect(first.attachmentId).not.toBe(second.attachmentId)
+    expect(first.currentSize).toEqual({ cols: 132, rows: 45 })
+    expect(second.currentSize).toBeNull()
     expect(client.attachTerminal).toHaveBeenCalledOnce()
     expect(client.readRunReplay).toHaveBeenCalledWith(control.run, 8)
     expect(controller.resourceOwnerCounts()).toEqual({

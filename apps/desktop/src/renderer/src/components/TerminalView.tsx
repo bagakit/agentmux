@@ -48,7 +48,7 @@ import {
   TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
   subscribeTerminalSearchCount
 } from '../lib/terminal-search-count'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay, yieldTerminalWork } from '../lib/terminal-replay'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
@@ -215,6 +215,8 @@ export function TerminalView({
   const [attachFailed, setAttachFailed] = useState(false)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
+  const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
+  const [viewportSyncFailed, setViewportSyncFailed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchToggles, setSearchToggles] = useState<TerminalSearchToggles>(DEFAULT_TERMINAL_SEARCH_TOGGLES)
@@ -356,6 +358,8 @@ export function TerminalView({
     setAttachFailed(false)
     setHasOutput(false)
     setReplayGap(false)
+    setReplaySizeUnknown(false)
+    setViewportSyncFailed(false)
     rememberedSelectionRef.current = ''
     const terminal = new Terminal({
       ...terminalOptions(themeId, fontSizeRef.current),
@@ -583,8 +587,13 @@ export function TerminalView({
         const rect = root.getBoundingClientRect()
         return { width: rect.width, height: rect.height }
       },
-      onResizeError: (error) => console.warn('[terminal] failed to synchronize PTY viewport', error)
+      onResizeError: (error) => {
+        if (!disposed) setViewportSyncFailed(true)
+        console.warn('[terminal] failed to synchronize PTY viewport', error)
+      },
+      onResizeSuccess: () => { if (!disposed) setViewportSyncFailed(false) }
     })
+    viewport.beginReplay()
     viewport.setInteractiveResize(interactiveResizeRef.current)
     viewport.setVisible(visibleRef.current)
     viewportRef.current = viewport
@@ -806,11 +815,14 @@ export function TerminalView({
           return
         }
         attachmentId = result.attachmentId
+        if (result.currentSize) terminal.resize(result.currentSize.cols, result.currentSize.rows)
+        const hasReplay = result.replay.some((chunk) => chunk.data.length > 0)
+        setReplaySizeUnknown(hasReplay && result.currentSize === null)
         if (result.gap) {
           setReplayGap(true)
           cursor = result.gap.firstAvailableByte
         }
-        if (result.replay.some((chunk) => chunk.data.length > 0)) observeOutput()
+        if (hasReplay) observeOutput()
         cursor = await hydrateTerminalReplay(
           result.replay,
           async (data) => {
@@ -820,10 +832,6 @@ export function TerminalView({
             kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
           }
         ) ?? cursor
-        // 重放的那一屏是按**此刻**的 grid 排的。记下来，起活时才判得出它有没有排错宽度：
-        // 后面第一次 live fit 若把 grid 挪到别处，那一屏就是按错的宽度排的，而 alt screen
-        // 不会自行重排（详见 viewport-sync 的 `gridWhenReplayLanded`）。
-        viewport.markReplayLanded()
         // Initial attaches and true rebuilds have no previous viewport to restore. Explicitly pin
         // their first visible frame to the latest output instead of relying on xterm's parser
         // default, which can be the top of a freshly-created normal buffer.
@@ -842,9 +850,10 @@ export function TerminalView({
         reveal()
         if (autoFocusRef.current) terminal.focus()
         await finishTerminalReplayRecovery({
-          gap: Boolean(result.gap),
+          gap: Boolean(result.gap) || (hasReplay && result.currentSize === null),
           canControlRun: canControlRunRef.current,
           startLiveSynchronization: async () => await viewport.startLiveSynchronization(),
+          finishReplay: () => viewport.endReplay(hasReplay),
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
             if (!disposed) setLiveOutputReady(true)
@@ -1021,6 +1030,12 @@ export function TerminalView({
       })
     )
   )
+  const replayGeometryNotice = serviceNoticeToRender(classifyServiceNotice(
+    terminalReplayGeometryOutcome(replaySizeUnknown, session.processState)
+  ))
+  const viewportSyncNotice = serviceNoticeToRender(classifyServiceNotice(
+    terminalViewportSyncOutcome(viewportSyncFailed, session.processState)
+  ))
 
   return (
     <Fragment>
@@ -1123,9 +1138,11 @@ export function TerminalView({
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
-          {revealNotice ? (
+          {revealNotice || replayGeometryNotice || viewportSyncNotice ? (
             <div className="terminal-service-window">
               <ServiceWindowNotice notice={revealNotice} />
+              <ServiceWindowNotice notice={replayGeometryNotice} />
+              <ServiceWindowNotice notice={viewportSyncNotice} />
             </div>
           ) : null}
           {!hydrating && replayGap ? (

@@ -735,7 +735,15 @@ export class RuntimeController {
         this.sessionAttachmentOwners.set(key, owner)
         this.sessionAttachmentLeases.set(attachmentId, { key, webContentsId })
         retainedRun = null
-        return { attachmentId, session, replay: attached.replay, gap: attached.gap }
+        return {
+          attachmentId,
+          session,
+          currentSize: attached.run.cols === null || attached.run.rows === null
+            ? null
+            : { cols: attached.run.cols, rows: attached.run.rows },
+          replay: attached.replay,
+          gap: attached.gap
+        }
       } catch (error) {
         if (retainedRun) {
           try {
