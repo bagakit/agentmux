@@ -142,21 +142,31 @@ export function WorkspaceSidebar({
     if (ids.length === 0) return null
     return ids.map((id) => {
       const { label, targetId, onSelect } = resolve(id)
+      const branchPin = scope !== SCRATCH_WORKSPACE_ID
+      const row = (
+        <button
+          type="button"
+          className="project-rail-row project-rail-row--pinned-child"
+          aria-label={label}
+          title={label}
+          style={{ '--rail-depth': depth } as CSSProperties}
+          onClick={() => {
+            if (onSelect) onSelect()
+            else if (targetId) void selectWorkspace(targetId)
+          }}
+        >
+          {branchPin ? <span className="project-rail-row__icon" aria-hidden="true" /> : null}
+          <span className="project-rail-row__identity"><strong>{label}</strong></span>
+        </button>
+      )
       return (
         <div className="project-rail-entry" key={`${scope}:${id}`}>
-          <button
-            type="button"
-            className="project-rail-row project-rail-row--pinned-child"
-            aria-label={label}
-            title={label}
-            style={{ '--rail-depth': depth } as CSSProperties}
-            onClick={() => {
-              if (onSelect) onSelect()
-              else if (targetId) void selectWorkspace(targetId)
-            }}
-          >
-            <span className="project-rail-row__identity"><strong>{label}</strong></span>
-          </button>
+          {branchPin ? (
+            <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
+              <span className="project-rail-row__collapse-spacer" aria-hidden="true" />
+              {row}
+            </div>
+          ) : row}
         </div>
       )
     })
