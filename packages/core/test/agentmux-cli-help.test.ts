@@ -128,6 +128,34 @@ describe('agentmux CLI discovery', () => {
     }
   })
 
+  it('读不出来的 Session 存档报自己的码，不折成「命令打错了」那一个', async () => {
+    // 与上一条同族，但它是**结构判据看不见**的那一半，所以必须有自己的行为判据。
+    //
+    // 那道扫描面只走「CLI 直接 import 的模块」加一层 client 的深二层，agent-session-store.ts 不在
+    // 里面；它是经 `connect()` → `registry.load` → `store.load()` 进来的。结构判据当初还给这个码
+    // 记过一条豁免，理由是「CLI 调不到写路径」——那条理由只数了写路径，而这条命令证明读路径同步就抛。
+    //
+    // 判据取 `version`：垃圾字节走的是另一条路（salvage + quarantine，只打 warning 不抛），真正抛
+    // 的是 schema 对不上。所以这里必须写一个结构合法但版本不对的存档，写 'garbage' 是测不到的。
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-store-invalid-'))
+    try {
+      const store = join(directory, 'sessions.json')
+      await writeFile(store, JSON.stringify({ version: 3, agentSessions: [] }))
+      const broken = await fail(['inspect', '--session', 'any-probe'], {
+        AGENTMUX_AGENT_SESSION_STORE: store
+      })
+      const reported = JSON.parse(broken.stdout || broken.stderr).error
+      expect(reported.message, '这条命令没走到存档读取，判据测的不是它该测的东西').toContain(
+        'Agent Session store is invalid.'
+      )
+      expect(reported.code, `存档读不出来却报 ${reported.code}——与「命令打错了」同一个码`).toBe(
+        'INVALID_AGENT_SESSION_STORE'
+      )
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('CLI 够得着的每一个码都在 CLI_ERROR_CODES 里——不在册的会被静默折成 AGENTMUX_FAILED', async () => {
     // 上面那条是行为判据，只盯住一个码。这条是结构判据，盯住**下一个**码。
     //
@@ -181,6 +209,39 @@ describe('agentmux CLI discovery', () => {
         }
         const args = source.slice(match.index, index)
         found.push(...[...args.matchAll(/'([A-Z][A-Z_]{3,})'/g)].map((code) => code[1]!))
+      }
+      // 上面那圈只看得见**字面量直接写在构造里**的码。control-host.ts 不是这么写的：`object` / `id` /
+      // `identity` / `text` 各自把 `code: string` 当形参收下，再 `throw new AgentMuxError(message, code)`，
+      // 于是真正的码只出现在调用点（`object(v, '…', 'INVALID_CONTROL_REQUEST')`），构造里一个大写字面量
+      // 也没有。d035a948 的 message 写过「每一处调用点都是字面量」——那句话当时就是错的。
+      //
+      // 这些码今天恰好都在册（CONTROL_PROTOCOL_ERROR / INVALID_CONTROL_REQUEST），所以这不是在补一个
+      // 活着的缺陷，是在补**看不见**：只要这个形状存在，下一个经它新增的码就是静默漏网。
+      //
+      // 收的是「转发型 helper 的调用点上的字面量」，不是整个文件的大写字面量：先试过后者，当场捞回
+      // ENOENT / ECONNREFUSED / ECONNRESET / EPIPE —— 那是 errno 比较（`error.code === 'ENOENT'`），
+      // 不是 AgentMux 码。判 helper 的两个条件缺一不可：形参里有 `code`，且函数体确实把它转发给
+      // AgentMuxError。只满足前者的函数（拿 code 只为比较或透传别处）不该让它的调用点被当成 throw 点。
+      const forwarders = [...source.matchAll(/function\s+(\w+)\s*\(([^)]*)\)[^{]*\{/g)]
+        .filter((match) => /\bcode\b/.test(match[2]!))
+        .filter((match) => {
+          const body = source.slice(match.index + match[0].length)
+          const end = body.search(/\n(?:export )?(?:async )?function /)
+          return /new AgentMuxError\([^)]*,\s*code\s*\)/.test(end < 0 ? body : body.slice(0, end))
+        })
+        .map((match) => match[1]!)
+      for (const name of forwarders) {
+        // 形参默认值本身就是一个码（`text` 的 `code = 'INVALID_CONTROL_REQUEST'`），调用点不写也会抛它。
+        for (const call of source.matchAll(new RegExp(`\\b${name}\\s*\\(`, 'g'))) {
+          let depth = 0
+          let index = call.index + call[0].length - 1
+          for (; index < source.length; index += 1) {
+            if (source[index] === '(') depth += 1
+            else if (source[index] === ')') { depth -= 1; if (depth === 0) break }
+          }
+          const args = source.slice(call.index, index)
+          found.push(...[...args.matchAll(/'([A-Z][A-Z_]{3,})'/g)].map((code) => code[1]!))
+        }
       }
       return found
     }
@@ -298,19 +359,16 @@ describe('agentmux CLI discovery', () => {
       // 目前唯一的调用方是 desktop 主进程（runtime-controller.ts）。给一个到不了的码上户口，
       // 等于在注册表里留一条永远不会出现的答案。
       REMOTE_UNSUPPORTED: { symbol: 'connectSshAgentMux', why: 'CLI 只用 connectLocalAgentMux' },
-      // 下面两个来自 agent-session-registry.ts，是深二层扫描按**模块**粒度捞进来的多报。CLI 只调
-      // `client.resolveAgentSession / agentSession / agentSessions`，它们落到 registry 的
-      // `resolve / get / list` 三个入口；这两个码分别由 `update`（写路径）与 `retiredAgentSession`
-      // 抛，而 client 里调它们的是 createAgent / resumeAgent / stopAgent / bindAcp / acknowledge——
-      // 一个都不在 CLI 的调用面上。
+      // `INVALID_AGENT_SESSION_STORE` 曾经也在这张表里，理由写的是「CLI 调不到写路径；connect 链上
+      // 那一处是 void 浮 promise」。那条理由被一条真命令证伪了：把 store 的 `version` 改掉再跑
+      // `agentmux inspect --session x`，它当场就抛——**读**路径（connect → registry.load →
+      // store.load）同步抛，跟写路径那处浮 promise 毫无关系。只数了一个方向的调用点，就把「我没找到」
+      // 写成了「到不了」。它现在在 CLI_ERROR_CODES 里。
       //
-      // 唯一一处「看起来够得着」的是 `connect()` 链上的 `invalidateEndedRunReadiness`，它写的是
-      // `void this.registry.update(…)`：浮着的 promise，拒绝不会传到 CLI 的顶层 catch。下面的自检
-      // 就钉这个 `void`——哪天有人给它补上 await，这个码就真到得了，豁免当场失效。
-      INVALID_AGENT_SESSION_STORE: {
-        symbol: 'update',
-        why: 'CLI 调不到写路径；connect 链上那一处是 void 浮 promise'
-      },
+      // 下面这个来自 agent-session-registry.ts，是深二层扫描按**模块**粒度捞进来的多报。CLI 只调
+      // `client.resolveAgentSession / agentSession / agentSessions`，它们落到 registry 的
+      // `resolve / get / list` 三个入口；这个码由 `retiredAgentSession` 抛，而 client 里调它的是
+      // resumeAgent，不在 CLI 的调用面上。
       AGENT_SESSION_IDENTITY_CONFLICT: {
         symbol: 'retiredAgentSession',
         why: '只有 resumeAgent 调它，CLI 不调 resumeAgent'
@@ -342,14 +400,6 @@ describe('agentmux CLI discovery', () => {
         `CLI 现在调用了 ${symbol}，${code} 到得了顶层 catch——豁免不再成立，把它加进 CLI_ERROR_CODES`
       ).toBe(false)
     }
-    // `INVALID_AGENT_SESSION_STORE` 的豁免比其它两条弱一档：`update` 确实在 connect 链上被调到了，
-    // 挡住它的只是那一处写成了 `void`（浮 promise，拒绝到不了顶层 catch）。这条断言把那个 `void` 钉住
-    // ——理由不是注释，是真的去查一遍。有人补上 await，这里立刻红，提醒把码加进 CLI_ERROR_CODES。
-    expect(
-      clientSource,
-      'connect 链上的 registry.update 不再是浮 promise 了——INVALID_AGENT_SESSION_STORE 现在到得了顶层 catch'
-    ).toContain('void this.registry.update(')
-
     // 自检：两个解析都不许在空集上恒绿，且判据真的认得出「抛了但没在册」。
     expect(registered.has('AGENTMUX_FAILED'), '注册表解析漏了已知成员').toBe(true)
     // 注册表解析的方向性：注释里写出来的码**不算**在册。这条钉住的是「漏报是静默的」那一侧——
