@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 175
+    "next_cursor": 176
   },
   "features": [
     {
@@ -1728,6 +1728,16 @@
     {
       "feat_id": "f-27n8fk8vq",
       "title": "输入框截图缩略图",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27p8ftaqc",
+      "title": "Message Tools 右侧操作整体",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

@@ -6,6 +6,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
 import { SemanticIcon } from './semantic-icons'
 import { AgentComposer } from './AgentComposer'
+import { AgentContextUsage } from './AgentContextUsage'
 import type { ComposerQueuedMessage } from './ComposerOutbox'
 import { appendSemanticReference, expandSemanticReferences, encodeSemanticReference } from '../lib/composer-semantic-reference'
 import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../../shared/composer-shortcut-library'
@@ -107,6 +108,9 @@ export function ObservationSurfaceGallery() {
       <article id="composer-details" className="observation-sample observation-sample--composer observation-sample--full">
         <div className="observation-sample__label">Agent workspace composer</div>
         <AgentComposer
+          primaryAction="stop"
+          onInterrupt={() => setComposerAction('Example current reply interrupted; Session retained')}
+          contextUsage={<AgentContextUsage usage={{ inputTokens: 24000, outputTokens: 0, totalTokens: 24000, observedAt: 1, context: { usedTokens: 24000, capacityTokens: 100000 } }} />}
           readPastedImage={async () => ({ dataUrl: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" fill="#e9edf4"/><rect x="12" y="12" width="216" height="20" rx="4" fill="#7586ab"/><rect x="12" y="44" width="60" height="102" rx="4" fill="#bbc8de"/><rect x="84" y="44" width="144" height="62" rx="4" fill="#8ba9dd"/><rect x="84" y="118" width="108" height="8" rx="4" fill="#7586ab"/></svg>')}` })}
           feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
           onAttach={() => setComposerAction('Example file picker requested')}

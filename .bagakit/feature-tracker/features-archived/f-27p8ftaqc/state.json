@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "feat_id": "f-27p8ftaqc",
+  "title": "Message Tools 右侧操作整体",
+  "slug": "composer-session-controls",
+  "goal": "用量、发送、打断与邮箱头像形成一个整体，打断不与结束 Session 混淆",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run apps/desktop/test/composer-session-controls.test.tsx apps/desktop/test/composer-form-actions.test.tsx apps/desktop/test/agent-composer.test.tsx apps/desktop/test/session-mailbox.test.tsx apps/desktop/test/message-tools-three-state.test.tsx --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-27p8ftaqc/artifacts/gate-T-001-r1-0001.log",
+    "last_context": {
+      "candidate_sha": "ffeaa2c119dd7c5657dcba5a115494fbd3ec23e7",
+      "worktree_digest": "ea9f44b8f6a501f226c44b689d9ed5663c08a7ca0d5ec4304de21677279c8f04",
+      "verification_digest": "none",
+      "dedup_key": "5e5acc4fcfca7a54d1cc5980f74c897aa0f5d0d5aeff91661665429c0ddb5af7",
+      "source_key": "046a85b564973ed6fd5d997ef16f2b6b7e7ebead7625524de60c3d35deb79c2c",
+      "artifact_digests": {},
+      "plan_revision": 1
+    }
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}
