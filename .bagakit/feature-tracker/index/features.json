@@ -1378,10 +1378,10 @@
     {
       "feat_id": "f-26d8fvepu",
       "title": "应用链接打不开：内置浏览器把 lark:// 一类地址当非法挡掉，popup 那条还会开出一个没人管的窗口",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
-      "branch": "",
-      "worktree_name": "",
+      "status": "ready",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-26d8fvepu",
+      "worktree_name": "wt-f-26d8fvepu",
       "runtime_role": "standalone",
       "runtime_relations": []
     },
