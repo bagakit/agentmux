@@ -381,7 +381,7 @@ describe('AgentSessionComposer adapter', () => {
   it('空闲的 Agent 没有中断可给——它不是被谁拿走的，是本来就没有', () => {
     // 上一条的相反世界。少了它，把 onInterrupt 写成无条件传入也照样"通过"，而那会让一个没在跑的
     // Agent 也显示出可点的中断。
-    fixture.state.sessions = [agentSession({ status: { state: 'idle', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.sessions = [agentSession({ status: { state: 'waiting', source: 'native-hook', observedAt: 1 } })]
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
       props: { onInterrupt?: () => void; primaryAction: string }
     }

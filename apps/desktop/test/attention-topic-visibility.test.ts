@@ -143,6 +143,7 @@ describe('an Agent finishing behind another Scratch Topic', () => {
       windowFocused: true,
       visibleSessionIds: visibleSessionIdsForState(state),
       mode: 'standard',
+      sound: false,
       timelines: {} as Record<string, AgentTimelineSnapshot>
     })
 
@@ -174,6 +175,7 @@ describe('an Agent finishing behind another Scratch Topic', () => {
       windowFocused: true,
       visibleSessionIds: visibleSessionIdsForState(state),
       mode: 'standard',
+      sound: false,
       timelines: {} as Record<string, AgentTimelineSnapshot>
     })
 

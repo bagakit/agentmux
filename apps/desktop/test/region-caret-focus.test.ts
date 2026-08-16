@@ -118,7 +118,11 @@ function spyStoreSideBySide(): WorkbenchShortcutStore & { caretCauses: string[] 
     requestCloseRegion: noop,
     splitRegion: noop,
     focusRegion: (_w, _t, _r, cause) => caretCauses.push(cause),
-    swapRegions: noop
+    swapRegions: noop,
+    // 这份替身只问「dispatch 把 cause 传对没有」，跳转那一路不在本文件的判据里；但 store 替身缺一个
+    // slice 就会在运行期抛 TypeError，栈指向生产文件、看起来像组件回归，所以两个字段都补齐而不是断言外留空。
+    sessions: [],
+    selectSession: noop
   }
 }
 
