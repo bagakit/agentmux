@@ -41,7 +41,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     useAppStore.setState({ sessions: [agent('run-1') as never] })
     useAppStore.getState().enqueueAgentSteer('s', 'typed at run-1')
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'run-1', text: 'typed at run-1' }
+      { operationId: expect.any(String), runId: 'run-1', text: 'typed at run-1', status: 'queued' }
     ])
   })
 
@@ -84,7 +84,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     // 用户写下的字不由这个循环替他决定丢不丢：角标仍要拿得到它们（并标成送不出去）。
     // 变异：把 flush 里的 `continue` 改成删除条目，这里红。
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'run-1', text: 'stale steer' }
+      { operationId: expect.any(String), runId: 'run-1', text: 'stale steer', status: 'queued' }
     ])
   })
 
@@ -100,7 +100,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[1]).toBe('fresh tail')
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'run-1', text: 'stale head' }
+      { operationId: expect.any(String), runId: 'run-1', text: 'stale head', status: 'queued' }
     ])
   })
 })

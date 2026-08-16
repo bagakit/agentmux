@@ -22,7 +22,7 @@ function runningAgent(id = 's') {
 }
 
 describe('steer queue operationId correlation (T-008)', () => {
-  it('(c)+(a) keeps one entry\'s id stable across a failed flush and replays it on retry', async () => {
+  it('(c)+(a) freezes after failure and reuses the same id only when the user sends now', async () => {
     useAppStore.setState({ sessions: [runningAgent() as never] })
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     const ids: string[] = []
@@ -35,9 +35,11 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
     await useAppStore.getState().flushAgentSteerQueue('s')
     // Retained after the failure — same entry, same id still on it.
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: ids[0], runId: 'r', text: 'steer me' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: ids[0], runId: 'r', text: 'steer me', status: 'failed', error: 'busy' }])
 
     await useAppStore.getState().flushAgentSteerQueue('s')
+    expect(ids).toHaveLength(1)
+    await useAppStore.getState().sendQueuedAgentSteer('s', ids[0]!)
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
 
     expect(ids).toHaveLength(2)
