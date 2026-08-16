@@ -534,6 +534,110 @@ describe('lifecycle-busy 的两个产生点 evidence 可区分（f-23j8f43ck / T
 })
 
 // ---------------------------------------------------------------------------
+// f-25k8f8m9k / T-005：身份绑定与重启恢复的 durable 边界（Core owner 侧）。
+//
+// outcome 逐字：「新进程按原 Session 身份恢复而不误投递」。这一侧证两件事，都在真 AgentMuxClient
+// + 真内存 store + 真 registry 上跑，只 stub 进程外接缝（kernel/hookServer/probe/handshake）：
+//
+//   1. 一次 provider-native resume 之后，恢复出来的 Session **仍是原 agentSessionId**，且 registry
+//      把 native handle 与新 Run 都改绑到这个原身份上——不铸新身份。承重断言落在 agentSessionId 与
+//      registry.resolve(provider-native/run) 都指回原 id；把 client.ts:2017 的 `...current` 换成新
+//      身份，这条立刻红（也过不了 store 的 assertLifecycleCommit）。
+//   2. resume 之后往这个原身份发一次 writeAgent，字节落到**新 Run**（spawned-run-1）而不是退役的
+//      旧 Run（run-1）。这是「不误投递」的可数判据：writeAgentInput 走 session.run.runId，新 Run 才
+//      是当前绑定。若身份/绑定在 resume 时漂移，输入会打到错误的 Run 上。
+// ---------------------------------------------------------------------------
+
+describe('重启恢复保持原 Session 身份且输入不误投递（f-25k8f8m9k / T-005）', () => {
+  it('provider-native resume 后 Session 仍是原身份，registry 把 native handle 与新 Run 改绑到它', async () => {
+    const harness = await continuityHarness()
+
+    const result = await harness.client.ensureAgentContinuity({
+      agentSessionId: 'agent-1',
+      expectedRun: { runId: 'run-1' },
+      operationId: 'op-restart'
+    })
+
+    // 恢复成功且换了 Run——但身份是原来的 agent-1，不是新铸的。
+    expect(result.kind).toBe('resumed')
+    expect(result).toMatchObject({
+      kind: 'resumed',
+      session: { agentSessionId: 'agent-1' },
+      previousRun: { runId: 'run-1' },
+      run: { runId: 'spawned-run-1' }
+    })
+
+    // registry 是身份绑定的权威：按稳定的 native locator 反查，回到原 agentSessionId；
+    // 而新 Run 也绑到了原身份。改 client.ts:2017 的 `...current`（铸新 id）会同时打红这两条。
+    const internals = harness.client as unknown as {
+      registry: {
+        resolve(lookup:
+          | { kind: 'provider-native'; providerId: string; sessionId: string }
+          | { kind: 'run'; run: { runId: string } }
+        ): AgentMuxStoredAgentSession
+        isRetiredRun(ref: { runId: string }): boolean
+      }
+    }
+    const byNative = internals.registry.resolve({
+      kind: 'provider-native',
+      providerId: 'codex',
+      sessionId: 'native-1'
+    })
+    expect(byNative.agentSessionId).toBe('agent-1')
+    expect(byNative.run.runId).toBe('spawned-run-1')
+    const byRun = internals.registry.resolve({ kind: 'run', run: { runId: 'spawned-run-1' } })
+    expect(byRun.agentSessionId).toBe('agent-1')
+    // 旧 Run 已退役，不再是可投递绑定。
+    expect(internals.registry.isRetiredRun({ runId: 'run-1' })).toBe(true)
+
+    await harness.client.dispose()
+  })
+
+  it('resume 后对原身份发的输入落到新 Run，而非退役的旧 Run', async () => {
+    const harness = await continuityHarness()
+    const inputs: string[] = []
+    const inputRuns: string[] = []
+    const internals = harness.client as unknown as {
+      kernel: {
+        status(runId: string): Promise<CtxmuxAdapterRun>
+        input(runId: string, op: { data: string }): Promise<{
+          run: CtxmuxAdapterRun
+          appliedByteRange: { startByte: number; endByte: number }
+        }>
+      }
+    }
+    // 恢复前 run-1 已退出；恢复后 spawned-run-1 running（continuityHarness 的 status 已如此约定）。
+    // 记录每一次 input 打到了哪个 Run。
+    internals.kernel.input = async (runId: string, op: { data: string }) => {
+      inputs.push(op.data)
+      inputRuns.push(runId)
+      return {
+        run: continuityRun(runId, { type: 'running' }),
+        appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(op.data) }
+      }
+    }
+
+    const resumed = await harness.client.ensureAgentContinuity({
+      agentSessionId: 'agent-1',
+      expectedRun: { runId: 'run-1' },
+      operationId: 'op-restart-input'
+    })
+    expect(resumed.kind).toBe('resumed')
+
+    // 按原稳定身份发输入——调用方只知道 agentSessionId，不知道 Run 换过。
+    await harness.client.writeAgent('agent-1', 'after-restart')
+
+    // 承重：这次输入落到**新** Run，不落到退役的旧 Run。若 resume 让身份/绑定漂移，
+    // 这里会看到 run-1（或抛 STALE_AGENT_SESSION_BINDING）。
+    expect(inputs).toContain('after-restart')
+    expect(inputRuns.at(-1)).toBe('spawned-run-1')
+    expect(inputRuns).not.toContain('run-1')
+
+    await harness.client.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // f-23q8faabh / T-001：屏幕验证失败时服务窗降级，不挡健康 Agent 的提交。
 //
 // 走到渲染验证这一步时 payload 的 CtxMux 受据已经确认、Run 的输入通道是好的；replay 被截断
