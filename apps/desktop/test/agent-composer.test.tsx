@@ -721,3 +721,240 @@ describe('AgentComposer Region 名水印', () => {
     expect(rule, '水印用了字面量颜色而不是 token').not.toMatch(/#[0-9a-f]{3,}/i)
   })
 })
+
+/**
+ * 识别词：裸词命中的候选、Tab 接管边界、以及下划线装饰。
+ *
+ * 判据分两层。**接线层**（本组）读 AgentComposer 的 props 与 keydown：候选开不开、Tab 拦不拦、
+ * keyword 有没有真的交到编辑器手里。**装饰层**在 inline-composer 那侧——它要一个真编辑器，而本仓的
+ * vitest 是 node 环境。
+ */
+describe('识别词的候选与 Tab 接管', () => {
+  const promptKeywords = [
+    { text: 'eli5', description: 'Explain simply · Your prompt' },
+    { text: 'grill_me', description: 'Grill me · Your prompt' }
+  ]
+
+  function composerFor(value: string, extra: Partial<Parameters<typeof AgentComposer>[0]> = {}) {
+    return AgentComposer({
+      value,
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      promptKeywords,
+      ...extra
+    }) as unknown as {
+      props: {
+        children: unknown[]
+      }
+    }
+  }
+
+  /** 候选浮层的 role=listbox 那一层；缺席时是 null（`suggestions.length` 为 0 就整段不渲染）。 */
+  function suggestionTexts(value: string): string[] {
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value,
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      promptKeywords
+    }))
+    if (!markup.includes('composer__suggestions')) return []
+    return promptKeywords.filter((item) => markup.includes(`>${item.text}<`)).map((item) => item.text)
+  }
+
+  it('打字过程中就给出提示，且打全整个 keyword 之后候选仍在', () => {
+    // 打到一半：前缀命中。
+    expect(suggestionTexts('please eli'), '打到一半没有提示——用户无从知道有这个词').toEqual(['eli5'])
+    // **打全之后仍在**。若沿用 `/` 那条 `item.text !== trigger` 的排除，这里会空掉，而那正是
+    // 用户要按 Tab / 点它的那一刻——候选恰好在此消失。
+    expect(suggestionTexts('please eli5'), '打全 keyword 后候选消失了：Tab 与点击都无从下手').toEqual(['eli5'])
+    // 不是 keyword 的普通词不开口。
+    expect(suggestionTexts('please explain this')).toEqual([])
+    // 单个字符不开口：否则几乎每句话都在弹候选。
+    expect(suggestionTexts('e')).toEqual([])
+  })
+
+  it('显式 / 触发不被裸词分支抢走', () => {
+    // `/diff` 这类命令走原来的路，`promptKeywords` 不该掺进来。
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: 'run /di',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      promptKeywords,
+      commands: [{ text: '/diff', description: 'Show the diff' }]
+    }))
+    expect(markup).toContain('/diff')
+    expect(markup, '`/` 触发时把识别词也端了出来').not.toMatch(/>eli5</)
+  })
+
+  it('Tab 只在光标停在识别词末尾时接管，其余一律放行', () => {
+    function pressTab(value: string, caret: number, onChange = vi.fn()) {
+      const preventDefault = vi.fn()
+      const tree = composerFor(value, { onChange }) as unknown as {
+        props: { children: [{ props: { onKeyDown(event: unknown, caret: number): void } }, ...unknown[]] }
+      }
+      tree.props.children[0].props.onKeyDown({ key: 'Tab', shiftKey: false, preventDefault }, caret)
+      return { preventDefault, onChange }
+    }
+
+    // 命中：接管并替换。
+    const hit = pressTab('please eli5', 11)
+    expect(hit.preventDefault, '光标停在识别词末尾却没接管 Tab').toHaveBeenCalled()
+    expect(hit.onChange).toHaveBeenCalledWith('please eli5')
+
+    // 未命中：**不得** preventDefault，否则 Tab 永远出不了输入框（无条件拦的实现在这里红）。
+    const miss = pressTab('please explain', 14)
+    expect(miss.preventDefault, '没命中也吃掉了 Tab：用户被永久困在输入框里').not.toHaveBeenCalled()
+    expect(miss.onChange).not.toHaveBeenCalled()
+
+    // 词中间按 Tab 的人在遍历焦点，不是要替换。
+    const inside = pressTab('please eli5', 9)
+    expect(inside.preventDefault, '词中间也接管了 Tab').not.toHaveBeenCalled()
+
+    // Shift+Tab 是反向遍历，永不接管。
+    const tree = composerFor('please eli5') as unknown as {
+      props: { children: [{ props: { onKeyDown(event: unknown, caret: number): void } }, ...unknown[]] }
+    }
+    const shiftPrevent = vi.fn()
+    tree.props.children[0].props.onKeyDown({ key: 'Tab', shiftKey: true, preventDefault: shiftPrevent }, 11)
+    expect(shiftPrevent, 'Shift+Tab 也被接管了：反向焦点遍历没了').not.toHaveBeenCalled()
+  })
+
+  it('Tab 替换走 onSelectSuggestion，拿到的是裸 keyword 与 keyword 这个 kind', () => {
+    // 这条钉的是 Tab 与点击**同一条替换路径**：宿主只实现一次「keyword → 正文」。
+    const onSelectSuggestion = vi.fn(() => '[Explain simply](agentmux-subcommand:body)')
+    const onChange = vi.fn()
+    const tree = composerFor('please eli5', { onSelectSuggestion, onChange }) as unknown as {
+      props: { children: [{ props: { onKeyDown(event: unknown, caret: number): void } }, ...unknown[]] }
+    }
+
+    tree.props.children[0].props.onKeyDown({ key: 'Tab', shiftKey: false, preventDefault: vi.fn() }, 11)
+
+    expect(onSelectSuggestion).toHaveBeenCalledWith('eli5', 'keyword')
+    expect(onChange, 'Tab 没有把 keyword 换成宿主给的正文').toHaveBeenCalledWith('please [Explain simply](agentmux-subcommand:body)')
+  })
+
+  it('识别词交到编辑器手里用于画下划线', () => {
+    // 装饰本身由 InlineComposer 的扩展画（要真编辑器，见 inline-composer 那侧）。这里钉的是这条线
+    // 真的接上了：不传下去的话下划线永远不出现，而候选与 Tab 照旧工作——半个功能，且测试全绿。
+    const tree = composerFor('hello') as unknown as {
+      props: { children: [{ props: { keywords?: readonly string[] } }, ...unknown[]] }
+    }
+    expect(tree.props.children[0].props.keywords, '识别词没交给编辑器：下划线永远不出现').toEqual(['eli5', 'grill_me'])
+  })
+
+  it('没有识别词时这条路整体静默——不开候选、不拦 Tab', () => {
+    // 反向世界：一条 prompt 都没有（用户删光了）时，上面每一条都必须变成"什么也不做"。
+    // 少了这条，一个把 promptKeywords 当摆设、恒开候选的实现也能通过前面几条。
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: 'please eli5',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn()
+    }))
+    expect(markup).not.toContain('composer__suggestions')
+
+    const preventDefault = vi.fn()
+    const tree = AgentComposer({
+      value: 'please eli5',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn()
+    }) as unknown as {
+      props: { children: [{ props: { onKeyDown(event: unknown, caret: number): void } }, ...unknown[]] }
+    }
+    tree.props.children[0].props.onKeyDown({ key: 'Tab', shiftKey: false, preventDefault }, 11)
+    expect(preventDefault, '一条识别词都没有却还是拦了 Tab').not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 候选按来源分段（设计 SSOT「同一个 `/` 列表，但分组带标题」——用户在两个方案里挑的就是这个，
+ * 而不是第二个触发符）。
+ *
+ * 判据必须落在**成员归属**上，不是落在「两个标题都在场」：一个把所有候选塞进第一段、第二段只剩一个
+ * 空标题的实现，同样能让两个标题都出现在 markup 里（本仓「在场判据太弱」那一族）。所以这里按段切开，
+ * 逐段核对里面装的是哪几条。
+ */
+describe('候选浮层按来源分段', () => {
+  /** 把浮层按 `<div class="composer__suggestion-group" … aria-label="X">` 切成 { 段名: 段内文本 }。 */
+  function sections(markup: string): Record<string, string> {
+    const out: Record<string, string> = {}
+    const re = /<div class="composer__suggestion-group"[^>]*aria-label="([^"]+)"[^>]*>([\s\S]*?)<\/h4>([\s\S]*?)(?=<div class="composer__suggestion-group"|<\/div><\/div>$)/g
+    for (const [, label, , body] of markup.matchAll(re)) out[label!] = body!
+    return out
+  }
+
+  const mine = [
+    { text: '/review-changes', description: 'Review changes', group: 'Shortcuts' },
+    { text: '/eli5', description: 'Explain simply', group: 'Shortcuts' }
+  ]
+  const theirs = [
+    { text: '/diff', description: 'Show the diff', group: 'Agent commands' },
+    { text: '/compact', description: 'Compact context', group: 'Agent commands' }
+  ]
+
+  function markupFor(commands: typeof mine) {
+    return renderToStaticMarkup(createElement(AgentComposer, {
+      value: '/',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      commands
+    }))
+  }
+
+  it('两个来源各成一段，每条候选落在自己那一段里', () => {
+    const found = sections(markupFor([...mine, ...theirs]))
+    // 先证切分有收获：切出空的话，下面每一条 not.toContain 都恒真（本仓 indexOf 取空那一族）。
+    expect(Object.keys(found), '浮层没有切出两个分段：分组根本没渲染').toEqual(['Shortcuts', 'Agent commands'])
+    for (const [label, body] of Object.entries(found)) {
+      expect(body.length, `${label} 段切出来是空的：这一段里的断言全部恒真`).toBeGreaterThan(0)
+    }
+    // 归属：我的两条在 Shortcuts 段里，Agent 的两条不在。**两个方向都判**——只判前者的话，
+    // 一个把全部候选塞进第一段的实现照样通过。
+    expect(found['Shortcuts']).toContain('/review-changes')
+    expect(found['Shortcuts']).toContain('/eli5')
+    expect(found['Shortcuts'], 'Agent 原生命令混进了 Shortcuts 段：分段只是视觉上的，归属是错的').not.toContain('/diff')
+    expect(found['Agent commands']).toContain('/diff')
+    expect(found['Agent commands']).toContain('/compact')
+    expect(found['Agent commands'], '我的 Shortcut 混进了 Agent commands 段').not.toContain('/review-changes')
+  })
+
+  it('只有一个来源时不分段——给一份列表起个多余的名字', () => {
+    const markup = markupFor(theirs)
+    expect(markup, '单一来源也画了分段标题').not.toContain('composer__suggestion-group')
+    // 反向锚：候选本身照旧在（上一条不是因为整个浮层没渲染）。
+    expect(markup).toContain('/diff')
+    expect(markup).toContain('/compact')
+  })
+})
+
+/**
+ * 候选浮层必须有边界并内部滚动（density SSOT DEN:480「菜单有边界和内部滚动」，interaction INT:735
+ * 「当候选过多时在浮层内部滚动，输入框和底部操作保持可见」）。
+ *
+ * 为什么这条现在才立得住：候选来源合并成 Provider 原生命令 ∪ 用户自己的 prompt 之后，条数由**配置**
+ * 决定而没有上限。不封顶时浮层会把输入框和底部操作顶出视口——而那两个正是用户此刻要看的东西。
+ */
+describe('候选浮层的边界', () => {
+  it('有 max-height 且溢出时内部滚动', () => {
+    const rules = allStyleRules()
+    const found = [...rules.matchAll(/([^{}\n]*)\{([^{}]*)\}/g)]
+      .filter(([, selector]) => /^\s*\.composer__suggestions\s*$/.test(selector!))
+
+    expect(found.length, '.composer__suggestions 的基础规则不是恰好一条——判据会落到别的规则上').toBe(1)
+    const body = found[0]![2]!
+    expect(body, '候选浮层没有高度上限：候选一多就把输入框和 Send 顶出视口').toMatch(/max-height:/)
+    // 只封顶不给滚动更糟：超出的候选既看不见也到不了。
+    expect(body, '封了顶却没给内部滚动：溢出的候选永远够不着').toMatch(/overflow-y:\s*auto/)
+  })
+})

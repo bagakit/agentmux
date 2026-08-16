@@ -1,18 +1,19 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import { Bell, Bot, Boxes, FolderGit2, Globe, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import { Bell, Bot, Boxes, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { AgentSettingsPane } from './settings/AgentSettingsPane'
 import { AppearanceSettingsPane } from './settings/AppearanceSettingsPane'
 import { BrowserSettingsPane } from './settings/BrowserSettingsPane'
+import { ShortcutSettingsPane } from './settings/ShortcutSettingsPane'
 import { GeneralSettingsPane } from './settings/GeneralSettingsPane'
 import { HostSettingsPane } from './settings/HostSettingsPane'
 import { NotificationSettingsPane } from './settings/NotificationSettingsPane'
 import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
 
-export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser'
+export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser' | 'prompts'
 type SettingsGroupId = 'setup' | 'preferences'
 
 // Grouped navigation, using `group`-tagged sections at this app's small scale
@@ -43,6 +44,7 @@ const SECTIONS = [
   { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
   { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts, how long they stay, and whether you hear them', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
   { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Whether Agents may drive an open page', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
+  { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Your own prompts, their keywords, and which Agent each belongs to', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
   { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
 
@@ -145,6 +147,14 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
     setConfig(await api.config.save({ ...current, browser }))
   }
 
+  // 空列表照样写：`[]` 是「用户把默认那两条都删了」这个事实。写成按长度判会让删光静默变回默认，
+  // 而缺席不回填这条纪律的全部意义就是删掉即永久没有。
+  async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[]): Promise<void> {
+    const current = useAppStore.getState().config
+    if (!current) return
+    setConfig(await api.config.save({ ...current, composerShortcuts }))
+  }
+
   return (
     <div className="settings-page">
       <div className="window-drag-region" />
@@ -172,6 +182,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
           {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {active === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
           {active === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
+          {active === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
           {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} /> : null}
           {active === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
           {active === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}

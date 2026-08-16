@@ -75,7 +75,11 @@ export function SemanticIconProvider({ theme, children }: { theme: SemanticIconT
 export function SemanticIcon({ name, size = 14, className, ...props }: { name: SemanticIconName; size?: number; className?: string } & Omit<LucideProps, 'size'>) {
   const theme = useContext(SemanticIconThemeContext)
   const Icon = (theme[name] ?? defaultSemanticIconTheme[name]) as SemanticIconRenderer
-  return <Icon size={size} className={className ? `semantic-icon ${className}` : 'semantic-icon'} aria-hidden="true" {...props} />
+  // `working`（正在产出）的字形带节奏动势，`running`（进程活着、未在产出）保持静态——两者字形本已不同
+  // （Activity vs Radio），动势是第二条轴而非唯一区分。动势与它在别处驱动工作点的是同一条 opacity 节奏
+  // （activity.css 的 activity-working-pulse），reduced-motion 下退化为静态而字形差异仍在。
+  const classes = ['semantic-icon', name === 'working' ? 'semantic-icon--working' : null, className].filter(Boolean).join(' ')
+  return <Icon size={size} className={classes} aria-hidden="true" {...props} />
 }
 
 export function WorkflowSemanticIcon({ status, size = 12, className }: { status: WorkflowAgentStatus; size?: number; className?: string }) {

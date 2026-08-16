@@ -4,10 +4,18 @@ import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
 import { presentError } from '../lib/error-presentation'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
-import { COMPOSER_PROMPT_PRESETS } from '../lib/composer-semantic-reference'
 
 type ToolDockPhase = 'current' | 'collapsed' | 'restored' | 'expanded'
 
+/**
+ * 三态循环。改变的是**输入区自身的形态**，不是「露出更多工具」——后者是这枚键此前的语义，
+ * 用户明确否掉了（设计 SSOT：agentmux-desktop-interaction.md「Message Tools 三态」）：
+ *   collapsed = 收起成一行（工具整排隐藏，只留这枚键与主动作）
+ *   current / restored = 两行常态（输入行 + 一排工具）
+ *   expanded = 大输入框（输入区放高供长文编辑，工具排仍在）
+ * 形态由 `.composer` 上按 data-mode 命中的 CSS 承担（composer.css），组件只报当前档位——
+ * 三态是这枚键的**唯一**入口，绝对定位的第二个 disclosure 已废止。
+ */
 export function nextToolDockPhase(phase: ToolDockPhase): ToolDockPhase {
   switch (phase) {
     case 'current': return 'collapsed'
@@ -17,13 +25,20 @@ export function nextToolDockPhase(phase: ToolDockPhase): ToolDockPhase {
   }
 }
 
-export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onPromptPreset, onCapture, reportError }: {
+/** 下一次点击会把输入区变成什么形态——按钮的可访问名说的是这件事，而不是当前档位。 */
+const NEXT_SHAPE: Record<ToolDockPhase, string> = {
+  current: 'Collapse the composer to one line',
+  collapsed: 'Show the message tool row',
+  restored: 'Grow the input box for long text',
+  expanded: 'Collapse the composer to one line'
+}
+
+export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, reportError }: {
   disabled: boolean
   commands: NonNullable<AgentCatalogEntry['composer']>['commands']
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
   onCommand(text: string): void
-  onPromptPreset?: (preset: (typeof COMPOSER_PROMPT_PRESETS)[number]) => void
   onCapture?: () => Promise<void>
   reportError(error: unknown): void
 }) {
@@ -33,12 +48,11 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   const [error, setError] = useState('')
   const [phase, setPhase] = useState<ToolDockPhase>('current')
   const mode = phase === 'collapsed' ? 'collapsed' : phase === 'expanded' ? 'expanded' : 'current'
-  const action = phase === 'current' || phase === 'expanded' ? 'Collapse' : phase === 'collapsed' ? 'Restore' : 'Expand'
   return <span className="composer-tools" data-mode={mode}>
     <button type="button" className="composer-tool composer-tool--mode" disabled={disabled}
-      aria-label={`${action} message tools`}
-      title={`${action} message tools`}
-      onClick={() => setPhase(nextToolDockPhase)}><SemanticIcon name="message-tools" size={14} />{mode === 'expanded' ? 'More' : ''}</button>
+      aria-label={NEXT_SHAPE[phase]}
+      title={NEXT_SHAPE[phase]}
+      onClick={() => setPhase(nextToolDockPhase)}><SemanticIcon name="message-tools" size={14} /></button>
     {mode === 'collapsed' ? null : <>
     {onCapture ? <button type="button" className="composer-tool" disabled={disabled || capturing}
       title="Capture a screen region" onClick={() => {
@@ -69,9 +83,6 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         </DropdownMenu.Item>)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root> : null}
-    {onPromptPreset ? <span className="composer-prompt-presets" aria-label="Editable prompt presets">
-      {COMPOSER_PROMPT_PRESETS.map((preset) => <button type="button" key={preset.text} className="composer-tool composer-tool--preset" disabled={disabled} title={preset.description} onClick={() => onPromptPreset(preset)}><SemanticIcon name="subcommand" size={13} />{preset.label}</button>)}
-    </span> : null}
     </>}
   </span>
 }

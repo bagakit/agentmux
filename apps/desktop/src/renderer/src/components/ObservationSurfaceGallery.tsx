@@ -1,14 +1,25 @@
 import { useState } from 'react'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { ConversationMessage } from './ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
 import { SemanticIcon } from './semantic-icons'
 import { AgentComposer, type ComposerQueuedMessage } from './AgentComposer'
-import { appendSemanticReference, expandSemanticReferences, COMPOSER_PROMPT_PRESETS, encodeSemanticReference } from '../lib/composer-semantic-reference'
+import { appendSemanticReference, expandSemanticReferences, encodeSemanticReference } from '../lib/composer-semantic-reference'
+import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../../shared/composer-shortcut-library'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
+
+// 画廊里那条示例 prompt。它是**一份 fixture**，不是第二套注册表：画廊要画出「用户自己的 prompt
+// 混在 Provider 命令里长什么样」，而画廊没有 store、读不到真实配置。形状用真类型，所以字段一改
+// 这里当场编译不过。
+const GALLERY_PROMPT: ComposerShortcut = {
+  id: 'gallery-review',
+  keyword: 'review-changes',
+  label: 'Review changes',
+  body: 'Review the current changes. Identify concrete bugs and missing tests.'
+}
 
 const workingStatus: SessionSnapshot['status'] = {
   state: 'working',
@@ -98,11 +109,11 @@ export function ObservationSurfaceGallery() {
           onRemoveQueued={(id) => setQueued((items) => items.filter((item) => item.id !== id))}
           onSendQueued={(id) => { setComposerAction(`Example send: ${queued.find((item) => item.id === id)?.text}`); setQueued((items) => items.filter((item) => item.id !== id)) }}
           onSubmit={() => { setComposerAction(`Example payload: ${expandSemanticReferences(draft)}`); setDraft('') }}
-          commands={[{ text: '/status', description: 'Provider command' }]}
-          onSelectSuggestion={(text) => { const preset = COMPOSER_PROMPT_PRESETS.find((item) => item.text === text); return preset ? encodeSemanticReference({ token: text, label: preset.label, kind: 'subcommand', reference: preset.prompt }) : text }}
+          commands={[{ text: '/status', description: 'Provider command' }, composerShortcutSuggestion(GALLERY_PROMPT)]}
+          onSelectSuggestion={(text) => { const mine = composerShortcutForBareWord([GALLERY_PROMPT], text.replace(/^\//, '')); return mine ? encodeSemanticReference({ token: text, label: mine.label, kind: 'subcommand', reference: mine.body }) : text }}
           queueDeliverable
           onActivateSemanticReference={(reference) => setComposerAction(`Open reference: ${reference.reference}`)}
-          tools={<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} onPromptPreset={(preset) => setDraft((text) => `${text}${text ? ' ' : ''}${preset.prompt} `)} reportError={(error) => setComposerAction(String(error))} />}
+          tools={<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} reportError={(error) => setComposerAction(String(error))} />}
         />
         {composerAction ? <p role="status">{composerAction}</p> : null}
         <small>队列失败会停住并说明原因；引用以短 token 展示，hover 可见完整路径。</small>

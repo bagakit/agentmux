@@ -987,7 +987,10 @@ describe('ConfigStore workspace identity', () => {
       // get() back-fills the notification default for a config saved before the field existed.
       notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
       // 同理：授权位也是后加的字段，get() 会把它补成具体的 false 再交出去。
-      browser: { ...saved.browser, agentAutomation: false }
+      browser: { ...saved.browser, agentAutomation: false },
+      // 同理：prompt 库也是后加的字段。**键缺席**（这个 fixture 就是）读成默认那两条；
+      // 用户显式删光留下的 `[]` 不在此列，那条由本文件「用户删光之后不被回填」单独钉。
+      composerShortcuts: DEFAULT_CONFIG.composerShortcuts
     })
   })
 
@@ -1145,9 +1148,12 @@ describe('ConfigStore workspace identity', () => {
       }
     })
 
-    await expect(initial).resolves.toEqual(baseConfig)
+    // baseConfig 写于 prompt 库这个字段之前（它不带这个键），所以存取都会补上默认那两条。
+    // 两处都按同一个来源比，而不是把默认那两条在测试里手抄一遍——手抄的那份会和 DEFAULT_CONFIG 漂开。
+    const withDefaults = { ...baseConfig, composerShortcuts: DEFAULT_CONFIG.composerShortcuts }
+    await expect(initial).resolves.toEqual(withDefaults)
     await expect(rebound).rejects.toThrow('Agent Executor codex is already bound to Provider codex')
-    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(baseConfig)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(withDefaults)
   })
 
   it('rejects Provider rebinding through the Runtime config transaction without committing it', async () => {
@@ -1243,6 +1249,118 @@ describe('ConfigStore workspace identity', () => {
     // the old inline key used (`join(..., '.')` and `posix.normalize`) must be gone from the block.
     expect(block).not.toContain("join(workspace.path, '.')")
     expect(block).not.toContain('posix.normalize')
+  })
+})
+
+describe('ConfigStore 本地 prompt 库', () => {
+  // 这一族守的是「删掉即永久没有」。它不是一条偏好开关：内置那两条是 DEFAULT_CONFIG 里的**默认项**，
+  // 而任何「缺席即补默认」的回填都会把用户删掉的东西送回来——删了又回来比一开始不能删更糟。
+  // 所以判据必须同时钉住两侧：默认要在场（否则新用户一条都没有），缺席与空列表都不许被补。
+
+  it('默认给出那两条可改可删的 prompt，每条都能真的工作（keyword 与正文都非空）', () => {
+    const prompts = DEFAULT_CONFIG.composerShortcuts ?? []
+    expect(prompts.map((prompt) => prompt.id)).toEqual(['review-changes', 'summarize-progress'])
+    // 空 keyword 补全不了也识别不了裸词，空 body 替换进去等于清空草稿——两者都是「这条什么都不做」。
+    // 只判条数会让一条空壳 prompt 通过（本仓「声明了却静默不做的能力」）。
+    for (const prompt of prompts) {
+      expect(prompt.keyword.length, `${prompt.id} 没有 keyword，它既补全不了也识别不了裸词`).toBeGreaterThan(0)
+      expect(prompt.body.length, `${prompt.id} 没有正文，选中它等于把草稿清空`).toBeGreaterThan(0)
+      // keyword 不带 `/`：同一个字段既作 `/` 候选的补全词、也作正文里的裸词识别，带上前缀就只能服务前一处。
+      expect(prompt.keyword.startsWith('/'), `${prompt.id} 的 keyword 带了 /，裸词识别永不命中`).toBe(false)
+    }
+  })
+
+  it('用户删光之后不被回填——盘上是空列表，读出来仍是空列表', async () => {
+    // 这是本族的题眼。fixture 先把 scratch 与 notifications 两个上游 back-fill 喂饱，否则它们各自
+    // 也会置 persist、把盘重写一遍，于是「我这条没有回填」这件事会搭它们的便车被掩盖。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      workspaces: [{
+        id: SCRATCH_WORKSPACE_ID,
+        name: SCRATCH_WORKSPACE_NAME,
+        hostId: 'local',
+        path: join(tmpdir(), '.agentmux', 'scratch'),
+        kind: 'folder'
+      }],
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+      browser: { ...baseConfig.browser, agentAutomation: false },
+      composerShortcuts: []
+    }))
+
+    const loaded = await store.get()
+    expect(loaded.composerShortcuts, '删光的 prompt 被默认值补回来了——删掉必须是永久的').toEqual([])
+    // 内存里没补还不够：只在内存里空着、却把默认写回盘，下次冷启动它们就回来了。
+    const onDisk = JSON.parse(await readFile(path, 'utf8')) as { composerShortcuts?: unknown }
+    expect(onDisk.composerShortcuts, '盘上被写回了默认 prompt，下次冷启动删掉的又回来').toEqual([])
+    // 反向锚点：断言不是因为「默认恰好是空」而成立。
+    expect((DEFAULT_CONFIG.composerShortcuts ?? []).length).toBeGreaterThan(0)
+  })
+
+  it('字段整个缺席＝这份配置写于本功能之前，读出来是默认那两条（真机上就是这个情形）', async () => {
+    // 这一条是**用户报的缺陷**：「我们要的那种自定义 command 能力似乎也没见到」。真机上
+    // `~/Library/Application Support/dev.agentmux.desktop/agentmux.config.json` 是 version 9、
+    // 写于本字段存在之前，一个 composerShortcuts 键都没有。此前这里按「缺席与空同义、都不回填」
+    // 收口，于是旧配置的用户永远看不到任何 prompt，也不会有识别词——功能像根本没做。
+    //
+    // 缺席与 `[]` 必须分开：前者是「还没见过这个字段」，后者是「用户删光了」。它们只差一个键
+    // 的有无，而 zod 的 `.default()` 正好只在键缺席时生效。上面那条「删光不回填」仍然成立，
+    // 两条一起钉住这个分叉——单钉任何一侧，另一侧的实现都能是错的还全绿。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      workspaces: [{
+        id: SCRATCH_WORKSPACE_ID,
+        name: SCRATCH_WORKSPACE_NAME,
+        hostId: 'local',
+        path: join(tmpdir(), '.agentmux', 'scratch'),
+        kind: 'folder'
+      }],
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+      browser: { ...baseConfig.browser, agentAutomation: false }
+    }))
+    // 自证：fixture 真的没这个字段，否则下面判的是别的东西。
+    expect('composerShortcuts' in JSON.parse(await readFile(path, 'utf8'))).toBe(false)
+
+    const loaded = await store.get()
+
+    // 读出来必须是能用的那两条，而不是空列表。按 id 钉而不只数条数：一条空壳 prompt
+    // （keyword 或 body 为空）条数也对，但它什么都不做。
+    expect(loaded.composerShortcuts?.map((prompt) => prompt.id),
+      '旧配置读出来没有 prompt：真机上这就是「自定义 command 看不到」').toEqual(['review-changes', 'summarize-progress'])
+    // 反向锚点：这条断言不是因为「默认恰好是空」而成立。
+    expect((DEFAULT_CONFIG.composerShortcuts ?? []).length).toBeGreaterThan(0)
+  })
+
+  it('用户写的 prompt 原样存取，包括绑定到某个 Provider 的那条', async () => {
+    const { store } = await storeFixture()
+    const mine = [
+      { id: 'p-1', keyword: 'eli5', label: 'Explain simply', body: 'Explain this like I am five.' },
+      { id: 'p-2', keyword: 'grill_me', label: 'Grill me', body: 'Attack my reasoning.', providerId: 'codex' as const }
+    ]
+
+    const saved = await store.save({ ...baseConfig, composerShortcuts: mine })
+
+    expect(saved.composerShortcuts).toEqual(mine)
+    // 重新读一遍：strict schema 漏声明这个字段的话，整块配置在这里判失败而不是静默丢字段。
+    expect((await store.get()).composerShortcuts).toEqual(mine)
+  })
+
+  it('退役重置带走用户的 prompt，而不是把它们换回默认那两条', () => {
+    // prompt 正文是用户**自己打的字**，不是一键能设回来的偏好。和 appearance / browser 那些不同，
+    // 丢了它就是丢了用户写的内容，所以它必须落在 carry-over 那一侧。
+    const carried = authoredConfigCarryOver({
+      ...baseConfig,
+      composerShortcuts: [{ id: 'p-1', keyword: 'eli5', label: 'Explain simply', body: 'Explain this like I am five.' }]
+    })
+    expect(carried.composerShortcuts).toEqual([
+      { id: 'p-1', keyword: 'eli5', label: 'Explain simply', body: 'Explain this like I am five.' }
+    ])
+    // 空列表也要带过来：`[]` 是「用户把默认那两条都删了」这个事实，按长度判会让删光静默变回默认。
+    expect(authoredConfigCarryOver({ ...baseConfig, composerShortcuts: [] }).composerShortcuts).toEqual([])
+    // 而坏掉的一条让整列表不带过来（默认顶上），不是静默塞一条半截数据进去。
+    expect(authoredConfigCarryOver({ ...baseConfig, composerShortcuts: [{ id: 'p-1', keyword: '' }] }).composerShortcuts)
+      .toBeUndefined()
   })
 })
 
