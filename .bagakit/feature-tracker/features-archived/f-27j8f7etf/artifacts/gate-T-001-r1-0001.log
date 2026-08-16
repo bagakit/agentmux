@@ -1,0 +1,11 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+candidate_sha=07bde27760fc128cab66631b82e710f0eb18999e
+worktree_digest=31e3ba45f03cc3af35395253ce2d7aa21b604557a6a31bc9a89abbbc37015430
+verification_digest=none
+dedup_key=3c2ad4209cc3a5823e5bae050ab84ab7e7f011d048def8e1439abc2b603f9991
+commands:
+- pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run packages/core/test/prompt-submission-diagnostics.test.ts packages/core/test/agent-session-store.test.ts packages/core/test/continuous-progress.test.ts packages/core/test/client-submit-prompt-interrupted.test.ts apps/desktop/test/continuous-progress-loop-manager.test.ts apps/desktop/test/continuous-progress-delivery.test.ts --maxWorkers=1 => pass (0)

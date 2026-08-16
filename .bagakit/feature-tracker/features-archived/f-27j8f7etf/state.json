@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "feat_id": "f-27j8f7etf",
+  "title": "完成事实与人工输入的原子准入",
+  "slug": "completion-input-admission",
+  "goal": "人工消息先于 native start 确认时不触发重复自动推进",
+  "status": "archived",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --dir /tmp/agentmux-message-tools-20260920 exec vitest run packages/core/test/prompt-submission-diagnostics.test.ts packages/core/test/agent-session-store.test.ts packages/core/test/continuous-progress.test.ts packages/core/test/client-submit-prompt-interrupted.test.ts apps/desktop/test/continuous-progress-loop-manager.test.ts apps/desktop/test/continuous-progress-delivery.test.ts --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-27j8f7etf/artifacts/gate-T-001-r1-0001.log",
+    "last_context": {
+      "candidate_sha": "07bde27760fc128cab66631b82e710f0eb18999e",
+      "worktree_digest": "31e3ba45f03cc3af35395253ce2d7aa21b604557a6a31bc9a89abbbc37015430",
+      "verification_digest": "none",
+      "dedup_key": "3c2ad4209cc3a5823e5bae050ab84ab7e7f011d048def8e1439abc2b603f9991",
+      "source_key": "3dcf85a1bbcd17d15531f407d291c49e5c813404602ed429001d9ba5ca7a1ac5",
+      "artifact_digests": {},
+      "plan_revision": 1
+    }
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "feat_archived",
+      "detail": "tracker metadata closed; Git workspace unchanged"
+    }
+  ],
+  "closed_from_status": "done"
+}

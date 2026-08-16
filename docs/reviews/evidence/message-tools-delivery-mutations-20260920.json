@@ -132,6 +132,32 @@
       "caught": true,
       "exit": 1,
       "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > does not continue a partially accepted old transaction into a pending interaction"
+    },
+    {
+      "name": "completion-not-recorded",
+      "caught": true,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > consumes done atomically for manual single-phase input before a delayed native start"
+    },
+    {
+      "name": "completion-not-rechecked",
+      "caught": true,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > consumes done atomically for manual single-phase input before a delayed native start"
+    },
+    {
+      "name": "completion-not-decoded",
+      "caught": true,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > consumes done atomically for manual single-phase input before a delayed native start"
+    },
+    {
+      "name": "single-phase-range-lost",
+      "caught": true,
+      "failed_test": "FAIL  packages/core/test/prompt-submission-diagnostics.test.ts > reuses the original single-phase operation and byte range after an unknown outcome"
+    },
+    {
+      "name": "scheduler-reuses-consumed-completion",
+      "caught": true,
+      "failed_test": "FAIL  packages/core/test/continuous-progress.test.ts > does not reuse done while a manual admission is waiting for its native start event"
     }
-  ]
+  ],
+  "followup_base": "07bde277"
 }

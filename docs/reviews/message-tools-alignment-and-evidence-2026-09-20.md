@@ -43,3 +43,7 @@ UI 延续 f-2688fn733 的身份呈现 Closure；终端确认是独立行为 Clos
 - 浏览器真实控件：314 / 554 / 994px 宽度，三态的切换、Inbox、Send、头像均 24px；切换在左、头像在右且无常驻文字。关闭告示后 inbox 仍保留条目。另有 DOM 测试覆盖空 Session 启动投影、同一事实重挂载已读、恢复后再发生、换 Run 新提醒、队列消息和局部 retry 不被关闭动作删除。
 - 无 Stop 连续 steer、保存后新 Client 恢复继续发送、排队后取消、submit 已接收而确认丢失后在 working 状态恢复相同事务，均通过公开 Client / 实际 coordinator 的行为测试。
 - 屏幕前缀被保留窗口淘汰后，继续保存观察连接；只有可信 RIS 终端重置恢复完整屏幕权威，普通清屏或同步帧不伪装为完整证据。无完整确认时输入仍继续，Inbox 保留真实降级。
+
+安装前最后的并发复核证实：manual acknowledgment 不会立即改变 native semantic done；仅比较完成 ID 仍可误发自动提示。暂停 07bde277 的安装，追加 Core 的完成事实输入认领记录（含原 operation/range 供 single-phase 对账），与两阶段 claim 原子持久化。该字段是准入事实而不是第二套 Agent 状态，不伪造 working；完成事实消费只限制新自动输入。
+
+补充准入候选验证：80 项相关回归与 desktop typecheck 通过；新增 5 个变异全部由行为断言检出（累计 27 个）。single-phase 与 two-phase 的完成消费、原子重验、持久解码、原字节区间恢复、调度侧停止重复探测均有覆盖。独立增量复核未发现新的 P1。最终安装候选包含该补充修复。

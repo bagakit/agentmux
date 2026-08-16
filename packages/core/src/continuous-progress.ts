@@ -3,7 +3,7 @@ import type { AgentMuxAgentSession } from './types.js'
 
 /** The scheduler's deliberately small, provider-neutral observation contract. */
 export type ContinuousProgressObservation = {
-  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction'>
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission'>
   tickId: string
   now: number
   lastTickId?: string
@@ -36,6 +36,6 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
   }
   if (semantic !== 'done') return { kind: 'skip', reason: 'unknown-status' }
   const completionId = agentTurnCompletionIdentity(session)!
-  if (observation.lastCompletionId === completionId) return { kind: 'skip', reason: 'completion-consumed' }
+  if (observation.lastCompletionId === completionId || session.promptCompletionAdmission?.completionId === completionId) return { kind: 'skip', reason: 'completion-consumed' }
   return { kind: 'send', tickId: observation.tickId, completionId }
 }
