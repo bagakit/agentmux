@@ -51,6 +51,12 @@
   font: inherit;
   font-variant-numeric: tabular-nums;
 }
+.agent-status-bar__group { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.agent-tree__disclose { width: 16px; height: 16px; flex: 0 0 auto; justify-content: center; }
+.agent-tree__disclose:hover,
+.agent-tree__disclose:focus-visible,
+.agent-tree__disclose[data-state='open'] { background: var(--surface-3); color: var(--text); }
+.agent-tree__disclose:focus-visible { outline: 1px solid var(--text-2); outline-offset: 1px; }
 .agent-status-bar__segment--action { cursor: pointer; border-radius: var(--radius-sm); }
 .agent-status-bar__segment--action:hover { color: var(--text-2); }
 
