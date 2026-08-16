@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 154
+    "next_cursor": 155
   },
   "features": [
     {
@@ -1560,6 +1560,16 @@
       "title": "对话组件最终运行期验收",
       "status": "archived",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26z8fuvzk",
+      "title": "Browser 内嵌 frame 应用链接交接",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

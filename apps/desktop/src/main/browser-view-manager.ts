@@ -934,7 +934,6 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
     const guardNavigation = (event: { url: string; isMainFrame: boolean; preventDefault(): void }): void => {
-      if (!event.isMainFrame) return
       // 应用链接在闸门**之前**分流。闸门本身逐字不变：`lark://` 装不进 WebContentsView，它要的不是
       // 放行进视图，是改道给系统。两件事分开之后，`javascript:` 一类仍然原地死在闸门上。
       const target = classifyBrowserTarget(event.url)
@@ -944,6 +943,9 @@ export class BrowserViewManager {
         void this.handOffAppLink(entry, event.url, target.scheme!)
         return
       }
+      // 普通 child-frame navigation belongs to the page. Only the application-link
+      // branch above crosses the Browser boundary for embedded frames.
+      if (!event.isMainFrame) return
       try {
         assertAllowedBrowserUrl(event.url)
       } catch (error) {
