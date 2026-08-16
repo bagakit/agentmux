@@ -47,8 +47,8 @@ import {
 // literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
 // vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
 // runtime with no compile error. Binding two consumers to this one validated source is the fix.
-export const CTXMUX_COMMIT = 'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02'
-const CTXMUX_TREE = '1d97495e717cce1c3ac588a3c0712d9555b5c871'
+export const CTXMUX_COMMIT = 'c35f6217109c358ad730b0c8a7e879c3257a2ab7'
+const CTXMUX_TREE = 'c0dfd9be2289816a56f27eed2d39b99909d21e08'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -424,8 +424,19 @@ async function verifyArtifacts(): Promise<VerifiedArtifacts> {
     const version = await execFileAsync(daemonPath, ['--version'], {
       maxBuffer: 64 * 1024
     })
-    if (version.stdout.trim() !== `ctxmuxd ${CTXMUX_VERSION} (protocol ${PROTOCOL_VERSION})`) {
-      throw new Error(`unexpected version: ${version.stdout.trim()}`)
+    // 括号里是一串**开放的**身份事实，不只有 protocol：ctxmuxd 还在同一对括号里声明它能接受的
+    // handoff schema（`--version` 是 exec-in-place 升级前唯一能问出这件事的通道）。所以这里读到
+    // protocol 号就停，但**必须**要求它后面紧跟 `,` 或 `)`——否则 `protocol 17` 会把 `protocol 170`
+    // 也认成合法，即放过一个真正不兼容的产物。
+    //
+    // 把 `)` 钉在 protocol 数字后面，正是上游 vendor 构建被打断的原因（`build-local-artifacts.mjs`
+    // 那条正则，已由上游 `c35f621` 修掉）：二进制是对的，正则是错的。我们这条断言当时有同一个缺陷，
+    // 只是还没撞上——protocol 17 起 ctxmuxd 就会多印一段，于是一个**完好**的产物会被判成合同不符。
+    const versionText = version.stdout.trim()
+    const versionPrefix = `ctxmuxd ${CTXMUX_VERSION} (protocol ${PROTOCOL_VERSION}`
+    const delimiter = versionText.slice(versionPrefix.length, versionPrefix.length + 1)
+    if (!versionText.startsWith(versionPrefix) || (delimiter !== ',' && delimiter !== ')')) {
+      throw new Error(`unexpected version: ${versionText}`)
     }
   } catch (error) {
     throw new AgentMuxError(
@@ -891,7 +902,7 @@ export class CtxmuxRunAdapter {
         // The daemon can outlive this application. Every new local Run receives the current
         // client environment; explicit Run overrides remain authoritative.
         env: { ...localProcessEnvironment(), ...input.env },
-        size: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
+        initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
       }), createOperationKey(input.operationKey))
       return this.projectRun(run)
     } catch (error) {

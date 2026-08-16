@@ -24,7 +24,13 @@ async function write(screen: AgentTerminalScreen, data: string): Promise<void> {
   })
 }
 
-function runInfo(currentSize: { cols: number; rows: number } | null): unknown {
+/**
+ * 返回 `RunInfo`（而不是 `unknown`）是刻意的：protocol 17 把 `RunSpec.size` 改名成
+ * `initial_size` 并去掉了 `#[serde(default)]`。上游把它做成 breaking rename 的**目的**就是让
+ * 每个消费点在 tsc 上显形；而一个 `unknown` 的 fixture 会把这份保护整块吃掉——里面写旧字段名
+ * 编译器一声不响，于是这个专门守「别拿 spec 的启动尺寸当当前尺寸」的文件会带着过期形状照绿。
+ */
+function runInfo(currentSize: { cols: number; rows: number } | null): RunInfo {
   return {
     id: 'resize-run',
     spec: {
@@ -32,11 +38,20 @@ function runInfo(currentSize: { cols: number; rows: number } | null): unknown {
       args: [],
       cwd: '/tmp/resize-run',
       env: {},
-      size: { cols: 80, rows: 24 }
+      initial_size: { cols: 80, rows: 24 },
+      declared_inputs: []
     },
     lineage: null,
     backend: { type: 'native' },
-    capabilities: {},
+    capabilities: {
+      input: true,
+      resize: true,
+      signal: true,
+      stop: true,
+      fork_level_a: false,
+      fork_level_b: false,
+      replay: 'raw_from_start'
+    },
     pid: 4321,
     state: { type: 'running' },
     latest_output_bytes: 0,
@@ -178,11 +193,11 @@ describe('Resized 是几何事件，不是进程退出', () => {
  * 删掉了那本只记录**我们自己**发起的 resize 的本地台账——daemon 的答案在每条路径上都先到。
  */
 describe('vendored ctxmux 的协议现状', () => {
-  it('是 protocol 16：current_size 与 resized 都已在场', () => {
+  it('是 protocol 17：current_size 与 resized 都已在场', () => {
     // 用 SDK 导出的常量，而不是 grep 生成物的 .d.ts：常量是 SDK 的公开契约，随 tarball 一起被
     // pnpm-lock 的 integrity 钉住；grep 要写死一条 node_modules/.pnpm 路径，路径一变就**静默**
     // 变成读不到文件或恒真断言——那正是这条用例要防的东西。
-    expect(PROTOCOL_VERSION).toBe(16)
+    expect(PROTOCOL_VERSION).toBe(17)
   })
 
   it('current_size 是必填字段——台账被删掉正是靠这一条', () => {

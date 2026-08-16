@@ -132,14 +132,21 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
  * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
  */
 const IDENTITY_HASHES = [
-  'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02',
-  '1d97495e717cce1c3ac588a3c0712d9555b5c871',
-  'e71a4bf25a3506d74c35b5c331e8a79d60e52eee5b3f87a8fffea30a7655ce0f'
+  'c35f6217109c358ad730b0c8a7e879c3257a2ab7',
+  'c0dfd9be2289816a56f27eed2d39b99909d21e08',
+  'ff02d96700ffc22f691aec774595bf3945cb3f3c8aa26dad57c86923a59e6f60'
 ] as const
 
-/** 两种「组合版本串」形态。api.ts 的预览串只由这里命中（它不含任何哈希）。 */
+/**
+ * 两种「组合版本串」形态。api.ts 的预览串只由这里命中（它不含任何哈希）。
+ *
+ * protocol 号后面是 `[,)]` 而不是 `\)`：ctxmuxd 从 protocol 17 起在同一对括号里追加
+ * `, handoff <schema>`（升级目标必须能自报它接受的 handoff schema，否则 exec 前会被拒），
+ * 而 ctxmux CLI 仍然只印到 protocol。钉死 `\)` 会让这个派生器**漏掉** ctxmuxd 的那一族手抄，
+ * 而漏掉不会报错——它只会让清单看起来是满的。
+ */
 const IDENTITY_VERSION_STRING_PATTERNS = [
-  'ctxmuxd? [0-9]+\\.[0-9]+\\.[0-9]+ \\(protocol [0-9]+\\)',
+  'ctxmuxd? [0-9]+\\.[0-9]+\\.[0-9]+ \\(protocol [0-9]+[,)]',
   'CtxMux [0-9]+\\.[0-9]+\\.[0-9]+ · protocol [0-9]+'
 ] as const
 
