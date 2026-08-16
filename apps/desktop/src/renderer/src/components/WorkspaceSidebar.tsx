@@ -1,8 +1,9 @@
 import { ProjectIcon } from './ProjectIcon'
 import { ProjectActivity } from './ProjectActivity'
-import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower, Rows2, Rows3 } from 'lucide-react'
 import { useMemo, useState, Fragment, type CSSProperties, type ReactNode } from 'react'
 import { SCRATCH_WORKSPACE_ID, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import type { ProjectRailDensity } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
   projectGroupKey,
@@ -70,6 +71,18 @@ export function WorkspaceSidebar({
     return projectNodes.some((ancestor) => ancestor.project.id !== projectId && ancestor.project.hostId === node.project.hostId && isPathInside(node.project.repoPath, ancestor.project.repoPath) && collapsedProjectGroups[projectCollapseKey(ancestor.project.id)] === true)
   }
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  // 密度是看法不是数据：缺席即默认档，读处一律 `?? 'default'`，不改树结构/归属/选中/滚动位置。
+  const railDensity: ProjectRailDensity = config?.projectRailDensity ?? 'default'
+  const nextDensity: ProjectRailDensity = railDensity === 'default' ? 'compact' : 'default'
+  async function toggleDensity(): Promise<void> {
+    if (!config) return
+    // 走 api.config.save 而非只改内存：这一档 durable，重启后仍是用户选的那一档。
+    try {
+      setConfig(await api.config.save({ ...config, projectRailDensity: nextDensity }))
+    } catch (error) {
+      reportError(error)
+    }
+  }
   const { topics: scratchTopics } = useScratchTopics(scratch?.id ?? null)
   const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
     ? workspaceProjectId(activeWorkspace)
@@ -246,7 +259,7 @@ export function WorkspaceSidebar({
   }
 
   return (
-    <aside className="sidebar project-rail">
+    <aside className="sidebar project-rail" {...(railDensity !== 'default' ? { 'data-rail-density': railDensity } : {})}>
       <header className="project-rail-titlebar">
         <SidebarToggleChrome />
       </header>
@@ -303,7 +316,18 @@ export function WorkspaceSidebar({
       ) : null}
       <div className="sidebar__section-heading">
         <span>Projects</span>
-        <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
+        <div className="sidebar__heading-actions">
+          {/* 密度就地切换：可见常驻控件，不进设置页——用户要在看着树的同时调（DEN
+              「Project Rail 与 Topic 行密度」）。两档轮换，不是无级滑块。 */}
+          <button
+            className="icon-button"
+            onClick={() => void toggleDensity()}
+            aria-label={nextDensity === 'compact' ? 'Use compact project spacing' : 'Use default project spacing'}
+            aria-pressed={railDensity === 'compact'}
+            title={nextDensity === 'compact' ? 'Compact spacing' : 'Default spacing'}
+          >{railDensity === 'compact' ? <Rows3 size={15} /> : <Rows2 size={15} />}</button>
+          <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
+        </div>
       </div>
       <nav className="project-list" aria-label="Projects">
         {projectRailTree(projects).map((group) => {

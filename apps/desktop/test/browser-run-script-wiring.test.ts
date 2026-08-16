@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -106,7 +107,7 @@ vi.mock('electron', () => ({
 // 走 vi.hoisted 是因为 vi.mock 的工厂会被提到文件顶部，直接引用下面的 const 会撞到 TDZ。
 const dispatchSpy = vi.hoisted(() => {
   const calls: { name: string; args: unknown[] }[] = []
-  const create = vi.fn(() => async (name: string, args: unknown[]) => {
+  const create = vi.fn((_context: BrowserPageContext) => async (name: string, args: unknown[]) => {
     calls.push({ name, args })
     return `dispatched:${name}`
   })
@@ -121,6 +122,8 @@ vi.mock('../src/main/browser-page-dispatch.js', () => ({
 
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal.js'
+import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
 
 const profiles: BrowserProfileResolver = {
   defaultProfileId: () => 'default',
@@ -128,14 +131,18 @@ const profiles: BrowserProfileResolver = {
 }
 
 function fakeWindow(): any {
+  const events: unknown[] = []
   return {
+    events,
     isDestroyed: () => false,
     contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-    webContents: { isDestroyed: () => false, send: vi.fn() }
+    // Electron serializes at send time. Retaining the mutable operation object here would let later
+    // phase changes rewrite earlier events and make a missing real-time emit pass this test.
+    webContents: { isDestroyed: () => false, send: vi.fn((_channel, event) => events.push(structuredClone(event))) }
   }
 }
 
-async function managerWithBrowser(): Promise<{
+async function managerWithBrowser(journal?: BrowserOperationJournal): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -153,14 +160,14 @@ async function managerWithBrowser(): Promise<{
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  })
+  }, journal)
   await manager.create('b1', 'https://example.invalid/')
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
   return {
     manager,
     contents: view.webContents,
-    sentEvents: () => window.webContents.send.mock.calls.map((call: unknown[]) => call[1])
+    sentEvents: () => window.events
   }
 }
 
@@ -346,6 +353,7 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       'await click("@e1"); try { await click("@e2") } catch (error) { } return "done"'
     )
     takeoverOnFirstCall(contents)
+    manager.returnControl('b1')
     const thrown = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
 
     for (const [label, report] of [['吞了的', swallowed], ['没吞的', thrown]] as const) {
@@ -385,11 +393,23 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
     const first = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
     expect(first.outcome.kind, '第一次没被判接管——这条判据在对空气生效').toBe('stopped')
 
+    manager.returnControl('b1')
     const second = await manager.runScript('b1', 'await click("@e1"); return "done"')
 
     expect(second.outcome.kind, '上一次的接管漏到了下一次运行——监听器没摘干净').toBe('completed')
     expect(contents.listeners.get('input-event') ?? [], 'input-event 的监听没摘掉——每轮泄漏一个')
       .toHaveLength(0)
+  }, 30_000)
+
+  it('人接管后必须显式交还方向盘，交还会清掉锁', async () => {
+    const { manager, contents } = await managerWithBrowser()
+    takeoverOnFirstCall(contents)
+    const stopped = await manager.runScript('b1', 'await click("@e1"); return "done"')
+    expect(stopped.outcome.kind).toBe('stopped')
+    await expect(manager.runScript('b1', 'return "blocked"')).rejects.toThrow(/return control/i)
+    manager.returnControl('b1')
+    const resumed = await manager.runScript('b1', 'return "resumed"')
+    expect(resumed.outcome.kind).toBe('completed')
   }, 30_000)
 })
 
@@ -407,6 +427,7 @@ describe('runScript：驱动状态推到渲染进程', () => {
     return events
       .filter((event) => event?.type === 'updated')
       .map((event) => event.browser.driving)
+      .filter((value, index, values) => index === 0 || value !== values[index - 1])
   }
 
   it('运行期间推一次 true，结束后推一次 false', async () => {
@@ -450,5 +471,213 @@ describe('runScript：驱动状态推到渲染进程', () => {
       true,
       false
     ])
+  }, 30_000)
+})
+
+describe('Browser RSI：manager 到真实 journal 的竖切', () => {
+  function fileJournal() {
+    const path = join(mkdtempSync(join(tmpdir(), 'agentmux-operation-wiring-')), 'operations.json')
+    return { path, journal: new BrowserOperationJournal(new BrowserOperationFileStore(path)) }
+  }
+
+  it('同一 operation identity 经 receipt、实时事件与重启后的 history 保留语义目标', async () => {
+    const { path, journal } = fileJournal()
+    const { manager, sentEvents } = await managerWithBrowser(journal)
+    const target = { role: 'button', name: 'Continue', ordinal: 2, count: 2 }
+    createDispatch.mockImplementationOnce((context) => async (name) => {
+      if (name === 'click') context.recordTarget?.(target)
+      return name === 'snapshot' ? { nodes: [] } : null
+    })
+
+    const report = await manager.runScript('b1', 'await snapshot(); await click("@e2"); return "done"', {
+      id: 'operator-1', name: 'Navigator', providerId: 'codex'
+    })
+
+    expect(report.outcome.kind).toBe('completed')
+    expect(report.runOperation).toMatchObject({
+      id: expect.any(String),
+      operator: { id: 'operator-1', name: 'Navigator', providerId: 'codex' },
+      steps: [
+        { sequence: 1, method: 'snapshot', status: 'completed' },
+        { sequence: 2, method: 'click', status: 'completed', target, replay: { target, args: [] } }
+      ]
+    })
+    const operationId = report.runOperation!.id
+    const updates = sentEvents().filter((event) => event.type === 'updated' && event.browser.activity?.operation)
+    expect(updates.map((event) => event.browser.activity.operation.id)).toEqual(
+      Array(updates.length).fill(operationId)
+    )
+    expect(updates.length).toBeGreaterThan(2)
+    expect(updates.some((event) => event.browser.activity.operation.steps.some((step) => step.status === 'running'))).toBe(true)
+    expect(updates.at(-1).browser.activity.operation).toMatchObject({ id: operationId, phase: 'completed' })
+
+    const history = await manager.listOperationHistory()
+    expect(history).toMatchObject([{ id: operationId, steps: [{ method: 'snapshot' }, { target, replay: { target } }] }])
+    const plan = await manager.replayPlan(operationId)
+    expect(plan).toMatchObject({ operationId, steps: [{ method: 'snapshot' }, { method: 'click', target, args: [] }] })
+    // Wait for the file store's serialized final write before reading it with a fresh owner. Do not
+    // create a fresh owner until the completed snapshot is on disk: loading the transient running
+    // version would correctly recover it as indeterminate and then overwrite the completed record.
+    await vi.waitFor(async () => {
+      const document = JSON.parse(await readFile(path, 'utf8')) as { operations?: Array<{ id: string; phase: string }> }
+      expect(document.operations?.find((operation) => operation.id === operationId)?.phase).toBe('completed')
+    })
+    const restarted = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+    await expect(restarted.list()).resolves.toMatchObject([
+      { id: operationId, phase: 'completed', steps: [{ method: 'snapshot' }, { target, replay: { target } }] }
+    ])
+  }, 30_000)
+
+  it('敏感步骤保留为闸门，整份计划先拒绝，不能跳过填值后只回放两旁的 click', async () => {
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    createDispatch.mockImplementationOnce((context) => async (name) => {
+      context.recordTarget?.({ role: name === 'fillInput' ? 'textbox' : 'button', name: 'Target', ordinal: 1, count: 1 })
+      return null
+    })
+    const report = await manager.runScript('b1', 'await click("@e1"); await fillInput("@e2", "secret-value"); await click("@e3")')
+    const plan = await manager.replayPlan(report.runOperation!.id)
+    expect(plan?.steps.map((step) => step.method)).toEqual(['click', 'fillInput', 'click'])
+    expect(plan?.steps[1]).toMatchObject({ method: 'fillInput', args: [], inputKey: 'value', blockedReason: expect.any(String) })
+    expect(JSON.stringify(await manager.listOperationHistory())).not.toContain('secret-value')
+    expect(JSON.stringify(report.runOperation)).not.toContain('secret-value')
+    expect(plan).not.toBeNull()
+
+    createDispatch.mockClear()
+    await expect(manager.runReplay('b1', plan!)).rejects.toThrow(/review|value|blocked|sensitive/i)
+    expect(createDispatch).not.toHaveBeenCalled()
+    expect((await manager.listOperationHistory()).map((operation) => operation.id)).toEqual([report.runOperation!.id])
+  }, 30_000)
+
+  it('可运行的 replay 重新解析语义 ref，receipt 与 journal 都链接原 operation', async () => {
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const target = { role: 'button', name: 'Continue', ordinal: 1, count: 1 }
+    createDispatch.mockImplementationOnce((context) => async () => {
+      context.recordTarget?.(target)
+      return null
+    })
+    const original = await manager.runScript('b1', 'await click("@old")')
+    const plan = await manager.replayPlan(original.runOperation!.id)
+    expect(plan?.steps).toEqual([expect.objectContaining({ method: 'click', target })])
+
+    const calls: { name: string; args: unknown[] }[] = []
+    createDispatch.mockImplementationOnce((context) => async (name, args) => {
+      calls.push({ name, args })
+      if (name === 'pageInfo') return { url: 'https://example.invalid/' }
+      if (name === 'snapshot') return { nodes: [{ ref: '@fresh', role: 'button', name: 'Continue' }] }
+      if (name === 'click') context.recordTarget?.(target)
+      return null
+    })
+    const replay = await manager.runReplay('b1', plan!)
+    expect(replay.outcome.kind).toBe('completed')
+    expect(calls).toEqual([
+      { name: 'pageInfo', args: [] },
+      { name: 'snapshot', args: [] },
+      { name: 'click', args: ['@fresh'] }
+    ])
+    expect(replay.runOperation).toMatchObject({ replayOf: original.runOperation!.id })
+    expect(replay.runOperation!.id).not.toBe(original.runOperation!.id)
+    expect((await manager.listOperationHistory()).map(({ id, replayOf }) => ({ id, replayOf }))).toEqual([
+      { id: original.runOperation!.id, replayOf: undefined },
+      { id: replay.runOperation!.id, replayOf: original.runOperation!.id }
+    ])
+  }, 30_000)
+
+  it('journal 写入失败不阻断健康 Browser，降级告示到达 receipt 和实际 renderer 事件', async () => {
+    const journal = new BrowserOperationJournal({
+      load: async () => null,
+      save: async () => { throw new Error('storage unavailable') }
+    })
+    const { manager, sentEvents } = await managerWithBrowser(journal)
+    const report = await manager.runScript('b1', 'return await snapshot()')
+    expect(report.outcome.kind).toBe('completed')
+    expect(report.result).toBe('dispatched:snapshot')
+    expect(report.runOperation?.warning).toMatch(/could not be saved|unavailable/i)
+    expect(sentEvents().at(-1)?.browser.activity.warning).toMatch(/could not be saved|unavailable/i)
+    expect((await manager.listOperationHistory()).map((operation) => operation.id)).toEqual([report.runOperation!.id])
+  }, 30_000)
+})
+
+describe('Browser RSI：及时交接与单一运行者', () => {
+  function holdNextCall() {
+    let release!: () => void
+    let arrived!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    const entered = new Promise<void>((resolve) => { arrived = resolve })
+    const calls: string[] = []
+    createDispatch.mockImplementationOnce(() => async (name) => {
+      calls.push(name)
+      if (calls.length === 1) {
+        arrived()
+        await released
+      }
+      return null
+    })
+    return { calls, entered, release }
+  }
+
+  it('真人输入当时就推送 control=human，不等挂起的 page call 结束', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    const held = holdNextCall()
+    const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")')
+    try {
+      await held.entered
+      const before = sentEvents().length
+      contents.emit('input-event', { type: 'mouseDown' })
+      const handoffEvents = sentEvents().slice(before)
+      expect(handoffEvents).toHaveLength(1)
+      expect(handoffEvents[0]).toMatchObject({
+        type: 'updated', browser: { driving: false, activity: { control: 'human', operation: { phase: 'human' } } }
+      })
+    } finally {
+      held.release()
+      await pending
+    }
+    expect((await pending).outcome.kind).toBe('stopped')
+    expect(held.calls).toEqual(['wait'])
+  }, 30_000)
+
+  it('显式 Stop 立即交还控制并停止后续动作，直到人明确交还', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const held = holdNextCall()
+    const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")')
+    try {
+      await held.entered
+      const before = sentEvents().length
+      const stopped = manager.stopOperation('b1')
+      expect(stopped).toMatchObject({ driving: false, activity: { control: 'human' } })
+      expect(sentEvents().slice(before)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ browser: expect.objectContaining({ driving: false, activity: expect.objectContaining({ control: 'human' }) }) })
+      ]))
+    } finally {
+      held.release()
+      await pending
+    }
+    expect((await pending).outcome.kind).toBe('stopped')
+    expect(held.calls).toEqual(['wait'])
+    await expect(manager.runScript('b1', 'return "cannot take control"')).rejects.toThrow(/return control/i)
+    manager.returnControl('b1')
+    expect((await manager.runScript('b1', 'return "resumed"')).result).toBe('resumed')
+  }, 30_000)
+
+  it('已有程序挂起时拒绝重入，旧程序和 operation identity 继续有效', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    const held = holdNextCall()
+    const pending = manager.runScript('b1', 'await wait(1000); return "first"')
+    let operationId: string | undefined
+    try {
+      await held.entered
+      operationId = sentEvents().at(-1).browser.activity.operation.id
+      await expect(manager.runScript('b1', 'return "second"')).rejects.toThrow(/already running/i)
+      expect(contents.debugger.isAttached()).toBe(true)
+      expect(sentEvents().at(-1).browser.activity.operation.id).toBe(operationId)
+    } finally {
+      held.release()
+      await pending
+    }
+    const report = await pending
+    expect(report).toMatchObject({ result: 'first', outcome: { kind: 'completed' }, runOperation: { id: operationId } })
+    expect(held.calls).toEqual(['wait'])
   }, 30_000)
 })

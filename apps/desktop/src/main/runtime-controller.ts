@@ -629,6 +629,34 @@ export class RuntimeController {
     })
   }
 
+  /**
+   * 「这一个 Session 现在是什么」——解析单个 Session，不拉整张快照。
+   *
+   * 与 {@link snapshot} 的区别不是规模而是 RPC 形状：`snapshot` 为了给出 Timeline，对**每个** agent
+   * Session 各发一次 `sessionTimeline`（见那里的 `Promise.allSettled`），所以「解析一个 Session」
+   * 走 `snapshot` 的代价随房里 Session 数线性增长——而调用方只要那一个 Session 的 workspacePath
+   * 与 providerId，一条 Timeline 都不看。这里只做一次 `runtimeProjection()`。
+   *
+   * 为什么仍要在主进程解析、而不是让 renderer 直接把 workspacePath 传进来：那会把「枚举任意
+   * 路径下的文件」变成 renderer 能直接驱动的原语。身份必须由权威状态给出，便宜只能便宜在 RPC 上。
+   *
+   * 不接受 hostId：调用方（IPC 的 sessionId 入参）本来就只有 Session id，跨 host 找一遍是这个
+   * 方法存在的理由。找不到返回 `null` 而不是抛——「这个 Session 不在了」是调用方要分辨的事实，
+   * 不是异常。
+   */
+  async resolveSession(sessionId: string, config: AppConfig): Promise<SessionSnapshot | null> {
+    for (const { client } of this.hosts.values()) {
+      await client.connect()
+      const subject = (await client.runtimeProjection()).subjects.find((candidate) => (
+        candidate.kind === 'agent'
+          ? candidate.agentSession.agentSessionId === sessionId
+          : candidate.run.runId === sessionId
+      ))
+      if (subject) return projectSession(subject, config, providerCapabilitiesFrom(client))
+    }
+    return null
+  }
+
   async sessionTimeline(control: Extract<SessionControl, { kind: 'agent' }>) {
     const client = await this.connectedClient(control.hostId)
     const timeline = await client.sessionTimeline(control.agentSessionId)

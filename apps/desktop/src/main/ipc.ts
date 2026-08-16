@@ -78,6 +78,7 @@ import {
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
@@ -142,6 +143,10 @@ export async function registerIpc(args: {
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
+  const browserOperationJournal = new BrowserOperationJournal(
+    new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
+  )
+  await browserOperationJournal.ready()
   const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore(), {
     // 每次现读 `config`（这个闭包变量在 config:save 里被重新赋值），不是构造时快照一份：
     // 用户刚在 Settings 里把某个 scheme 改回 allow，不该等重启才生效。
@@ -157,7 +162,7 @@ export async function registerIpc(args: {
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
-  })
+  }, browserOperationJournal)
   const notifier = createAgentNotifier({
     window: args.window,
     onActivate: (sessionId) => {
@@ -514,8 +519,7 @@ export async function registerIpc(args: {
   })
   handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
     requireTrustedSender('ui:listAgentSkills', event)
-    const snapshot = await args.runtime.snapshot(config)
-    const session = snapshot.sessions.find((item) => item.id === sessionId)
+    const session = await args.runtime.resolveSession(sessionId, config)
     if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
     if (session.hostId !== 'local') throw new Error('Skill discovery is available for local Agents.')
     const catalog = args.runtime.providerCatalog().find((item) => item.id === session.providerId)
@@ -672,7 +676,7 @@ export async function registerIpc(args: {
    *
    * 拒绝要说清去哪开（AGENTS.md:32-52：不许静默、也不许给一句无法行动的拒绝）。
    */
-  handleWithEvent('browser:runScript', async (event, id: string, code: string) => {
+  handleWithEvent('browser:runScript', async (event, id: string, code: string, operator?: import('../shared/browser-operation.js').BrowserOperator) => {
     requireTrustedSender('browser:runScript', event)
     if (config.browser.agentAutomation !== true) {
       // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
@@ -684,7 +688,30 @@ export async function registerIpc(args: {
         { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
       )
     }
-    return await browsers.runScript(id, code)
+    return await browsers.runScript(id, code, operator)
+  })
+  handleWithEvent('browser:listOperationHistory', async (event) => {
+    requireTrustedSender('browser:listOperationHistory', event)
+    return await browsers.listOperationHistory()
+  })
+  handleWithEvent('browser:replayPlan', async (event, operationId: string) => {
+    requireTrustedSender('browser:replayPlan', event)
+    return await browsers.replayPlan(operationId)
+  })
+  handleWithEvent('browser:returnControl', async (event, id: string) => {
+    requireTrustedSender('browser:returnControl', event)
+    return browsers.returnControl(id)
+  })
+  handleWithEvent('browser:stopOperation', async (event, id: string) => {
+    requireTrustedSender('browser:stopOperation', event)
+    return browsers.stopOperation(id)
+  })
+  handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator) => {
+    requireTrustedSender('browser:runReplay', event)
+    if (config.browser.agentAutomation !== true) {
+      throw Object.assign(new Error('Agent browser automation is off. Turn it on in Settings › Browser.'), { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode })
+    }
+    return await browsers.runReplay(id, plan, operator)
   })
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)

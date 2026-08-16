@@ -1002,6 +1002,11 @@ const mockApi: AgentMuxDesktopApi = {
     // Web 预览里没有真页面也没有子进程。**不能返回一个假的"跑完了"**——那会让 Agent 以为它的程序
     // 执行过了。与上面 captureScreenshot 抛"requires the desktop app"同一条理由。
     runScript: async () => { throw new Error('Driving a Browser requires the desktop app.') },
+    listOperationHistory: async () => [],
+    replayPlan: async () => null,
+    returnControl: async (id) => structuredClone(requireMockBrowser(id)),
+    runReplay: async () => { throw new Error('Browser replay requires the desktop app.') },
+    stopOperation: async (id) => structuredClone(requireMockBrowser(id)),
     selectElement: async () => null,
     // Web 预览里没有主进程，也就没有真的 shell.openExternal 可走。抛而不是默默返回：
     // 悄悄什么都不做，看起来和「点了 Open 但那个 app 没装」一模一样。

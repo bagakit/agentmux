@@ -136,7 +136,11 @@
   text-decoration-skip-ink: none;
 }
 
-.composer-tool--mode { min-width: 28px; }
+/* 两行态里切换键排在工具行**末尾**（order），不再挤在 Files 与 Capture 之间那个「很奇怪」的落点
+   （interaction SSOT「切换键在两行态重新安排位置」）。一行态它是 .composer-tools 里唯一可见的子元素
+   （其余工具 mode='collapsed' 时不渲染），order 不影响它——于是两种形态的落点天然不同，满足「不得
+   沿用一行态那个落点」。 */
+.composer-tool--mode { min-width: 28px; order: 1; }
 .composer__editor-fallback { display: none; }
 
 /*
@@ -176,6 +180,12 @@
    让用户在最窄的形态下看不见自己排了几条。恢复入口（这枚三态键）在 .composer-tools 里，是孙元素，
    所以这条直接子元素选择器碰不到它。 */
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool { display: none; }
+/* 一行态是最安静的形态，切换键也要最安静（interaction SSOT「切换键在一行态必须是弱的」，
+   用户原话「存在感太强…高度稍微再窄一些…不要那么强的边框」）：压掉纵向 padding 让它更矮、
+   在静息态调淡、并把 hover 的实心底也收成透明。基础 .composer-tool 本就 border:0，这里进一步把
+   它降到「有就好、别抢戏」——只在这一档覆写，两行/大输入框档位仍走基础那份更强的存在感。 */
+.composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode { padding: 0 var(--sp-2); opacity: .5; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--mode:hover:not(:disabled) { opacity: 1; background: transparent; }
 /* 大输入框：放高供长文编辑，工具排仍在。改的是 --composer-input-max 而不是就地再写一条
    `.composer__editor .tiptap { max-height }`——后者会让那个选择器在全表出现两次，而
    agent-composer.test.tsx 的地板判据按「基础规则恰好一条」取值，第二条会让它认错对象。
