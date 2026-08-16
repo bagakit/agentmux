@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-26n8fwmd3",
+  "title": "站点专用知识：按域名给 Agent 加载这个站怎么用",
+  "slug": "browser-per-site-knowledge",
+  "goal": "用户提的「指定日常常用信息平台，让 Agent 沿指定渠道去搜」今天没有承载点。Agent 在任何站点上拿到的都是同一套通用页面能力，不知道这个站的搜索入口在哪、结果怎么读、哪些操作在这个站上是危险的。成熟做法是按当前 URL 的域名匹配、把该站点的使用说明与专用动作加载进 Agent 的上下文，是软性的渠道偏好而不是网络层封锁——Agent 仍然能去别处，只是默认先走指定渠道。配套要写死几条硬约束：只用稳定选择器不用像素坐标（本仓 browser-page-snapshot.ts 的 ref 体系已经是这个方向）、任何密钥不进站点知识文件。待讨论：这份知识存在哪（仓库内文件？用户配置？）、匹配粒度（域名还是路径前缀）、以及它和 skill 体系的关系——如果 skill 已经能按条件加载，这条可能就是给 skill 加一个 URL 触发条件，而不是新造一套。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}

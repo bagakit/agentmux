@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-26m8fqews",
+  "title": "人机之间的双向交接：Agent 主动交还控制权，人处理完再还回去",
+  "slug": "browser-two-way-handover",
+  "goal": "今天的接管只有单向：人伸手碰页面，Agent 就停（browser-view-manager.ts 的 BrowserTakeover，动作拒绝、观察放行）。缺的是反向那一半——Agent 撞到验证码、二次验证、或一个必须人来点的登录步骤时，只能停下来报错，没有一个「把控制权交还给人、人处理完再交回来」的动作。这不是 packages/core/src/agent-handoff.ts 那个 handOff：那个是 Agent 之间的任务移交，不是人机之间，不能复用。价值集中在登录与人机验证这两个场景——它们恰恰是共用浏览器这个形态最该赢的地方。待讨论：交还请求长什么样（Agent 侧的一个显式动作？还是撞到特定页面特征时自动发起？）、人在界面上怎么看到这个请求、人怎么表示「我弄完了」、以及交回之后 Agent 从哪一步继续。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}

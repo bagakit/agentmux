@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feat_id": "f-26p8fsvg4",
+  "title": "破坏性浏览器操作要收窄作用域并经人批准",
+  "slug": "browser-destructive-scope",
+  "goal": "共享登录态是这套 Browser 生态的核心优势，它必然带来一个对偶代价：profile 级的清 cookie / 清缓存 / 登出，会同时影响人和该 profile 上的所有空间，且不可撤销。今天没有任何作用域约束或批准环节——一个 Agent 的清理动作可以把人的登录态一起清掉。这一条不是可选的加固，是共享这个决定自带的账单。待讨论：哪些动作算破坏性（先把清单列全，别漏 localStorage 与 IndexedDB）、作用域怎么收窄（按站点而不是按 profile？）、批准走什么形态（每次问，还是像应用链接那样记住答案）、以及和 browser-profile-manager.ts 的 partition 划分怎么对齐。",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    }
+  ]
+}
