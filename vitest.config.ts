@@ -1,14 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { relative, dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { relative, join } from 'node:path'
 import { defaultExclude, defineConfig } from 'vitest/config'
 
-// 这两个辅助文件跟着**本配置文件**走，不跟着 cwd 走。写成 `./x.ts` 的话，vitest 按 cwd 解析：
+// 下面两个辅助文件跟着**本配置文件**走，不跟着 cwd 走。写成 `./x.ts` 的话，vitest 按 cwd 解析：
 // 从仓根跑没事，而 `pnpm --filter @agentmux/core exec vitest`（gate 命令的形态）把 cwd 切到
 // packages/core/，于是去找 packages/core/vitest.dist-freshness.ts —— 不存在，整次运行直接
-// `ERR_LOAD_URL` 崩掉，看起来像被测代码红了。2026-09-06 的 b20ac0af 新增 globalSetup 时带进了
-// 这个缺陷，静默打坏了全仓每一条子包 gate（f-23z8fgsw3 早先那些 pass 的收据都在它之前）。
-const here = dirname(fileURLToPath(import.meta.url))
+// `ERR_LOAD_URL` 崩掉，看起来像被测代码红了。两个入口是分别被打坏的：setupFiles 来自
+// 6f31e9eb（2026-09-06 10:29），globalSetup 来自同日 15:27 的 b20ac0af —— **先坏的是
+// setupFiles 那一条**，此前把整个缺陷记在 b20ac0af 头上只对了一半。
 
 /**
  * 嵌套 worktree 里的测试**不属于**本次运行。
@@ -66,8 +65,8 @@ export default defineConfig({
     // 见 vitest.dist-freshness.ts：desktop 经 dist 消费 @agentmux/core，dist 陈旧时整个 desktop
     // 测试面会为上一次构建的 Core 背书。放 globalSetup 而不是测试文件，是因为路径过滤在收集阶段
     // 就把没点名的测试文件挡掉了——那里的守卫只在不需要它的那些次运行里生效。
-    globalSetup: [join(here, 'vitest.dist-freshness.ts')],
+    globalSetup: [join(import.meta.dirname, 'vitest.dist-freshness.ts')],
     // 见 vitest.setup.ts：把测试夹具跑的 git 与开发者本人的 gitconfig 隔开。
-    setupFiles: [join(here, 'vitest.setup.ts')]
+    setupFiles: [join(import.meta.dirname, 'vitest.setup.ts')]
   }
 })
