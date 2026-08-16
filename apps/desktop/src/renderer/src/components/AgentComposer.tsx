@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AtSign, ArrowUp, Hand, Paperclip } from 'lucide-react'
+import { AtSign, ArrowUp, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
@@ -226,41 +226,18 @@ export function AgentComposer({
         <div>
           <div className="composer-session-controls" role="group" aria-label="Session controls">
             {contextUsage}
-            {primaryAction === 'stop' ? (
-              <>
-                <button
-                  type="button"
-                  className="composer-send composer-send--secondary"
-                  disabled={!canSubmit}
-                  onClick={onSubmit}
-                  aria-label="Send steer"
-                  title="Send this steer while the current turn continues"
-                >
-                  <ArrowUp size={15} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="composer-send composer-send--working"
-                  disabled={disabled || !onInterrupt}
-                  onClick={onInterrupt}
-                  aria-label="Interrupt the current turn"
-                  title="Interrupt the current reply — keep this session"
-                >
-                  <Hand size={15} aria-hidden="true" />
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="composer-send"
-                disabled={!canSubmit}
-                onClick={onSubmit}
-                aria-label="Send"
-                title="Send"
-              >
-                <ArrowUp size={15} aria-hidden="true" />
-              </button>
-            )}
+            <button
+              type="button"
+              className={`composer-send${primaryAction === 'stop' ? ' composer-send--working' : ''}`}
+              disabled={primaryAction === 'stop' ? disabled || !onInterrupt : !canSubmit}
+              onClick={primaryAction === 'stop' ? onInterrupt : onSubmit}
+              aria-label={primaryAction === 'stop' ? 'Interrupt the current turn' : 'Send'}
+              title={primaryAction === 'stop' ? 'Interrupt the current reply — keep this session' : 'Send'}
+            >
+              {primaryAction === 'stop'
+                ? <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+                : <ArrowUp size={15} aria-hidden="true" />}
+            </button>
             {mailbox}
           </div>
         </div>

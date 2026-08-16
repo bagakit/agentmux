@@ -590,3 +590,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 ## Topic 行的 Region 与 Agent 在场状态（2026-09-20）
 
 选中 Region 的绿框只需 1px，保持四边可见且不增加叠加光晕；原生 Browser 为焦点环让出的尺寸必须与同一宽度一致。Topic 的 Agent 图标缩小放在对应 Region 格子里，形成一个整体，几何仍表达真实分屏；窄格内不得溢出覆盖相邻格。Agent 状态与可见性语义见 desktop-interaction 同名段。
+
+### Message Tools 主按钮密度（2026-09-20）
+
+主按钮保持同一点击区：发送箭头与执行中的实心方形互换，后者用柔和琥珀色和 hover 反馈。行内截图不用固定方形框，保留比例并限制在一行文字的高度。此约束替代此前 Send steer 与 Hand 并排的提议；行为见 desktop-interaction 对应小节。

@@ -39,7 +39,8 @@
 .composer-send:hover:not(:disabled) { background: var(--surface-3); }
 .composer-send:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
 .composer-send:disabled { opacity: .35; cursor: default; }
-.composer-send--working { color: var(--text-2); }
+.composer-send--working { color: var(--amber); }
+.composer-send--working:hover:not(:disabled) { background: var(--amber-bg); }
 .composer-session-controls .composer__identity { padding-inline: 0; }
 .composer-session-controls .agent-avatar { background: transparent; box-shadow: none; }
 .composer-session-controls .agent-avatar:is(.status--working, .status--running) { outline: none; color: var(--status-ink); }
@@ -187,8 +188,7 @@
 .composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
 
 /* The image is the same durable @path token, rendered by the shared conversation image viewer. */
-.composer-image { display: inline-block; vertical-align: middle; line-height: 1; }
+.composer-image { display: inline-block; vertical-align: middle; line-height: inherit; }
 .composer-image .md-conversation-image { vertical-align: middle; }
-.composer-image .md-conversation-image__thumb { width: calc(var(--sp-7) * 2); height: calc(var(--sp-7) * 2); object-fit: contain; }
-.composer:has(.composer-tools[data-mode='collapsed']) .composer-image .md-conversation-image__thumb { width: var(--sp-7); height: var(--sp-6); }
+.composer-image .md-conversation-image__thumb { width: auto; height: auto; max-height: 1lh; max-width: min(10em, 100%); object-fit: contain; }
 .launcher-composer .composer__editor { min-height: 6em; }
