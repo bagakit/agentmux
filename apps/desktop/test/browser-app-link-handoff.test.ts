@@ -12,7 +12,7 @@ import {
 
 /**
  * 守的缺陷：内置 Browser 里点外部应用页面的交接控件 什么都不发生。不止一种应用——
- * 每一个 `slack:` / `vscode:` / `zoommtg:` / `mailto:` 在这里都是坏的。用户定的策略是
+ * 自定义应用 scheme 和 `mailto:` 在这里都是坏的。用户定的策略是
  * **「对齐一般浏览器，假定用户会自己把本应用当做浏览器」**。
  *
  * 每一条正向断言都配一条反向的。只证「应用链接被交出去」的实现，把 http(s) 也一起交出去照样全绿，
@@ -172,7 +172,7 @@ describe('应用链接的三段分类', () => {
     // 交给 OS 判，我们枚举不完。把第三段写成白名单时，这一行会红。
     const cases: Array<[string, string]> = [
       ['customapp://open', 'customapp'],
-      ['slack://channel?id=1', 'slack'],
+      ['custom-app://channel?id=1', 'custom-app'],
       ['mailto:hi@example.com', 'mailto'],
       ['fictional-app://whatever', 'fictional-app']
     ]
@@ -216,13 +216,13 @@ describe('嵌入 frame 的应用链接', () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
 
-    const { prevented } = navigateTo(view, 'customapp://applink.feishu.cn/client/security/bind_device', false, 'will-frame-navigate')
+    const { prevented } = navigateTo(view, 'customapp://app.example.invalid/client/security/bind_device', false, 'will-frame-navigate')
     await Promise.resolve()
     await Promise.resolve()
 
     expect(prevented).toBe(true)
     expect(latest(fixture).appLinkPrompt).toEqual({
-      url: 'customapp://applink.feishu.cn/client/security/bind_device',
+      url: 'customapp://app.example.invalid/client/security/bind_device',
       scheme: 'customapp'
     })
     expect(host.opened).toEqual([])
@@ -260,6 +260,18 @@ describe('导航路：闸门之前分流，闸门本身不变', () => {
 
     expect(host.opened).toEqual(['customapp://open?token=2'])
     expect(latest(fixture).appLinkPrompt, '记过 allow 还在问').toBeNull()
+  })
+
+  it('系统交接失败时在当前 Browser 留下可恢复的反馈', async () => {
+    const host = appLinkHost()
+    host.openExternal = async () => { throw new Error('no handler') }
+    const { manager, view, fixture } = await managerWith(host)
+    navigateTo(view, 'customapp://open?token=failure')
+    await Promise.resolve(); await Promise.resolve()
+    await manager.answerAppLink('b1', true, false)
+    await Promise.resolve(); await Promise.resolve()
+    expect(latest(fixture).error).toMatch(/Could not open this link.*no handler/u)
+    expect(latest(fixture).appLinkPrompt).toBeNull()
   })
 
   it('http(s) 与 file 照旧进视图：既不被拦，也不交给系统', async () => {

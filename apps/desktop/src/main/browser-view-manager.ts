@@ -170,7 +170,7 @@ export interface AppLinkHost {
   rememberedSchemes(): Promise<Record<string, AppLinkSchemeChoice>>
   /** 记住一个答案。只有用户勾了「记住」才会被调到。 */
   rememberScheme(scheme: string, choice: AppLinkSchemeChoice): Promise<void>
-  openExternal(target: string): void
+  openExternal(target: string): void | Promise<void>
 }
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
@@ -713,8 +713,18 @@ export class BrowserViewManager {
     // 读盘是异步的，这中间页面可能已经换掉或被顶掉。既有的每一处异步回写都先判这一句。
     if (!this.owns(entry, view)) return
     this.projectAppLinkOutcome(entry, appLinkOutcome(url, scheme, remembered, (target) => {
-      this.appLinks.openExternal(target)
+      void this.openExternalWithFeedback(entry, target)
     }))
+  }
+
+  private async openExternalWithFeedback(entry: BrowserEntry, target: string): Promise<void> {
+    try {
+      await this.appLinks.openExternal(target)
+    } catch (error) {
+      if (!this.owns(entry, entry.view)) return
+      entry.error = `Could not open this link in another app: ${error instanceof Error ? error.message : String(error)}. Try again or choose another app.`
+      this.emit(entry)
+    }
   }
 
   /** 把一次移交结局写进 entry 并广播。三档各自对应快照上不同的一组字段，不许有第二处这样写。 */
@@ -741,7 +751,7 @@ export class BrowserViewManager {
     if (remember) await this.appLinks.rememberScheme(pending.scheme, choice)
     // 记不记得住是两回事：这一次照答案走。传 choice 而不是 remembered，才让「只答这一次」成立。
     this.projectAppLinkOutcome(entry, appLinkOutcome(pending.url, pending.scheme, choice, (target) => {
-      this.appLinks.openExternal(target)
+      void this.openExternalWithFeedback(entry, target)
     }))
     return this.snapshot(entry)
   }
@@ -961,7 +971,7 @@ export class BrowserViewManager {
     contents.on('will-frame-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
     // 弹窗那条路。`649df3a2` 把整个 handler 删掉是为了保住原生 popup 语义，而缺席的代价是应用链接的
-    // `window.open` 会真的开出一个装着 `lark:` 的窗口，没人管。这里回装，但只截应用链接——回调体就是
+    // `window.open` 会真的开出一个装着 `customapp:` 的窗口，没人管。这里回装，但只截应用链接——回调体就是
     // 一次转发，判定与副作用都在 `browserWindowOpenOutcome` 里（照 window-security.ts 那两个实测存活
     // 的变异：回调体里有语句就能改）。
     contents.setWindowOpenHandler(({ url }) =>

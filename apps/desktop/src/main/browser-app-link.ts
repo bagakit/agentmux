@@ -119,7 +119,7 @@ export function appLinkOutcome(
  * semantics）删掉的那段，把**每一个** window-open 都改道成 `this.navigate(entry.id, url)` 再 deny——
  * 于是 `target="_blank"` 的普通链接被压进同一个 view，弹窗语义全没了。那次修法是**整个 handler 缺席**，
  * 而缺席的后果就是本 Feature 要修的另一半：应用链接的弹窗会真的开出一个 Electron 窗口（实测窗口数
- * 1→2→3），里面装着一个装不下的 `lark:` 地址，没人管。
+ * 1→2→3），里面装着一个装不下的 `customapp:` 地址，没人管。
  *
  * 所以这里回装 handler，但**不回到那个形状**：非应用链接返回 `{ action: 'allow' }`，那正是「没有
  * handler」时 Electron 的默认动作，逐字等价。回到「一律改道」就是把 `649df3a2` 修的 bug 重新引入。

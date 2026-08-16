@@ -202,6 +202,14 @@ describe('Browser bar contract', () => {
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
 
+  it('shows an accessible control handoff state while an Agent operates the page', () => {
+    const markup = renderToStaticMarkup(<BrowserPane tab={{ ...tab, driving: true }} visible />)
+    expect(markup).toContain('Agent is operating this page')
+    expect(markup).toContain('Interact with the page to take control back.')
+    expect(markup).toContain('role="status"')
+    expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent is operating this page')
+  })
+
   it('renders an explicit release state without pretending a hidden Browser still owns WebContents', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible={false} released />)
     expect(markup).toContain('Browser parked')
