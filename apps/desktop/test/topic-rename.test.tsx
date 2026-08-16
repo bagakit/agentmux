@@ -83,7 +83,7 @@ describe('handleTopicRenameKeyDown', () => {
 })
 
 const dockSource = readFileSync(
-  new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+  new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
   'utf8'
 )
 
