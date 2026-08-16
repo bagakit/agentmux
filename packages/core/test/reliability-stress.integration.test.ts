@@ -73,7 +73,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             )
           },
           ctxmux: {
-            sourceCommit: 'aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02',
+            sourceCommit: 'c35f6217109c358ad730b0c8a7e879c3257a2ab7',
             artifactPlatform: 'darwin-arm64',
             protocolVersion: 16
           }
