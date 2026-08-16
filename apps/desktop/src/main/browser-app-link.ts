@@ -5,7 +5,9 @@
  * 单元测试直接质询。
  *
  * 这个文件**必须保持纯**：不 import electron、无模块级副作用。`shell.openExternal` 由调用方注入。
+ * （`contracts.ts` 只进 `import type`，不落运行时 import。）
  */
+import type { AppLinkSchemeChoice } from '../shared/contracts.js'
 
 /**
  * 视图真的装得下的那些。
@@ -69,8 +71,13 @@ export function classifyBrowserTarget(rawUrl: string): BrowserTarget {
   return { kind: 'hand-off', scheme: protocol.slice(0, -1) }
 }
 
-/** 用户对某个 scheme 记住的答案。没记过就是 undefined——那一档要问。 */
-export type AppLinkSchemeChoice = 'allow' | 'deny'
+/**
+ * 用户对某个 scheme 记住的答案。没记过就是 undefined——那一档要问。
+ *
+ * 真源在 `contracts.ts` 的 `APP_LINK_SCHEME_CHOICES` 元组（`config-store.ts` 的 `z.enum` 读同一份），
+ * 这里只转出去，不再声明第二遍——原先本文件自己写一份 `'allow' | 'deny'`，与磁盘校验各说各的。
+ */
+export type { AppLinkSchemeChoice }
 
 /**
  * 一次应用链接移交的结局。`open` 是唯一带副作用的一档，由 `appLinkOutcome` 自己执行——
