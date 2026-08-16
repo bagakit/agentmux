@@ -56,7 +56,7 @@ describe('切换键的位置与密度（诉求 2）', () => {
 })
 
 describe('Send 与 Interrupt 收成图标但保住区分（诉求 3）', () => {
-  it('Stop 形态：↑ steer（绿）与 ■ interrupt（红）是两个不同图标、两种颜色语汇', () => {
+  it('Stop 形态：↑ steer 与举手 interrupt是两个不同图标、两种颜色语汇', () => {
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: 'steer me',
       disabled: false,
@@ -66,12 +66,12 @@ describe('Send 与 Interrupt 收成图标但保住区分（诉求 3）', () => {
       onSubmit: vi.fn(),
       onInterrupt: vi.fn()
     }))
-    // 图形区分：steer 是箭头，interrupt 是方块——收成图标不等于两个键长一样。
+    // 图形区分：steer 是箭头，interrupt 是举手——收成图标不等于两个键长一样。
     expect(markup, 'steer 键没有箭头图标').toContain('lucide-arrow-up')
-    expect(markup, 'interrupt 键没有方块图标').toContain('lucide-square')
-    // 颜色语汇（Design Control Language）：推进走绿的 --secondary，破坏性走红的 --working。
+    expect(markup, 'interrupt 键没有举手图标').toContain('lucide-hand')
+    // 两种动作保留各自标识；举手不沿用结束 Session 的危险色块。
     expect(markup, 'steer 键不是绿的推进色').toContain('composer-send--secondary')
-    expect(markup, 'interrupt 键不是红的破坏性色').toContain('composer-send--working')
+    expect(markup, 'interrupt 键丢失独立动作标识').toContain('composer-send--working')
     // 收成图标后不再带文字标签，但可访问名把两者分得清清楚楚（破坏性区分不随文字消失而消失）。
     expect(markup).toContain('aria-label="Send steer"')
     expect(markup).toContain('aria-label="Interrupt the current turn"')
