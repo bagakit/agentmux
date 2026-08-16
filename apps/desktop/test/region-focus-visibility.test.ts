@@ -935,6 +935,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
    */
   it('焦点框宽度只有一处：CSS 与原生视图取值方按同一个自定义属性', () => {
     const PROPERTY = '--region-focus-ring-width'
+    expect(styles.match(/--region-focus-ring-width\s*:\s*([^;]+);/)?.[1]).toBe('1px')
     // tokens.css 里声明了它（allStyles 已合并全部样式表）。
     expect(
       new RegExp(`${PROPERTY}\\s*:\\s*[0-9]`).test(styles),

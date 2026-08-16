@@ -82,7 +82,7 @@ function isPresenceElement(node: ts.Node): boolean {
     : ts.isJsxOpeningElement(node)
       ? node.tagName
       : undefined
-  return tag !== undefined && ts.isIdentifier(tag) && tag.text === 'SelectorPresence'
+  return tag !== undefined && ts.isIdentifier(tag) && ['SelectorPresence', 'TopicPresence', 'RegionMosaic'].includes(tag.text)
 }
 
 describe('SelectorPresence 的入参里不许有第二个注意力真相', () => {
@@ -122,7 +122,7 @@ describe('SelectorPresence 的入参里不许有第二个注意力真相', () =>
 
     const blockArrow = parse(
       'probe.tsx',
-      'const x = <SelectorPresence agents={xs.map((a) => { return { key: a.id, attention: f(a) } })} />'
+      'const x = <TopicPresence agents={xs.map((a) => { return { key: a.id, attention: f(a) } })} />'
     )
     expect(presenceAgentPropertyNames(blockArrow), '认不出块体箭头里的对象').toContain('attention')
   })
