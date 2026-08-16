@@ -39,8 +39,8 @@ const degradedNotice: RenderableServiceNotice = {
 export function ObservationSurfaceGallery() {
   const [draft, setDraft] = useState(() => appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' }))
   const [queued, setQueued] = useState<ComposerQueuedMessage[]>([
-    { id: 'gallery-q-1', text: 'Run the focused tests', status: 'queued' },
-    { id: 'gallery-q-2', text: 'Summarize the remaining risk', status: 'failed', error: 'Previous run ended before delivery' }
+    { id: 'gallery-q-1', text: 'Run the focused tests', status: 'deferred', deliverable: true, error: 'The Agent is not ready to accept another message yet.' },
+    { id: 'gallery-q-2', text: 'Summarize the remaining risk', status: 'failed', deliverable: false, error: 'Previous run ended before delivery' }
   ])
   const [composerAction, setComposerAction] = useState('')
   const [conversationAction, setConversationAction] = useState('')
@@ -111,12 +111,11 @@ export function ObservationSurfaceGallery() {
           onSubmit={() => { setComposerAction(`Example payload: ${expandSemanticReferences(draft)}`); setDraft('') }}
           commands={[{ text: '/status', description: 'Provider command' }, composerShortcutSuggestion(GALLERY_PROMPT)]}
           onSelectSuggestion={(text) => { const mine = composerShortcutForBareWord([GALLERY_PROMPT], text.replace(/^\//, '')); return mine ? encodeSemanticReference({ token: text, label: mine.label, kind: 'subcommand', reference: mine.body }) : text }}
-          queueDeliverable
           onActivateSemanticReference={(reference) => setComposerAction(`Open reference: ${reference.reference}`)}
           tools={<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => [{ name: 'card', path: '/components/card.tsx', description: 'Example component reference', source: 'project' }]} onChooseSkill={(skill) => setDraft((text) => appendSemanticReference(text, { token: '', label: skill.name, kind: 'component', reference: `@${skill.path}` }))} onCommand={(command) => setDraft((text) => `${command} ${text}`)} reportError={(error) => setComposerAction(String(error))} />}
         />
         {composerAction ? <p role="status">{composerAction}</p> : null}
-        <small>队列失败会停住并说明原因；引用以短 token 展示，hover 可见完整路径。</small>
+        <small>队列保留未投递消息和原因；旧 Run 条目不阻塞当前消息。引用以短 token 展示。</small>
       </article>
     </section>
   )

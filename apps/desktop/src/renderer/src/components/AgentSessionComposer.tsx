@@ -86,6 +86,7 @@ export function AgentSessionComposer({
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
   // selector on every store update (zustand compares by reference) — the `.map` to text happens once per
   // real render below, not inside the selector, so it does not defeat that reference check.
+  const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
@@ -141,34 +142,16 @@ export function AgentSessionComposer({
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
   const submitMode = composerSubmitMode(session, disabled)
 
-  async function submit(): Promise<void> {
+  function submit(): void {
     if (!submitMode.canSubmit || !text.trim()) return
     const value = expandSemanticReferences(text)
-    // 防抖 = identical-submit suppression. Mashing Send with the same text within a short window is an
-    // accidental double-tap; drop the second silently. This checks the last SUCCEEDED submit only, and we
-    // record below only after send() does NOT throw — so a real "readiness epoch already consumed" failure
-    // is never recorded and its retry is never suppressed. Coalescing distinct sends / rate-limiting the
-    // agent were rejected: both would swallow messages the user meant to send.
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
-    try {
-      await send(sessionId, value)
-      clearAgentComposerDraftIfUnchanged(sessionId, text)
-      // Only reached when send() resolved: record for history recall and the resubmit guard.
-      lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
-      historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
-    } catch {
-      // The Store owns error presentation; keep the draft available for retry. A codex mid-turn steer that
-      // Core refuses (fail-closed readiness) lands here too — the draft staying put is the honest "not
-      // sent" signal, and no user turn is recorded because Core throws before it appends one. Nothing is
-      // recorded, so the retry the user is about to make is not mistaken for an accidental duplicate.
-    }
+    if (!send(sessionId, value)) return
+    clearAgentComposerDraftIfUnchanged(sessionId, text)
+    lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
+    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
   }
 
-  // Queue a steer for a working Agent. Unlike send() this cannot fail (it appends to the local queue), so
-  // the observability fix lives here: CLEAR THE DRAFT. That is the missing "it entered the queue" signal —
-  // the user's words leaving the box, plus the badge count ticking up, is what turns a silent number into
-  // an observed event. Same resubmit guard (a double-tap Enter would otherwise queue two identical steers)
-  // and the same history recording as the send path.
   function queue(): void {
     const value = expandSemanticReferences(text)
     if (!value.trim()) return
@@ -177,7 +160,8 @@ export function AgentSessionComposer({
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
     if (!enqueueAgentSteer(sessionId, value)) return
-    setAgentComposerDraft(sessionId, '')
+    clearAgentComposerDraftIfUnchanged(sessionId, text)
+    void useAppStore.getState().flushAgentSteerQueue(sessionId)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
     historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
   }
@@ -263,6 +247,8 @@ export function AgentSessionComposer({
         id: entry.operationId,
         text: entry.text,
         status: entry.status,
+        sending: entry.operationId === sendingId,
+        deliverable: session?.kind === 'agent' && steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId),
         ...(entry.error ? { error: entry.error } : {})
       }))}
       onActivateSemanticReference={(reference) => {
@@ -271,21 +257,6 @@ export function AgentSessionComposer({
       }}
       onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
       onSendQueued={(operationId) => { void sendQueuedAgentSteer(sessionId, operationId).catch(reportError) }}
-      // Read the same fact the store's flush guard reads, through the same predicate — not a second
-      // hand-copy of `processState === 'running'`. `steerQueueCanEverDrain` answers "will this queue
-      // EVER empty"; the flush guard adds the pendingInteraction gate on top of it, which is the one
-      // difference and deliberately not part of this question: a pending interaction also blocks the
-      // flush, but `respondInteraction` flushes again as soon as the card is answered, so those entries
-      // genuinely are still coming.
-      //
-      // The runId half is the other precondition. A steer typed at a run that has since been replaced
-      // will never be sent (the flush skips it by design), so a live run whose queue still holds entries
-      // from a previous run must NOT claim they are on their way.
-      queueDeliverable={
-        session?.kind === 'agent' &&
-        steerQueueCanEverDrain(session.processState) &&
-        queuedEntries.every((entry) => steerEntryTargetsRun(entry, session.control.run.runId))
-      }
       onCopyQueued={(text) => void copyTextToClipboard(text, reportError)}
       commands={commandCandidates}
       promptKeywords={keywordCandidates}

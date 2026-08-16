@@ -85,8 +85,8 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'hurry this')
     useAppStore.getState().enqueueAgentSteer('s', 'and this')
     const first = useAppStore.getState().agentSteerQueues.s![0]!.operationId
-    // 手动路径会 throw：有人在等一个当场的答复，Composer 靠它把原因弹出来。
-    await expect(useAppStore.getState().sendQueuedAgentSteer('s', first)).rejects.toThrow('not ready yet')
+    // 手动与自动共用投递 owner；拒绝原因驻留在条目上。
+    await useAppStore.getState().sendQueuedAgentSteer('s', first)
     expect(useAppStore.getState().agentSteerQueues.s![0]!.status).toBe('deferred')
 
     // 决定性的一句：被拒之后自动投递照常继续，两条都按原顺序送出去。
@@ -96,10 +96,8 @@ describe('steer queue operationId correlation (T-008)', () => {
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('同一条被拒只报一次——第一次要报，自动重试要安静', async () => {
-    // 两侧都要钉。少了「第一次要报」：用户敲完回车，横幅是他唯一能看到真正原因的地方
-    // （session-launch-lifecycle 那两条守的就是这个，其中一条正是用户报的那串 raw IPC 文案）。
-    // 少了「重试要安静」：每个 runtime 事件都会重新 flush，同一件事会一遍遍弹。
+  it('投递拒绝保留在队列条目上，重试不产生全局弹窗', async () => {
+    // 原因必须可读，但自动拒绝和重试都不打断其他 Session。
     useAppStore.setState({ sessions: [runningAgent() as never] })
     const reported: string[] = []
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation((e) => { reported.push(String(e)) })
@@ -107,13 +105,14 @@ describe('steer queue operationId correlation (T-008)', () => {
 
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
     await useAppStore.getState().flushAgentSteerQueue('s')
-    expect(reported).toHaveLength(1) // 第一次发现：报
+    expect(reported).toEqual([])
+    expect(useAppStore.getState().agentSteerQueues.s![0]!.error).toBe('not ready yet')
 
     await useAppStore.getState().flushAgentSteerQueue('s')
     await useAppStore.getState().flushAgentSteerQueue('s')
     // 还在重试（条目仍在队列里等着），但不再上报——驻留状态由徽标那一档常驻表达。
-    expect(useAppStore.getState().agentSteerQueues.s![0]!.status).toBe('deferred')
-    expect(reported).toHaveLength(1)
+    expect(useAppStore.getState().agentSteerQueues.s![0]).toMatchObject({ status: 'deferred', error: 'not ready yet' })
+    expect(reported).toEqual([])
   })
 
   it('重启后 hydrate 回来的队列照旧能投递，且不会替用户丢掉对不上 run 的那条', async () => {
@@ -216,7 +215,7 @@ describe('超限的 prompt 进不了队列', () => {
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation((error) => { reported.push(error) })
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async () => {})
 
-    await expect(useAppStore.getState().send('s', oversized)).rejects.toThrow()
+    expect(useAppStore.getState().send('s', oversized)).toBe(false)
     // 三个独立判据：没进队列、没打到 Core、只报了一次（不是入队一次 + send 再报一次）。
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
     expect(submit).not.toHaveBeenCalled()
