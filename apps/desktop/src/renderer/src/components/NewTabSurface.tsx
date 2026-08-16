@@ -524,7 +524,7 @@ export function NewTabSurface({
               ))}
             >
               <span className="agent-pick__icon"><Globe2 size={16} /></span>
-              <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
+              <span className="agent-pick__copy"><strong>Browser</strong><small>Pages an Agent can read and drive; app links ask before leaving</small></span>
               <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
             </button>
 
