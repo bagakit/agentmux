@@ -33,15 +33,17 @@
 .composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
 .composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .composer-tool--danger:hover:not(:disabled) { color: var(--red); }
-.composer-send { display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-micro); font-weight: 620; box-shadow: var(--hl-strong); cursor: pointer; transition: background .12s ease; }
-.composer-send:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
-.composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--scrim-1); }
+/* One surface owns the boundary; each action keeps its own hit area and focus. */
+.composer-session-controls { display: inline-flex; align-items: center; gap: 0; flex-shrink: 0; padding: 0; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.composer-send { display: inline-flex; align-items: center; justify-content: center; min-width: var(--sp-8); padding: 0 var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--green-text); background: transparent; box-shadow: none; cursor: pointer; }
+.composer-send:hover:not(:disabled) { background: var(--surface-3); }
+.composer-send:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
 .composer-send:disabled { opacity: .35; cursor: default; }
-.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 0; box-shadow: none; }
-.composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
-.composer-send-group { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.composer-send--secondary { color: var(--green-text); background: var(--green-bg); box-shadow: none; }
-.composer-send--secondary:hover:not(:disabled) { color: var(--green-text); background: var(--surface-3); }
+.composer-send--working { color: var(--text-2); }
+.composer-session-controls .composer__identity { padding-inline: 0; }
+.composer-session-controls .agent-avatar { background: transparent; box-shadow: none; }
+.composer-session-controls .agent-avatar:is(.status--working, .status--running) { outline: none; color: var(--status-ink); }
+
 
 .composer__toolbar { flex-wrap: nowrap; gap: var(--sp-2); }
 .composer__toolbar > div { flex-wrap: nowrap; align-items: center; }

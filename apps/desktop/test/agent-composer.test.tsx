@@ -99,11 +99,11 @@ describe('AgentComposer reusable surface', () => {
     expect(markup.match(/disabled=""/gu) ?? []).toHaveLength(1)
   })
 
-  it('offers a single ■ that names interrupting THIS turn, not stopping the session', () => {
+  it('offers a single raised hand that names interrupting THIS turn, not stopping the session', () => {
     // The button calls Core's semantic interrupt, which ends the current turn and leaves the Run alive.
     // Terminating the whole session is a different action living in the Tabbar, so this one must not say
     // "Stop" — a word a user reads as "I lose the session", which makes them afraid to press it. The mark
-    // is ■ and the accessible name says "current turn"; the two entry points stay tellable apart.
+    // is a raised hand and the accessible name says "current turn"; the two entry points stay tellable apart.
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: 'Some text',
       disabled: false,
@@ -116,8 +116,8 @@ describe('AgentComposer reusable surface', () => {
 
     expect(markup).toContain('composer-send--working')
     expect(markup).toContain('aria-label="Interrupt the current turn"')
-    // The mark carries it: a filled ■ glyph, no word that could be read as ending the session.
-    expect(markup).toContain('lucide-square')
+    // The mark carries it: a raised hand glyph, no word that could be read as ending the session.
+    expect(markup).toContain('lucide-hand')
     expect(markup).not.toContain('>Stop')
     // Stop remains the primary action, while a visible secondary Send makes steer discoverable.
     expect(markup).toContain('aria-label="Send steer"')

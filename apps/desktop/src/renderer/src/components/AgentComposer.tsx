@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AtSign, ArrowUp, Paperclip, Square } from 'lucide-react'
+import { AtSign, ArrowUp, Hand, Paperclip } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
@@ -224,50 +224,45 @@ export function AgentComposer({
           ) : null}
         </div>
         <div>
-          {contextUsage}
-          {primaryAction === 'stop' ? (
-            // Send 与 Interrupt 收成图标（interaction SSOT「Send 与 Interrupt 收成图标」）。两者仍
-            // 必须可区分：破坏性动作收成图标 ≠ 收掉这个区分。区分靠两处，都不是文字——
-            //   · 图形：↑（推进/steer）对 ■（停/破坏性），本就是两个不同符号；
-            //   · 颜色语汇（Design Control Language：绿=推进、红=破坏性）：steer 走 --secondary 的绿，
-            //     Interrupt 走 --working 的红。
-            // ■ 中断的是**这一轮**（onInterrupt → Core semantic interrupt），不结束整个 Run；结束会话是
-            // Tabbar 里另一个动作，故它的可访问名/tooltip 说「current turn」，把两个对象分开。
-            <span className="composer-send-group">
-            <button
-              type="button"
-              className="composer-send composer-send--secondary"
-              disabled={!canSubmit}
-              onClick={onSubmit}
-              aria-label="Send steer"
-              title="Send this steer while the current turn continues"
-            >
-              <ArrowUp size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="composer-send composer-send--working"
-              disabled={disabled || !onInterrupt}
-              onClick={onInterrupt}
-              aria-label="Interrupt the current turn"
-              title="Interrupt the current turn — the session keeps running"
-            >
-              <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-            </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="composer-send"
-              disabled={!canSubmit}
-              onClick={onSubmit}
-              aria-label="Send"
-              title="Send"
-            >
-              <ArrowUp size={15} aria-hidden="true" />
-            </button>
-          )}
-          {mailbox}
+          <div className="composer-session-controls" role="group" aria-label="Session controls">
+            {contextUsage}
+            {primaryAction === 'stop' ? (
+              <>
+                <button
+                  type="button"
+                  className="composer-send composer-send--secondary"
+                  disabled={!canSubmit}
+                  onClick={onSubmit}
+                  aria-label="Send steer"
+                  title="Send this steer while the current turn continues"
+                >
+                  <ArrowUp size={15} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="composer-send composer-send--working"
+                  disabled={disabled || !onInterrupt}
+                  onClick={onInterrupt}
+                  aria-label="Interrupt the current turn"
+                  title="Interrupt the current reply — keep this session"
+                >
+                  <Hand size={15} aria-hidden="true" />
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="composer-send"
+                disabled={!canSubmit}
+                onClick={onSubmit}
+                aria-label="Send"
+                title="Send"
+              >
+                <ArrowUp size={15} aria-hidden="true" />
+              </button>
+            )}
+            {mailbox}
+          </div>
         </div>
       </div>
       {feedback}
