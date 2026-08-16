@@ -13,6 +13,8 @@ import {
   initialWorkbenchRegionId
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store.js'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 
 const initialState = useAppStore.getState()
 
@@ -200,6 +202,8 @@ describe('Renderer persistence boundary', () => {
       projectRailOpen: true,
       projectRailWidth: 210,
       collapsedProjectGroups: {},
+      explorerCollapsed: {},
+      pinnedItems: {},
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440,
@@ -236,6 +240,95 @@ describe('Renderer persistence boundary', () => {
     } finally {
       useAppStore.setState({ collapsedProjectGroups: state.collapsedProjectGroups })
     }
+  })
+
+  it('explorerCollapsed round-trips a per-workspace override through persist (true and false both stored)', () => {
+    // Slice 1 whitelist entry. Unlike collapsedProjectGroups, BOTH booleans are values here — the map
+    // records the user's explicit override and absence means "use the workspace kind default".
+    useAppStore.getState().setExplorerCollapsed('workspace-a', true)
+    useAppStore.getState().setExplorerCollapsed('workspace-b', false)
+
+    const partialize = useAppStore.persist.getOptions().partialize
+    const persisted = partialize!(useAppStore.getState()) as Record<string, unknown>
+    // Dropping explorerCollapsed from partialize reddens here: the override would never reach disk.
+    expect(persisted.explorerCollapsed).toEqual({ 'workspace-a': true, 'workspace-b': false })
+  })
+
+  it('explorerCollapsed keeps an explicit false and never invents one for an untouched workspace', () => {
+    // The critical distinction: an explicit false (user expanded a Scratch that defaults collapsed) is
+    // NOT the same as absent (fall back to the kind default). Two mutations redden this test:
+    //   - setExplorerCollapsed deleting the key when collapsed===false → absence swallows the false;
+    //   - restoredExplorerCollapsed matching only `value === true` (the collapse idiom) → false dropped.
+    useAppStore.getState().setExplorerCollapsed('workspace-a', false)
+    // The action must STORE the false, not fold it into absence.
+    expect(useAppStore.getState().explorerCollapsed).toEqual({ 'workspace-a': false })
+
+    const restored = restorePersistedUiState(config, { explorerCollapsed: { 'workspace-a': false } })
+    // false survives the restore boundary…
+    expect(restored.explorerCollapsed['workspace-a']).toBe(false)
+    // …and an untouched workspace stays absent (restore must not manufacture a default value for it).
+    expect(restored.explorerCollapsed).not.toHaveProperty('workspace-b')
+  })
+
+  it('pinnedItems round-trips scoped pin order through persist', () => {
+    // Slice 2 whitelist entry. One slice for both Topic and Branch pins, keyed by scope, order preserved.
+    const scratchScope = SCRATCH_WORKSPACE_ID
+    useAppStore.getState().togglePinnedItem(scratchScope, 'launcher:one')
+    useAppStore.getState().togglePinnedItem(scratchScope, 'session:two')
+
+    const partialize = useAppStore.persist.getOptions().partialize
+    const persisted = partialize!(useAppStore.getState()) as Record<string, unknown>
+    // Dropping pinnedItems from partialize reddens here.
+    expect(persisted.pinnedItems).toEqual({ [scratchScope]: ['launcher:one', 'session:two'] })
+  })
+
+  it('togglePinnedItem preserves pin order, removes exactly one on unpin, and drops an emptied scope key', () => {
+    const scope = 'scope-order'
+    useAppStore.getState().togglePinnedItem(scope, 'a')
+    useAppStore.getState().togglePinnedItem(scope, 'b')
+    useAppStore.getState().togglePinnedItem(scope, 'c')
+    // Unpin the middle one: the other two keep their relative order.
+    useAppStore.getState().togglePinnedItem(scope, 'b')
+    expect(useAppStore.getState().pinnedItems[scope]).toEqual(['a', 'c'])
+    // Unpinning the last survivors must delete the key, not leave an empty array (collapse idiom).
+    useAppStore.getState().togglePinnedItem(scope, 'a')
+    useAppStore.getState().togglePinnedItem(scope, 'c')
+    expect(useAppStore.getState().pinnedItems).not.toHaveProperty(scope)
+  })
+
+  it('the same branch name pinned in two different project scopes stays independent', () => {
+    // A branch name is unique only within a repo — two projects can both have `main`. Scope keys are
+    // DERIVED (never hand-written), so `main` in project A and `main` in project B are distinct pins.
+    // Mutation: key togglePinnedItem by a constant instead of the passed scope → both `main`s collide
+    // and this goes red.
+    const scopeA = workspaceProjectId(config.workspaces[0]!)
+    const scopeB = workspaceProjectId(config.workspaces[1]!)
+    expect(scopeA).not.toBe(scopeB)
+
+    useAppStore.getState().togglePinnedItem(scopeA, 'main')
+    useAppStore.getState().togglePinnedItem(scopeB, 'main')
+    expect(useAppStore.getState().pinnedItems).toEqual({ [scopeA]: ['main'], [scopeB]: ['main'] })
+
+    // Unpinning `main` in project A must not touch project B's `main`.
+    useAppStore.getState().togglePinnedItem(scopeA, 'main')
+    expect(useAppStore.getState().pinnedItems[scopeA]).toBeUndefined()
+    expect(useAppStore.getState().pinnedItems[scopeB]).toEqual(['main'])
+  })
+
+  it('筛掉坏掉的 explorerCollapsed / pinnedItems 值——垃圾输入不让 store 崩，也不污染好记录', () => {
+    // 与这个函数已有的立场一致：坏值走默认、逐条筛，而不是整体丢弃或抛。
+    // 非对象整体丢：
+    expect(restorePersistedUiState(config, {
+      explorerCollapsed: 'nope' as never,
+      pinnedItems: [1, 2, 3] as never
+    })).toMatchObject({ explorerCollapsed: {}, pinnedItems: {} })
+    // 嵌套垃圾逐条筛：空 key 丢、非 boolean 丢、false 保住；空 scope 丢、非字符串/空串 id 丢、去重、空数组丢。
+    const restored = restorePersistedUiState(config, {
+      explorerCollapsed: { '': true, 'workspace-a': 'yes' as never, 'workspace-b': false, 'workspace-c': null as never },
+      pinnedItems: { '': ['x'], 'good': [1 as never, 'main', '', 'main'], 'empty': [] as string[], 'bad': null as never }
+    })
+    expect(restored.explorerCollapsed).toEqual({ 'workspace-b': false })
+    expect(restored.pinnedItems).toEqual({ 'good': ['main'] })
   })
 
   it('waits for persistence hydration before asking Core for a recovery snapshot', async () => {

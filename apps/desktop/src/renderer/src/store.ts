@@ -359,6 +359,39 @@ type AppState = {
    * 漏了就默认折叠——那是把一个派生结构当成了需要注册的实体。
    */
   collapsedProjectGroups: Record<string, true>
+  /**
+   * 内容槽里 Explorer 的折叠状态，按 workspace id 存。
+   *
+   * 与紧邻的 {@link collapsedProjectGroups} 是**相邻却相反**的存法，值得说清为什么：那份只存
+   * 「折叠」一侧、缺席即默认，因为它只有**一个**全局默认（默认展开），存另一侧就得为每个新发现的
+   * 分组补一条注册、漏一条就默认错。而 Explorer 有**两个** kind 默认——Scratch 默认折叠、Project
+   * 默认展开——一个「折叠集合」编码不了它。所以这里存的是**用户的显式覆盖**：`true` 和 `false`
+   * 都是值，**缺席**才表示「按这个 workspace 的 kind 默认走」（默认由消费侧的
+   * `contentSlotPresentation` 解析，这里不 import、不算它——store 只记覆盖）。
+   *
+   * 它守住的仍是 collapsedProjectGroups 那条规则要保护的**同一个**性质：一个用户从没碰过的
+   * workspace 无需任何注册，天然拿到正确状态（缺席 → kind 默认）。区别只是「正确状态」不再是
+   * 单一的展开，而随 kind 而定。所以既不能像折叠集合那样把 `false` 读成缺席，也不能把缺席补成
+   * `false`——那都会把「按 kind 默认」这一档抹掉。
+   */
+  explorerCollapsed: Record<string, boolean>
+  /** 记下某个 workspace 的 Explorer 折叠覆盖（true/false 都是显式值；不清除、不折叠成缺席）。 */
+  setExplorerCollapsed(workspaceId: string, collapsed: boolean): void
+  /**
+   * 被 pin 住的项，按 scope key 存 → 该 scope 内的 id 列表（保序，pin 的先后就是顺序）。
+   *
+   * Topic 与 Branch 是**同一个概念**的两次实例化——一个 scope 内的一组 id——所以是**一个** slice
+   * 而不是两个。scope key 由调用方**派生**、绝不在调用点手写：
+   *   - Topic scope：`SCRATCH_WORKSPACE_ID`（只有一个 Scratch workspace，Topic id 在其内唯一）。
+   *   - Branch scope：`workspaceProjectId(workspace)`（= `[hostId, repoPath]`，因而正确地横跨一个
+   *     repo 的多个 worktree）。
+   * **一个分支名只在其 repo 内唯一**：两个项目都能有 `main`。若拿一个全局的分支名集合来存，单项目
+   * 测试下看着没问题，真实使用里会跨项目串 pin——所以 scope 必须进 key，且必须派生。store 本身对
+   * scope 不做解释，只按给来的 key 分桶。
+   */
+  pinnedItems: Record<string, string[]>
+  /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
+  togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
   tabMenuOpen: boolean
   workspaceTool: WorkspaceTool
@@ -1391,6 +1424,8 @@ type PersistedAppState = {
   mainSurface?: MainSurface
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
+  explorerCollapsed?: Record<string, boolean>
+  pinnedItems?: Record<string, string[]>
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   projectRailWidth?: number
@@ -1404,6 +1439,8 @@ export type RestoredUiState = Pick<
   | 'mainSurface'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
+  | 'explorerCollapsed'
+  | 'pinnedItems'
   | 'toolsOpen'
   | 'workspaceTool'
   | 'projectRailWidth'
@@ -1428,6 +1465,38 @@ function restoredCollapsedGroups(candidate: unknown): Record<string, true> {
 }
 
 /**
+ * Explorer 折叠覆盖的读回。逐条筛（同 restoredCollapsedGroups 的立场，坏记录不拖垮整份），但这里
+ * `false` 是**合法值**——它是「用户显式展开一个默认折叠的 Scratch」这一意图，与缺席（按 kind 默认）
+ * 必须区分开。所以只丢掉「key 是空串 / 值不是 boolean」的垃圾，两个布尔值都收下。
+ */
+function restoredExplorerCollapsed(candidate: unknown): Record<string, boolean> {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return {}
+  const restored: Record<string, boolean> = {}
+  for (const [key, value] of Object.entries(candidate)) {
+    if (key !== '' && typeof value === 'boolean') restored[key] = value
+  }
+  return restored
+}
+
+/**
+ * pin 列表的读回。key 是 scope，value 是保序的 id 列表。逐条筛：丢掉空 scope、非数组的值，并把
+ * 数组里的非字符串、空串、重复项剔掉；剩下的一条都不剩时连键一起丢（写入侧移空即删键，读回同步）。
+ */
+function restoredPinnedItems(candidate: unknown): Record<string, string[]> {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return {}
+  const restored: Record<string, string[]> = {}
+  for (const [scope, value] of Object.entries(candidate)) {
+    if (scope === '' || !Array.isArray(value)) continue
+    const seen = new Set<string>()
+    for (const id of value) {
+      if (typeof id === 'string' && id !== '' && !seen.has(id)) seen.add(id)
+    }
+    if (seen.size > 0) restored[scope] = [...seen]
+  }
+  return restored
+}
+
+/**
  * Validate persisted presentation state at the configuration boundary. Persisted JSON is user data,
  * not a trusted in-memory AppState: a removed Workspace, an old enum value, or a corrupt dock width
  * must not make startup render an unusable surface. Missing fields intentionally resolve to the
@@ -1441,6 +1510,8 @@ export function restorePersistedUiState(
     | 'mainSurface'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
+    | 'explorerCollapsed'
+    | 'pinnedItems'
     | 'toolsOpen'
     | 'workspaceTool'
     | 'projectRailWidth'
@@ -1453,6 +1524,8 @@ export function restorePersistedUiState(
     mainSurface: restoredMainSurface(persisted.mainSurface),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
+    explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
+    pinnedItems: restoredPinnedItems(persisted.pinnedItems),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
     projectRailWidth: clampProjectRailWidth(persisted.projectRailWidth ?? PROJECT_RAIL_DEFAULT_WIDTH),
@@ -1602,6 +1675,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   mainSurface: 'workbench',
   projectRailOpen: true,
   collapsedProjectGroups: {},
+  explorerCollapsed: {},
+  pinnedItems: {},
   toolsOpen: true,
   tabMenuOpen: false,
   workspaceTool: 'files-branches',
@@ -3068,6 +3143,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 变成两条规则。
       const { [key]: collapsed, ...rest } = state.collapsedProjectGroups
       return { collapsedProjectGroups: collapsed ? rest : { ...rest, [key]: true } }
+    })
+  },
+  setExplorerCollapsed(workspaceId, collapsed) {
+    // 写显式覆盖（true/false 都存下）。绝不删键、绝不折成缺席——缺席在这个 slice 里另有含义
+    // （「按 kind 默认走」），把 false 抹成缺席就等于把默认折叠的 Scratch 又弹回默认。
+    set((state) => ({ explorerCollapsed: { ...state.explorerCollapsed, [workspaceId]: collapsed } }))
+  },
+  togglePinnedItem(scope, id) {
+    set((state) => {
+      const current = state.pinnedItems[scope] ?? []
+      const next = current.includes(id)
+        ? current.filter((entry) => entry !== id) // unpin：只去这一条，其余保序
+        : [...current, id] // pin：追加到末尾，pin 的先后就是顺序
+      // 移空就删键，别留下空数组（同 toggleProjectGroup 的删键立场）。
+      if (next.length === 0) {
+        const { [scope]: _removed, ...rest } = state.pinnedItems
+        return { pinnedItems: rest }
+      }
+      return { pinnedItems: { ...state.pinnedItems, [scope]: next } }
     })
   },
   setTabMenuOpen(tabMenuOpen) {
@@ -4719,6 +4813,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
     collapsedProjectGroups: state.collapsedProjectGroups,
+    // Explorer 折叠是用户意图，重开要还在。存的是显式覆盖（true/false 都进），缺席在读回侧另有含义。
+    explorerCollapsed: state.explorerCollapsed,
+    // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
+    // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
+    pinnedItems: state.pinnedItems,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
     projectRailWidth: state.projectRailWidth,
