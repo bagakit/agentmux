@@ -2,6 +2,13 @@ import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// SessionPane → lib/api，api 在模块加载时就读这个 build-time define 决定跑在哪个宿主里。
+// 本仓 vitest 没有 vite 的 define 过程，不先立起它，import 阶段就抛 ReferenceError，一条断言都跑不到。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
+
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import type { LinkClickModifiers } from '../src/renderer/src/components/AgentMarkdown.js'
 import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
