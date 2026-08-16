@@ -415,6 +415,52 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onPasteImage).toBeTypeOf('function')
   })
 
+  it('卡片待答时不给姿态切换——那一下真的会被 daemon 拒掉', () => {
+    // 上一条的边界在哪：附件/@文件只改本地草稿，卡片在不在都无所谓；姿态**不是**草稿动作。
+    // client.setAgentPosture 查完 Provider 的按键之后调的就是 writeAgentInput，而 writeAgentInput 在
+    // pendingInteraction 时是**故意**抛 AGENT_INTERACTION_PENDING 的。所以这是原则 11 第 1 类（这条路
+    // 真的不通），不是第 2 类——递出去只会让每一次点击换来一条错误横幅。
+    //
+    // 曾经有一版把它跟附件归在一起，理由写的是「setAgentPosture 不依赖 submit readiness」。那句话是
+    // 错的：它只读到了按键查表，没读到后面那次写入。
+    // grok 是 fixture 里唯一声明了 postureControl 的 Provider；默认的 codex 没有，用它这条测试会恒真。
+    const waiting = agentSession({
+      providerId: 'grok',
+      status: { state: 'working', source: 'native-hook', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        id: 'permission-1',
+        agentSessionId: 'agent-1',
+        title: 'Allow command?',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+        evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
+      }
+    })
+    fixture.state.providerCatalog = [postureCatalogEntry()]
+    fixture.state.sessions = [waiting]
+    const pending = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSetPosture?: (modeId: string) => void; onAttach?: () => void; postureControl?: unknown }
+    }
+
+    // 三条一起：Provider 确实声明了姿态（否则下面两条恒真）、附件仍在（证明不是整片收走）、
+    // 而姿态被挡住。
+    expect(pending.props.postureControl, '这个 Provider 本来就没声明姿态，这条测试什么都没证明').toBeTruthy()
+    expect(pending.props.onAttach, '收得过头了——附件只改草稿，不该跟着一起消失').toBeTypeOf('function')
+    expect(pending.props.onSetPosture, '卡片待答时递出了姿态——点下去会被 writeAgentInput 拒掉').toBeUndefined()
+
+    // 相反世界：卡片答完（没有 pendingInteraction）姿态必须回来，否则「永远不给」也能通过上一条。
+    fixture.state.providerCatalog = [postureCatalogEntry()]
+    fixture.state.sessions = [
+      agentSession({ providerId: 'grok', status: { state: 'working', source: 'native-hook', observedAt: 2 } })
+    ]
+    const clear = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSetPosture?: (modeId: string) => void }
+    }
+    expect(clear.props.onSetPosture, '没有卡片时姿态该是可用的').toBeTypeOf('function')
+    clear.props.onSetPosture?.('always-approve')
+    expect(fixture.state.setPosture).toHaveBeenCalledWith('agent-1', 'always-approve')
+  })
+
   it('does not guess that a disconnected running process can accept input', () => {
     const disconnected = agentSession({
       status: { state: 'disconnected', source: 'run-process', observedAt: 2 }
