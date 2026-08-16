@@ -153,19 +153,6 @@ export function emitWebloc(url: string): string {
 }
 
 /**
- * 发射一份 `.url`（`[InternetShortcut]`）。**只写 `URL=`**，LF 不 CRLF（§2.7.1：本机五个真实样本
- * 全是纯一行、LF、无 BOM，别顺手加键）。这个格式的全部价值是跨到 Windows 侧还能用。
- */
-export function emitUrlShortcut(url: string): string {
-  return `[InternetShortcut]\nURL=${url}\n`
-}
-
-/** `emit` 分派：按种类发射。存 `.webloc` 走 XML plist，存 `.url` 走 `[InternetShortcut]`。 */
-export function emitBookmark(kind: BookmarkFileKind, url: string): string {
-  return kind === 'webloc' ? emitWebloc(url) : emitUrlShortcut(url)
-}
-
-/**
  * 从页面标题派生一个安全的书签文件名（不含扩展名）。
  *
  * 承重的一条：**必须挡住 `/` `\\` `:` 与所有控制字符（含 NUL）**——派生出一个含 `/` 的名字会写到

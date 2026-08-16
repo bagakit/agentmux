@@ -9,8 +9,6 @@ import {
   BOOKMARK_FILE_EXTENSIONS,
   bookmarkFileNameFromTitle,
   bookmarkKindForPath,
-  emitBookmark,
-  emitUrlShortcut,
   emitWebloc,
   isBinaryContent,
   parseBookmarkUrl,
@@ -102,24 +100,6 @@ describe('.webloc emission is real plist that plutil accepts', () => {
   })
 })
 
-describe('.url emission matches real on-disk samples (LF, single URL= line)', () => {
-  it('is [InternetShortcut] then URL=, LF not CRLF, no extra keys', () => {
-    const text = emitUrlShortcut('https://example.com/x')
-    expect(text).toBe('[InternetShortcut]\nURL=https://example.com/x\n')
-    expect(text).not.toContain('\r') // LF, 不是 CRLF
-    // 只有这两行有内容（本机五个真实样本全是纯一行 URL=）。
-    expect(text.split('\n').filter((line) => line.length > 0)).toEqual([
-      '[InternetShortcut]',
-      'URL=https://example.com/x'
-    ])
-  })
-
-  it('emitBookmark dispatches by kind', () => {
-    expect(emitBookmark('webloc', 'https://a')).toContain('<key>URL</key>')
-    expect(emitBookmark('url', 'https://a')).toBe('[InternetShortcut]\nURL=https://a\n')
-  })
-})
-
 describe('parsing returns null (never throws) on inputs with no URL', () => {
   it.each([
     ['empty string', ''],
@@ -135,7 +115,7 @@ describe('parsing returns null (never throws) on inputs with no URL', () => {
 
   it('parseBookmarkUrl extracts from valid content of each kind', () => {
     expect(parseBookmarkUrl('webloc', emitWebloc('https://x/y'))).toBe('https://x/y')
-    expect(parseBookmarkUrl('url', emitUrlShortcut('https://x/y'))).toBe('https://x/y')
+    expect(parseBookmarkUrl('url', '[InternetShortcut]\nURL=https://x/y\n')).toBe('https://x/y')
   })
 
   // 上面四条「取不出」全在**结构缺席**那一侧（没有 plist、没有 URL 键、没有 URL= 行），它们连正则/前缀
