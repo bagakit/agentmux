@@ -3,11 +3,13 @@ import { X } from 'lucide-react'
 import { WorkflowCard } from './WorkflowCard'
 import type { WorkflowSnapshot } from './types'
 
-export function WorkflowDock({ workflow, onClose }: { workflow: WorkflowSnapshot; onClose?: () => void }) {
+export function WorkflowDock({ workflow, open: openProp, onOpenChange, onClose }: { workflow: WorkflowSnapshot; open?: boolean; onOpenChange?: (open: boolean) => void; onClose?: () => void }) {
   const [visible, setVisible] = useState(true)
-  if (!visible) return null
+  const open = openProp ?? visible
+  if (!open) return null
   const close = (): void => {
-    setVisible(false)
+    if (openProp === undefined) setVisible(false)
+    onOpenChange?.(false)
     onClose?.()
   }
   return (

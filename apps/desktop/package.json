@@ -10,6 +10,7 @@
     "predev": "pnpm build:workspace-move-helper",
     "dev": "node scripts/dev-desktop.mjs",
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
+    "build:gallery": "vite build --config vite.gallery.config.ts",
     "prebuild": "pnpm build:workspace-move-helper",
     "build": "electron-vite build && node scripts/build-renderer-release.mjs",
     "package:mac": "node scripts/package-macos.mjs",

@@ -13,7 +13,7 @@ export function WorkflowToolRow({
   workflowName: string
   status: WorkflowStatus
   duration: string
-  notice: string
+  notice?: string
 }) {
   return (
     <div className="wf-tool-row" data-status={status}>
@@ -22,7 +22,7 @@ export function WorkflowToolRow({
       <span className="wf-tool-row__title">{title}</span>
       <span className="wf-tool-row__workflow"><GitBranch size={12} aria-hidden="true" />Workflow {workflowName}</span>
       <span className="wf-tool-row__status"><WorkflowStatusGlyph status={status} />{duration}</span>
-      <span className="wf-note">{notice}</span>
+      {notice ? <span className="wf-note">{notice}</span> : null}
     </div>
   )
 }

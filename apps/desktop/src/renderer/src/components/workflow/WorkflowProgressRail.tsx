@@ -1,4 +1,6 @@
-export function WorkflowProgressRail({ completed, total, status }: { completed: number; total: number; status: string }) {
+import type { WorkflowStatus } from './types'
+
+export function WorkflowProgressRail({ completed, total, status }: { completed: number; total: number; status: WorkflowStatus }) {
   const percentage = total === 0 ? 0 : Math.max(0, Math.min(100, (completed / total) * 100))
   return (
     <span

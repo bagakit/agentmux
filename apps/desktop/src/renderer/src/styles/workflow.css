@@ -95,6 +95,20 @@
 .wf-card--dock .wf-m-model { display: none; }
 .wf-card--dock .wf-agent__button { min-height: 20px; }
 .wf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.observation-gallery { margin-top: var(--sp-8); padding-top: var(--sp-7); border-top: 1px solid var(--line-soft); }
+.observation-gallery__heading { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-5); }
+.observation-gallery__eyebrow, .observation-sample__label { color: var(--text-3); font-size: var(--fs-micro); font-weight: 620; letter-spacing: .06em; text-transform: uppercase; }
+.observation-gallery__heading h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 620; }
+.observation-gallery__heading p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.observation-gallery__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
+.observation-sample { min-width: 0; display: grid; align-content: start; gap: var(--sp-3); padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--hl); }
+.observation-sample__body { min-height: 116px; color: var(--text-2); font-size: var(--fs-prose); }
+.observation-sample__status { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.observation-sample__status .status { color: var(--green); }
+.observation-sample .service-window { margin: 0; padding: var(--sp-3); background: var(--surface-0); box-shadow: none; }
+.observation-sample--composer textarea { width: 100%; min-height: 68px; resize: vertical; border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); color: var(--text); background: var(--surface-0); font: inherit; }
+.observation-sample--composer small { color: var(--text-3); font-size: var(--fs-micro); }
+@media (max-width: 760px) { .observation-gallery__grid { grid-template-columns: 1fr; } }
 @media (max-width: 560px) {
   .wf-gallery { padding-inline: var(--sp-4); }
   .wf-head { flex-wrap: wrap; }
