@@ -11,7 +11,7 @@ import {
 } from '../src/main/browser-app-link.js'
 
 /**
- * 守的缺陷：内置 Browser 里点飞书文档的 "Authorize in Feishu App" 什么都不发生。不只飞书——
+ * 守的缺陷：内置 Browser 里点外部应用页面的交接控件 什么都不发生。不止一种应用——
  * 每一个 `slack:` / `vscode:` / `zoommtg:` / `mailto:` 在这里都是坏的。用户定的策略是
  * **「对齐一般浏览器，假定用户会自己把本应用当做浏览器」**。
  *
@@ -83,7 +83,7 @@ const profiles = { defaultProfileId: () => 'default', resolvePartition: (id: str
 
 /**
  * 一个记账的应用链接宿主。`openExternal` 必须是假的——真的 `shell.openExternal` 会在跑测试的人脸上
- * 弹出飞书。记下 URL 而不是只数次数：判据要能说出交出去的是**哪一个**。
+ * 弹出外部应用。记下 URL 而不是只数次数：判据要能说出交出去的是**哪一个**。
  */
 function appLinkHost(remembered: Record<string, 'allow' | 'deny'> = {}) {
   const opened: string[] = []
@@ -171,7 +171,7 @@ describe('应用链接的三段分类', () => {
     // 枚举得出的那几个是人人都想到的；`fictional-app` 是这条判据的要害：一般浏览器把未知 scheme
     // 交给 OS 判，我们枚举不完。把第三段写成白名单时，这一行会红。
     const cases: Array<[string, string]> = [
-      ['lark://open', 'lark'],
+      ['customapp://open', 'customapp'],
       ['slack://channel?id=1', 'slack'],
       ['mailto:hi@example.com', 'mailto'],
       ['fictional-app://whatever', 'fictional-app']
@@ -184,27 +184,27 @@ describe('应用链接的三段分类', () => {
 describe('记住的答案决定这一次怎么走', () => {
   it('没记过就问，而且一个字节都还没交出去', () => {
     const opened: string[] = []
-    const outcome = appLinkOutcome('lark://open', 'lark', undefined, (t) => opened.push(t))
-    expect(outcome).toEqual({ kind: 'ask', scheme: 'lark', url: 'lark://open' })
+    const outcome = appLinkOutcome('customapp://open', 'customapp', undefined, (t) => opened.push(t))
+    expect(outcome).toEqual({ kind: 'ask', scheme: 'customapp', url: 'customapp://open' })
     // 承重的反向一半：`ask` 档要是顺手也开了，那一问就成了摆设——先斩后奏地问「刚才那下行吗」。
     expect(opened, '还没问就已经把它交出去了').toEqual([])
   })
 
   it('记过 allow 就直接开；记过 deny 就不开，且有话说', () => {
     const allowed: string[] = []
-    expect(appLinkOutcome('lark://open', 'lark', 'allow', (t) => allowed.push(t)))
-      .toEqual({ kind: 'opened', scheme: 'lark' })
-    expect(allowed).toEqual(['lark://open'])
+    expect(appLinkOutcome('customapp://open', 'customapp', 'allow', (t) => allowed.push(t)))
+      .toEqual({ kind: 'opened', scheme: 'customapp' })
+    expect(allowed).toEqual(['customapp://open'])
 
     const denied: string[] = []
-    expect(appLinkOutcome('lark://open', 'lark', 'deny', (t) => denied.push(t)))
-      .toEqual({ kind: 'refused', scheme: 'lark' })
+    expect(appLinkOutcome('customapp://open', 'customapp', 'deny', (t) => denied.push(t)))
+      .toEqual({ kind: 'refused', scheme: 'customapp' })
     expect(denied, 'deny 记着却照样开了').toEqual([])
   })
 
   it('拒绝的话点名一个真能走到的地方', () => {
-    const message = appLinkRefusedMessage('lark')
-    expect(message).toContain('lark')
+    const message = appLinkRefusedMessage('customapp')
+    expect(message).toContain('customapp')
     // 房规（browser-automation-setting-reachable）：文案点名的位置要被证明存在且可达。
     // Settings › Browser 这一节是真的，用户当初也正是在那里回答的。
     expect(message, '没告诉人怎么改回来，等于一句无法行动的拒绝').toContain('Settings › Browser')
@@ -212,18 +212,18 @@ describe('记住的答案决定这一次怎么走', () => {
 })
 
 describe('嵌入 frame 的应用链接', () => {
-  it('飞书授权 iframe 的 lark 导航也走同一条交接路', async () => {
+  it('嵌入 frame 的自定义应用导航也走同一条交接路', async () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
 
-    const { prevented } = navigateTo(view, 'lark://applink.feishu.cn/client/security/bind_device', false, 'will-frame-navigate')
+    const { prevented } = navigateTo(view, 'customapp://applink.feishu.cn/client/security/bind_device', false, 'will-frame-navigate')
     await Promise.resolve()
     await Promise.resolve()
 
     expect(prevented).toBe(true)
     expect(latest(fixture).appLinkPrompt).toEqual({
-      url: 'lark://applink.feishu.cn/client/security/bind_device',
-      scheme: 'lark'
+      url: 'customapp://applink.feishu.cn/client/security/bind_device',
+      scheme: 'customapp'
     })
     expect(host.opened).toEqual([])
     void manager
@@ -241,24 +241,24 @@ describe('导航路：闸门之前分流，闸门本身不变', () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
 
-    const { prevented } = navigateTo(view, 'lark://open?token=1')
+    const { prevented } = navigateTo(view, 'customapp://open?token=1')
     await Promise.resolve()
     await Promise.resolve()
 
     expect(prevented, '没拦住——页面会真的导航到一个装不下的地址').toBe(true)
-    expect(latest(fixture).appLinkPrompt).toEqual({ url: 'lark://open?token=1', scheme: 'lark' })
+    expect(latest(fixture).appLinkPrompt).toEqual({ url: 'customapp://open?token=1', scheme: 'customapp' })
     expect(host.opened, '还没问就交出去了').toEqual([])
   })
 
   it('记过 allow 的 scheme 直接交给系统，不再问', async () => {
-    const host = appLinkHost({ lark: 'allow' })
+    const host = appLinkHost({ customapp: 'allow' })
     const { manager, view, fixture } = await managerWith(host)
 
-    navigateTo(view, 'lark://open?token=2')
+    navigateTo(view, 'customapp://open?token=2')
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(host.opened).toEqual(['lark://open?token=2'])
+    expect(host.opened).toEqual(['customapp://open?token=2'])
     expect(latest(fixture).appLinkPrompt, '记过 allow 还在问').toBeNull()
   })
 
@@ -292,9 +292,9 @@ describe('导航路：闸门之前分流，闸门本身不变', () => {
 describe('弹窗路：只截应用链接，其余交回 Chromium', () => {
   it('应用链接的 window.open 被截走，并按同一条路移交', () => {
     const handed: Array<[string, string]> = []
-    expect(browserWindowOpenOutcome('lark://open?token=6', (u, s) => handed.push([u, s])))
+    expect(browserWindowOpenOutcome('customapp://open?token=6', (u, s) => handed.push([u, s])))
       .toEqual({ action: 'deny' })
-    expect(handed).toEqual([['lark://open?token=6', 'lark']])
+    expect(handed).toEqual([['customapp://open?token=6', 'customapp']])
   })
 
   it('http(s) 与 about:blank 的弹窗一律 allow，且一个字节都不移交', () => {
@@ -319,16 +319,16 @@ describe('弹窗路：只截应用链接，其余交回 Chromium', () => {
 
   it('装在 view 上的 handler 与导航路共用同一份记住的答案，不是第二份判定', async () => {
     // 两个写入点收成一处投影：导航路上答过 allow 的 scheme，弹窗路直接开，不该再问一次。
-    const host = appLinkHost({ lark: 'allow' })
+    const host = appLinkHost({ customapp: 'allow' })
     const { view, fixture } = await managerWith(host)
     const handler = view.webContents.windowOpenHandler
     expect(handler, 'handler 根本没装上——弹窗会开出一个没人管的窗口').not.toBeNull()
 
-    expect(handler!({ url: 'lark://open?token=7' })).toEqual({ action: 'deny' })
+    expect(handler!({ url: 'customapp://open?token=7' })).toEqual({ action: 'deny' })
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(host.opened).toEqual(['lark://open?token=7'])
+    expect(host.opened).toEqual(['customapp://open?token=7'])
     expect(latest(fixture).appLinkPrompt, '记过 allow 的 scheme 在弹窗路上又问了一次').toBeNull()
   })
 })
@@ -337,27 +337,27 @@ describe('回答那一问', () => {
   it('答 Open 就开；勾了记住才落盘', async () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
-    navigateTo(view, 'lark://open?token=3')
+    navigateTo(view, 'customapp://open?token=3')
     await Promise.resolve()
     await Promise.resolve()
 
     const snapshot = await manager.answerAppLink('b1', true, true)
 
-    expect(host.opened).toEqual(['lark://open?token=3'])
-    expect(host.saved).toEqual([{ scheme: 'lark', choice: 'allow' }])
+    expect(host.opened).toEqual(['customapp://open?token=3'])
+    expect(host.saved).toEqual([{ scheme: 'customapp', choice: 'allow' }])
     expect(snapshot.appLinkPrompt, '答完了还挂着那一问').toBeNull()
   })
 
   it('没勾记住就只答这一次：开了，但什么都没存', async () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
-    navigateTo(view, 'lark://open?token=4')
+    navigateTo(view, 'customapp://open?token=4')
     await Promise.resolve()
     await Promise.resolve()
 
     await manager.answerAppLink('b1', true, false)
 
-    expect(host.opened).toEqual(['lark://open?token=4'])
+    expect(host.opened).toEqual(['customapp://open?token=4'])
     // 反向的一半：一个「答了就记住」的实现会让上一条全绿，而它把「就这一次」变成了永久授权。
     expect(host.saved, '没勾记住却把选择存下来了').toEqual([])
   })
@@ -365,14 +365,14 @@ describe('回答那一问', () => {
   it('答 Not now 不开，并留下一句能走到下一步的话', async () => {
     const host = appLinkHost()
     const { manager, view, fixture } = await managerWith(host)
-    navigateTo(view, 'lark://open?token=5')
+    navigateTo(view, 'customapp://open?token=5')
     await Promise.resolve()
     await Promise.resolve()
 
     const snapshot = await manager.answerAppLink('b1', false, true)
 
     expect(host.opened, '答了 Not now 还是开了').toEqual([])
-    expect(host.saved).toEqual([{ scheme: 'lark', choice: 'deny' }])
+    expect(host.saved).toEqual([{ scheme: 'customapp', choice: 'deny' }])
     expect(snapshot.appLinkPrompt).toBeNull()
     expect(snapshot.error).toContain('Settings › Browser')
   })
