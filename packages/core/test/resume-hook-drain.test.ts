@@ -14,6 +14,8 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     hostId: 'local', workspacePath: upstreamFixturePath("review-fixture"), run: { runId: 'old-run' }, retiredRuns: [],
     hookBindingId: 'review-binding'.padEnd(43, 'A'), hookToken: 'review-token'.padEnd(43, 'B'),
     outputCursorBytes: 0, createdAt: 1, updatedAt: 1,
+    promptCompletionAdmission: { submissionId: 'old-prompt',
+      operationId: 'old-input', startByte: 0, endByte: 5 },
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'review-native' }
   }
   const ended: CtxmuxAdapterRun = {
@@ -95,7 +97,8 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     releaseStatus(ended)
     await new Promise((resolve) => setImmediate(resolve))
     const restored = (await store.load())[0]
-    expect(restored?.run.runId).toBe('new-run')
+    expect(restored).toMatchObject({ run: { runId: 'new-run' } })
+    expect(restored).not.toHaveProperty('promptCompletionAdmission')
     expect(restored).not.toHaveProperty('hookReceipt')
     expect(restored).not.toHaveProperty('semanticStatus')
   } finally {
