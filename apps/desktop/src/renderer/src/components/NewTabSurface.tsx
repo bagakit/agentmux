@@ -1,3 +1,4 @@
+import type { ComposerInsertionHandle } from '../lib/composer-insertion'
 import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Paperclip, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
@@ -37,6 +38,7 @@ export function NewTabSurface({
   visible?: boolean
 }) {
   const [executorId, setExecutorId] = useState('codex')
+  const insertionRef = useRef<ComposerInsertionHandle>(null)
   // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
   // 若草稿只活在组件里，启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）就会
   // 重挂一个空的新实例——正是用户报告的"报错退回初始页、之前输入没缓存"。store 是唯一数据源，
@@ -55,10 +57,7 @@ export function NewTabSurface({
     local: localPrompt,
     writeLocal: setLocalPrompt
   })
-  const latestPrompt = useRef(prompt)
-  latestPrompt.current = prompt
   function setPrompt(value: string) {
-    latestPrompt.current = value
     writePrompt(value)
   }
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
@@ -220,17 +219,21 @@ export function NewTabSurface({
   }
 
   function appendReference(path: string): void {
-    setPrompt(appendFileReferences(latestPrompt.current, [path]))
+    void feedback.run(() => insertionRef.current?.insert(() => appendFileReferences('', [path]), { separate: true }))
   }
 
   async function captureComposerScreenshot(): Promise<void> {
-    const path = await api.ui.captureScreenshot()
-    if (path) appendReference(path)
+    await insertionRef.current?.insert(async () => {
+      const path = await api.ui.captureScreenshot()
+      return path ? appendFileReferences('', [path]) : null
+    }, { separate: true })
   }
 
   async function chooseComposerFiles(): Promise<void> {
-    const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
-    if (paths?.length) setPrompt(appendFileReferences(latestPrompt.current, paths, workspace?.path))
+    await insertionRef.current?.insert(async () => {
+      const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
+      return paths?.length ? appendFileReferences('', paths, workspace?.path) : null
+    }, { separate: true })
   }
 
   return (
@@ -328,7 +331,11 @@ export function NewTabSurface({
         aria-label="Agent prompt"
         disabled={false}
         readPastedImage={(path) => api.ui.readPastedImage(path)}
-        onPasteImage={(image) => { void feedback.run(async () => appendReference(await api.ui.savePastedImage(image))) }}
+        insertionRef={insertionRef}
+        onPasteImage={(file, insert) => { void feedback.run(() => insert(async () => {
+          const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
+          return appendFileReferences('', [path])
+        }, { separate: true })) }}
         autoFocus={visible}
         value={prompt}
         onValueChange={setPrompt}

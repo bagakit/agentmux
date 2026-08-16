@@ -1,3 +1,4 @@
+import type { ComposerInsert, ComposerInsertionHandle } from '../src/renderer/src/lib/composer-insertion'
 import { renderComponentBoundary } from './helpers/render-component-boundary'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -591,10 +592,10 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'Look at this' }
     nativeApi.savePastedImage.mockRejectedValueOnce(new Error('Pasted image exceeds the size limit.'))
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
+      props: { onPasteImage(file: File, insert: ComposerInsert): void }
     }
 
-    composer.props.onPasteImage({ bytes: new Uint8Array([1, 2, 3]), extension: 'png' })
+    composer.props.onPasteImage(new File([new Uint8Array([1, 2, 3])], 'paste.png', { type: 'image/png' }), async (resolve) => { await resolve() })
 
     await vi.waitFor(() => expect(nativeApi.savePastedImage).toHaveBeenCalledOnce())
     expect(fixture.state.reportError).not.toHaveBeenCalled()
@@ -606,9 +607,10 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession()]
     nativeApi.chooseFiles.mockRejectedValueOnce(new Error('Workspace file picker failed.'))
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onAttach(): void }
+      props: { onAttach(): void; insertionRef: { current: ComposerInsertionHandle | null } }
     }
 
+    composer.props.insertionRef.current = { insert: async (resolve) => { await resolve() } }
     composer.props.onAttach()
 
     await vi.waitFor(() => expect(nativeApi.chooseFiles).toHaveBeenCalledOnce())
@@ -619,13 +621,18 @@ describe('AgentSessionComposer adapter', () => {
   it('keeps a successful paste on its existing path-reference behaviour', async () => {
     fixture.state.sessions = [agentSession()]
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
+      props: { onPasteImage(file: File, insert: ComposerInsert): void }
     }
 
-    composer.props.onPasteImage({ bytes: new Uint8Array([1]), extension: 'png' })
+    const inserted: string[] = []
+    composer.props.onPasteImage(new File([new Uint8Array([1])], 'paste.png', { type: 'image/png' }), async (resolve) => {
+      const value = await resolve()
+      if (value) inserted.push(value)
+    })
 
-    // Proves the catch did not swallow the success path too: the reference still lands, silently.
-    await vi.waitFor(() => expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledOnce())
+    // The editor owns insertion; the adapter supplies the saved reference, never a full draft.
+    await vi.waitFor(() => expect(inserted).toEqual(['@/tmp/pasted.png ']))
+    expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
     expect(fixture.state.reportError).not.toHaveBeenCalled()
   })
 })

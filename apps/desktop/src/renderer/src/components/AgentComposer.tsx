@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion'
+import type { ReactNode, Ref } from 'react'
 import { AtSign, ArrowUp, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
@@ -51,7 +52,8 @@ export type AgentComposerProps = {
   onInterrupt?: () => void
   onReferenceActiveFile?: () => void
   onAttach?: () => void
-  onPasteImage?: (image: { bytes: Uint8Array; extension: string }) => void
+  onPasteImage?: ComposerPasteImage
+  insertionRef?: Ref<ComposerInsertionHandle>
   onSetPosture?: (modeId: string) => void
 }
 
@@ -79,6 +81,7 @@ export function AgentComposer({
   onReferenceActiveFile,
   onAttach,
   onPasteImage,
+  insertionRef,
   onSetPosture,
   onHistoryRecall,
   promptKeywords = []
@@ -121,6 +124,7 @@ export function AgentComposer({
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <InlineComposer
         aria-label="Message Agent"
+        {...(insertionRef ? { insertionRef } : {})}
         disabled={disabled}
         value={value}
         onValueChange={onChange}
