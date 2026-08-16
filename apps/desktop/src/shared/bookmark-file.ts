@@ -183,5 +183,7 @@ export function bookmarkFileNameFromTitle(title: string): string {
     out += ch === '/' || ch === '\\' || ch === ':' || code < 0x20 ? ' ' : ch
   }
   const cleaned = out.replace(/\s+/g, ' ').trim().replace(/^\.+/, '').trim()
-  return cleaned.length > 0 ? cleaned.slice(0, 120) : 'Bookmark'
+  // 按码点截，不按 UTF-16 code unit：`slice(0, 120)` 若切在代理对中间会留下半个字符（孤立
+  // 代理），派生名里就多个坏字符。`Array.from` 逐码点，切 emoji/CJK 边界也整。
+  return cleaned.length > 0 ? Array.from(cleaned).slice(0, 120).join('') : 'Bookmark'
 }
