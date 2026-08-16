@@ -984,14 +984,8 @@ describe('并发写同一份 store 的锁竞争', () => {
       expect(rejected.map((error) => (error as { code?: string })?.code ?? String(error))).toEqual([])
 
       // 不只是「没抛错」——每个槽位都得真的落在盘上，证明锁确实轮转过而不是有人被跳过。
-      const reader = new AgentMuxFileAgentSessionStore(path)
-      const claimed = await reader.claimStaleLifecycles({
-        ownerId: 'race-auditor',
-        ownerPid: process.pid,
-        now: 5_000_000_000_000,
-        expiresAt: 5_000_060_000_000
-      })
-      expect([...claimed.map((entry) => entry.reservationId)].sort()).toEqual(
+      const document = JSON.parse(await readFile(path, 'utf8')) as { reservations: Array<{ reservationId: string }> }
+      expect(document.reservations.map((entry) => entry.reservationId).sort()).toEqual(
         writers.map((_writer, index) => `race-reservation-${index}`).sort()
       )
     } finally {
@@ -1377,51 +1371,25 @@ describe('Agent Session store corruption salvage', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// claimStaleLifecycles 的第三臂 processIsAlive(ownerPid) 在两个 impl 里都无守卫。
-// 跳过（保护）条件是三臂 AND：
-//   reservation.ownerId !== claim.ownerId && reservation.expiresAt > claim.now && processIsAlive(ownerPid)
-// 把第三臂替换成 false，在 memory 与 file 两个 impl 里都存活——因为唯一驱动真实预约的用例
-// （上方「并发落盘不会有人被饿死」）seed expiresAt: 4e12、claim now: 5e12，于是 arm2
-// (expiresAt > now) 恒假，整条 AND 恒假，arm2/arm3 都不可能改变结果。registry 用例只委派不
-// claim，store-limits / client-connection-lost 把这个方法 stub 成 `return []`。
-//
-// 后果若回归：一次崩溃恢复扫描（client.ts 重连时调 registry.claimStaleLifecycles）会把一个仍
-// 被**活着且未过期**的 owner 持有的 lifecycle 预约抢走，两个 client 于是同时认为自己拥有同一个
-// Agent Session 的 create/resume/stop。
-//
-// 判据设计：受保护的那条预约必须让**三臂全为真**——异 owner（arm1）、未过期（arm2，
-// expiresAt >> now）、owner 进程活着（arm3，用 process.pid，本进程恒活）。只有这样，唯一还把它
-// 挡在回收之外的就是 arm3；把 arm3 变 false 就会把它一并回收，claimed 里于是多出这一条。
-// 另 seed 一条**已过期**（arm2 假）的预约作存在性自检：它在正确码与变异码下都会被回收，证明扫描
-// 真的跑过、返回非空，从而「protected 不在 claimed 里」不是因为整体空集这种假绿。
-// 两个 impl 各写一个 it()，让「变异 memory 的臂」与「变异 file 的臂」红在不同名字的用例上。
-// 盲点：这里只钉 arm3；arm1/arm2 各自的既有覆盖（异 owner 才回收、过期才回收）不在本组断言内。
-// ---------------------------------------------------------------------------
-describe('claimStaleLifecycles 保护活 owner 的未过期预约（两个 impl 各一）', () => {
+describe('lifecycle ownership survives slow operations', () => {
   async function seedAndClaim(store: AgentMuxAgentSessionStore): Promise<string[]> {
-    // 受保护：异 owner、未过期（5e12 >> now 1e6）、owner 进程活着（process.pid）。三臂全真 ⇒ 应被跳过。
-    await store.reserveLifecycle({
-      reservationId: 'protected-reservation',
-      ownerId: 'live-owner',
-      ownerPid: process.pid,
-      kind: 'create',
-      agentSessionId: 'protected-session',
-      operationId: 'protected-operation',
-      expiresAt: 5_000_000_000_000
-    })
-    // 已过期（arm2 假）：正确码与变异码下都被回收——存在性自检，证明扫描确实运行且返回非空。
-    await store.reserveLifecycle({
-      reservationId: 'expired-reservation',
-      ownerId: 'other-owner',
-      ownerPid: process.pid,
-      kind: 'create',
-      agentSessionId: 'expired-session',
-      operationId: 'expired-operation',
-      expiresAt: 500_000
-    })
+    for (const [id, ownerPid, expiresAt] of [
+      ['live-expired', process.pid, 500_000],
+      ['live-unexpired', process.pid, 5_000_000_000_000],
+      ['dead-owner', 999_999_999, 5_000_000_000_000]
+    ] as const) {
+      await store.reserveLifecycle({
+        reservationId: id,
+        ownerId: id,
+        ownerPid,
+        kind: 'create',
+        agentSessionId: id,
+        operationId: id,
+        expiresAt
+      })
+    }
     const claimed = await store.claimStaleLifecycles({
-      ownerId: 'auditor',
+      ownerId: 'observer',
       ownerPid: process.pid,
       now: 1_000_000,
       expiresAt: 6_000_000_000_000
@@ -1429,19 +1397,15 @@ describe('claimStaleLifecycles 保护活 owner 的未过期预约（两个 impl 
     return claimed.map((reservation) => reservation.reservationId).sort()
   }
 
-  it('memory impl：活 owner 的未过期预约不被回收，只回收过期的那条', async () => {
-    // 正确码：protected 被 arm3 保护、只有 expired 被回收 ⇒ ['expired-reservation']。
-    // 把 memory impl 的 processIsAlive(...) 换成 false：protected 也被回收 ⇒ 多出它，本条红。
-    expect(await seedAndClaim(new AgentMuxMemoryAgentSessionStore())).toEqual(['expired-reservation'])
+  it('memory: another client only reclaims a dead owner, never a slow live one', async () => {
+    expect(await seedAndClaim(new AgentMuxMemoryAgentSessionStore())).toEqual(['dead-owner'])
   })
 
-  it('file impl：活 owner 的未过期预约不被回收，只回收过期的那条', async () => {
-    // 与上等价，但走文件锁 + 落盘路径。file impl 的 processIsAlive(...) 是**独立的第二份手抄**，
-    // 只变异它时上面的 memory 用例仍绿、唯有本条红。
+  it('file: reconnect preserves a live owner even after lease expiry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-claim-live-owner-'))
     try {
       const store = new AgentMuxFileAgentSessionStore(join(root, 'agent-sessions.json'))
-      expect(await seedAndClaim(store)).toEqual(['expired-reservation'])
+      expect(await seedAndClaim(store)).toEqual(['dead-owner'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
