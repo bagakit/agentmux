@@ -156,6 +156,32 @@ describe('Provider human-interaction request contract (T-003)', () => {
     // if a host-permission kind is ever merged into AgentMuxInteractionRequest, this Record demands the new
     // key and tsc fails (TS2741) — the plan's "host and provider permissions are not one request" invariant.
     const kinds: Record<AgentMuxInteractionRequest['kind'], true> = { permission: true, question: true }
-    expect(Object.keys(kinds).sort()).toEqual(['permission', 'question'])
+
+    // Why the union matters at runtime, not just to tsc: the one legality validator dispatches with
+    // `if (request.kind === 'permission') { … }` and then FALLS THROUGH to the question branch
+    // (agent-interaction.ts:371 / :392). A third kind would be silently validated as a question rather
+    // than refused. So each declared kind must own a branch that rejects the OTHER kind's response —
+    // that is what proves the dispatch is exhaustive today, and it is not a restatement of the literal
+    // above: it drives the real validator once per kind.
+    const permission = permissionRequest('claude', 'rcpt-union')
+    const question: AgentMuxInteractionRequest = {
+      kind: 'question',
+      id: 'rcpt-union-q',
+      agentSessionId: 'agent-1',
+      title: 'Pick one',
+      questions: [{ id: 'q1', prompt: 'Which?', options: [{ id: 'o1', label: 'One' }] }],
+      evidence: { source: 'native-hook', observedAt: 0 }
+    }
+    const requestFor: Record<AgentMuxInteractionRequest['kind'], AgentMuxInteractionRequest> = {
+      permission,
+      question
+    }
+    expect(Object.keys(requestFor).sort()).toEqual(Object.keys(kinds).sort())
+
+    for (const [kind, request] of Object.entries(requestFor)) {
+      const foreignKind = kind === 'permission' ? 'question' : 'permission'
+      const foreign = { kind: foreignKind, requestId: request.id } as unknown as AgentMuxInteractionResponse
+      expect(() => normalizeAgentInteractionResponse(request, foreign)).toThrow('does not match its request')
+    }
   })
 })
