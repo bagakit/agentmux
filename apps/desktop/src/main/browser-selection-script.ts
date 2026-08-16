@@ -305,7 +305,7 @@ export function buildBrowserDriveBadgeScript(): string {
   const dot = document.createElement('span');
   dot.className = 'dot';
   const label = document.createElement('span');
-  label.textContent = 'Agent is driving · click to take over';
+  label.textContent = 'Agent is operating · interact here to take back control';
   badge.append(dot, label);
   shadow.append(style, badge);
   root.appendChild(host);

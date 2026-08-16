@@ -147,7 +147,7 @@ describe('三处对外说明都跟上了应用链接这条能力', () => {
     // 这一条是 skill 独有的读者需求：Agent 会 click 一个授权按钮然后等导航。等不到时，
     // 它的默认解释是「点击没生效」或「还在加载」，于是重试或者把超时耗光。
     const skill = flat(AGENTMUX_CLI_SKILL)
-    expect(skill, 'skill 没提应用链接这回事').toMatch(/lark:|desktop app/iu)
+    expect(skill, 'skill 没提应用链接这回事').toMatch(/custom-app:|desktop app/iu)
     expect(skill, 'skill 没说 url 不会变——Agent 会一直等一个永远不来的导航')
       .toMatch(/pageInfo\(\)\.url[\s\S]{0,120}(stays|did not move)/iu)
     // 承重的反向一半：必须说清这**不是**失败。只说「url 不变」的话，Agent 仍然会判成错误并重试。
@@ -168,7 +168,7 @@ describe('三处对外说明都跟上了应用链接这条能力', () => {
     expect(launchGuide, '启动引导没提应用链接——Agent 会把「页面没动」读成自己的失败')
       .toMatch(/desktop app[\s\S]{0,160}does not navigate/iu)
     // 发现面不许抄语法：确切用法的唯一真相在 skill（与既有那条「不抄 browser run --browser」同源）。
-    expect(launchGuide, '启动引导抄了 scheme 清单，与 skill 争夺唯一真相').not.toContain('lark:')
+    expect(launchGuide, '启动引导抄了 scheme 清单，与 skill 争夺唯一真相').not.toContain('custom-app:')
   })
 
   it('三处说的是同一件事：都没把它说成静默移交', () => {

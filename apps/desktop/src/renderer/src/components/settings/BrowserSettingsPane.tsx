@@ -99,7 +99,7 @@ function AppLinkSchemes({ browser, onSave }: {
     <section className="settings-group">
       <header><span>App links you answered</span><small>{remembered.length}</small></header>
       <p className="settings-group-note">
-        Remembered per scheme, not per site — <code>lark:</code> links behave the same wherever they
+        Remembered per scheme, not per site — custom application links behave the same wherever they
         appear, because the question was about the app they open, not the page they came from.
         Forget one to be asked again the next time it comes up.
       </p>
