@@ -271,7 +271,7 @@ export function SessionPane({
 
   return (
     <section className="agent-surface">
-      <div className="agent-body">
+      <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' ? (
           <div className="agent-terminal-stage">
             {parked ? (

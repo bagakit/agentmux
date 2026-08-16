@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
+import { ChevronRight, Info } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -40,6 +40,7 @@ import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from '
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { SemanticIcon } from './semantic-icons'
 
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
@@ -47,11 +48,11 @@ import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
  * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
  */
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
-  if (kind === 'user_message') return <UserRound size={size} />
-  if (kind === 'assistant_message') return <Bot size={size} />
-  if (kind === 'tool_call') return <Hammer size={size} />
-  if (kind === 'permission') return <ShieldAlert size={size} />
-  return <CircleDot size={size} />
+  if (kind === 'user_message') return <SemanticIcon name="user-message" size={size} />
+  if (kind === 'assistant_message') return <SemanticIcon name="assistant-message" size={size} />
+  if (kind === 'tool_call') return <SemanticIcon name="tool-call" size={size} />
+  if (kind === 'permission') return <SemanticIcon name="permission" size={size} />
+  return <SemanticIcon name="neutral" size={size} />
 }
 
 /**
