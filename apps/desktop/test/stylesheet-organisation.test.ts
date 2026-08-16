@@ -19,6 +19,7 @@ describe('样式表的组织', () => {
       'chrome.css',
       'selector.css',
       'dock.css',
+      'file-explorer.css',
       'source-control.css',
       'workbench.css',
       'terminal.css',

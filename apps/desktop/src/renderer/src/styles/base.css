@@ -158,6 +158,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-height: 720px) {
   .launch-surface { padding-top:var(--sp-7); }
 }
+/* 状态语汇从 chrome.css 搬来：本文件头一直把它列为共享原子，而规则却长在 chrome 里——
+   dock / workbench / agent 三个表面都覆写它，它必须排在它们之前，这也正是共享原子的位置。
+   （搬家的直接触因是 chrome.css 破了 400 行上限；但落点选这里不是就近腾地方，是归位。）*/
+/* 状态→颜色只在这里说一次。
+   `--status-ink` 由每个 .status--<state> 赋值，点用它填充、头像用它描边、将来任何形状也读它。
+   把它写成一个继承下去的自定义属性，是为了让"一个状态在哪儿都是同一个颜色"成为结构事实而非
+   靠人盯：新表面只需要 `var(--status-ink)`，不必也不能再列一遍九个状态。 */
+.status { --status-ink: var(--neutral-3); display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); text-transform: capitalize; }
+.status--working, .status--running { --status-ink: var(--green); }
+.status--waiting, .status--blocked { --status-ink: var(--amber); }
+.status--error, .status--exited { --status-ink: var(--red); }
+.status--done { --status-ink: var(--blue); }
+.status--disconnected { --status-ink: var(--text-3); }
+.status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ink); box-shadow: 0 0 0 2px var(--overlay-line); }
+.status--working .status__dot, .status--running .status__dot { box-shadow: 0 0 0 3px var(--overlay-line); }
+.status--working .status__dot { animation: pulse var(--dur-breath) infinite; }
+/* Needs-you (waiting/blocked) carries a SHAPE, not only a colour: an amber pip bearing a "?" so the
+   one "an agent needs you" state survives colour-blindness and a fast glance, and never reads the
+   same as any other amber. This is the shared status seam — StatusDot and the status bar's
+   StatusCount both render .status--waiting/.status--blocked, so the pip lifts every full-size
+   surface at once (tab, board card, quick switcher, attention bar) from one rule. Accent expresses
+   state, not decoration (design SSOT: "颜色表达状态，不兼任布局线"). */
+.status--waiting .status__dot, .status--blocked .status__dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--amber-wash); }
+.status--waiting .status__dot::after, .status--blocked .status__dot::after { content: "?"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--amber-bg); font-size: 7px; font-weight: 800; line-height: 1; }
+/* Disconnected is a dropped link, not an attention request — split off amber (which now means "needs
+   you") onto a neutral hollow dot so a lost connection can never be mistaken for one. Ring, not fill:
+   a distinct shape as well as a neutral colour. */
+.status--disconnected .status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--status-ink); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: 0s !important; }
 }
