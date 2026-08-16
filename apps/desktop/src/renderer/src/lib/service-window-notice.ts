@@ -282,7 +282,7 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
       degradedMode: session.terminalPromptDelivery.reason === 'screen-evidence-gap'
         ? 'Earlier terminal output is no longer retained. Prompt input continued without full screen confirmation.'
         : 'Prompt input continued without full screen confirmation.',
-      restore: 'Check the Agent’s response. You can move this notice to the inbox; a verified prompt clears it.'
+      restore: 'Check the Agent’s response. You can review this notice in System; a verified prompt clears it.'
     },
     agentViability: agentViabilityFromProcessState(session.processState)
   }

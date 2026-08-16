@@ -12,7 +12,8 @@ const session = () => ({ ...composerSession(), terminalPromptDelivery: {
   state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
   submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: 1
 } })
-beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipts: {} }))
+beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipts: {},
+  timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 0, items: [] } } }))
 const trigger = () => dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
 const mailbox = () => dom.container.querySelector<HTMLDivElement>('.composer-mailbox')!
 const unread = () => trigger().getAttribute('data-unread')
@@ -22,7 +23,7 @@ async function toggle(state: 'open' | 'closed') {
   Object.defineProperty(event, 'newState', { value: state })
   await act(async () => mailbox().dispatchEvent(event))
 }
-async function folder(name: 'inbox' | 'outbox') {
+async function folder(name: 'inbox' | 'outbox' | 'system') {
   await dom.click(`[role="tab"][id$="-${name}-tab"]`)
 }
 
@@ -50,17 +51,20 @@ it('uses one right Session mailbox, opens incoming notices to clear the red dot,
   expect(mailbox().textContent).toContain('screen confirmation')
 })
 
-it('only reads the visible inbox; opening and closing the outbox leaves incoming notifications unread', async () => {
+it('prioritizes unread on opening but never switches an open outbox for new notices', async () => {
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
+    { operationId: 'q', runId: 'run-agent-1', text: 'pending', status: 'queued' }
+  ] } })
   const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  await folder('outbox')
   await toggle('open')
-  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('No pending messages.')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-outbox-tab$/)
+  await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('true')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-outbox-tab$/)
   await toggle('closed')
-  expect(unread()).toBe('true')
   await toggle('open')
-  await folder('inbox')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-system-tab$/)
   expect(unread()).toBe('false')
   expect(send).not.toHaveBeenCalled()
 })
@@ -141,11 +145,11 @@ it('does not confuse a healthy pending count with unread notices and supports ke
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(unread()).toBe('false')
   expect(trigger().textContent).toBe('1')
-  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Outbox (1)')
   await toggle('open')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Outbox (1)')
   await act(async () => mailbox().querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
   expect(document.activeElement?.textContent).toBe('Inbox (0)')
-  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toBe('No current notices.')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toBe('No Agent messages.')
 })
 
 it('retains receipts through empty startup snapshots but alerts for a new Run', async () => {
@@ -189,4 +193,55 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
   expect(action).toHaveBeenCalledTimes(2)
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(0)
   expect(unread()).toBe('false')
+})
+
+function delivered(id: string, authorAgentSessionId?: string) {
+  return { id: `prompt:${id}`, agentSessionId: 'agent-1', kind: 'user_message' as const,
+    status: 'complete' as const, source: 'user' as const, title: 'Prompt', content: `Body ${id}`, createdAt: 100, updatedAt: 100,
+    ...(authorAgentSessionId ? { authorAgentSessionId } : {}) }
+}
+it('separates actual incoming Agent messages, sent user history and system facts; reading survives restart', async () => {
+  const items = [delivered('in', 'reviewer'), delivered('sent')]
+  useAppStore.setState({ timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 2, items } },
+    agentSteerQueues: { 'agent-1': [{ operationId: 'sent', runId: 'run-agent-1', text: 'Body sent', status: 'queued' }] } })
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(['Inbox (1)', 'Outbox (1)', 'System (1)'])
+  expect(trigger().textContent).toBe('') // Durable sent item is never shown as pending again.
+  await toggle('open')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox (1)')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Body in')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).not.toContain('screen confirmation')
+  expect(unread()).toBe('true') // System was not read by opening Inbox.
+  await folder('system')
+  expect(unread()).toBe('false')
+  const persisted = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
+  expect(persisted.noticeReadReceipts['mail:agent-1']['prompt:in']).toBeTruthy()
+  expect(persisted.noticeReadReceipts['agent-1'].delivery).toBeTruthy()
+  await dom.render(null)
+  await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(unread()).toBe('false')
+  await toggle('open')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Sent')
+  expect(useAppStore.getState().timelines['agent-1']?.items).toEqual(items)
+})
+it('does not switch folders or consume new incoming messages while reading the Outbox', async () => {
+  useAppStore.setState({ sessions: [composerSession()], timelines: { 'agent-1': {
+    agentSessionId: 'agent-1', revision: 1, items: [delivered('sent')] } } })
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  await act(async () => useAppStore.setState({ timelines: { 'agent-1': {
+    agentSessionId: 'agent-1', revision: 2, items: [delivered('sent'), delivered('new', 'other')] } } }))
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
+  expect(unread()).toBe('true')
+  await toggle('closed')
+  await toggle('open')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox (1)')
+  expect(unread()).toBe('false')
+  const receipt = useAppStore.getState().noticeReadReceipts['mail:agent-1']
+  await dom.render(null)
+  await act(async () => useAppStore.setState({ timelines: {} }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(useAppStore.getState().noticeReadReceipts['mail:agent-1']).toEqual(receipt)
 })

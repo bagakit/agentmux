@@ -187,6 +187,8 @@ export type AgentMuxAgentPromptInput = {
   signal?: AbortSignal
   agentSessionId: string
   operationId: string
+  /** Trusted host attribution; authorization stays at the control boundary. */
+  authorAgentSessionId?: string
   prompt: string
 }
 
@@ -2345,7 +2347,8 @@ export class AgentMuxClient {
       `prompt:${operationId}`,
       'Prompt',
       outbound,
-      Date.now()
+      Date.now(),
+      input.authorAgentSessionId
     )
   }
 
@@ -3336,7 +3339,8 @@ export class AgentMuxClient {
     itemId: string,
     title: string,
     content: string,
-    observedAt: number
+    observedAt: number,
+    authorAgentSessionId?: string
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -3350,7 +3354,8 @@ export class AgentMuxClient {
         createdAt: observedAt,
         updatedAt: observedAt,
         title,
-        content
+        content,
+        ...(authorAgentSessionId ? { authorAgentSessionId } : {})
       }
     }
     const evidence = { source: 'user' as const, observedAt, run: { ...session.run } }
