@@ -1,0 +1,260 @@
+{
+  "version": 2,
+  "feat_id": "f-26h8fybpz",
+  "plan_status": "reviewed",
+  "plan_revision": 2,
+  "supersedes_revision": 1,
+  "review_ref": "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+  "source_refs": [
+    "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+    "apps/desktop/src/renderer/src/lib/workspace-projects.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+      "source_refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+        "apps/desktop/src/renderer/src/lib/workspace-projects.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+      "source_refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md",
+        "apps/desktop/src/renderer/src/lib/workspace-projects.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-001",
+            "to": "T-003"
+          },
+          {
+            "from": "T-001",
+            "to": "T-004"
+          }
+        ],
+        "removed": [
+          {
+            "from": "T-001",
+            "to": "T-002"
+          }
+        ]
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "一个 pin 切片同时服务 Topic 与 Branch",
+      "objective": "Topic pin 与 Branch pin 是同一个概念的两次实例化：某个 scope 内的一组 id。建一次模，左栏就只读一个东西，而不是并集两份平行切片。",
+      "outcome": "store.ts 新增 pinnedItems: Record<string, string[]>（scope key -> 按 pin 序的 id）、toggle 动作、进 partialize 并带 restore 校验器，另有一个派生 scope key 的纯函数。",
+      "acceptance": [
+        "scope key 一律派生，不在调用点手写：Topic 用 SCRATCH_WORKSPACE_ID，Branch 用 workspaceProjectId(workspace)（即 [hostId, repoPath]）。分支名跨仓库会撞，所以全局的分支名集合是缺陷——必须有一条测试在两个 project 里 pin 同名分支，证明互不影响。",
+        "一个 project 跨它的多个 worktree 共用一个 pin scope。这条要断言，不许假设。",
+        "顺序即 pin 序并保持；取消 pin 只移除一条，其余顺序不变。",
+        "持久化往返成立；restore 读到垃圾值不崩。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "proves": "pin 切片按 scope 隔离、顺序稳定、可往返持久化。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/lib/workspace-projects.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "pinned-first 排序收成一个共享纯函数",
+      "objective": "两个列表都要「pin 的在前，各自分区内既有次序不变」。写一次，不写两份——两份必然漂移。",
+      "outcome": "纯函数 partitionPinned(ids, pinned)（自然归宿是 lib/topic-order.ts，与 orderTopics 同处），pin 在前且两个分区内的相对次序都保持。不渲染即可单测。",
+      "acceptance": [
+        "未 pin 分区内的相对次序不变——正是这条性质让 pin 对用户拖拽序、对服务端分支序都是非破坏的。",
+        "已 pin 分区内按 pin 列表的次序，而不是按传入列表的次序。",
+        "磁盘上已不存在的 pin id 被丢弃，绝不复活——与 orderTopics 对过期顺序偏好的既有规则同一条。",
+        "与 orderTopics 组合而非取代：pin 不能把用户的拖拽序吃掉。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/topic-order.test.ts  # 判据：摘要须为 Test Files 1 passed",
+          "proves": "分区排序保持两侧既有次序、按 pin 序排前、丢弃过期 id。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/topic-order.ts"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Topic 行上的 pin 交互",
+      "objective": "让用户在 Topic 行上一键 pin，并让已 pin 的 Topic 在面板里排最前。",
+      "outcome": "每行复用既有 icon-button 惯例放进行尾预留的动作槽，面板的投影列表过一遍 partitionPinned。",
+      "acceptance": [
+        "不得挤掉或压住既有的 Reveal-in-Files 按钮——行网格要真的容纳两枚，而不是悄悄重叠。",
+        "已 pin 在静息态就看得出来，不能只在 hover 时出现。",
+        "拖拽重排仍可用，且不与 pin 分区打架（拖一个未 pin 的行，不该看起来跳到 pin 的上面去）。",
+        "新增类名要有对应 CSS 规则。",
+        "注意：WorkspaceTopicsPanel 正在被一个并行改动抽到独立文件；开工时以它当时所在的文件为准，动手前再确认一次。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/surface-tool-dock.test.ts apps/desktop/test/topic-rename.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 3 passed",
+          "proves": "Topic 行可 pin、pin 后排前，且既有行内动作与重命名未回归。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-001",
+        "T-002"
+      ],
+      "title": "Branch 行上的 pin 交互",
+      "objective": "让用户 pin 分支并排最前，同时不破坏 Worktrees / Without worktree 这个承载真实含义的分组。",
+      "outcome": "Branch 行上可达的 pin 开关，pinned-first 在既有 bound / unbound 两组**之内**生效。",
+      "acceptance": [
+        "保留 Worktrees / Without worktree 的切分——pin 只在组内重排；把没有 worktree 的分支提进 Worktrees 组会让组标题说谎。",
+        ".branch-row 本身是个 <button>，嵌套控件必须 stopPropagation，否则 pin 的同时把分支打开了。",
+        "pin 按 project 隔离：在一个 project 里 pin 的分支名，不能在另一个 project 里显示为已 pin。",
+        "新增类名要有对应 CSS 规则。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/branches-panel.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+          "proves": "分支可 pin、组内排前、分组语义未被破坏且按 project 隔离。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/BranchesPanel.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "左栏把 pin 的条目挂成子节点",
+      "objective": "把已 pin 的 Topic 挂到 Scratch 下、已 pin 的 Branch 挂到对应 Project 下，用更小的字号，让 pin 的东西不打开面板也够得着。",
+      "outcome": "WorkspaceSidebar 里 Scratch 与 Project 条目下的子行，数据来自 pin 切片，字号小于父行，点击可导航到目标。",
+      "acceptance": [
+        "只凭 pin 列表渲染，**不要**为此在左栏引入分支拉取。pin 下来的名字本身就够做行标签；为侧栏加一次 per-project 的分支加载毫无收益。",
+        "左栏今天**没有**子节点槽（现有嵌套是用 --rail-depth 假装的平铺兄弟行）。要显式决定子行是复用 --rail-depth 还是做成真子元素，并记下理由。",
+        "不要与 Scratch 行上那枚静态 Pin 徽标撞车——那个的含义是「这个 workspace 是钉住的」，是另一件事。两者若挨着且读起来像同一个东西，就改呈现。",
+        "pin 子行遵守分组折叠态：折叠的分组不许漏出子节点。",
+        "零个 pin 就什么都不渲染：不留空容器、不留标题。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/project-rail.test.tsx apps/desktop/test/rendered-class-has-rule.test.ts  # 判据：摘要须为 Test Files 2 passed",
+          "proves": "pin 子行按 scope 挂到正确父节点、遵守折叠、空态不留痕。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "title": "对 pin 的不变量做变异测试",
+      "objective": "证明这套测试抓得住 pin 悄悄烂掉的方式，而不是证明它现在是绿的。",
+      "outcome": "一次记录在案的变异运行，覆盖：(a) 把分支 pin key 的 scope 去掉让分支名变全局；(b) 让 partitionPinned 打乱未 pin 分区；(c) 让过期的 pin id 复活一个已删的 Topic；(d) 从 partialize 摘掉切片。",
+      "acceptance": [
+        "每个变异都打红一条具名断言，报告里引用是哪条。",
+        "每个变异都用「反做自己的编辑」恢复，绝不 checkout HEAD；跑完 git diff 与跑前逐字节一致。",
+        "保持绿的变异就是结论：先加强测试再重跑。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_HOOK_URL -u AGENTMUX_HOOK_TOKEN -u AGENTMUX_HOOK_EVENT -u AGENTMUX_AGENT_SESSION_ID npx vitest run apps/desktop/test/topic-order.test.ts apps/desktop/test/branches-panel.test.tsx apps/desktop/test/project-rail.test.tsx apps/desktop/test/store-persistence.test.ts  # 判据：摘要须为 Test Files 4 passed",
+          "proves": "四处变异都能被具名断言抓住，pin 的不变量是被真正守住的。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/workspace-pane-collapse-and-pin-2026-09-15.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

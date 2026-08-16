@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 137
+    "next_cursor": 140
   },
   "features": [
     {
@@ -1390,6 +1390,36 @@
       "title": "书签文件：把当前页存成 .webloc，以及打开一个存着链接的文件",
       "status": "proposal",
       "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26f8f333w",
+      "title": "CLI error-code reachability: derive the scan surface from the call graph",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26g8f8z6y",
+      "title": "Explorer collapses fully, per-kind default",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-26h8fybpz",
+      "title": "Pin a Topic or Branch; pinned items surface in the sidebar",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

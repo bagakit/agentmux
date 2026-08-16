@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "feat_id": "f-26h8fybpz",
+  "title": "Pin a Topic or Branch; pinned items surface in the sidebar",
+  "slug": "pin-topic-branch",
+  "goal": "One-click pin on a Topic or Branch row. A pinned item sorts first in its own Topics/Branches list, and additionally appears as a child node under its Scratch/Project entry in the left sidebar, rendered at a smaller font than the parent.",
+  "status": "in_progress",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    }
+  ]
+}
