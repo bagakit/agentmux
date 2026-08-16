@@ -37,7 +37,16 @@ const CLI_ERROR_CODES = [
   // 理由：后者说「这个角色没人认领」（去 register 一个），前者说「登记表我读不了」（去修那个文件）。
   // 不在册时 `cliErrorCode` 把它折成 `AGENTMUX_FAILED`——与「命令打错了」同一个码，于是机读侧分不出
   // 「你的文件坏了」与「你的命令错了」。人读的 message 一直是对的，机读的码此前是错的。
-  'AGENT_ROLE_DIRECTORY_UNREADABLE'
+  'AGENT_ROLE_DIRECTORY_UNREADABLE',
+  // `inspect --run/--provider-native/--acp-native <不存在的 id>`。`registry.resolve` 在同一个函数里抛
+  // 四种码，另外三种（UNKNOWN_AGENT_SESSION / STALE_AGENT_SESSION_BINDING ×2）都经控制码表在册，
+  // 只有这一种漏了——于是「你给的 run id 不存在」与「你把命令打错了」在机读侧是同一个
+  // `AGENTMUX_FAILED`，而 `--session <不存在>` 走 `registry.get`，报的是它自己的
+  // `UNKNOWN_AGENT_SESSION`。同一条命令的两个选择器，一个说得清一个说不清。
+  //
+  // 不进控制码表而进这里：它是**进程内**抛的（CLI 直接 new AgentMuxClient，registry 是本地 Map），
+  // 不经 daemon 往返，定型它的是这条顶层 catch。
+  'UNKNOWN_AGENT_SESSION_BINDING'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
 type FlagKind = 'boolean' | 'value' | 'data'
