@@ -297,6 +297,34 @@ export function clampTerminalFontSize(value: number): number {
 export const APP_APPEARANCE_IDS = ['dark', 'light', 'system'] as const
 export type AppAppearanceId = (typeof APP_APPEARANCE_IDS)[number]
 
+/**
+ * 用户对一个应用链接 scheme 记住的两档答案，唯一真源。
+ *
+ * 为什么是元组而不是裸 union：`config-store.ts` 的 `appLinkSchemes` 要用 `z.enum(...)` 校验磁盘上
+ * 的值，而手抄一份 `z.enum(['allow', 'deny'])` 正是 `TERMINAL_THEME_IDS` 那段注释记下的形状——
+ * 抄出来的那份今天等价，等到 union 加一档时只有一边跟着走，另一边 `.strict()` 静默丢值。房规由
+ * `schema-enum-ssot.test.ts` 守着：枚举成员必须**追溯到一个 import 进来的元组**，不是文本相同。
+ *
+ * **缺席是第三档**，不在这个元组里：没记过就是没问过，与 `'deny'` 是两件事（见 `appLinkOutcome`）。
+ * 这里只列「记下来的答案」有哪几种。
+ */
+export const APP_LINK_SCHEME_CHOICES = ['allow', 'deny'] as const
+
+/**
+ * 用户对某个 scheme 记住的答案。DERIVED 自 {@link APP_LINK_SCHEME_CHOICES}，方向被锁死：往元组里
+ * 加一档，这个类型和 `config-store.ts` 的校验一起变宽。
+ */
+export type AppLinkSchemeChoice = (typeof APP_LINK_SCHEME_CHOICES)[number]
+
+/**
+ * 两向精确，同 `_terminalThemeIdsAreExactlyTheUnion`。`satisfies` 只能证 ⊆；加一档会先坏的是 ⊇。
+ */
+const _appLinkSchemeChoicesAreExactlyTheUnion: [
+  (typeof APP_LINK_SCHEME_CHOICES)[number] extends AppLinkSchemeChoice ? true : never,
+  AppLinkSchemeChoice extends (typeof APP_LINK_SCHEME_CHOICES)[number] ? true : never
+] = [true, true]
+void _appLinkSchemeChoicesAreExactlyTheUnion
+
 export type AppearanceConfig = {
   appAppearance?: AppAppearanceId
   terminalTheme: TerminalThemeId
@@ -336,7 +364,7 @@ export type BrowserConfig = {
    * 但这一个**不**回填成 `{}`：空对象与缺席在语义上完全一样（都是「一个都没记过」），补一次盘
    * 只是白写。
    */
-  appLinkSchemes?: Record<string, 'allow' | 'deny'>
+  appLinkSchemes?: Record<string, AppLinkSchemeChoice>
   toolbar: BrowserToolbarConfig
 }
 
