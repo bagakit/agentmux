@@ -138,9 +138,9 @@ async function managerWith(host: ReturnType<typeof appLinkHost>) {
 }
 
 /** 跑一次 `will-navigate`，返回它有没有被拦下。 */
-function navigateTo(view: { webContents: { emit(event: string, ...args: unknown[]): void } }, url: string) {
+function navigateTo(view: { webContents: { emit(event: string, ...args: unknown[]): void } }, url: string, isMainFrame = true) {
   const preventDefault = vi.fn()
-  view.webContents.emit('will-navigate', { url, isMainFrame: true, preventDefault })
+  view.webContents.emit('will-navigate', { url, isMainFrame, preventDefault })
   return { prevented: preventDefault.mock.calls.length > 0 }
 }
 
@@ -208,6 +208,31 @@ describe('记住的答案决定这一次怎么走', () => {
     // 房规（browser-automation-setting-reachable）：文案点名的位置要被证明存在且可达。
     // Settings › Browser 这一节是真的，用户当初也正是在那里回答的。
     expect(message, '没告诉人怎么改回来，等于一句无法行动的拒绝').toContain('Settings › Browser')
+  })
+})
+
+describe('嵌入 frame 的应用链接', () => {
+  it('飞书授权 iframe 的 lark 导航也走同一条交接路', async () => {
+    const host = appLinkHost()
+    const { manager, view, fixture } = await managerWith(host)
+
+    const { prevented } = navigateTo(view, 'lark://applink.feishu.cn/client/security/bind_device', false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(prevented).toBe(true)
+    expect(latest(fixture).appLinkPrompt).toEqual({
+      url: 'lark://applink.feishu.cn/client/security/bind_device',
+      scheme: 'lark'
+    })
+    expect(host.opened).toEqual([])
+    void manager
+  })
+
+  it('普通 child-frame http 导航仍由页面自己处理', async () => {
+    const host = appLinkHost()
+    const { view } = await managerWith(host)
+    expect(navigateTo(view, 'https://example.com/frame', false).prevented).toBe(false)
   })
 })
 
