@@ -374,10 +374,10 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
   标签上必须画两个，折成一个就是把"哪一格在被驱动"这条信息折没了。驱动是**瞬时事实**，随运行开始
   和结束，绝不进持久化：重启后复活一个"正在被驱动"的死标记，比不画更糟。
 - Browser Profile 由 Browser Tools 导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
-- **应用链接（`lark://`、`slack://`、`vscode://`、`mailto:` 等非 http(s) scheme）要像一般浏览器那样交给系统，不能当成非法地址挡掉。** 用户原话：「对齐一般浏览器，假定用户会自己把本应用当做浏览器」。今天这类链接一律抛「Unsupported browser URL protocol」，于是飞书文档的 "Authorize in Feishu App" 点下去什么都不发生——这不是一个安全姿态，是一个哑掉的浏览器。约束：
+- **应用链接（非 `http(s)` 的 URL scheme，例如自定义应用 scheme 与 `mailto:`）要像一般浏览器那样交给系统，不能当成非法地址挡掉。** 用户原话：「对齐一般浏览器，假定用户会自己把本应用当做浏览器」。这类链接不能被静默吞掉，也不能因为某个站点的按钮形态而增加站点专用分支。约束：
   - **两条路的症状不同，必须分别处理。** 真机探针（Electron 43.3.0，`WebContentsView`，与生产同形：不设 `setWindowOpenHandler`）实测：
-    - 页面内导航（`location.href = 'lark://…'`）走 `will-navigate`，被 `guardNavigation` 拦下并写进 `entry.error`，URL 不变。这一条**有**错误可显示。
-    - `window.open` 与 `target="_blank"`（授权按钮最常见的形状）**不**走 `will-navigate`。Electron 默认行为是**真的开一个 `BrowserWindow`**：探针里窗口数 1 → 2 → 3，`did-create-window:lark://open` 各发一次。所以症状不是「被吞掉」，是**冒出一个应用管不着的空窗口**，而那个窗口既不在 Region 里、也没有工具栏、还不归 Browser 的生命周期管。
+    - 页面内导航（`location.href = 'custom-app://…'`）走 `will-navigate`，被 `guardNavigation` 拦下并写进 `entry.error`，URL 不变。这一条**有**错误可显示。
+    - `window.open` 与 `target="_blank"`（外部应用交接控件常见的形状）**不**走 `will-navigate`。Electron 默认行为是**真的开一个 `BrowserWindow`**：探针里窗口数 1 → 2 → 3，`did-create-window:custom-app://open` 各发一次。所以症状不是「被吞掉」，是**冒出一个应用管不着的空窗口**，而那个窗口既不在 Region 里、也没有工具栏、还不归 Browser 的生命周期管。
   - **那个缺席的 handler 是一次有意的决定，不是遗漏。** `649df3a2`（"preserve native popup semantics"）把它删掉，并留下 `browser-view-manager.test.ts:643` 钉住 `windowOpenHandler` 为 `null`。要改回去就得先推翻那条决定并改那条断言——不许绕过它，也不许假装它不存在。
   - **默认不静默移交，也不静默丢弃。** 一般浏览器在把地址交给另一个应用之前会问一次，并允许「以后都这样」。这里同样：每个 scheme 首次出现时问一次，记住选择；拒绝或失败要在同一工作面说出来，说到下一步为止。需要这一层的理由是能力边界——一个被访问的页面可以任意构造 `scheme://…`，无条件移交等于让任意网页拿用户选定的参数去启动本机应用。
   - **判定是纯函数，不是写在 Electron 回调里的语句。** 照 `window-security.ts` 的形状：那个文件的 docstring 记着两个**实测存活**的变异，都是因为判定住在回调体里、只能靠文本扫描守。这里的判定同样要能被单元测试直接质询，回调体里不留语句。
@@ -817,4 +817,4 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - Provider 原生命令保持原语义；本地预置 prompt 明确标识为提示词，点击后在原位展开为可编辑正文，保留其他草稿且不自动发送。两者复用已有工具候选入口，不建立第二套命令执行系统。
 - 交付证据必须覆盖真实宿主调用、关键实现变异变红、浏览器交互及草稿恢复；此前已归档任务的验收缺口在本次明确补证，不以归档状态代替验证。
 
-- **Browser 内嵌 frame 发起的应用授权也必须走同一条应用链接交接。** 飞书设备授权页把 `lark://` 放在跨域 iframe 的 `src` 中；Browser 不能因为它不是顶层导航就静默放行或吞掉。约束：顶层页面和子 frame 的应用链接都先拦截、按 scheme 询问一次并交给系统，普通 http(s) 子 frame 继续由页面自行加载，页面本身仍留在当前 Browser。
+- **Browser 内嵌 frame 发起的应用交接也必须走同一条应用链接交接。** 页面把自定义应用 scheme 放在跨域 iframe 或其他子 frame 中时，Browser 不能因为它不是顶层导航就静默放行或吞掉。约束：顶层页面和子 frame 的应用链接都先拦截、按 scheme 询问一次并交给系统，普通 http(s) 子 frame 继续由页面自行加载，页面本身仍留在当前 Browser。

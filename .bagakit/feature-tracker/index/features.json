@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 155
+    "next_cursor": 156
   },
   "features": [
     {
@@ -1568,6 +1568,16 @@
     {
       "feat_id": "f-26z8fuvzk",
       "title": "Browser 内嵌 frame 应用链接交接",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2728fae6d",
+      "title": "核心机制不得站点特化",
       "status": "proposal",
       "workspace_mode": "proposal_only",
       "branch": "",
