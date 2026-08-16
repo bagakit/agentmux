@@ -269,7 +269,8 @@ export type AgentSteerQueueEntry = {
 
 type AppState = {
   runtimeOwnershipWarnings: string[]
-  environmentWarning: string | null
+  // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
+  environmentWarning: string | null | undefined
   /**
    * Agent Session ids whose Region vanished mid-launch even though the Agent itself started healthy
    * (T-005). Ephemeral (never persisted) — a launch race is a within-session fact, not layout the user
@@ -1705,7 +1706,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
   runtimeOwnershipWarnings: [],
-  environmentWarning: null,
+  environmentWarning: undefined,
   displacedAgentSessionIds: [],
   error: null,
   lastError: null,
