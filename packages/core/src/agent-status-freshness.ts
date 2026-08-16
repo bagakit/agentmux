@@ -1,4 +1,11 @@
-import type { AgentDisplayState, AgentMuxEvidenceSource, AgentSemanticState, AgentStatus } from './types.js'
+import type {
+  AgentCapabilities,
+  AgentDisplayState,
+  AgentMuxEvidenceSource,
+  AgentMuxRunState,
+  AgentSemanticState,
+  AgentStatus
+} from './types.js'
 
 /**
  * 语义状态的新鲜度判定：给定最后一次观察时刻与现在，这个状态还算不算数。
@@ -167,4 +174,149 @@ const AGENT_ACTIVITY_STATUS_SOURCE: Record<AgentMuxEvidenceSource, boolean> = {
 
 export function isAgentActivityStatusSource(source: AgentMuxEvidenceSource): boolean {
   return AGENT_ACTIVITY_STATUS_SOURCE[source]
+}
+
+/**
+ * 一次 Agent 观察的**三条不折叠的轴**——收敛入口。
+ *
+ * 这三件事此前分散在三处、各判各的，谁都没有把它们放在一起当一份合同来回答：进程活性走
+ * `agent-run-status.ts` 的 {@link projectRunProcessStatus}；「此刻是不是在干活」的语义声明走本文件的
+ * {@link agentDisplayState} / {@link isAgentActivityStatusSource} / 衰减；「就绪没就绪」则散在 Session
+ * 的 `terminalPromptReadiness` / `pendingInteraction` / 终端能力降级里。三者一旦被某个消费者塌进一个
+ * `busy` 布尔，就再也分不出「进程还活着但闲着」「在跑」「活着但还没就绪到能接你的话」——而它们要求用户
+ * 做的事完全不同。这个类型把三条轴**并排**保留，各带自己的证据来源与观察时刻，谁也不冒充谁。
+ */
+export type AgentObservation = {
+  /** 进程活性：内核报的 run 状态，独立于语义活动。`running` 不等于「在干活」。 */
+  process: AgentMuxRunState
+  /**
+   * 语义活性：Agent 自己声明的「此刻在不在干活」。由**声明的 state** 与**来源**共同决定，不是只看来源
+   * ——同一个 `native-hook` 会先后报 `working`（在干活）、`waiting`/`blocked`（停下了、在等你）、
+   * `done`/`error`（出了结论），只看来源会把这三件事塌成一个 active。判定见 {@link observeAgent}。
+   *
+   * - `active`：有一条**活动声明**（native-hook / acp）且其 state 是「此刻正在干活」的 `working`，且未过
+   *   新鲜度窗口。「哪个 state 算在干活」不另立拼法——直接问本文件 SSOT {@link semanticStatusCanDecay}。
+   * - `awaiting-input`：进程在跑，且 Agent 明确声明 `waiting`/`blocked`——「我停下了、在等你」的**静止
+   *   声明**。它既不是 active（没在干活）也不能压成 idle：它驱动界面的「需要你」提醒，压成 idle 等于把
+   *   一个真实、可操作的信号悄悄抹掉（本仓明确记过的坑，见 {@link semanticStatusCanDecay} 注释）。四档
+   *   active/idle/unknown/unsupported 装不下它，所以它自成一档。与 unknown 的分野：unknown 是「进程没在
+   *   跑、无从谈起」，awaiting-input 是「进程在跑、且明确在等你」。且它不随静默衰减（只有 working 会），
+   *   一条 20 分钟前的「等你」仍然在等你。
+   * - `idle`：进程活着，但既没有在干活的活动声明、也没在等你。含裸 running、15 分钟静默衰减后的 working，
+   *   以及 `done`/`error` 这类**结论**——它们在 running 下绝不报 active（那会谎称一个已出结论的 Agent
+   *   还在干活）。
+   * - `unknown`：进程不再是 running（starting/exited/interrupted 等），谈不上语义活性——不伪造 idle。
+   * - `unsupported`：这个 Provider 的 timeline 能力是 `unavailable`，它根本不产语义活动信号。
+   *   与 `unknown` 分开：unknown 是「这一刻碰巧没有」，unsupported 是「这条通道永远不存在」，
+   *   叫用户去等一个永远不来的信号是错的。
+   */
+  semantic: 'active' | 'idle' | 'awaiting-input' | 'unknown' | 'unsupported'
+  /**
+   * 就绪性：Agent 现在能不能接你的一条普通输入。
+   *
+   * - `pending`：进程活着但还没就绪——正卡在一个待答的 typed 请求上（`awaitingRequest`），或终端
+   *   能力尚未确认（握手降级）。此刻把 prompt 当普通输入送进去要么被拒、要么被当成对请求的回答。
+   * - `ready`：进程 running 且没有上述阻塞，普通输入送得进去。
+   * - `unknown`：进程不是 running，就绪与否无从谈起——不伪造 ready。
+   */
+  readiness: 'ready' | 'pending' | 'unknown'
+  /** 谁观察到支撑这次读数的语义状态；沿用证据来源词表。 */
+  source: AgentMuxEvidenceSource
+  /** 支撑这次读数的最后一次观察时刻（epoch ms）。 */
+  observedAt: number
+  /**
+   * 支撑 `semantic === 'active'` 的那条证据是否已过新鲜度窗口。
+   *
+   * `active` 由门禁（session-state / runtime-controller）在采纳时就会随衰减落回 idle，所以稳态下
+   * 一个 stale 的读数通常已不是 active；这一位是给「拿到一份原始读数、想自己判它还新不新」的消费者
+   * 用的诚实标注，判据只看 observedAt、与 {@link agentEvidenceStale} 同口径。
+   */
+  stale: boolean
+}
+
+/**
+ * 迟到/过期/异源的读数是否**有资格**覆盖当前 Run 的观察。
+ *
+ * 这是「不能用一条陈旧或不属于当前 Run 的事件改写当前状态」这条不变量的收口判定，做成纯函数让它能被
+ * 直接断言，而不是埋在某个 reducer 的 `&&` 链里各写一遍（session-state 的 agent-status/agent-session
+ * 两条 arm 就各自手抄过 `observedAt >= …` 与 run 比对）。
+ *
+ * 两道门，缺一不可：
+ *   1. **同一个 Run**：`incoming.runId` 必须等于 `current.runId`。一条属于旧 Run 的迟到事件绝不作用于
+ *      新 Run（Resume 后 runId 变、agentSessionId 不变，正是这条要挡的场景）。`current.runId` 缺席读作
+ *      「还没绑定到任何 Run」——此时无从比对，拒绝采纳。
+ *   2. **不更旧**：`incoming.observedAt >= current.observedAt`。严格更旧的读数一律不采纳；正好同刻放行，
+ *      与既有门禁的 `>=` 同口径（同刻重发是常态，不该被判为过期）。
+ */
+export function observationSupersedes(
+  current: { runId?: string; observedAt: number },
+  incoming: { runId: string; observedAt: number }
+): boolean {
+  if (current.runId === undefined || current.runId !== incoming.runId) return false
+  return incoming.observedAt >= current.observedAt
+}
+
+/**
+ * 把「Session 现在的三条事实」收敛成一份 {@link AgentObservation}——**唯一**的观察合同投影。
+ *
+ * 输入刻意收成「三条轴各自的原始事实」而不是某个具名 Session 类型：Core 侧的
+ * `AgentMuxAgentSession` 与渲染侧的 `SessionSnapshot` 是两个不同的载体，它们只在这几条上同名同义，
+ * 让两侧都喂这一个函数，才不会各自再拼一份塌成 busy 的逻辑（那正是本 Feature 要消灭的
+ * 「声明了却各造一套」）。
+ *
+ * @param input.process        内核报的 run 状态。
+ * @param input.status         当前语义/进程投影出的 {@link AgentStatus}（含 state/source/observedAt）。
+ * @param input.timelineCapability 这个 Provider 的 timeline 能力档位；`unavailable` ⇒ semantic 恒
+ *   `unsupported`（它根本不产语义信号，别叫用户等）。
+ * @param input.awaitingRequest 是否正卡在一个待答的 typed 请求上（permission/question）。
+ * @param input.terminalCapabilityUnverified 终端能力是否尚未确认（握手降级），此时就绪性 pending。
+ * @param now                  现在时刻，用于新鲜度标注。
+ */
+export function observeAgent(
+  input: {
+    process: AgentMuxRunState
+    status: Pick<AgentStatus, 'state' | 'source' | 'observedAt'>
+    timelineCapability: AgentCapabilities['timeline']
+    awaitingRequest: boolean
+    terminalCapabilityUnverified: boolean
+  },
+  now: number
+): AgentObservation {
+  const running = input.process === 'running'
+  const state = input.status.state
+  const declared = isAgentActivityStatusSource(input.status.source)
+  const semantic: AgentObservation['semantic'] = input.timelineCapability === 'unavailable'
+    ? 'unsupported'
+    : !running
+      ? 'unknown'
+      // 语义活性由**声明的 state** 与**来源**共同决定，不是只看来源：只有活动声明来源（native-hook/acp）
+      // 才谈得上语义活性，裸的 run-process/terminal/user 投影一律 idle（它不能压过自己）。
+      : !declared
+        ? 'idle'
+        // waiting/blocked：「我停下了、在等你」的静止声明——自成一档 awaiting-input，绝不压成 idle
+        // （压成 idle 会抹掉驱动「需要你」提醒的真实信号，见 semanticStatusCanDecay 注释里记的坑）。
+        // 它不随静默衰减（只有 working 会），所以不看 agentEvidenceStale：一条 20 分钟前的「等你」仍在等你。
+        // 「waiting/blocked = 需要人介入」这个概念的 SSOT 在渲染侧 attention-vocabulary.ts 的 NeedsYouState；
+        // Core 够不着它（那个模块 import 自 @agentmux/core，反向依赖会成环），故此处就地判定。
+        : state === 'waiting' || state === 'blocked'
+          ? 'awaiting-input'
+          // working 且新鲜 = 此刻正在干活。「哪个 state 算在干活」不另立第三份拼法——直接问本文件
+          // SSOT semanticStatusCanDecay（只有 working）。done/error 这类**结论**、以及已过新鲜度窗口的
+          // working，都落 idle：绝不冒充 active（那会谎称一个已出结论/已沉默的 Agent 还在干活）。
+          : semanticStatusCanDecay(state) && !agentEvidenceStale(input.status, now)
+            ? 'active'
+            : 'idle'
+  const readiness: AgentObservation['readiness'] = !running
+    ? 'unknown'
+    : input.awaitingRequest || input.terminalCapabilityUnverified
+      ? 'pending'
+      : 'ready'
+  return {
+    process: input.process,
+    semantic,
+    readiness,
+    source: input.status.source,
+    observedAt: input.status.observedAt,
+    stale: agentEvidenceStale(input.status, now)
+  }
 }
