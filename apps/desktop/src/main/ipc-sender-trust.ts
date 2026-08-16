@@ -45,6 +45,9 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:importProfile': 'Browser Profile',
   'browser:selectElement': 'Browser selection',
   'browser:cancelElementSelection': 'Browser selection',
+  // 回答「要不要把这个应用链接交给系统」。伪造它等于替用户按下"允许"，于是任意页面能拿它选定的
+  // 参数启动本机应用——这正是那一问要挡住的事，所以它和别的特权频道一样验发送方。
+  'browser:answerAppLink': 'Browser app link',
   'browser:setAnnotationMarkers': 'Browser annotation',
   // 跑一段 Agent 现写的代码，是 browser:* 里权限最高的一条——比选元素高。任何能伪造这个频道的
   // 发送者都能在用户已登录的页面上做任意操作。

@@ -78,7 +78,8 @@ function browser(id: string, url = 'about:blank'): BrowserSnapshot {
     canGoForward: false,
     viewport: 'responsive',
     error: null,
-    driving: false
+    driving: false,
+    appLinkPrompt: null
   }
 }
 

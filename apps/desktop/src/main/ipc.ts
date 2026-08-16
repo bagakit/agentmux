@@ -135,7 +135,22 @@ export async function registerIpc(args: {
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
-  const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore())
+  const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore(), {
+    // 每次现读 `config`（这个闭包变量在 config:save 里被重新赋值），不是构造时快照一份：
+    // 用户刚在 Settings 里把某个 scheme 改回 allow，不该等重启才生效。
+    rememberedSchemes: async () => config.browser.appLinkSchemes ?? {},
+    rememberScheme: async (scheme, choice) => {
+      // 走 configStore.save 这条既有写路并回写闭包，和别处改 config 的写法一致；直接改
+      // `config.browser` 不落盘，关掉应用就没了。
+      const current = config.browser.appLinkSchemes ?? {}
+      config = await args.configStore.save({
+        ...config,
+        browser: { ...config.browser, appLinkSchemes: { ...current, [scheme]: choice } }
+      })
+    },
+    // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
+    openExternal: (target) => { void shell.openExternal(target) }
+  })
   const notifier = createAgentNotifier({
     window: args.window,
     onActivate: (sessionId) => {
@@ -656,6 +671,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)
     return await browsers.selectElement(id)
+  })
+  handleWithEvent('browser:answerAppLink', async (event, id: string, allow: boolean, remember: boolean) => {
+    requireTrustedSender('browser:answerAppLink', event)
+    return await browsers.answerAppLink(id, allow, remember)
   })
   handleWithEvent('browser:cancelElementSelection', async (event, id: string) => {
     requireTrustedSender('browser:cancelElementSelection', event)

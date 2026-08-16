@@ -20,6 +20,12 @@ import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserRunOutcomeFromFailure } from './browser-run-outcome.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
+import {
+  appLinkOutcome,
+  appLinkRefusedMessage,
+  classifyBrowserTarget,
+  type AppLinkSchemeChoice
+} from './browser-app-link.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
@@ -55,6 +61,8 @@ type BrowserEntry = {
    * 已 attach 的 page 第二次会抛，`runScript` 第一件事就是它。
    */
   driving: boolean
+  /** 这一页上待答的那个应用链接提问。回答掉或换页就清。 */
+  appLinkPrompt: { url: string; scheme: string } | null
 }
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
@@ -151,6 +159,19 @@ export interface BrowserProfileResolver {
   resolvePartition(profileId: string): string
 }
 
+/**
+ * 应用链接移交要用到的两样外部能力。做成一个注入的接口而不是让 manager 自己 import electron +
+ * ConfigStore：这个类必须能在没有 Electron 的单测里被直接质询（既有的 `profiles` / `refLedgers`
+ * 就是同一个理由）。
+ */
+export interface AppLinkHost {
+  /** 读这一刻记住的答案。每次现读而不是构造时快照一份——设置面改完不该等重启才生效。 */
+  rememberedSchemes(): Promise<Record<string, AppLinkSchemeChoice>>
+  /** 记住一个答案。只有用户勾了「记住」才会被调到。 */
+  rememberScheme(scheme: string, choice: AppLinkSchemeChoice): Promise<void>
+  openExternal(target: string): void
+}
+
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
 const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 const BROWSER_MARKER_MAX_COUNT = 50
@@ -196,7 +217,15 @@ export class BrowserViewManager {
      * ref 的跨轮/跨重启账本。和 `profiles` 一样从外面传进来，不给默认值：默认值要调
      * `app.getPath('userData')`，那会让这个类在**构造时**就绑死 Electron，而它此前只在真正开页面时才需要。
      */
-    private readonly refLedgers: BrowserRefLedgerStore
+    private readonly refLedgers: BrowserRefLedgerStore,
+    /**
+     * 应用链接的移交能力。和 `refLedgers` 同理从外面传进来：`shell.openExternal` 与读写 config 都会
+     * 让这个类绑死 Electron/磁盘，而它此前只在真正开页面时才需要 Electron。
+     *
+     * `openExternal` 必须由调用方以箭头包一层或 `.bind(shell)` 传入——直接摘方法会丢掉原生 receiver
+     * （本仓吃过这个亏）。
+     */
+    private readonly appLinks: AppLinkHost
   ) {}
 
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
@@ -286,7 +315,8 @@ export class BrowserViewManager {
       visible: false,
       viewport,
       error: null,
-      driving: false
+      driving: false,
+      appLinkPrompt: null
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -668,6 +698,53 @@ export class BrowserViewManager {
     }
   }
 
+  /**
+   * 一个应用链接想走。按已记住的答案决定这一次怎么办：记过 allow 就直接开，记过 deny 就说出来，
+   * 没记过就把这一问挂上快照等人回答。
+   *
+   * 判定与「真的开」都在 `appLinkOutcome` 里，这里只负责把结局投影出去——让这里写成
+   * `if (decision.shouldOpen) this.appLinks.openExternal(url)` 是**实测可被劫持**的形状，
+   * 见 `window-security.ts` 里 `windowOpenOutcome` 的注释。
+   */
+  private async handOffAppLink(entry: BrowserEntry, url: string, scheme: string): Promise<void> {
+    const view = entry.view
+    const remembered = (await this.appLinks.rememberedSchemes())[scheme]
+    // 读盘是异步的，这中间页面可能已经换掉或被顶掉。既有的每一处异步回写都先判这一句。
+    if (!this.owns(entry, view)) return
+    this.projectAppLinkOutcome(entry, appLinkOutcome(url, scheme, remembered, (target) => {
+      this.appLinks.openExternal(target)
+    }))
+  }
+
+  /** 把一次移交结局写进 entry 并广播。三档各自对应快照上不同的一组字段，不许有第二处这样写。 */
+  private projectAppLinkOutcome(
+    entry: BrowserEntry,
+    outcome: ReturnType<typeof appLinkOutcome>
+  ): void {
+    entry.appLinkPrompt = outcome.kind === 'ask' ? { url: outcome.url, scheme: outcome.scheme } : null
+    entry.error = outcome.kind === 'refused' ? appLinkRefusedMessage(outcome.scheme) : null
+    this.emit(entry)
+  }
+
+  /**
+   * 用户回答了那个提问。
+   *
+   * url 取自 entry 上挂着的那一次，不从渲染进程收——渲染进程回传 url 等于开了第二个事实源，
+   * 页面可以在人回答之前又发起一次，两边就对不上了。
+   */
+  async answerAppLink(id: string, allow: boolean, remember: boolean): Promise<BrowserSnapshot> {
+    const entry = this.require(id)
+    const pending = entry.appLinkPrompt
+    if (!pending) throw new Error('No app link is waiting for an answer on this Browser')
+    const choice: AppLinkSchemeChoice = allow ? 'allow' : 'deny'
+    if (remember) await this.appLinks.rememberScheme(pending.scheme, choice)
+    // 记不记得住是两回事：这一次照答案走。传 choice 而不是 remembered，才让「只答这一次」成立。
+    this.projectAppLinkOutcome(entry, appLinkOutcome(pending.url, pending.scheme, choice, (target) => {
+      this.appLinks.openExternal(target)
+    }))
+    return this.snapshot(entry)
+  }
+
   async selectElement(id: string): Promise<BrowserElementSelection | null> {
     const entry = this.require(id)
     const view = entry.view
@@ -857,6 +934,15 @@ export class BrowserViewManager {
     const contents = view.webContents
     const guardNavigation = (event: { url: string; isMainFrame: boolean; preventDefault(): void }): void => {
       if (!event.isMainFrame) return
+      // 应用链接在闸门**之前**分流。闸门本身逐字不变：`lark://` 装不进 WebContentsView，它要的不是
+      // 放行进视图，是改道给系统。两件事分开之后，`javascript:` 一类仍然原地死在闸门上。
+      const target = classifyBrowserTarget(event.url)
+      if (target.kind === 'hand-off') {
+        event.preventDefault()
+        if (!this.owns(entry, view)) return
+        void this.handOffAppLink(entry, event.url, target.scheme!)
+        return
+      }
       try {
         assertAllowedBrowserUrl(event.url)
       } catch (error) {
@@ -1032,7 +1118,8 @@ export class BrowserViewManager {
       canGoForward: contents.navigationHistory.canGoForward(),
       viewport: entry.viewport,
       error: entry.error,
-      driving: entry.driving
+      driving: entry.driving,
+      appLinkPrompt: entry.appLinkPrompt
     }
   }
 

@@ -304,7 +304,8 @@ describe('durable Workbench file/browser projection', () => {
       canGoForward: false,
       viewport: 'responsive',
       error: null,
-      driving: false
+      driving: false,
+      appLinkPrompt: null
     })
     const projected = projectPersistedWorkbench({
       tabs: { [tab.id]: tab },

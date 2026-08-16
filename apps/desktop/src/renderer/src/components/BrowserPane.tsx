@@ -112,6 +112,12 @@ export function BrowserPane({
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
+  // 「记住」的勾选是**这一问的草稿**，不是已保存的状态——真正记住发生在主进程，由回答那一次带过去。
+  // 留在渲染进程做本地 state 而不是读 config：读 config 会让这个勾选看起来像已生效的设置。
+  const [rememberAppLink, setRememberAppLink] = useState(false)
+  // 每换一个 scheme 就把勾选清回去。不清的话，上一次勾了「记住」会让下一个**不同的** scheme
+  // 一出现就预先勾着——用户扫一眼点 Open，等于替他记住了一件他没答应的事。
+  useEffect(() => setRememberAppLink(false), [tab.appLinkPrompt?.scheme])
   const [restoring, setRestoring] = useState(false)
   const nativeLifecycleRef = useRef<'present' | 'releasing' | 'released' | 'restoring'>(
     released ? 'released' : 'present'
@@ -223,6 +229,9 @@ export function BrowserPane({
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
           tab.error ||
+          // 原生视图是**窗口级**层，画在页面之上。不把它藏起来，那个提问就渲染在它背后——看不见，
+          // 也点不到，于是这一问永远没人能回答，而页面看起来只是什么都没发生。和 `tab.error` 同理。
+          tab.appLinkPrompt !== null ||
           tab.url === 'about:blank'
         ) {
           synchronizer.observe(null)
@@ -270,7 +279,7 @@ export function BrowserPane({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
 
   // 焦点环内缩是一件与「边界同步的生命周期」正交的事，所以它有自己的依赖数组（#545）。焦点结论翻转时
   // 只重算一次边界——复用上面那个还活着的 synchronizer（recomputeBoundsRef），不拆不建，因此没有那道
@@ -561,6 +570,36 @@ export function BrowserPane({
               <button className="primary-button" type="button" onClick={addElementAnnotation}><Check size={12} /> Add annotation</button>
             </footer>
           </section>
+        ) : tab.appLinkPrompt ? (
+          <div className="pane-state browser-app-link-prompt">
+            <ArrowUpRight size={20} />
+            <strong>Open this link in another app?</strong>
+            <span>
+              This page wants to hand <code>{tab.appLinkPrompt.scheme}:</code> links to an app on your
+              computer. AgentMux cannot show them itself.
+            </span>
+            <small className="browser-app-link-prompt__url">{tab.appLinkPrompt.url}</small>
+            <label className="browser-app-link-prompt__remember">
+              <input
+                type="checkbox"
+                checked={rememberAppLink}
+                onChange={(event) => setRememberAppLink(event.target.checked)}
+              />
+              <span>Remember for every <code>{tab.appLinkPrompt.scheme}:</code> link</span>
+            </label>
+            <div className="browser-app-link-prompt__actions">
+              <button
+                className="small-button"
+                type="button"
+                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, false, rememberAppLink))}
+              >Not now</button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, true, rememberAppLink))}
+              >Open</button>
+            </div>
+          </div>
         ) : tab.error ? (
           <div className="pane-state pane-state--error">
             <AlertTriangle size={20} />
