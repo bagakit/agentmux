@@ -23,6 +23,7 @@ import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import {
   appLinkOutcome,
   appLinkRefusedMessage,
+  browserWindowOpenOutcome,
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
@@ -954,6 +955,16 @@ export class BrowserViewManager {
     }
     contents.on('will-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
+    // 弹窗那条路。`649df3a2` 把整个 handler 删掉是为了保住原生 popup 语义，而缺席的代价是应用链接的
+    // `window.open` 会真的开出一个装着 `lark:` 的窗口，没人管。这里回装，但只截应用链接——回调体就是
+    // 一次转发，判定与副作用都在 `browserWindowOpenOutcome` 里（照 window-security.ts 那两个实测存活
+    // 的变异：回调体里有语句就能改）。
+    contents.setWindowOpenHandler(({ url }) =>
+      browserWindowOpenOutcome(url, (target, scheme) => {
+        if (!this.owns(entry, view)) return
+        void this.handOffAppLink(entry, target, scheme)
+      })
+    )
     contents.on('did-finish-load', () => {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)

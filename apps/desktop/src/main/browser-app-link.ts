@@ -8,7 +8,7 @@
  */
 
 /**
- * 视图真的装得下的那些。`about:blank` 归这一类是因为它就是空页面本身。
+ * 视图真的装得下的那些。
  *
  * 与 `assertAllowedBrowserUrl` 的关系：那道闸门**逐字不变**，分流发生在它之前。`lark://` 装不进
  * `WebContentsView`，所以应用链接要的不是「放行进视图」，是改道给系统。
@@ -21,8 +21,12 @@ const EMBEDDABLE_PROTOCOLS = new Set(['http:', 'https:', 'file:'])
  *
  * 反过来把「未知即拒绝」写成白名单就不行了：漏一个的后果是「这个 app 链接永远打不开」，而且
  * 没有人会注意到。判据是漏了会往哪边倒，不是清单本身长不长。
+ *
+ * `about:` 在这张表里而不在兜底那一段：它是浏览器自己的伪 scheme，不是任何一个应用的。递出去会得到
+ * 一句「open about: links in another app?」——那一问对用户毫无意义，而 `about:blank` 更是每一个无参
+ * `window.open()` 的目标，等于每开一个空白页都弹一次。
  */
-const NEVER_HANDED_OFF_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:'])
+const NEVER_HANDED_OFF_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:', 'about:'])
 
 export type BrowserTargetKind =
   /** 进视图，走原来的闸门。 */
@@ -99,6 +103,38 @@ export function appLinkOutcome(
   if (remembered === 'deny') return { kind: 'refused', scheme }
   openExternal(url)
   return { kind: 'opened', scheme }
+}
+
+/**
+ * 一次「这个页面想开新窗口」的结局。**只截应用链接**，其余一律交回 Chromium。
+ *
+ * 为什么「其余一律 allow」是承重的而不是偷懒：`649df3a2`（fix(browser): preserve native popup
+ * semantics）删掉的那段，把**每一个** window-open 都改道成 `this.navigate(entry.id, url)` 再 deny——
+ * 于是 `target="_blank"` 的普通链接被压进同一个 view，弹窗语义全没了。那次修法是**整个 handler 缺席**，
+ * 而缺席的后果就是本 Feature 要修的另一半：应用链接的弹窗会真的开出一个 Electron 窗口（实测窗口数
+ * 1→2→3），里面装着一个装不下的 `lark:` 地址，没人管。
+ *
+ * 所以这里回装 handler，但**不回到那个形状**：非应用链接返回 `{ action: 'allow' }`，那正是「没有
+ * handler」时 Electron 的默认动作，逐字等价。回到「一律改道」就是把 `649df3a2` 修的 bug 重新引入。
+ *
+ * `refuse` 那一档也走 `allow`，这不是放行而是**不插手**：`javascript:` 的 `window.open` 由 Chromium
+ * 按 opener 自己的规则处置，与今天逐字相同。本任务只回装应用链接那一条截流，不顺手扩大 handler
+ * 的职责——扩大了就得为每一档新行为负责，而那些行为今天没有任何人要求改。
+ *
+ * 与 `window-security.ts` 的 `windowOpenOutcome` 是两件事，别串：那个管的是**应用主窗口**（一律
+ * deny，https 交给系统浏览器）；这个管的是内嵌 Browser 里那张页面（只有应用链接归我们）。
+ *
+ * `handOff` 由调用方注入，和 `appLinkOutcome` 的 `openExternal` 同理——判定与它唯一的副作用收在
+ * 一次调用里，Electron 回调体里不留语句可改。
+ */
+export function browserWindowOpenOutcome(
+  rawUrl: string,
+  handOff: (url: string, scheme: string) => void
+): { readonly action: 'allow' | 'deny' } {
+  const target = classifyBrowserTarget(rawUrl)
+  if (target.kind !== 'hand-off') return { action: 'allow' }
+  handOff(rawUrl, target.scheme!)
+  return { action: 'deny' }
 }
 
 /**

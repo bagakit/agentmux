@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   appLinkOutcome,
   appLinkRefusedMessage,
+  browserWindowOpenOutcome,
   classifyBrowserTarget
 } from '../src/main/browser-app-link.js'
 
@@ -28,7 +29,10 @@ const fakeElectron = vi.hoisted(() => {
     destroyed = false
     readonly listeners = new Map<string, Listener[]>()
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
-    readonly setWindowOpenHandler = vi.fn()
+    windowOpenHandler: null | ((details: { url: string }) => { action: string }) = null
+    readonly setWindowOpenHandler = vi.fn((handler: (details: { url: string }) => { action: string }) => {
+      this.windowOpenHandler = handler
+    })
     readonly executeJavaScriptInIsolatedWorld = vi.fn(async () => true)
     readonly setZoomFactor = vi.fn()
     readonly enableDeviceEmulation = vi.fn()
@@ -153,6 +157,12 @@ describe('应用链接的三段分类', () => {
     for (const url of ['javascript:alert(1)', 'data:text/html,<b>x', 'blob:https://example.com/abc']) {
       expect(classifyBrowserTarget(url), url).toEqual({ kind: 'refuse', scheme: null })
     }
+    // `about:` 是浏览器自己的伪 scheme，不是任何一个应用的。递出去会得到一句
+    // 「open about: links in another app?」——而 `about:blank` 是每一个无参 `window.open()` 的目标，
+    // 等于每开一个空白页都弹一次。这一条是弹窗路那半边的测试反过来抓出来的。
+    for (const url of ['about:blank', 'about:srcdoc']) {
+      expect(classifyBrowserTarget(url), url).toEqual({ kind: 'refuse', scheme: null })
+    }
     // 连 scheme 都解析不出来的东西，没有任何理由递给 shell.openExternal。
     expect(classifyBrowserTarget('not a url at all')).toEqual({ kind: 'refuse', scheme: null })
   })
@@ -251,6 +261,50 @@ describe('导航路：闸门之前分流，闸门本身不变', () => {
       .toContain('Unsupported browser URL protocol')
     expect(latest(fixture).appLinkPrompt, '伪 scheme 也去问用户了').toBeNull()
     expect(host.opened, 'javascript: 被交给了系统').toEqual([])
+  })
+})
+
+describe('弹窗路：只截应用链接，其余交回 Chromium', () => {
+  it('应用链接的 window.open 被截走，并按同一条路移交', () => {
+    const handed: Array<[string, string]> = []
+    expect(browserWindowOpenOutcome('lark://open?token=6', (u, s) => handed.push([u, s])))
+      .toEqual({ action: 'deny' })
+    expect(handed).toEqual([['lark://open?token=6', 'lark']])
+  })
+
+  it('http(s) 与 about:blank 的弹窗一律 allow，且一个字节都不移交', () => {
+    // 承重的反向一半。`649df3a2` 删掉的那段正是把**每一个** window-open 都改道再 deny；一个
+    // 「一律截走」的实现会让上一条全绿，而它就是把 649df3a2 修的那个 bug 重新引入。
+    const handed: string[] = []
+    for (const url of ['https://example.com/popup', 'http://localhost:4173/x', 'about:blank']) {
+      expect(browserWindowOpenOutcome(url, (u) => handed.push(u)), url).toEqual({ action: 'allow' })
+    }
+    expect(handed, 'http(s) 的弹窗被当成应用链接交出去了').toEqual([])
+  })
+
+  it('伪 scheme 的弹窗也不插手：交回 Chromium，绝不移交', () => {
+    // `refuse` 那一档走 allow 不是放行，是**不插手**——由 Chromium 按 opener 自己的规则处置，
+    // 与今天逐字相同。要害在后半句：它绝不能掉进移交那条路。
+    const handed: string[] = []
+    for (const url of ['javascript:alert(1)', 'data:text/html,<b>x', 'not a url at all']) {
+      expect(browserWindowOpenOutcome(url, (u) => handed.push(u)), url).toEqual({ action: 'allow' })
+    }
+    expect(handed, '伪 scheme 被递给了 shell.openExternal').toEqual([])
+  })
+
+  it('装在 view 上的 handler 与导航路共用同一份记住的答案，不是第二份判定', async () => {
+    // 两个写入点收成一处投影：导航路上答过 allow 的 scheme，弹窗路直接开，不该再问一次。
+    const host = appLinkHost({ lark: 'allow' })
+    const { view, fixture } = await managerWith(host)
+    const handler = view.webContents.windowOpenHandler
+    expect(handler, 'handler 根本没装上——弹窗会开出一个没人管的窗口').not.toBeNull()
+
+    expect(handler!({ url: 'lark://open?token=7' })).toEqual({ action: 'deny' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(host.opened).toEqual(['lark://open?token=7'])
+    expect(latest(fixture).appLinkPrompt, '记过 allow 的 scheme 在弹窗路上又问了一次').toBeNull()
   })
 })
 
