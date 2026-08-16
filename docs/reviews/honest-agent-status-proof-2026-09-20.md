@@ -36,4 +36,18 @@ Do not restart or stop an existing runtime merely for this subtask. On the paren
 3. A normal completion or user-stopped Run remains neutral; a recorded crash is red. Compare snapshot after reconnect with its original live-event presentation.
 4. Running appears blue/hollow in both the menu and Avatar, while working appears green/active.
 
-One pre-existing durability gap was raised to the parent: `stopRequestedRuns` and `endedRuns` are in-memory. A new Client cannot recover a previous Client's user-stop intent from those maps, so an old signal exit can be classified as crashed after a true process restart. The snapshot tests prove re-projection of supplied authoritative facts, not persistence of that intent. Closing this gap requires durable AgentMux intent ownership, not duplicating ctxmux process facts; this status-only change does not claim to have supplied it.
+The earlier claim that a normal user-stopped Agent could reappear red after restart is **withdrawn**. It inspected the in-memory classification maps without following the full stop ownership chain. `stopAgent` commits a durable retirement and removes the AgentSession; `listRuns` suppresses retired Runs. An uncertain stop keeps its existing durable stop reservation, which startup reconciliation completes before projection. There is no retained user-stopped Agent to recolor on this path, so no extra exit ledger was added.
+
+### Actual process-boundary verification
+
+`stop-retirement-restart.test.ts` launches **two different Node processes per case** over one temporary FileStore. Only the kernel transport is a fixture. Each new process reconstructs the real Client and registry; the second invokes the production stale-lifecycle recovery and process projection. No process-local maps survive. Five cases pass:
+
+- Successful stop: persisted retired identity, no Session and no projected Run after restart.
+- Stop accepted, receipt lost, Run ended: the existing reservation retires the Session after restart without issuing another stop.
+- Stop receipt lost before a result, Run still alive: restart replays the exact durable stop operation, then retires the Session.
+- Stop preparation failed, followed by a SIGSEGV exit: no stop reservation exists; the crash remains visible, so failed setup cannot invent user-stopped intent.
+- Independent SIGSEGV exit: the Agent remains present as a real error. This control uses a fault signal, not an assumption that any SIGTERM proves a crash.
+
+Two production mutants are killed: expose retired Runs from listRuns; omit stop-reservation completion during restart. Logs: `/tmp/stop-retirement-restart.log`, `/tmp/retired-visible-mutant.log`, `/tmp/forgot-stop-recovery-mutant.log`.
+
+This proves FileStore/Client behavior across actual process loss; it still does not substitute for the parent's installed-app layout/reattach checks above. No existing runtime or Agent was stopped for this verification.
