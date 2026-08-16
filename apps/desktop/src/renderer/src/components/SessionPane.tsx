@@ -19,9 +19,7 @@ import { AgentSessionComposer } from './AgentSessionComposer'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
-import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
-import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { isMacPlatform } from '../lib/host-platform'
 import {
   classifyContinuityFailure,
@@ -360,15 +358,6 @@ export function SessionPane({
       />
       {surfaceKind === 'agent' && session.kind === 'agent' ? (
         <div className="agent-input-stack">
-          {/* 服务窗（原则 11）：一处我们的流程失败，在阻断用户之前先分清是哪一类。这里的 disconnected
-              是样板——终端投影有恢复横幅承载，但 Activity 投影下它此前只剩一个禁用占位，等于静默降级。
-              放行 + 明确告知由这条告示补上；判定全在 lib，组件只渲染结果。 */}
-          <ServiceWindowNotice
-            notice={serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session)))}
-          />
-          <ServiceWindowNotice
-            notice={serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))}
-          />
           {session.pendingInteraction ? (
             <AgentInteractionCard
               request={session.pendingInteraction}

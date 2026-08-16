@@ -98,29 +98,20 @@ async function coordinatorFixture(stored = session()) {
 }
 
 describe('prompt readiness refusal diagnostics', () => {
-  it('reports the observed Run and pending epoch when no readiness can be consumed', async () => {
+  it.each(['missing', 'pending'] as const)('continues with %s readiness and verifies the actual payload', async (state) => {
     const stored = session()
-    delete stored.terminalPromptReadiness
-    const { coordinator, currentRun, kernel } = await coordinatorFixture(stored)
-    const plan = new AgentProviderRegistry().get('codex').planPromptInput('must remain private')
-
-    const refusal = await coordinator.submitInputPlan(
-      stored,
-      currentRun,
-      'submission-not-ready',
-      'must remain private',
-      plan
-    ).then(() => null, (error: unknown) => error as AgentMuxError)
-    expect(refusal).toMatchObject({
-      code: 'AGENT_PROMPT_NOT_READY',
-      detail: expect.stringContaining('runId=run-1 readinessId=none readinessSource=none')
-    })
-    expect(refusal?.detail).toContain('reason=epoch-missing')
-    expect(refusal?.message).not.toContain('must remain private')
-    expect(kernel.input).not.toHaveBeenCalled()
+    if (state === 'missing') delete stored.terminalPromptReadiness
+    else delete stored.terminalPromptReadiness!.readyThroughByte
+    const { coordinator, currentRun, kernel, registry, screenEvidence } = await coordinatorFixture(stored)
+    const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
+    await coordinator.submitInputPlan(stored, currentRun, 'submission-new', 'hello', plan)
+    expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['hello', '\r'])
+    expect(screenEvidence.wait).toHaveBeenCalledTimes(1)
+    expect(registry.get('agent-1').terminalPromptSubmission?.readinessEvidence).toBeUndefined()
+    expect(registry.get('agent-1').terminalPromptSubmission?.submit.acknowledged).toBe(true)
   })
 
-  it('reports the owner submission when a readiness epoch was already consumed', async () => {
+  it('sends a steer after acknowledged delivery without waiting for Stop', async () => {
     const stored = session()
     stored.terminalPromptReadiness = {
       ...stored.terminalPromptReadiness!,
@@ -130,10 +121,7 @@ describe('prompt readiness refusal diagnostics', () => {
       run: { runId: 'run-1' },
       submissionId: 'submission-owner',
       promptDigest: 'a'.repeat(43),
-      readinessSource: 'initial-composer',
-      readinessId: 'readiness-1',
-      readinessOutputCursorBytes: 0,
-      readyThroughByte: 12,
+      readinessEvidence: { source: 'initial-composer', id: 'readiness-1', outputCursorBytes: 0, readyThroughByte: 12 },
       outputCursorBytes: 12,
       payload: {
         operationId: 'payload-owner',
@@ -149,20 +137,9 @@ describe('prompt readiness refusal diagnostics', () => {
     const { coordinator, currentRun, kernel } = await coordinatorFixture(stored)
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('must remain private')
 
-    const refusal = await coordinator.submitInputPlan(
-      stored,
-      currentRun,
-      'submission-contender',
-      'must remain private',
-      plan
-    ).then(() => null, (error: unknown) => error as AgentMuxError)
-    expect(refusal).toMatchObject({
-      code: 'AGENT_PROMPT_READINESS_CONSUMED',
-      detail: expect.stringContaining('runId=run-1 readinessId=readiness-1')
-    })
-    expect(refusal?.detail).toContain('consumedBySubmissionId=submission-owner')
-    expect(refusal?.message).not.toContain('must remain private')
-    expect(kernel.input).not.toHaveBeenCalled()
+    await coordinator.submitInputPlan(stored, currentRun, 'submission-contender', 'must remain private', plan)
+    expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['must remain private', '\r'])
+
   })
 
   it('reports non-sensitive submission facts when another two-phase prompt is in flight', async () => {
@@ -296,7 +273,7 @@ describe('assertSubmission 的字节游标顺序对账', () => {
     // 把 readyThroughByte 改小只会让 (B) 更容易成立，所以红只能来自 (A)。最后一条测试把这个
     // 「只违反一条」的前提直接钉成断言，而不是留在注释里。
     const refusal = await refusalAfterCorrupting((submission) => {
-      submission.readyThroughByte = submission.readinessOutputCursorBytes - 1
+      submission.readinessEvidence!.readyThroughByte = submission.readinessEvidence!.outputCursorBytes - 1
     })
     expect(refusal, 'readyThroughByte < readinessOutputCursorBytes 必须被拒').toBeInstanceOf(AgentMuxError)
     expect(refusal).toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
@@ -306,7 +283,7 @@ describe('assertSubmission 的字节游标顺序对账', () => {
     // 同理只改一个字段：把 outputCursorBytes 压到 readyThroughByte 之下。readyThroughByte 本身
     // 不动，所以 (A) 保持为假，红只能来自 (B)。
     const refusal = await refusalAfterCorrupting((submission) => {
-      submission.outputCursorBytes = submission.readyThroughByte - 1
+      submission.outputCursorBytes = submission.readinessEvidence!.readyThroughByte - 1
     })
     expect(refusal, 'outputCursorBytes < readyThroughByte 必须被拒').toBeInstanceOf(AgentMuxError)
     expect(refusal).toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
@@ -316,7 +293,8 @@ describe('assertSubmission 的字节游标顺序对账', () => {
     // 本仓反复记过「两个守卫互相掩盖：各自单独变异都存活」。这里把「每次损坏只违反一条」这个前提
     // 直接钉成断言，读的是生产代码写出来的真实取值，而不是我在注释里的声称。
     const { persisted } = await submittedFixture()
-    const { readinessOutputCursorBytes: epochCursor, readyThroughByte, outputCursorBytes } = persisted
+    const { outputCursorBytes } = persisted
+    const { outputCursorBytes: epochCursor, readyThroughByte } = persisted.readinessEvidence!
 
     // 干净记录上两条顺序都成立——这是「损坏前后的差别只有那一条」的另一半。
     expect(readyThroughByte).toBeGreaterThanOrEqual(epochCursor)
@@ -402,26 +380,15 @@ describe('prompt readiness observation', () => {
     expect(kernel.input, '观察落盘之后，两阶段投递必须真的发出去').toHaveBeenCalledTimes(2)
   })
 
-  it('观察之前 prompt 就是发不出去的——这正是插早退之后生产里的样子', async () => {
-    // 反向那一侧，把「观察半边承重」这件事变成可证的：同一个起点上**不**调 observeReadiness，
-    // submitInputPlan 必须以 observation-pending 被拒。上面那条与这条成对，才排除了
-    // 「submitInputPlan 本来就不需要 readyThroughByte」这种解释。
+  it('does not block a healthy Run when readiness observation is pending and render confirmation degrades', async () => {
     const stored = unobservedSession()
-    const { coordinator, currentRun, kernel } = await coordinatorFixture(stored)
+    const { coordinator, currentRun, kernel, registry, screenEvidence } = await coordinatorFixture(stored)
+    screenEvidence.wait.mockRejectedValue(new AgentMuxError('History evicted', 'OUTPUT_GAP'))
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
-
-    const refusal = await coordinator.submitInputPlan(
-      stored as AgentMuxAgentSession,
-      currentRun,
-      'submission-before-observation',
-      'hello',
-      plan
-    ).then(() => null, (error: unknown) => error as AgentMuxError)
-
-    expect(refusal).toMatchObject({ code: 'AGENT_PROMPT_NOT_READY' })
-    expect(refusal?.detail, 'epoch 在场、只差观察——理由必须是 observation-pending 而不是 epoch-missing')
-      .toContain('reason=observation-pending')
-    expect(kernel.input).not.toHaveBeenCalled()
+    await coordinator.submitInputPlan(stored, currentRun, 'without-observation', 'hello', plan)
+    expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['hello', '\r'])
+    expect(registry.get('agent-1').terminalPromptDelivery).toMatchObject({ state: 'unverified', reason: 'screen-evidence-gap' })
+    expect(registry.get('agent-1').terminalPromptSubmission?.readinessEvidence).toBeUndefined()
   })
 
   it('观察失败要响亮地报出去，不能静默停在「永远等就绪」', async () => {
@@ -562,4 +529,84 @@ describe('渲染确认途中几何变了：重建屏幕再看，而不是把这�
       '几何变化被当成了证据链失败：一次本可完整确认的提交被记成 unverified 降级并广播了服务窗'
     ).toEqual([])
   })
+})
+
+it('rejects a stale automatic completion at the durable input claim, while leaving manual input available', async () => {
+  const stored = session()
+  stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
+  const fixture = await coordinatorFixture(stored)
+  await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: 2 }))
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]'))
+    .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(fixture.kernel.input).not.toHaveBeenCalled()
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan)
+  expect(fixture.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['next', '\r'])
+})
+
+it('checks cancellation at the durable claim, after any input queue wait', async () => {
+  const stored = session(); const fixture = await coordinatorFixture(stored)
+  const cancelled = new AbortController(); cancelled.abort()
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, undefined, cancelled.signal))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_CANCELLED' })
+  expect(fixture.kernel.input).not.toHaveBeenCalled()
+  expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission).toBeUndefined()
+})
+it('reconciles an admitted automatic operation after its completion changes without admitting another prompt', async () => {
+  const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
+  const fixture = await coordinatorFixture(stored)
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')
+  await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
+  const calls = fixture.kernel.input.mock.calls.length
+  expect(calls).toBe(2)
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, '["run-1",1]')
+  expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
+  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'other-auto', 'next', plan, '["run-1",1]'))
+    .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
+})
+
+it('recovers a lost acknowledgement after submit was accepted and the Agent is working', async () => {
+  const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
+  const fixture = await coordinatorFixture(stored)
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
+  const accepted = new Map<string, { startByte: number; endByte: number }>(); let cursor = 0
+  fixture.kernel.input.mockImplementation(async (_runId, operation) => {
+    const id = (operation as typeof operation & { operationId: string }).operationId
+    let range = accepted.get(id)
+    if (!range) { range = { startByte: operation.expectedByte, endByte: operation.expectedByte + Buffer.byteLength(operation.data) }; accepted.set(id, range); cursor = range.endByte }
+    return { run: run(cursor), appliedByteRange: range }
+  })
+  const update = fixture.registry.update.bind(fixture.registry)
+  const spy = vi.spyOn(fixture.registry, 'update').mockImplementationOnce(update)
+    .mockRejectedValueOnce(new Error('receipt persistence interrupted'))
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')).rejects.toThrow('receipt persistence interrupted')
+  spy.mockRestore()
+  expect(cursor).toBe(5)
+  expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(false)
+  await update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(cursor), 'auto', 'next', plan, '["run-1",1]')
+  expect(accepted.size).toBe(2)
+  expect(cursor).toBe(5)
+  expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(true)
+})
+
+it('does not continue a partially accepted old transaction into a pending interaction', async () => {
+  const stored = session(); const fixture = await coordinatorFixture(stored)
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
+  // Persist a real claim, then interrupt before either byte phase is accepted.
+  fixture.kernel.input.mockRejectedValueOnce(new Error('connection interrupted'))
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'same-op', 'next', plan)).rejects.toThrow('connection interrupted')
+  await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
+    pendingInteraction: { request: { id: 'permission', agentSessionId: 'agent-1', kind: 'permission', title: 'Allow?', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }], evidence: { source: 'native-hook', observedAt: 1, run: { runId: 'run-1' }, hookReceiptId: 'permission' } } } as never,
+    updatedAt: Date.now() }))
+  fixture.kernel.input.mockClear()
+  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(0), 'same-op', 'next', plan))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
+  expect(fixture.kernel.input).not.toHaveBeenCalled()
 })

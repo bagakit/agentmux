@@ -1,19 +1,20 @@
+import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { AgentMuxAgentSession } from './types.js'
 
 /** The scheduler's deliberately small, provider-neutral observation contract. */
 export type ContinuousProgressObservation = {
-  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'terminalPromptReadiness'>
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction'>
   tickId: string
   now: number
   lastTickId?: string
-  lastReadinessId?: string
+  lastCompletionId?: string
   userInputRevision?: number
   submittedInputRevision?: number
 }
 
 export type ContinuousProgressDecision =
-  | { kind: 'send'; tickId: string; readinessId: string }
-  | { kind: 'skip'; reason: 'working' | 'stale-working' | 'interaction-pending' | 'not-ready' | 'readiness-consumed' | 'duplicate-tick' | 'user-input-changed' | 'unknown-status' }
+  | { kind: 'send'; tickId: string; completionId: string }
+  | { kind: 'skip'; reason: 'working' | 'stale-working' | 'interaction-pending' | 'completion-consumed' | 'duplicate-tick' | 'user-input-changed' | 'unknown-status' }
 
 /**
  * Decide only. It performs no timer work and sends no bytes. The Host calls this
@@ -34,8 +35,7 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
     return { kind: 'skip', reason: observation.now - observedAt > 30 * 60_000 ? 'stale-working' : 'working' }
   }
   if (semantic !== 'done') return { kind: 'skip', reason: 'unknown-status' }
-  const readiness = session.terminalPromptReadiness
-  if (!readiness || readiness.run.runId !== session.run.runId || readiness.readyThroughByte === undefined) return { kind: 'skip', reason: 'not-ready' }
-  if (readiness.consumedBySubmissionId || observation.lastReadinessId === readiness.id) return { kind: 'skip', reason: 'readiness-consumed' }
-  return { kind: 'send', tickId: observation.tickId, readinessId: readiness.id }
+  const completionId = agentTurnCompletionIdentity(session)!
+  if (observation.lastCompletionId === completionId) return { kind: 'skip', reason: 'completion-consumed' }
+  return { kind: 'send', tickId: observation.tickId, completionId }
 }

@@ -318,7 +318,8 @@ type ScreenWaiter = {
 
 async function screenClient(
   replays: string[],
-  sizes: ReadonlyArray<{ cols: number | null; rows: number | null }> = []
+  sizes: ReadonlyArray<{ cols: number | null; rows: number | null }> = [],
+  retainedStart = 0
 ): Promise<{
   client: AgentMuxClient
   waiter: ScreenWaiter
@@ -350,18 +351,18 @@ async function screenClient(
     const dataBytes = Uint8Array.from(Buffer.from(replay))
     replayedBytes += dataBytes.byteLength
     return {
-      run: screenRun(size.cols, size.rows),
+      run: { ...screenRun(size.cols, size.rows), firstAvailableByte: retainedStart },
       replay: replay
         ? [{
             type: 'data' as const,
             runId: 'screen-run',
-            startByte: 0,
-            endByte: dataBytes.byteLength,
+            startByte: retainedStart,
+            endByte: retainedStart + dataBytes.byteLength,
             data: replay,
             dataBytes
           }]
         : [],
-      gap: null,
+      gap: _afterByte < retainedStart ? { requestedAfterByte: _afterByte, firstAvailableByte: retainedStart } : null,
       close: async () => {}
     }
   }
@@ -482,4 +483,32 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     )).rejects.toMatchObject({ code: 'TERMINAL_SIZE_UNKNOWN' })
     await client.dispose()
   })
+})
+
+
+it('retains the attachment after prefix eviction and recovers only after a real terminal reset', async () => {
+  const prefix = `${FRAME_START}\u001b[2J\u001b[22;1H› hello${FRAME_END}`
+  const { client, waiter, emit, observeCalls } = await screenClient([prefix], [], 100)
+  const options = { timeoutMs: 100, timeoutMessage: 'timeout', terminalMessage: 'exit' }
+  const observe = () => waiter.wait(screenStoredSession(), 100, true,
+    (screen) => screen.composerText('›') === 'hello', options)
+  try {
+    // Clear + positioning + complete synchronization frame still lacks prior terminal modes.
+    await expect(observe()).rejects.toMatchObject({ code: 'OUTPUT_GAP' })
+    let cursor = 100 + Buffer.byteLength(prefix)
+    const send = (text: string) => {
+      const dataBytes = Uint8Array.from(Buffer.from(text))
+      emit({ type: 'data', runId: 'screen-run', startByte: cursor, endByte: cursor + dataBytes.length, data: text, dataBytes })
+      cursor += dataBytes.length
+    }
+    send('\u001b')
+    await expect(observe()).rejects.toMatchObject({ code: 'OUTPUT_GAP' })
+    send(`c${FRAME_START}\u001b[22;1H› hello${FRAME_END}`)
+    await expect(observe()).resolves.toBe(cursor)
+    expect(observeCalls()).toBe(1)
+    // Real gaps after recovery remain invalidating, never silently bridged.
+    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: cursor + 99 })
+    await expect(observe()).rejects.toMatchObject({ code: 'OUTPUT_GAP' })
+    expect(observeCalls()).toBe(2)
+  } finally { await client.dispose() }
 })

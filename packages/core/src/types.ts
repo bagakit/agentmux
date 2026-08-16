@@ -436,7 +436,7 @@ export type AgentHookReceipt = {
  * Why an Agent's prompt-readiness was established. `initial-composer` — the boundary the terminal
  * handshake drew when the composer first became writable; `native-stop` — a native Stop event proving
  * the Agent yielded the prompt. This is the SSOT for the vocabulary: {@link AgentTerminalPromptReadinessState.source}
- * uses it, {@link AgentTerminalPromptSubmissionState.readinessSource} derives from that, and the on-disk
+ * uses it, {@link AgentTerminalPromptSubmissionState.readinessEvidence} derives from that, and the on-disk
  * validator in agent-session-store projects its runtime whitelist off a total `Record<this, true>` table
  * so adding a member here forces the table to gain a key (a compile error) rather than silently
  * fail-closing every legitimate session that carries the new member.
@@ -578,10 +578,13 @@ export type AgentTerminalPromptSubmissionState = {
   run: AgentMuxRunRef
   submissionId: string
   promptDigest: string
-  readinessSource: AgentTerminalPromptReadinessState['source']
-  readinessId: string
-  readinessOutputCursorBytes: number
-  readyThroughByte: number
+  /** Optional observation, never an admission permit for a healthy Run. */
+  readinessEvidence?: {
+    source: AgentTerminalPromptReadinessState['source']
+    id: string
+    outputCursorBytes: number
+    readyThroughByte: number
+  }
   outputCursorBytes: number
   payload: AgentTerminalInputPhaseState
   submit: AgentTerminalInputPhaseState

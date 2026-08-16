@@ -43,14 +43,14 @@ describe('切换键的位置与密度（诉求 2）', () => {
     expect(base[0]![2]!).not.toMatch(/order:/)
   })
 
-  it('一行态里切换键更矮更淡——最安静的形态里控件也最安静（诉求 2b）', () => {
-    // 一行态对 .composer-tool--mode 的覆写：压掉纵向 padding（更矮）+ 调淡（存在感更弱）。
+  it('一行态切换键更淡但保持相同高度', () => {
+    // 安静通过透明度表达，不改变点击区高度。
     const collapsed = [...rules.matchAll(/([^{}]*)\{([^{}]*)\}/g)]
       .filter(([, selector]) => /\.composer:has\(\.composer-tools\[data-mode='collapsed'\]\)\s+\.composer-tool--mode\s*$/.test(selector!.trim()))
     expect(collapsed.length, '一行态没有任何针对切换键的覆写：它仍沿用两行态那份更强的存在感')
       .toBeGreaterThan(0)
     const body = collapsed.map(([, , declarations]) => declarations!).join(' ')
-    expect(body, '一行态没有压掉切换键的纵向 padding：它没有变矮').toMatch(/padding:/)
+    expect(body).not.toMatch(/(?:height|padding(?:-block)?):/)
     expect(body, '一行态没有调淡切换键：它的存在感没有降下来').toMatch(/opacity:/)
   })
 })

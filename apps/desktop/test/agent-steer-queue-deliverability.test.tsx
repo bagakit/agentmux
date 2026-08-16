@@ -23,27 +23,19 @@ describe('queue delivery facts and recovery actions', () => {
     expect(html).toContain('Keep these exact words')
   })
 
-  it('puts the actual deferred reason outside the closed popover, with recovery instructions', () => {
+  it('keeps the deferred reason and recovery actions with the message, without a second permanent banner', () => {
     const html = render([entry({ status: 'deferred', error: 'Readiness not observed Diagnostic: latestOutputBytes=123' })])
-    const statusStart = html.indexOf('role="status"')
-    const cardStart = html.indexOf('popover="auto"')
-    expect(statusStart).toBeGreaterThan(-1)
-    expect(cardStart).toBeGreaterThan(-1)
-    expect(statusStart).toBeGreaterThan(html.indexOf('aria-label="Send"'))
-    const visible = html.slice(statusStart)
-    expect(visible).toContain('Readiness not observed')
-    expect(visible).not.toContain('latestOutputBytes')
-    expect(html).toContain('Diagnostic: latestOutputBytes=123')
-    expect(visible).toContain('Kept in the queue; retries when the Agent or connection becomes ready')
+    expect(html).toContain('Readiness not observed')
     expect(html).toContain('data-state="deferred"')
-    expect(html).not.toContain('queued for delivery')
     expect(html).toContain('Retry queue')
+    expect(html).not.toContain('composer__queue-notice')
+    expect(html).not.toContain('role="status"')
   })
 
   it('does not promise automatic delivery of a deferred entry whose Run ended', () => {
     const html = render([entry({ status: 'deferred', deliverable: false, error: 'Not ready earlier' })])
     expect(html).toContain('cannot be sent to the current Run')
-    expect(html).toContain('They are kept here')
+    expect(html).toContain('Keep these exact words')
     expect(html).toContain('Copy message')
     expect(html).not.toContain('retries when')
     expect(html).not.toContain('Retry queue')
@@ -68,7 +60,7 @@ describe('queue delivery facts and recovery actions', () => {
 
   it('only describes copying when the caller supplies that action', () => {
     const html = render([entry({ deliverable: false })], false)
-    expect(html).toContain('They are kept here')
+    expect(html).toContain('Keep these exact words')
     expect(html).not.toContain('copy them')
     expect(html).not.toContain('Copy message')
   })

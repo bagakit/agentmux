@@ -45,8 +45,7 @@ import {
 import { createExecutionHost } from './host-factory.js'
 import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
 import { ProcessResourceSampler } from './process-resource-sampler.js'
-import { humanizePromptDeliveryError, isPromptReadinessSemanticState } from './prompt-readiness-diagnostics.js'
-import type { PromptReadinessSemanticState } from './prompt-readiness-diagnostics.js'
+import { humanizePromptDeliveryError } from './prompt-readiness-diagnostics.js'
 import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
@@ -832,7 +831,8 @@ export class RuntimeController {
     // passes a fresh id. The `?? randomUUID()` is a per-call fallback for callers that do not correlate
     // (only test callers) — it is never a STABLE default, so a caller that omits it can never make two
     // distinct attempts collide on one id.
-    operationId?: string
+    operationId?: string,
+    automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal }
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -844,9 +844,13 @@ export class RuntimeController {
         throw new AgentMuxError('Agent Session is not running. Use explicit resume.', 'SESSION_NOT_RUNNING')
       }
       try {
+        if (automation && !automation.isCurrent()) {
+          throw new AgentMuxError('Automatic delivery was cancelled.', 'AGENT_COMPLETION_CHANGED')
+        }
         await client.submitAgentPrompt({
           agentSessionId: control.agentSessionId,
           operationId: operationId ?? randomUUID(),
+          ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
           prompt
         })
       } catch (error) {
@@ -854,30 +858,21 @@ export class RuntimeController {
         // authoritative Run before translating a readiness error so a stopped Agent is never told to
         // keep waiting for an observation that can no longer arrive.
         let runState: 'running' | 'ended' | undefined
-        let semanticState: PromptReadinessSemanticState | undefined
         if (error instanceof AgentMuxError && (
-          error.code === 'AGENT_PROMPT_NOT_READY' ||
-          error.code === 'AGENT_PROMPT_READINESS_CONSUMED' ||
           error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
         )) {
           try {
             const latest = await client.statusAgent(control.agentSessionId)
             if (latest.run.runId === control.run.runId) {
               if (latest.run.state !== 'running') runState = 'ended'
-              else {
-                const candidate = latest.session.semanticStatus?.state
-                if (candidate && isPromptReadinessSemanticState(candidate)) {
-                  semanticState = candidate
-                }
-              }
+
             }
           } catch {
             // Keep the original fail-closed error when the follow-up observation is unavailable.
           }
         }
         throw humanizePromptDeliveryError(error, {
-          ...(runState ? { runState } : {}),
-          ...(semanticState ? { semanticState } : {})
+          ...(runState ? { runState } : {})
         })
       }
     })

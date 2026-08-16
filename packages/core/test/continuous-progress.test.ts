@@ -9,17 +9,17 @@ const base = {
 
 describe('decideContinuousProgress', () => {
   it('sends once for an unconsumed ready stop', () => {
-    expect(decideContinuousProgress({ session: base, tickId: 't1', now: 2000 })).toEqual({ kind: 'send', tickId: 't1', readinessId: 'ready-1' })
+    expect(decideContinuousProgress({ session: base, tickId: 't1', now: 2000 })).toEqual({ kind: 'send', tickId: 't1', completionId: '["r",1000]' })
   })
-  it('never sends while working, waiting for interaction, or readiness', () => {
+  it('does not send while working or awaiting interaction, but missing readiness is not a gate', () => {
     expect(decideContinuousProgress({ session: { ...base, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1000 } }, tickId: 't1', now: 2000 })).toEqual({ kind: 'skip', reason: 'working' })
     expect(decideContinuousProgress({ session: { ...base, pendingInteraction: {} as never }, tickId: 't1', now: 2000 })).toEqual({ kind: 'skip', reason: 'interaction-pending' })
     const { readyThroughByte: _readyThroughByte, ...notReady } = base.terminalPromptReadiness
-    expect(decideContinuousProgress({ session: { ...base, terminalPromptReadiness: notReady }, tickId: 't1', now: 2000 })).toEqual({ kind: 'skip', reason: 'not-ready' })
+    expect(decideContinuousProgress({ session: { ...base }, tickId: 't1', now: 2000 })).toEqual({ kind: 'send', tickId: 't1', completionId: '["r",1000]' })
   })
   it('deduplicates tick/readiness and protects changed user input', () => {
     expect(decideContinuousProgress({ session: base, tickId: 't1', lastTickId: 't1', now: 2000 })).toEqual({ kind: 'skip', reason: 'duplicate-tick' })
-    expect(decideContinuousProgress({ session: base, tickId: 't2', lastReadinessId: 'ready-1', now: 2000 })).toEqual({ kind: 'skip', reason: 'readiness-consumed' })
+    expect(decideContinuousProgress({ session: base, tickId: 't2', lastCompletionId: '["r",1000]', now: 2000 })).toEqual({ kind: 'skip', reason: 'completion-consumed' })
     expect(decideContinuousProgress({ session: base, tickId: 't2', userInputRevision: 2, submittedInputRevision: 1, now: 2000 })).toEqual({ kind: 'skip', reason: 'user-input-changed' })
   })
 })

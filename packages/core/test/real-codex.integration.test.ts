@@ -254,10 +254,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(firstExit!.run.exitCode).toBe(0)
     expect(firstExit!.run.exitSignal).toBeUndefined()
     expect(client.agentSession(created.agentSessionId).terminalPromptSubmission).toMatchObject({
-      readinessSource: 'native-stop',
-      readinessId: initialReadiness?.id,
-      readinessOutputCursorBytes: initialReadiness?.outputCursorBytes,
-      readyThroughByte: initialReadiness?.readyThroughByte,
+      readinessEvidence: { source: 'native-stop', id: initialReadiness?.id, outputCursorBytes: initialReadiness?.outputCursorBytes, readyThroughByte: initialReadiness?.readyThroughByte },
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
@@ -347,10 +344,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(resumedExit!.run.exitCode).toBe(0)
     expect(resumedExit!.run.exitSignal).toBeUndefined()
     expect(client.agentSession(resumed.agentSessionId).terminalPromptSubmission).toMatchObject({
-      readinessSource: 'native-stop',
-      readinessId: resumedReadiness?.id,
-      readinessOutputCursorBytes: resumedReadiness?.outputCursorBytes,
-      readyThroughByte: resumedReadiness?.readyThroughByte,
+      readinessEvidence: { source: 'native-stop', id: resumedReadiness?.id, outputCursorBytes: resumedReadiness?.outputCursorBytes, readyThroughByte: resumedReadiness?.readyThroughByte },
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })

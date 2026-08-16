@@ -12,8 +12,8 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
-const failure = () => dom.container.querySelector('.composer-feedback')
-const retry = '.composer-feedback button:first-of-type'
+const failure = () => dom.container.querySelector('.composer__notices, .composer-feedback')
+const retry = '.composer__notices .composer-notice__body button, .composer-feedback button:first-of-type'
 
 it('keeps file errors next to the Session draft, retries, and appends every chosen file to the latest draft', async () => {
   const choose = vi.spyOn(api.ui, 'chooseFiles').mockRejectedValueOnce(new Error('Picker unavailable')).mockResolvedValueOnce(['/repo/a.ts', '/repo/b.ts'])
@@ -89,7 +89,7 @@ it.each(['oversized', 'full queue'] as const)('reports %s admission locally and 
   expect(failure()?.textContent).toMatch(reason === 'oversized' ? /too large/ : /queue is full/)
   expect(dom.draft()).toBe(draft)
   expect(useAppStore.getState().error).toBeNull()
-  await dom.click('[aria-label="Dismiss message tool error"]')
+  await dom.click('[aria-label="Move notice to inbox"], [aria-label="Dismiss message tool error"]')
   expect(failure()).toBeNull()
   expect(dom.draft()).toBe(draft)
 })
