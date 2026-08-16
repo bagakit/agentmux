@@ -294,12 +294,27 @@ export function describePersistedTabRepairs(repairs: readonly PersistedTabRepair
   return `Saved layout contained inconsistent split panes: ${parts.join(', ')}.`
 }
 
-export function persistedAgentSessionIds(
+/**
+ * Every attached-session identity the persisted Workbench still names — Agent AND Terminal.
+ *
+ * This drives the startup empty-snapshot fail-open guard (store `initialize`): "an empty Runtime
+ * snapshot cannot distinguish 'no Sessions' from a not-yet-ready/mis-rooted Runtime, so keep the
+ * persisted Regions until a canonical snapshot confirms or retires them." That property is identical
+ * for both session kinds; scoping this to `kind === 'agent'` was an omission, not a decision, and it
+ * made the guard SILENTLY VANISH on a pure-Terminal layout (`.size` was 0, so `.size > 0` never
+ * fired) — a saved Terminal only survived a transient empty snapshot when it happened to share a Tab
+ * with an Agent that kept the guard alive. `sessionSurface` is the SSOT phase+kind predicate, so a
+ * future session-bearing kind is enrolled here once instead of being dropped by another copy.
+ *
+ * The recovery-candidate filter also reads this set, and stays correct: recovery candidates are only
+ * Agents, and a Terminal's id is its `run.runId`, which never equals an `agentSessionId`.
+ */
+export function persistedSessionSurfaceIds(
   persisted: PersistedWorkbench | null
 ): Set<string> {
   return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
     workbenchSurfaces(tab).flatMap((surface) => (
-      surface.kind === 'agent' && surface.phase === 'attached' ? [surface.sessionId] : []
+      sessionSurface(surface) ? [surface.sessionId] : []
     ))
   )) : [])
 }
