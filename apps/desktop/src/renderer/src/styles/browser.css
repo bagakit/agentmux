@@ -145,3 +145,10 @@
 .browser-screenshot-toolbar__actions > span { max-width: 220px; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .browser-screenshot-toolbar__actions .primary-button { width: auto; color: var(--bg); background: var(--green); font-weight: 700; }
 .browser-screenshot-toolbar__actions .primary-button:hover:not(:disabled) { color: var(--bg); background: var(--green-text); }
+/* 应用链接的那一问。骨架用既有的 .pane-state（居中列 + gap），这里只补它没有的三样：
+   URL 的等宽省略、勾选行、以及一行两个按钮。 */
+.browser-app-link-prompt svg { color: var(--text-3); }
+.browser-app-link-prompt code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: 10px/1.45 "SFMono-Regular", monospace; }
+.browser-app-link-prompt__url { max-width: min(420px, 100%); overflow: hidden; color: var(--text-3); font: 10px/1.45 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.browser-app-link-prompt__remember { display: flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.browser-app-link-prompt__actions { display: flex; gap:var(--sp-3); margin-top:var(--sp-1); }

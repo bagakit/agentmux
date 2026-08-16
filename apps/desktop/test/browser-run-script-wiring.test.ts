@@ -148,7 +148,12 @@ async function managerWithBrowser(): Promise<{
   const window = fakeWindow()
   const manager = new BrowserViewManager(window, profiles, new BrowserRefLedgerStore(
     join(mkdtempSync(join(tmpdir(), 'agentmux-wiring-')), 'ref-ledger.json')
-  ))
+  ), {
+    // 派发层已被 mock，应用链接走不到；给个惰性宿主，不要真的去开系统应用。
+    rememberedSchemes: async () => ({}),
+    rememberScheme: async () => {},
+    openExternal: () => {}
+  })
   await manager.create('b1', 'https://example.invalid/')
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。

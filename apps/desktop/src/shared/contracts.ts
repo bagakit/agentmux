@@ -324,6 +324,19 @@ export type BrowserConfig = {
    * 这是一个总开关，不是权限分级：开了就是全套页面能力可用。
    */
   agentAutomation?: boolean
+  /**
+   * 用户对「把某个 scheme 的应用链接交给系统」记住的答案，按 scheme 名存（不带冒号，如 `lark`）。
+   *
+   * 为什么按 scheme 而不按站点：用户回答的那一问是「准不准这类链接启动本机应用」，那是一个关于
+   * **目标应用**的判断，不是关于当前这个页面的。按站点存会让同一个飞书链接在文档域和开放平台域
+   * 上各问一次，而用户两次想的是同一件事。
+   *
+   * 缺席即「没问过」，不是「拒绝」——这三档必须分得开（见 `appLinkOutcome`）。同 `agentAutomation`
+   * 一样 optional，理由也一样：既有磁盘 config 没有这个字段，写成必需会让 browser 整块判失败。
+   * 但这一个**不**回填成 `{}`：空对象与缺席在语义上完全一样（都是「一个都没记过」），补一次盘
+   * 只是白写。
+   */
+  appLinkSchemes?: Record<string, 'allow' | 'deny'>
   toolbar: BrowserToolbarConfig
 }
 
@@ -875,6 +888,17 @@ export type BrowserSnapshot = {
    * 口子：冷启动复活一个「正在被驱动」的死标记，比不画更糟——它指的那段程序早就不在了。
    */
   driving: boolean
+  /**
+   * 这一页正等着用户回答「要不要把这个应用链接交给系统」。`null` 表示没有待答的。
+   *
+   * 走这份已经在流的快照，而不是新开一条 main→renderer 的提示通道：主进程今天**没有**任何能让
+   * 渲染进程弹确认框的通路（`BrowserEvent` 只有 `updated` / `closed` 两种），新开一条意味着第二套
+   * 「谁在等用户回答」的生命周期，而切 Tab、多 Region、窗口重建这些问题快照这条已经解决过一遍了。
+   *
+   * 和 `driving` 一样是**瞬时事实，不进持久化**：冷启动复活一个待答的提问，问的是一个早就不在的
+   * 页面上的一次点击。
+   */
+  appLinkPrompt: { url: string; scheme: string } | null
 }
 
 export type BrowserProfileImportedSource = {
@@ -1233,6 +1257,14 @@ export type AgentMuxDesktopApi = {
      */
     runScript(id: string, code: string): Promise<BrowserScriptRunReport>
     selectElement(id: string): Promise<BrowserElementSelection | null>
+    /**
+     * 回答这一页上待答的那个应用链接提问。`remember` 为真时把这个答案按 scheme 记进
+     * `BrowserConfig.appLinkSchemes`，此后同 scheme 不再问。
+     *
+     * 只收一个 id 而不收 url：待答的那一次就挂在这个 entry 上（`BrowserSnapshot.appLinkPrompt`），
+     * 让渲染进程回传 url 等于开了第二个事实源——页面可以在人回答之前又发起一次，两边就对不上了。
+     */
+    answerAppLink(id: string, allow: boolean, remember: boolean): Promise<BrowserSnapshot>
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>

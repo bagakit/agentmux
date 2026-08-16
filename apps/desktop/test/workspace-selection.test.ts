@@ -57,7 +57,8 @@ describe('selected worktree workspace context', () => {
       canGoForward: false,
       viewport: 'responsive',
       error: null,
-      driving: false
+      driving: false,
+      appLinkPrompt: null
     }
     useAppStore.setState({
       config,

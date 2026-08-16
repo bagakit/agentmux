@@ -341,7 +341,13 @@ describe('自愈过的运行不许报成干净的成功', () => {
     const manager = new BrowserViewManager(
       { isDestroyed: () => false, contentView: { addChildView() {}, removeChildView() {} }, webContents: { isDestroyed: () => false, send() {} } } as never,
       { defaultProfileId: () => 'default', resolvePartition: (id: string) => `persist:${id}` },
-      new BrowserRefLedgerStore(join(await mkdtemp(join(tmpdir(), 'agentmux-ref-run-')), 'l.json'))
+      new BrowserRefLedgerStore(join(await mkdtemp(join(tmpdir(), 'agentmux-ref-run-')), 'l.json')),
+      // 本文件判的是 ref 账本，应用链接一次都不会走到；给一个什么都不做的宿主而不是真 shell。
+      {
+      rememberedSchemes: async () => ({}),
+      rememberScheme: async () => {},
+      openExternal: () => {}
+    }
     )
     await manager.create('b1', 'https://example.invalid/')
 
