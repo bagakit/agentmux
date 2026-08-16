@@ -15,24 +15,31 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 5
+    "round_count": 13
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-005",
+    "last_task_id": "T-010",
     "last_check_commands": [
       {
-        "command": "test -f apps/desktop/test/provider-identity-restart.integration.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/provider-identity-restart.integration.test.ts --maxWorkers=1",
+        "command": "pnpm exec vitest run apps/desktop/test/terminal-replay-reflow-recovery.test.ts apps/desktop/test/terminal-viewport-sync.test.ts apps/desktop/test/runtime-controller.test.ts apps/desktop/test/provider-identity-restart.integration.test.ts --maxWorkers=1",
         "exit_code": 0,
         "status": "pass"
       },
       {
-        "command": "pnpm --filter @agentmux/core exec vitest run test/agent-session-continuity.test.ts --maxWorkers=1",
+        "command": "rg -n \"beginReplay|endReplay\" apps/desktop/src/renderer/src/components/TerminalView.tsx",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-25k8f8m9k/artifacts/gate-T-005-r5-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-25k8f8m9k/artifacts/gate-T-010-r13-0001.log",
+    "last_context": {
+      "candidate_sha": "342ac5e20b0958f14c9ce5d3f1bc6ce4b035bc37",
+      "worktree_digest": "91b3c270280fd90f3fc5708aaba384ffc5cadd6ec546d99e28cb359d9e17e2bf",
+      "verification_digest": "none",
+      "dedup_key": "e135dc76c861a5fa544bee40567e5b0b6c58db3ad0c90ef659b14a8aa64364b5",
+      "plan_revision": 5
+    }
   },
   "history": [
     {
@@ -78,6 +85,74 @@
     {
       "action": "task_finished",
       "detail": "T-005 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-008"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-008 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=4; supersedes_revision=3"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=5; supersedes_revision=4"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-009"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => fail (rerun: Final admission, keyboard and scoped retry fixes with mutation evidence)"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => fail (rerun: Final pending-output geometry lock and resize failure recovery validated)"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => fail (rerun: Rebuilt Core after concurrent source update; final candidate validation)"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => pass (rerun: Run immediately after rebuilding concurrently edited Core source)"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-009 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass (rerun: Run final geometry gate immediately after rebuilding concurrently edited Core source)"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => done"
     }
   ]
 }

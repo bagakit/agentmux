@@ -2,13 +2,13 @@
   "version": 2,
   "feat_id": "f-25k8f8m9k",
   "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
-  "review_ref": "docs/reviews/provider-human-interaction-refactor-2026-09-13.md",
+  "plan_revision": 5,
+  "supersedes_revision": 4,
+  "review_ref": "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
   "source_refs": [
+    "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
     "docs/design/agentmux-desktop-interaction.md",
-    "docs/design/agentmux-surface-density.md",
-    "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+    "docs/design/agentmux-surface-density.md"
   ],
   "plan_history": [
     {
@@ -55,6 +55,103 @@
       "dependency_changes": {
         "added": [],
         "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/notice-dedup-defeated-by-volatile-diagnostic-2026-09-19.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/notice-dedup-defeated-by-volatile-diagnostic-2026-09-19.md",
+        "docs/reviews/provider-human-interaction-refactor-2026-09-13.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-002",
+            "to": "T-009"
+          },
+          {
+            "from": "T-005",
+            "to": "T-010"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+      "source_refs": [
+        "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": [
+          {
+            "from": "T-002",
+            "to": "T-009"
+          }
+        ]
       }
     }
   ],
@@ -379,6 +476,178 @@
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
+    },
+    {
+      "id": "T-008",
+      "depends_on": [],
+      "title": "关掉的通报按原因去重，不按呈现文本",
+      "objective": "用户报告：同一条 readiness 拒绝关掉后反复复活。根因是 reportError 按整串消息相等去重，而消息尾部的 Diagnostic 段带着单调增长的 latestOutputBytes，于是同一原因每次都是新字符串。把去重键收敛到「失败的身份」这一处，易变诊断只进展示层；反向边界同样硬：不得粗到把两个不同失败合并。",
+      "outcome": "用户关掉一个失败后，同一失败即使诊断数字变了也不再复活；不同的失败照常出现；诊断本身不因去重而丢失（reopen 仍拿得到可粘贴的诊断）。",
+      "acceptance": [
+        "同一原因、Diagnostic 里的 latestOutputBytes 变化：关掉后再次上报不得复活（errorDismissed 保持 true）。",
+        "不同原因：关掉一个后，另一个失败必须照常出现——身份不得退化成常量。",
+        "reopen 仍返回带 Diagnostic 的文本；被抑制的那次不写 store，因此拿到的是首次那份诊断（runId/readinessId/reason 与后续完全一致，无可诊断信息丢失）。",
+        "跨文件链有守卫：机器细节的标签在 main 侧拼、在 renderer 侧剥，标签改名必须红。",
+        "记录三条 mutation 破坏点与红/恢复绿输出，以及排除定义文件后的生产调用者证据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/test/error-presentation.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/error-presentation.test.ts --maxWorkers=1",
+          "proves": "同一原因诊断变化不复活、不同原因照常出现、标签跨文件链在场——三条都在这个文件里，且各有对应 mutation。"
+        },
+        {
+          "kind": "command",
+          "ref": "grep -rn 'errorIdentity' apps/desktop/src | grep -v 'lib/error-presentation.ts'",
+          "proves": "零调用者检查：排除定义文件后仍有生产调用点（store.ts 的 reportError），能力真的接到了产品上。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/notice-dedup-defeated-by-volatile-diagnostic-2026-09-19.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "introduced_in_revision": 3,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "test -f apps/desktop/test/error-presentation.test.ts && pnpm --filter @agentmux/desktop exec vitest run test/error-presentation.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "grep -rn 'errorIdentity' apps/desktop/src | grep -v 'lib/error-presentation.ts'",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "2336b111609476b6f2e4fbff162812aa1b11cccc",
+        "worktree_digest": "2162ac62949e318e30fd7e4f97e01ad4ea32486c026f3aa9bcc9e91df14128d9",
+        "verification_digest": "none",
+        "dedup_key": "37dde6eba66a093cf9a609af283e7363ba7394ca2da15c59dae8c9db221737e2",
+        "plan_revision": 3
+      }
+    },
+    {
+      "id": "T-009",
+      "depends_on": [],
+      "title": "收敛队列条目与 Composer 草稿归属",
+      "objective": "Unify queue ownership, admission, single-flight delivery, current-state reads, scoped wakeups and truthful per-entry feedback.",
+      "outcome": "No duplicate admission, deleted-tail delivery, stale-run blocking or retry storms; restored queues progress.",
+      "acceptance": [
+        "Admission transfers the unchanged draft to one queue entry immediately; refused admission keeps the draft.",
+        "Manual and automatic delivery share one per-session flight; reread current entries and Session before every delivery; remove by operationId.",
+        "Old Run entries remain copyable without blocking current Run; in-flight entries cannot falsely promise cancellation.",
+        "Only relevant state/readiness/reconnect events wake retries; canonical snapshot restoration wakes persisted queues without requiring output.",
+        "Mutation red/green and external production callers recorded."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/provider-ingress-consumers.test.tsx test/agent-session-composer.test.tsx test/agent-steer-queue.test.ts --maxWorkers=1",
+          "proves": "队列与草稿只有一个待投递副本，拒绝入队仍保留草稿，重试复用 operationId。"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"sendQueuedAgentSteer|enqueueAgentSteer|flushAgentSteerQueue\" apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+          "proves": "队列能力存在真实生产消费者，排除定义文件后仍有调用者。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "发送失败、草稿清理和队列回执跨 Store/Composer 两个 owner，需要行为竖切闭合。",
+      "introduced_in_revision": 4,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/provider-ingress-consumers.test.tsx test/agent-session-composer.test.tsx test/agent-steer-queue.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "rg -n \"sendQueuedAgentSteer|enqueueAgentSteer|flushAgentSteerQueue\" apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "342ac5e20b0958f14c9ce5d3f1bc6ce4b035bc37",
+        "worktree_digest": "91b3c270280fd90f3fc5708aaba384ffc5cadd6ec546d99e28cb359d9e17e2bf",
+        "verification_digest": "none",
+        "dedup_key": "7b8d9921a011e02eae2b2afc7b3e92e1316617a746838a2fbf588ff1c3e28efb",
+        "plan_revision": 5
+      }
+    },
+    {
+      "id": "T-010",
+      "depends_on": [
+        "T-005"
+      ],
+      "title": "Restore attachment replay geometry from ctxmux owner size",
+      "objective": "Carry attached.run current size to Renderer and freeze parsing geometry throughout replay before normal viewport synchronization.",
+      "outcome": "Resume/reattach no longer clips the first screen through wrong or changing replay geometry.",
+      "acceptance": [
+        "Attach conveys owner-confirmed size or explicit unknown; do not substitute RunSpec initial size.",
+        "Replay starts at attachment geometry and fit cannot change it between batches; live viewport resumes after replay.",
+        "Unknown size remains visible and does not block the healthy Agent; retained layout and Session recover across isolated process restart.",
+        "Real headless behavior, mutation red/green and production callers prove the chain."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/terminal-replay-reflow-recovery.test.ts apps/desktop/test/terminal-viewport-sync.test.ts apps/desktop/test/runtime-controller.test.ts apps/desktop/test/provider-identity-restart.integration.test.ts --maxWorkers=1",
+          "proves": "Attachment geometry, replay ordering and isolated restart recovery."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"beginReplay|endReplay\" apps/desktop/src/renderer/src/components/TerminalView.tsx",
+          "proves": "Real TerminalView invokes the replay geometry owner."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-input-queue-and-resume-size-2026-09-20.md",
+        "packages/core/src/client.ts",
+        "apps/desktop/src/main/runtime-controller.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "尺寸事实跨 ctxmux/Core/Runtime/Renderer，必须保留唯一 owner 并覆盖自动与显式恢复。",
+      "introduced_in_revision": 4,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm exec vitest run apps/desktop/test/terminal-replay-reflow-recovery.test.ts apps/desktop/test/terminal-viewport-sync.test.ts apps/desktop/test/runtime-controller.test.ts apps/desktop/test/provider-identity-restart.integration.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "rg -n \"beginReplay|endReplay\" apps/desktop/src/renderer/src/components/TerminalView.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "342ac5e20b0958f14c9ce5d3f1bc6ce4b035bc37",
+        "worktree_digest": "91b3c270280fd90f3fc5708aaba384ffc5cadd6ec546d99e28cb359d9e17e2bf",
+        "verification_digest": "none",
+        "dedup_key": "e135dc76c861a5fa544bee40567e5b0b6c58db3ad0c90ef659b14a8aa64364b5",
+        "plan_revision": 5
+      }
     }
   ]
 }

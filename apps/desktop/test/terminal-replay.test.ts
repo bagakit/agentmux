@@ -54,13 +54,14 @@ describe('hydrateTerminalReplay', () => {
       canControlRun: true,
       startLiveSynchronization: async () => { calls.push('live') },
       releaseLiveOutput: async () => { calls.push('release') },
+      finishReplay: () => { calls.push('finish') },
       redrawCurrentScreen: async () => {
         calls.push('redraw')
         return true
       }
     })).resolves.toBe(true)
 
-    expect(calls).toEqual(['release', 'live', 'redraw'])
+    expect(calls).toEqual(['release', 'finish', 'live', 'redraw'])
   })
 
   it('keeps historical Gap replay read-only', async () => {
@@ -71,13 +72,14 @@ describe('hydrateTerminalReplay', () => {
       canControlRun: false,
       startLiveSynchronization: async () => { calls.push('live') },
       releaseLiveOutput: async () => { calls.push('release') },
+      finishReplay: () => { calls.push('finish') },
       redrawCurrentScreen: async () => {
         calls.push('redraw')
         return true
       }
     })).resolves.toBe(false)
 
-    expect(calls).toEqual(['release'])
+    expect(calls).toEqual(['release', 'finish'])
   })
 
   it('keeps an optional redraw failure from turning a successful attach into an attach error', async () => {
@@ -88,6 +90,7 @@ describe('hydrateTerminalReplay', () => {
       canControlRun: true,
       startLiveSynchronization: async () => {},
       releaseLiveOutput: async () => {},
+      finishReplay: () => {},
       redrawCurrentScreen: async () => { throw new Error('resize unavailable') },
       onRedrawError
     })).resolves.toBe(false)
@@ -107,11 +110,12 @@ describe('hydrateTerminalReplay', () => {
         throw new Error('resize unavailable')
       },
       releaseLiveOutput: async () => { calls.push('release') },
+      finishReplay: () => { calls.push('finish') },
       redrawCurrentScreen: async () => { calls.push('redraw'); return true },
       onRecoveryError
     })).resolves.toBe(false)
 
-    expect(calls).toEqual(['release', 'live'])
+    expect(calls).toEqual(['release', 'finish', 'live'])
     expect(onRecoveryError).toHaveBeenCalledOnce()
   })
 })

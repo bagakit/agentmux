@@ -1,3 +1,32 @@
+import type { AgentMuxRunState } from '@agentmux/core'
+import { agentViabilityFromProcessState, type StepOutcome } from './service-window-notice'
+
+export function terminalReplayGeometryOutcome(unknown: boolean, processState: AgentMuxRunState): StepOutcome {
+  if (!unknown) return { completed: true }
+  return {
+    completed: false,
+    agentViability: agentViabilityFromProcessState(processState),
+    step: {
+      label: 'Confirming replay geometry',
+      degradedMode: 'The terminal remains available. Retained output may have an incorrect layout because its size is unknown.',
+      restore: 'Viewport synchronization requests a repaint of the current screen. Resize the pane to retry; historical layout cannot be confirmed.'
+    }
+  }
+}
+
+export function terminalViewportSyncOutcome(failed: boolean, processState: AgentMuxRunState): StepOutcome {
+  if (!failed) return { completed: true }
+  return {
+    completed: false,
+    agentViability: agentViabilityFromProcessState(processState),
+    step: {
+      label: 'Synchronizing terminal size',
+      degradedMode: 'The terminal remains available, but the Runtime has not confirmed the requested screen size.',
+      restore: 'Resize the pane or return to this tab to retry. This notice clears when the Runtime confirms the resize.'
+    }
+  }
+}
+
 export type TerminalReplayChunk = {
   data: string
   endByte: number
@@ -57,6 +86,7 @@ export async function finishTerminalReplayRecovery(options: {
   canControlRun: boolean
   startLiveSynchronization(): Promise<void>
   releaseLiveOutput(): Promise<void>
+  finishReplay(): void
   redrawCurrentScreen(): Promise<boolean>
   onRedrawError?(error: unknown): void
   onRecoveryError?(error: unknown): void
@@ -68,6 +98,10 @@ export async function finishTerminalReplayRecovery(options: {
     await options.releaseLiveOutput()
   } catch (error) {
     options.onRecoveryError?.(error)
+  } finally {
+    // The startup bytes were rendered at the attachment's size too. Unlock only after their
+    // drain settles, including failed drains and historical Runs that cannot resize a PTY.
+    options.finishReplay()
   }
   if (options.canControlRun) {
     try {
