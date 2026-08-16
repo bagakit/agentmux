@@ -88,6 +88,10 @@ export interface StrandedDeclaration {
 function multiLineComments(text: string): { startLine: number; body: string }[] {
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.JSX, text)
   const out: { startLine: number; body: string }[] = []
+  // 模板字符串里的 `${ ... }`：裸 `scan()` 把回到模板那一步的 `}` 当成普通右花括号，于是紧随其后的
+  // 模板尾（`}/**` 里的 `/*`）被误判成注释起点，一路吞到文件尾——真声明连同它被静默吃掉。要在每层
+  // 模板表达式收尾处调 `reScanTemplateToken` 续读模板尾。栈记每层模板内表达式已进入的花括号深度。
+  const templateBraceDepth: number[] = []
   let kind = scanner.scan()
   while (kind !== ts.SyntaxKind.EndOfFileToken) {
     if (kind === ts.SyntaxKind.MultiLineCommentTrivia) {
@@ -97,6 +101,18 @@ function multiLineComments(text: string): { startLine: number; body: string }[] 
       if (body.includes('\n')) {
         out.push({ startLine: text.slice(0, start).split('\n').length, body })
       }
+    } else if (kind === ts.SyntaxKind.TemplateHead) {
+      templateBraceDepth.push(0)
+    } else if (kind === ts.SyntaxKind.OpenBraceToken && templateBraceDepth.length > 0) {
+      templateBraceDepth[templateBraceDepth.length - 1]! += 1
+    } else if (kind === ts.SyntaxKind.CloseBraceToken && templateBraceDepth.length > 0) {
+      if (templateBraceDepth[templateBraceDepth.length - 1] === 0) {
+        // 这个 `}` 是最内层 `${` 的收尾——续读模板尾，别让它当普通花括号。
+        kind = scanner.reScanTemplateToken(false)
+        if (kind === ts.SyntaxKind.TemplateTail) templateBraceDepth.pop()
+        continue
+      }
+      templateBraceDepth[templateBraceDepth.length - 1]! -= 1
     }
     kind = scanner.scan()
   }
