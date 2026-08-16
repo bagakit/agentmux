@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PROTOCOL_VERSION, type RunEvent } from '@ctxmux/sdk'
+import { PROTOCOL_VERSION, type RunEvent, type RunInfo } from '@ctxmux/sdk'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
@@ -92,50 +92,20 @@ describe('Run 投影报告 owner-confirmed current_size，而不是 spec.size', 
     await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
   })
 
-  it('current_size 显式为 null 时，连自己刚记下的 applied size 都不许顶上', async () => {
-    // 上一条用的是**全新 adapter**，`confirmedSizes` 是空的——于是 `=== undefined` 与 `!snapshot`
-    // 两种判据给出同一个 null，那条断言对这个分支是空转的（实测：把 `snapshot === undefined` 改成
-    // `!snapshot`，5/5 全绿）。判别力只在「缓存里**有**东西」时才出现，所以这里先真做一次 resize
-    // 把 applied size 记进 confirmedSizes，再让 owner 报 null。
+  it('刚成功 resize 过，owner 随后报 null 也必须是 null——不许留一份缓存顶上', async () => {
+    // 上一条用的是**全新 adapter**：它从没见过任何尺寸，所以「不缓存」这个性质在那里是空转的。
+    // 判别力只在「刚刚见过一个尺寸」时才出现，所以这里先真做一次 resize 拿到 200x87，再让 owner 报 null。
     //
-    // 契约是两件不同的事必须分开：字段**缺席**（老快照没这个字段）可以回退到我们记下的 applied
-    // size；字段**显式为 null**是 owner 在说「我现在也不知道」——那就得如实是 unknown。拿一个陈旧的
-    // 缓存值去冒充「当前尺寸」，比承认不知道更糟：它看起来是权威事实，而屏幕证据会按这个错尺寸重建。
+    // 曾经有一本本地台账记着我们自己发起的 resize，用来在快照没有 `current_size` 字段时顶上；protocol 16
+    // 把该字段变成必填，台账随之删掉。这条用例留下来守的是**删掉之后**的性质：`null` 是 owner 在说
+    // 「我现在也不知道」，任何形式的缓存回填都不许把它改写成一个看起来权威的陈旧尺寸——屏幕证据会按那个
+    // 错尺寸重建，而它要拿去做严格等值比较。谁再加回一层缓存，这条立刻红。
     const adapter = adapterWith({ currentSize: { cols: 80, rows: 24 }, appliedSize: { cols: 200, rows: 87 } })
     await adapter.resize('resize-run', 200, 90)
     await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: 200, rows: 87 })
 
     ;(adapter as unknown as { client: { status: () => Promise<unknown> } }).client.status =
       async () => runInfo(null)
-    await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
-  })
-
-  it('没有 current_size 字段时，也不用 spec.size 冒充当前尺寸', async () => {
-    const adapter = new CtxmuxRunAdapter()
-    const snapshot = {
-      id: 'resize-run',
-      spec: {
-        program: 'codex',
-        args: [],
-        cwd: '/tmp/resize-run',
-        env: {},
-        size: { cols: 80, rows: 24 }
-      },
-      lineage: null,
-      backend: { type: 'native' },
-      capabilities: {},
-      pid: 4321,
-      state: { type: 'running' },
-      latest_output_bytes: 0,
-      durable_output_bytes: 0,
-      first_available_byte: 0,
-      attachments: 1,
-      applied_input_bytes: 0
-    }
-    ;(adapter as unknown as { client: unknown }).client = {
-      status: async () => snapshot,
-      list: async () => [snapshot]
-    }
     await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
   })
 })
@@ -160,7 +130,7 @@ describe('折行随屏幕宽度重算——这是尺寸必须正确的原因', (
 })
 
 describe('Resized 是几何事件，不是进程退出', () => {
-  it('observeOutput 把 Resized 投递给观察者，并记下 applied size', async () => {
+  it('observeOutput 把 Resized 投递给观察者，且**不**把它记进任何本地尺寸记录', async () => {
     const adapter = new CtxmuxRunAdapter()
     const seen: CtxmuxAdapterObservationEvent[] = []
     async function* events(): AsyncGenerator<RunEvent, void, void> {
@@ -182,26 +152,7 @@ describe('Resized 是几何事件，不是进程退出', () => {
         detach: async () => {},
         close: () => {}
       }),
-      status: async () => ({
-        id: 'resize-run',
-        spec: {
-          program: 'codex',
-          args: [],
-          cwd: '/tmp/resize-run',
-          env: {},
-          size: { cols: 80, rows: 24 }
-        },
-        lineage: null,
-        backend: { type: 'native' },
-        capabilities: {},
-        pid: 4321,
-        state: { type: 'running' },
-        latest_output_bytes: 0,
-        durable_output_bytes: 0,
-        first_available_byte: 0,
-        attachments: 1,
-        applied_input_bytes: 0
-      })
+      status: async () => runInfo(null)
     }
 
     const observation = await adapter.observeOutput('resize-run', 0, (event) => seen.push(event))
@@ -211,27 +162,35 @@ describe('Resized 是几何事件，不是进程退出', () => {
     }
     expect(seen.map((event) => event.type)).toEqual(['resized', 'exit'])
     expect(seen[0]).toMatchObject({ type: 'resized', cols: 200, rows: 87 })
-    // Live Resized fills the observation cache used when a later snapshot omits current_size.
-    await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: 200, rows: 87 })
+    // 事件**只**投递给观察者，不回填进任何本地尺寸记录：owner 随后说 null，投影就得是 null。
+    // 这一条是删掉那本台账的守卫——谁再把 `resized` 记进一张 Map 并让 projectRun 读它，这里立刻红。
+    await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
     await observation.close()
   })
 })
 
 /**
  * 上面那些 `resized` / `current_size` 用例喂的都是**合成**事件与快照。它们证明 handler 写对了，
- * 证明不了 daemon 发得出来——而今天它发不出来：vendored artifact 是 ctxmux `c13ab114`、protocol 14，
- * 其 SDK 既没有 `RunInfo.current_size` 也没有 `resized` 变体。所以真正在跑的只有 resize receipt 的
- * `applied_size` 那条路，跨客户端的 resize 收不到。
+ * 证明不了 daemon 发得出来。这一条把「发得出来」钉在**产物**上：换代即红。
  *
- * 这一条把那个事实钉在**产物**上而不是注释里：重新 vendor 到带这两个字段的版本时它会变红，提示去
- * 掉 adapter 里的 cast、把 `docs/architecture/terminal-runtime.md` 那行 caveat 删掉，并确认跨客户端
- * resize 真的通了。红的时候不是缺陷，是"前提变了，来收尾"。
+ * protocol 16 起 `current_size` 是 RunInfo 上的**必填**字段（Rust 侧没有 `skip_serializing_if`），
+ * 所以每张快照都给出答案，`null` 是「没有 owner 能确认」这个真答案，不是「字段缺席」。adapter 因此
+ * 删掉了那本只记录**我们自己**发起的 resize 的本地台账——daemon 的答案在每条路径上都先到。
  */
 describe('vendored ctxmux 的协议现状', () => {
-  it('仍是 protocol 14：current_size 与 resized 尚未存在，cast 与 caveat 都还需要', () => {
+  it('是 protocol 16：current_size 与 resized 都已在场', () => {
     // 用 SDK 导出的常量，而不是 grep 生成物的 .d.ts：常量是 SDK 的公开契约，随 tarball 一起被
     // pnpm-lock 的 integrity 钉住；grep 要写死一条 node_modules/.pnpm 路径，路径一变就**静默**
     // 变成读不到文件或恒真断言——那正是这条用例要防的东西。
-    expect(PROTOCOL_VERSION).toBe(14)
+    expect(PROTOCOL_VERSION).toBe(16)
+  })
+
+  it('current_size 是必填字段——台账被删掉正是靠这一条', () => {
+    // 类型层判据，不是运行时的：一个值上「字段缺席」根本无从运行时区分于「值是 undefined」，而承重
+    // 的性质恰恰是**类型**上不允许缺席。若上游把它改回 `current_size?:`，`undefined` 就进了这个联合，
+    // RequiredCurrentSize 塌成 never，下面这行赋值立刻是 tsc 错误——而不是一条静默照绿的运行时断言。
+    type RequiredCurrentSize = undefined extends RunInfo['current_size'] ? never : true
+    const currentSizeIsRequired: RequiredCurrentSize = true
+    expect(currentSizeIsRequired).toBe(true)
   })
 })

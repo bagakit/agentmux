@@ -96,7 +96,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/control.ts`、`lib/workbench-view-layout.ts`、`lib/workbench-layout.ts` |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
 | Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
-| Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 投影不得用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。**当前 vendored artifact 是 protocol 14，两者都还不存在**，实际生效的是每次 resize receipt 的 `applied_size`：我们自己发起的 resize 覆盖到，别的客户端发起的收不到。重新 vendor 到 protocol 16 后无需改代码即自动启用 | `ctxmux-run-adapter.ts`、`screen-evidence.ts` |
+| Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 投影不得用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。`current_size` 是 protocol 16 的**必填**字段：daemon 每次快照都给出答案，`null` 是「没有 owner 能确认」这个真答案（tmux 托管的 pane、历史 Run），不是「字段缺失」。跨客户端 resize 通过广播给所有 attachment 的 `RunEvent::Resized` 收到 | `ctxmux-run-adapter.ts`、`screen-evidence.ts` |
 | Replay（重连时的字节回放） | CtxMux 快照，adapter 解码 | `ctxmux-run-adapter.ts:609`（`attach`）、`:641`（`replay`）、`:665`（`observeOutput`） |
 | Input（带累计 cursor 的可恢复写入） | CtxMux，adapter 用 `recoverableInput` 重试一次 | `ctxmux-run-adapter.ts:738`（`input`，`attempt < 2` + `disposition === 'unknown'`） |
 | Core Provider handshake（终端能力握手） | `AgentMuxClient` | `client.ts:1139`（`ensureTerminalHandshake`） |

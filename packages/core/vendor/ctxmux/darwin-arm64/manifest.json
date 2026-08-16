@@ -1,14 +1,14 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7",
-    "tree": "c43e3992e2e127d4b4e65e447fd23b9037be7f9c",
-    "commit_time_unix": "1788018958",
+    "commit": "aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02",
+    "tree": "1d97495e717cce1c3ac588a3c0712d9555b5c871",
+    "commit_time_unix": "1789501181",
     "worktree_clean": true
   },
   "product": {
     "version": "0.1.0",
-    "protocol": 14
+    "protocol": 16
   },
   "support": {
     "platform": "darwin",
@@ -19,7 +19,7 @@
   "build": {
     "profile": "release",
     "locked": true,
-    "source_date_epoch": "1788018958",
+    "source_date_epoch": "1789501181",
     "rustc": "1.96.0",
     "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
     "node": "v24.14.1",
@@ -28,13 +28,13 @@
   "sdk": {
     "name": "@ctxmux/sdk",
     "version": "0.0.0",
-    "protocol": 14,
-    "entry_count": 238,
-    "unpacked_bytes": 386239,
+    "protocol": 16,
+    "entry_count": 246,
+    "unpacked_bytes": 403977,
     "archive": {
       "path": "ctxmux-sdk-0.0.0.tgz",
-      "sha256": "4ab5772c6a7fa4f6475a40c819cde280a99b3c2492a0a5ed2afdcab2a10f6e93",
-      "bytes": 84860,
+      "sha256": "7e4d82f7cafe4ecd9c78df1973859ca64c8c7baacbe5749d3bcbc0acbfd8ced3",
+      "bytes": 90323,
       "mode": "0644"
     }
   },
@@ -42,19 +42,19 @@
     {
       "name": "ctxmux",
       "version": "0.1.0",
-      "protocol": 14,
+      "protocol": 16,
       "path": "bin/ctxmux",
-      "sha256": "50b3d6d5ca2e5422c2e3a159f75082eb66f54ee30c05e1806735804abd0c9389",
-      "bytes": 2705968,
+      "sha256": "5fed994868c219809f6dd165b2495f367020c545ea8dd605304a16184ffc6475",
+      "bytes": 2783488,
       "mode": "0755"
     },
     {
       "name": "ctxmuxd",
       "version": "0.1.0",
-      "protocol": 14,
+      "protocol": 16,
       "path": "bin/ctxmuxd",
-      "sha256": "b6cf8c862123ee2edb41e7e895acd56a783d716d9cdf2bc792527b16c760b309",
-      "bytes": 5488704,
+      "sha256": "3637eb59efcf5d1cf3213dbe1fbf9fee57e5a430b0f41ecb4f223b9a3bd48760",
+      "bytes": 5649264,
       "mode": "0755"
     }
   ],
