@@ -353,8 +353,12 @@ describe('T-002 Topic panel projects each Topic’s Agents from the filesystem',
   })
 
   it('reuses the existing openScratchTopic navigation action rather than a second path', () => {
+    // 这条扫的是**规则现在住的那个文件**：459f5ccc 把 Topic 面板从 SurfaceToolDock 抽成了
+    // WorkspaceTopicsPanel，而判据还钉着旧文件名。`toContain` 在「文件还在、内容搬走了」时
+    // 只会变红（这次就是），但同一族的 `not.toContain` 会静默恒真——所以搬家之后判据必须
+    // 跟着搬，而不是放宽。SurfaceToolDock 里如今 openScratchTopic/nextTopicId 是 0 处。
     const source = readFileSync(
-      new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
+      new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
       'utf8'
     )
     expect(source).toContain('await openScratchTopic(nextTopicId)')
