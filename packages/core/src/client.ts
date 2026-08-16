@@ -3733,6 +3733,22 @@ export class AgentMuxClient {
     return this.registry.get(agentSessionId)
   }
 
+  /** A cancelled Hook must finish draining even if its read-only Runtime query never replies. */
+  private async observeHookRun(runId: string, signal: AbortSignal): Promise<CtxmuxAdapterRun> {
+    signal.throwIfAborted()
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(signal.reason)
+      signal.addEventListener('abort', abort, { once: true })
+    })
+    try {
+      // Only the observation is abandoned. No input, lifecycle command, or shared connection is cancelled.
+      return await Promise.race([this.kernel.status(runId), cancelled])
+    } finally {
+      signal.removeEventListener('abort', abort)
+    }
+  }
+
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     // 进程已经终结的 run 不再收它的 hook。这一条挡的是**两个**写入点：下面既发 agent-status 事件、又把
@@ -3787,7 +3803,7 @@ export class AgentMuxClient {
     // 让 screenEvidence 从头扫，把上一轮的提示符误认成这一轮的，于是在 Agent 其实没就绪时放行 prompt。
     // 缺席则让下一次 agentPrompt 收到 `epoch-missing` 的响亮拒绝（prompt-submission.ts:199）。
     const stopRun = normalized.lifecycleEvent === 'turn-end'
-      ? await this.kernel.status(session.run.runId).catch((error: unknown) => {
+      ? await this.observeHookRun(session.run.runId, signal).catch((error: unknown) => {
           if (error instanceof AgentMuxError && error.code === 'CTXMUX_DISCONNECTED') return null
           throw error
         })
