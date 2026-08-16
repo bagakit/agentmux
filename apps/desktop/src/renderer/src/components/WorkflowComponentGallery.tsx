@@ -48,6 +48,7 @@ export function WorkflowComponentGallery() {
         <a href="#workflow-scale"><SemanticIcon name="scale" />规模与降级</a>
         <a href="#workflow-dock"><SemanticIcon name="dock" />输入框上方 dock</a>
         <a href="#existing-surfaces"><SemanticIcon name="branch" />聊天表面</a>
+        <a href="#composer-details"><SemanticIcon name="message-tools" />Composer 细节</a>
       </nav>
       <section id="workflow-context" className="wf-gallery__section">
         <p className="wf-gallery__caption"><SemanticIcon name="context" /><b>A · 时间线上下文</b><span>Workflow 与普通 tool 行共用低干扰的时间线语言。</span></p>

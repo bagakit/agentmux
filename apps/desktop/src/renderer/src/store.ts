@@ -254,9 +254,9 @@ export type HostCheckState = {
 /**
  * One queued steer, carrying the correlation key for its ONE submission attempt. The id is born when the
  * entry is enqueued and dies when the entry drains — it lives ONLY on the entry, never in a persisted
- * field. A failed flush retains the entry (store.ts flushAgentSteerQueue), so the next flush replays it
- * with the SAME `operationId`; Core then recognizes the idempotent replay instead of gating it BUSY. Two
- * distinct prompts are two distinct entries with two distinct ids. Never added to `partialize` — a
+ * field. A failed automatic flush changes the entry to `failed` and never retries it. A user-triggered
+ * "Send now" reuses the SAME `operationId`; Core can therefore recognize an accepted-but-unacknowledged
+ * attempt instead of writing it twice. Two distinct prompts are two distinct entries with two distinct ids. Never added to `partialize` — a
  * correlation key for an in-flight attempt is not layout the user meant to keep across a restart.
  *
  * `runId` is the run this steer was typed AT, and it is what makes "stale" a decidable fact rather than
@@ -266,7 +266,13 @@ export type HostCheckState = {
  * is exactly the "silently replaying a stale steer into a fresh session" the composer refuses to offer
  * as a button. See lib/agent-steer-queue-drain.ts for why the check lives at the consumer.
  */
-export type AgentSteerQueueEntry = { operationId: string; runId: string; text: string }
+export type AgentSteerQueueEntry = {
+  operationId: string
+  runId: string
+  text: string
+  status: 'queued' | 'failed'
+  error?: string
+}
 
 type AppState = {
   runtimeOwnershipWarnings: string[]
@@ -4554,7 +4560,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const entry: AgentSteerQueueEntry = {
       operationId: crypto.randomUUID(),
       runId: session.control.run.runId,
-      text
+      text,
+      status: 'queued'
     }
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
     return true
@@ -4575,8 +4582,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!entry) return
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
-    await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
-    get().removeAgentSteer(sessionId, operationId)
+    if (!steerEntryTargetsRun(entry, session.control.run.runId)) {
+      const error = new Error('This message belongs to an earlier Agent run. Start a new message to send it.')
+      set((state) => ({
+        agentSteerQueues: {
+          ...state.agentSteerQueues,
+          [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
+            item.operationId === operationId ? { ...item, status: 'failed', error: error.message } : item
+          )
+        }
+      }))
+      throw error
+    }
+    try {
+      await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
+      get().removeAgentSteer(sessionId, operationId)
+    } catch (error) {
+      set((state) => ({
+        agentSteerQueues: {
+          ...state.agentSteerQueues,
+          [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
+            item.operationId === operationId
+              ? { ...item, status: 'failed', error: presentError(error) }
+              : item
+          )
+        }
+      }))
+      throw error
+    }
   },
   async flushAgentSteerQueue(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
@@ -4585,6 +4618,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (queued.length === 0 || !steerQueueCanDrainNow(session)) return
     const runId = session.control.run.runId
     for (const entry of queued) {
+      // Failed is a terminal AUTO-delivery state. Keeping it at the head preserves authored order and
+      // prevents every runtime event from hammering the same rejected submission. Only the explicit
+      // sendQueuedAgentSteer action is allowed to retry it.
+      if (entry.status === 'failed') return
       // A steer typed at a run that is gone is NOT sent to whatever run inherited the agentSessionId.
       // Skipping rather than deleting: the badge still shows the user their words (the composer labels
       // them undeliverable), and deciding to discard user-authored text is not this loop's call.
@@ -4600,14 +4637,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { agentSteerQueues }
         })
       } catch (error) {
-        // Every failure here is treated as retryable: the entry stays and the loop stops, so a
-        // transient refusal neither loses the user's words nor reorders what follows.
-        //
-        // That is only safe because nothing permanently-rejectable can reach this queue. A permanent
-        // verdict (INVALID_AGENT_PROMPT) would be retried on every runtime event forever and would
-        // head-of-line-block every entry behind it — which is why the size check lives at
-        // `enqueueAgentSteer`, the single door in, rather than here. If a second permanent rejection
-        // class ever appears, this catch is where it would wedge; classify it at the door too.
+        set((state) => ({
+          agentSteerQueues: {
+            ...state.agentSteerQueues,
+            [sessionId]: (state.agentSteerQueues[sessionId] ?? []).map((item) =>
+              item.operationId === entry.operationId
+                ? { ...item, status: 'failed', error: presentError(error) }
+                : item
+            )
+          }
+        }))
         get().reportError(error)
         return
       }
