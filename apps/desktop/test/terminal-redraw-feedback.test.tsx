@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { TerminalReplayGapNotice } from '../src/renderer/src/components/TerminalReplayGapNotice'
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 afterEach(() => { document.body.replaceChildren() })
@@ -31,7 +33,10 @@ it.each(['success', 'unavailable', 'failure'] as const)('reports the actual %s o
   } finally { await act(async () => root.unmount()) }
 })
 it('TerminalView returns the real viewport outcome to the visible notice', () => {
-  const source = readFileSync('apps/desktop/src/renderer/src/components/TerminalView.tsx', 'utf8')
+  // happy-dom 会用它自己的 URL 覆盖全局，`new URL(..).protocol` 不是 file，readFileSync(URL) 会抛。
+  // 从 import.meta.url 的字符串本身算路径，绕开被替换的 URL 构造器。
+  const here = dirname(fileURLToPath(import.meta.url))
+  const source = readFileSync(join(here, '../src/renderer/src/components/TerminalView.tsx'), 'utf8')
   expect(source.length).toBeGreaterThan(0)
   // 重构把单行拆成了绑定 + return。只截取 redrawCurrentScreen 的函数体来守：真返回值
   // 必须来自真调用，而非硬编码 true——缺了真调用或改成 `return true` 都会红。
