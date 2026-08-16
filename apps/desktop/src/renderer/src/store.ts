@@ -1,3 +1,4 @@
+import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
@@ -256,6 +257,7 @@ export type HostCheckState = {
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean }>()
+
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -4625,6 +4627,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await get().flushAgentSteerQueue(sessionId)
   },
   flushAgentSteerQueue(sessionId) {
+    set((state) => reconcileDeliveredSteers(state, sessionId))
     const active = agentSteerDrains.get(sessionId)
     if (active) {
       active.wake = true
@@ -4653,14 +4656,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             })
           } catch (error) {
             // A delivery refusal is a retained local fact, not another global notification.
-            set((current) => ({
-              agentSteerQueues: {
-                ...current.agentSteerQueues,
-                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map((item) =>
-                  item.operationId === entry.operationId ? { ...item, status: 'deferred', error: presentError(error) } : item
-                )
+            set((current) => {
+              const pending = current.agentSteerQueues[sessionId]
+              if (!pending?.some((item) => item.operationId === entry.operationId)) return current
+              return {
+                agentSteerQueues: {
+                  ...current.agentSteerQueues,
+                  [sessionId]: pending.map((item) =>
+                    item.operationId === entry.operationId ? { ...item, status: 'deferred', error: presentError(error) } : item
+                  )
+                }
               }
-            }))
+            })
             // A readiness/reconnect wake arriving during the attempt must not be lost.
             if (!drain.wake) return
           } finally {
@@ -4843,7 +4850,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ))
           if (!session || session.kind !== 'agent') return
           const snapshot = await api.sessions.timeline(session.control)
-          set((state) => reduceTimelineSnapshot(state, snapshot))
+          set((state) => reconcileDeliveredSteers({ ...state, ...reduceTimelineSnapshot(state, snapshot) }, sessionId))
         } while (entry.requested)
       } catch (error) {
         get().reportError(error)
@@ -4876,7 +4883,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const reduced = projectRuntimeEvent(state, event)
       timelineGapSessionId = reduced.timelineGapSessionId
       sessionMembershipGap = reduced.sessionMembershipGap === true
-      return reduced.state
+      return core.type === 'agent-timeline'
+        ? reconcileDeliveredSteers({ ...state, ...reduced.state }, core.agentSessionId)
+        : reduced.state
     })
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
