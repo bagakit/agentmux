@@ -45,9 +45,3 @@ export function semanticReferenceKind(reference: string): SemanticReferenceKind 
 export function semanticReferenceLabel(reference: string): string {
   return reference.replace(/[\\/]$/, '').split(/[\\/]/).filter(Boolean).at(-1)?.replace(/\.[^.]+$/, '') ?? reference
 }
-
-// Local editable prompts, not Provider commands. They never dispatch anything on selection.
-export const COMPOSER_PROMPT_PRESETS = [
-  { text: '/review-changes', label: 'Review changes', description: 'Expand an editable review prompt', prompt: 'Review the current changes. Identify concrete bugs and missing tests, cite the relevant files, and explain any remaining risks.' },
-  { text: '/summarize-progress', label: 'Summarize progress', description: 'Expand an editable progress prompt', prompt: 'Summarize the goal, completed work, verification results, remaining work, and the next useful action. Distinguish confirmed facts from uncertainty.' }
-] as const

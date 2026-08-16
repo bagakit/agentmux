@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 156
+    "next_cursor": 158
   },
   "features": [
     {
@@ -976,7 +976,7 @@
     {
       "feat_id": "f-2548fr8qc",
       "title": "Message Tools 触发与菜单收敛",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1568,8 +1568,8 @@
     {
       "feat_id": "f-26z8fuvzk",
       "title": "Browser 内嵌 frame 应用链接交接",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "archived",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -1578,8 +1578,28 @@
     {
       "feat_id": "f-2728fae6d",
       "title": "核心机制不得站点特化",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2738ftw82",
+      "title": "本地 prompt 库：用户拥有的一套 prompt 与候选合并",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2748fftu5",
+      "title": "Browser 操作与交还状态条",
+      "status": "archived",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

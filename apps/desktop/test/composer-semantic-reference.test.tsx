@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { InlineComposer, draftDocument, documentDraft } from '../src/renderer/src/components/InlineComposer.js'
-import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, encodeSemanticReference, parseComposerDraft, COMPOSER_PROMPT_PRESETS } from '../src/renderer/src/lib/composer-semantic-reference.js'
+import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, encodeSemanticReference, parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
 
 describe('composer semantic references', () => {
   it('keeps a short token in the draft and expands it only at submission', () => {
@@ -19,10 +19,12 @@ describe('composer semantic references', () => {
     expect(semanticReferenceKind('/repo/skills/review/SKILL.md')).toBe('skill')
   })
 
-  it('round-trips the durable editor document and exposes prompt presets', () => {
+  it('round-trips the durable editor document', () => {
+    // prompt 正文不再由这个模块持有：它搬进了用户配置（`AppConfig.composerShortcuts`，取值层是
+    // shared/composer-shortcut-library）。这里原先还断言 `COMPOSER_SHORTCUT_PRESETS.length > 0`——
+    // 那一半随常量一起删掉，它现在的守卫在 composer-shortcut-library.test.ts 与 config-store.test.ts。
     const doc = draftDocument('[review](agentmux-skill:%40%2Fskills%2Freview%2FSKILL.md)')
     expect(documentDraft(doc)).toContain('agentmux-skill')
-    expect(COMPOSER_PROMPT_PRESETS.length).toBeGreaterThan(0)
   })
 
   it('renders the compact name, kind-specific icon and full hover reference', () => {

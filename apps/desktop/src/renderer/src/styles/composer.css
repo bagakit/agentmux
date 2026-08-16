@@ -33,7 +33,6 @@
 .composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
 .composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
 .composer-tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.composer-tools[data-mode='expanded'] { flex: 1 1 100%; flex-wrap: wrap; padding-top: var(--sp-1); }
 .composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
 .composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .composer-tool--danger:hover:not(:disabled) { color: var(--red); }
@@ -49,19 +48,22 @@
 
 .composer__toolbar { flex-wrap: wrap; gap: var(--sp-2); }
 .composer__toolbar > div { flex-wrap: wrap; }
-.composer__disclosure { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; list-style: none; }
-.composer__disclosure::-webkit-details-marker { display: none; }
-.composer__disclosure > svg:last-child { margin-left: auto; }
-.composer:not([open]) .composer__disclosure > svg:last-child { transform: rotate(180deg); }
-.composer[open] .composer__disclosure { position: absolute; left: var(--sp-2); bottom: var(--sp-2); z-index: 1; }
-.composer[open] .composer__disclosure > span, .composer[open] .composer__disclosure > small { display: none; }
-.composer[open] .composer__toolbar { padding-left: 42px; }
-.composer__disclosure:hover { color: var(--text); background: var(--surface-2); }
 .composer-menu { max-height: min(50vh, 360px); max-width: min(90vw, 360px); overflow-y: auto; }
 .composer-menu__hint { padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
 .composer-menu__item > span { min-width: 0; }
 .composer-menu__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); max-width: 32ch; }
-.composer__suggestions { display: grid; padding: var(--sp-2); }
+/* 候选浮层。有边界且内部滚动（density SSOT DEN:480「菜单有边界和内部滚动」）：候选来源现在是
+   Provider 原生命令 ∪ 用户自己的 prompt，条数由配置决定而没有上限，不封顶就会把输入框和底部操作
+   顶出视口——而那两个正是用户此刻要看的。上限沿用同文件 .composer-menu 那条（min(50vh, 360px)），
+   不另立一个数：两个浮层是同一套语汇。 */
+.composer__suggestions { display: grid; padding: var(--sp-2); max-height: min(50vh, 360px); overflow-y: auto; }
+/* 候选分段：Shortcuts（AgentMux 自己的）与 Agent commands 分开，各带小标题。标题沿用本表已有的
+   分段标题语汇（queued-card / context-card 的 h3：--fs-micro、大写、字距、--text-3），不新造一种。
+   只在确实有两段时才出现（组件侧判），所以这里不必也不该考虑"只有一段时把标题藏掉"。
+   sticky 让长列表滚动时当前分段的归属始终可见——列表上限是 360px，Shortcut 多了就会滚。 */
+.composer__suggestion-group { display: grid; }
+.composer__suggestion-group h4 { position: sticky; top: calc(-1 * var(--sp-2)); z-index: 1; margin: var(--sp-2) 0 var(--sp-1); padding: var(--sp-1) var(--sp-3); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.composer__suggestion-group:first-child h4 { margin-top: 0; }
 .composer__suggestions button { display: flex; gap: var(--sp-3); border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
 .composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
 .composer__suggestions small { color: var(--text-3); }
@@ -105,16 +107,78 @@
 .composer__context-card strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }
 .composer__context-card p { margin: var(--sp-2) 0 0; color: var(--text-3); }
 
-/* The document is plain prose plus atomic tool references; ProseMirror owns native editing. */
-.composer__editor .tiptap { width: 100%; min-height: calc(1lh + var(--sp-4) + var(--sp-1)); max-height: 132px; overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-1); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The document is plain prose plus atomic tool references; ProseMirror owns native editing.
+   max-height 与上下 padding 都走变量（默认在 .composer 上）而不是就地写死：三态的大输入框档位要
+   放高前者、一行态要压掉后者，而在这里再写一条 `.composer__editor .tiptap { … }` 会让这个选择器
+   在全表出现两次，agent-composer.test.tsx 的地板判据按「基础规则恰好一条」取值就会认错对象。
+   几何预算因此只有一个家——档位只改变量，落点始终是下面这一条。
+   min-height 里的上下两档必须跟着同两个变量走：border-box 让地板含 padding，写死 --sp-4/--sp-1
+   会在一行态把地板算高，于是空输入框仍按两行高画（正是这条地板当初要修的那个缺陷）。 */
+.composer { --composer-input-max: 132px; --composer-input-pad-top: var(--sp-4); --composer-input-pad-bottom: var(--sp-1); }
+.composer__editor .tiptap { width: 100%; min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__editor .tiptap p { margin: 0; }
 .composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; }
 .composer__editor[data-disabled='true'] { color: var(--text-3); }
 .composer__editor .composer-semantic-token { font-size: inherit; vertical-align: baseline; border-bottom: 0; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
 .composer__editor .ProseMirror-selectednode { background: var(--surface-3); outline: 1px solid var(--focus-line); }
 
+/* 识别词命中：打出 eli5 一类 keyword 时原位加下划线，告诉用户"这个词可以 Tab 展开"。
+   沿用既有的下划线语汇（上面那条 semantic-token、activity-conversation 的路径链接都是这一套：
+   underline + offset 3px + skip-ink:none），不新造一种视觉。skip-ink 那条是必须的——keyword 常带
+   下划线字符（grill_me），引擎默认的 auto 会在 `_` 处把线切断，看起来像两个词。
+   颜色不用 --green（那是 subcommand token 已经占的、"已经是个东西"的语义）：这里的词还只是一段
+   普通文字，只是**可以**变成 prompt，所以只借 text-decoration-color 提示，字色不动。 */
+.composer__editor .composer-keyword-hit {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--blue);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
+}
+
 .composer-tool--mode { min-width: 28px; }
 .composer__editor-fallback { display: none; }
 
-.composer-prompt-presets { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); }
-.composer-tool--preset { color: var(--purple); }
+/*
+ * 三态：一行 / 两行常态 / 大输入框。改变的是**输入区自身的形态**——这枚键此前的语义是「露出更多
+ * 工具」，用户明确否掉了（interaction SSOT「Message Tools 三态」）。档位由 AgentComposerTools 报在
+ * `.composer-tools[data-mode]` 上，而要变形的是它的**祖先**，所以两条都走 `:has()`（仓内先例
+ * base.css:42、surfaces.css:178）。
+ *
+ * 两行常态不写规则：它就是上面那些基础规则本身。给它补一条「恢复默认值」的规则等于把同一个几何
+ * 写两遍，而这两处必然漂移。
+ *
+ * 只动 max-height，绝不碰 min-height：静息地板在全表**只许有一处**（agent-composer.test.tsx
+ * 「这个元素上只有一处 min-height」），第二条更特异的规则会按级联赢回去，把静息高度抬成两行。
+ */
+/* 收起成一行：输入行与主动作同排。grid 让工具条落到编辑区右侧而不是它下面一行——此前那个
+   绝对定位的做法要给工具行留一段左内边距避让，工具行一折行就整体错位，已废止。
+   同一条规则里还把编辑区上下留白压掉：两行态那份 padding 是为了让水印与 placeholder 各有其位，
+   一行态两者都不在上方，留着就把输入文字压到偏下、与右侧按钮的基线错开。改变量而不是再写一条
+   `.composer__editor .tiptap { padding }`，理由见上方 --composer-input-max 那条注释。
+   这几件事必须合在**一条**规则里：根元素上按 collapsed 命中的规则全表只许有一条
+   （message-tools-three-state.test.tsx 按选择器形状把那一条摘出来单判，多一条即红——它这么判是
+   因为按并集计数已被实测证明会被同族里带 `display: none` 的旁证满足）。 */
+.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__suggestions { grid-column: 1 / -1; }
+/* 一行态里 Region 名水印必须收掉。它是 `position: absolute; top; right`——不参与流，所以两行态下它
+   待在输入框上方那片空白里谁都不压；而收成一行之后，右上角正好是工具条与 Send 的位置，于是水印
+   直接叠在按钮上（用户报的「叠在一起」）。这不是 z-index 能解决的事：它压着的是可点击的控件，
+   而它自己 pointer-events:none，压出来的是视觉糊成一团。一行态本来就没有能安放它的空白，
+   所以这里不是挪位置而是不显示——Region 名在标签页上仍然看得到。 */
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__region { display: none; }
+/* 工具条与主动作在一行态里贴着输入行的基线排，而不是继承两行态那份为「独立一行」准备的上下 padding
+   与 wrap。`flex-wrap: wrap` 在这里是有害的：一行态的右列宽度由内容决定（`auto`），一旦允许折行，
+   按钮会在窄宽度下叠成两层，正是「叠在一起」的第二个来源。 */
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { flex-wrap: nowrap; padding: var(--sp-2); align-items: center; }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { flex-wrap: nowrap; }
+/* 工具整排隐藏，但队列徽标留下：它报的是待发消息这一**状态**，不是一个入口。把它一并藏掉等于
+   让用户在最窄的形态下看不见自己排了几条。恢复入口（这枚三态键）在 .composer-tools 里，是孙元素，
+   所以这条直接子元素选择器碰不到它。 */
+.composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool { display: none; }
+/* 大输入框：放高供长文编辑，工具排仍在。改的是 --composer-input-max 而不是就地再写一条
+   `.composer__editor .tiptap { max-height }`——后者会让那个选择器在全表出现两次，而
+   agent-composer.test.tsx 的地板判据按「基础规则恰好一条」取值，第二条会让它认错对象。
+   高度预算因此只有一个家：基础规则读这个变量，档位只改变量。 */
+.composer:has(.composer-tools[data-mode='expanded']) { --composer-input-max: 40vh; }
+

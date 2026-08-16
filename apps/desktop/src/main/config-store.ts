@@ -3,7 +3,7 @@ import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
-import type { AppConfig, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import type { AppConfig, ComposerShortcut, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
@@ -117,6 +117,46 @@ const notificationsSchema = z
   .object({ mode: z.enum(notificationModeIds), sound: z.boolean().optional() })
   .strict()
 
+/**
+ * 一条本地 prompt。`keyword` 与 `body` 非空是承重的：空 keyword 既补全不了也识别不了裸词，空 body
+ * 替换进去等于把草稿清空——两者都是「这条 prompt 什么都不做」，存下来只会让用户以为它在工作。
+ *
+ * `providerId` 只校验成非空字符串而不是枚举：`AgentProviderId` 是开放并集
+ * （`BuiltInAgentProviderId | (string & {})`），用户可以配置自己的 Executor，把它钉成内置那 13 个
+ * 会让绑定到自定义 Provider 的 prompt 整条判失败。
+ */
+const composerShortcutSchema = z
+  .object({
+    id: z.string().min(1),
+    keyword: z.string().min(1),
+    label: z.string().min(1),
+    body: z.string().min(1),
+    providerId: z.string().min(1).optional()
+  })
+  .strict()
+
+/**
+ * 可改可删的默认 prompt。一份定义两处用：`configSchema` 在**键缺席**时回填它，`DEFAULT_CONFIG`
+ * 拿它当初始值。写成两份字面量会漂——而漂的时候没有症状：全新配置一套、旧配置另一套。
+ *
+ * keyword 刻意不带 `/`：同一个字段既作 `/` 候选的补全词，也作正文里的裸词识别，带上前缀就只能
+ * 服务前一处。取用处一律 `structuredClone`，免得某个消费者就地改了它波及另一处。
+ */
+const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
+  {
+    id: 'review-changes',
+    keyword: 'review-changes',
+    label: 'Review changes',
+    body: 'Review the current changes. Identify concrete bugs and missing tests, cite the relevant files, and explain any remaining risks.'
+  },
+  {
+    id: 'summarize-progress',
+    keyword: 'summarize-progress',
+    label: 'Summarize progress',
+    body: 'Summarize the goal, completed work, verification results, remaining work, and the next useful action. Distinguish confirmed facts from uncertainty.'
+  }
+]
+
 const configSchema = z
   .object({
     version: z.literal(CONFIG_VERSION),
@@ -128,7 +168,16 @@ const configSchema = z
     // Optional: a config written before this field existed is still valid, and `get()` back-fills the
     // explicit default. The mode is validated against the one tier table so an unknown id is rejected
     // rather than silently meaning "off".
-    notifications: notificationsSchema.optional()
+    notifications: notificationsSchema.optional(),
+    // 缺席读成默认那两条，**显式 `[]` 读成空**。这两件事必须分开，而它们只差一个键的有无：
+    //   - 缺席 = 这份配置写于本字段存在之前（本机那份 v9 就是：一个 composerShortcuts 键都没有）。
+    //     此时给空列表，用户永远看不到任何 prompt，也不会有识别词——功能像根本没做。
+    //   - `[]` = 用户把默认那两条都删了。此时回填等于把他删掉的东西塞回去。
+    // 所以判据是 `.default(...)` 而不是 `.optional()`：zod 的 default 只在**键缺席**时生效，
+    // 显式 `[]` 原样通过。这条路与同文件 `toolbar.saveBookmark` 完全同形——那一项也比
+    // CONFIG_VERSION=9 晚到，磁盘上已有写于它之前的 v9 配置，也是用 `.default()` 收口的。
+    // 版本号因此不必 +1（+1 会走 retiredConfigReplacement 那条退休路径，代价大得多）。
+    composerShortcuts: z.array(composerShortcutSchema).default(() => structuredClone(DEFAULT_COMPOSER_SHORTCUTS))
   })
   .strict()
   .superRefine((config, context) => {
@@ -263,7 +312,8 @@ export const DEFAULT_CONFIG: AppConfig = {
       more: true
     }
   },
-  notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID }
+  notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+  composerShortcuts: structuredClone(DEFAULT_COMPOSER_SHORTCUTS)
 }
 
 /**
@@ -400,6 +450,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   appearance: AppConfig['appearance'] | undefined
   browser: AppConfig['browser'] | undefined
   notifications: AppConfig['notifications'] | undefined
+  composerShortcuts: AppConfig['composerShortcuts'] | undefined
   found: number
   strandedByDamagedHost: Array<{ hostId: string; workspaceIds: string[] }>
   /**
@@ -464,7 +515,8 @@ export function authoredConfigCarryOver(raw: unknown): {
       executors: z.unknown().optional(),
       appearance: z.unknown().optional(),
       browser: z.unknown().optional(),
-      notifications: z.unknown().optional()
+      notifications: z.unknown().optional(),
+      composerShortcuts: z.unknown().optional()
     })
     .safeParse(raw)
   const rawHosts = outer.success && Array.isArray(outer.data.hosts) ? outer.data.hosts : []
@@ -627,6 +679,11 @@ export function authoredConfigCarryOver(raw: unknown): {
     // loose — the same reason `configSchema.parse` needs its cast at the two sites below.
     notifications: carried(notificationsSchema, outer.success ? outer.data.notifications : undefined) as
       AppConfig['notifications'] | undefined,
+    // 用户写的 prompt 正文是**他自己打的字**，不是一键能设回来的偏好——所以退役重置时它必须跟着
+    // 过来，而不是落回默认那两条。整条列表一起判：一条坏掉就整列表不带过来（那时用户看到的是
+    // 默认两条，而磁盘上的旧文件仍在，没有丢）。
+    composerShortcuts: carried(z.array(composerShortcutSchema), outer.success ? outer.data.composerShortcuts : undefined) as
+      AppConfig['composerShortcuts'] | undefined,
     found: evidenceOfWorkspaces,
     hostsUnreadable,
     executorsUnreadable,
@@ -751,7 +808,10 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     executors: carried.executors,
     ...(carried.appearance ? { appearance: carried.appearance } : {}),
     ...(carried.browser ? { browser: carried.browser } : {}),
-    ...(carried.notifications ? { notifications: carried.notifications } : {})
+    ...(carried.notifications ? { notifications: carried.notifications } : {}),
+    // 空列表也要带过来：`[]` 是「用户把默认那两条都删了」这个事实，而 `? :` 对空数组是真值，
+    // 所以这里落在带过来那一侧——写成按长度判会让「删光」静默变回默认两条。
+    ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {})
   }
 }
 

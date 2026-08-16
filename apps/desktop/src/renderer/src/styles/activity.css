@@ -316,6 +316,13 @@
   0%, 60%, 100% { opacity: .28; }
   30% { opacity: 1; }
 }
+/* running 与 working 的字形本就不同（静态 Radio vs 律动 Activity）；working 再叠一层节奏动势，让"正在
+   产出"与"进程活着但没在产出"在动与静上也分得开，而不是只靠字形或颜色。复用上面那条工作点的 opacity
+   节奏，不为图标另发明第二种动画（见密度合同「动画不能由业务组件各自实现」）。这枚 class 由共享的
+   SemanticIcon renderer 挂在 name==='working' 上，所以每个走它的调用方——不止 Activity 面——都一致带上。 */
+.semantic-icon--working { animation: activity-working-pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .activity-working__dots i { animation: none; opacity: .6; }
+  /* 动势退化为静态，但字形差异（Activity vs Radio）不受影响仍在——满足合同「reduced-motion 下字形差异必须保留」。 */
+  .semantic-icon--working { animation: none; }
 }

@@ -71,7 +71,7 @@ const LAYOUT_GEOMETRY = new Map<string, string>([
   ['.launch-surface', 'clamp 上界 60px 是大屏阅读宽度；底部 44px 给 composer 让位'],
   ['.browser-selection-result', 'clamp 上界 44px 是大屏阅读宽度'],
   ['.activity-feed__empty', '70px 让空态在视觉中心而非几何中心'],
-  ['.composer[open] .composer__toolbar', '展开时 disclosure 绝对定位在工具条左下角，42px 给它的图标+箭头让位']
+  ['.wf-gallery__intro', '左 32px 给绝对定位的 24px 章节标记让位']
 ])
 
 

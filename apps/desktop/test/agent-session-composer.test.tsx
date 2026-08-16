@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentCatalogEntry } from '@agentmux/core'
-import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { ComposerShortcut, SessionSnapshot } from '../src/shared/contracts.js'
 
 const fixture = vi.hoisted(() => ({
   session: undefined as SessionSnapshot | undefined,
@@ -10,7 +10,8 @@ const fixture = vi.hoisted(() => ({
     sessions: [] as SessionSnapshot[],
     providerCatalog: [] as AgentCatalogEntry[],
     config: {
-      workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' as const }]
+      workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' as const }],
+      composerShortcuts: [] as ComposerShortcut[]
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
     agentComposerDrafts: {} as Record<string, string>,
@@ -52,6 +53,7 @@ import {
   AgentSessionComposer,
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
+import { parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
 
 // Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
 function message(error: unknown): string {
@@ -92,6 +94,7 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
 afterEach(() => {
   fixture.state.sessions = []
   fixture.state.providerCatalog = []
+  fixture.state.config.composerShortcuts = []
   fixture.state.agentComposerDrafts = {}
   fixture.state.agentSteerQueues = {}
   fixture.state.send.mockClear()
@@ -671,5 +674,92 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
       props: { queueDeliverable?: boolean }
     }
     expect(composer.props.queueDeliverable).toBe(false)
+  })
+})
+
+/**
+ * 候选入口只有一处：Provider 原生命令 ∪ 我自己的 prompt。
+ *
+ * 修之前这里是一条**死桥**。渲染层写着两条常驻按钮（`COMPOSER_SHORTCUT_PRESETS`），另有一句
+ * `COMPOSER_SHORTCUT_PRESETS.find((entry) => entry.text === item)` 想把它们并进 `/` 候选——但
+ * `commands` 只装 Provider catalog 的命令（全部内置 Provider 加起来只有 `/compact /context /cost
+ * /diff /help /model /status`），那句 find 恒 undefined。今天打 `/review` 一条候选都不会出，而
+ * tsc 干净、测试全绿：这正是本仓「声明了却静默不做的能力」那一族。
+ *
+ * 判据取 `commands` prop 而不是渲染文本：候选浮层只在有 trigger 时才画，而 trigger 是组件内部
+ * state，静态渲染改不到。
+ */
+describe('AgentSessionComposer 的 / 候选是命令与我的 prompt 的并集', () => {
+  function candidates(): Array<{ text: string; description: string }> {
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { commands?: Array<{ text: string; description: string }> }
+    }
+    return composer.props.commands ?? []
+  }
+
+  function catalogWithCommands(): AgentCatalogEntry {
+    const entry: AgentCatalogEntry = { ...postureCatalogEntry(), id: 'codex' }
+    entry.composer = { skillRoots: [], commands: [{ text: '/diff', description: 'Show the working diff' }] }
+    return entry
+  }
+
+  it('配置里 keyword 为 review-changes 的 prompt 出现在候选里', () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.providerCatalog = [catalogWithCommands()]
+    fixture.state.config.composerShortcuts = [
+      { id: 'p-1', keyword: 'review-changes', label: 'Review changes', body: 'Review the working diff.' }
+    ]
+
+    const texts = candidates().map((candidate) => candidate.text)
+
+    // 两边都要在场。只断言 prompt 在会让「把 Provider 命令整片丢掉」也全绿，那是另一半的回归。
+    expect(texts, '配置里的 prompt 没进候选——打 /review 一条都不会出，正是那条死桥').toContain('/review-changes')
+    expect(texts, 'Provider 原生命令不见了：并集把另一边吃掉了').toContain('/diff')
+
+    // 来源必须标出来：同一列表里两种东西「打下去会发生什么」不同（一个交给 Agent 执行，
+    // 一个只把正文填进草稿），看不出区别就会误发。来源走 `group` 字段，浮层按它分段加标题。
+    const mine = candidates().find((candidate) => candidate.text === '/review-changes')
+    const theirs = candidates().find((candidate) => candidate.text === '/diff')
+    expect(mine?.group, '我的 Shortcut 没标来源，浮层无从分段').toBe('Shortcuts')
+    // 两边都要标，且标得不一样。只判我这边会让「两边都标成 Shortcuts」全绿，那时分段仍然只有一段。
+    expect(theirs?.group, 'Agent 原生命令没标来源').toBe('Agent commands')
+    expect(mine?.group).not.toBe(theirs?.group)
+  })
+
+  it('选中我的 prompt 会展开成带正文的 subcommand token，而 Provider 命令原样落下', () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.providerCatalog = [catalogWithCommands()]
+    fixture.state.config.composerShortcuts = [
+      { id: 'p-1', keyword: 'review-changes', label: 'Review changes', body: 'Review the working diff.' }
+    ]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => string | void }
+    }
+
+    const mine = composer.props.onSelectSuggestion?.('/review-changes', 'command')
+    // 读回来用的是真解析器：正文在 token 里是 URI 编码的，按原文 `toContain` 会因为空格变 `%20`
+    // 而恒假——而更要紧的是，能被 `parseComposerDraft` 读回来才是这个 token 真正要满足的性质。
+    const parts = parseComposerDraft(typeof mine === 'string' ? mine : '')
+    const reference = parts.find((part) => 'reference' in part)
+    expect(reference && 'reference' in reference ? reference.reference : undefined, '选中后没有带上正文——候选出得来但点了什么也没发生')
+      .toEqual({ token: expect.any(String), label: 'Review changes', kind: 'subcommand', reference: 'Review the working diff.' })
+
+    // 反面：Provider 命令必须原样填进草稿交给 Provider，不能也被包成 token。
+    expect(composer.props.onSelectSuggestion?.('/diff', 'command')).toBe('/diff')
+  })
+
+  it('绑了别的 Provider 的 prompt 不出现在这个 Agent 的候选里', () => {
+    // Session 是 codex。绑给 claude 的那条必须缺席，否则「绑定」这件事在候选侧根本没有效果。
+    fixture.state.sessions = [agentSession()]
+    fixture.state.providerCatalog = [catalogWithCommands()]
+    fixture.state.config.composerShortcuts = [
+      { id: 'p-1', keyword: 'eli5', label: 'Explain simply', body: 'Explain simply.' },
+      { id: 'p-2', keyword: 'claude-only', label: 'Claude only', body: 'Only here.', providerId: 'claude' }
+    ]
+
+    const texts = candidates().map((candidate) => candidate.text)
+
+    expect(texts, '不绑定的那条也没出来——过滤把所有 prompt 都筛掉了').toContain('/eli5')
+    expect(texts, '绑给 claude 的 prompt 出现在 codex 的候选里').not.toContain('/claude-only')
   })
 })

@@ -47,7 +47,10 @@ const MICRO_MARKS = [
   '.activity-ruler__tick',
   '.activity-ruler__band',
   '.agent-pick--selected::before',
-  '.terminal-theme-preview__composer'
+  '.terminal-theme-preview__composer',
+  // 10px 高的进度轨（workflow.css:73）。--radius-sm 的 6px 在这个高度上把两端啃成半圆，读起来是
+  // 一颗胶囊而不是一条轨。与上面 activity-ruler 那三条同类：量级只有几像素的装饰性刻度。
+  '.wf-rail'
 ]
 
 const DECLARED_EXCEPTIONS = new Set([...COMPACT_CONTROLS, ...MICRO_MARKS])
