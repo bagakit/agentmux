@@ -20,6 +20,8 @@ Status: approved for implementation.
   网页 HTML 源码不在此列，DevTools 已经覆盖。
 - 「**本轮只做单文件**」——Netscape bookmark HTML 的批量导入导出不做。AgentMux 今天没有书签库，
   导进来无处安放。
+- 「**不要整页打包 就是保存个 link**」——存档整页那条路（`webContents.savePage` 的 MHTML /
+  HTMLComplete，以及 `printToPDF`）**不做**。见 §2.10。
 
 ## 2. 约束设计形状的发现
 
@@ -155,6 +157,25 @@ Finder 双击交给系统默认浏览器，那本来就对，不需要我们做�
 让 Finder 双击唤起 AgentMux 需要 `CFBundleDocumentTypes` 加 `app.on('open-file')`，
 全仓零先例（`open-file`/`CFBundleDocumentTypes` 均零命中）。**不做**，也没人要求。
 
+### 2.10 存的是链接，不是整页存档
+
+`webContents.savePage(path, 'HTMLOnly' | 'HTMLComplete' | 'MHTML')` 在 Electron 43 的类型里就有
+（`electron.d.ts:18306`），`printToPDF` 同理（`:18271`）。也就是说「把整页冻成一个 `.mhtml`
+单文件」是现成的一行 API，不是做不到。
+
+**但本 Feature 不做它。** 用户的原话是「不要整页打包 就是保存个 link」。
+
+两者是不同的东西，值得写下来免得下一个人把它们混成一件事：
+
+| | 存的是什么 | 内容会不会变 |
+|---|---|---|
+| `.webloc` 书签 | 一个 URL | **随网页变** |
+| `.mhtml` 存档 | 那一刻的整页字节 | 冻死，永不变 |
+
+书签的价值恰恰在「会变」：存的是**那个地方**，不是那一刻的样子。做成存档就把这个语义丢了。
+
+不开 draft 记这条。真要存档时它是一行 API，比一条会过期的 tracker 条目更可靠。
+
 ## 3. 落地形状
 
 ### A. 书签文件
@@ -196,3 +217,4 @@ Finder 双击交给系统默认浏览器，那本来就对，不需要我们做�
 - 能写到 workspace 之外的保存通路（§2.8）。
 - 新的 workbench surface kind（§2.6）。
 - 二进制 plist 的发射（§2.7）。
+- 整页存档：MHTML / HTMLComplete / PDF（§2.10，用户原话「不要整页打包 就是保存个 link」）。
