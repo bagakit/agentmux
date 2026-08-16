@@ -165,3 +165,28 @@ it('retains receipts through empty startup snapshots but alerts for a new Run', 
   await act(async () => useAppStore.setState({ sessions: [resumed] }))
   expect(unread()).toBe('true')
 })
+
+it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox and clears it on success', async (kind) => {
+  const queued = { operationId: 'q-local', runId: 'run-agent-1', text: 'Keep this pending message', status: 'queued' as const }
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [queued] } })
+  const action = kind === 'copy'
+    ? vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValueOnce()
+    : vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockRejectedValueOnce(new Error('Retry unavailable')).mockResolvedValueOnce()
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  const clickAction = async () => {
+    const label = kind === 'copy' ? 'Copy message' : 'Retry queue'
+    const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find((item) => item.textContent?.trim() === label)
+    expect(button).toBeDefined()
+    await act(async () => button!.click())
+  }
+  await clickAction()
+  expect(unread()).toBe('true')
+  expect(mailbox().querySelector('.composer-notice')?.textContent).toContain('unavailable')
+  expect(useAppStore.getState().error).toBeNull()
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued])
+  await clickAction()
+  expect(action).toHaveBeenCalledTimes(2)
+  expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(0)
+  expect(unread()).toBe('false')
+})
