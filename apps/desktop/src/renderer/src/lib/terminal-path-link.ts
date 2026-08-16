@@ -69,9 +69,18 @@ export function detectTerminalPathLinks(
     const lineStr = match[2]
     const colStr = match[3]
     const hasSuffix = lineStr !== undefined
+    // A LEADING `@` is a mention/composer sigil, not part of the path. `PATH_TOKEN` puts `@` in both
+    // the lookbehind and the segment class, and the lookbehind only stops a match RESTARTING after an
+    // `@` — it does not stop one STARTING at an `@`. So `@src/foo.ts` arrives here with the `@` glued
+    // on and, left in place, resolves against the root as `<root>/@/…` (a path that never exists).
+    // Strip only the leading `@`; a mid-segment `@` (`node_modules/@types/node/index.d.ts`) must
+    // survive, and it does — there the `@` never starts a match because the preceding `/` is in the
+    // lookbehind set, so it is never at `rawCore[0]`. The stripped `@` stays OUTSIDE the link span
+    // (index advances past it, length shrinks) so it renders as the plain sigil it is.
+    const atPrefixLength = rawCore.startsWith('@') ? 1 : 0
     // Trim trailing prose punctuation from the core. This is only reachable when there is no
     // `:line` suffix, since a suffix ends the token in digits.
-    const core = rawCore.replace(TRAILING_PUNCTUATION, '')
+    const core = rawCore.slice(atPrefixLength).replace(TRAILING_PUNCTUATION, '')
     if (!core || core.length > MAX_CORE_LENGTH) continue
     // The crux: a real path either has a directory separator or a line-number suffix. This drops
     // every bare dotted word (`e.g.`, `1.2.3`, `README`) without touching real paths.
@@ -86,7 +95,7 @@ export function detectTerminalPathLinks(
     if (resolved === null) continue
     const suffix = hasSuffix ? match[0].slice(rawCore.length) : ''
     links.push({
-      index: match.index,
+      index: match.index + atPrefixLength,
       length: core.length + suffix.length,
       path: resolved,
       ...(lineStr !== undefined ? { line: Number(lineStr) } : {}),

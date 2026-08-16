@@ -134,6 +134,7 @@ const api: AgentMuxPreloadApi = {
     chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
+    readPastedImage: (path: string) => ipcRenderer.invoke('ui:readPastedImage', path),
     revealCrashLog: () => ipcRenderer.invoke('ui:revealCrashLog'),
     notifyAgentAttention: (input: AgentAttentionNotifyInput) =>
       ipcRenderer.invoke('ui:notifyAgentAttention', input),

@@ -14,6 +14,7 @@ import { regionDisplayName, regionSurfaceLabel } from '../lib/region-display-nam
 import { regionIds } from '@agentmux/layout'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
+import { api } from '../lib/api'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -149,6 +150,11 @@ export function SessionPane({
     },
     [openFile, reportError, linkOrigin.tabGroupId]
   )
+  // A pasted image cited in the conversation is read back through main (the only place that can reach a
+  // file outside the workspace) as an <img>-ready data URI. Main confines the read to the pasted
+  // directory; a null return means "not a readable pasted image", and the renderer falls back to the
+  // plain-text reference. Stable identity so the thumbnail's load effect does not re-fire each render.
+  const readPastedImage = useCallback((path: string) => api.ui.readPastedImage(path), [])
   // An http(s) link in agent prose gets the SAME destination menu the Terminal gives, opening into this
   // pane's own Region — never a jump straight to the system browser. This is the host that owns the menu
   // because it is the host that holds the Region origin, mirroring TerminalView exactly.
@@ -355,6 +361,7 @@ export function SessionPane({
             displayState={session.status.state}
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
+            readPastedImage={readPastedImage}
             openHttpLink={onProseLinkClick}
             describeSpeaker={describeSpeaker}
           />

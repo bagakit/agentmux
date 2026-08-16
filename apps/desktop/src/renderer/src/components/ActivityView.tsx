@@ -37,6 +37,7 @@ import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
+import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 
@@ -516,6 +517,7 @@ function Turn({
   speaker,
   describeSpeaker,
   openWorkspaceFile,
+  readPastedImage,
   openHttpLink,
   workspaceRoot,
   onContinue
@@ -526,6 +528,7 @@ function Turn({
   speaker: ConversationSpeaker
   describeSpeaker?: DescribeSpeaker
   openWorkspaceFile?: OpenWorkspaceFile
+  readPastedImage?: ReadPastedImage
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot: string
   onContinue?: () => void
@@ -569,6 +572,7 @@ function Turn({
           className="log-turn__body"
           workspaceRoot={workspaceRoot}
           {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(readPastedImage ? { readPastedImage } : {})}
           {...(openHttpLink ? { openHttpLink } : {})}
         />
       ) : null}
@@ -657,6 +661,7 @@ export function ActivityView({
   capability,
   displayState,
   openWorkspaceFile,
+  readPastedImage,
   openHttpLink,
   workspaceRoot = '',
   onContinue,
@@ -668,6 +673,8 @@ export function ActivityView({
   displayState?: AgentDisplayState
   /** Absent means file references in agent prose stay plain text. */
   openWorkspaceFile?: OpenWorkspaceFile
+  /** Absent means pasted-image references stay plain text (a text link, as before). */
+  readPastedImage?: ReadPastedImage
   /** Absent means an http(s) link in agent prose raises no menu. Set by the host that owns the
    *  destination menu and the Region origin (SessionPane), never resolved here. */
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
@@ -908,6 +915,7 @@ export function ActivityView({
                   workspaceRoot={workspaceRoot}
                   {...(describeSpeaker ? { describeSpeaker } : {})}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                  {...(readPastedImage ? { readPastedImage } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}
                   {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(items, entry.item.id)) } : {})}
                 />
