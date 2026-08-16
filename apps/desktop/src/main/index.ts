@@ -216,6 +216,15 @@ function startPrimaryInstance(): void {
     const reportStartupStage = (stage: string) => {
       if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) process.stderr.write(`file_editing_startup_stage=${stage}\n`)
     }
+    if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) {
+      // A renderer exception during boot leaves the probe staring at the `loading` shell until it times out,
+      // and the failure it prints ("Timed out waiting for …") names the symptom, not the throw. Forward the
+      // renderer console here so the probe's own stderr carries the real stack. Probe-only: gated on the
+      // report env var, so nothing is forwarded in a normal run.
+      window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+        if (level >= 2) process.stderr.write(`file_editing_renderer_console=${JSON.stringify({ level, message, line, sourceId })}\n`)
+      })
+    }
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
     reportStartupStage('before-ipc')

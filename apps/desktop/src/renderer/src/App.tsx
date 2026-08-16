@@ -65,7 +65,7 @@ function DesktopApp() {
   const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  const layouts = useAppStore((state) => state.layouts ?? {})
+  const layouts = useAppStore((state) => state.layouts)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
