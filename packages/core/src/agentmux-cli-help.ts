@@ -117,7 +117,13 @@ host shell at Terminal creation; it is never typed into an attached terminal.`],
 Usage: agentmux open browser --url <url> <destination>
 
 Exactly one destination from open --help is required. The Main Browser owner validates
-and opens the URL; Renderer layout state does not own Browser navigation truth.`],
+and opens the URL; Renderer layout state does not own Browser navigation truth.
+
+A link the view cannot render — \`lark:\`, \`slack:\`, \`zoommtg:\`, \`mailto:\` and anything
+else that belongs to a desktop app — is handed to the system instead, after asking the
+person once. The answer is remembered per scheme, not per site, and is theirs to give:
+\`open browser --url\` only accepts http(s) and file, so this is about links the page
+itself leads to.`],
   ['browser', `Drive an already-open Browser
 
 Usage: agentmux browser run --browser <browser-id> < program.js
@@ -385,6 +391,16 @@ theirs. Your actions are refused from then on and the run comes back \`stopped\`
 \`script-failed\`, because nothing is wrong with your program. Observation still works, so take
 a \`snapshot()\` to see where you actually left things, say so, and run the program again when
 the page is free. Do not try to take the page back by driving harder.
+
+Some links leave the browser entirely: \`lark:\`, \`slack:\`, \`zoommtg:\`, \`mailto:\` and anything
+else belonging to a desktop app. Clicking one does not navigate — AgentMux asks the person
+whether to hand it to their system, and remembers the answer per scheme rather than per site.
+So a \`click\` on one of those returns normally while \`pageInfo().url\` stays exactly where it
+was. That is not a failed click and not a page that is still loading: waiting for a navigation
+that will never come just burns your timeout. Read the url; if it did not move, the link went
+out to an app (or is waiting on a person who has not answered yet), and whatever you were going
+to do after the navigation has to be reconsidered. You cannot answer that question on their
+behalf, and there is no page function that opens an app link directly.
 
 ## Apply a deliberate layout
 
