@@ -44,6 +44,18 @@
 .branch-row__sync--ahead { color: var(--blue); background: color-mix(in srgb, var(--blue) 13%, var(--surface-0)); }
 .branch-row__sync--behind { color: var(--amber-text); background: var(--amber-bg); }
 .branch-row__sync--diverged { color: var(--red-text); background: var(--red-bg); }
+/* 每行尾部的 pin 键。走共享的 .icon-button 底子（base.css），这里只收窄尺寸并管它的可见性。
+   未 pin 时压暗、整行 hover 才浮起来——常驻但不与分支名抢注意力，同 .change-row__stage 那一档。 */
+.branch-row__pin { width: 22px; height: 22px; opacity: 0; transition: opacity .12s ease, color .12s ease, background .12s ease; }
+.branch-row:hover .branch-row__pin { opacity: .55; }
+.branch-row__pin:hover:not(:disabled) { opacity: 1; }
+/* 键盘到达时也要显形。`opacity: 0` 不影响可聚焦性——Tab 照样停在这枚键上，而 base.css 那圈焦点环
+   连同按钮一起被透明度吃掉：焦点落在一个看不见的控件上，比没有这个控件更糟。同 .log-row 用
+   `:focus-visible` 把 hover 才显形的部件提上来的做法（activity.css）。 */
+.branch-row__pin:focus-visible { opacity: 1; }
+/* 已 pin：在**不 hover 时**也看得出来——扫一眼列表就该分辨哪些被 pin 了，而不是把它藏进指针位置。
+   用品牌绿实心表达「钉住了」，和右键那枚装饰性 Pin 徽标（表示 workspace 被 pin）语义不同但同族配色。 */
+.branch-row__pin--pinned, .branch-row:hover .branch-row__pin--pinned { opacity: 1; color: var(--green); }
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
 .branches-empty--error span { max-width: 230px; line-height: 1.4; }
