@@ -23,3 +23,17 @@ Agent and Launcher consume the same insertion API. The existing local feedback o
 - Zero-caller check: InlineComposer imports and calls both insertion functions; AgentComposer forwards insertionRef; AgentSessionComposer and NewTabSurface invoke the ref for attachments and capture. The shared helper has actual product consumers outside its defining file.
 
 Learning: controlled draft replacement is a synchronization operation, not a paste operation. Selection and async position mapping belong to the maintained editor; host tools should supply their result, not reconstruct the entire draft.
+
+## Integrated Composer regression follow-up
+
+The user's request to review and fix this whole area also covers tests left behind by the rich-input migration. On the unmodified da29f060 baseline, the same ten pending-keyboard/IME/export/focus checks fail and all 317 test-tree diagnostics match bb48dcc6 after normalizing line numbers and worktree paths. This is not a paste regression, but leaving the checks unusable hides future regressions.
+
+Acceptance: visible Launchers acquire the real rich editor focus and hidden Launchers do not steal it; marked IME Enter never sends or queues while ordinary Enter still does; the discovered handler guard checks the actual event argument and reachable control flow for both React and native events; pending Run messages remain clearly distinct from unavailable Run messages through the real Outbox. Fixtures must satisfy current production types without casts that hide mismatches. Existing behavioral and structural guards remain active.
+
+Verification: composer input ownership DOM tests plus existing pending interaction, IME, effect reachability, workspace registry, provider ingress, image preview, local feedback and continuous progress suites; deliberate focus/IME/queue-copy mutations must fail.
+
+Follow-up result: 13 related suites pass (122 tests), including the real Agent and Launcher editor DOM paths, pending keyboard, Outbox delivery, attachment feedback, continuous progress and nonempty-scan guards. Test-tree diagnostics fall from 317 to 308, with no added diagnostics after normalizing locations. The six related fixture files now type-check; unrelated existing errors remain. No production behavior was changed just to satisfy an obsolete assertion.
+
+Six production mutations are killed by the revised coverage: delete focus; focus a hidden Launcher; stop reacting to visibility; give the IME predicate the wrong event; promise delivery for an unavailable Run; return before the focus call. Caller inspection confirms AgentComposer and NewTabSurface mount InlineComposer, AgentComposer invokes the native IME SSOT, and SessionMailbox mounts ComposerOutbox.
+
+The IME source-discovery suite now recognizes both the React wrapper and its native SSOT predicate while preserving argument identity, reachable control flow, nonempty discovery and actual import checks. It passes 27/28 checks in isolation; its remaining failure correctly identifies WorkspaceTopicsPanel's separate unguarded Enter handler, delegated to the Topic owner. No exemption was added to conceal that finding. Baseline and current evidence: `/tmp/composer-integration-baseline-tests.log`, `/tmp/composer-integration-baseline-types.log`, `/tmp/composer-integration-final-tests.log`, `/tmp/composer-integration-fixed-types.log`, `/tmp/composer-integration-ime-final.log`, `/tmp/composer-integration-mutations.json`.

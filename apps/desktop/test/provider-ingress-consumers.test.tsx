@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
+import { ComposerOutbox } from '../src/renderer/src/components/ComposerOutbox'
 
 /**
  * T-002 gate: the renderer consumes ONE delivery owner (Core, via api.sessions.submitPrompt) and keeps
@@ -122,11 +122,10 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
   })
 })
 
-describe('badge keeps Host-accepted separate from Provider-consumed/unknown at the UI layer', () => {
+describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at the UI layer', () => {
   function render(deliverable: boolean): string {
-    return renderToStaticMarkup(createElement(AgentComposer, {
-      value: '', disabled: false, placeholder: '',
-      queued: [{ id: 'a', text: 'a', status: 'queued', deliverable }, { id: 'b', text: 'b', status: 'queued', deliverable }], onChange: () => {}
+    return renderToStaticMarkup(createElement(ComposerOutbox, {
+      queued: [{ id: 'a', text: 'a', status: 'queued', deliverable }, { id: 'b', text: 'b', status: 'queued', deliverable }]
     }))
   }
 
@@ -135,7 +134,7 @@ describe('badge keeps Host-accepted separate from Provider-consumed/unknown at t
     expect(markup).toContain('queued for delivery')
     expect(markup).toContain('Messages for the current Run are sent in order as soon as the Agent can accept them.')
     // "queued for delivery" is Host-accepted intent, NOT proof the Provider consumed anything.
-    // MUTATION: change the deliverable-branch copy in AgentComposer.tsx:300 to say "replied"/"accepted" —
+    // MUTATION: change the deliverable-branch copy in ComposerOutbox.tsx to say "replied"/"accepted" —
     // this pair splits → red.
     expect(markup.toLowerCase()).not.toContain('replied')
     expect(markup.toLowerCase()).not.toContain('accepted')
@@ -145,8 +144,10 @@ describe('badge keeps Host-accepted separate from Provider-consumed/unknown at t
     const markup = render(false)
     expect(markup).not.toContain('queued for delivery')
     expect(markup).toContain('Not sent')
-    // MUTATION: collapse the two branches to one optimistic label (AgentComposer.tsx:284-285) — a
+    // MUTATION: collapse the two branches to one optimistic label (ComposerOutbox.tsx) — a
     // non-deliverable queue would read "queued for delivery" → red.
-    expect(markup).toContain('kept here')
+    expect(markup).toContain('this message targets a Run that is no longer available here')
+    expect(markup).toContain('<span>a</span>')
+    expect(markup).toContain('<span>b</span>')
   })
 })

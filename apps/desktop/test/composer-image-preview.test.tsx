@@ -89,7 +89,7 @@ it('uses the same image editor for Launcher screenshots', async () => {
   await vi.waitFor(() => expect(thumbnail()?.src).toBe(dataUrl))
   expect(dom.container.querySelector('.tiptap')?.getAttribute('aria-label')).toBe('Agent prompt')
   expect(dom.draft('region')).toBe(`Launch draft @${path} `)
-  const launch = vi.spyOn(useAppStore.getState(), 'launchAgent').mockResolvedValue('new-session')
+  const launch = vi.spyOn(useAppStore.getState(), 'launchAgent').mockResolvedValue(undefined)
   await act(async () => useAppStore.setState({ executorDetections: { [executorDetectionKey('local', 'codex')]: { state: 'ready' } } }))
   const enter = (composing: boolean) => new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: composing, bubbles: true, cancelable: true })
   await act(async () => dom.container.querySelector('.tiptap')!.dispatchEvent(enter(true)))

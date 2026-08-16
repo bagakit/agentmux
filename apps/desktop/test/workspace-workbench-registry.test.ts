@@ -54,7 +54,8 @@ describe('window-owned Workspace Workbench registry', () => {
     // 依赖数组的内容同样不在这里抄：抄整个字面量会让每次合法增删依赖都打红这一条（实测 #308 就
     // 撞上了），而它并不比 AST 判据更强。warm-terminal-ownership.test.ts 的接线层守「visible 与
     // warmSlotHeld 在依赖里、带归属的 warmSession/warmPending 不在」，那才是承重的性质。
-    expect(newTab).toContain('if (visible) promptRef.current?.focus()')
+    // DOM behavior (hidden → visible → hidden) is covered by composer-input-ownership.
+    expect(newTab).toContain('autoFocus={visible}')
     expect(newTab).toContain('if (!visible) return')
     expect(newTab).toContain('visible={visible}')
   })

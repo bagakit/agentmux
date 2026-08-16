@@ -57,7 +57,7 @@ import {
   AgentSessionComposer,
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
-import type { ComposerSuggestion } from '../src/renderer/src/components/AgentComposer.js'
+import type { AgentComposerProps, ComposerSuggestion } from '../src/renderer/src/components/AgentComposer.js'
 import { parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
 
 // Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
@@ -165,8 +165,9 @@ describe('AgentSessionComposer adapter', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
-    expect(renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }).props.value).toContain('Browser element context')
-    expect(renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }).props.value).toContain('Selector: main > button')
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as import('react').ReactElement<AgentComposerProps>
+    expect(composer.props.value).toContain('Browser element context')
+    expect(composer.props.value).toContain('Selector: main > button')
   })
 
   it('submits and compare-clears the exact shared draft snapshot', async () => {

@@ -6,6 +6,7 @@ const loop: ContinuousProgressLoop = { loopId: 'l', agentSessionId: 'a', interva
   nextCheckAt: 0, status: 'active', pendingCompletion: { id: '["r",1]', operationId: 'same-operation' } }
 function fixture(state: 'done' | 'working' = 'done', runId = 'r', observedAt = 1) {
   return { observeContinuousProgress: vi.fn(async () => ({ session: {
+    kind: 'agent' as const, executorId: 'codex', retiredRuns: [], outputCursorBytes: 0, createdAt: 1, updatedAt: 1,
     agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w', run: { runId },
     semanticStatus: { state, source: 'native-hook' as const, observedAt }
   }, tickId: 't', now: 1 })), submitPrompt: vi.fn(async () => {}) }

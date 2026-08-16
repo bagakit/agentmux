@@ -9,7 +9,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[], providerCatalog: [],
-    agentComposerDrafts: {} as Record<string, string>, agentSteerQueues: {}, agentSteerInFlight: {},
+    agentComposerDrafts: {} as Record<string, string>, agentSteerQueues: {}, agentSteerInFlight: {}, noticeReadReceipts: {},
     setAgentComposerDraft: vi.fn(), clearAgentComposerDraftIfUnchanged: vi.fn(),
     enqueueAgentSteer: vi.fn(() => true), flushAgentSteerQueue: vi.fn(async () => {}),
     send: vi.fn(() => true), interrupt: vi.fn(), setPosture: vi.fn(), reportError: vi.fn()
@@ -56,6 +56,18 @@ function enter(shiftKey = false) {
 }
 
 describe('pending interaction queue keyboard path', () => {
+  it.each([
+    { isComposing: true }, { keyCode: 229 },
+    { nativeEvent: { isComposing: true } }, { nativeEvent: { keyCode: 229 } }
+  ])('the actual composer handler leaves IME-owned Enter untouched (%j)', (marker) => {
+    const { keyDown } = input('running', false)
+    const key = enter()
+    keyDown(Object.assign(key.event, marker), 17)
+    expect(key.preventDefault).not.toHaveBeenCalled()
+    expect(fixture.state.send).not.toHaveBeenCalled()
+    expect(fixture.state.enqueueAgentSteer).not.toHaveBeenCalled()
+  })
+
   for (const state of ['waiting', 'blocked'] as const) {
     it(`${state}: Enter queues through the real input handler while immediate submission is gated`, () => {
       const { id, keyDown } = input(state, true)

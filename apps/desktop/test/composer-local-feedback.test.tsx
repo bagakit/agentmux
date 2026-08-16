@@ -65,7 +65,7 @@ it('capture failure stays local, can fail repeatedly, and cancellation preserves
 })
 
 it('skill discovery failure remains visible after the menu closes and retry discovers real choices', async () => {
-  const discover = vi.spyOn(api.ui, 'listAgentSkills').mockRejectedValueOnce(new Error('Skill folders unavailable')).mockResolvedValueOnce([{ name: 'Review', path: '/skills/review/SKILL.md', source: 'workspace', description: 'Review changes' }])
+  const discover = vi.spyOn(api.ui, 'listAgentSkills').mockRejectedValueOnce(new Error('Skill folders unavailable')).mockResolvedValueOnce([{ name: 'Review', path: '/skills/review/SKILL.md', source: 'project', description: 'Review changes' }])
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-tool--mode')
   await act(async () => dom.container.querySelector('[aria-label="Choose a skill"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
