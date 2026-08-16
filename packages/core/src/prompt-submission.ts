@@ -114,9 +114,12 @@ export class AgentPromptSubmissionCoordinator {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }
     }
-    const consumeCompletion = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number): AgentMuxStoredAgentSession => {
+    const claimInput = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number): AgentMuxStoredAgentSession => {
       const completionId = agentTurnCompletionIdentity(current)
-      return completionId ? { ...current, promptCompletionAdmission: { completionId, operationId, startByte, endByte } } : current
+      return { ...current, promptCompletionAdmission: {
+        submissionId, ...(completionId ? { completionId } : {}),
+        operationId, startByte, endByte
+      } }
     }
     if (plan.kind === 'single-phase') {
       const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'payload', plan.data)
@@ -126,12 +129,16 @@ export class AgentPromptSubmissionCoordinator {
       }
       const current = await this.deps.registry.update(session.agentSessionId, session.run, (stored) => {
         const admitted = stored.promptCompletionAdmission
-        if (admitted?.operationId === operationId) {
+        if (admitted && (admitted.operationId === operationId || admitted.submissionId === submissionId)) {
+          if (admitted.operationId !== operationId ||
+            admitted.endByte - admitted.startByte !== Buffer.byteLength(plan.data)) {
+            throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+          }
           if (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte) assertInteraction(stored)
           return stored
         }
         assertAdmission(stored)
-        return consumeCompletion(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data))
+        return claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data))
       })
       const admitted = current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
       const accepted = await this.deps.kernel.input(session.run.runId, {
@@ -230,7 +237,7 @@ export class AgentPromptSubmissionCoordinator {
       // must not lock a healthy Agent out. Payload rendering below still verifies or degrades.
       const outputCursorBytes = Math.max(run.latestOutputBytes, readinessEvidence?.readyThroughByte ?? 0)
       return {
-        ...consumeCompletion(stored, payloadOperationId, expectedByte, expectedByte + payloadBytes + submitBytes),
+        ...claimInput(stored, payloadOperationId, expectedByte, expectedByte + payloadBytes + submitBytes),
         ...(readinessEvidence ? { terminalPromptReadiness: {
           ...readiness!, consumedBySubmissionId: submissionId
         } } : {}),

@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import type { AgentMuxStoredAgentSession, AgentMuxPendingInteraction } from '../src/types.js'
 import { advanceDelivery, createThread } from '../src/agent-message.js'
@@ -71,35 +75,57 @@ type Internals = {
   registry: { load(hostId: string): Promise<void> }
 }
 
+/** The daemon owns physical idempotency and byte CAS; its receipt also binds the original range. */
+function daemonFixture() {
+  let cursor = 0
+  let runState: 'running' | 'exited' = 'running'
+  let loseAck = false
+  const writes: string[] = []
+  type Operation = Parameters<CtxmuxRunAdapter['input']>[1]
+  const operations: Operation[] = []
+  const receipts = new Map<string, Operation>()
+  return {
+    writes, operations,
+    setRunState: (state: 'running' | 'exited') => { runState = state },
+    loseNextAck: () => { loseAck = true },
+    status: async () => ({ ...runProjection(cursor),
+      state: runState === 'running' ? { type: 'running' as const } : { type: 'exited' as const, exitCode: 0 } }),
+    input: async (runId: string, operation: Operation) => {
+      expect(runId).toBe(RUN_ID)
+      operations.push(structuredClone(operation))
+      const retained = receipts.get(operation.operationId)
+      if (retained) {
+        // Mirroring the SDK's exact receipt check: same key with a NEW expectedByte is NOT a replay.
+        expect(operation).toEqual(retained)
+      } else {
+        expect(operation.expectedByte).toBe(cursor)
+        receipts.set(operation.operationId, structuredClone(operation))
+        writes.push(typeof operation.data === 'string' ? operation.data : Buffer.from(operation.data).toString('utf8'))
+        cursor += Buffer.byteLength(operation.data)
+      }
+      if (loseAck) { loseAck = false; throw new Error('Input response lost after acceptance') }
+      return { run: runProjection(cursor), appliedByteRange: {
+        startByte: operation.expectedByte, endByte: operation.expectedByte + Buffer.byteLength(operation.data)
+      } }
+    }
+  }
+}
+
 async function ingressClient(
-  extra: Partial<AgentMuxStoredAgentSession> = {}
-): Promise<{ client: AgentMuxClient; writes: string[]; setRunState(state: 'running' | 'exited'): void }> {
-  const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, storedSession(extra))
+  extra: Partial<AgentMuxStoredAgentSession> = {},
+  store: AgentMuxAgentSessionStore = new AgentMuxMemoryAgentSessionStore(),
+  daemon = daemonFixture()
+) {
+  if ((await store.load()).length === 0) await store.compareAndSwap(null, storedSession(extra))
   const client = new AgentMuxClient({ store })
   const state = client as unknown as Internals
   await state.registry.load('local')
-
-  let cursor = 0
-  let runState: 'running' | 'exited' = 'running'
-  const writes: string[] = []
   state.kernel.isConnected = () => true
   state.kernel.identity = () => ({ daemonInstanceId: 'daemon-1', protocolVersion: 1, buildIdentity: 'test' })
-  state.kernel.status = async () => ({
-    ...runProjection(cursor),
-    state: runState === 'running' ? { type: 'running' as const } : { type: 'exited' as const, exitCode: 0 }
-  })
-  state.kernel.input = async (_runId: string, operation: { expectedByte: number; data: string }) => {
-    writes.push(operation.data)
-    cursor = operation.expectedByte + Buffer.byteLength(operation.data)
-    return {
-      run: runProjection(cursor),
-      appliedByteRange: { startByte: operation.expectedByte, endByte: cursor }
-    }
-  }
+  state.kernel.status = daemon.status
+  state.kernel.input = daemon.input
   ;(client as unknown as { connected: boolean }).connected = true
-
-  return { client, writes, setRunState: (s) => { runState = s } }
+  return { client, store, ...daemon }
 }
 
 describe('typed prompt ingress has one delivery owner in Core', () => {
@@ -111,20 +137,83 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       prompt: 'ship it'
     })
     // claude is single-phase: the whole outbound (prompt + \r) is one daemon input write.
-    // MUTATION: change submitAgentPrompt to call promptSubmission.submitInputPlan twice, or drop the
-    // single-phase early return in prompt-submission.ts:134 — writes.length becomes 2 → this goes red.
     expect(fixture.writes).toEqual(['ship it\r'])
   })
 
-  it('does NOT double-send when the SAME operationId is replayed (the anti-double-send owner is Core)', async () => {
+  it('replays the SAME operation and original byte range without a completion observation', async () => {
     const fixture = await ingressClient()
     const input = { agentSessionId: AGENT_SESSION_ID, operationId: 'op-replay', prompt: 'once only' }
     await fixture.client.submitAgentPrompt(input)
     await fixture.client.submitAgentPrompt(input)
-    // The renderer steer queue leans ENTIRELY on this: a retry replays the same id and Core recognizes it.
-    // MUTATION: mint a fresh operationId per attempt (e.g. randomUUID() inside submitAgentPrompt instead of
-    // using input.operationId) — the second call writes again → length 2 → red.
+    // Core retains the complete operation; ctxmux returns its receipt without a second physical write.
+    expect(fixture.operations).toHaveLength(2)
+    expect(fixture.operations[1]).toEqual(fixture.operations[0])
     expect(fixture.writes).toEqual(['once only\r'])
+  })
+
+  it.each(['other', 'different'])('rejects reuse of a claimed logical operation for changed content (%s) before another write', async (changed) => {
+    const fixture = await ingressClient()
+    const input = { agentSessionId: AGENT_SESSION_ID, operationId: 'claimed', prompt: 'first' }
+    await fixture.client.submitAgentPrompt(input)
+    await expect(fixture.client.submitAgentPrompt({ ...input, prompt: changed }))
+      .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+    expect(fixture.writes).toEqual(['first\r'])
+    expect(fixture.operations).toHaveLength(1)
+  })
+
+  it.each([false, true])('recovers the persisted single-phase range after client restart (lost ack: %s)', async (lostAck) => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-ingress-restart-'))
+    try {
+      const path = join(root, 'sessions.json')
+      const daemon = daemonFixture()
+      const first = await ingressClient({}, new AgentMuxFileAgentSessionStore(path), daemon)
+      const input = { agentSessionId: AGENT_SESSION_ID, operationId: 'restart-operation', prompt: 'persist me' }
+      if (lostAck) {
+        daemon.loseNextAck()
+        await expect(first.client.submitAgentPrompt(input)).rejects.toThrow('Input response lost')
+      } else await first.client.submitAgentPrompt(input)
+      // A fresh file store and Client have no in-memory cursor or coordinator state.
+      const restarted = await ingressClient({}, new AgentMuxFileAgentSessionStore(path), daemon)
+      await restarted.client.submitAgentPrompt(input)
+      expect(daemon.writes).toEqual(['persist me\r'])
+      expect(daemon.operations).toHaveLength(2)
+      expect(daemon.operations[1]).toEqual(daemon.operations[0])
+      expect((await restarted.store.load())[0]).toMatchObject({ promptCompletionAdmission: {
+        submissionId: input.operationId, startByte: 0, endByte: 11
+      } })
+      await expect(restarted.client.submitAgentPrompt({ ...input, prompt: 'changed after restart' }))
+        .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+      expect(daemon.writes).toEqual(['persist me\r'])
+      // A new logical prompt remains usable without a native completion/start hook.
+      await restarted.client.submitAgentPrompt({ ...input, operationId: 'next-operation', prompt: 'next' })
+      expect(daemon.writes).toEqual(['persist me\r', 'next\r'])
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('reads an existing four-field completion admission and recovers its receipt after restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-ingress-existing-admission-'))
+    try {
+      const path = join(root, 'sessions.json')
+      const daemon = daemonFixture()
+      const first = await ingressClient({ semanticStatus: { state: 'done', source: 'native-hook', observedAt: 100 } },
+        new AgentMuxFileAgentSessionStore(path), daemon)
+      const input = { agentSessionId: AGENT_SESSION_ID, operationId: 'existing-operation', prompt: 'existing input' }
+      await first.client.submitAgentPrompt(input)
+      const stored = (await first.store.load())[0] as AgentMuxStoredAgentSession
+      const { operationId, startByte, endByte, completionId } = stored.promptCompletionAdmission!
+      // This is the exact already-installed shape. Missing logical identity is unknown, not invalid.
+      expect(completionId).toBe('["ingress-run",100]')
+      const existing = { operationId, startByte, endByte, completionId: completionId! }
+      await first.store.compareAndSwap(stored, { ...stored, promptCompletionAdmission: existing })
+      const restarted = await ingressClient({}, new AgentMuxFileAgentSessionStore(path), daemon)
+      await restarted.client.submitAgentPrompt(input)
+      expect(daemon.writes).toEqual(['existing input\r'])
+      expect(daemon.operations).toHaveLength(2)
+      expect(daemon.operations[1]).toEqual(daemon.operations[0])
+      expect((await restarted.store.load())[0]).toMatchObject({ promptCompletionAdmission: existing })
+      expect(((await restarted.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission)
+        .not.toHaveProperty('submissionId')
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('refuses a prompt while a human request is pending — a prompt is not silently its answer', async () => {
@@ -141,15 +230,14 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
         evidence: { source: 'native-hook', observedAt: 200, run: { runId: RUN_ID }, hookReceiptId: 'perm-1' }
       }
     }
-    const fixture = await ingressClient({ pendingInteraction: pending })
+    const fixture = await ingressClient({ pendingInteraction: pending, updatedAt: 200 })
     await expect(fixture.client.submitAgentPrompt({
       agentSessionId: AGENT_SESSION_ID,
       operationId: 'op-during-pending',
       prompt: 'must-not-bypass-permission'
     })).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
     // Not one byte reached the Agent — the pending card owns the input surface.
-    // MUTATION: delete the `if (current.pendingInteraction) throw` guard in submitAgentPrompt
-    // (client.ts:2336) — the prompt is written and the reject below fails → red.
+    // The coordinator's durable new-admission check owns this refusal.
     expect(fixture.writes).toEqual([])
   })
 

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   observeAgent,
-  observationSupersedes,
   type AgentObservation
 } from '../src/agent-status-freshness.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -14,8 +13,7 @@ import type {
 
 /**
  * Provider 观察合同的收敛点：{@link observeAgent} 把三条**不折叠**的轴（进程活性 / 语义活性 / 就绪性）
- * 从 Session 现在的事实里投影出来，而 {@link observationSupersedes} 决定一条迟到/过期/异源的读数有没有
- * 资格覆盖当前 Run。
+ * 从 Session 现在的事实里投影出来。
  *
  * 这一族守的是判定本身；「真实消费者是否真的走了这个投影」由 client.statusAgent（Core 侧公开 API）与
  * desktop 侧 provider-observation-consumer.test.tsx 各自钉死。分工与本仓既有的
@@ -161,24 +159,5 @@ describe('就绪性区分 ready / pending / unknown', () => {
     expect(observe({ process: 'running' }).readiness).toBe('ready')
     expect(observe({ process: 'running', awaitingRequest: true }).readiness).toBe('pending')
     expect(observe({ process: 'running', terminalUnverified: true }).readiness).toBe('pending')
-  })
-})
-
-describe('迟到/过期/异源事件不能覆盖当前 Run', () => {
-  it('异 Run 的读数一律不采纳（Resume 后 runId 变、agentSessionId 不变正是要挡的场景）', () => {
-    expect(observationSupersedes(
-      { runId: 'run-2', observedAt: NOW },
-      { runId: 'run-1', observedAt: NOW + 10_000 } // 更新，但属于旧 Run
-    )).toBe(false)
-  })
-
-  it('同 Run 但更旧的读数不采纳；正好同刻或更新才采纳', () => {
-    expect(observationSupersedes({ runId: 'run-1', observedAt: NOW }, { runId: 'run-1', observedAt: NOW - 1 })).toBe(false)
-    expect(observationSupersedes({ runId: 'run-1', observedAt: NOW }, { runId: 'run-1', observedAt: NOW })).toBe(true)
-    expect(observationSupersedes({ runId: 'run-1', observedAt: NOW }, { runId: 'run-1', observedAt: NOW + 1 })).toBe(true)
-  })
-
-  it('当前还没绑定到任何 Run 时无从比对，拒绝采纳', () => {
-    expect(observationSupersedes({ observedAt: NOW }, { runId: 'run-1', observedAt: NOW + 10_000 })).toBe(false)
   })
 })

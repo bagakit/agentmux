@@ -999,8 +999,10 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
       const admission = record(source.promptCompletionAdmission, 'promptCompletionAdmission')
       const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
       const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
-      if (endByte <= startByte) throw new AgentMuxError('Invalid completion input range.', 'INVALID_AGENT_SESSION_STORE')
-      return { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId'),
+      if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
+      return {
+        ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
+        ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
         operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), startByte, endByte }
     })() }),
     ...(source.terminalPromptSubmission === undefined
