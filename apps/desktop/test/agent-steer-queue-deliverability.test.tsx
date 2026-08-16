@@ -18,7 +18,10 @@ import { AgentComposer } from '../src/renderer/src/components/AgentComposer.js'
  * 本仓记过 renderToStaticMarkup 对 effect 完全失明——这里没有 effect 可失明。
  */
 describe('AgentComposer 队列徽标的可投递性', () => {
-  const queued = ['steer one', 'steer two']
+  const queued = [
+    { id: 'q-1', text: 'steer one', status: 'queued' as const },
+    { id: 'q-2', text: 'steer two', status: 'queued' as const }
+  ]
 
   function render(deliverable: boolean, onCopyQueued?: (text: string) => void): string {
     return renderToStaticMarkup(createElement(AgentComposer, {
@@ -77,7 +80,7 @@ describe('AgentComposer 队列徽标的可投递性', () => {
   it('单数时按钮说 message 而不是 all', () => {
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: '', disabled: false, placeholder: '',
-      queued: ['only one'], queueDeliverable: false, onCopyQueued: () => {}, onChange: () => {}
+      queued: [{ id: 'q-1', text: 'only one', status: 'queued' }], queueDeliverable: false, onCopyQueued: () => {}, onChange: () => {}
     }))
 
     expect(markup).toContain('Copy message')

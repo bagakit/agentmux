@@ -5,6 +5,8 @@ import { ComposerTextarea } from './ComposerTextarea'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
 import { SemanticIcon } from './semantic-icons'
+import { AgentComposer } from './AgentComposer'
+import { AgentComposerTools } from './AgentComposerTools'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
 const workingStatus: SessionSnapshot['status'] = {
@@ -49,6 +51,27 @@ export function ObservationSurfaceGallery() {
           <small>{draft ? '草稿已输入，交付仍由宿主负责。' : '受控输入与 IME 处理仍由原有组件负责。'}</small>
         </article>
       </div>
+      <article className="observation-sample observation-sample--composer observation-sample--full">
+        <div className="observation-sample__label">Agent workspace composer</div>
+        <AgentComposer
+          value={draft}
+          disabled={false}
+          placeholder="Ask, steer, or paste a command…"
+          onChange={setDraft}
+          queued={[
+            { id: 'gallery-q-1', text: 'Run the focused tests', status: 'queued' },
+            { id: 'gallery-q-2', text: 'Summarize the remaining risk', status: 'failed', error: 'Previous run ended before delivery' }
+          ]}
+          queueDeliverable
+          semanticReferences={[
+            { token: '$review', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' },
+            { token: '$card', label: 'card', kind: 'component', reference: '@/components/card.tsx' },
+            { token: '/status', label: 'status', kind: 'subcommand', reference: '/status' }
+          ]}
+          tools={<AgentComposerTools disabled={false} commands={[{ text: '/status', description: 'Inspect the current Agent state' }]} loadSkills={async () => []} onChooseSkill={() => {}} onCommand={() => {}} reportError={() => {}} />}
+        />
+        <small>队列失败会停住并说明原因；引用以短 token 展示，hover 可见完整路径。</small>
+      </article>
     </section>
   )
 }

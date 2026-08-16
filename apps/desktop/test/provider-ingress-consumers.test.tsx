@@ -48,7 +48,7 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('a rejected send is RETAINED for retry and send() reports the retention (draft must be kept)', async () => {
+  it('a rejected send becomes a stable failed item and send() reports the retention (draft must be kept)', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('link dropped'))
@@ -58,11 +58,11 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     // throws and the entry vanishes → both assertions red.
     await expect(useAppStore.getState().send('s', 'retry me')).rejects.toThrow()
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'r', text: 'retry me' }
+      { operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'failed', error: 'link dropped' }
     ])
   })
 
-  it('no double-send: a retry replays the SAME operationId, which is Core’s only anti-double-send key', async () => {
+  it('does not auto-retry a failed item; explicit Send now reuses the SAME operationId', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
     const ids: string[] = []
@@ -72,7 +72,10 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
 
     useAppStore.getState().enqueueAgentSteer('s', 'once')
     await useAppStore.getState().flushAgentSteerQueue('s') // fails, retains
-    await useAppStore.getState().flushAgentSteerQueue('s') // retries with same id
+    await useAppStore.getState().flushAgentSteerQueue('s') // terminal failed state: no retry
+    expect(ids).toHaveLength(1)
+    const operationId = useAppStore.getState().agentSteerQueues.s![0]!.operationId
+    await useAppStore.getState().sendQueuedAgentSteer('s', operationId)
 
     expect(ids).toHaveLength(2)
     // Same id → Core recognizes the idempotent replay instead of writing twice. MUTATION: mint a fresh id
@@ -113,7 +116,7 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     // with the new run → red.
     expect(submit).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'run-1', text: 'stale' }
+      { operationId: expect.any(String), runId: 'run-1', text: 'stale', status: 'queued' }
     ])
   })
 })
@@ -122,7 +125,7 @@ describe('badge keeps Host-accepted separate from Provider-consumed/unknown at t
   function render(deliverable: boolean): string {
     return renderToStaticMarkup(createElement(AgentComposer, {
       value: '', disabled: false, placeholder: '',
-      queued: ['a', 'b'], queueDeliverable: deliverable, onChange: () => {}
+      queued: [{ id: 'a', text: 'a', status: 'queued' }, { id: 'b', text: 'b', status: 'queued' }], queueDeliverable: deliverable, onChange: () => {}
     }))
   }
 
