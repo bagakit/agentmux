@@ -526,6 +526,49 @@ describe('Renderer persistence boundary', () => {
     dispose()
   })
 
+  it('keeps a pure-Terminal View when the first verified snapshot is transiently empty', async () => {
+    // The empty-snapshot fail-open guard must protect a Terminal Region exactly as it protects an
+    // Agent one: the ctxmux daemon outlives the app, so a surviving PTY reappears a beat after
+    // startup, and one transient empty snapshot must not be judged authoritative. The bug was that
+    // the guard counted ONLY persisted Agent ids, so on a pure-Terminal layout its size was 0 and the
+    // guard silently never fired — a Terminal only survived when it shared a Tab with an Agent that
+    // kept the guard alive. This case has NO Agent sibling, so it fails if the guard regresses to
+    // counting Agents only. The sibling `reconciles an unknown Terminal Region ...` test above pins
+    // the opposite direction (a genuinely absent Terminal in a NON-empty snapshot is removed), so the
+    // two together track the property, not just "keep everything".
+    const runId = 'terminal-alive-across-restart'
+    const tab = createWorkbenchTab('terminal-alive-view', {
+      regionId: initialWorkbenchRegionId('terminal-alive-view'),
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId: runId
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    // A verified but empty snapshot: the daemon has not yet re-reported the surviving Terminal run.
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: []
+    })
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+    expect(state.tabs[tab.id]).toEqual(tab)
+    expect(state.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tab.id])
+    expect(state.error).toContain('returned no Session facts')
+    dispose()
+  })
+
   it('keeps existing Sessions usable when the Provider catalog lookup fails', async () => {
     useAppStore.setState({ loading: true, restoredWorkbench: null })
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
