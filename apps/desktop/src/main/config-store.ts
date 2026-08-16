@@ -7,6 +7,7 @@ import type { AppConfig, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from 
 import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
+  APP_LINK_SCHEME_CHOICES,
   CONFIG_VERSION,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -95,7 +96,7 @@ const browserSchema = z.object({
    * 写成必需会让 browser 整块判失败）——但这一个**不**回填：空对象与缺席语义完全一样（都是「一个
    * 都没记过」），补一次盘只是白写。`z.record` 的值域收死成两档，别的字符串一律判失败。
    */
-  appLinkSchemes: z.record(z.string(), z.enum(['allow', 'deny'])).optional(),
+  appLinkSchemes: z.record(z.string(), z.enum(APP_LINK_SCHEME_CHOICES)).optional(),
   toolbar: z.object({
     selectElement: z.boolean(),
     screenshot: z.boolean(),
