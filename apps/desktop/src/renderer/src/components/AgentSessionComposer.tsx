@@ -63,10 +63,15 @@ export function agentComposerAvailability(
 
 export function AgentSessionComposer({
   sessionId,
-  disabled = false
+  disabled = false,
+  regionName
 }: {
   sessionId: string
   disabled?: boolean
+  // 这一格的显示名（含去重编号），由 SessionPane 现算好传进来——它是唯一持有 Region 起点（tabId +
+  // regionId + 兄弟格）的宿主。缺席即水印整段不渲染（launcher/PR/board 那些无 Region 的宿主本就不
+  // 经这条路走 AgentComposer，此处只透传，不判断）。
+  regionName?: string
 }) {
   const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
@@ -242,17 +247,35 @@ export function AgentSessionComposer({
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
       onHistoryRecall={historyRecall}
+      {...(regionName ? { regionName } : {})}
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
-      {...(submitMode.canSubmit ? {
-        onSubmit: () => void submit(),
-        onInterrupt: () => void interrupt(sessionId),
+      // Interrupt rides `primaryAction`, NOT `canSubmit`. They answer different questions and
+      // composer-submit-mode.ts keeps them apart on purpose ("Stop … independent of `canSubmit`"); wiring
+      // Interrupt into the submit spread collapsed them again. The state that exposed it: a `working`
+      // Agent with a pending permission card has `canSubmit:false` while `primaryAction` stays `'stop'`,
+      // so the ■ button rendered with `onInterrupt` undefined — `disabled={disabled || !onInterrupt}` —
+      // and the only UI path to interrupt a turn was dead exactly when a card was up.
+      //
+      // 原则 11 第 2 类: the daemon never stopped honouring it. store.interrupt → runtime.interrupt →
+      // client.signalAgent → kernel.interrupt(runId) carries no pendingInteraction gate and no
+      // processState gate — contrast writeAgentInput, which deliberately DOES throw
+      // AGENT_INTERACTION_PENDING. So this took away an ability the runtime still has: RED-LINES.md
+      // 判定流程 "绕过我这段代码，这条路还能不能通？→ 能" ⇒ red line.
+      {...(submitMode.primaryAction === 'stop' ? { onInterrupt: () => void interrupt(sessionId) } : {})}
+      // Draft-building helpers follow `canType`, which is what their own bodies already check
+      // (attachFiles/pasteImage/addFileReference each return early on `!canType`). Gating them on
+      // canSubmit contradicted those guards: while a card is pending the placeholder invites "Draft a
+      // steer…" yet attach/paste/@-file were withheld from the draft the user is allowed to type.
+      // Posture is a live capability too — client.setAgentPosture does not depend on submit readiness.
+      {...(submitMode.canType ? {
         onAttach: () => void attachFiles(),
         onPasteImage: (image: { bytes: Uint8Array; extension: string }) => void pasteImage(image),
         ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
+      {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
         onQueue: () => queue()
       } : {})}

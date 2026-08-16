@@ -341,6 +341,80 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out')
   })
 
+  it('一张待答卡片不许夺走中断——daemon 那条路从来没关过', () => {
+    // 原则 11 第 2 类。`canSubmit:false` 是对的（卡片拥有输入），但 Interrupt 此前跟 onSubmit 挤在同
+    // 一个条件展开里，于是 `primaryAction` 仍是 `'stop'`、■ 按钮照常渲染，而 `onInterrupt` 是
+    // undefined——`disabled={disabled || !onInterrupt}` 把它变成死按钮。composer 是中断一个 turn 的
+    // **唯一** UI 入口。
+    //
+    // 判据钉的是「daemon 还认不认」这一侧：store.interrupt → kernel.interrupt(runId) 一路没有
+    // pendingInteraction 门，也没有 processState 门（对照 writeAgentInput 是**故意**抛
+    // AGENT_INTERACTION_PENDING 的）。所以这里不是「我们这段代码降级了」，是「我们拿走了用户还有的
+    // 能力」。两个世界同时钉：卡片在时中断仍在，且它真的打到 store。
+    const waiting = agentSession({
+      status: { state: 'working', source: 'native-hook', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        id: 'permission-1',
+        agentSessionId: 'agent-1',
+        title: 'Allow command?',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+        evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
+      }
+    })
+    fixture.state.sessions = [waiting]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onInterrupt?: () => void; onSubmit?: () => void; primaryAction: string }
+    }
+
+    // 三条一起才说明问题：按钮是 Stop 形态、提交确实被挡住、而中断仍然接得上。少了中间那条，
+    // 「把卡片门整个拆掉」也会绿。
+    expect(composer.props.primaryAction, '正在跑的 Agent 主操作应当是 Stop').toBe('stop')
+    expect(composer.props.onSubmit, '卡片在时不该能直接提交').toBeUndefined()
+    expect(composer.props.onInterrupt, '卡片待答时中断被拿走了——daemon 那条路还通着').toBeTypeOf(
+      'function'
+    )
+    composer.props.onInterrupt?.()
+    expect(fixture.state.interrupt).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('空闲的 Agent 没有中断可给——它不是被谁拿走的，是本来就没有', () => {
+    // 上一条的相反世界。少了它，把 onInterrupt 写成无条件传入也照样"通过"，而那会让一个没在跑的
+    // Agent 也显示出可点的中断。
+    fixture.state.sessions = [agentSession({ status: { state: 'idle', source: 'native-hook', observedAt: 1 } })]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onInterrupt?: () => void; primaryAction: string }
+    }
+
+    expect(composer.props.primaryAction).toBe('send')
+    expect(composer.props.onInterrupt).toBeUndefined()
+  })
+
+  it('卡片待答时仍可往草稿里加附件与 @文件——它们跟着 canType，不是 canSubmit', () => {
+    // placeholder 明写着「Draft a steer…」，而这些 affordance 此前跟 onSubmit 挤在同一个展开里被一起
+    // 收走。它们各自的函数体本来就先查 `canType`（attachFiles/pasteImage/addFileReference 三处都有
+    // 早退），传入条件却比那个守卫更严——两处判定不一致时，松的那处等于白写。
+    const waiting = agentSession({
+      status: { state: 'working', source: 'native-hook', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        id: 'permission-1',
+        agentSessionId: 'agent-1',
+        title: 'Allow command?',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+        evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
+      }
+    })
+    fixture.state.sessions = [waiting]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onAttach?: () => void; onPasteImage?: (image: unknown) => void; disabled: boolean }
+    }
+
+    expect(composer.props.disabled, 'canType 为真，输入框不该是禁用的').toBe(false)
+    expect(composer.props.onAttach, '能打字却不能加附件——两处判定不一致').toBeTypeOf('function')
+    expect(composer.props.onPasteImage).toBeTypeOf('function')
+  })
+
   it('does not guess that a disconnected running process can accept input', () => {
     const disconnected = agentSession({
       status: { state: 'disconnected', source: 'run-process', observedAt: 2 }
