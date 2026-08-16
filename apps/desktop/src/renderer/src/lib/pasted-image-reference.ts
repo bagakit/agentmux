@@ -21,11 +21,25 @@ import { PASTED_IMAGE_EXTENSIONS } from '../../../shared/contracts'
 // Extension alternation is derived from the write-side SSOT, never re-authored, so the renderer cannot
 // recognise a format the write side does not produce (or miss one it does).
 const EXTENSION_ALTERNATION = PASTED_IMAGE_EXTENSIONS.join('|')
-// `@?` optional sigil (outside the capture). Group 1 = an absolute path that runs through
-// `/.agentmux/pasted/` and ends in a known image extension at a token boundary.
-const PASTED_IMAGE_TOKEN = new RegExp(
-  `@?(/[^\\s]*?/\\.agentmux/pasted/[^\\s/]+\\.(?:${EXTENSION_ALTERNATION}))(?=$|[\\s.,;:)\\]])`,
-  'giu'
+/**
+ * The literal that makes a token ours. Scanning is driven by `indexOf` on THIS string rather than by a
+ * regex that walks the whole run.
+ *
+ * The obvious pattern — `/[^\s]*?/\.agentmux/pasted/…` — is O(N²) on hostile input: the lazy `[^\s]*?`
+ * restarts at every `/` and rescans forward to failure, so a slash-dense run with no valid token (a file
+ * tree dump, a stack trace, anything an Agent can emit or fetch) costs quadratic time ON THE RENDER
+ * THREAD. Measured on the real pattern: 16k→33ms, 64k→543ms, 256k→8.9s of synchronous freeze.
+ *
+ * Two pattern rewrites were measured and BOTH were worse (segment-wise lazy repeat: 6x slower;
+ * anchor-first with a greedy prefix: 31s at 256k) — backtracking cannot be patched by re-spelling the
+ * pattern. Anchoring the SCAN is what removes it: the number of starting points becomes the number of
+ * times this literal actually occurs, and each one does bounded work.
+ */
+const PASTED_IMAGE_ANCHOR = '/.agentmux/pasted/'
+/** The file-name half, applied only at a real anchor. `i` mirrors the original pattern's flag. */
+const PASTED_IMAGE_TAIL = new RegExp(
+  `^[^\\s/]+\\.(?:${EXTENSION_ALTERNATION})(?=$|[\\s.,;:)\\]])`,
+  'iu'
 )
 
 /** One piece of a text run, split around any pasted-image tokens inside it. */
@@ -40,16 +54,39 @@ export type PastedImageSegment =
  * rendered before rather than special-casing the empty case.
  */
 export function splitPastedImageReferences(text: string): PastedImageSegment[] {
-  PASTED_IMAGE_TOKEN.lastIndex = 0
   const segments: PastedImageSegment[] = []
   let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = PASTED_IMAGE_TOKEN.exec(text)) !== null) {
-    const path = match[1]
-    if (path === undefined) continue
-    if (match.index > cursor) segments.push({ kind: 'text', text: text.slice(cursor, match.index) })
-    segments.push({ kind: 'image', text: match[0], path })
-    cursor = match.index + match[0].length
+  let from = 0
+  let anchor: number
+  while ((anchor = text.indexOf(PASTED_IMAGE_ANCHOR, from)) !== -1) {
+    const tail = PASTED_IMAGE_TAIL.exec(text.slice(anchor + PASTED_IMAGE_ANCHOR.length))
+    if (!tail) {
+      from = anchor + PASTED_IMAGE_ANCHOR.length
+      continue
+    }
+    // Whitespace is the only hard left wall: it cannot appear inside the path.
+    let low = anchor
+    while (low > cursor && !/\s/u.test(text[low - 1]!)) low--
+    if (low < cursor) low = cursor
+    // The LEFTMOST `/` in [low, anchor) — a regex tries start positions left to right, so the earliest
+    // viable one wins. Walking left only as far as `@` would be wrong: `@` is an ordinary character
+    // inside the path for everything except a sigil directly before the start.
+    let start = -1
+    for (let k = low; k < anchor; k++) {
+      if (text[k] === '/') { start = k; break }
+    }
+    if (start === -1) {
+      from = anchor + PASTED_IMAGE_ANCHOR.length
+      continue
+    }
+    const path = text.slice(start, anchor + PASTED_IMAGE_ANCHOR.length + tail[0].length)
+    const sigil = start > cursor && text[start - 1] === '@'
+    const whole = sigil ? `@${path}` : path
+    const tokenStart = sigil ? start - 1 : start
+    if (tokenStart > cursor) segments.push({ kind: 'text', text: text.slice(cursor, tokenStart) })
+    segments.push({ kind: 'image', text: whole, path })
+    cursor = tokenStart + whole.length
+    from = cursor
   }
   if (segments.length === 0) return [{ kind: 'text', text }]
   if (cursor < text.length) segments.push({ kind: 'text', text: text.slice(cursor) })
