@@ -4673,7 +4673,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               }
             })
             // A readiness/reconnect wake arriving during the attempt must not be lost.
-            if (!drain.wake) return
+            const stillPending = get().agentSteerQueues[sessionId]?.some((item) => item.operationId === entry.operationId)
+            if (stillPending && !drain.wake) return
           } finally {
             set((current) => {
               const agentSteerInFlight = { ...current.agentSteerInFlight }
@@ -4854,7 +4855,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ))
           if (!session || session.kind !== 'agent') return
           const snapshot = await api.sessions.timeline(session.control)
+          const pendingBefore = get().agentSteerQueues[sessionId]
           set((state) => reconcileDeliveredSteers({ ...state, ...reduceTimelineSnapshot(state, snapshot) }, sessionId))
+          if (get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {
+            void get().flushAgentSteerQueue(sessionId)
+          }
         } while (entry.requested)
       } catch (error) {
         get().reportError(error)
@@ -4881,6 +4886,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? get().sessions.find((session) => session.id === core.session.agentSessionId) : undefined
     const interactionCleared = core.type === 'agent-session' && !core.session.pendingInteraction &&
       previous?.kind === 'agent' && Boolean(previous.pendingInteraction)
+    const pendingBefore = core.type === 'agent-timeline' ? get().agentSteerQueues[core.agentSessionId] : undefined
     let timelineGapSessionId: string | undefined
     let sessionMembershipGap = false
     set((state) => {
@@ -4891,6 +4897,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? reconcileDeliveredSteers({ ...state, ...reduced.state }, core.agentSessionId)
         : reduced.state
     })
+    if (core.type === 'agent-timeline' && get().agentSteerQueues[core.agentSessionId] !== pendingBefore &&
+      !agentSteerDrains.has(core.agentSessionId)) void get().flushAgentSteerQueue(core.agentSessionId)
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     if (core.type === 'connection-state' && core.state === 'restored') {
