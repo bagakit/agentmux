@@ -103,3 +103,28 @@ describe('pending Outbox converges with durable Core delivery', () => {
     expect(submit).not.toHaveBeenCalled()
   })
 })
+
+
+it.each(['before rejection', 'after rejection', 'snapshot after rejection'] as const)(
+  'continues the tail when durable head delivery arrives %s', async (ordering) => {
+    const tail = { ...queued, operationId: 'tail', text: 'next words' }
+    useAppStore.setState({ sessions: [session()], agentSteerQueues: { s: [queued, tail] }, timelines: {} })
+    let reject!: (error: Error) => void
+    const submit = vi.spyOn(api.sessions, 'submitPrompt')
+      .mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail }))
+      .mockResolvedValue(undefined)
+    const drain = useAppStore.getState().flushAgentSteerQueue('s')
+    await Promise.resolve()
+    expect(submit.mock.calls.map((call) => call[2])).toEqual([queued.operationId])
+    if (ordering === 'before rejection') useAppStore.getState().applyEvent(timelineEvent(message(queued.operationId)))
+    reject(new Error('reply lost after durable delivery'))
+    await drain
+    if (ordering === 'after rejection') useAppStore.getState().applyEvent(timelineEvent(message(queued.operationId)))
+    if (ordering === 'snapshot after rejection') {
+      vi.spyOn(api.sessions, 'timeline').mockResolvedValue({ agentSessionId: 's', revision: 1, items: [message(queued.operationId)] })
+      await useAppStore.getState().resyncTimeline('s')
+    }
+    await vi.waitFor(() => expect(submit.mock.calls.map((call) => call[2])).toEqual([queued.operationId, tail.operationId]))
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
+  }
+)
