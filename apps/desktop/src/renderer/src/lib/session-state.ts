@@ -43,6 +43,8 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 }
 
 export type PendingAgentLaunch = {
+  /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
+  request?: { executorId: string; prompt?: string }
   events: RuntimeEvent[]
   overflowed: boolean
 }

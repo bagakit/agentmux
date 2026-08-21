@@ -16,6 +16,7 @@ import { api } from '../lib/api'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
+import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
@@ -67,6 +68,11 @@ export function SessionPane({
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
+  const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId)
+  const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
+  const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.appearance.agentAvatars?.[connectingExecutorId] : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
@@ -209,11 +215,13 @@ export function SessionPane({
   if (!session || !terminalThemeId) {
     return (
       <section className="agent-surface">
-        <div className="pane-state" role="status" aria-live="polite">
-          <LoaderCircle className="spin" size={18} />
-          <strong>Connecting to this session…</strong>
-          <span>Waiting for the Core client to publish this Runtime View.</span>
-        </div>
+        <SessionConnectingSurface key={`connecting:${sessionId}`}
+          phase={pendingLaunch ? 'launch' : recoveryCandidate ? 'restore' : 'connect'}
+          surfaceKind={surfaceKind}
+          request={pendingLaunch?.request}
+          executor={connectingExecutor}
+          appearance={connectingAppearance}
+        />
         {surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
