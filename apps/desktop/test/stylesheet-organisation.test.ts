@@ -27,6 +27,7 @@ describe('样式表的组织', () => {
       'board.css',
       'browser.css',
       'agent.css',
+      'session-connecting.css',
       'composer.css',
       'activity.css',
       'activity-conversation.css',
