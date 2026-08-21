@@ -590,6 +590,7 @@ export class RuntimeController {
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(request.authorAgentSessionId ? { authorAgentSessionId: request.authorAgentSessionId } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })

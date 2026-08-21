@@ -137,6 +137,8 @@ export type AgentMuxAgentCreateInput = {
   workspacePath: string
   injectAgentMuxGuide: boolean
   prompt?: string
+  /** Trusted host attribution; it does not authorize the caller. */
+  authorAgentSessionId?: string
   /**
    * AgentMux 自己要对 Agent 说的额外上下文（如 Scratch Topic 说明），署名进出站信封而非混进用户段。
    * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
@@ -1575,11 +1577,12 @@ export class AgentMuxClient {
       operationId: input.operationId,
       now: Date.now()
     })
-    const session = await this.createAgent({
+    const { session, promptConfirmed } = await this.createAgentWithDelivery({
       executorId: input.executorId,
       providerId: input.providerId,
       workspacePath: input.workspacePath,
       prompt: plan.launchPrompt,
+      authorAgentSessionId: author.agentSessionId,
       injectAgentMuxGuide: true,
       // 同一个 operation id：重试落到同一次创建，不会重复 Spawn 或重复注入 Prompt。
       createOperationId: input.operationId
@@ -1589,13 +1592,19 @@ export class AgentMuxClient {
         ...plan.thread,
         targetAgentSessionId: session.agentSessionId,
         // ctxmux 收下了启动输入——这最多证明送达。
-        delivery: advanceDelivery(plan.thread.delivery, 'delivered', Date.now())
+        delivery: advanceDelivery(plan.thread.delivery, promptConfirmed ? 'delivered' : 'failed', Date.now())
       },
       session
     }
   }
 
   async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxAgentSession> {
+    return (await this.createAgentWithDelivery(input)).session
+  }
+
+  private async createAgentWithDelivery(input: AgentMuxAgentCreateInput): Promise<{
+    session: AgentMuxAgentSession; promptConfirmed: boolean
+  }> {
     this.requireConnected()
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
     const agentSessionId = safeId(input.agentSessionId ?? randomUUID(), 'Agent Session id')
@@ -1754,10 +1763,11 @@ export class AgentMuxClient {
           'Initial prompt',
           input.prompt.trim(),
           now,
-          { status: promptConfirmed ? 'complete' : 'failed' }
+          { status: promptConfirmed ? 'complete' : 'failed',
+            ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {}) }
         )
       }
-      return cloneSession(readySession)
+      return { session: cloneSession(readySession), promptConfirmed }
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
