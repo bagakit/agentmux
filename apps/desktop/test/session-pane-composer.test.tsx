@@ -29,11 +29,13 @@ const captured = vi.hoisted(() => ({
 const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[],
+    pendingAgentLaunches: {},
+    recoveryCandidates: [],
     timelines: {} as Record<string, { items: never[] }>,
     // `workspaces` is required on the real config, and the pane reads it to resolve file references
     // in agent prose the same way the terminal does. An empty list is the honest "no active
     // workspace" case: absolute paths then resolve to nothing rather than to a guess.
-    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [] },
+    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [], executors: {} },
     activeWorkspaceId: undefined as string | undefined,
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
@@ -152,7 +154,7 @@ function render(
 afterEach(() => {
   fixture.state.sessions = []
   fixture.state.viewModes = {}
-  fixture.state.config = { appearance: { terminalTheme: 'graphite' }, workspaces: [] }
+  fixture.state.config = { executors: {}, appearance: { terminalTheme: 'graphite' }, workspaces: [] }
   fixture.state.activeWorkspaceId = undefined
   captured.onProseLinkClick = null
   captured.onMenuSelect = null
@@ -168,6 +170,7 @@ describe('这一格按哪个仓根缩短路径', () => {
   // 当它是 session 路径的**祖先**时，shortenPath 的边界守卫会匹配成功并剥掉，渲染出一条根在别的仓
   // 的相对路径——看起来完全像个真答案。长路径只是难读，错路径是谎。
   const twoWorkspaces = {
+    executors: {},
     appearance: { terminalTheme: 'graphite' },
     workspaces: [
       { id: 'ws-parent', name: 'parent', hostId: 'local', path: '/repo-parent', kind: 'folder', branch: 'main' },
@@ -194,6 +197,7 @@ describe('这一格按哪个仓根缩短路径', () => {
     // 配置里没有任何 workspace 拥有 /repo。
     fixture.state.activeWorkspaceId = 'ws-parent'
     fixture.state.config = {
+      executors: {},
       appearance: { terminalTheme: 'graphite' },
       workspaces: [{ id: 'ws-parent', name: 'parent', hostId: 'local', path: '/repo-parent', kind: 'folder', branch: 'main' }]
     } as typeof fixture.state.config

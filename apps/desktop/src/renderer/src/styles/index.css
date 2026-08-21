@@ -17,6 +17,7 @@
 @import './board.css';
 @import './browser.css';
 @import './agent.css';
+@import './session-connecting.css';
 @import './composer.css';
 @import './activity.css';
 @import './activity-conversation.css';

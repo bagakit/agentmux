@@ -204,7 +204,8 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     // 分岔的——接上时说 "so you can copy them"，接不上时改口说 "kept here, not sent"。所以删掉这处
     // 转发不会留下一个点不动的按钮，而是整段静默换成另一句话，人只会以为这些字本来就没救了。
     // 而这些字是人亲手打的、发不出去了，复制是把它们捞回来的唯一手段。
-    ['components/AgentSessionComposer.tsx', ['AgentSessionComposer > jsx:onCopyQueued']]
+    ['components/AgentSessionComposer.tsx', ['AgentSessionComposer > jsx:onCopyQueued']],
+    ['components/SessionConnectingSurface.tsx', ['SessionConnectingSurface > copyPrompt']]
   ]
 
   it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {

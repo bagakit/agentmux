@@ -2547,7 +2547,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         mainSurface: 'workbench',
         tabs: plan.tabs,
         layouts: plan.layouts,
-        pendingAgentLaunches: { ...current.pendingAgentLaunches, [agentSessionId]: { events: [], overflowed: false } }
+        pendingAgentLaunches: { ...current.pendingAgentLaunches, [agentSessionId]: { events: [], overflowed: false, request: { executorId, ...(content.prompt === undefined ? {} : { prompt: content.prompt }) } } }
       }))
       const cancel = (): void => rollback(pending)
       signal?.addEventListener('abort', cancel, { once: true })
@@ -3888,7 +3888,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false }
+        [sessionId]: { events: [], overflowed: false, request: { executorId, prompt } }
       }
     }))
     try {
