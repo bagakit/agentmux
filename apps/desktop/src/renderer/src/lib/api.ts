@@ -20,6 +20,8 @@ import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmu
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import {
+  DEFAULT_TOPIC_WIKI,
+  SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   scratchTopicDirectoryName,
   scratchTopicIdFromDirectoryName
@@ -536,7 +538,14 @@ const mockApi: AgentMuxDesktopApi = {
           const fileName = path.slice(prefix.length)
           const match = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.identity\.md$/.exec(fileName)
           return match ? [{ fileName, providerId: match[1]!, sessionId: match[2]! }] : []
-        })
+        }),
+        wiki: {
+          path: `${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`,
+          content: mockFiles.get(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`) ?? DEFAULT_TOPIC_WIKI,
+          version: 'mock-topic-wiki',
+          source: mockFiles.has(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`) ? 'user' : 'default',
+          updatedAt: null
+        }
       }
     },
     ensureTopic: async (workspaceId, topicId) => {
@@ -545,10 +554,14 @@ const mockApi: AgentMuxDesktopApi = {
       mockFiles.set(`${directoryPath}/outcome`, null)
       mockFiles.set(`${directoryPath}/refs`, null)
       mockFiles.set(`${directoryPath}/.agents`, null)
+      mockFiles.set(`${directoryPath}/.agentmux`, null)
       const topicPath = `${directoryPath}/topic.md`
       if (!mockFiles.has(topicPath)) {
         mockFiles.set(topicPath, '# Untitled Topic\n\nDescribe the shared goal.\n')
         mockFileRevisions.set(topicPath, `mock:${++mockRevisionSequence}`)
+      }
+      if (!mockFiles.has(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`)) {
+        mockFiles.set(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, DEFAULT_TOPIC_WIKI)
       }
       return (await mockApi.scratch.readTopic(workspaceId, topicId))!
     },
@@ -1004,10 +1017,16 @@ const mockApi: AgentMuxDesktopApi = {
     // 执行过了。与上面 captureScreenshot 抛"requires the desktop app"同一条理由。
     runScript: async () => { throw new Error('Driving a Browser requires the desktop app.') },
     listOperationHistory: async () => [],
+    // 查不到是一次成功的回答（`null`），不是错误——Web 预览里没有 journal，所以每个 id 都查不到。
+    // 与 `runScript` 抛"requires the desktop app"不同：那条抛是因为**谎称跑过了**会误导 Agent，
+    // 而"这条操作我这儿没有"本来就是这条入口的合法答案之一。
+    getOperation: async () => null,
+    // 同上：没有在飞的操作可停，答"没有这条"而不是抛。取消一个不存在的操作在真实实现里也是
+    // 幂等成功答 null（RED-LINES 第 2 类：我们查不到 ≠ Browser 坏了）。
+    stopOperationById: async () => null,
     replayPlan: async () => null,
     returnControl: async (id) => structuredClone(requireMockBrowser(id)),
     runReplay: async () => { throw new Error('Browser replay requires the desktop app.') },
-    stopOperation: async (id) => structuredClone(requireMockBrowser(id)),
     selectElement: async () => null,
     // Web 预览里没有主进程，也就没有真的 shell.openExternal 可走。抛而不是默默返回：
     // 悄悄什么都不做，看起来和「点了 Open 但那个 app 没装」一模一样。

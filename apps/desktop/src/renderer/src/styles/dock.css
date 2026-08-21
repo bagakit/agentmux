@@ -121,6 +121,8 @@
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
+.workspace-topic-wiki { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--green-2); cursor: pointer; }
+.workspace-topic-wiki:hover { background: var(--surface-2); color: var(--text); }
 /* 已 pin 的静息态标记：品牌绿小 Pin，扫一眼列表就分辨得出（不靠 hover）。行首可空槽里的东西
    （同 leading spinner，只在 pinned 时占位），不是按钮——切换 pin 的动作在右键菜单里。 */
 .workspace-topic-entry__pin { flex: 0 0 auto; color: var(--green); }
@@ -222,3 +224,4 @@
 .workspace-settings-list strong { font-size: var(--fs-meta); }
 .workspace-settings-list small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .workspace-settings-list em { color: var(--text-3); font-size: var(--fs-micro); font-style: normal; }
+.workspace-topic-entry__wiki { margin-left: 6px; color: var(--green-2); font-size: var(--fs-micro); }
