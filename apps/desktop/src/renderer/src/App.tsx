@@ -23,7 +23,7 @@ import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-s
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
-import { WorkspaceBoard } from './components/WorkspaceBoard'
+import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -289,7 +289,7 @@ function DesktopApp() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
-              {mainSurface === 'board' ? <WorkspaceBoard /> : null}
+              {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {workspace ? (
                 <div
                   className={`workspace-workbench-registry ${workbenchVisible ? '' : 'workspace-workbench-registry--parked'}`}
