@@ -23,7 +23,7 @@ describe('prompt delivery service window', () => {
     const markup = renderToStaticMarkup(createElement(ServiceWindowNotice, { notice: notice(session()) }))
     expect(markup).toContain('while the terminal refreshed')
     expect(markup).toContain('continued without full screen confirmation')
-    expect(markup).toContain('move this notice to the inbox')
+    expect(markup).toContain('review this notice in System')
     expect(markup).toContain('a verified prompt clears it')
     expect(markup).toContain('role="status"')
     expect(markup).not.toContain('role="dialog"')
