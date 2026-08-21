@@ -12,7 +12,7 @@ import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlRequest
 } from '@agentmux/core'
-import type { AgentLaunchResult, AppConfig, RuntimeSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentLaunchResult, AppConfig, RuntimeEvent, RuntimeSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import {
@@ -23,7 +23,7 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { App } from '../src/renderer/src/App.js'
-import { DisplacedAgentNotice } from '../src/renderer/src/components/DisplacedAgentNotice.js'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
 
 // ---------------------------------------------------------------------------
 // T-005 第二半：已健康启动的 Agent 遇布局失败仍可发现且有持续告示。
@@ -144,11 +144,36 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     expect(stop, '错位路径停掉了一个完好的 Run').not.toHaveBeenCalled()
   })
 
+  it('clears placement intent only when the matching Run is authoritatively removed', async () => {
+    const id = await driveDisplacementThroughStore()
+    const element = await mount(<GlobalSystemNotices />)
+    const session = useAppStore.getState().sessions.find((item) => item.id === id)!
+    const removal = (runId: string): RuntimeEvent => ({ type: 'core', hostId: 'local', event: {
+      type: 'run-removed', agentSessionId: id, run: { runId }, evidence: { source: 'run-process', observedAt: 2 }
+    } })
+    await act(async () => useAppStore.getState().applyEvent(removal('unrelated-run')))
+    expect(useAppStore.getState().displacedAgentSessionIds).toContain(id)
+    expect(element.querySelector('.global-system-notices__action')).not.toBeNull()
+    await act(async () => useAppStore.getState().applyEvent(removal(session.control.run.runId)))
+    expect(useAppStore.getState().sessions.find((item) => item.id === id)).toBeUndefined()
+    expect(useAppStore.getState().displacedAgentSessionIds).not.toContain(id)
+    expect(element.querySelector('.global-system-notices__action')).toBeNull()
+  })
+
+  it('does not clear displacement when the requested Tab Group cannot accept a placement', async () => {
+    const id = await driveDisplacementThroughStore()
+    useAppStore.getState().selectSession(id, 'missing-group')
+    expect(useAppStore.getState().displacedAgentSessionIds).toContain(id)
+    expect(useAppStore.getState().error).toContain('Tab Group is no longer available')
+    const element = await mount(<GlobalSystemNotices />)
+    expect(element.querySelector('.global-system-notices__action')).not.toBeNull()
+  })
+
   it('告示从选择器渲染出来（真实 render），点「找回」落到那个 session，随后自愈消失', async () => {
     const id = await driveDisplacementThroughStore()
     const selectSession = vi.spyOn(useAppStore.getState(), 'selectSession')
 
-    const element = await mount(<DisplacedAgentNotice />)
+    const element = await mount(<GlobalSystemNotices />)
 
     // 告示在场，且说的是这个 Agent、进程还在跑（文案来自 displacedAgentStepOutcome，经选择器过滤）。
     const notice = element.querySelector('.service-window')
@@ -157,7 +182,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     expect(notice?.textContent).toContain('still running')
 
     // 点「找回」：只凭 session id 重新解析落点（selectSession），绝不复用失效的 plan.regionId/旧 tabId。
-    const action = element.querySelector<HTMLButtonElement>('.displaced-agent-notice__action')!
+    const action = element.querySelector<HTMLButtonElement>('.global-system-notices__action')!
     expect(action, '没有找回入口——告示不可操作').not.toBeNull()
     await act(async () => { action.click() })
 
@@ -166,6 +191,13 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     const placed = Object.values(useAppStore.getState().tabs).some((tab) =>
       workbenchSurfaces(tab).some((s) => (s.kind === 'agent' || s.kind === 'terminal') && s.sessionId === id))
     expect(placed, 'selectSession 没有把这个 session 安放到任何一格').toBe(true)
+    expect(useAppStore.getState().displacedAgentSessionIds).not.toContain(id)
+    const placedTab = Object.values(useAppStore.getState().tabs).find((tab) =>
+      workbenchSurfaces(tab).some((surface) => surface.kind === 'agent' && surface.sessionId === id))!
+    const group = useAppStore.getState().layouts.workspace!.activeGroupId
+    await act(async () => { await useAppStore.getState().closeTab('workspace', group, placedTab.id, { keepAgentSessions: true }) })
+    expect(useAppStore.getState().tabs[placedTab.id]).toBeUndefined()
+    expect(useAppStore.getState().sessions.find((session) => session.id === id)).toBeDefined()
 
     // 自愈：重新拿回一格后，选择器把它从告示里去掉，DOM 上不再有服务窗。
     expect(element.querySelector('.service-window'), '重新安放后告示没有自愈消失').toBeNull()
@@ -196,8 +228,8 @@ describe('T-005 第二半：告示真的挂在窗口上（不在会消失的 Reg
 
     const mainShell = element.querySelector('main.main-shell')
     expect(mainShell, '主壳没挂出来').not.toBeNull()
-    // 告示必须落在 main-shell 的 notices 区里——那是任何布局操作都搬不动、也毁不掉的锚点。
-    expect(mainShell?.querySelector('.displaced-agent-notice'), '错位告示没有挂在窗口锚点上').not.toBeNull()
-    expect(mainShell?.textContent).toContain('Runner')
+    // 告示挂在窗口底部统一系统入口，独立于任何可关闭的 Region/Tab。
+    expect(element.querySelector('footer.window-status-bar .global-system-notices__item'), '错位告示没有挂在窗口锚点上').not.toBeNull()
+    expect(element.querySelector('footer.window-status-bar')?.textContent).toContain('Runner')
   })
 })

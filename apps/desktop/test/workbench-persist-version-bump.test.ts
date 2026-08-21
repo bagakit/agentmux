@@ -88,6 +88,8 @@ const PERSISTED_PREFERENCES = {
   projectRailWidth: 317, // 非默认（默认 210）且落在 clamp 区间 [180,420] 内，见 store.ts:1516
   toolsOpen: true,
   agentNames: { 'sess-1': '我给它起的名字' },
+  noticeReadReceipts: { 'global:environment': { shell: 'read-warning-fingerprint' } },
+  displacedAgentSessionIds: ['unplaced-agent-1'],
   scratchTopicOrder: ['topic-9', 'topic-3'],
   collapsedProjectGroups: { '/repo/group': true },
   explorerCollapsed: { 'workspace-alpha': true },
@@ -113,7 +115,7 @@ async function rehydrateFromPreviousVersion(state: Record<string, unknown>): Pro
   consoleErrors: unknown[][]
 }> {
   const options = useAppStore.persist.getOptions()
-  const name = options.name
+  const name = options.name!
   const previousVersion = (options.version as number) - 1
   const backing = new Map<string, string>([
     [name, JSON.stringify({ state, version: previousVersion })]
@@ -181,6 +183,8 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.projectRailWidth, '项目栏宽度被重置了').toBe(PERSISTED_PREFERENCES.projectRailWidth)
     expect(state.toolsOpen, '工具面板开合被重置了').toBe(PERSISTED_PREFERENCES.toolsOpen)
     expect(state.agentNames, '用户自己起的 Agent 名字丢了').toEqual(PERSISTED_PREFERENCES.agentNames)
+    expect(state.noticeReadReceipts).toEqual(PERSISTED_PREFERENCES.noticeReadReceipts)
+    expect(state.displacedAgentSessionIds).toEqual(PERSISTED_PREFERENCES.displacedAgentSessionIds)
     expect(state.scratchTopicOrder, 'Topic 顺序丢了').toEqual(PERSISTED_PREFERENCES.scratchTopicOrder)
     expect(state.collapsedProjectGroups, '折叠状态丢了').toEqual(
       PERSISTED_PREFERENCES.collapsedProjectGroups
@@ -297,7 +301,7 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     // 但一个写坏的 migrate（比如它其实是 merge 的位置）会连带弄坏这条。
     const options = useAppStore.persist.getOptions()
     const backing = new Map<string, string>([
-      [options.name, JSON.stringify({ state: { ...PERSISTED_PREFERENCES }, version: options.version })]
+      [options.name!, JSON.stringify({ state: { ...PERSISTED_PREFERENCES }, version: options.version })]
     ])
     useAppStore.persist.setOptions({
       storage: createJSONStorage(() => ({

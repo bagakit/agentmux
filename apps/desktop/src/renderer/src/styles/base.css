@@ -39,7 +39,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .app-shell.app-shell--project-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
 /* When the rail is collapsed its Settings badge floats at the bottom-left; lift it clear of the bar
    only while the bar is present, with no JS coupling. */
-.app-shell:has(.agent-status-bar) .project-rail-corner-toolbar { bottom: 28px; }
+.app-shell:has(.window-status-bar) .project-rail-corner-toolbar { bottom: 28px; }
 .brand-mark {
   width: 24px;
   height: 24px;
@@ -123,16 +123,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .boot--error > svg { color: var(--red); }
 .boot--error > span { width: min(620px, calc(100vw - 48px)); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; text-align: center; }
 .main-shell__notices { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); padding: 0 var(--sp-4) var(--sp-3); }
-.main-shell__notices .service-window { margin: 0; }
-.shell-environment-notice { display: flex; justify-content: flex-end; min-width: 0; }
-.shell-environment-notice__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --shell-environment-notice; }
-.shell-environment-notice__trigger:hover { color: var(--text); background: var(--surface-2); }
-.shell-environment-notice__trigger > svg { color: var(--amber); }
-.shell-environment-notice__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); }
-.shell-environment-notice__details { position: fixed; position-anchor: --shell-environment-notice; position-area: top span-left; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(420px, 90vw); max-height: 70vh; overflow-y: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); }
-.shell-environment-notice__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-meta); }
-.shell-environment-notice__details .service-window { margin: 0; padding: var(--sp-2) 0; border: 0; background: transparent; box-shadow: none; }
-.shell-environment-notice__details .service-window__body { overflow-wrap: anywhere; }
+.main-shell__notices:empty { display: none; }
+.global-system-notices { flex: none; margin-left: auto; }
+.global-system-notices__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --global-system-notices; }
+.global-system-notices__trigger:hover { color: var(--text); background: var(--surface-2); }
+.global-system-notices__trigger[data-unread="true"] > svg { color: var(--amber); }
+.global-system-notices__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); }
+.global-system-notices__details { position: fixed; position-anchor: --global-system-notices; position-area: top span-left; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(420px, 90vw); max-height: 70vh; overflow-y: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); }
+.global-system-notices__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-meta); }
+.global-system-notices__details .service-window { margin: 0; padding: var(--sp-2) 0; border: 0; background: transparent; box-shadow: none; }
+.global-system-notices__details .service-window__body { overflow-wrap: anywhere; }
+.global-system-notices__item + .global-system-notices__item { border-top: 1px solid var(--line-soft); }
+.global-system-notices__action { display: block; margin-left: auto; }
 .error-notice { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); box-shadow: inset 0 0 0 1px var(--red-line), var(--hl); font-size: var(--fs-micro); line-height: 1.45; }
 .error-notice > span { min-width: 0; overflow-wrap: anywhere; }
 .error-notice__close { width: 24px; height: 24px; margin: calc(var(--sp-1) * -1) calc(var(--sp-2) * -1) 0 0; color: var(--red-text); }
