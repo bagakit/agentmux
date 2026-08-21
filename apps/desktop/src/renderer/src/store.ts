@@ -268,15 +268,11 @@ export type AgentSteerQueueEntry = {
 }
 
 type AppState = {
-  runtimeOwnershipWarnings: string[]
+  runtimeOwnershipWarnings: string[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
   environmentWarning: string | null | undefined
-  /**
-   * Agent Session ids whose Region vanished mid-launch even though the Agent itself started healthy
-   * (T-005). Ephemeral (never persisted) — a launch race is a within-session fact, not layout the user
-   * asked to keep. The list is only ever appended to; it is not the source of truth for what to SHOW —
-   * {@link selectDisplacedAgentNotices} re-derives that against live sessions and the current layout, so
-   * a stale id is harmless (a re-placed or ended Agent self-heals out of the notice).
+  /** Durable placement intent for healthy Agents whose requested Region vanished mid-launch.
+   * Current notices derive from Session/layout facts; successful placement clears the marker.
    */
   displacedAgentSessionIds: string[]
   restoredWorkbench: PersistedWorkbench | null
@@ -1320,7 +1316,7 @@ function startSessionMembershipResync(
             membershipGap ||= reduced.sessionMembershipGap === true
             if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
           }
-          return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [] }
+          return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) void useAppStore.getState().flushAgentSteerQueue(sessionId)
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
@@ -1439,6 +1435,7 @@ type PersistedAppState = {
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
   noticeReadReceipts?: Record<string, Record<string, string>>
+  displacedAgentSessionIds?: string[]
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
@@ -1705,7 +1702,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   projectRailWidth: PROJECT_RAIL_DEFAULT_WIDTH,
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
-  runtimeOwnershipWarnings: [],
+  runtimeOwnershipWarnings: undefined,
   environmentWarning: undefined,
   displacedAgentSessionIds: [],
   error: null,
@@ -1789,8 +1786,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ])
       if (configResult.status === 'rejected') throw configResult.reason
       const config = configResult.value
-      set({ environmentWarning: initialSnapshotResult.status === 'fulfilled'
-        ? initialSnapshotResult.value.environmentWarning ?? null : get().environmentWarning })
+      if (initialSnapshotResult.status === 'fulfilled') set({
+        environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
+        runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? []
+      })
       const startupWarnings: string[] = []
       let snapshot = initialSnapshotResult.status === 'fulfilled'
         ? initialSnapshotResult.value
@@ -1945,7 +1944,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         recoveryCandidates: snapshot.recoveryCandidates,
         unclaimedTerminalSessionIds: [...failedCleanupIds],
         timelines: snapshot.timelines,
-        runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [],
+        runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
+        environmentWarning: snapshotVerified ? snapshot.environmentWarning ?? null : get().environmentWarning,
         pendingAgentLaunches: {},
         ...restoredUi,
         tabs: workbench.tabs,
@@ -2803,7 +2803,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [workspace.id]: nextLayout }
+      layouts: { ...state.layouts, [workspace.id]: nextLayout },
+      // Placement succeeded in this same commit; a later intentional close is not this old failure.
+      displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
     if (existing) get().focusRegion(workspace.id, tabId, regionId)
   },
@@ -5017,6 +5019,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
     agentNames: state.agentNames,
     noticeReadReceipts: state.noticeReadReceipts,
+    displacedAgentSessionIds: state.displacedAgentSessionIds,
     // These are Renderer presentation facts. They are deliberately persisted beside Workbench
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,

@@ -10,26 +10,7 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts.js'
 
-/**
- * 两块服务窗（Runtime 归属 / 本机 shell 环境）**真的挂在窗口上**，且 Runtime 那块的两个写入点都能把
- * 它点亮。
- *
- * 为什么这个文件必须存在，而 `runtime-ownership-notice.test.tsx` / `shell-environment-notice.test.tsx`
- * 不够：那两个文件渲染的是**裸组件**，`root.render(<RuntimeOwnershipNotice />)`。于是「App.tsx 里那行
- * `<RuntimeOwnershipNotice />` 被删掉」这个变异对它们完全隐身——组件本身照样正确地把 store 投影成告示，
- * 只是全窗口没有任何人渲染它，用户永远看不到。实测：删掉 App.tsx 里任一行，那两个 suite 全绿。
- *
- * 同理，那两个文件只驱动 `initialize`，所以 `runtimeOwnershipWarnings` 的**第二个**写入点——
- * `startSessionMembershipResync` 里那句 `runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? []`
- * ——可以被改成恒 `[]` 而无人发现。那不是可有可无的一路：daemon 的启动凭据在**运行期**才不可核实时
- * （连上了一个别人起的兼容 daemon），只有 resync 这条路会把它带进 store；initialize 那条路早就跑完了。
- * 两个写入点写同一个字段、只有一个被钉住，正是「两个写入点要收成一处投影」那一族的活样本。
- *
- * 所以这里挂**真的 `<App />`**、配**真的 store**（happy-dom + `act`，effect 真跑），两半各一条：
- *  1. initialize 侧：两块告示都出现在 `main.main-shell` 里，且各自说的是自己那件事。
- *  2. resync 侧：initialize 时干净（无告示），随后一条指向未知 Agent 的事件触发成员重同步，重同步读到的
- *     快照带上归属警告，界面上就得亮起来。
- */
+/** Real App → canonical snapshots → one footer inbox. Removing its actual caller must fail. */
 
 const initial = useAppStore.getState()
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -88,7 +69,7 @@ async function mountApp(): Promise<HTMLElement> {
 
 /** 窗口上那一组服务窗的标题行。告示形态同构（都是 `.service-window`），所以按标题区分是哪一块。 */
 function serviceWindowSteps(element: HTMLElement): string[] {
-  return [...element.querySelectorAll('main.main-shell .service-window')]
+  return [...element.querySelectorAll('footer.window-status-bar .service-window')]
     .map((notice) => notice.querySelector('.service-window__step')?.textContent ?? '')
 }
 
@@ -104,6 +85,9 @@ describe('窗口把两块服务窗真的挂了出来', () => {
 
     const element = await mountApp()
 
+    expect(element.querySelectorAll('footer.window-status-bar')).toHaveLength(1)
+    expect(element.querySelector('footer.window-status-bar .global-system-notices__trigger')).not.toBeNull()
+    expect(element.querySelector('main.main-shell .global-system-notices')).toBeNull()
     // 两块都要在，且**各说各的那件事**：只断言「有两块告示」会被同一块渲染两次满足，而把 App.tsx 里
     // 两行换成同一个组件正是最像的手滑。
     expect(serviceWindowSteps(element)).toEqual([
@@ -111,11 +95,11 @@ describe('窗口把两块服务窗真的挂了出来', () => {
       'Runtime launch record is unavailable'
     ])
     expect(
-      element.querySelector('main.main-shell')?.textContent,
+      element.querySelector('footer.window-status-bar')?.textContent,
       'Runtime 归属告示没挂在窗口上——组件自己是对的，只是没人渲染它'
     ).toContain('Existing Agents remain usable')
     expect(
-      element.querySelector('main.main-shell')?.textContent,
+      element.querySelector('footer.window-status-bar')?.textContent,
       'shell 环境告示没挂在窗口上'
     ).toContain('Your login shell did not export PATH')
   })
@@ -138,7 +122,7 @@ describe('成员重同步这条路也能点亮归属告示', () => {
     const snapshot = vi.spyOn(api.sessions, 'snapshot')
       // 启动这一次干净：于是下面亮起来的那块**只能**来自 resync 的写入，不可能是 initialize 那句留下的。
       .mockResolvedValueOnce(emptySnapshot())
-      .mockResolvedValue({ ...emptySnapshot(), runtimeOwnershipWarnings: ['studio'] })
+      .mockResolvedValue({ ...emptySnapshot(), runtimeOwnershipWarnings: ['studio'], environmentWarning: 'Recovered shell snapshot warning' })
 
     const element = await mountApp()
     expect(serviceWindowSteps(element), '启动快照没有警告，却已经亮了告示').toEqual([])
@@ -158,9 +142,9 @@ describe('成员重同步这条路也能点亮归属告示', () => {
       useAppStore.getState().runtimeOwnershipWarnings,
       '重同步读到了归属警告却没写进 store（只有 initialize 那侧写了）'
     ).toEqual(['studio'])
-    expect(serviceWindowSteps(element)).toEqual(['Runtime launch record is unavailable'])
+    expect(serviceWindowSteps(element)).toEqual(['Local shell environment is incomplete', 'Runtime launch record is unavailable'])
     expect(
-      element.querySelector('main.main-shell')?.textContent,
+      element.querySelector('footer.window-status-bar')?.textContent,
       '重同步点亮的告示没有出现在窗口上'
     ).toContain('Connected to the compatible Runtime on studio')
   })

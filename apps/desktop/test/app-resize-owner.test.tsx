@@ -27,11 +27,12 @@ const observed = vi.hoisted(() => {
       setToolDockWidth: () => {},
       sessions: [],
       // App renders every chrome child, so this hand-rolled store stand-in must carry the fields
-      // those children read — not just the ones this test asserts on. `DisplacedAgentNotice` reads
+      // those children read — not just the ones this test asserts on. `GlobalSystemNotices` reads
       // both of these; omitting them made `Object.values(undefined)` throw from inside a component
       // this test does not care about, which reads as a source regression rather than a gap here.
       tabs: {},
-      displacedAgentSessionIds: []
+      displacedAgentSessionIds: [],
+      noticeReadReceipts: {}
     }
   }
 })

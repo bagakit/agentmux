@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
-import { RuntimeOwnershipNotice } from '../src/renderer/src/components/RuntimeOwnershipNotice.js'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
 
 const initial = useAppStore.getState()
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -26,16 +26,16 @@ describe('Runtime launch provenance notice', () => {
     try {
       await act(async () => {
         dispose = await useAppStore.getState().initialize()
-        root.render(<RuntimeOwnershipNotice />)
+        root.render(<GlobalSystemNotices />)
       })
       expect(useAppStore.getState().loading).toBe(false)
       expect(element.querySelector('[role="status"]')?.textContent).toContain('Existing Agents remain usable')
       expect(element.textContent).toContain('restarting the app is not required')
       await act(async () => useAppStore.getState().selectWorkspace(config.workspaces[0]!.id))
       expect(element.querySelector('[role="status"]')?.textContent).toContain('Existing Agents remain usable')
-      expect(element.querySelector('button')).toBeNull()
+      expect(element.querySelector('.global-system-notices__trigger')).not.toBeNull()
       await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: [] }))
-      expect(element.textContent).toBe('')
+      expect(element.querySelector('.service-window')).toBeNull()
     } finally {
       await act(async () => { dispose?.(); root.unmount() })
       element.remove()

@@ -7,7 +7,7 @@
 
 /* The window-wide agent rollup spans the full width under both the rail and the main surface, so it
    reads as a property of the window rather than of any one pane. */
-.agent-status-bar { grid-column: 1 / -1; }
+.window-status-bar { grid-column: 1 / -1; }
 .agent-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--surface-0); }
 .agent-provider-mark {
   width: 17px;
@@ -28,7 +28,7 @@
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
-.agent-status-bar {
+.window-status-bar {
   height: 24px;
   display: flex;
   align-items: center;
@@ -40,6 +40,7 @@
   font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
 }
+.agent-status-bar { display: flex; align-items: center; gap: var(--sp-5); flex: 1; min-width: 0; overflow: hidden; }
 .agent-status-bar__segment {
   display: inline-flex;
   align-items: center;
@@ -229,8 +230,6 @@
 .service-window__mode { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
 .service-window__restore { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
 /* 错位 Agent 告示（T-005）：服务窗 + 一枚「找回」动作键，语汇沿用服务窗，键靠右对齐。 */
-.displaced-agent-notice { display: grid; gap:var(--sp-2); }
-.displaced-agent-notice__action { justify-self: end; }
 
 /* 连续推进面板：一条状态告示 + 一排控制键，语汇沿用紧邻的 .service-window（Surface 填充 + elevation，
    不描边——描边会与 Composer 争同一条边界）。状态用文字表达，控制键是无底色的图标键，同 .icon-button。 */
