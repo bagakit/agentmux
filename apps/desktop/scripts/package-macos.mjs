@@ -45,6 +45,10 @@ const outputDmg = join(
   `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`
 )
 const installRequested = process.argv.includes('--install')
+// Runtime 变了就必须先做 Run/resume review——但 review 做完之后要有一条路能装。缺了这条路，
+// 任何 ctxmux 升级都永远装不上：门就不再是"先 review"，而是"不许升级"。
+// 这个参数带的是 review 记录的路径，不是一个裸开关；它会被读、被校验非空、被打进安装收据。
+const runtimeReviewArgument = process.argv.find((argument) => argument.startsWith('--runtime-reviewed='))
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -911,13 +915,26 @@ async function relaunchInstalledApplication(appPath) {
 
 async function installApplication(appPath) {
   const currentPath = canonicalInstallPath(homedir())
+  let runtimeReviewPath
   if (await pathExists(currentPath)) {
     const runtimeRelative = 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux'
     const [currentRuntime, candidateRuntime] = await Promise.all([
       hashTree(currentPath, [runtimeRelative]), hashTree(appPath, [runtimeRelative])
     ])
-    assert(updateRoute({ shell: '', ctxmux: currentRuntime }, { shell: '', ctxmux: candidateRuntime }) !== 'runtime-review',
-      'CtxMux runtime differs. Installation requires a separate Run/resume review before restart; no running application was changed.')
+    if (updateRoute({ shell: '', ctxmux: currentRuntime }, { shell: '', ctxmux: candidateRuntime }) === 'runtime-review') {
+      // Runtime 变了：新 artifact 派生出新的 endpoint，旧 daemon 上的 Run 不会被接管。这一步要求
+      // 先把它们盘清楚——哪些能自己 resume、哪些不能——并把结论落到磁盘上。
+      //
+      // 判据是**那份记录读得到且非空**，不是"命令行上打了个开关"。裸 `--force` 只证明有人想跳过
+      // 检查；一份读得出内容的 review 记录才证明检查真的做了，而且装完之后还能回去看。
+      assert(runtimeReviewArgument,
+        'CtxMux runtime differs; the Runs on the running daemon will not carry over. Record which Runs can resume on their own, then pass --runtime-reviewed=<path to that record>. No running application was changed.')
+      runtimeReviewPath = runtimeReviewArgument.slice('--runtime-reviewed='.length)
+      assert(runtimeReviewPath, '--runtime-reviewed= needs the path to the Run/resume review, not an empty value.')
+      const review = await readFile(runtimeReviewPath, 'utf8').catch(() => null)
+      assert(review !== null, `Cannot read the Run/resume review at ${runtimeReviewPath}; nothing proves the review happened.`)
+      assert(review.trim().length > 0, `The Run/resume review at ${runtimeReviewPath} is empty.`)
+    }
   }
 
   const destination = canonicalInstallPath(homedir())
@@ -954,6 +971,7 @@ async function installApplication(appPath) {
     throw error
   }
   process.stdout.write(`installed_app=${destination}\n`)
+  if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
   if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
   process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
   const relaunched = await relaunchInstalledApplication(destination)
