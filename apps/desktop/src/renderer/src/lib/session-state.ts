@@ -29,6 +29,7 @@ export type SessionViewMode = 'terminal' | 'activity'
 
 export type SessionProjectionState = {
   displacedAgentSessionIds?: string[]
+  noticeReadReceipts?: Record<string, Record<string, string>>
   sessions: SessionSnapshot[]
   timelines: Record<string, AgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
@@ -296,6 +297,8 @@ export function removeSessionProjection(
   return {
     sessions: state.sessions.filter((session) => session.id !== sessionId),
     ...(state.displacedAgentSessionIds ? { displacedAgentSessionIds: state.displacedAgentSessionIds.filter((id) => id !== sessionId) } : {}),
+    ...(state.noticeReadReceipts ? { noticeReadReceipts:
+      withoutKey(withoutKey(state.noticeReadReceipts, sessionId), `mail:${sessionId}`) } : {}),
     timelines: withoutKey(state.timelines, sessionId),
     pendingAgentLaunches: withoutKey(state.pendingAgentLaunches, sessionId),
     tabs,

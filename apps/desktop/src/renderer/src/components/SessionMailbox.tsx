@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { Mail, X } from 'lucide-react'
 import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
@@ -7,6 +7,26 @@ import { useReadReceipts, type useServiceNotices } from '../lib/use-service-noti
 
 type Folder = 'inbox' | 'outbox' | 'system'
 const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
+
+function useMessageFingerprints(items: readonly AgentTimelineItem[]) {
+  // Activity-only revisions must not rehash unchanged mail or hide its unread state.
+  const signature = useMemo(() => JSON.stringify(items.map((item) =>
+    [item.id, item.authorAgentSessionId, item.content, item.createdAt, item.status])), [items])
+  const [result, setResult] = useState<{ signature: string; values: Record<string, string> }>()
+  useEffect(() => {
+    let current = true
+    const messages = JSON.parse(signature) as [string, ...unknown[]][]
+    void Promise.all(messages.map(async ([id, ...fields]) => {
+      const content = JSON.stringify(fields)
+      const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
+      return [id, Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')] as const
+    })).then((entries) => {
+      if (current) setResult({ signature, values: Object.fromEntries(entries) })
+    })
+    return () => { current = false }
+  }, [signature])
+  return result?.signature === signature ? result.values : undefined
+}
 
 function MessageHistory({ items, incoming, onCopy }: { items: readonly AgentTimelineItem[]; incoming: boolean; onCopy?: ((text: string) => void) | undefined }) {
   const sessions = useAppStore((state) => state.sessions)
@@ -35,13 +55,13 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
   const id = useId()
   const [open, setOpen] = useState(false)
   const [folder, setFolder] = useState<Folder>('inbox')
-  const messages = timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
-    item.kind === 'user_message' && item.status !== 'streaming') ?? []
-  const incoming = messages.filter((item) => item.authorAgentSessionId !== undefined)
+  const messages = useMemo(() => timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
+    item.kind === 'user_message' && item.status !== 'streaming') ?? [], [timeline])
+  const incoming = useMemo(() => messages.filter((item) => item.authorAgentSessionId !== undefined), [messages])
   const sent = messages.filter((item) => item.authorAgentSessionId === undefined)
-  const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`,
-    Object.fromEntries(incoming.map((item) => [item.id, JSON.stringify([item.authorAgentSessionId, item.content, item.createdAt, item.status])])),
-    timeline !== undefined)
+  const fingerprints = useMessageFingerprints(incoming)
+  const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`, fingerprints ?? {},
+    timeline !== undefined && fingerprints !== undefined)
   const unread = receipts.unread.length + system.unread.length
   const deliveredIds = new Set(messages.filter((item) => item.status === 'complete').map((item) => item.id))
   const pending = queued.filter((item) => !deliveredIds.has(`prompt:${item.id}`))
