@@ -84,17 +84,11 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
     // `git add` 之前跑这道门，第四个手抄点会被静默放过——实测过一次（新建一个 .mjs 抄一份 id，
     // 4 条全绿）。而那恰好是最可能发生的时序：作者写完新脚本、跑测试、然后才提交。
     //
-    // `:!*.sample` 与上面两个排除项同族：它们都是**机器产出**，不是作者手抄。`docs/reviews/evidence/`
-    // 里的 `.sample` 是 macOS `sample(1)` 的进程采样转储，bundle id 出现在**它自己的头部**
-    // （`Identifier:` 行与被加载的二进制清单里），是采样工具打印的，不是谁抄了一份 id。
-    // 这条排除的**前提在下面被断言**（不只写在注释里）：每个被排除的 `.sample` 必须真的带着
-    // sample 工具的头部。否则手写一个 `.mjs` 改名叫 `.sample` 就能躲进这个豁免区——
-    // 「被排除的集合悄悄长大」正是这一族守卫失效的方式。
     const grep = spawnSync(
       'git',
       [
         'grep', '-l', '--untracked', '--fixed-strings', literal!,
-        '--', ':!*pnpm-lock*', ':!*/dist/*', ':!*.sample'
+        '--', ':!*pnpm-lock*', ':!*/dist/*'
       ],
       { cwd: fileURLToPath(new URL('../../', DESKTOP)), encoding: 'utf8' }
     )
@@ -117,8 +111,7 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
       // 就加载不了」时，举证依据正是本机那份真实配置的所在目录，注释里点名它才说得清这不是
       // 假想缺陷。没有任何代码读这两处，改掉它们也不会让任何一份用户数据换位置。
       ['apps/desktop/src/main/config-store.ts', '注释：举证那份缺键的真实 v9 配置在哪'],
-      ['apps/desktop/test/config-store.test.ts', '注释：同上，回归用例的出处说明'],
-      ['docs/reviews/renderer-runaway-field-diagnosis-2026-09-19.md', '复盘：点名 crash-log.ndjson 的真实路径，说明它为何空着']
+      ['apps/desktop/test/config-store.test.ts', '注释：同上，回归用例的出处说明']
     ])
 
     const unexpected = hits.filter((path) => !known.has(path))
@@ -133,29 +126,6 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
       expect(hits, `${path} 不再含有 bundle id（例外理由已过时：${why}）`).toContain(path)
     }
 
-    // `:!*.sample` 那条排除的**前提**：被它挡掉的每个文件都必须真的是 `sample(1)` 的转储。
-    // 只把理由写在注释里等于没守——改名一个手抄文件成 `.sample` 就进了豁免区。
-    const repoRoot = fileURLToPath(new URL('../../', DESKTOP))
-    const excluded = spawnSync(
-      'git',
-      ['grep', '-l', '--untracked', '--fixed-strings', literal!, '--', '*.sample'],
-      { cwd: repoRoot, encoding: 'utf8' }
-    )
-    expect(excluded.error, `git grep 没跑起来：${excluded.error?.message}`).toBeUndefined()
-    const excludedFiles = excluded.stdout.split('\n').filter((line) => line.length > 0)
-    // 自证非空：一个都没扫到时下面的 for 空转，这条排除就变成无人核对的白名单。
-    // 今天的在场者是渲染进程跑飞那次现场采样（docs/reviews/evidence/*-2026-09-19.sample）。
-    expect(
-      excludedFiles.length,
-      '没有任何 .sample 含 bundle id——排除项已无对象，请连同 `:!*.sample` 一起删掉，别留空守卫'
-    ).toBeGreaterThan(0)
-    for (const path of excludedFiles) {
-      const head = readFileSync(join(repoRoot, path), 'utf8').slice(0, 4096)
-      expect(
-        head,
-        `${path} 走的是 .sample 豁免，但它不是 sample(1) 的转储——手写文件不能靠改扩展名进豁免区`
-      ).toMatch(/^Analysis of sampling /u)
-    }
   })
 
   it('扫描确实覆盖未跟踪文件——删掉 --untracked 会让上一条重新失明', () => {

@@ -181,15 +181,16 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     // `jsx:onCopyPath` 这一段是 #619 换成限定路径后才拿到的粒度：它与紧邻的 onRename/onReveal
     // 形状完全一样，只有点名到 handler 才拦得住「复制被搬到另一个菜单项」。
     ['components/WorkspaceTopicsPanel.tsx', ['WorkspaceTopicsPanel > jsx:onCopyPath']],
-    // 五处各自承重，缺一不可，且不共用代码：
+    // 六处各自承重，缺一不可：
     //   · 前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口；
     //   · `copySelection` 是**右键菜单**里走选区的那条复制；
     //   · `copyViewport` / `copyScrollback` 是 #638 的出路——两条**不经过选区**的复制路。
     //     它们从 `terminal.buffer.active` 取文本，不问选区服务死活，所以 TUI 开着鼠标上报、
     //     xterm 自禁选区、`copySelection` 恒空时，这两条是用户仅剩的复制手段。删掉任一条，
     //     那个场景下的复制就彻底没了。
+    //   · writeClipboardText 把Agent身份菜单的Session地址复制接到同一出口，与终端文本复制分开。
     // 前两条路径逐字相同（同名端口、同一层），故它们之间对调不可观测——见上面「不保证」。
-    ['components/TerminalView.tsx', ['TerminalView > writeClipboard', 'TerminalView > writeClipboard', 'TerminalView > copySelection', 'TerminalView > copyViewport', 'TerminalView > copyScrollback']],
+    ['components/TerminalView.tsx', ['TerminalView > writeClipboard', 'TerminalView > writeClipboard', 'TerminalView > copySelection', 'TerminalView > copyViewport', 'TerminalView > copyScrollback', 'TerminalView > writeClipboardText']],
     ['components/BrowserPane.tsx', ['BrowserPane > copyElementContext']],
     // 两个菜单注入点：地址菜单的复制经这里注入的 writeClipboardText 落到出口。两处的属性名同为
     // `jsx:writeClipboardText`，靠外层组件名区分——这也是判据取整条路径而非最内层名字的另一半理由。
