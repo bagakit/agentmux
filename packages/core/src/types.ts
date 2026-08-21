@@ -798,6 +798,14 @@ export type AgentMuxAcpEvent =
 
 export type AgentMuxClientEvent =
   | {
+      /** Ordered with terminal-output on the Run attachment; never a resize request. */
+      type: 'terminal-resized'
+      agentSessionId?: string
+      run: AgentMuxRunRef
+      cols: number
+      rows: number
+    }
+  | {
       type: 'terminal-output'
       agentSessionId?: string
       run: AgentMuxRunRef

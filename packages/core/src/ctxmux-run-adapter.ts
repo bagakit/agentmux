@@ -910,7 +910,11 @@ export class CtxmuxRunAdapter {
     }
   }
 
-  async attach(runId: string, afterByte: number): Promise<CtxmuxAdapterAttachment> {
+  async attach(
+    runId: string,
+    afterByte: number,
+    beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void
+  ): Promise<CtxmuxAdapterAttachment> {
     if (this.attachments.has(runId)) {
       throw new AgentMuxError('This client already owns an Attachment for the Run.', 'ATTACHMENT_EXISTS')
     }
@@ -920,10 +924,7 @@ export class CtxmuxRunAdapter {
       const replay = attachment.snapshot.replay.chunks.map((chunk) => (
         decodeChunk(runId, decoder, chunk)
       ))
-      const token = Symbol(runId)
-      this.attachments.set(runId, { attachment, token })
-      void this.pump(runId, token, attachment, decoder)
-      return {
+      const snapshot = {
         run: this.projectRun(attachment.snapshot.run),
         replay,
         gap: classifyReplayGap({
@@ -932,6 +933,19 @@ export class CtxmuxRunAdapter {
           firstAvailableByte: attachment.snapshot.replay.first_available_byte
         })
       }
+      // Reconnect consumers publish this snapshot synchronously before the live iterator is read.
+      // No second queue: the SDK attachment owns all bytes until its pump starts.
+      try { beforeLive?.(snapshot) } catch (error) {
+        try { await attachment.detach() } catch (cleanupError) {
+          attachment.close()
+          throw new AggregateError([error, cleanupError], 'Run snapshot delivery and attachment cleanup failed.')
+        }
+        throw error
+      }
+      const token = Symbol(runId)
+      this.attachments.set(runId, { attachment, token })
+      void this.pump(runId, token, attachment, decoder)
+      return snapshot
     } catch (error) {
       throw translateCtxmuxError(error)
     }

@@ -951,10 +951,16 @@ export class AgentMuxClient {
    *   「先 running 后 error」的顺序发——披露走在后面才洗不掉。gap 事件因此由调用方发出，不在这里发。
    */
   private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | 'truncated'> {
-    let session: AgentMuxStoredAgentSession
     let attached: CtxmuxAdapterAttachment
     try {
-      ;({ session, attached } = await this.attachAgentRun(agentSessionId))
+      ;({ attached } = await this.attachAgentRun(agentSessionId, undefined, (snapshot, current) => {
+        if (snapshot.run.cols !== null && snapshot.run.rows !== null) {
+          this.acceptKernelEvent({
+            type: 'resized', runId: snapshot.run.runId, cols: snapshot.run.cols, rows: snapshot.run.rows
+          })
+        }
+        for (const event of snapshot.replay) this.publisher.publishRunEvent(event, current)
+      }))
     } catch (error) {
       this.publisher.publish({
         type: 'agent-error',
@@ -967,7 +973,6 @@ export class AgentMuxClient {
       })
       return 'dead'
     }
-    for (const event of attached.replay) this.publisher.publishRunEvent(event, session)
     // gap 的披露交给调用方，在它 republish 之后发——见本方法文档的 `'truncated'` 一条。
     return attached.gap ? 'truncated' : 'live'
   }
@@ -1865,17 +1870,22 @@ export class AgentMuxClient {
    */
   private async attachAgentRun(
     agentSessionId: string,
-    afterByte?: number
+    afterByte?: number,
+    beforeLive?: (snapshot: CtxmuxAdapterAttachment, session: AgentMuxStoredAgentSession) => void
   ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
-    const attached = await this.kernel.attach(session.run.runId, afterByte ?? session.outputCursorBytes)
-    try {
+    const validate = (snapshot: CtxmuxAdapterAttachment): void => {
       const current = this.requireAgentSession(agentSessionId)
       if (current.run.runId !== session.run.runId) {
         throw new AgentMuxError('Agent Session changed while its Run was being attached.', 'STALE_AGENT_SESSION_BINDING')
       }
-      this.assertAgentRun(session, attached.run)
+      this.assertAgentRun(session, snapshot.run)
+    }
+    const attached = await this.kernel.attach(session.run.runId, afterByte ?? session.outputCursorBytes,
+      beforeLive ? (snapshot) => { validate(snapshot); beforeLive(snapshot, session) } : undefined)
+    try {
+      validate(attached)
     } catch (error) {
       try {
         await this.kernel.detach(attached.run.runId)
@@ -4057,8 +4067,13 @@ export class AgentMuxClient {
       return
     }
     if (event.type === 'resized') {
-      // Screen evidence consumes Resized on its own attachment and fail-closes.
-      // This live pump must not treat geometry change as process exit.
+      this.publisher.publish({
+        type: 'terminal-resized',
+        ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
+        run: runRef(event.runId),
+        cols: event.cols,
+        rows: event.rows
+      })
       return
     }
     // run 进程终结是「这个 run 再不会有 hook 事件」的权威终点。子代理若被信号/OOM 杀死、或其

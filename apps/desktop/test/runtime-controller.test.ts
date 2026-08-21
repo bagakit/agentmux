@@ -2265,3 +2265,20 @@ describe('RuntimeController configuration transaction', () => {
     })
   })
 })
+
+
+it('forwards owner geometry to the attached Renderer without requesting another resize', async () => {
+  const controller = await configuredController()
+  const client = runtimeFixture.FakeClient.instances.at(-1)!
+  const renderer = webContentsFixture()
+  const release = controller.attach(renderer)
+  const geometry = { type: 'terminal-resized', run: { runId: 'run-1' }, cols: 132, rows: 45 }
+  client.eventListener?.(geometry)
+  expect(renderer.send).toHaveBeenCalledWith('agentmux:session-event', {
+    type: 'core', hostId: 'local', event: geometry
+  })
+  expect(client.resizeAgent).not.toHaveBeenCalled()
+  expect(client.resizeTerminal).not.toHaveBeenCalled()
+  release()
+  await controller.dispose()
+})

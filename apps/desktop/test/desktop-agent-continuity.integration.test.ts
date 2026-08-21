@@ -235,6 +235,16 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     const attached = await runtime.attachSession(renderer.id, control, 0, config)
     expect(attached.currentSize).toEqual({ cols: 132, rows: 45 })
     expect(attached.session.control).toEqual(control)
+    // A separate Node client changes the same retained PTY while this Desktop View stays attached.
+    const changed = await runWorker('resize', created.run.runId)
+    expect(changed.run).toMatchObject({ runId: created.run.runId, pid: created.run.pid, cols: 160, rows: 50 })
+    const resized = await waitFor('independent owner resize reaching the existing Renderer', () =>
+      renderer.sentEvents.flatMap((entry) => entry.args as RuntimeEvent[]).find((event) =>
+        event.hostId === 'local' && event.event.type === 'terminal-resized' &&
+        event.event.run.runId === created.run.runId && event.event.cols === 160 && event.event.rows === 50))
+    expect(resized).toMatchObject({ type: 'core', hostId: 'local', event: {
+      type: 'terminal-resized', run: { runId: created.run.runId }, cols: 160, rows: 50
+    } })
     await runtime.detachSession(renderer.id, attached.attachmentId)
     detach()
   }, 30_000)
