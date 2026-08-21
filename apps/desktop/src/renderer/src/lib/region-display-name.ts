@@ -2,16 +2,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import type { WorkbenchSurface } from './workbench-tabs'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 
-/**
- * 「这一格叫什么」——一个 Region 显示名的**唯一**派生处。
- *
- * 一个 Tab 有真名字段（`WorkbenchTab.name`，含改名交互）；一个 Region 没有任何名字字段——布局叶子的
- * 载荷就是 `{ regionId }`。它唯一能给人看的名，全靠这里现算。此前这份逻辑劈成两半散在两个文件里
- * （表面→短名在 WorkspaceWorkbench，重名编号在 regionSwapMenuEntries），只为喂换位子菜单。第二个
- * 消费者（composer 里的 Region 名水印）即将出现；它若照抄这份逻辑，就是本仓 duplicated-rule-defeats-
- * the-fix 那一族：两份拼法今天一致、日后静默分家，各自被自己的测试守着、双双全绿。收成这一处即两个
- * 消费者共用同一次派生，不存在第二份可漂移。
- */
+/** Region labels and sibling numbering share one derivation for the region switch menu. */
 
 /**
  * 一格的**表面短名**：按种类给一个人能认出的名——文件名（basename）/ 会话 label（Agent 与终端都用
@@ -70,16 +61,3 @@ export function regionDisplayNames(
   })
 }
 
-/**
- * 单独一格的显示名——但它**要求整套兄弟格**作为入参，因为名字取决于兄弟：「Terminal」只有在另一格也叫
- * 「Terminal」时才变成「Terminal 2」。故这里没有、也不提供一个「只看单格就返回名字」的重载：那种签名
- * 必然是错的（它看不见让自己变成 "Terminal 2" 的那个兄弟）。取不到该格返回 undefined。
- *
- * 水印消费者用这一支：给它这张 Tab 的全体 regions（视觉顺序）与要显示的那一格 id。
- */
-export function regionDisplayName(
-  regions: ReadonlyArray<{ regionId: string; label: string }>,
-  regionId: string
-): string | undefined {
-  return regionDisplayNames(regions).find((region) => region.regionId === regionId)?.name
-}
