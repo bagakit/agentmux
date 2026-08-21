@@ -18,7 +18,8 @@ export type {
   AgentTimelineSnapshot
 } from './types.js'
 
-export const MAX_AGENT_TIMELINE_ITEMS = 200
+const MAX_TIMELINE_ITEMS_PER_WINDOW = 200
+export const MAX_AGENT_TIMELINE_ITEMS = 2 * MAX_TIMELINE_ITEMS_PER_WINDOW
 const MAX_TIMELINE_MUTATION_BYTES = 128 * 1024
 const UTF8_ENCODER = new TextEncoder()
 // These three arrays are the sole runtime validation gate in `normalizeItem`. A plain
@@ -192,6 +193,19 @@ export function normalizeAgentTimelineMutation(value: unknown): AgentTimelineMut
   }
 }
 
+// Inputs and activity share one ordered durable history, but cannot evict each other.
+function retainTimelineWindows(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  let inputs = 0
+  let activity = 0
+  const retained: AgentTimelineItem[] = []
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!
+    const count = item.kind === 'user_message' ? ++inputs : ++activity
+    if (count <= MAX_TIMELINE_ITEMS_PER_WINDOW) retained.push(item)
+  }
+  return retained.reverse()
+}
+
 export function applyAgentTimelineMutation(
   current: readonly AgentTimelineItem[],
   value: AgentTimelineMutation
@@ -207,13 +221,13 @@ export function applyAgentTimelineMutation(
       if (sameItemSemantics(existing, mutation.item)) return items
       throw new AgentMuxError('Timeline item identity conflicts with existing content.', 'AGENT_TIMELINE_ID_CONFLICT')
     }
-    return [...items, structuredClone(mutation.item)].slice(-MAX_AGENT_TIMELINE_ITEMS)
+    return retainTimelineWindows([...items, structuredClone(mutation.item)])
   }
   if (mutation.type === 'upsert') {
     const index = items.findIndex((item) => item.id === mutation.item.id)
     if (index < 0) {
       // 目标不在（事前那条丢投或被逐出）：补落一条自洽的终态行，而不是抛错吞掉整条 hook 事件。
-      return [...items, structuredClone(mutation.item)].slice(-MAX_AGENT_TIMELINE_ITEMS)
+      return retainTimelineWindows([...items, structuredClone(mutation.item)])
     }
     // 就地替换。保留最初的 createdAt——这仍是「同一件事」，创建时刻不该被事后投递改写；
     // 语义未变则原样返回，避免推空的 revision。
@@ -229,7 +243,7 @@ export function applyAgentTimelineMutation(
     const next: AgentTimelineItem = { ...structuredClone(mutation.item), createdAt: previous.createdAt }
     if (sameItemSemantics(previous, next)) return items
     items[index] = next
-    return items
+    return retainTimelineWindows(items)
   }
   const index = items.findIndex((item) => item.id === mutation.itemId)
   if (index < 0) {
@@ -262,10 +276,15 @@ export function normalizeAgentTimeline(
   if (!Array.isArray(values) || values.length > MAX_AGENT_TIMELINE_ITEMS) {
     throw new AgentMuxError('Agent Timeline exceeds its item limit.', 'AGENT_TIMELINE_LIMIT')
   }
-  return values.reduce<AgentTimelineItem[]>((items, item) => applyAgentTimelineMutation(items, {
+  const normalized = values.map(normalizeItem)
+  const inputs = normalized.filter((item) => item.kind === 'user_message').length
+  if (inputs > MAX_TIMELINE_ITEMS_PER_WINDOW || normalized.length - inputs > MAX_TIMELINE_ITEMS_PER_WINDOW) {
+    throw new AgentMuxError('Agent Timeline exceeds its retention window.', 'AGENT_TIMELINE_LIMIT')
+  }
+  return normalized.reduce<AgentTimelineItem[]>((items, item) => applyAgentTimelineMutation(items, {
     type: 'append',
     agentSessionId,
-    item: normalizeItem(item)
+    item
   }), [])
 }
 
