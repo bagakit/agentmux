@@ -30,6 +30,7 @@ import {
   BROWSER_TOOLBAR_ITEM_ORDER,
   type BrowserToolbarItem
 } from '../lib/browser-toolbar'
+import { boardTaskColumns, projectBoardTasks, type BoardTaskStatus } from '../lib/global-task-board'
 import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import type { MainSurface } from '../store'
@@ -37,7 +38,6 @@ import {
   contentSlotPresentation,
   resolveExplorerCollapsed,
   resolveWorkspaceTools,
-  boardListSegments,
   workspaceAgentGroups,
   type WorkspaceAgentGroupId,
   type WorkspaceTool
@@ -465,97 +465,28 @@ export function WorkspaceAgentsTool({
  * 空态——没有任何行时它才有话说。
  */
 export function BoardToolList({ hostId }: { hostId: string }) {
-  const { rows, kind, loading, error } = useBoardRows()
-  const selectSession = useAppStore((state) => state.selectSession)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
-  const [showAll, setShowAll] = useState(false)
-  const { shown, hidden } = boardListSegments(rows, showAll)
-
-  function toggleRow(id: string): void {
-    setExpandedRows((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const boardRows = useBoardRows()
+  const config = useAppStore((state) => state.config)
+  const sessions = useAppStore((state) => state.sessions)
+  const boardTasks = useAppStore((state) => state.boardTasks)
+  const selectedTaskId = useAppStore((state) => state.selectedBoardTaskId)
+  const setSelectedTask = useAppStore((state) => state.setSelectedBoardTask)
+  const tasks = projectBoardTasks(config, sessions, boardTasks)
+  const columns = boardTaskColumns(tasks)
+  if (tasks.length === 0 && boardRows.error && boardRows.rows.length === 0) {
+    return <div className="surface-tool-error" role="alert">{boardRows.error}</div>
   }
-
-  if (error && rows.length === 0) {
-    return <div className="surface-tool-error" role="alert">{error}</div>
-  }
-
-  if (rows.length === 0) {
-    return (
-      <section className="surface-tool-summary">
-        <div className="surface-tool-summary__icon"><Columns3 size={18} /></div>
-        <div className="eyebrow">Project board</div>
-        <h2>{kind === 'topic' ? 'Topic × status' : 'Branch × status'}</h2>
-        <p>
-          {loading
-            ? 'Reading the board…'
-            : `No ${kind === 'topic' ? 'Topics' : 'branches'} yet. ${kind === 'topic' ? 'Create a Topic from the Topics panel' : 'Create a branch with Git'}, then it appears here as a row.`}
-        </p>
-        <div className="board-tool-legend">
-          <div><MessageSquarePlus size={13} /><span><strong>Inbox</strong><small>Start a discussion</small></span></div>
-          <div><Activity size={13} /><span><strong>Working</strong><small>Running now</small></span></div>
-          <div><BellRing size={13} /><span><strong>Needs You</strong><small>{BOARD_COLUMN_DESCRIPTIONS['needs-you']}</small></span></div>
-          <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span></div>
-        </div>
-      </section>
-    )
-  }
-
   return (
-    <section className="board-tool-list">
-      {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
-      <div className="board-tool-context">
-        <span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span>
-        <em>{rows.length} {kind === 'topic' ? 'topic' : 'branch'}{rows.length === 1 ? '' : 'es'}</em>
-      </div>
-      {shown.map((row) => {
-        const isOpen = expandedRows.has(row.id)
-        return (
-          <div className="board-tool-row" key={row.id}>
-            <button
-              className="board-tool-row__head"
-              type="button"
-              aria-expanded={isOpen}
-              onClick={() => toggleRow(row.id)}
-              title={row.name}
-            >
-              {row.kind === 'topic' ? <NotebookText size={12} /> : <FolderGit2 size={12} />}
-              <strong>{row.name}</strong>
-              <em>{row.sessions.length}</em>
-            </button>
-            {isOpen ? (
-              <div className="board-tool-row__agents">
-                {row.sessions.length === 0
-                  ? <small className="board-tool-row__empty">No agents on this row</small>
-                  : row.sessions.map((session) => (
-                    <button
-                      className="board-tool-agent"
-                      key={session.id}
-                      type="button"
-                      // 定位走全局那一个 selectSession，不新增第二条导航路径。
-                      onClick={() => selectSession(session.id)}
-                      aria-label={`Open ${session.label} · ${session.status.state}`}
-                      title={`${session.label} · ${session.status.state}`}
-                    >
-                      <StatusDot status={session.status} />
-                      {session.providerId ? <AgentProviderIcon providerId={session.providerId} size={11} /> : null}
-                      <span>{session.label}</span>
-                    </button>
-                  ))}
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
-      {hidden > 0 ? (
-        <button className="board-tool-more" type="button" onClick={() => setShowAll(true)}>
-          其余 {hidden} 条
+    <section className="board-tool-list" aria-label="Global task index">
+      <div className="board-tool-context"><span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span><em>{tasks.length} task{tasks.length === 1 ? '' : 's'}</em></div>
+      {tasks.length === 0 && boardRows.rows.length > 0 ? boardRows.rows.slice(0, 5).map((row) => <div className="board-tool-row__empty" key={row.id}>{row.name}</div>) : null}
+      {tasks.length === 0 && boardRows.rows.length === 0 ? <div className="board-tool-row__empty">No tasks yet. Use Default Session to create one.</div> : null}
+      {(['working', 'needs-you', 'inbox', 'done'] as BoardTaskStatus[]).flatMap((status) => columns[status].slice(0, 5).map((task) => (
+        <button className={`board-tool-task ${selectedTaskId === task.id ? 'selected' : ''}`} type="button" key={task.id} onClick={() => setSelectedTask(task.id)} title={task.title}>
+          <StatusDot status={task.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
+          <span><strong>{task.title}</strong><small>{task.projectName ?? 'Global'} · {status}</small></span>
         </button>
-      ) : null}
+      )))}
     </section>
   )
 }
