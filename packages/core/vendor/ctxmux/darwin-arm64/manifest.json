@@ -1,9 +1,9 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "c35f6217109c358ad730b0c8a7e879c3257a2ab7",
-    "tree": "c0dfd9be2289816a56f27eed2d39b99909d21e08",
-    "commit_time_unix": "1788563344",
+    "commit": "c168c0ab9cd849bfade68461b62684982c71f688",
+    "tree": "a2cc33fe7adac2b25110df58370e3dac17850e00",
+    "commit_time_unix": "1789924008",
     "worktree_clean": true
   },
   "product": {
@@ -19,7 +19,7 @@
   "build": {
     "profile": "release",
     "locked": true,
-    "source_date_epoch": "1788563344",
+    "source_date_epoch": "1789924008",
     "rustc": "1.96.0",
     "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
     "node": "v24.14.1",
@@ -30,11 +30,11 @@
     "version": "0.0.0",
     "protocol": 17,
     "entry_count": 246,
-    "unpacked_bytes": 404931,
+    "unpacked_bytes": 412817,
     "archive": {
       "path": "ctxmux-sdk-0.0.0.tgz",
-      "sha256": "c1aef443972a4abaeb00c10203f9c1e15daf6c0f0cca702e15d446281d97ab9b",
-      "bytes": 90720,
+      "sha256": "574b6ba22ef716768dc2ddf78a8a79b669caaa2ad27991f5ccbb3459ebdc3a90",
+      "bytes": 91899,
       "mode": "0644"
     }
   },
@@ -53,8 +53,8 @@
       "version": "0.1.0",
       "protocol": 17,
       "path": "bin/ctxmuxd",
-      "sha256": "2786f5938cda54f823f1ef570a0c147546b116e2437675940cb3095a8e85db4a",
-      "bytes": 5670080,
+      "sha256": "844a7bee88b6b9c00586c556030e324a35a8684e8435a6fb79d4300d2700d8ab",
+      "bytes": 5689008,
       "mode": "0755"
     }
   ],
