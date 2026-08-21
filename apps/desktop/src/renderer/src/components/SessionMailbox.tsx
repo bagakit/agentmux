@@ -8,15 +8,17 @@ import { useReadReceipts, type useServiceNotices } from '../lib/use-service-noti
 type Folder = 'inbox' | 'outbox' | 'system'
 const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
 
-function MessageHistory({ items, incoming }: { items: readonly AgentTimelineItem[]; incoming: boolean }) {
+function MessageHistory({ items, incoming, onCopy }: { items: readonly AgentTimelineItem[]; incoming: boolean; onCopy?: ((text: string) => void) | undefined }) {
   const sessions = useAppStore((state) => state.sessions)
   const names = useAppStore((state) => state.agentNames)
   const authorLabel = (id: string) => names?.[id] || sessions.find((session) => session.id === id)?.label || `Agent ${id.slice(0, 8)}`
-  return items.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Agent messages' : 'Sent messages'}>
+  return items.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Recent Agent messages' : 'Recent outgoing messages'}>
     {items.map((item) => <li key={item.id}>
-      <header><strong>{incoming ? authorLabel(item.authorAgentSessionId!) : 'Sent'}</strong>
+      <header><strong>{incoming ? authorLabel(item.authorAgentSessionId!) : item.status === 'complete' ? 'Sent' : 'Delivery not confirmed'}</strong>
         <time dateTime={new Date(item.createdAt).toISOString()}>{new Date(item.createdAt).toLocaleString()}</time></header>
       <p>{item.content}</p>
+      {item.status === 'failed' ? <><small>Delivery not confirmed. Check the Agent’s response before sending again.</small>
+        {onCopy && item.content ? <button type="button" className="composer-tool" onClick={() => onCopy(item.content!)}>Copy message</button> : null}</> : null}
     </li>)}
   </ol> : incoming ? <p>No Agent messages.</p> : null
 }
@@ -33,15 +35,15 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
   const id = useId()
   const [open, setOpen] = useState(false)
   const [folder, setFolder] = useState<Folder>('inbox')
-  const delivered = timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
-    item.kind === 'user_message' && item.status === 'complete') ?? []
-  const incoming = delivered.filter((item) => item.authorAgentSessionId !== undefined)
-  const sent = delivered.filter((item) => item.authorAgentSessionId === undefined)
+  const messages = timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
+    item.kind === 'user_message' && item.status !== 'streaming') ?? []
+  const incoming = messages.filter((item) => item.authorAgentSessionId !== undefined)
+  const sent = messages.filter((item) => item.authorAgentSessionId === undefined)
   const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`,
-    Object.fromEntries(incoming.map((item) => [item.id, JSON.stringify([item.authorAgentSessionId, item.content, item.createdAt])])),
+    Object.fromEntries(incoming.map((item) => [item.id, JSON.stringify([item.authorAgentSessionId, item.content, item.createdAt, item.status])])),
     timeline !== undefined)
   const unread = receipts.unread.length + system.unread.length
-  const deliveredIds = new Set(delivered.map((item) => item.id))
+  const deliveredIds = new Set(messages.filter((item) => item.status === 'complete').map((item) => item.id))
   const pending = queued.filter((item) => !deliveredIds.has(`prompt:${item.id}`))
   const counts = { inbox: incoming.length, outbox: pending.length + sent.length, system: system.notices.length }
   // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
@@ -82,12 +84,12 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
         </button>)}
       </div>
       <div id={`${id}-inbox`} role="tabpanel" aria-labelledby={`${id}-inbox-tab`} hidden={folder !== 'inbox'}>
-        {timeline ? <MessageHistory items={incoming} incoming /> : <p>Waiting for message history.</p>}
+        {timeline ? <MessageHistory items={incoming} incoming onCopy={onCopyQueued} /> : <p>Waiting for message history.</p>}
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         <ComposerOutbox queued={pending} {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
           {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
-        <MessageHistory items={sent} incoming={false} />
+        <MessageHistory items={sent} incoming={false} onCopy={onCopyQueued} />
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
         {system.notices.length ? system.notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
