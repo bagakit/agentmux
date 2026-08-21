@@ -199,7 +199,7 @@ describe('Project Rail density is durable', () => {
       await act(async () => root.unmount())
       container.remove()
     }
-    const saveMock = (api as { config: { save: ReturnType<typeof vi.fn> } }).config.save
+    const saveMock = api.config.save
     expect(saveMock).toHaveBeenCalled()
     expect(savedConfigs.calls.at(-1)?.projectRailDensity, '点击没有把档位翻到 compact 并落盘').toBe('compact')
   })
