@@ -13,9 +13,11 @@ const captured = vi.hoisted(() => ({ tabName: undefined as string | undefined })
 const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[],
+    pendingAgentLaunches: {},
+    recoveryCandidates: [],
     timelines: {} as Record<string, { items: never[] }>,
     tabs: {} as Record<string, unknown>,
-    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [] },
+    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [], executors: {} },
     activeWorkspaceId: undefined as string | undefined,
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
