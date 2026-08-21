@@ -4,9 +4,6 @@ import {
   LoaderCircle
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { RuntimeOwnershipNotice } from './components/RuntimeOwnershipNotice'
-import { ShellEnvironmentNotice } from './components/ShellEnvironmentNotice'
-import { DisplacedAgentNotice } from './components/DisplacedAgentNotice'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useAgentStatusDecay } from './lib/agent-status-decay'
@@ -17,6 +14,7 @@ import {
   getToolDockMinimumWidth
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
+import { GlobalSystemNotices } from './components/GlobalSystemNotices'
 import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -323,9 +321,6 @@ function DesktopApp() {
           </div>
         )}
         <div className="main-shell__notices">
-          <ShellEnvironmentNotice />
-          <RuntimeOwnershipNotice />
-          <DisplacedAgentNotice />
           <TransientErrorNotice
             error={error}
             dismissed={errorDismissed}
@@ -335,7 +330,10 @@ function DesktopApp() {
           />
         </div>
       </main>
-      <AgentStatusBar />
+      <footer className="window-status-bar">
+        <AgentStatusBar />
+        <GlobalSystemNotices />
+      </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
       <ShortcutsCheatSheet
         open={shortcutsHelpOpen}
