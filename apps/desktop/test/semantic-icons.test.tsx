@@ -23,7 +23,7 @@ describe('semantic icon contract', () => {
   it('allows a plugin theme to replace a semantic renderer without changing the call site', () => {
     const theme = createSemanticIconTheme({ workflow: Circle })
     const markup = renderToStaticMarkup(
-      createElement(SemanticIconProvider, { theme }, createElement(SemanticIcon, { name: 'workflow' }))
+      createElement(SemanticIconProvider, { theme, children: createElement(SemanticIcon, { name: 'workflow' }) })
     )
     expect(markup).toContain('semantic-icon')
     expect(markup).toContain('circle')
