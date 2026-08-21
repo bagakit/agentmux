@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 // imports it to verify the packed manifest bytes and the owner receipt; the
 // endpoint id below derives from it so each artifact version claims its own
 // socket/state root.
-export const CTXMUX_MANIFEST_SHA256 = 'ff02d96700ffc22f691aec774595bf3945cb3f3c8aa26dad57c86923a59e6f60'
+export const CTXMUX_MANIFEST_SHA256 = '1dfe2c94d089a5ba4248c34abbeccbc61300e59308bcb6c3e96967503fee4711'
 
 // Derive the endpoint identity from the pinned manifest so an artifact upgrade
 // lands on a fresh socket/state root instead of colliding with a stale detached
