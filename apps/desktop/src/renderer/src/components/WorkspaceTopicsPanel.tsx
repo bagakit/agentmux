@@ -10,13 +10,14 @@ import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
-import { SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
 // 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
 import { resolveAgentName } from '../lib/display-name'
 import { firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
   DndContext,
   KeyboardSensor,
@@ -76,7 +77,10 @@ export function WorkspaceTopicsPanel({
   // 头像点击走全局那一个 selectSession——跳转到某个 Agent 全窗口只有这一条路径，
   // 在这里另写一段"找到它的 Tab 再激活"就是第二条，两条迟早对不上。
   const selectSession = useAppStore((state) => state.selectSession)
+  const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
+  const localHome = useAppStore((state) => state.localHome)
+  const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
   const [topics, setTopics] = useState<ScratchTopicSnapshot[] | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
@@ -263,7 +267,7 @@ export function WorkspaceTopicsPanel({
                 isCurrent={isCurrent}
                 pinned={pinned}
                 key={topic.id}
-                onCopyPath={() => void copyTextToClipboard(topic.directoryPath, reportError)}
+                onCopyPath={() => void copyTextToClipboard(applyCopyPathStyle(topic.directoryPath, { home: localHome, copyPathsAsAbsolute }), reportError)}
                 onRename={() => beginRename(topic)}
                 onReveal={() => onRevealDirectory(topic.directoryPath)}
                 onTogglePin={() => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id)}
@@ -308,7 +312,7 @@ export function WorkspaceTopicsPanel({
                     <SelectorRow
                       leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
-                      subtitle={topic.summary || topic.directoryPath}
+                      subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className="workspace-topic-entry__wiki" title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>Wiki · {topic.wiki.version}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
                         <TopicPresence
@@ -354,6 +358,16 @@ export function WorkspaceTopicsPanel({
                   onClick={() => onRevealDirectory(topic.directoryPath)}
                 >
                   <Crosshair size={13} />
+                </button>
+                <button
+                  className="workspace-topic-wiki"
+                  type="button"
+                  aria-label={`Edit ${topic.title} Wiki`}
+                  title="Edit Topic Wiki"
+                  disabled={pending !== null}
+                  onClick={() => void openFile(`${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)}
+                >
+                  <NotebookText size={13} />
                 </button>
               </SortableTopicItem>
             )
