@@ -1,0 +1,21 @@
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+const exec = promisify(execFile)
+const controlModule = fileURLToPath(new URL('../dist/control-host.js', import.meta.url))
+
+// Run the built server in its own process: an unhandled socket error must fail this
+// test as a process exit, not be swallowed by a test-runner error listener.
+describe('Control socket error lifetime', () => {
+  it.each(['late-success', 'late-error', 'during-execution'])(
+    'survives %s and still serves the next client without replaying the operation',
+    async (scenario) => {
+      const { stdout } = await exec(process.execPath, ['--input-type=module', '-e', ("\n        import assert from 'node:assert/strict';\n        import { once } from 'node:events';\n        import { mkdtemp, rm } from 'node:fs/promises';\n        import { createConnection } from 'node:net';\n        import { join } from 'node:path';\n        import { pathToFileURL } from 'node:url';\n        const { AgentMuxControlServer, requestAgentMuxControl } = await import(pathToFileURL(process.argv[1]));\n        const { AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(new URL('./control.js', pathToFileURL(process.argv[1])));\n        const scenario = process.argv[2];\n        const root = await mkdtemp('" + (upstreamFixturePath("tmp/amx-epipe-")) + "');\n        const path = join(root, 'control.sock');\n        const entered = Promise.withResolvers();\n        const finish = Promise.withResolvers();\n        let executions = 0;\n        const server = new AgentMuxControlServer({\n          async execute(request) {\n            executions++;\n            if (request.requestId === 'abandoned') {\n              entered.resolve();\n              await finish.promise;\n              if (scenario === 'late-error') throw new Error('Operation failed');\n            }\n            return { operation: 'list.agents', agents: [] };\n          }\n        }, path);\n        let peer;\n        try {\n          await server.start();\n          // Observe the real accepted socket only to synchronize peer FIN / inject\n          // an OS-style async failure. No replacement transport or error catcher.\n          const accepted = once(server.server, 'connection');\n          peer = createConnection(path);\n          peer.on('error', () => {});\n          const [socket] = await accepted;\n          const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'abandoned', operation: 'list.agents' };\n          peer.write(JSON.stringify(request) + '\\n');\n          await entered.promise;\n          if (scenario === 'during-execution') {\n            const closed = new Promise(resolve => socket.once('close', resolve));\n            socket.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));\n            await closed;\n          } else {\n            const ended = once(socket, 'end');\n            peer.destroy();\n            await ended;\n            assert.equal(socket.destroyed, false, 'Must exercise the writable half-open reply race');\n          }\n          const closed = socket.closed ? Promise.resolve() : new Promise(resolve => socket.once('close', resolve));\n          finish.resolve();\n          await closed;\n          const receipt = await requestAgentMuxControl({ ...request, requestId: 'next-client' }, path);\n          assert.equal(receipt.ok, true);\n          assert.equal(receipt.requestId, 'next-client');\n          assert.equal(executions, 2, 'A failed reply must never replay the operation');\n          console.log('control-server-survived');\n        } finally {\n          peer?.destroy();\n          finish.resolve();\n          await server.stop();\n          await rm(root, { recursive: true, force: true });\n        }\n      "), controlModule, scenario], { timeout: 10_000 })
+      expect(stdout.trim()).toBe('control-server-survived')
+    },
+    15_000
+  )
+})

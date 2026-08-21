@@ -672,6 +672,10 @@ export class AgentMuxControlServer {
   }
 
   private async handle(socket: Socket): Promise<void> {
+    // readMessage removes its error listener once the request is parsed. Keep a
+    // connection-level handler through execution and the final asynchronous write:
+    // a peer disconnect must close this socket, not crash the owning application.
+    socket.on('error', () => socket.destroy())
     // 还没读到请求，不知道是哪个操作：先按短预算等第一条消息，读出来之后（下面）再按操作重排。
     socket.setTimeout(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, () => socket.destroy())
     let raw: unknown
