@@ -245,3 +245,17 @@ it('does not switch folders or consume new incoming messages while reading the O
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(useAppStore.getState().noticeReadReceipts['mail:agent-1']).toEqual(receipt)
 })
+
+it('keeps unconfirmed initial input visible and copyable without calling it Sent', async () => {
+  useAppStore.setState({ sessions: [composerSession()], timelines: { 'agent-1': {
+    agentSessionId: 'agent-1', revision: 1, items: [{ ...delivered('initial'), status: 'failed' }] } } })
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  const visible = mailbox().querySelector('[role="tabpanel"]:not([hidden])')!
+  expect(visible.textContent).toContain('Body initial')
+  expect(visible.textContent).toContain('Delivery not confirmed')
+  expect(visible.querySelector('.composer-mailbox__messages strong')?.textContent).not.toBe('Sent')
+  await dom.click('.composer-mailbox__messages button')
+  expect(copy).toHaveBeenCalledExactlyOnceWith('Body initial')
+})
