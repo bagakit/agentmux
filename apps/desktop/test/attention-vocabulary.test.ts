@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import ts from 'typescript'
+import { Window } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
@@ -468,6 +469,30 @@ function descriptionExpressions(source: string, tableName: string): Record<strin
   return found
 }
 
+// Split at combinators/top-level commas only; :is(.working, [data-attention]) is one compound.
+const selectorDocument = new Window().document
+function attentionRuleReaches(styles: string, classNames: readonly string[]): boolean {
+  const element = selectorDocument.createElement('span')
+  element.className = classNames.join(' ')
+  element.setAttribute('data-attention', '')
+  for (const [, selector] of styles.matchAll(/([^{}]+)\{[^{}]*\}/gu)) {
+    let depth = 0
+    let compound = ''
+    const matches = () => compound.includes('[data-attention') &&
+      classNames.some((name) => new RegExp(`\\.${name}(?![\\w-])`, 'u').test(compound)) &&
+      element.matches(compound.replace(/\[data-attention(?:[^\]]*)\]/gu, '[data-attention]'))
+    for (const char of `${selector!} `) {
+      if ('(['.includes(char)) depth++
+      if (')]'.includes(char)) depth--
+      if (depth === 0 && /[\s,>+~]/u.test(char)) {
+        if (compound && matches()) return true
+        compound = ''
+      } else compound += char
+    }
+  }
+  return false
+}
+
 describe('each attention call site is wired to the shared vocabulary', () => {
   it('QuickSwitcher gives every data-attention the shared accent, not a local ternary', () => {
     const source = read('../src/renderer/src/components/QuickSwitcher.tsx')
@@ -536,15 +561,22 @@ describe('each attention call site is wired to the shared vocabulary', () => {
         // `.status--working[data-attention]`——一个共享的基类就此替这个元素借到了别人的规则（实测：
         // 头像的独有类名改掉后，同元素上的 `status` 让整条判据照旧通过）。所以要求类名后面紧跟的
         // 不是类名字符：选择器里合法的下一个字符只能是 `.#[:>+~,{` 或空白。
-        const reachable = classNames.some((className) =>
-          new RegExp(`\\.${className}(?![\\w-])[^,{]*\\[data-attention`, 'u').test(styles)
-        )
+        const reachable = attentionRuleReaches(styles, classNames)
         expect(
           reachable,
           `${component} emits data-attention (${attention}) on .${classNames.join('/.')} but no rule selects that pair`
         ).toBe(true)
       }
     }
+  })
+
+  it('recognizes compound functional selectors without borrowing a descendant or alternate rule', () => {
+    expect(attentionRuleReaches('.avatar:is(.working, [data-attention]) .contour { filter: none }', ['avatar'])).toBe(true)
+    expect(attentionRuleReaches('.avatar[data-attention] { color: red }', ['avatar'])).toBe(true)
+    expect(attentionRuleReaches('.avatar .child[data-attention] { color: red }', ['avatar'])).toBe(false)
+    expect(attentionRuleReaches('.avatar, .other[data-attention] { color: red }', ['avatar'])).toBe(false)
+    expect(attentionRuleReaches('.other:is(.avatar, [data-attention]) { color: red }', ['avatar'])).toBe(false)
+    expect(attentionRuleReaches('', ['avatar'])).toBe(false)
   })
 
   it('the emission extractor reads the class off the same element, both spellings', () => {

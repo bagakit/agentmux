@@ -35,28 +35,28 @@ describe('#473 关闭的协作者不被画成在跑', () => {
     expect(closed).not.toContain('status--running')
   })
 
-  it('样式表给 disconnected 头像一条专属规则，把它与 done/exited 那种「跑完了还在」区分开', () => {
+  it('同一个共享状态点把 disconnected 与 running、done、exited 区分开', () => {
     const styles = allStyleRules()
-    // 取每条 .agent-avatar.status--<state> 规则体，比较 disconnected 与 done/exited 的视觉处理。
-    const ruleFor = (state: string): string => {
-      for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        if (selector!.split(',').some((one) => one.trim() === `.agent-avatar.status--${state}`)) return body!
-      }
-      return ''
-    }
-    const disconnected = ruleFor('disconnected')
-    // disconnected 必须有专属规则（缺陷正是它此前没有）。
-    expect(disconnected, 'disconnected 头像没有专属规则，与 done/exited 逐像素同款').not.toBe('')
-    // 它必须画出一个可见的「不在场」记号（描边），且仍读 --status-ink，不自己挑色。
-    expect(disconnected).toMatch(/outline:[^;]*var\(--status-ink\)/)
-    // done / exited 刻意没有这条专属规则（它们「在场但结束」，走基础的灰度收敛），
-    // 所以 disconnected 与它们分得开正是靠这条独有规则。
-    expect(ruleFor('done'), 'done 现在有了专属头像规则——与 disconnected 的区分被抹掉了').toBe('')
-    expect(ruleFor('exited'), 'exited 现在有了专属头像规则——与 disconnected 的区分被抹掉了').toBe('')
-    // 而它与 running 那档也要分得开：running 是实线描边（在场且活跃），disconnected 是虚线（占位）。
-    const running = ruleFor('running')
-    expect(running).toContain('outline')
-    expect(disconnected).toContain('dashed')
-    expect(running).not.toContain('dashed')
+    const rules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+    expect(rules.length).toBeGreaterThan(0)
+    const bodiesFor = (selector: string) => rules.filter(([, selectors]) =>
+      selectors!.split(',').some((one) => one.trim() === selector)).map(([, , body]) => body!).join(';')
+    const closed = renderToStaticMarkup(createElement(AgentAvatar, {
+      label: 'a', providerId: 'claude', state: 'disconnected'
+    }))
+    expect(closed).toContain('agent-avatar__status status__dot')
+    expect(closed).toContain('agent-avatar__contour')
+    const baseDot = bodiesFor('.status__dot')
+    expect(baseDot).toContain('background: var(--status-ink)')
+    const disconnected = bodiesFor('.status--disconnected .status__dot')
+    expect(disconnected, '断开态必须走共享空心点').toContain('background: transparent')
+    expect(disconnected).toContain('var(--status-ink)')
+    expect(bodiesFor('.status--disconnected')).toContain('--status-ink: var(--text-3)')
+    expect(bodiesFor('.status--running')).toContain('--status-ink: var(--blue)')
+    // done/exited retain the filled base dot; no private avatar rule can turn them into disconnected.
+    expect(bodiesFor('.status--done .status__dot')).not.toContain('background: transparent')
+    expect(bodiesFor('.status--exited .status__dot')).not.toContain('background: transparent')
+    expect(bodiesFor('.agent-avatar__contour')).toContain('drop-shadow(')
+    expect(bodiesFor('.agent-avatar__contour')).toContain('var(--status-ink)')
   })
 })
