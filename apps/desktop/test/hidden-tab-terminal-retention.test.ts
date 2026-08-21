@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
 import { allStyles } from './helpers/styles.js'
 
 /**
@@ -141,11 +142,27 @@ describe('实例的存活边界等于 Region 的存活边界', () => {
   it('长期隐藏时只释放 TerminalView，不删除 Region/Session/Composer 真相', () => {
     expect(sessionPane).toContain('parked?: boolean')
     expect(sessionPane).toContain('Terminal parked')
-    // 断到 `sessionId={session.id}` 为止，**不含**后面的 `/>`：这一处 JSX 会长出别的 prop
-    // （`e1dd8a79` 加了 `regionName`），而那与"Composer 在非 parked 支里仍然渲染"这条约束无关。
-    // 判到自闭合标签等于把「这行一个字都不许改」也钉进来，红的时候读到的是"Composer 被删了"，
-    // 真相却是隔壁加了个属性。仍然唯一——另一处是 `sessionId={sessionId}` 的 disabled 占位。
-    expect(sessionPane).toContain('<AgentSessionComposer sessionId={session.id}')
+    // Props may be reordered or gain a Session-scoped key. Assert identity and lifetime, not typography.
+    const file = ts.createSourceFile('SessionPane.tsx', sessionPane, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const composers: ts.JsxSelfClosingElement[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(file) === 'AgentSessionComposer') composers.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+    expect(composers.length).toBeGreaterThan(0)
+    const live = composers.filter((node) => node.attributes.properties.some((prop) =>
+      ts.isJsxAttribute(prop) && prop.name.getText(file) === 'sessionId' &&
+      prop.initializer && ts.isJsxExpression(prop.initializer) && prop.initializer.expression?.getText(file) === 'session.id'))
+    expect(live).toHaveLength(1)
+    const conditions: string[] = []
+    for (let parent = live[0]!.parent; parent; parent = parent.parent) {
+      if (ts.isConditionalExpression(parent)) conditions.push(parent.condition.getText(file))
+      if (ts.isBinaryExpression(parent)) conditions.push(parent.left.getText(file))
+    }
+    expect(conditions.length).toBeGreaterThan(0)
+    expect(conditions.join("\n")).toContain("session.kind === 'agent'")
+    expect(conditions.some((condition) => /\bparked\b/u.test(condition))).toBe(false)
     expect(parkingCoordinator).toContain('TerminalParkingProvider')
     expect(parkingCoordinator).toContain('collectTerminalColdParkCandidates')
     expect(parkingCoordinator).toContain('nextTerminalColdParkDelayMs')

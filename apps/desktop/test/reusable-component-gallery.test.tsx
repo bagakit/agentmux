@@ -1,6 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+// The gallery intentionally runs as the standalone web entry, not the Electron bridge.
+vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { WorkflowComponentGallery } from '../src/renderer/src/components/WorkflowComponentGallery.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -47,7 +50,7 @@ describe('Workflow component gallery production reachability', () => {
       ['AgentInteractionCard', sessionPane],
       ['InlineComposer', read('components/AgentComposer.tsx')],
       ['StatusDot', read('components/SurfaceToolDock.tsx')],
-      ['ServiceWindowNotice', sessionPane]
+      ['ServiceWindowNotice', read('components/TerminalView.tsx')]
     ]
     expect(consumers.length).toBeGreaterThan(0)
     for (const [name, text] of consumers) expect(text, `${name} has no production consumer`).toContain(`<${name}`)
