@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixtureClock, fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -92,10 +92,10 @@ describe('Daemon cutover benchmark protocol', () => {
       'stopCleanup'
     ])
     expect(CTXMUX_ARTIFACT).toMatchObject({
-      commit: 'c35f6217109c358ad730b0c8a7e879c3257a2ab7',
-      tree: 'c0dfd9be2289816a56f27eed2d39b99909d21e08',
-      protocol: 16,
-      manifestSha256: '61d9f6d75841b970453adb277d831eea10dca3fbb38a3fe3bab786ae7c3170bc'
+      commit: 'c168c0ab9cd849bfade68461b62684982c71f688',
+      tree: 'a2cc33fe7adac2b25110df58370e3dac17850e00',
+      protocol: 17,
+      manifestSha256: 'ccf0a9bbc9e3db468459b81d011e40e90599ba43873bc795a1c6fc9dd668ce45'
     })
     expect(parseBenchmarkArguments(['--', '--round', '2'])).toEqual({
       help: false,
@@ -104,12 +104,12 @@ describe('Daemon cutover benchmark protocol', () => {
       output: null
     })
     expect(parseBenchmarkArguments([
-      '--smoke', '--round', '1', '--output', upstreamFixturePath("tmp/agentmux-benchmark-smoke.json")
+      '--smoke', '--round', '1', '--output', fixturePath("tmp/agentmux-benchmark-smoke.json")
     ])).toEqual({
       help: false,
       mode: 'smoke',
       round: 1,
-      output: upstreamFixturePath("tmp/agentmux-benchmark-smoke.json")
+      output: fixturePath("tmp/agentmux-benchmark-smoke.json")
     })
     expect(() => parseBenchmarkArguments(['--smoke', '--round', '1'])).toThrow(
       'requires an explicit --output'
@@ -139,7 +139,7 @@ describe('Daemon cutover benchmark protocol', () => {
       positiveStepsNanoseconds: ['3000', '1000', '2000'],
       observedQuantumNanoseconds: '1000'
     })
-    expect(() => parseProcessCpuSnapshot('0:00.01')).toThrow('Invalid process CPU snapshot')
+    expect(() => parseProcessCpuSnapshot(((fixtureClock(0, 0)) + ".01"))).toThrow('Invalid process CPU snapshot')
     expect(() => parseProcessCpuSnapshot('sample 2 1 3 4')).toThrow('monotonic interval regressed')
     expect(() => parseProcessCpuCalibration('calibration 2 100000')).toThrow('did not observe')
   })
@@ -209,12 +209,12 @@ describe('Daemon cutover benchmark protocol', () => {
 
   it('matches only the exact benchmark-owned daemon scope', () => {
     const expected = {
-      daemonPath: upstreamFixturePath("repo/vendor/bin/ctxmuxd"),
-      socketPath: upstreamFixturePath("tmp/agentmux-benchmark-abc/runtime/ctxmux.sock"),
-      stateDirectory: upstreamFixturePath("tmp/agentmux-benchmark-abc/runtime/state")
+      daemonPath: fixturePath("repo/vendor/bin/ctxmuxd"),
+      socketPath: fixturePath("tmp/agentmux-benchmark-abc/runtime/ctxmux.sock"),
+      stateDirectory: fixturePath("tmp/agentmux-benchmark-abc/runtime/state")
     }
     const owned = `  123 ${expected.daemonPath} --socket ${expected.socketPath} --state-dir ${expected.stateDirectory} --readiness-fd 3`
-    const user = ("  456 " + (upstreamFixturePath("repo/vendor/bin/ctxmuxd")) + " --socket " + (upstreamFixturePath("tmp/user.sock")) + " --state-dir " + (upstreamFixturePath("tmp/user-state")))
+    const user = ("  456 " + (fixturePath("repo/vendor/bin/ctxmuxd")) + " --socket " + (fixturePath("tmp/user.sock")) + " --state-dir " + (fixturePath("tmp/user-state")))
     expect(parseOwnedDaemonProcesses(`${owned}\n${user}\n`, expected)).toEqual([123])
   })
 
@@ -319,10 +319,10 @@ describe('Daemon cutover benchmark protocol', () => {
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
     'restores the caller runtime scope and removes its private root after an early failure',
     async () => {
-      const outputRoot = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-benchmark-failure-proof-"))
+      const outputRoot = await mkdtemp(fixturePath("tmp/agentmux-benchmark-failure-proof-"))
       const output = join(outputRoot, 'failure.json')
       const original = process.env.AGENTMUX_RUNTIME_DIRECTORY
-      process.env.AGENTMUX_RUNTIME_DIRECTORY = upstreamFixturePath("tmp/agentmux-caller-sentinel")
+      process.env.AGENTMUX_RUNTIME_DIRECTORY = fixturePath("tmp/agentmux-caller-sentinel")
       try {
         const receipt = await runBenchmark({
           mode: 'invalid',
@@ -336,7 +336,7 @@ describe('Daemon cutover benchmark protocol', () => {
         }
         expect(result.runnerError.message).toContain('Unknown benchmark mode')
         expect(result.cleanup).toEqual(expect.objectContaining({ rootRemoved: true, errors: [] }))
-        expect(process.env.AGENTMUX_RUNTIME_DIRECTORY).toBe(upstreamFixturePath("tmp/agentmux-caller-sentinel"))
+        expect(process.env.AGENTMUX_RUNTIME_DIRECTORY).toBe(fixturePath("tmp/agentmux-caller-sentinel"))
         await expect(stat(result.manifest.runtimeScope)).rejects.toMatchObject({ code: 'ENOENT' })
       } finally {
         if (original === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
