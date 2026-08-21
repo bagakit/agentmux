@@ -413,7 +413,8 @@ async function sendCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
   const value = flags.values.get(selected)!
-  const owner = selected === '--to-session' ? callerForSelf(value) : undefined
+  const owner = (selected === '--to-session' && value === 'self') || process.env.AGENTMUX_ENV === '1'
+    ? managedCaller() : undefined
   const target = selected === '--to-session'
     ? value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: identifier(value, 'Agent Session id') } as const
     : selected === '--to-region'

@@ -45,7 +45,7 @@ type ClientInternals = {
     run: CtxmuxAdapterRun,
     lifecycleOperationId: string,
     text: string
-  ): Promise<void>
+  ): Promise<boolean>
 }
 
 function session(): AgentMuxAgentSession {
@@ -138,14 +138,14 @@ describe('起来之后补送那份 prompt——行为验收（不是源码扫描
       // 关键是**不抛**：这个方法的合同是绝不把已经起来的 Run 拖成一次失败的启动。
       await expect(
         internals.deliverPostLaunchPrompt(KIMI, session(), RUN, 'op-9', 'hello')
-      ).resolves.toBeUndefined()
+      ).resolves.toBe(false)
 
       const reported = errors()
       expect(reported).toHaveLength(1)
       // 原始错误码要带出来，别折成一个笼统的自己的码——那样用户和日志都追不回真因。
       expect(reported[0]?.code).toBe('AGENT_INPUT_REJECTED')
-      // 而且要说清「起来了，但这条没送到，你可以再发一次」，不是只说失败。
-      expect(reported[0]?.message).toContain('could not be delivered')
+      // 确认失败不等于绝对没送到：先检查 Agent 回复再决定是否重投。
+      expect(reported[0]?.message).toContain('was not confirmed')
       expect(reported[0]?.evidence).toBeDefined()
     } finally {
       await dispose()
@@ -172,7 +172,7 @@ describe('起来之后补送那份 prompt——行为验收（不是源码扫描
       }
       await expect(
         internals.deliverPostLaunchPrompt(KIMI, session(), RUN, 'op-11', 'hello')
-      ).resolves.toBeUndefined()
+      ).resolves.toBe(false)
     } finally {
       await dispose()
     }
