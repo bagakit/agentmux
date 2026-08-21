@@ -61,7 +61,7 @@ import {
   admitTerminalLiveOutput,
   composeTerminalLiveOutputWrite,
   takeTerminalLiveOutputBatch,
-  type TerminalLiveOutputChunk
+  type TerminalLiveItem
 } from '../lib/terminal-live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import {
@@ -557,17 +557,19 @@ export function TerminalView({
     let readyForLiveOutput = false
     let cursor = 0
     let outputTail = Promise.resolve()
-    const liveOutputQueue: TerminalLiveOutputChunk[] = []
+    const liveOutputQueue: TerminalLiveItem[] = []
     let liveDrain: Promise<void> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
+    let droppedPendingSize: { cols: number; rows: number } | null = null
     // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
     let kittyKeyboard = initialKittyKeyboardState()
     let renderReady: { dispose(): void } | null = null
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
       fit: () => fit.fit(),
+      applyOwnerGrid: ({ cols, rows }) => terminal.resize(cols, rows),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => {
         // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
@@ -620,6 +622,10 @@ export function TerminalView({
       while (!disposed && liveOutputQueue.length > 0) {
         const taken = takeTerminalLiveOutputBatch(liveOutputQueue)
         liveOutputQueue.splice(0, liveOutputQueue.length, ...taken.rest)
+        if (taken.size) {
+          viewport.acceptOwnerSize(taken.size)
+          continue
+        }
         // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
         // 「部分已有」曾落到告示分支，于是无缺字节也报缺、且把已显示的内容重写一遍。
         const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
@@ -638,7 +644,7 @@ export function TerminalView({
       }
     }
 
-    const scheduleLiveOutputDrain = (output: TerminalLiveOutputChunk): void => {
+    const scheduleLiveOutputDrain = (output: TerminalLiveItem): void => {
       if (disposed) return
       // 入队必须**经过** admit：直接 push 会让这个队列无界，而 attach 之后再没有第二道闸
       // （MAX_PENDING_* 那对只管 attach 前的启动缓冲）。积压超上限时从队头丢，省略由 drain 里
@@ -660,17 +666,21 @@ export function TerminalView({
 
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
-      if (!output) return
-      if (output.data.length > 0) observeOutput()
+      const core = event.event
+      const size = event.hostId === session.hostId && core.type === 'terminal-resized' &&
+        core.run.runId === session.control.run.runId ? { cols: core.cols, rows: core.rows } : null
+      if (!output && !size) return
+      if (output && output.data.length > 0) observeOutput()
       if (!readyForLiveOutput) {
         pending.push(event)
-        pendingBytes += output.endByte - output.startByte
+        pendingBytes += output ? output.endByte - output.startByte : 0
         while (
           pending.length > MAX_PENDING_OUTPUT_EVENTS ||
           pendingBytes > MAX_PENDING_OUTPUT_BYTES
         ) {
           const dropped = pending.shift()
           if (!dropped) break
+          if (dropped.event.type === 'terminal-resized') droppedPendingSize = dropped.event
           const droppedOutput = outputForSession(dropped, session)
           if (!droppedOutput) continue
           pendingBytes -= droppedOutput.endByte - droppedOutput.startByte
@@ -678,7 +688,8 @@ export function TerminalView({
         }
         return
       }
-      scheduleLiveOutputDrain({
+      if (size) scheduleLiveOutputDrain({ size })
+      else if (output) scheduleLiveOutputDrain({
         data: output.data,
         startByte: output.startByte,
         endByte: output.endByte
@@ -858,6 +869,7 @@ export function TerminalView({
             readyForLiveOutput = true
             if (!disposed) setLiveOutputReady(true)
             if (cursor > 0) acknowledger.queue(cursor)
+            if (droppedPendingSize) scheduleLiveOutputDrain({ size: droppedPendingSize })
             for (const event of pending.splice(0)) accept(event)
             await outputTail
           },

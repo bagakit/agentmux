@@ -1,8 +1,12 @@
+import type { TerminalGridSize } from './terminal-viewport-sync'
+
 export type TerminalLiveOutputChunk = {
   data: string
   startByte: number
   endByte: number
 }
+
+export type TerminalLiveItem = TerminalLiveOutputChunk | { size: TerminalGridSize }
 
 /** Keep one visual live-output write bounded while coalescing small RuntimeEvents. */
 export const TERMINAL_LIVE_OUTPUT_BATCH_BYTES = 64 * 1024
@@ -21,7 +25,8 @@ export const TERMINAL_LIVE_OUTPUT_BATCH_BYTES = 64 * 1024
  */
 export const TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES = 2 * 1024 * 1024
 
-function chunkBytes(chunk: TerminalLiveOutputChunk): number {
+function chunkBytes(chunk: TerminalLiveItem): number {
+  if ('size' in chunk) return 0
   return Math.max(0, chunk.endByte - chunk.startByte)
 }
 
@@ -35,23 +40,30 @@ function chunkBytes(chunk: TerminalLiveOutputChunk): number {
  * cursor 的推进不在这里做：drain 逐块把 `nextCursor` 推到 `output.endByte`，所以被丢掉的那段字节
  * 会随着它后面那块一起被跨过去。生产者永远不会因为我们丢了字节而卡住。
  */
-export function admitTerminalLiveOutput(
-  chunks: readonly TerminalLiveOutputChunk[],
-  incoming: TerminalLiveOutputChunk,
+export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
+  chunks: readonly T[],
+  incoming: T,
   maxBytes = TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES
-): { queue: TerminalLiveOutputChunk[]; droppedBytes: number } {
+): { queue: T[]; droppedBytes: number } {
   const limit = Math.max(1, Math.floor(maxBytes))
-  const queue = [...chunks, incoming]
+  const queue = [...chunks]
+  // Consecutive geometry observations have no bytes between them; only the last can affect parsing.
+  if ('size' in incoming && queue.length && 'size' in queue[queue.length - 1]!) queue.pop()
+  queue.push(incoming)
   let bytes = queue.reduce((total, chunk) => total + chunkBytes(chunk), 0)
   let droppedBytes = 0
+  let droppedGeometry: T | undefined
   // 至少留一块：把队列清空会把刚收到的最新字节也丢掉，那等于这一刻的终端什么都不显示。
-  while (queue.length > 1 && bytes > limit) {
+  while (queue.length > 1 && (bytes > limit || queue.length > 4096)) {
     const dropped = queue.shift()
     if (!dropped) break
+    if ('size' in dropped) droppedGeometry = dropped
     const size = chunkBytes(dropped)
     bytes -= size
     droppedBytes += size
   }
+  // Retained bytes must still parse under the last geometry preceding their prefix.
+  if (droppedGeometry && !('size' in queue[0]!)) queue.unshift(droppedGeometry)
   return { queue, droppedBytes }
 }
 
@@ -110,24 +122,26 @@ export function composeTerminalLiveOutputWrite(
 }
 
 /** Takes the largest ordered prefix that fits the visual batch budget. */
-export function takeTerminalLiveOutputBatch(
-  chunks: readonly TerminalLiveOutputChunk[],
+export function takeTerminalLiveOutputBatch<T extends TerminalLiveItem>(
+  chunks: readonly T[],
   maxBytes = TERMINAL_LIVE_OUTPUT_BATCH_BYTES
-): { batch: TerminalLiveOutputChunk[]; rest: TerminalLiveOutputChunk[] } {
+): { batch: TerminalLiveOutputChunk[]; rest: T[]; size?: TerminalGridSize } {
   if (chunks.length === 0) return { batch: [], rest: [] }
+  const first = chunks[0]!
+  if ('size' in first) return { batch: [], rest: chunks.slice(1), size: first.size }
   const limit = Math.max(1, Math.floor(maxBytes))
   let bytes = 0
   let count = 0
   while (count < chunks.length) {
     const chunk = chunks[count]
-    if (!chunk) break
+    if (!chunk || 'size' in chunk) break
     const size = chunkBytes(chunk)
     if (count > 0 && bytes + size > limit) break
     bytes += size
     count += 1
   }
   return {
-    batch: chunks.slice(0, count),
+    batch: chunks.slice(0, count) as TerminalLiveOutputChunk[],
     rest: chunks.slice(count)
   }
 }

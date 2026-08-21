@@ -11,6 +11,7 @@ export type TerminalViewportPixels = {
 type TerminalViewportSynchronizerOptions = {
   proposeGrid(): TerminalGridSize | null
   fit(): void
+  applyOwnerGrid?(size: TerminalGridSize): void
   readGrid(): TerminalGridSize
   /**
    * Deliver this grid to the PTY.
@@ -72,6 +73,13 @@ export class TerminalViewportSynchronizer {
 
   constructor(private readonly options: TerminalViewportSynchronizerOptions) {}
 
+  /** Apply an ordered owner fact without competing with another View for PTY geometry. */
+  acceptOwnerSize(size: TerminalGridSize): void {
+    if (this.disposed || !isUsableGrid(size)) return
+    this.options.applyOwnerGrid?.(size)
+    this.lastRequestedGrid = gridKey(size)
+  }
+
   observeViewport(): void {
     if (this.disposed) return
     if (this.suspended) {
@@ -108,6 +116,7 @@ export class TerminalViewportSynchronizer {
    * 就是十份持续开销。切回时补一次 observe，把隐藏期间错过的几何变化一次性追上。
    */
   setVisible(visible: boolean): void {
+    if (visible && this.suspendReasons.has('hidden')) this.lastFittedPixels = null
     this.setSuspended('hidden', !visible)
   }
 
@@ -297,6 +306,8 @@ export class TerminalViewportSynchronizer {
       return
     }
 
+    // A real local layout change can reclaim its grid even if a past request used the same size.
+    if (!this.lastFittedPixels || !samePixels(pixels, this.lastFittedPixels)) this.lastRequestedGrid = null
     if (gridDiverged) this.options.fit()
     // 记录本次 fit 决策所依据的像素，作为后续抖动判定的基线。存副本，避免调用方
     // 复用同一可变对象时把基线一起改掉（getBoundingClientRect 每次新建，但契约不保证）。
