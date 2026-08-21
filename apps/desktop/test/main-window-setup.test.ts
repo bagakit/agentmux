@@ -28,6 +28,27 @@ function stripComments(source: string): string {
 }
 
 describe('main window setup wiring', () => {
+  it('lets RendererUpdates own normal startup navigation so healthy Sessions do not stay Connecting', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    const startupAt = source.indexOf("if (process.env.AGENTMUX_DESKTOP_READY_FILE)")
+    expect(startupAt).toBeGreaterThan(-1)
+    const closeAt = source.indexOf("window.once('closed'", startupAt)
+    expect(closeAt).toBeGreaterThan(startupAt)
+    const startup = source.slice(startupAt, closeAt)
+
+    // The smoke harness is the only path allowed to call loadFile directly. Normal startup
+    // must let RendererUpdates.initialize() perform the one navigation it awaits; a second
+    // navigation advances the Renderer generation and makes an otherwise healthy Run's exact
+    // Session Attachment look like a failed connection.
+    expect(startup.match(/window\.loadFile\(packagedRendererPath/g)).toHaveLength(1)
+    const normalBranchAt = startup.indexOf('} else {')
+    expect(normalBranchAt).toBeGreaterThan(-1)
+    const normalBranch = startup.slice(normalBranchAt)
+    expect(normalBranch).toContain('rendererUpdates.initialize()')
+    expect(normalBranch).toContain('rendererUpdates.start()')
+    expect(normalBranch).not.toContain('window.loadFile(packagedRendererPath')
+  })
+
   it('drives the BrowserWindow size from persisted geometry, not the fixed literal', async () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     // The scan must actually find the constructor — an empty read must not pass silently.
