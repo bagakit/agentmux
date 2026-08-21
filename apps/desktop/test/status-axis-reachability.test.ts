@@ -13,7 +13,7 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 //   PIP    —— needs-you 那枚 `?` 角标。共享状态点那道缝（`.status--<state> .status__dot::after`）。
 //   PULSE  —— 「在跑」那颗点的脉动动画（`.status--<state> .status__dot { animation }`）。
 //   SHAPE  —— 点的填充形态：默认实心 vs 掉线态的空心环（`background: transparent`）。
-//   OUTLINE—— 头像按状态给的描边（dock.css：在跑=实线、掉线=虚线）。
+//   CONTOUR—— Provider alpha轮廓读共享墨色；状态点在右上，不能重新画矩形状态框。
 //
 // 词表两半都从**代码**读，不在这里手抄：`AGENT_DISPLAY_STATES` 是成员全集，`isNeedsYouState` 是逐态判定
 // （二者都来自 attention-vocabulary.ts 那张 total Record）。于是在 `NEEDS_YOU_BY_STATE` 里翻一个判定，
@@ -33,10 +33,7 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 //     的点」必须与 needs-you 不相交（脉动=在忙，别打扰，恰是 needs-you 的反面）、「空心的点」也必须与
 //     needs-you 不相交（等你的点必须是实心琥珀带角标，绝不能空心）。翻某个态成 needs-you 会立刻让这两条
 //     红，这就是它们与 SSOT 的挂钩，且都不手抄任何状态名。
-//   - OUTLINE 用**区分度**：一条掉线的链路（虚线描边=占位/不在场）必须与一个在跑的 Agent（实线描边=在场
-//     活跃）画得看得出区别（#473）。这是「两者不能同款」的区分度性质，不是「每个成员都要有描边」的可达性
-//     性质，所以不按词表全集判。头像按 `data-attention` 的那一支描边（needs-you/error）已由
-//     topic-agent-status 逐 category 守住可达性，这里只补它没碰的**按状态**那一支。
+//   - CONTOUR 与共享状态点挂钩：在跑蓝色、断开中性色；轮廓跟随Provider alpha，不另造矩形状态框。
 
 const NEEDS_YOU = AGENT_DISPLAY_STATES.filter(isNeedsYouState)
 const NOT_NEEDS_YOU = AGENT_DISPLAY_STATES.filter((state) => !isNeedsYouState(state))
@@ -202,39 +199,29 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
     expect([...hollowStates].every((state) => NOT_NEEDS_YOU.includes(state as (typeof NOT_NEEDS_YOU)[number]))).toBe(true)
   })
 
-  /**
-   * OUTLINE —— 头像按状态的描边。
-   *
-   * 判据是**区分度**：一条掉线的链路（虚线=占位/不在场）与一个在跑的 Agent（实线=在场活跃）必须画得看得
-   * 出区别（#473：durable memory 被当成 live presence，两者此前逐像素同款）。这是「两者不能同款」的性质，
-   * 不是「每个成员都要有描边」的可达性，所以不按词表全集判——不是每个态都该有头像描边。
-   *
-   * 只看**按状态**那一支（`.agent-avatar.status--<state>`）：按 `data-attention` 的那一支（needs-you/error）
-   * 已由 topic-agent-status 逐 category 守住可达性，重复它等于装饰。
-   */
-  it('OUTLINE：头像的实线描边（在跑）与虚线描边（占位）都在场且不相交', () => {
-    const byStyle = new Map<string, Set<string>>()
-    for (const rule of rules) {
-      if (!/\.agent-avatar(?![\w-])/u.test(rule.selector)) continue
-      const outline = declValue(rule.body, 'outline')
-      if (!outline || outline === '0' || outline === 'none') continue
-      const style = /\b(solid|dashed|dotted|double)\b/u.exec(outline)?.[1]
-      if (!style) continue
-      for (const member of rule.members) {
-        if (!/\.agent-avatar\.status--/u.test(member)) continue // 排除 data-attention 那一支
-        for (const state of statesIn(member)) {
-          if (!byStyle.has(style)) byStyle.set(style, new Set())
-          byStyle.get(style)!.add(state)
-        }
-      }
+  it('CONTOUR：Provider alpha描边与右上共享状态点可达，不重建矩形状态框', () => {
+    const contour = rules.find((rule) => rule.selector === '.agent-avatar__contour')
+    expect(contour, 'alpha轮廓规则缺失').toBeDefined()
+    expect(declValue(contour!.body, 'filter')).toMatch(/drop-shadow\([^;]*var\(--status-ink\)/u)
+    const avatar = rules.find((rule) => rule.selector === '.agent-avatar')
+    expect(avatar).toBeDefined()
+    expect(declValue(avatar!.body, 'background')).toBe('transparent')
+    expect(declValue(avatar!.body, 'outline')).toBeUndefined()
+    const corner = rules.find((rule) => rule.selector === '.agent-avatar .agent-avatar__status')
+    expect(corner, '状态点不在头像右上').toBeDefined()
+    expect(declValue(corner!.body, 'position')).toBe('absolute')
+    expect(declValue(corner!.body, 'top')).toBeDefined()
+    expect(declValue(corner!.body, 'right')).toBeDefined()
+    const ink = (state: string) => {
+      const rule = rules.find((item) => item.selector === `.status--${state}`)
+      expect(rule, `没有共享${state}墨色`).toBeDefined()
+      return declValue(rule!.body, '--status-ink')
     }
-    const solid = byStyle.get('solid') ?? new Set<string>()
-    const dashed = byStyle.get('dashed') ?? new Set<string>()
-
-    // 自检：两侧都真的扫到了态，否则下面的「不相交」在空集上恒真。
-    expect(solid.size, '没有实线描边的头像态——「在跑」的在场描边没了').toBeGreaterThan(0)
-    expect(dashed.size, '没有虚线描边的头像态——「占位/不在场」画成了别的样子（#473）').toBeGreaterThan(0)
-    // 同一个态不会既实又虚；两种样式确实是两个值，所以「在跑」与「占位」分得开。
-    expect([...dashed].filter((state) => solid.has(state)), '同一状态既实线又虚线，语义打架').toEqual([])
+    expect(ink('running')).toBe('var(--blue)')
+    expect(ink('disconnected')).toBe('var(--text-3)')
+    // Any new per-state rectangular outline would compete with the shared corner language.
+    const rectangular = rules.filter((rule) => /\.agent-avatar\.status--/u.test(rule.selector) &&
+      /(?:^|;)\s*outline\s*:/u.test(rule.body))
+    expect(rectangular).toEqual([])
   })
 })
