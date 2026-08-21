@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import type { CtxmuxAdapterAttachment, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type {
   AgentMuxClientEvent,
   AgentMuxStoredAgentSession
@@ -35,7 +35,7 @@ type Internals = {
   connected: boolean
 }
 
-type KernelDataEvent = {
+type KernelDataEvent = { type: 'resized'; runId: string; cols: number; rows: number } | {
   type: 'data'
   runId: string
   startByte: number
@@ -69,7 +69,8 @@ function runningRun(runId: string, overrides: Partial<CtxmuxAdapterRun> = {}): C
 class FakeKernel {
   private sink: ((event: KernelDataEvent) => void) | null = null
   private readonly attachments = new Map<string, { afterByte: number }>()
-  readonly attach = vi.fn(async (runId: string, afterByte: number) => {
+  earlyLive: KernelDataEvent[] = []
+  readonly attach = vi.fn(async (runId: string, afterByte: number, beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void) => {
     const spec = this.attachSpecs.get(runId)
     if (spec?.throwOnAttach) throw spec.throwOnAttach
     this.attachments.set(runId, { afterByte })
@@ -82,11 +83,11 @@ class FakeKernel {
       data: chunk.data,
       dataBytes: new Uint8Array(Buffer.from(chunk.data))
     }))
-    return {
-      run,
-      replay,
-      gap: spec?.gap ?? null
-    }
+    const snapshot = { run, replay, gap: spec?.gap ?? null }
+    beforeLive?.(snapshot)
+    for (const event of this.earlyLive) this.sink?.(event)
+    await Promise.resolve()
+    return snapshot
   })
 
   private readonly attachSpecs = new Map<string, {
@@ -416,5 +417,27 @@ describe('T-002 输出通道断了的可持久告知', () => {
     // 且清除也经 agent-session 事件到达渲染端——最后一条投影里这个字段是缺席的。
     const lastFact = outputChannelOf(events, 'agent-1').at(-1)
     expect(lastFact).toBeUndefined()
+  })
+})
+
+
+describe('owner geometry across reconnect', () => {
+  it.each([true, false])('publishes known=%s snapshot geometry and replay before early live resize/output', async (known) => {
+    const { events, state, kernel } = await fixture([storedSession()])
+    kernel.configureRuns([runningRun('run-1')])
+    kernel.configureAttach('run-1', {
+      run: runningRun('run-1', { cols: known ? 132 : null, rows: known ? 45 : null }),
+      replay: [{ startByte: 0, data: 'REPLAY' }]
+    })
+    kernel.earlyLive = [
+      { type: 'resized', runId: 'run-1', cols: 160, rows: 50 },
+      { type: 'data', runId: 'run-1', data: 'LIVE', startByte: 6, endByte: 10, dataBytes: new Uint8Array(Buffer.from('LIVE')) }
+    ]
+    await driveReconnect(state, events)
+    const geometryAndOutput = events.flatMap((event) => event.type === 'terminal-resized'
+      ? [`${event.cols}x${event.rows}`] : event.type === 'terminal-output' ? [event.data] : [])
+    expect(geometryAndOutput).toEqual([...(known ? ['132x45'] : []), 'REPLAY', '160x50', 'LIVE'])
+    expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' }))
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent-error' }))
   })
 })

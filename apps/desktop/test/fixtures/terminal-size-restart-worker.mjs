@@ -13,6 +13,7 @@ try {
       })).runId
     : retainedRunId
   if (mode === 'create') await client.resizeTerminal({ runId }, 132, 45)
+  if (mode === 'resize') await client.resizeTerminal({ runId }, 160, 50)
   const attached = await client.attachTerminal(runId, 0)
   process.stdout.write(`${JSON.stringify({
     clientPid: process.pid,

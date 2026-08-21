@@ -1718,7 +1718,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let booting = true
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
-        if (event.event.type !== 'terminal-output') {
+        if (event.event.type !== 'terminal-output' && event.event.type !== 'terminal-resized') {
           pendingSessionEvents.push(event)
           if (pendingSessionEvents.length > 256) {
             pendingSessionEvents.shift()
@@ -1727,7 +1727,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return
       }
-      if (event.event.type !== 'terminal-output') get().applyEvent(event)
+      if (event.event.type !== 'terminal-output' && event.event.type !== 'terminal-resized') get().applyEvent(event)
     })
     const disposeBrowsers = api.browser.onEvent((event) => {
       if (booting) {

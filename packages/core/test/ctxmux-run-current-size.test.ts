@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION, type RunEvent, type RunInfo } from '@ctxmux/sdk'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import {
@@ -207,5 +207,43 @@ describe('vendored ctxmux 的协议现状', () => {
     type RequiredCurrentSize = undefined extends RunInfo['current_size'] ? never : true
     const currentSizeIsRequired: RequiredCurrentSize = true
     expect(currentSizeIsRequired).toBe(true)
+  })
+})
+
+
+describe('attachment snapshot precedes its live iterator', () => {
+  it.each([{ reject: false, cleanupFails: false }, { reject: true, cleanupFails: false }, { reject: true, cleanupFails: true }])('cleans up callback failure=$reject cleanupFails=$cleanupFails without starting the stream early', async ({ reject, cleanupFails }) => {
+    const adapter = new CtxmuxRunAdapter()
+    const order: string[] = []
+    const close = vi.fn()
+    const detach = vi.fn(async () => { if (cleanupFails) throw new Error('detach failed') })
+    const events = vi.fn(async function* (): AsyncGenerator<RunEvent> {
+      order.push('iterator')
+      yield { type: 'resized', size: { cols: 160, rows: 50 } }
+      yield { type: 'exited', state: { type: 'exited', code: 0, signal: null } }
+    })
+    ;(adapter as unknown as { client: unknown }).client = {
+      attach: async () => ({
+        snapshot: { run: runInfo({ cols: 132, rows: 45 }), replay: { chunks: [], truncated: false, first_available_byte: 0 } },
+        events, detach, close
+      })
+    }
+    adapter.onEvent((event) => { if (event.type === 'resized') order.push(`${event.cols}x${event.rows}`) })
+    const attaching = adapter.attach('resize-run', 0, (snapshot) => {
+      order.push(`${snapshot.run.cols}x${snapshot.run.rows}`)
+      if (reject) throw new Error('rejected snapshot')
+    })
+    if (reject) {
+      await expect(attaching).rejects.toThrow(cleanupFails ? 'Run snapshot delivery and attachment cleanup failed.' : 'rejected snapshot')
+      expect(close).toHaveBeenCalledTimes(cleanupFails ? 1 : 0)
+      expect(detach).toHaveBeenCalledOnce()
+      expect(events).not.toHaveBeenCalled()
+      expect(adapter.hasAttachment('resize-run')).toBe(false)
+      expect(order).toEqual(['132x45'])
+    } else {
+      await attaching
+      await vi.waitFor(() => expect(order).toEqual(['132x45', 'iterator', '160x50']))
+      expect(detach).not.toHaveBeenCalled()
+    }
   })
 })
