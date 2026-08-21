@@ -15,6 +15,10 @@ it('real CLI send retains managed authors for every target without inventing an 
   const requests: AgentMuxControlRequest[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
     requests.push(request)
+    if (request.operation === 'open.agent') return { operation: 'open.agent', region: {
+      kind: 'agent', regionId: 'new-region', tabId: 'tab', workspaceId: 'workspace',
+      agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex'
+    } }
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
   await server.start()
@@ -37,6 +41,14 @@ it('real CLI send retains managed authors for every target without inventing an 
     await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests).toHaveLength(5)
+    const open = ['open', 'agent', '--agent', 'codex', '--right-of', 'region', '--prompt', 'first mail']
+    await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' } })
+    expect(requests[5]).toMatchObject({ operation: 'open.agent', caller: { agentSessionId: 'sender' },
+      content: { kind: 'new-agent', prompt: 'first mail' } })
+    await exec(cli, open, { timeout: 5000, env: humanEnv })
+    expect(requests[6]).toMatchObject({ operation: 'open.agent', content: { kind: 'new-agent', prompt: 'first mail' } })
+    expect(requests[6]).not.toHaveProperty('caller')
+    expect(requests).toHaveLength(7)
   } finally {
     await server.stop()
     await rm(runtime, { recursive: true, force: true })

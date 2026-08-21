@@ -302,7 +302,8 @@ async function openCommand(args: readonly string[]): Promise<number> {
     content: contentFlag === '--agent'
       ? { kind: 'new-agent', executorId: identifier(flags.values.get(contentFlag), 'Agent Executor id'), ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}) }
       : { kind: 'agent-session', agentSessionId: explicitSelectorId(flags.values.get(contentFlag), 'Agent Session id') },
-    ...placement
+    ...placement,
+    ...(process.env.AGENTMUX_ENV === '1' ? { caller: managedCaller() } : {})
   })
   printSuccess(receipt.operation, receipt.result); return 0
 }

@@ -489,14 +489,16 @@ describe('RuntimeController configuration transaction', () => {
       executorId: 'codex-review',
       hostId: 'local',
       workspacePath: '/repo',
-      prompt: 'Open Claude on the right.'
+      prompt: 'Open Claude on the right.',
+      authorAgentSessionId: 'launch-author'
     }, config)).rejects.toThrow('stopped after input capture')
 
     expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
       providerId: 'codex',
       executorId: 'codex-review',
       injectAgentMuxGuide,
-      prompt: 'Open Claude on the right.'
+      prompt: 'Open Claude on the right.',
+      authorAgentSessionId: 'launch-author'
     }))
   })
 
