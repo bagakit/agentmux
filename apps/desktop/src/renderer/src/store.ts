@@ -155,6 +155,7 @@ import {
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
+import type { BoardTaskArrangement, BoardTaskPriority, BoardTaskRecord, BoardTaskStatus } from './lib/global-task-board'
 import {
   activeWorkbenchSurface,
   addWorkbenchRegion,
@@ -350,6 +351,25 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
+  /** Durable global Board task records. Session projections remain derived from Core snapshots. */
+  boardTasks: Record<string, BoardTaskRecord>
+  selectedBoardTaskId: string | null
+  boardTaskArrangement: BoardTaskArrangement
+  defaultSessionLauncherHidden: boolean
+  setSelectedBoardTask(id: string | null): void
+  setBoardTaskArrangement(arrangement: BoardTaskArrangement): void
+  setDefaultSessionLauncherHidden(hidden: boolean): void
+  createBoardTask(input: {
+    title: string
+    description?: string
+    projectId?: string | null
+    projectName?: string | null
+    sessionIds?: readonly string[]
+    priority?: BoardTaskPriority
+    status?: BoardTaskStatus
+    source?: BoardTaskRecord['source']
+  }): string
+  updateBoardTask(id: string, patch: Partial<Pick<BoardTaskRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds'>>): void
   projectRailOpen: boolean
   /**
    * 折叠起来的 Project 分组，key 由 {@link projectGroupKey} 从 hostId + 父目录派生。
@@ -1439,6 +1459,10 @@ type PersistedAppState = {
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
+  boardTasks?: Record<string, BoardTaskRecord>
+  selectedBoardTaskId?: string | null
+  boardTaskArrangement?: BoardTaskArrangement
+  defaultSessionLauncherHidden?: boolean
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
@@ -1692,6 +1716,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
+  boardTasks: {},
+  selectedBoardTaskId: null,
+  boardTaskArrangement: 'columns',
+  defaultSessionLauncherHidden: false,
   projectRailOpen: true,
   collapsedProjectGroups: {},
   explorerCollapsed: {},
@@ -3249,6 +3277,46 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setMainSurface(mainSurface) {
     set({ mainSurface })
+  },
+  setSelectedBoardTask(id) {
+    set({ selectedBoardTaskId: id })
+  },
+  setBoardTaskArrangement(arrangement) {
+    set({ boardTaskArrangement: arrangement })
+  },
+  setDefaultSessionLauncherHidden(hidden) {
+    set({ defaultSessionLauncherHidden: hidden })
+  },
+  createBoardTask(input) {
+    const id = `task:${crypto.randomUUID()}`
+    const now = Date.now()
+    const record: BoardTaskRecord = {
+      id,
+      title: input.title.trim() || 'Untitled task',
+      description: input.description?.trim() ?? '',
+      status: input.status ?? 'inbox',
+      priority: input.priority ?? 'normal',
+      projectId: input.projectId ?? null,
+      projectName: input.projectName ?? null,
+      sessionIds: [...(input.sessionIds ?? [])],
+      createdAt: now,
+      updatedAt: now,
+      source: input.source ?? 'default-topic'
+    }
+    set((state) => ({ boardTasks: { ...state.boardTasks, [id]: record }, selectedBoardTaskId: id }))
+    return id
+  },
+  updateBoardTask(id, patch) {
+    set((state) => {
+      const current = state.boardTasks[id]
+      if (!current) return state
+      return {
+        boardTasks: {
+          ...state.boardTasks,
+          [id]: { ...current, ...patch, updatedAt: Date.now() }
+        }
+      }
+    })
   },
   toggleProjectRail() {
     set((state) => ({ projectRailOpen: !state.projectRailOpen }))
@@ -5033,6 +5101,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
+    boardTasks: state.boardTasks,
+    selectedBoardTaskId: state.selectedBoardTaskId,
+    boardTaskArrangement: state.boardTaskArrangement,
+    defaultSessionLauncherHidden: state.defaultSessionLauncherHidden,
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
