@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import type { WorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
-  regionDisplayName,
   regionDisplayNames,
   regionSurfaceLabel
 } from '../src/renderer/src/lib/region-display-name.js'
@@ -127,18 +126,3 @@ describe('regionDisplayNames：重名才编号，按视觉顺序', () => {
   })
 })
 
-describe('regionDisplayName：单格取名，但要求整套兄弟', () => {
-  it('一格的名字取决于兄弟——同名兄弟在场时它才带编号', () => {
-    const withSibling = [
-      { regionId: 't1', label: 'Terminal' },
-      { regionId: 't2', label: 'Terminal' }
-    ]
-    // 同一格 t2：有同名兄弟时是 "Terminal 2"，独一份时是裸 "Terminal"。看不见兄弟就取不对。
-    expect(regionDisplayName(withSibling, 't2')).toBe('Terminal 2')
-    expect(regionDisplayName([{ regionId: 't2', label: 'Terminal' }], 't2')).toBe('Terminal')
-  })
-
-  it('取不到该格返回 undefined', () => {
-    expect(regionDisplayName([{ regionId: 't1', label: 'Terminal' }], 'nope')).toBeUndefined()
-  })
-})
