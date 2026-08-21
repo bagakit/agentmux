@@ -139,7 +139,7 @@ describe('组件把这些值渲染出去', () => {
   const file = ts.createSourceFile(COMPONENT, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 
   /** 一行菜单项：它的可见标签，以及它那个 `<kbd>` 的唯一子表达式（没有 kbd 则为 undefined）。 */
-  type MenuRow = { label: string | null; chord: string | null | undefined }
+  type MenuRow = { label: string | null; labelExpression: string | null; chord: string | null | undefined; source: string | null; handler: string | null }
 
   /** 一个 JSX 元素的唯一子表达式的源码文本。子节点不止一个、或不是表达式时为 null。 */
   function soleChildExpression(element: ts.JsxElement): string | null {
@@ -166,6 +166,18 @@ describe('组件把这些值渲染出去', () => {
     const visit = (node: ts.Node): void => {
       if (ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === 'ContextMenu.Item') {
         let label: string | null = null
+        let labelExpression: string | null = null
+        let source: string | null = null
+        for (let parent = node.parent; parent; parent = parent.parent) {
+          if (ts.isCallExpression(parent) && parent.expression.getText(file).endsWith('.map')) {
+            source = parent.expression.getText(file)
+            break
+          }
+        }
+        const select = node.openingElement.attributes.properties.find((prop) =>
+          ts.isJsxAttribute(prop) && prop.name.getText(file) === 'onSelect')
+        const handler = select && ts.isJsxAttribute(select) && select.initializer && ts.isJsxExpression(select.initializer)
+          ? select.initializer.expression?.getText(file) ?? null : null
         let chord: string | null | undefined
         const scan = (child: ts.Node): void => {
           if (ts.isJsxElement(child)) {
@@ -173,6 +185,7 @@ describe('组件把这些值渲染出去', () => {
             if (tag === 'span') {
               const text = child.children.find((grand) => ts.isJsxText(grand))
               label = text !== undefined ? text.getText(file).trim() : null
+              labelExpression = soleChildExpression(child)
             } else if (tag === 'kbd') {
               chord = soleChildExpression(child)
             }
@@ -180,7 +193,7 @@ describe('组件把这些值渲染出去', () => {
           ts.forEachChild(child, scan)
         }
         ts.forEachChild(node, scan)
-        rows.push({ label, chord })
+        rows.push({ label, labelExpression, chord, source, handler })
       }
       ts.forEachChild(node, visit)
     }
@@ -189,7 +202,15 @@ describe('组件把这些值渲染出去', () => {
   }
 
   it('每一行读的都是它自己那个 action 的键位', () => {
-    const rows = menuRows()
+    const discovered = menuRows()
+    // Identity actions are a real ninth JSX path, generated from the shared action model. They have
+    // no registered shortcuts; check their actual label/handler source rather than ignoring unknown rows.
+    const dynamic = discovered.filter((row) => row.labelExpression !== null)
+    expect(dynamic).toEqual([{
+      label: null, labelExpression: 'action.label', chord: undefined,
+      source: 'identityActions.map', handler: '() => void action.onSelect()'
+    }])
+    const rows = discovered.filter((row) => row.labelExpression === null)
     // 在场自检：遍历坏掉（改 tag 名判据、走错文件）时整条断言会静默恒真
     // （记忆 false-green-gate-patterns「扫描根写错静默变绿」）。
     expect(rows.length, '一个菜单项都没扫到——AST 遍历坏了，下面那些断言已经恒真').toBe(
