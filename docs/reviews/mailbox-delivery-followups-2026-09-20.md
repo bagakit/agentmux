@@ -23,4 +23,16 @@ Logs: `/tmp/mail-delivery-restored.log`, `/tmp/mail-delivery-typecheck.log`, `/t
 ## Separate review findings handed to root
 
 - The generic activity timeline caps all records at 200. As the sole Inbox data source, 200 subsequent tool/lifecycle records can evict an unread message and its red dot. This needs an explicit retention decision; simply raising the cap does not establish durable mail retention.
-- `startDiscussion` creates a new Agent with a launch prompt but currently does not pass its already-verified author into launch history, and advances its Thread to delivered without checking deferred-input confirmation. This is a separate existing structured-message path; it is not silently claimed fixed by the bounded CLI send patch.
+- The initial review also found `startDiscussion` losing its already-verified author and advancing its Thread to delivered without checking deferred-input confirmation. Root explicitly included this existing message path in T-004; the follow-up below closes it.
+
+## Approved extension: initial messages from Agents
+
+`AgentMuxAgentCreateInput.authorAgentSessionId` carries host-owned display attribution, with no change to authorization. `startDiscussion` still validates the invocation capability before any creation, then forwards the verified author. Its actual create operation returns the existing Session and a local prompt-confirmation result through a private helper. Public `createAgent` keeps its original return type. The Thread advances to delivered only when initial input is confirmed; otherwise it records failed confirmation while retaining the healthy Session. No new persisted ledger or inferred parsing of the amux message text is involved.
+
+The other existing launch entry, `open agent --prompt`, now retains a managed CLI caller even with an explicit destination. Desktop Control forwards it through the same launch input and RuntimeController to Core. Ordinary human CLI launches remain unattributed.
+
+The public lifecycle suite now drives `startDiscussion` through real capability verification, registry, creation, deferred delivery and timeline persistence. It covers deferred success/failure and argv delivery, and rejects a forged capability before submitting anything. The real CLI socket test covers managed and human initial prompts; existing production Control-owner and RuntimeController tests assert the metadata at their actual seams.
+
+Validation for the extension: 7 suites / 146 tests passed; Core typecheck (including tests) and production Desktop typecheck passed. Six isolated production mutations were killed by behavioral assertions: discussion attribution, false delivered Thread state, initial timeline attribution, Desktop Control forwarding, RuntimeController forwarding, and CLI open attribution. Logs are `/tmp/discuss-mail-tests.log`, `/tmp/discuss-mail-types.log`, `/tmp/discuss-mail-desktop-types.log`, `/tmp/discuss-mail-mutants.json` and `/tmp/discuss-mutant-*.log`. Each Core mutation is rebuilt before testing; restored code is rebuilt before final verification.
+
+Restored extension verification: 4 suites / 89 tests passed (`/tmp/discuss-mail-restored.log`).

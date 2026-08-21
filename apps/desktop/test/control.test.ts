@@ -251,10 +251,11 @@ describe('Desktop Control owner', () => {
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
 
     const opened = await useAppStore.getState().executeControl(request({
-      operation: 'open.agent',
+      operation: 'open.agent', caller: { agentSessionId: 'caller' },
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
       destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
     }))
+    expect(api.sessions.launchAgent).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'write', authorAgentSessionId: 'caller' }))
     if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
 
     // Region 带着连接键：agentSessionId 连到 Session，workspaceId 连到 destination 的 Workspace。

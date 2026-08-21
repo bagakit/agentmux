@@ -2572,7 +2572,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ...(scratchTopicId ? { scratchTopicId } : {}),
           agentSessionId,
           createOperationId: request.requestId,
-          ...(content.prompt === undefined ? {} : { prompt: content.prompt })
+          ...(content.prompt === undefined ? {} : { prompt: content.prompt }),
+          ...(request.caller ? { authorAgentSessionId: request.caller.agentSessionId } : {})
         })
         if (launched.session.id !== agentSessionId || launched.timeline.agentSessionId !== agentSessionId) {
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Session identity.'))

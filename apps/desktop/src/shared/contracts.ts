@@ -726,6 +726,8 @@ export type AgentLaunchInput = {
   agentSessionId?: string
   createOperationId?: string
   prompt?: string
+  /** Trusted control caller attribution, independent of destination. */
+  authorAgentSessionId?: string
   /**
    * The choice ids the launcher picked for this Provider's declared launch options (DESCRIBE half in
    * {@link AgentCatalogEntry.launchOptions}). Core resolves each choice's argv at spawn; a choice the
