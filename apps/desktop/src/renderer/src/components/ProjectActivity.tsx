@@ -50,7 +50,7 @@ function groupSummary(
   if (reason !== session.status.state) return reason
   switch (session.status.state) {
     case 'starting': return 'Starting Agent'
-    case 'running':
+    case 'running': return 'Idle · no recent summary'
     case 'working': return 'Working · no recent summary'
     case 'waiting': return 'Waiting for your reply'
     case 'blocked': return 'Blocked · needs attention'
@@ -61,35 +61,13 @@ function groupSummary(
   }
 }
 
-/**
- * 这一批 Agent 此刻该叫「在干活」还是「跑着」。
- *
- * **计数不在这里决定**——数量照旧走 `workingAgentCount`（Board 的 working 列，含
- * `starting`/`running`/`working`）。那个判据是 #582 收敛出来的唯一一处，四个投影共用，
- * `working-count-convergence.test.tsx` 的结构层守卫盯着它不许再被抄第二份。本函数只决定**用哪个词**。
- *
- * 判据取既有的 `turnWorking`（activity-working-state.ts 那张穷举判定表：`starting`/`working` 为真、
- * `running` 为假），不是新写一份「在跑吗」——它回答的是另一个问题：**这些跑着的里面，有在产出的吗**。
- * 所以它既不与计数争，也不给守卫添一处 `state === 'working'` 的裸比较。
- *
- * 区分值得做，是因为 `running` 不是边角状态而是**主稳态**：`agentDisplayState` 的
- * `unknown → 'running'`（core/agent-status-freshness.ts）有三条来路，其中一条是 15 分钟静默衰减。
- * 于是「正在吐字的 Agent」与「半小时前说过一句话、此后没动静的 Agent」同在 working 列里。一个词盖住
- * 两者，用户就看不出哪一个值得等——而那正是这枚标记存在的理由。
- */
-function activityWord(sessions: readonly SessionSnapshot[]): 'Working' | 'Running' {
-  return sessions.some((session) => session.kind === 'agent' && turnWorking(session.status.state))
-    ? 'Working'
-    : 'Running'
-}
-
 function groupState(group: ActivityGroup): string {
   const attention = rowAttention(group.sessions)
   if (attention.category === 'needs-you' || attention.category === 'error') return ''
-  const running = workingAgentCount(group.sessions)
+  const running = workingAgentCount(group.sessions.filter((session) => turnWorking(session.status.state)))
   // 这里保留数字：它是**本条工作线**的计数，与触发器上那个项目级的数字不是同一个数，没有重复。
-  if (running > 0) return `${running} ${activityWord(group.sessions).toLowerCase()}`
-  return group.sessions[0]?.status.state ?? 'idle'
+  if (running > 0) return `${running} working`
+  return ''
 }
 
 function contextLabel(group: ActivityGroup): string {
@@ -118,7 +96,7 @@ export function ProjectActivity({
   const agentNames = useAppStore((state) => state.agentNames)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
-  const running = workingAgentCount(sessions)
+  const running = workingAgentCount(sessions.filter((session) => turnWorking(session.status.state)))
   if (!attention.category && !running) return null
   // 一次渲染取一次时钟，供各行算 elapsed——与旧 quietDuration 在渲染时读 Date.now() 同口径。
   const now = Date.now()
@@ -133,7 +111,7 @@ export function ProjectActivity({
     ? 'Needs you'
     : attention.category === 'error'
       ? 'Error'
-      : activityWord(sessions)
+      : 'Working'
   const notificationCount = attention.category === 'error'
     ? sessions.filter((session) => session.status.state === 'error').length
     : attention.category === 'needs-you'

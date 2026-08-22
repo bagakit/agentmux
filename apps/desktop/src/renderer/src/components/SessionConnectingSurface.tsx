@@ -30,13 +30,13 @@ function ConnectingExecutorMark({ executor, label, appearance }: {
       ? <AgentEnamelFilter id={filterId} tint={appearance.tint} className="session-connecting__executor-mark-contour" filterClassName="session-connecting__executor-filters">
           <AgentProviderIcon providerId={executor.providerId} size={22} />
           {appearance.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
-            <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
+            <AgentAvatarBadgeIcon badge={appearance.badge} size={7} />
           </span> : null}
         </AgentEnamelFilter>
       : <span className="session-connecting__executor-mark-contour" aria-hidden="true">
           <AgentProviderIcon providerId={executor.providerId} size={22} />
           {appearance?.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
-            <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
+            <AgentAvatarBadgeIcon badge={appearance.badge} size={7} />
           </span> : null}
         </span>}
   </span>

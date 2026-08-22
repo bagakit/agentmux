@@ -242,7 +242,7 @@ describe('状态到颜色的映射只有一处定义', () => {
       .filter((selector) => !selector.includes('--status-ink:'))
     // 状态墨水只由共享状态点消费；头像轮廓是身份层，不能再把状态色变成光晕。
     expect(consumers.some((selector) => selector.includes('.status__dot'))).toBe(true)
-    expect(consumers.some((selector) => selector.includes('.agent-avatar'))).toBe(false)
+    expect(consumers.filter((selector) => selector.includes('.agent-avatar'))).toEqual(['.agent-avatar .agent-avatar__status--working'])
   })
 
   it('头像以图形透明轮廓读共享状态色，不给矩形容器画状态框', () => {

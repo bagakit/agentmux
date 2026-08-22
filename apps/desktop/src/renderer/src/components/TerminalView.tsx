@@ -23,7 +23,13 @@ import {
   terminalLinkModifierOpensSystemBrowser,
   terminalLinkPreviewAnchor
 } from '../lib/terminal-link-gesture'
-import { detectTerminalPathLinks } from '../lib/terminal-path-link'
+import {
+  detectTerminalPathLinks,
+  isSystemArtifactPath,
+  terminalPathLinkAtCell,
+  type TerminalPathLink
+} from '../lib/terminal-path-link'
+import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
 import { installTerminalPasteSanitizer, pasteIntoTerminal } from '../lib/terminal-paste'
 import { terminalScrollbackText, terminalViewportText } from '../lib/terminal-buffer-copy'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
@@ -108,6 +114,31 @@ const SEARCH_TOGGLES: ReadonlyArray<{
 ])
 
 type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number }
+
+function terminalPathAtPointer(
+  terminal: Terminal | null,
+  element: HTMLElement,
+  clientX: number,
+  clientY: number,
+  workspaceRoot: string
+): TerminalPathLink | null {
+  if (!terminal || terminal.cols <= 0 || terminal.rows <= 0) return null
+  const screen = element.querySelector('.xterm-screen')
+  if (!screen) return null
+  const rect = screen.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  const column = Math.floor(((clientX - rect.left) / rect.width) * terminal.cols) + 1
+  const row = Math.floor(((clientY - rect.top) / rect.height) * terminal.rows)
+  if (row < 0 || row >= terminal.rows || column < 1 || column > terminal.cols) return null
+  const lineNumber = terminal.buffer.active.viewportY + row
+  const bufferLine = terminal.buffer.active.getLine(lineNumber)
+  const line = bufferLine?.translateToString(true)
+  // Terminal columns count wide cells, while the scanner indexes UTF-16 text.
+  const textColumn = bufferLine?.translateToString(false, 0, column - 1).length
+  return line === undefined || textColumn === undefined
+    ? null
+    : terminalPathLinkAtCell(line, textColumn + 1, workspaceRoot)
+}
 
 // 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
 // 住在 lib/open-destination.ts——对话渲染器不能在模块加载期拖进 xterm，所以共用出口只能放在那边。
@@ -207,6 +238,7 @@ export function TerminalView({
    * 初值 'none'（不压制、不提示）：还没右键过就没有可信的模式，不猜。
    */
   const [mouseTrackingMode, setMouseTrackingMode] = useState<MouseTrackingMode>('none')
+  const [pathActions, setPathActions] = useState<TerminalPathLink | null>(null)
   const [hydrating, setHydrating] = useState(true)
   /**
    * 揭示是被我们自己的步骤逼出来的，而不是走通了（`lib/terminal-reveal.ts`）。
@@ -232,12 +264,17 @@ export function TerminalView({
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
   const [linkPreview, setLinkPreview] = useState<
     | { kind: 'http'; url: string; left: number; top: number; placement: 'above' | 'below'; fastPath: boolean }
-    | { kind: 'file'; label: string; left: number; top: number; placement: 'above' | 'below' }
+    | { kind: 'file'; label: string; system: boolean; left: number; top: number; placement: 'above' | 'below' }
     | null
   >(null)
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
+  const workspaceIsLocal = useAppStore((state) =>
+    state.config?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local'
+  )
+  const workspaceIsLocalRef = useRef(workspaceIsLocal)
+  workspaceIsLocalRef.current = workspaceIsLocal
   const regionCaretFocus = useAppStore((state) =>
     regionCaretFocusTargets(state.regionCaretFocus, linkOrigin.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
@@ -364,6 +401,7 @@ export function TerminalView({
     setReplayGap(false)
     setReplaySizeUnknown(false)
     setViewportSyncFailed(false)
+    setPathActions(null)
     rememberedSelectionRef.current = ''
     const terminal = new Terminal({
       ...terminalOptions(themeId, fontSizeRef.current),
@@ -512,16 +550,22 @@ export function TerminalView({
                 hasSelection: terminal.hasSelection()
               })) return
               setLinkPreview(null)
-              // openFile ignores its workspaceId and uses the active workspace; a terminal is only
-              // clickable while its workspace is active, so linkOrigin.tabGroupId lands the file in
-              // the terminal's own Tab Group. A miss surfaces through reportError (fail visibly).
-              void openFile(match.path, linkOriginRef.current.tabGroupId, location).catch(reportError)
+              // System artifacts belong to the host OS. Keep the Workspace id on the typed seam so
+              // Main can enforce local/root confinement; never turn a `.dmg`/`.app` path into an
+              // editor or Browser Tab. Ordinary source paths retain the existing openFile route.
+              void openTerminalFileLink({
+                link: match,
+                local: workspaceIsLocalRef.current,
+                openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
+                openFile: (link) => openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId)
+              }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
               const anchor = previewAnchorAt(event.clientX, event.clientY)
               setLinkPreview({
                 kind: 'file',
                 label,
+                system: isSystemArtifactPath(match.path),
                 left: anchor.left,
                 top: anchor.top,
                 placement: anchor.placement
@@ -1080,6 +1124,16 @@ export function TerminalView({
     <Fragment>
       <TerminalContextMenu
         hasSelection={hasSelection}
+        pathActions={terminalFileMenuActions({
+          link: pathActions,
+          local: workspaceIsLocal,
+          onReveal: (path) => {
+            void api.files.reveal(linkOriginRef.current.workspaceId, path).catch(reportError)
+          },
+          onOpenSystem: (path) => {
+            void api.files.openSystem(linkOriginRef.current.workspaceId, path).catch(reportError)
+          }
+        })}
         identityActions={terminalIdentityMenuActions({
           // 身份取**这一格自己的** session，不从 store 读当前活跃会话：用户右键的那一格往往
           // 恰恰不是聚焦的那一格（分屏下尤其），从 store 取会复制出邻座的身份。
@@ -1118,6 +1172,15 @@ export function TerminalView({
                 // 需要解释「为什么 Copy 是灰的」的情形，若只在有选区时采样，提示永远不会出现。
                 const mode = terminalRef.current?.modes.mouseTrackingMode
                 if (mode) setMouseTrackingMode(mode)
+                setPathActions(terminalPathAtPointer(
+                  terminalRef.current,
+                  event.currentTarget,
+                  event.clientX,
+                  event.clientY,
+                  activeWorkspaceRootRef.current
+                ))
+              } else {
+                setPathActions(null)
               }
               linkPressRef.current = { x: event.clientX, y: event.clientY }
               terminalRef.current?.focus()
@@ -1148,7 +1211,7 @@ export function TerminalView({
                   <span className="terminal-link-preview__url" title={linkPreview.label}>
                     {linkPreview.label}
                   </span>
-                  <span className="terminal-link-preview__hint">click to open</span>
+                  <span className="terminal-link-preview__hint">{linkPreview.system ? 'click to open with system' : 'click to open'}</span>
                 </>
               )}
             </div>
