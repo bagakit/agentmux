@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { browserPageCapabilityNames } from '@agentmux/core'
 import {
   BROWSER_PAGE_FUNCTION_NAMES,
   runBrowserScript
@@ -41,19 +43,40 @@ describe('页面函数库', () => {
     expect(result.completed && result.value).toEqual(BROWSER_PAGE_FUNCTION_NAMES.map(() => 'function'))
   }, SPAWN_TIMEOUT_MS)
 
-  it('五组能力一组都不缺', async () => {
-    // 按组判，而不是数总数。数总数的话，删掉 cdp 再加一个 clickTwice 也能绿。
-    const groups = {
-      观察: ['snapshot', 'snapshotText', 'pageInfo', 'captureScreenshot'],
-      动作: ['click', 'fillInput', 'typeText', 'pressKey', 'hover', 'scroll'],
-      等待: ['waitForElement', 'waitForLoad', 'waitForNetworkIdle', 'wait'],
-      导航: ['gotoUrl'],
-      逃生口: ['js', 'cdp']
+  it('五组能力一组都不缺，且分组取自能力表不是手抄', async () => {
+    // 此前这里是一份手写的分组映射（观察/动作/等待/导航/逃生口 → 名字）。它是这份事实的第四份
+    // 副本，而且方向是反的：手抄的那份里少写一个名字，这条测试只会少判一项，不会红。
+    //
+    // f-27c8fr4x2 之后分组取能力表上的 `effect` 字段（core 的 browser-page-capability.ts），
+    // 而**那个字段是被生产代码消费的**——人工接管之后拒绝谁就按它算。所以这里与生产判据同源：
+    // 分组错了会在接管行为上显形，不只是文档不好看。
+    const byEffect = {
+      观察: browserPageCapabilityNames('observe'),
+      动作: browserPageCapabilityNames('act'),
+      等待: browserPageCapabilityNames('wait'),
+      导航: browserPageCapabilityNames('navigate')
     }
-    for (const [group, names] of Object.entries(groups)) {
+
+    // 每一组都必须非空：某一组取空时下面的循环对它一条不跑，而空集合上的遍历恒真
+    // （MEMORY「空集合上的谓词断言恒成立」）。四组各钉一次，不是只钉总数。
+    for (const [group, names] of Object.entries(byEffect)) {
+      expect(names.length, `${group}组是空的——这一组的判据在对空气生效`).toBeGreaterThan(0)
       for (const name of names) {
         expect(BROWSER_PAGE_FUNCTION_NAMES, `${group}组少了 ${name}`).toContain(name)
       }
+    }
+
+    // 分组是对全表的**划分**：并集必须等于全表，不许有名字落在四组之外。少了这一条，
+    // 往表里加一个新的 effect 取值就会让那个能力从所有分组里消失，而没有东西会红。
+    expect(
+      Object.values(byEffect).flat().slice().sort(),
+      '有能力不属于任何一组，或被算进了两组——分组不是对全表的划分'
+    ).toEqual([...BROWSER_PAGE_FUNCTION_NAMES].sort())
+
+    // 逃生口按动作计（它们能做任何事，漏掉任何一个都等于没拦），单独钉一次它们在 act 里。
+    for (const hatch of ['js', 'cdp']) {
+      expect(browserPageCapabilityNames('act'), `逃生口 ${hatch} 没算成动作——接管之后它不会被拒`)
+        .toContain(hatch)
     }
 
     // 反向的一半：注入一个派发层服务不了的名字，比不注入更糟——Agent 会把它当成可用能力去规划，
@@ -61,6 +84,46 @@ describe('页面函数库', () => {
     for (const name of ['openOrReuseTab', 'switchTab', 'listTabs']) {
       expect(BROWSER_PAGE_FUNCTION_NAMES, `注入了 ${name}，但一个 Browser 只有一个页面，它必定失败`)
         .not.toContain(name)
+    }
+  })
+
+  it('每个注入的名字派发层都有自己的 case，没有会落到 default 的', () => {
+    // **这条守的是能力表与派发 switch 之间的缺口，它此前没有任何守卫。**
+    //
+    // `createBrowserPageDispatch` 是一个 `switch (name)`，而 `name` 的类型是 `string`——不是能力表
+    // 派生的联合。这是刻意的：名字从子进程经 IPC 送来，可以是任意字符串，所以 `default` 分支必须在。
+    // 代价是 **tsc 看不见漏掉的 case**：往能力表里加一个名字而忘了加 case，编译全绿、注入也成功，
+    // Agent 调它时才撞上 default 那句「injected but this Browser cannot serve it」——而那句话说的是
+    // 「这个 Browser 服务不了」，听起来像页面的问题，实际是我们漏了一行。
+    //
+    // 判据从**派发源码**反推 case 标签，与能力表比对。不真的调一遍派发，是因为那需要一个完整的
+    // CDP 替身，而那条路上任何一个细节不对都会抛，与「这个名字有没有 case」混在一起不可区分。
+    const dispatchSource = readFileSync(
+      new URL('../src/main/browser-page-dispatch.ts', import.meta.url),
+      'utf8'
+    )
+    // 只取 switch (name) 那一段，否则文件里别处的字符串字面量会混进来充数。
+    const switchStart = dispatchSource.indexOf('switch (name)')
+    expect(switchStart, '派发层里找不到 switch (name)——判据的范围落空，它什么都不检查').toBeGreaterThan(-1)
+    const switchBody = dispatchSource.slice(switchStart)
+    const defaultAt = switchBody.indexOf('default:')
+    expect(defaultAt, '派发 switch 没有 default 分支——未知名字会静默返回 undefined').toBeGreaterThan(0)
+
+    // case 标签只数 default 之前的那一段：default 之后是那句拒绝文案，里面也含名字。
+    const served = new Set(
+      [...switchBody.slice(0, defaultAt).matchAll(/case '([a-zA-Z]+)':/g)].map((match) => match[1]!)
+    )
+    // 非空自检：正则一条都没匹配上时，下面的循环恒真（MEMORY「扫到空内容」）。
+    expect(served.size, '一个 case 标签都没解析出来——判据失效').toBeGreaterThan(10)
+
+    for (const name of BROWSER_PAGE_FUNCTION_NAMES) {
+      expect(served, `注入了 ${name} 但派发层没有它的 case，Agent 调用时会撞上 default 那句拒绝`)
+        .toContain(name)
+    }
+    // 反向：派发层不该有能力表里没有的 case——那是个注入不到、永远走不到的死分支。
+    for (const name of served) {
+      expect(BROWSER_PAGE_FUNCTION_NAMES, `派发层有 ${name} 的 case，但它不在能力表里，永远不会被调到`)
+        .toContain(name)
     }
   })
 

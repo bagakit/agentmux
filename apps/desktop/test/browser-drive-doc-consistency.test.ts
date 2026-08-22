@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { AGENTMUX_CLI_SKILL } from '../../../packages/core/src/agentmux-cli-help.js'
+import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
+import { BROWSER_PAGE_FUNCTION_NAMES } from '../src/main/browser-script-runner.js'
 
 /**
  * 仓里原有三处白纸黑字写着「不做这件事」，与 Agent 结构化驱动页面直接打架。这条守的是改写之后
@@ -102,11 +105,26 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
       .find((line) => line.includes('| computer use |'))
     expect(stanceRow, 'F 段 computer use 行不在场——被测的 citation 没有作用对象').toBeDefined()
 
-    // 文档里引的行号，从该行正文里取出来再与源码实测比对。两边都不是手抄的。
-    const citedInDoc = [...stanceRow!.matchAll(/agentmux-cli-help\.ts[`:]*:?(\d+)/g)].map((match) => Number(match[1]))
-    expect(citedInDoc.length, 'computer use 行没有引 CLI help 的行号——被测的 citation 不在场').toBeGreaterThan(0)
-    for (const cited of citedInDoc) {
-      expect(prohibitionLines, `笔记引了 agentmux-cli-help.ts:${cited}，但那一行不是禁令`).toContain(cited)
+    // **按句子锚点核，不按行号核。** 这一格的行号引法被改写了九次，每次都只是被禁令上方新加的
+    // 文字顶下去了，禁令本身一次没动——判据盯着一个必然漂移的东西，于是它响的时候说的是"文档错了"，
+    // 而真相是"文件长高了"。句子锚点只在禁令本身被改写时才需要更新，那正是该更新的时候。
+    // 历史行号仍留在那格的散文里（记着这九次），所以这里**不能**再去正文里捞数字。
+    // 锚点的取法**不能按内容挑**（比如只认含 keystroke/automation 的那些）：那样一个写错的锚点
+    // （`no mouse coordinates`）会因为不含关键词而被静默跳过，于是"引错了"与"没引"在判据眼里一样。
+    // 取法改成形状：紧跟在「不按行号：」之后、到该句结束为止的所有反引号片段，全都要能在禁令里找到。
+    // 两端都钉：起锚点是「不按行号：」，止锚点是那对括号的开头（括号里是九次历史行号的散文，
+    // 不是引用）。任一端不在场就当场红——起锚点没了 indexOf 给 -1，slice 会切出整行；止锚点没了
+    // 会把历史散文一起吃进来。两种都会让这条判据看起来仍在工作，实际上在核错误的东西。
+    const zoneStart = stanceRow!.indexOf('不按行号：')
+    expect(zoneStart, '「不按行号：」这个起锚点不在场').toBeGreaterThan(-1)
+    const zoneEnd = stanceRow!.indexOf('（**此格此前反复引行号', zoneStart)
+    expect(zoneEnd, '历史行号那段的止锚点不在场——锚点区会把散文一起吃进来').toBeGreaterThan(zoneStart)
+    const anchorZone = stanceRow!.slice(zoneStart, zoneEnd)
+    const citedAnchors = [...anchorZone.matchAll(/`([^`]+)`/g)].map((match) => match[1]!.trim())
+    expect(citedAnchors.length, 'computer use 行没有引 CLI help 的禁令句锚点——被测的 citation 不在场').toBeGreaterThan(0)
+    const prohibitionText = help.filter((_, index) => prohibitionLines.includes(index + 1)).join('\n')
+    for (const anchor of citedAnchors) {
+      expect(prohibitionText, `笔记引了句锚点「${anchor}」，但 CLI help 的禁令句里没有这句话`).toContain(anchor)
     }
   })
 
@@ -175,31 +193,54 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
 
   // ── 四、skill 里那份页面函数清单不许落后于真正注入的那份 ──────────────────────
   //
-  // skill 是 Agent 的唯一用法真相，它列出 Agent 能调哪些页面函数。而真正注入子进程的那份清单是
-  // `BROWSER_PAGE_FUNCTION_NAMES`（browser-script-runner.ts），两者**分属两个包**、不在同一条
-  // 构建图上，skill 那份只能手抄。手抄的清单会漂：新增一个页面函数而忘了改 skill，Agent 就永远
-  // 不知道它存在；而两边都不会红（MEMORY「构建图之外的手抄常量」「多处手抄的常量只有 tsc 守」，
-  // 而这里连 tsc 都守不到——skill 是字符串）。
+  // **f-27c8fr4x2 之后这条判据换了地基。** 此前清单有三份手抄（注入那份、接管要拒的动作子集、
+  // skill 散文），分属两个包、不在同一条构建图上，所以这条测试只能**用正则去源码里抠**：
+  // 从 `BROWSER_PAGE_FUNCTION_NAMES = [` 切到 `] as const`，再 `matchAll` 取引号里的名字。
   //
-  // 判据从 SSOT 反推：解析出真清单，逐个要求 skill 提到。不维护第二份「应该有哪些」的名单。
+  // 那种写法是本仓反复踩过的两族白绿的合体：
+  //   1. 抠空了——数组一搬走，`split` 拿到 undefined、`block` 成空串，`names` 成空数组，
+  //      下面的 `for` 一条不跑（`expect(names.length).toBeGreaterThan(10)` 是当时唯一的活口，
+  //      正是它在本次搬迁时红了，说明那个自检是对的）；
+  //   2. indexOf 锚点没了——`help.indexOf('## Drive an open Browser')` 返回 -1 时，
+  //      `slice(-1, …)` 切出的段之后每条 `toContain` 恒真。
+  //
+  // 现在清单是 core 的一个真导出（`BROWSER_PAGE_CAPABILITIES`），所以判据直接 import 它：
+  // **没有可抠空的源码文本，也没有可改名的锚点。** 名字对不上是 tsc 红或断言红，不是静默通过。
   it('skill 教出的页面函数清单与真正注入的那份一致', () => {
-    const runner = read('apps/desktop/src/main/browser-script-runner.ts')
-    const block = runner.split('BROWSER_PAGE_FUNCTION_NAMES = [')[1]?.split('] as const')[0] ?? ''
-    const names = [...block.matchAll(/'([a-zA-Z]+)'/g)].map((match) => match[1]!)
-    // 扫描面非空自检：解析失败会让下面的循环一条不跑、整条静默通过。
-    expect(names.length, '页面函数清单解析成空——判据失效，这条什么都不检查').toBeGreaterThan(10)
+    // SSOT 本身，不是从源码正则出来的影子。
+    const names = BROWSER_PAGE_CAPABILITY_NAMES
+    // 扫描面非空自检仍然留着：万一表被改空，下面的循环会一条不跑。
+    expect(names.length, '页面能力表是空的——判据失效，这条什么都不检查').toBeGreaterThan(10)
 
-    const help = read('packages/core/src/agentmux-cli-help.ts')
-    const start = help.indexOf('## Drive an open Browser')
-    expect(start, 'skill 里没有「Drive an open Browser」这一节——判据的范围落空').toBeGreaterThan(-1)
-    // 取带右界的一节，避免只取左界让邻节顶上（MEMORY「只取左界的 section 判据」）。
-    const end = help.indexOf('\n## ', start + 1)
-    const section = help.slice(start, end < 0 ? undefined : end)
-    expect(section.length, 'skill 的这一节切出来是空的').toBeGreaterThan(200)
+    // 注入点消费的就是这一份：这条等式是「Desktop 没有偷偷另建一份」的判据。
+    expect(
+      [...BROWSER_PAGE_FUNCTION_NAMES],
+      '注入子进程的清单与 core 的能力表不是同一份——手抄又回来了'
+    ).toEqual([...names])
 
+    // skill 是渲染出来的，所以判「每个名字都在场」，而不是判源码里有没有字面量。
+    const skill = AGENTMUX_CLI_SKILL
     for (const name of names) {
-      expect(section, `skill 没教 \`${name}\`——它注入进了子进程，但 Agent 无从知道它存在`)
-        .toContain(name)
+      expect(skill, `skill 没教 \`${name}\`——它注入进了子进程，但 Agent 无从知道它存在`).toContain(name)
+    }
+
+    // 反向的一半：skill 里的名字不许比表多。少了会被上面那个循环抓住，多了此前没人管——
+    // 一个被教了却不存在的能力，Agent 会照着规划，然后在半途撞上 `not defined`。
+    // 从渲染出来的那一段里取反引号包着的标识符，与表比对；两边都不是手抄的。
+    //
+    // 锚点先判在场再切（两端都判），否则 -1 会让 slice 切出个宽到没有意义的段，
+    // 而下面的 `toContain` 在那种段上恒真——这条测试此前就是这么失明的。
+    const start = skill.indexOf('## Drive an open Browser')
+    expect(start, 'skill 里没有「Drive an open Browser」这一节——判据的范围落空').toBeGreaterThan(-1)
+    const section = skill.slice(start)
+    const sentenceEnd = section.indexOf('Write one program')
+    expect(sentenceEnd, '这一节里没有「Write one program」——右界锚点没了，切片没有右界').toBeGreaterThan(0)
+    const injectedSentence = section.slice(0, sentenceEnd)
+    expect(injectedSentence.length, '「注入了哪些函数」那句话切出来是空的').toBeGreaterThan(80)
+    const taught = new Set([...injectedSentence.matchAll(/`([a-zA-Z]+)`/g)].map((match) => match[1]!))
+    expect(taught.size, '那句话里一个反引号名字都没解析出来——判据失效').toBeGreaterThan(10)
+    for (const name of taught) {
+      expect(names, `skill 教了 \`${name}\`，但它不在能力表里——Agent 会调到一个不存在的名字`).toContain(name)
     }
   })
 

@@ -1,13 +1,14 @@
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { createServer } from 'node:net'
+import { createConnection, createServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentMuxControlServer,
   parseAgentMuxControlReceipt,
   parseAgentMuxControlRequest,
-  requestAgentMuxControl
+  requestAgentMuxControl,
+  subscribeAgentMuxControl
 } from '../src/control-host.js'
 import {
   AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS,
@@ -17,6 +18,9 @@ import {
   isLongAgentMuxControlOperation,
   resolveAgentMuxRegion,
   type AgentMuxAgentRegion,
+  type AgentMuxControlBrowserEvent,
+  type AgentMuxControlBrowserOperation,
+  type AgentMuxControlHost,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxRegion
@@ -301,6 +305,40 @@ describe('Control protocol', () => {
       operation: 'browser.run',
       browserId: 'browser:1'
     })).toThrow('Browser script')
+    // **在场但是空的，与缺席同罪（T-002）。** 此前只有 CLI 拦这一种，协议层的 `text()` 接受空串，
+    // 于是直连协议的客户端（编辑器、将来的适配器、另一个语言写的客户端）发一段空程序会拿到那次
+    // 不确定的成功，而走 CLI 的拿到明确拒绝——同一条规则两种结果。规则下沉到这一层之后所有
+    // 客户端经同一条。
+    //
+    // 空串与纯空白两种都要判：只判空串会放过 `'   '`——它同样什么都不做，同样给出那份无法区分的
+    // 成功回执。三种空白形态各钉一次（空串 / 空格 / 换行与制表），因为 `trim()` 换成
+    // `length === 0` 时只有后两种会红。
+    for (const [label, code] of [['空串', ''], ['纯空格', '   '], ['换行与制表', '\n\t\n']] as const) {
+      expect(() => parseAgentMuxControlRequest({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `run-empty-${label}`,
+        operation: 'browser.run',
+        browserId: 'browser:1',
+        code
+      }), `${label}的程序被放过了——回执会是一份"跑完了、什么都没发生"的成功`).toThrow(/empty/i)
+    }
+    // 码也要钉：拒绝得用 typed 的 INVALID_CONTROL_REQUEST，机读侧才分得出「我给的请求不合法」
+    // 与「那边坏了」。只判 message 的话，抛一个没有码的普通 Error 也会绿。
+    try {
+      parseAgentMuxControlRequest({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: 'run-empty-code-class',
+        operation: 'browser.run',
+        browserId: 'browser:1',
+        code: '   '
+      })
+      throw new Error('空程序没被拒——下面的码断言没有作用对象')
+    } catch (error) {
+      expect((error as { code?: string }).code, '空程序的拒绝不是 typed 的').toBe('INVALID_CONTROL_REQUEST')
+      // 文案要对两种调用方都可执行：走 CLI 的人忘了接管道，直连的客户端把 code 设成了空串。
+      expect(String((error as Error).message), '拒绝空程序时没告诉走 CLI 的人怎么喂程序').toContain('Pipe it in')
+      expect(String((error as Error).message), '拒绝空程序时没告诉直连客户端该设哪个字段').toContain('code')
+    }
   })
 
   it('parses Browser history and replay receipts without losing operation identity', () => {
@@ -331,6 +369,110 @@ describe('Control protocol', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'bad-step', operation: 'browser.replay', browserId: 'browser:1', operationId: 'op:1', mode: 'step'
     })).toThrow(/step is required/i)
+    // **非法的 step 取值只有这一处判（T-002）。** 此前 CLI 也用正则各判一遍、拿自己的
+    // `INVALID_CLI_ARGUMENT` 拒同一个输入，于是同一个非法 step 经两条路得到两个码——机读侧分不出
+    // 「这个值不能用」和「命令打错了」。四种非法形态各钉一次并且**都要落在同一个码上**：
+    // 分两步校验（先 finiteNumber 再 isInteger）时，非数字会落到 CONTROL_PROTOCOL_ERROR 而 0
+    // 落到 INVALID_CONTROL_REQUEST，同一件事长出两个码，那正是本 task 要消除的形状。
+    for (const [label, step] of [['零', 0], ['负数', -1], ['小数', 1.5], ['非数字', '2']] as const) {
+      let thrown: unknown = null
+      try {
+        parseAgentMuxControlRequest({
+          schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+          requestId: `bad-step-${label}`, operation: 'browser.replay', browserId: 'browser:1', operationId: 'op:1', mode: 'step', step
+        })
+      } catch (error) { thrown = error }
+      expect(thrown, `${label}的 step 被放过了`).not.toBeNull()
+      expect((thrown as { code?: string }).code, `${label}的 step 拒绝落在了别的码上——同一件事两个码`)
+        .toBe('INVALID_CONTROL_REQUEST')
+    }
+  })
+
+  // T-003/T-004/T-005：operation 的寿命长于任何一条连接，所以「凭 id 取消」「凭 id 查询」和
+  // 「开跑前就拿到 id」是同一条链子上的三环，缺任何一环前两条只对已结束的操作有效，等于没有。
+  it('carries a caller-supplied operationId on browser.run so the in-flight operation is addressable', () => {
+    const parsed = parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-with-id', operation: 'browser.run', browserId: 'browser:1',
+      code: 'return await snapshot()', operationId: 'op:mine'
+    })
+    // **这一条就是整条链子的前提。** 把 operationId 从请求里摘掉（或在解析臂里不透传），
+    // 调用方只能等终局回执才知道 id——而那时已无可取消，browser.stop 与 browser.operation
+    // 只对已结束的操作有效。
+    expect(parsed, '调用方给的 operationId 没进请求——在飞期间凭 id 够不着这个操作')
+      .toMatchObject({ operation: 'browser.run', operationId: 'op:mine' })
+    // 可选：不关心 identity 的调用方（发一次就等结果）不该被逼着造一个 uuid。缺席时**不许**
+    // 冒出一个键——那会让下游分不出「调用方给了空的」和「调用方没给」。
+    const without = parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'run-no-id', operation: 'browser.run', browserId: 'browser:1', code: 'return 1'
+    })
+    expect('operationId' in without, '没给 id 却凭空出现了一个键').toBe(false)
+    // 非法 id 走同一个 identity() 闸：`self` 是保留选择器（没有哪个操作叫 self），空白与换行
+    // 在标识符里没有意义。放过去的话它会被当成字面 id 发出去，错法变成"查不到这个操作"，
+    // 把一次参数错误伪装成环境问题。
+    for (const [label, operationId] of [['空串', ''], ['纯空格', '  '], ['self', 'self'], ['带换行', 'op\n1']] as const) {
+      expect(() => parseAgentMuxControlRequest({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `run-bad-id-${label}`, operation: 'browser.run', browserId: 'browser:1',
+        code: 'return 1', operationId
+      }), `${label}的 operationId 被放过了`).toThrow(/operation id/i)
+    }
+  })
+
+  it('parses browser.stop and browser.operation by operationId alone, with null as a legal answer', () => {
+    // 两条都**不收 browserId**：id 本身定位到那一个操作。要求调用方同时给 browserId 会引入
+    // 「两个参数互相矛盾时听谁的」这条没必要的裂缝，而协议调用方手上往往真的只有 id——
+    // 它不知道也不该需要知道那个操作跑在哪个 Browser 上。
+    for (const operation of ['browser.stop', 'browser.operation'] as const) {
+      expect(parseAgentMuxControlRequest({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `req-${operation}`, operation, operationId: 'op:1'
+      }), `${operation} 没解析出 operationId`).toMatchObject({ operation, operationId: 'op:1' })
+      // 缺 id 是 typed 拒绝：一条没有目标的取消/查询没有任何合法含义。
+      let thrown: unknown = null
+      try {
+        parseAgentMuxControlRequest({
+          schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `req-${operation}-noid`, operation
+        })
+      } catch (error) { thrown = error }
+      expect(thrown, `${operation} 缺 operationId 被放过了`).not.toBeNull()
+      expect((thrown as { code?: string }).code, `${operation} 缺 id 的拒绝不是 typed 的`)
+        .toBe('INVALID_CONTROL_REQUEST')
+    }
+    const operation = { id: 'op:1', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.test/', steps: [] }
+    // 回执两侧：答出那条操作的事实，**以及**答出 `null`。
+    //
+    // `null` 是一次成功的回答，不是解析失败：id 可能来自另一台机器、或者早被日志轮转掉了。
+    // 把「我们查不到」报成协议错误会让调用方以为 Browser 出了问题（RED-LINES 第 2 类）。
+    for (const op of ['browser.stop', 'browser.operation'] as const) {
+      expect(parseAgentMuxControlReceipt({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `receipt-${op}`, ok: true, operation: op, result: { runOperation: operation }
+      }), `${op} 的回执丢了 operation 事实`).toMatchObject({ operation: op, result: { runOperation: { id: 'op:1', phase: 'running' } } })
+      expect(parseAgentMuxControlReceipt({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `receipt-${op}-null`, ok: true, operation: op, result: { runOperation: null }
+      }), `${op} 把「查不到」当成了解析失败`).toMatchObject({ operation: op, result: { runOperation: null } })
+    }
+    // 四档 phase 经线上互不折叠。查询的全部价值在于分得出这四个——尤其 `indeterminate`：
+    // 它意味着「这件事做到哪儿我们不知道」，调用方对它唯一正确的反应是**别盲目重试**。
+    // 折进 failed 的话，同一次重启后的操作会被读成"失败了，改完重跑"。
+    const phases = ['running', 'completed', 'stopped', 'indeterminate'] as const
+    const roundTripped = phases.map((phase) => {
+      const receipt = parseAgentMuxControlReceipt({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: `receipt-phase-${phase}`, ok: true, operation: 'browser.operation',
+        result: { runOperation: { ...operation, phase } }
+      })
+      if (!receipt.ok || receipt.operation !== 'browser.operation' || !receipt.result.runOperation) {
+        throw new Error('not a browser.operation success receipt')
+      }
+      return receipt.result.runOperation.phase
+    })
+    // 自检：四条都真的过了线，否则下面的去重判据在对空气生效。
+    expect(roundTripped, '不是四档都被解析出来').toEqual([...phases])
+    expect(new Set(roundTripped).size, '四档 phase 在线上被折并了').toBe(4)
   })
 
   it('round-trips a browser.run receipt with its logs and four-class outcome', () => {
@@ -856,7 +998,17 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'browser.history': 'short',
       // replay 会把录下来的步骤真的重放到页面上——它就是一次 browser.run，只是程序是我们生成的。
       // 给短预算等于把一次正常回放掐成 CONTROL_TIMEOUT，而此时页面上已经点过几下了。
-      'browser.replay': 'long'
+      'browser.replay': 'long',
+      // stop 只发一次 abort 就返回，**不等被取消的那个操作真的收尾**。这条是判过的：等它就等于把
+      // 「停一个卡住的程序」变成「跟着那个程序一起卡住」，而卡住恰恰是最需要取消的场景。
+      // 注意它与本表上面那个 session 的 `stop: 'long'` 不同档，两者不是同一件事：那条要等进程收尾。
+      'browser.stop': 'short',
+      // 读一条 journal 记录，与 history 同档。
+      'browser.operation': 'short',
+      // subscribe 的**开场帧**只读本地状态（那条操作在不在、有没有缺口），所以短档。这个预算管不到
+      // 流本身：流的存活由长连接路径自己管，socket 上没有"请求超时"可言——一个操作安静十分钟是正常的。
+      // 给长档等于让一次只读本地状态的问答白等一分钟。
+      'browser.subscribe': 'short'
     }
     const entries = Object.entries(EXPECTED_BUDGET) as [AgentMuxControlRequest['operation'], 'long' | 'short'][]
     // 自检：表空了下面的循环就是死代码。条数由 tsc 钉住，这里只防「Object.entries 拿到空」这种失灵。
@@ -935,7 +1087,12 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 短常量那一处——与本段论述正好相反。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。
     const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
       .map((match) => match[1]!)
-    const PER_OPERATION = 'agentMuxControlTimeoutMs(request.operation)'
+    // 判据是「调的是那一处取值函数、且参数是某个请求对象的 operation」，**不是某个局部变量叫什么名字**。
+    // 此前这里钉死的是字面量 `agentMuxControlTimeoutMs(request.operation)`，于是一个把请求存进
+    // `parsed` 的新调用点（订阅那条路径就是）会被判成"第三种写法"——而它恰恰是正确的那种写法。
+    // 名字不是判据；同时这条正则仍然拦得住真正该拦的两样：写死某个操作字面量
+    // （`agentMuxControlTimeoutMs('inspect.tab')` 不匹配 `\w+\.operation`），以及自己算一遍。
+    const PER_OPERATION = /^agentMuxControlTimeoutMs\([A-Za-z_$][\w$]*\.operation\)$/
     const PRE_PARSE = 'AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS'
 
     // 恰好一处可以用短常量：还没读到请求，不知道是哪个操作，只能按短预算等第一条消息。
@@ -944,14 +1101,14 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       `用短常量当延时的 setTimeout 应当恰好一处（读到请求之前那一处）；实际：${delays.join(' | ')}`
     ).toHaveLength(1)
     // 其余每一处都必须按操作取值。少一处就有一条路把长操作按 2 秒等。
-    const perOperation = delays.filter((delay) => delay === PER_OPERATION)
+    const perOperation = delays.filter((delay) => PER_OPERATION.test(delay))
     expect(
       perOperation.length,
       `按操作取预算的 setTimeout 少于两处（读到请求后重排、以及客户端侧发起）；实际：${delays.join(' | ')}`
     ).toBeGreaterThanOrEqual(2)
     // 且没有第三种写法——谁想自己算一遍，那个表达式会落在这里。
     expect(
-      delays.filter((delay) => delay !== PRE_PARSE && delay !== PER_OPERATION),
+      delays.filter((delay) => delay !== PRE_PARSE && !PER_OPERATION.test(delay)),
       '有 setTimeout 的延时位既不是那一处短常量、也不是按操作取值'
     ).toEqual([])
 
@@ -961,5 +1118,243 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     const historical = `socket.setTimeout(longOperation(request.operation) ? LONG : SHORT, () => socket.destroy())`
     const probed = [...historical.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)].map((m) => m[1]!)
     expect(probed, '抽取器认不出内联算一遍的形状，那条守卫是死代码').toEqual(['longOperation(request.operation)'])
+    // 自检：放宽成正则之后仍然拦得住写死操作字面量的那种——否则上面那条"没有第三种写法"就是空的。
+    expect(PER_OPERATION.test("agentMuxControlTimeoutMs('inspect.tab')"), '正则放得太宽：写死操作字面量也算按操作取值了').toBe(false)
+    expect(PER_OPERATION.test('agentMuxControlTimeoutMs(parsed.operation)'), '正则收得太紧：换个变量名的正确写法被判成第三种').toBe(true)
+  })
+})
+
+describe('Browser 进度订阅：一问多答是独立的一支，一问一答那条不许被放宽', () => {
+  const operationFact = (phase: string): AgentMuxControlBrowserOperation => ({
+    id: 'op-stream',
+    browserId: 'b1',
+    operator: { id: 'agent-1', name: 'Agent 1' },
+    startedAt: 1,
+    phase,
+    summary: 'streaming',
+    url: 'https://example.invalid/',
+    steps: []
+  })
+
+  /**
+   * 订阅用的宿主替身。`emit` 交回给测试，所以事件是**测试驱动的**——不是让替身自己按固定脚本发几条。
+   * 后者会让「只在终局发一条」这颗变异活下来：替身照旧发三条，而生产代码改成只转发最后一条时，
+   * 断言看到的仍然是替身发的那三条里的某一条数量……除非计数钉死。这里让测试自己控制发几条，
+   * 生产代码少转发一条当场可见。
+   */
+  const streamingHost = (options: {
+    gap?: { droppedThrough: number } | null
+    runOperation?: AgentMuxControlBrowserOperation | null
+    onSubscribe?: (request: { operationId: string; afterSequence?: number }) => void
+    fail?: Error
+  } = {}): {
+    readonly disposals: number
+    emit(event: AgentMuxControlBrowserEvent): void
+    host: {
+      execute(): Promise<AgentMuxControlResult>
+      subscribeBrowserOperation(
+        request: { operationId: string; afterSequence?: number },
+        onEvent: (event: AgentMuxControlBrowserEvent) => void
+      ): Promise<{ runOperation: AgentMuxControlBrowserOperation | null; gap: { droppedThrough: number } | null; dispose(): void }>
+    }
+  } => {
+    let emit: ((event: AgentMuxControlBrowserEvent) => void) | null = null
+    let disposals = 0
+    return {
+      get disposals(): number { return disposals },
+      emit(event: AgentMuxControlBrowserEvent): void { emit?.(event) },
+      host: {
+        async execute(): Promise<AgentMuxControlResult> { throw new Error('must not be reached in a subscribe test') },
+        async subscribeBrowserOperation(request: { operationId: string; afterSequence?: number }, onEvent: (event: AgentMuxControlBrowserEvent) => void) {
+          options.onSubscribe?.(request)
+          if (options.fail) throw options.fail
+          emit = onEvent
+          return {
+            runOperation: options.runOperation === undefined ? operationFact('running') : options.runOperation,
+            gap: options.gap ?? null,
+            dispose(): void { disposals += 1 }
+          }
+        }
+      }
+    }
+  }
+
+  // 形参用真的 `AgentMuxControlHost`，**不用 `as never`**：那个 cast 会让替身的形状与真接口脱钩，
+  // 于是 subscribe 的签名改了（多一个参数、换个返回形状）之后这些测试照旧编译通过、照旧全绿，
+  // 而生产代码那边已经对不上了。判据要靠 tsc 钉住，不是靠 cast 绕开。
+  const serve = async (host: AgentMuxControlHost): Promise<{ server: AgentMuxControlServer; path: string }> => {
+    const root = await mkdtemp('/private/tmp/agentmux-subscribe-')
+    roots.push(root)
+    const path = join(root, 'control.sock')
+    const server = new AgentMuxControlServer(host, path)
+    await server.start()
+    return { server, path }
+  }
+
+  it('流出按序的多条事件，不是只在终局来一条', async () => {
+    const fake = streamingHost()
+    const { server, path } = await serve(fake.host)
+    const received: AgentMuxControlBrowserEvent[] = []
+    let ended: string | null = null
+    const opened = await subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-many', operation: 'browser.subscribe', operationId: 'op-stream' },
+      { onEvent: (event) => received.push(event), onEnd: (reason) => { ended = reason } },
+      path
+    )
+    // 开场帧先到，且它就是"在跑"那一档——早给的这一帧不许谎称已完成。
+    expect(opened.runOperation?.phase, '开场帧把一个在跑的操作说成了别的档').toBe('running')
+    expect(opened.gap, '没有缺口时不许编一个出来').toBeNull()
+
+    fake.emit({ sequence: 1, event: { type: 'operation-started' } })
+    fake.emit({ sequence: 2, event: { type: 'step-started', index: 0 } })
+    fake.emit({ sequence: 3, event: { type: 'step-finished', index: 0 } })
+    fake.emit({ sequence: 4, event: { type: 'operation-finished' } })
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    // **整条钉死**而不是 `toBeGreaterThan(0)`：后者放过的正是"其实还是一问一答"这个缺陷——
+    // 只转发最后一条时它照旧是 1 > 0。也不写 `every`：空集合上 every 恒真（本仓的白绿一族）。
+    expect(received.map(({ sequence }) => sequence), '事件没有按序全部流出来（只在终局发一条的实现会在这里掉到 1 条）').toEqual([1, 2, 3, 4])
+    expect(received.map(({ event }) => (event as { type: string }).type), '事件内容被改写了').toEqual([
+      'operation-started', 'step-started', 'step-finished', 'operation-finished'
+    ])
+    expect(ended, '流还开着的时候就报了结束').toBeNull()
+
+    opened.dispose()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(fake.disposals, '客户端退订之后承载方那侧的订阅没被清掉——它会继续往一条死 socket 写').toBe(1)
+    await server.stop()
+  })
+
+  it('一问一答那条路径没被放宽：读一条→回一条→关闭，尾随数据仍被拒', async () => {
+    // 这一条守的是本 task 最大的回归面。用**普通操作**（send）在同一个 server 上验证，因为放宽
+    // `readMessage` 的后果落在所有 14 个操作上，不只是 Browser 那几条。
+    const root = await mkdtemp('/private/tmp/agentmux-subscribe-framing-')
+    roots.push(root)
+    const path = join(root, 'control.sock')
+    let executions = 0
+    const server = new AgentMuxControlServer({
+      async execute(request): Promise<AgentMuxControlResult> {
+        executions += 1
+        if (request.operation !== 'send') throw new Error('Unexpected operation')
+        return { operation: request.operation, agentSessionId: 'semantic-1' }
+      }
+    }, path)
+    await server.start()
+
+    const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one' }
+    // 一条连接上塞两条请求：第二条是尾随数据，必须被拒，而且**execute 一次都不许跑**——放宽检查的
+    // 实现会把第一条执行掉（甚至两条都执行），这里的计数当场变。
+    const raw = await new Promise<string>((resolve, reject) => {
+      const socket = createConnection(path)
+      let text = ''
+      socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n${JSON.stringify({ ...request, requestId: 'framing-2' })}\n`))
+      socket.on('data', (chunk: Buffer) => { text += chunk.toString('utf8') })
+      socket.once('close', () => resolve(text))
+      socket.once('error', reject)
+    })
+    const frames = raw.split('\n').filter((line) => line.trim())
+    expect(frames.length, '一问一答那条路径回了不止一帧——framing 被放宽了').toBe(1)
+    expect(JSON.parse(frames[0]!), '尾随数据没有被拒').toMatchObject({ ok: false, error: { code: 'CONTROL_PROTOCOL_ERROR' } })
+    expect(executions, 'framing 检查该在执行之前就拒掉，它却已经把请求跑了').toBe(0)
+
+    // 正常的一条仍然照旧：读一条→回一条→关闭。
+    await expect(requestAgentMuxControl({ ...request, requestId: 'framing-ok' }, path)).resolves.toMatchObject({ operation: 'send' })
+    expect(executions, '正常请求反而没被执行').toBe(1)
+    await server.stop()
+  })
+
+  it('事件缺口在开场帧就说出来，不静默丢中段', async () => {
+    const fake = streamingHost({ gap: { droppedThrough: 40 } })
+    const { server, path } = await serve(fake.host)
+    const opened = await subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-gap', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: 7 },
+      { onEvent: () => {} },
+      path
+    )
+    // 缺口必须是**显式的一个数**：客户端凭它知道 40 之前的事件已经不可得，可以改去读一次完整快照。
+    // 静默丢弃的实现会在这里答 null，而它给出的流看起来连续、实际上少了中段。
+    expect(opened.gap, '缺口被静默吞掉了：客户端会把一份不完整的时间线当成完整的').toEqual({ droppedThrough: 40 })
+    await server.stop()
+  })
+
+  it('订阅建立失败：既不阻断（能力照在）也不静默（说得出哪一步没走通）', async () => {
+    // 两侧都要守。只守"不阻断"会放过静默降级，只守"有说法"会放过把失败写成阻断。
+    const fake = streamingHost({ fail: Object.assign(new Error('Progress journal is unavailable.'), { code: 'CONTROL_FAILED' }) })
+    const { server, path } = await serve(fake.host)
+    await expect(subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-fail', operation: 'browser.subscribe', operationId: 'op-stream' },
+      { onEvent: () => {} },
+      path
+    // 明说：一条带码、带话的拒绝，而不是一条空流或一次静默成功。
+    )).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: 'Progress journal is unavailable.' })
+
+    // 同一个 server 随后仍然服务其余操作——订阅建立不成没有拿走任何既有能力（RED-LINES 第 2 类）。
+    // 这里**不加 `as never`**：那个 cast 会把 execute 的形参一起推成 any（实测 TS7006），于是
+    // `request.operation` 上的收窄消失——判据本身被 cast 掉了。宿主接口的 subscribe 是可选的，
+    // 只给 execute 本来就合法。
+    const working = new AgentMuxControlServer({
+      async execute(request): Promise<AgentMuxControlResult> {
+        if (request.operation !== 'browser.operation') throw new Error('Unexpected operation')
+        return { operation: request.operation, runOperation: operationFact('completed') }
+      }
+    }, path)
+    await server.stop()
+    await working.start()
+    await expect(requestAgentMuxControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'still-works', operation: 'browser.operation', operationId: 'op-stream'
+    }, path)).resolves.toMatchObject({ operation: 'browser.operation', result: { runOperation: { phase: 'completed' } } })
+    await working.stop()
+  })
+
+  it('宿主不提供订阅时是一条类型化的能力协商答案，不是"暂时不可用"', async () => {
+    // 判据钉在**码**上而不是"抛了就行"：`CONTROL_UNAVAILABLE` 会让 Agent 去重试，而这件事重试一万次
+    // 也一样。折成那个码的实现在这里必须红。
+    const { server, path } = await serve({
+      async execute(): Promise<AgentMuxControlResult> { throw new Error('must not be reached') }
+    })
+    await expect(subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-unsupported', operation: 'browser.subscribe', operationId: 'op-stream' },
+      { onEvent: () => {} },
+      path
+    )).rejects.toMatchObject({ code: 'BROWSER_SUBSCRIBE_UNSUPPORTED' })
+    await server.stop()
+  })
+
+  it('查不到那条 id 时订阅是成功的：没有什么可流，但那不是 Browser 坏了', async () => {
+    const fake = streamingHost({ runOperation: null })
+    const { server, path } = await serve(fake.host)
+    const opened = await subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-unknown', operation: 'browser.subscribe', operationId: 'op-nobody' },
+      { onEvent: () => {} },
+      path
+    )
+    expect(opened.runOperation, '查不到被报成了失败——那是 RED-LINES 第 2 类').toBeNull()
+    expect(opened.gap, '查不到的操作不该带一个缺口').toBeNull()
+    opened.dispose()
+    await server.stop()
+  })
+
+  it('游标在协议入口就判，非法值不许穿到承载方', async () => {
+    // 判在入口的理由：让 -1 穿过去的结果是承载方拿它做比较，于是"从头发"还是"什么都不发"取决于
+    // 那边碰巧怎么写比较符——同一个非法输入在两个实现上两种行为。
+    const seen: Array<number | undefined> = []
+    const fake = streamingHost({ onSubscribe: (request) => seen.push(request.afterSequence) })
+    const { server, path } = await serve(fake.host)
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      await expect(subscribeAgentMuxControl(
+        { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-cursor', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: bad },
+        { onEvent: () => {} },
+        path
+      ), `afterSequence=${bad} 被放过了`).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    }
+    // 0 是合法的（"从第一条开始"），别把它连坐进去。
+    const opened = await subscribeAgentMuxControl(
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-zero', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: 0 },
+      { onEvent: () => {} },
+      path
+    )
+    expect(seen, '非法游标穿到了承载方，或者合法的 0 被拒了').toEqual([0])
+    opened.dispose()
+    await server.stop()
   })
 })

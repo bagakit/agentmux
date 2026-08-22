@@ -122,7 +122,10 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   stop: true,
   'browser.run': true,
   'browser.history': true,
-  'browser.replay': true
+  'browser.replay': true,
+  'browser.stop': true,
+  'browser.operation': true,
+  'browser.subscribe': true
 }
 
 const PERMISSION_KIND_MEMBERS = Object.keys(PERMISSION_KIND_ANCHOR) as readonly PermissionOptionKind[]

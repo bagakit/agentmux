@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-24d8fcuhy",
   "plan_status": "reviewed",
-  "plan_revision": 1,
-  "supersedes_revision": null,
+  "plan_revision": 2,
+  "supersedes_revision": 1,
   "review_ref": "docs/reviews/bookmark-files-and-conversation-images-2026-09-15.md",
   "source_refs": [
     "docs/reviews/bookmark-files-and-conversation-images-2026-09-15.md",
@@ -29,6 +29,32 @@
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/bookmark-files-and-conversation-images-2026-09-15.md",
+      "source_refs": [
+        "docs/reviews/bookmark-files-and-conversation-images-2026-09-15.md",
+        "apps/desktop/src/renderer/src/lib/terminal-path-link.ts",
+        "apps/desktop/src/renderer/src/components/AgentMarkdown.tsx"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      },
+      "command_corrections": [
+        "T-001"
+      ]
     }
   ],
   "tasks": [
@@ -48,7 +74,7 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "pnpm exec vitest run apps/desktop/test/terminal-path-link.test.ts apps/desktop/test/tilde-path-link.test.ts --maxWorkers=1  # 判据：摘要须为 Test Files 2 passed",
+          "ref": "pnpm --config.verify-deps-before-run=false exec vitest run apps/desktop/test/terminal-path-link.test.ts apps/desktop/test/tilde-path-link.test.ts --maxWorkers=1  # 判据：摘要须为 Test Files 2 passed",
           "proves": "起头的 @ 被摘掉、段中的 @ 保留、行列后缀不偏移，且既有检测行为未回归。"
         }
       ],
@@ -58,10 +84,25 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --config.verify-deps-before-run=false exec vitest run apps/desktop/test/terminal-path-link.test.ts apps/desktop/test/tilde-path-link.test.ts --maxWorkers=1  # 判据：摘要须为 Test Files 2 passed",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "a7179bb04c66e3a4f8952d1877af88aec1eb1585",
+        "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "verification_digest": "none",
+        "dedup_key": "87c977813b50c25417ad0a643ea44e11ee4453af4bb3998b02addf5ac04b59ca",
+        "source_key": "8282fa41ff228e6d65a3a662eb01ae355faaa9584f0e940851a08f71750f8735",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
     },
     {
       "id": "T-002",

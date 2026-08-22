@@ -15,6 +15,13 @@ const fixture = vi.hoisted(() => {
   return {
     state: {
       applyBrowserEvent: vi.fn(),
+      // BrowserPane 的停止/历史/回放全经协议（T-008 收口）。替身缺这一格的话，点按钮会抛
+      // TypeError 而栈指向生产文件——看起来像组件回归，其实是替身没覆盖到那个 slice。
+      executeControl: vi.fn(async (request: { operation: string }) => {
+        if (request.operation === 'browser.history') return { operation: 'browser.history', operations: [] }
+        if (request.operation === 'browser.stop') return { operation: 'browser.stop', runOperation: null }
+        throw new Error(`unexpected control operation in fixture: ${request.operation}`)
+      }),
       reportError: vi.fn(),
       setConfig: vi.fn(),
       saveBrowserBookmark: vi.fn(async () => 'Example.webloc'),
@@ -212,8 +219,17 @@ describe('Browser bar contract', () => {
     expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
   })
 
-  it('wires the rail takeover and stop controls to the Main-owned stop operation', async () => {
-    const stopOperation = vi.spyOn(api.browser, 'stopOperation').mockResolvedValue(tab)
+  /**
+   * 停止走**协议**，不走 `api.browser.stopOperation`（T-008 收口）。
+   *
+   * 这里断言两件事，缺一件这条就放过一半缺陷：**经协议**（不是又一份 IPC 语义），且**按 operationId
+   * 寻址**（不是 browserId）——后者是协议比旧 IPC 强的地方，一条操作的寿命长于这张 Tab。
+   */
+  it('rail 的接管与停止都经协议按 operationId 取消，不各自维护一份 IPC 语义', async () => {
+    fixture.state.executeControl.mockClear()
+    // 旧那条第二套语义**整个入口已被删掉**（contracts/preload/ipc/manager 四处），所以这里不 spy——
+    // spyOn 一个不存在的方法会抛。判它不在场比判它没被调用更强：不在场的入口无法被将来悄悄接回去。
+    expect('stopOperation' in api.browser, 'api.browser.stopOperation 又回来了——第二套语义复活').toBe(false)
     const activeTab = {
       ...tab,
       driving: true,
@@ -242,16 +258,21 @@ describe('Browser bar contract', () => {
     const stop = container.querySelector('button[aria-label="Stop browser operation"]')
     expect(stop).not.toBeNull()
     await act(async () => stop!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(stopOperation).toHaveBeenCalledTimes(2)
-    expect(stopOperation).toHaveBeenNthCalledWith(1, tab.browserId)
-    expect(stopOperation).toHaveBeenNthCalledWith(2, tab.browserId)
+    // 两次点击（Take control 与 Stop）各发一条协议请求，且都按 operationId。钉死整份参数而不是
+    // 只判"被调过"：只判次数会放过"发的是别的 operation"或"寻址回到了 browserId"。
+    const sent = fixture.state.executeControl.mock.calls.map(([request]) => request as Record<string, unknown>)
+    expect(sent.map((request) => request.operation), '停止没经协议，或发的不是 browser.stop')
+      .toEqual(['browser.stop', 'browser.stop'])
+    expect(sent.map((request) => request.operationId), '协议请求没按 operationId 寻址')
+      .toEqual(['operation-1', 'operation-1'])
+    // 另一半：**旧那条 IPC 语义一次都没被走**。只断言协议被调过会放过"两条都走了"。
     await act(async () => root.unmount())
     container.remove()
-    stopOperation.mockRestore()
   })
 
-  it('opens durable operation history from the rail and loads it on demand', async () => {
-    const listOperationHistory = vi.spyOn(api.browser, 'listOperationHistory').mockResolvedValue([])
+  it('rail 打开历史时经协议按 browserId 取，不各自维护一份 IPC 语义', async () => {
+    fixture.state.executeControl.mockClear()
+    const listOperationHistory = vi.spyOn(api.browser, 'listOperationHistory')
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -259,7 +280,11 @@ describe('Browser bar contract', () => {
     const openHistory = container.querySelector('button[aria-label="Open browser activity timeline"]')
     expect(openHistory).not.toBeNull()
     await act(async () => openHistory!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(listOperationHistory).toHaveBeenCalledTimes(1)
+    expect(fixture.state.executeControl.mock.calls.map(([request]) => (request as Record<string, unknown>).operation),
+      '历史没经协议').toEqual(['browser.history'])
+    expect((fixture.state.executeControl.mock.calls[0]![0] as Record<string, unknown>).browserId,
+      '过滤没交给协议——在客户端再滤一遍就是把同一条规则写两处').toBe(tab.browserId)
+    expect(listOperationHistory, '还在走 api.browser.listOperationHistory（第二套语义仍在）').not.toHaveBeenCalled()
     expect(container.textContent).toContain('Recent operations')
     expect(container.textContent).toContain('No recorded Browser operations yet.')
     await act(async () => root.unmount())

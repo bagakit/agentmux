@@ -4,24 +4,39 @@
   "title": "对话里的图片：贴图为缩略图而非链接",
   "slug": "conversation-images",
   "goal": "往对话里贴图片后，界面上只出现一个文件链接按钮，看不到图。已诊断清全链路：AgentComposer 拿到了字节，AgentSessionComposer 把它写到盘上只留一个路径，ipc 返回路径，composer-file-reference 把它变成 @path 记号，AgentMarkdown 把这个记号渲染成 md-link--file 按钮——时间轴的类型里根本没有'图片'这个概念。路径这个表示必须保留（agent 要靠它读图），所以做法是让渲染侧认出图片扩展名、取字节做成 data URI 显示缩略图、点击在应用内放大。注意 index.html:9 的 CSP 是 img-src 'self' data:，file: 被挡，所以必须走 data URI（浏览器截图那条路已经证明这条通）。附带一个次要缺陷：terminal-path-link.ts:37 把 @ 当成路径字符，解析出来的路径带着 @ 前缀。",
-  "status": "ready",
+  "status": "in_progress",
   "workspace_mode": "worktree",
   "base_ref": "main",
-  "branch": "feat/f-24d8fcuhy",
-  "worktree_name": "wt-f-24d8fcuhy",
-  "worktree_path": ".worktrees/wt-f-24d8fcuhy",
+  "branch": "fix/composer-integration-regressions-20260920",
+  "worktree_name": "agentmux-branch-pin-20260920",
+  "worktree_path": "../../../../../../private/tmp/agentmux-branch-pin-20260920",
   "runtime_role": "standalone",
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 0,
-    "round_count": 0
+    "no_progress_rounds": 2,
+    "round_count": 2
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --config.verify-deps-before-run=false exec vitest run apps/desktop/test/terminal-path-link.test.ts apps/desktop/test/tilde-path-link.test.ts --maxWorkers=1  # 判据：摘要须为 Test Files 2 passed",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-24d8fcuhy/artifacts/gate-T-001-r2-0001.log",
+    "last_context": {
+      "candidate_sha": "a7179bb04c66e3a4f8952d1877af88aec1eb1585",
+      "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification_digest": "none",
+      "dedup_key": "87c977813b50c25417ad0a643ea44e11ee4453af4bb3998b02addf5ac04b59ca",
+      "source_key": "8282fa41ff228e6d65a3a662eb01ae355faaa9584f0e940851a08f71750f8735",
+      "artifact_digests": {},
+      "plan_revision": 2
+    }
   },
   "history": [
     {
@@ -35,6 +50,26 @@
     {
       "action": "workspace_assigned",
       "detail": "proposal_only -> worktree; root_branch=main"
+    },
+    {
+      "action": "workspace_adopted",
+      "detail": "worktree:feat/f-24d8fcuhy@.worktrees/wt-f-24d8fcuhy -> worktree:fix/composer-integration-regressions-20260920@../../../../../../private/tmp/agentmux-branch-pin-20260920"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => fail"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
     }
   ]
 }

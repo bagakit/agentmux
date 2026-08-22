@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 176
+    "next_cursor": 185
   },
   "features": [
     {
@@ -756,10 +756,10 @@
     {
       "feat_id": "f-24d8fcuhy",
       "title": "对话里的图片：贴图为缩略图而非链接",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "worktree",
-      "branch": "feat/f-24d8fcuhy",
-      "worktree_name": "wt-f-24d8fcuhy",
+      "branch": "fix/composer-integration-regressions-20260920",
+      "worktree_name": "agentmux-branch-pin-20260920",
       "runtime_role": "standalone",
       "runtime_relations": []
     },
@@ -1338,10 +1338,10 @@
     {
       "feat_id": "f-2698f5kpc",
       "title": "PTY 尺寸：跨客户端 resize、重连与未知尺寸的诚实降级",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
-      "branch": "",
-      "worktree_name": "",
+      "status": "in_progress",
+      "workspace_mode": "worktree",
+      "branch": "fix/topic-presence-integration-20260920",
+      "worktree_name": "agentmux-region-topic-20260920",
       "runtime_role": "standalone",
       "runtime_relations": []
     },
@@ -1658,8 +1658,38 @@
     {
       "feat_id": "f-27a8f3deq",
       "title": "认出并寻址到某个 Agent：终端右键的身份入口与同 provider 的字母判别器",
-      "status": "blocked",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27b8fbsvp",
+      "title": "叠压头像簇里注意力角标被右邻座盖住：把状态标记落到可见的一侧",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27c8fr4x2",
+      "title": "Browser 通用能力协议与 CLI/Skill 接入",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27d8fd7tw",
+      "title": "状态库达到物理上限后 AgentMux 无法重启",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -1716,6 +1746,16 @@
       "runtime_relations": []
     },
     {
+      "feat_id": "f-27k8f9545",
+      "title": "更新退出期间所有 attach 被误报为 Host 正在重新配置",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
       "feat_id": "f-27m8f5n9n",
       "title": "Message Tools 统一邮箱",
       "status": "archived",
@@ -1739,6 +1779,96 @@
       "feat_id": "f-27p8ftaqc",
       "title": "Message Tools 右侧操作整体",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27q8fjs45",
+      "title": "消息控件语义与视觉反馈",
+      "status": "done",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27r8f63cj",
+      "title": "Restore interrupted Agent sessions",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27s8f9tn9",
+      "title": "Branch Pin spacing",
+      "status": "done",
+      "workspace_mode": "worktree",
+      "branch": "fix/branch-pin-spacing-20260920",
+      "worktree_name": "agentmux-branch-pin-20260920",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27t8fe2kg",
+      "title": "Topic Region presence and quiet focus",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27u8fu298",
+      "title": "Outbox delivery reconciliation",
+      "status": "done",
+      "workspace_mode": "worktree",
+      "branch": "fix/branch-pin-spacing-20260920",
+      "worktree_name": "agentmux-branch-pin-20260920",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27v8f9r46",
+      "title": "Composer paste selection",
+      "status": "done",
+      "workspace_mode": "worktree",
+      "branch": "fix/branch-pin-spacing-20260920",
+      "worktree_name": "agentmux-branch-pin-20260920",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27w8fu3gk",
+      "title": "Footer attention controls",
+      "status": "done",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27x8fkd5k",
+      "title": "新 Session Connecting 与当前终端画面恢复",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-27y8fzdf5",
+      "title": "全局 Agents 任务看板重构",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

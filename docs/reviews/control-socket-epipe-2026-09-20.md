@@ -16,4 +16,9 @@ T-002：固定已验证的 clean commit，经标准 macOS package gate 安装并
 - 变异：从构建产物中删除新增 listener，3 条 lifetime 测试全部重新因 EPIPE 失败（exit 1），恢复原产物后重跑通过。
 - 零调用者检查：apps/desktop/src/main/ipc.ts:745 创建 AgentMuxControlServer，并在 registerIpc 中 start；不是只有测试的辅助能力。
 - RED-LINES：出错的是单条已断开 transport；不关闭健康 Run、不阻断其他请求，不增加 Agent 操作门禁。错误不能送到已断开的 peer，不宣称该请求未执行。
-- 打包和安装连续性：待执行 T-002。
+- 打包：标准 `pnpm package:mac:install` 全部通过，安装并重启 `/Users/bytedance/Applications/AgentMux.app`。安装来源 clean commit `9953705a95e35b4e7b98841958435efe03723533`，修复 commit `2655c5588837cdad2aaa1958605d242c50bfa06e`；已安装 control-host.js 与发布产物 SHA-256 相同。
+- 安装验证（2026-09-20 21:08 CST）：12 个真实只读 Control 请求在写出后主动断连，后续 list.agents 请求成功。原 daemonInstanceId / runtimeId 未改变，安装前 28 个 running Run 全部保持相同 PID 与 running 状态。
+- 重启工作面：原项目列表、多个 Tab、上下分区、终端内容和输入框均已恢复可见；未创建替代 Session。未做完整布局逐字段相等断言。
+- 限制：首次启动一度空白、Control 请求超时，随后自行恢复；启动延迟原因尚未定位，本次不宣称修复。界面仍如实显示既有 interrupted PTY、输出已淘汰及 shell environment 提醒。
+- 本地证据：`/private/tmp/control-epipe-package-install.log`、`/private/tmp/control-epipe-installed-verification.json`、`/private/tmp/control-epipe-verify.mjs`。
+- 可复用结论：socket 的读取完成不代表连接生命周期结束；真实子进程与 peer 断连能验证未捕获异常是否杀死宿主。此处已由测试固化，不增加新的抽象或全局异常吞噬。

@@ -78,8 +78,11 @@
    用贴近用户原话的表述记录**约束**（"什么必须成立"），不记录实现步骤。
    同一件事只写在一处，另一处引用它。
 2. **建或更新 feature-tracker**。用
-   `python3 /Users/bytedance/proj/priv/bagakit/bagakit/skills/harness/bagakit-feature-tracker/scripts/feature-tracker.py`
-   驱动：新需求若与现有 Feature 的 Closure 不同就 `create-feature`（`--tasks-file` 要
+   `/Users/bytedance/proj/priv/bagakit/bagakit/skills/co-work/orchestrate/execution/bagakit-feature-tracker/scripts/feature-tracker.sh`
+   驱动（走 `.sh`；`.py` 没有 shebang。这条路径上游会搬——失败时先
+   `find /Users/bytedance/proj/priv/bagakit -name feature-tracker.sh -not -path '*/node_modules/*'`
+   重新定位，并跳过 `.tmp/` 与 `-adopt-worktree` 下的副本）：新需求若与现有 Feature 的
+   Closure 不同就 `create-feature`（`--tasks-file` 要
    `schema: "bagakit.feature-task-plan.v1"` + 已 approved 的 review artifact），
    同一 Closure 内则给现有 Feature 追加 task。每个 task 必须有可证伪的 acceptance 与
    verification command。

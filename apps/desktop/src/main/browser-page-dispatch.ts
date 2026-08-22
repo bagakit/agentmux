@@ -95,7 +95,9 @@ function requireString(value: unknown, name: string): string {
  */
 function pageAuthoredText(text: string | undefined): string {
   if (text === undefined || text.trim() === '') return 'unknown error (the page gave no message)'
-  const oneLine = text.replace(/\s+/gu, ' ').trim()
+  // 字符集与 browser-operation-journal.ts 的 `clampProse` 必须同一个（见那边注释）：`\s` 不含
+  // NEL（U+0085），而 NEL 在终端里照样当换行渲染。两条路形态不一致，就得逐条去数谁防住了。
+  const oneLine = text.replace(/\p{White_Space}+/gu, ' ').trim()
   return `[page-authored text] ${oneLine}`
 }
 

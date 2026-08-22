@@ -28,7 +28,8 @@ import {
   type BrowserReplayPlan,
   type BrowserScriptRunReport
 } from '../../../shared/contracts'
-import type { BrowserOperation } from '../../../shared/browser-operation'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
+import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '../../../shared/browser-operation'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
@@ -91,6 +92,7 @@ export function BrowserPane({
   yieldToFocusRing?: boolean
 }) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
+  const executeControl = useAppStore((state) => state.executeControl)
   const reportError = useAppStore((state) => state.reportError)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
@@ -345,10 +347,25 @@ export function BrowserPane({
   // Stopping an Agent operation is a control handoff, not another toolbar action. It must remain
   // available while a navigation or reload is busy so the page never traps the person behind a stale
   // busy guard.
+  //
+  // **经协议，不走 `api.browser.stopOperation`。** 这颗按钮与一个 CLI 客户端按下的取消必须是同一件
+  // 事：同一个 `activeRun.stop`、同一份四分类结局、同一条幂等规则（停一个已经结束的操作是成功并
+  // 答出它的终局）。各走一条的后果不是"两种写法"，是两套语义各自漂移——而漂移时两边看起来都对。
+  //
+  // 协议按 **operationId** 寻址而不是 browserId，这正是它比旧 IPC 强的地方：一条操作的寿命长于任何
+  // 一条连接，也长于这张 Tab。所以这里从 activity 投影里取那条操作的 id；投影里没有操作时按钮本身
+  // 不会出现（BrowserOperationRail 的 `operation` 为 null 时那一枝不渲染 onStop），所以这不是一个
+  // 需要兜底的状态——真的没有就什么也不做，而不是随便停一个。
   async function stopBrowserOperation(): Promise<void> {
+    const operationId = tab.activity?.operation?.id
+    if (!operationId) return
     try {
-      const browser = await api.browser.stopOperation(tab.browserId)
-      applyBrowserEvent({ type: 'updated', browser })
+      await executeControl({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: crypto.randomUUID(),
+        operation: 'browser.stop',
+        operationId
+      })
     } catch (error) {
       reportError(error)
     }
@@ -455,8 +472,16 @@ export function BrowserPane({
     setHistoryLoading(true)
     setHistoryError(null)
     try {
-      const operations = await api.browser.listOperationHistory()
-      setOperationHistory(operations.filter((operation) => operation.browserId === tab.browserId))
+      // 经协议，并且**按 browserId 过滤交给协议**而不是在这里过滤：协议的 history 本来就收这个参数，
+      // 在客户端再滤一遍就是把同一条规则写两处。
+      const receipt = await executeControl({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: crypto.randomUUID(),
+        operation: 'browser.history',
+        browserId: tab.browserId
+      })
+      if (receipt.operation !== 'browser.history') throw new Error('Control returned another operation for Browser history.')
+      setOperationHistory(receipt.operations.map(narrowBrowserOperation))
     } catch (error) {
       setHistoryError('Operation history is unavailable. Retry to restore the record view.')
       reportError(error)
@@ -484,8 +509,20 @@ export function BrowserPane({
     setReplayBusy(true)
     setReplayOutcome(undefined)
     try {
-      const report = await api.browser.runReplay(tab.browserId, { ...replayPlan, steps: [step] })
-      setReplayOutcome(report.outcome)
+      // 单步回放的 mode/step 语义在协议里（它自己判越界、判 blockedReason，并把两者分成不同的
+      // typed 失败）。这里把 step 交过去，不在客户端裁一份 plan——裁 plan 等于把"哪些步能重放"
+      // 这条人工闸门规则搬到了 Renderer。
+      const receipt = await executeControl({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: crypto.randomUUID(),
+        operation: 'browser.replay',
+        browserId: tab.browserId,
+        operationId: replayPlan.operationId,
+        mode: 'step',
+        step: sequence
+      })
+      if (receipt.operation !== 'browser.replay') throw new Error('Control returned another operation for Browser replay.')
+      setReplayOutcome(receipt.mode === 'preview' ? undefined : receipt.outcome)
     } catch (error) {
       reportError(error)
     } finally {
@@ -498,8 +535,16 @@ export function BrowserPane({
     setReplayBusy(true)
     setReplayOutcome(undefined)
     try {
-      const report = await api.browser.runReplay(tab.browserId, replayPlan)
-      setReplayOutcome(report.outcome)
+      const receipt = await executeControl({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: crypto.randomUUID(),
+        operation: 'browser.replay',
+        browserId: tab.browserId,
+        operationId: replayPlan.operationId,
+        mode: 'run'
+      })
+      if (receipt.operation !== 'browser.replay') throw new Error('Control returned another operation for Browser replay.')
+      setReplayOutcome(receipt.mode === 'preview' ? undefined : receipt.outcome)
     } catch (error) {
       reportError(error)
     } finally {
@@ -775,7 +820,18 @@ export function BrowserPane({
             {...(timelineWarning ? { warning: timelineWarning } : {})}
             onReplay={(operation) => {
               setReplayOutcome(undefined)
-              void api.browser.replayPlan(operation.id).then(setReplayPlan).catch(reportError)
+              void executeControl({
+                schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+                requestId: crypto.randomUUID(),
+                operation: 'browser.replay',
+                browserId: tab.browserId,
+                operationId: operation.id,
+                mode: 'preview'
+              }).then((receipt) => {
+                // preview 那一枝才带 plan。判 mode 而不是直接读 `receipt.plan`：run/step 两枝没有
+                // 这个字段，tsc 在这里要求收窄。
+                if (receipt.operation === 'browser.replay' && receipt.mode === 'preview') setReplayPlan(narrowBrowserReplayPlan(receipt.plan))
+              }).catch(reportError)
             }}
           />
           {replayPlan ? (

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgentMux · Board</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%239ad9d0'/%3E%3Cpath d='M8 9h16v4H8zm0 6h10v4H8zm0 6h7v4H8z' fill='%23111418'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup"><span class="brand-mark">A</span><span class="brand-name">AgentMux</span></div>
+      <div class="scope-path"><span>全局</span><span class="path-separator">/</span><strong>Board</strong></div>
+      <div class="topbar-tools">
+        <button class="icon-button" aria-label="搜索">⌕</button>
+        <button class="icon-button" aria-label="通知">◌<span class="attention-dot"></span></button>
+        <button class="icon-button" data-action="assistant" aria-label="打开默认 Session">✣</button>
+        <button class="avatar-button" aria-label="账户">L</button>
+      </div>
+    </header>
+
+    <main class="board-shell">
+      <section class="board-toolbar" aria-label="Board 工具栏">
+        <div class="toolbar-context"><span class="eyebrow">GLOBAL</span><strong>12 tasks</strong><span class="toolbar-muted">全部项目</span></div>
+        <div class="toolbar-actions">
+          <div class="segmented-control" role="group" aria-label="视图密度"><button class="segment active">看板</button><button class="segment">列表</button></div>
+          <button class="quiet-button">⌘ K</button>
+          <button class="create-button" data-action="new-task">＋ Task</button>
+        </div>
+      </section>
+      <section class="filter-row" aria-label="Task 筛选">
+        <button class="filter-chip active">全部 Project⌄</button><button class="filter-chip">状态⌄</button><button class="filter-chip">优先级⌄</button><button class="filter-chip">标签⌄</button><button class="filter-chip">Agent / Session⌄</button>
+        <label class="search-box"><span>⌕</span><input aria-label="搜索任务" placeholder="搜索 Task、Project 或 Session" /></label>
+      </section>
+
+      <section class="board-frame" aria-label="全局任务 Board">
+        <div class="lane"><div class="lane-header"><div><span class="status-dot neutral"></span><strong>待办</strong><span class="lane-count">4</span></div><button class="lane-action" aria-label="在待办中新建 Task">＋</button></div><div class="task-list">
+          <article class="task-row" data-task="routing"><div class="task-main"><div class="task-meta"><span class="task-id">AM-241</span><span class="priority p1">P1</span></div><strong class="task-title">把多项目需求路由到正确的工作区</strong><div class="task-context"><span class="project-dot purple"></span> sense / web <span class="context-separator">·</span> 需求拆分</div></div><div class="task-tail"><span class="task-state attention">待确认 Project</span><time>12m</time></div><div class="task-subline">3 个来源 · 1 个待确认</div></article>
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-238</span><span class="priority p2">P2</span></div><strong class="task-title">补齐 Agent Activity 的失败原因</strong><div class="task-context"><span class="project-dot mint"></span> agentmux / desktop</div></div><div class="task-tail"><span class="task-state">未分配</span><time>昨天</time></div></article>
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-236</span><span class="priority p3">P3</span></div><strong class="task-title">整理 Provider 能力说明</strong><div class="task-context"><span class="project-dot amber"></span> agentmux / core</div></div><div class="task-tail"><span class="task-state">待办</span><time>2d</time></div></article>
+        </div></div>
+        <div class="lane"><div class="lane-header"><div><span class="status-dot working"></span><strong>进行中</strong><span class="lane-count">5</span></div><button class="lane-action" aria-label="在进行中中新建 Task">＋</button></div><div class="task-list">
+          <article class="task-row selected" data-task="inspector"><div class="task-main"><div class="task-meta"><span class="task-id">AM-229</span><span class="priority p1">P1</span></div><strong class="task-title">Task Inspector：复用关联 Session 的 Region</strong><div class="task-context"><span class="project-dot mint"></span> agentmux / desktop <span class="context-separator">·</span> Board UX</div><div class="presence"><span class="presence-icon">✣</span><span class="presence-icon">⌘</span>2 个 Session 正在观察</div></div><div class="task-tail"><span class="task-state working-state">Working · 68%</span><time>刚刚</time></div></article>
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-223</span><span class="priority p2">P2</span></div><strong class="task-title">让重启后的旧 Session 保持可恢复</strong><div class="task-context"><span class="project-dot mint"></span> agentmux / core <span class="context-separator">·</span> continuity</div></div><div class="task-tail"><span class="task-state working-state">Working</span><time>7m</time></div></article>
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-217</span><span class="priority p2">P2</span></div><strong class="task-title">Browser 外部链接交接</strong><div class="task-context"><span class="project-dot pink"></span> agentmux / browser</div></div><div class="task-tail"><span class="task-state attention">Needs you</span><time>1h</time></div></article>
+        </div></div>
+        <div class="lane"><div class="lane-header"><div><span class="status-dot done"></span><strong>已完成</strong><span class="lane-count">3</span></div><button class="lane-action" aria-label="在已完成中新建 Task">＋</button></div><div class="task-list">
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-210</span><span class="priority p2">P2</span></div><strong class="task-title">Mailbox 的已读与送达语义</strong><div class="task-context"><span class="project-dot mint"></span> agentmux / desktop</div></div><div class="task-tail"><span class="task-state done-state">Done</span><time>昨天</time></div></article>
+          <article class="task-row"><div class="task-main"><div class="task-meta"><span class="task-id">AM-203</span><span class="priority p3">P3</span></div><strong class="task-title">统一 Executor 身份标识</strong><div class="task-context"><span class="project-dot amber"></span> agentmux / surface</div></div><div class="task-tail"><span class="task-state done-state">Done</span><time>3d</time></div></article>
+        </div></div>
+      </section>
+    </main>
+
+    <aside class="task-workspace" aria-label="Task 详情" aria-hidden="true">
+      <div class="workspace-header"><div><span class="eyebrow">AM-229 · TASK</span><strong>复用关联 Session 的 Region</strong></div><button class="icon-button close-workspace" aria-label="关闭详情">×</button></div>
+      <div class="workspace-summary"><div class="summary-line"><span class="task-state working-state">Working · 68%</span><span class="priority p1">P1</span><span class="toolbar-muted">agentmux / desktop</span></div><p>选中任务后，在这里观察关联 Session；需要输入或编辑时进入原 Project 工作台。</p><div class="summary-actions"><button class="quiet-button">来源与依据</button><button class="primary-button full-button">进入工作台 ↗</button></div></div>
+      <div class="workspace-section"><div class="section-heading"><span class="eyebrow">EXECUTION</span><span class="section-count">2 sessions</span><div class="arrangement-group"><button class="arrangement active">Grid</button><button class="arrangement">Columns</button></div></div><div class="session-mosaic"><article class="session-region"><div class="region-header"><div><strong>Claude · UI surface</strong><span>agentmux / desktop · board</span></div><button class="region-action" aria-label="进入 Claude 所在项目">↗</button></div><div class="region-body"><span class="region-mode">observer · read-only</span><pre>› pnpm test board-inspector ✓
+› attachment lease reused ▌</pre></div><div class="region-footer"><span class="status-dot working"></span>working · 68%</div></article><article class="session-region"><div class="region-header"><div><strong>Codex · Core contract</strong><span>agentmux / core · feature board</span></div><button class="region-action" aria-label="进入 Codex 所在项目">↗</button></div><div class="region-body"><span class="region-mode">observer · read-only</span><pre>› ctxmux Run ctmx_84f2
+› 2 leases · 1 PTY · 1 owner</pre></div><div class="region-footer"><span class="status-dot working"></span>working · 42%</div></article></div></div>
+      <div class="workspace-section facts"><div class="section-heading"><span class="eyebrow">TASK FACTS</span></div><dl><div><dt>Project</dt><dd>agentmux / desktop</dd></div><div><dt>Attempts</dt><dd>2 · 1 active</dd></div><div><dt>Created</dt><dd>Today · 10:42</dd></div></dl></div>
+    </aside>
+
+    <aside class="assistant-popover" aria-label="默认 Topic 工作面" aria-hidden="true">
+      <div class="topic-chrome">
+        <div class="topic-tabs"><button class="topic-tab active">default topic</button><button class="topic-tab">+ Region</button></div>
+        <div class="topic-actions"><span class="topic-injection">Wiki · 12 条规则</span><button class="icon-button close-assistant" aria-label="关闭默认 Topic">×</button></div>
+      </div>
+      <div class="topic-context"><span class="eyebrow">GLOBAL / DEFAULT TOPIC</span><span>AgentMux 调度 · observer</span><button class="topic-setting" aria-label="查看 Topic Wiki">⚙ Wiki</button></div>
+      <div class="topic-region">
+        <div class="topic-output"><div class="output-line muted-line">session ready · project index 18 · board cursor 482</div><div class="output-line"><span class="output-prompt">›</span> 我找到 3 个相关来源，最可能的目标是 <strong>agentmux / desktop</strong></div><div class="output-line"><span class="output-prompt">›</span> Core / Desktop 边界需要确认；保持 Task 为 pending</div><div class="topic-task-line"><span class="task-dot"></span><span>AM-241 · pending · agentmux / desktop 候选</span><button class="topic-confirm">确认</button><button class="topic-policy">按风险确认</button></div></div>
+        <div class="topic-composer"><span class="composer-plus">＋</span><input aria-label="默认 Topic 输入" placeholder="在 default topic 中继续…" /><span class="composer-model">Claude · high</span><button class="send-button" aria-label="发送">↑</button></div>
+      </div>
+    </aside>
+
+    <button class="floating-launcher" data-action="assistant" aria-label="打开 Default Session"><span>✣</span><i></i></button>
+    <div class="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="./prototype.js"></script>
+</body>
+</html>
