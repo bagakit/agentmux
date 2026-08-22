@@ -8,13 +8,22 @@ candidate signing fails, the previous installation remains active and the failur
 stage is reported. The three global surface controls remain a single bottom-centered
 switch; the top-right chrome has no duplicate Agents/Session/Board navigation.
 
-## Root cause and bounded fix
+## Observations and bounded change
 
-The Electron download carries macOS provenance extended attributes. Copying that
-bundle with `cp -cR` preserved them, and the ad-hoc signer failed while replacing the
-signature on `Electron Framework.framework`. Clearing extended attributes on the
-staged candidate before branding/signing is the smallest fix; it does not alter the
-runtime contents or the canonical cutover safety ordering.
+The Electron download carries macOS provenance extended attributes. The first
+package attempt failed while signing `Electron Framework.framework`. A test copy
+with extended attributes cleared passed signing, as did the second package attempt.
+This is correlation, not an isolated proof of cause: the disk subsequently exhausted
+its free space while extracting the DMG verification copy. Clearing attributes on
+the staged candidate does not alter runtime contents or canonical cutover ordering.
+
+The second attempt failed with `No space left on device` before installation.
+The installed identity remains `c5308881`; candidate commit `3d29b104` is not installed.
+The script removed its failed staging directory; this turn's signing test copy was
+also removed. Free space afterward was approximately 1.1 GiB. Installation remains
+blocked until sufficient staging space is available. The four targeted test files
+passed (13 tests); removing the candidate attribute-clear call made the contract
+test fail. No successful installation or restart verification is claimed.
 
 ## Verification boundary
 

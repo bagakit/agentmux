@@ -2010,7 +2010,7 @@
     {
       "feat_id": "f-29q8fbwba",
       "title": "macOS 候选包签名与 canonical 安装",
-      "status": "ready",
+      "status": "blocked",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
