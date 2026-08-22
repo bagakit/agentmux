@@ -16,6 +16,7 @@ export type CrashKind =
   | 'unhandled-rejection'
   | 'render-process-gone'
   | 'child-process-gone'
+  | 'startup-failure'
 
 /**
  * 这次崩溃是否致命到主进程本身。为真时接线层必须留证后 fail-fast——挂上 process 处理器会抑制
@@ -42,6 +43,15 @@ export type CrashEventInput =
       kind: 'child-process-gone'
       details: { type?: string; reason?: string; exitCode?: number; serviceName?: string; name?: string }
     }
+  | {
+      kind: 'startup-failure'
+      error: unknown
+      phase: string
+      configPath: string
+      attemptId: string
+      appVersion: string
+      pid: number
+    }
 
 /**
  * 归一后的崩溃记录。summary 是一眼能读懂的一句话，detail 承载栈或 URL 这种可能很长、也可能没有的补充。
@@ -52,6 +62,12 @@ export type CrashRecord = {
   kind: CrashKind
   summary: string
   detail?: string
+  phase?: string
+  configPath?: string
+  attemptId?: string
+  appVersion?: string
+  pid?: number
+  recoverable?: boolean
 }
 
 function messageOf(value: unknown): string {
@@ -116,6 +132,18 @@ export function crashRecordFrom(input: CrashEventInput, nowMs: number): CrashRec
       const exitCode = input.details.exitCode ?? 0
       const named = input.details.serviceName ?? input.details.name
       return buildRecord(at, input.kind, `${type} ${reason} (exit ${exitCode})`, named)
+    }
+    case 'startup-failure': {
+      const record = buildRecord(at, input.kind, `startup ${input.phase}: ${messageOf(input.error)}`, stackOf(input.error))
+      return {
+        ...record,
+        phase: input.phase,
+        configPath: input.configPath,
+        attemptId: input.attemptId,
+        appVersion: input.appVersion,
+        pid: input.pid,
+        recoverable: true
+      }
     }
   }
 }

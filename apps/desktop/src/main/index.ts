@@ -32,6 +32,7 @@ import { ContinuousProgressLoopManager } from './continuous-progress-loop-manage
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
+const startupAttemptId = randomUUID()
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 
 // Development launches and packaged launches must address the same durable user-data root. Electron's
@@ -142,6 +143,10 @@ function startPrimaryInstance(): void {
       dialog,
       disposeOwners,
       stderr: process.stderr,
+      persistDiagnostic: crashLog.appendSync.bind(crashLog),
+      attemptId: startupAttemptId,
+      appVersion: app.getVersion(),
+      pid: process.pid,
       app
     }))
 

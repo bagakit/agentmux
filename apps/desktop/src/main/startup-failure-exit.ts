@@ -1,4 +1,5 @@
 import { startupFailureNotice } from './startup-failure-notice.js'
+import { crashRecordFrom, type CrashRecord } from './crash-capture.js'
 
 /**
  * 启动失败时**做**的那几件事（说什么由 `startup-failure-notice.ts` 负责）。
@@ -25,6 +26,12 @@ export interface StartupFailureExitIo {
   disposeOwners(): Promise<void>
   /** 写一行诊断到 stderr（换行由实现补）。终端里启动的开发者读的是这个。 */
   writeDiagnostic(line: string): void
+  /** 同步写入可回看的结构化启动诊断；不能依赖 Renderer 或异步事件循环。 */
+  persistDiagnostic?(record: CrashRecord): void
+  /** 这次启动尝试的稳定关联字段。 */
+  attemptId?: string
+  appVersion?: string
+  pid?: number
   /** 结束进程。 */
   exit(code: number): void
 }
@@ -59,6 +66,10 @@ export interface StartupFailureHostApis {
   disposeOwners(): Promise<void>
   /** `process.stderr`，只用它的 `write`（换行在这里补，壳里不补）。 */
   stderr: { write(chunk: string): unknown }
+  persistDiagnostic?: (record: CrashRecord) => void
+  attemptId?: string
+  appVersion?: string
+  pid?: number
   /** `electron` 的 `app`，整个传进来（不摘 `exit`，见上）。 */
   app: { exit(code: number): void }
 }
@@ -77,6 +88,10 @@ export function startupFailureExitIo(host: StartupFailureHostApis): StartupFailu
     writeDiagnostic: (line) => {
       host.stderr.write(`${line}\n`)
     },
+    ...(host.persistDiagnostic ? { persistDiagnostic: host.persistDiagnostic } : {}),
+    ...(host.attemptId ? { attemptId: host.attemptId } : {}),
+    ...(host.appVersion ? { appVersion: host.appVersion } : {}),
+    ...(host.pid !== undefined ? { pid: host.pid } : {}),
     exit: (code) => host.app.exit(code)
   }
 }
@@ -98,6 +113,20 @@ export async function reportStartupFailureAndExit(
   io: StartupFailureExitIo
 ): Promise<void> {
   const notice = startupFailureNotice(error, { configPath: io.configPath })
+  try {
+    io.persistDiagnostic?.(crashRecordFrom({
+      kind: 'startup-failure',
+      error,
+      phase: 'bootstrap',
+      configPath: io.configPath,
+      attemptId: io.attemptId ?? 'unknown',
+      appVersion: io.appVersion ?? 'unknown',
+      pid: io.pid ?? 0
+    }, Date.now()))
+  } catch (diagnosticError) {
+    // 诊断只是回看线索；它写不进去时仍必须把原始启动错误、对话框和 exit(1) 送完。
+    io.writeDiagnostic(diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError))
+  }
   io.writeDiagnostic(error instanceof Error ? error.message : String(error))
   try {
     io.showErrorBox(notice.title, notice.body)
