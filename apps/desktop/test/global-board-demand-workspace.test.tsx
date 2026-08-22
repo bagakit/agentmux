@@ -30,7 +30,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  useAppStore.setState({ config, sessions: [makeSession()], demands: { 'task:one': { id: 'task:one', title: 'Build auth flow', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' })
+  useAppStore.setState({ config, sessions: [makeSession()], demands: { 'demand:one': { id: 'demand:one', title: 'Build auth flow', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' })
 })
 afterEach(async () => {
   await act(async () => root.unmount())
@@ -38,10 +38,10 @@ afterEach(async () => {
   useAppStore.setState(baseline, true)
 })
 
-describe('global Board task workspace', () => {
-  it('keeps Board visible and opens the selected task in the same surface', async () => {
+describe('global Board demand workspace', () => {
+  it('keeps Board visible and opens the selected demand in the same surface', async () => {
     await act(async () => root.render(createElement(GlobalBoardSurface)))
-    const card = container.querySelector('[data-demand-id="task:one"]') as HTMLButtonElement
+    const card = container.querySelector('[data-demand-id="demand:one"]') as HTMLButtonElement
     expect(card).toBeTruthy()
     await act(async () => card.click())
     expect(container.querySelector('.global-board-columns')).toBeTruthy()
@@ -50,13 +50,13 @@ describe('global Board task workspace', () => {
     expect(useAppStore.getState().mainSurface).toBe('board')
   })
 
-  it('keeps a persisted task visible when its Session is gone', async () => {
+  it('keeps a persisted demand visible when its Session is gone', async () => {
     useAppStore.setState({ sessions: [], demands: {
-      'task:recover': { id: 'task:recover', title: 'Recover the work surface', description: 'Keep context after restart', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['gone'], createdAt: 1, updatedAt: 3, source: 'default-topic' }
+      'demand:recover': { id: 'demand:recover', title: 'Recover the work surface', description: 'Keep context after restart', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['gone'], createdAt: 1, updatedAt: 3, source: 'default-topic' }
     } })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
-    expect(container.querySelector('[data-demand-id="task:recover"]')?.textContent).toContain('Recover the work surface')
-    await act(async () => (container.querySelector('[data-demand-id="task:recover"]') as HTMLButtonElement).click())
+    expect(container.querySelector('[data-demand-id="demand:recover"]')?.textContent).toContain('Recover the work surface')
+    await act(async () => (container.querySelector('[data-demand-id="demand:recover"]') as HTMLButtonElement).click())
     expect(container.querySelector('.global-demand-workspace')?.textContent).toContain('No Session linked yet')
   })
 })

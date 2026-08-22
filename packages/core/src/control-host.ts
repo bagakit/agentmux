@@ -160,35 +160,35 @@ function arrangeMode(value: unknown): AgentMuxArrangeMode {
   throw new AgentMuxError('Arrange mode is invalid.', 'INVALID_CONTROL_REQUEST')
 }
 
-function taskStatus(value: unknown): AgentMuxDemandStatus {
+function demandStatus(value: unknown): AgentMuxDemandStatus {
   if ((AGENTMUX_DEMAND_STATUSES as readonly unknown[]).includes(value)) return value as AgentMuxDemandStatus
-  throw new AgentMuxError('Task status is invalid.', 'INVALID_CONTROL_REQUEST')
+  throw new AgentMuxError('Demand status is invalid.', 'INVALID_CONTROL_REQUEST')
 }
-function taskPriority(value: unknown): AgentMuxDemandPriority {
+function demandPriority(value: unknown): AgentMuxDemandPriority {
   if ((AGENTMUX_DEMAND_PRIORITIES as readonly unknown[]).includes(value)) return value as AgentMuxDemandPriority
-  throw new AgentMuxError('Task priority is invalid.', 'INVALID_CONTROL_REQUEST')
+  throw new AgentMuxError('Demand priority is invalid.', 'INVALID_CONTROL_REQUEST')
 }
 function arrayOfIds(value: unknown, label: string): string[] {
   if (!Array.isArray(value) || value.length > 128) throw new AgentMuxError(`${label} are invalid.`, 'INVALID_CONTROL_REQUEST')
   return value.map((item) => id(item, `${label} are invalid.`, 'INVALID_CONTROL_REQUEST'))
 }
-function taskDecision(value: unknown): AgentMuxDemandDecision {
-  const source = object(value, 'Task decision is invalid.', 'INVALID_CONTROL_REQUEST')
+function demandDecision(value: unknown): AgentMuxDemandDecision {
+  const source = object(value, 'Demand decision is invalid.', 'INVALID_CONTROL_REQUEST')
   const candidates = Array.isArray(source.candidates) ? source.candidates.map((item) => {
-    const candidate = object(item, 'Task decision candidate is invalid.', 'INVALID_CONTROL_REQUEST')
-    return { projectId: id(candidate.projectId, 'Task decision project is invalid.', 'INVALID_CONTROL_REQUEST'), reason: text(candidate.reason, 'Task decision reason') }
+    const candidate = object(item, 'Demand decision candidate is invalid.', 'INVALID_CONTROL_REQUEST')
+    return { projectId: id(candidate.projectId, 'Demand decision project is invalid.', 'INVALID_CONTROL_REQUEST'), reason: text(candidate.reason, 'Demand decision reason') }
   }) : []
   const risk = source.risk
-  if (risk !== 'low' && risk !== 'medium' && risk !== 'high' && risk !== 'unknown') throw new AgentMuxError('Task decision risk is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (risk !== 'low' && risk !== 'medium' && risk !== 'high' && risk !== 'unknown') throw new AgentMuxError('Demand decision risk is invalid.', 'INVALID_CONTROL_REQUEST')
   const confirmation = source.confirmation
-  if (confirmation !== 'automatic' && confirmation !== 'user' && confirmation !== 'pending') throw new AgentMuxError('Task decision confirmation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (confirmation !== 'automatic' && confirmation !== 'user' && confirmation !== 'pending') throw new AgentMuxError('Demand decision confirmation is invalid.', 'INVALID_CONTROL_REQUEST')
   return {
-    input: text(source.input, 'Task decision input'), candidates,
-    selectedProjectId: source.selectedProjectId === null ? null : id(source.selectedProjectId, 'Task decision project is invalid.', 'INVALID_CONTROL_REQUEST'),
+    input: text(source.input, 'Demand decision input'), candidates,
+    selectedProjectId: source.selectedProjectId === null ? null : id(source.selectedProjectId, 'Demand decision project is invalid.', 'INVALID_CONTROL_REQUEST'),
     risk, confirmation,
-    wikiVersion: source.wikiVersion === null || source.wikiVersion === undefined ? null : id(source.wikiVersion, 'Task decision Wiki version is invalid.', 'INVALID_CONTROL_REQUEST'),
-    recordedAt: finiteNumber(source.recordedAt, 'Task decision timestamp is invalid.'),
-    sourceSessionId: source.sourceSessionId === null || source.sourceSessionId === undefined ? null : id(source.sourceSessionId, 'Task decision Session is invalid.', 'INVALID_CONTROL_REQUEST')
+    wikiVersion: source.wikiVersion === null || source.wikiVersion === undefined ? null : id(source.wikiVersion, 'Demand decision Wiki version is invalid.', 'INVALID_CONTROL_REQUEST'),
+    recordedAt: finiteNumber(source.recordedAt, 'Demand decision timestamp is invalid.'),
+    sourceSessionId: source.sourceSessionId === null || source.sourceSessionId === undefined ? null : id(source.sourceSessionId, 'Demand decision Session is invalid.', 'INVALID_CONTROL_REQUEST')
   }
 }
 
@@ -262,42 +262,42 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
-  if (source.operation === 'task.list') {
+  if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
-  if (source.operation === 'task.show' || source.operation === 'task.decision-log') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, taskId: id(source.taskId, 'Task id is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.operation === 'demand.show' || source.operation === 'demand.decision-log') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
-  if (source.operation === 'task.link-session') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, taskId: id(source.taskId, 'Task id is invalid.', 'INVALID_CONTROL_REQUEST'), sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.operation === 'demand.link-session') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
-  if (source.operation === 'task.link-project') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, taskId: id(source.taskId, 'Task id is invalid.', 'INVALID_CONTROL_REQUEST'), projectId: id(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.operation === 'demand.link-project') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), projectId: id(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
-  if (source.operation === 'task.create') {
-    const title = text(source.title, 'Task title')
-    const sessionIds = source.sessionIds === undefined ? undefined : arrayOfIds(source.sessionIds, 'Task Session ids')
+  if (source.operation === 'demand.create') {
+    const title = text(source.title, 'Demand title')
+    const sessionIds = source.sessionIds === undefined ? undefined : arrayOfIds(source.sessionIds, 'Demand Session ids')
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, title,
-      ...(source.description === undefined ? {} : { description: text(source.description, 'Task description') }),
+      ...(source.description === undefined ? {} : { description: text(source.description, 'Demand description') }),
       ...(source.projectId === undefined ? {} : { projectId: id(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST') }),
-      ...(source.priority === undefined ? {} : { priority: taskPriority(source.priority) }),
-      ...(source.status === undefined ? {} : { status: taskStatus(source.status) }),
+      ...(source.priority === undefined ? {} : { priority: demandPriority(source.priority) }),
+      ...(source.status === undefined ? {} : { status: demandStatus(source.status) }),
       ...(sessionIds ? { sessionIds } : {}),
-      ...(source.decision === undefined ? {} : { decision: taskDecision(source.decision) })
+      ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) })
     }
   }
-  if (source.operation === 'task.update') {
-    const patchSource = object(source.patch, 'Task patch is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'demand.update') {
+    const patchSource = object(source.patch, 'Demand patch is invalid.', 'INVALID_CONTROL_REQUEST')
     const patch: AgentMuxControlDemandUpdateRequest['patch'] = {}
-    if (patchSource.title !== undefined) patch.title = text(patchSource.title, 'Task title')
-    if (patchSource.description !== undefined) patch.description = text(patchSource.description, 'Task description')
-    if (patchSource.status !== undefined) patch.status = taskStatus(patchSource.status)
-    if (patchSource.priority !== undefined) patch.priority = taskPriority(patchSource.priority)
+    if (patchSource.title !== undefined) patch.title = text(patchSource.title, 'Demand title')
+    if (patchSource.description !== undefined) patch.description = text(patchSource.description, 'Demand description')
+    if (patchSource.status !== undefined) patch.status = demandStatus(patchSource.status)
+    if (patchSource.priority !== undefined) patch.priority = demandPriority(patchSource.priority)
     if (patchSource.projectId !== undefined) patch.projectId = patchSource.projectId === null ? null : id(patchSource.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST')
     if (patchSource.projectName !== undefined) patch.projectName = patchSource.projectName === null ? null : text(patchSource.projectName, 'Project name')
-    if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Task Session ids')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, taskId: id(source.taskId, 'Task id is invalid.', 'INVALID_CONTROL_REQUEST'), patch, ...(source.decision === undefined ? {} : { decision: taskDecision(source.decision) }) }
+    if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch, ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
   }
   if (source.operation === 'arrange') {
     const target = tabAnchor(source.target)
@@ -562,25 +562,25 @@ function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
   return result
 }
 
-function parseTask(value: unknown): AgentMuxDemand {
-  const source = object(value, 'Control task is invalid.', 'CONTROL_PROTOCOL_ERROR')
+function parseDemand(value: unknown): AgentMuxDemand {
+  const source = object(value, 'Control demand is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return {
-    id: id(source.id, 'Control task id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
-    title: text(source.title, 'Control task title', 'CONTROL_PROTOCOL_ERROR'),
-    description: text(source.description, 'Control task description', 'CONTROL_PROTOCOL_ERROR'),
-    status: taskStatus(source.status) as AgentMuxDemand['status'],
-    priority: taskPriority(source.priority) as AgentMuxDemand['priority'],
-    projectId: source.projectId === null ? null : id(source.projectId, 'Control task project is invalid.', 'CONTROL_PROTOCOL_ERROR'),
-    projectName: source.projectName === null ? null : text(source.projectName, 'Control task project name', 'CONTROL_PROTOCOL_ERROR'),
-    sessionIds: arrayOfIds(source.sessionIds, 'Control task Session ids'),
-    createdAt: finiteNumber(source.createdAt, 'Control task created timestamp is invalid.'),
-    updatedAt: finiteNumber(source.updatedAt, 'Control task updated timestamp is invalid.'),
-    source: source.source === 'default-topic' || source.source === 'session' ? source.source : (() => { throw new AgentMuxError('Control task source is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
+    id: id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    title: text(source.title, 'Control demand title', 'CONTROL_PROTOCOL_ERROR'),
+    description: text(source.description, 'Control demand description', 'CONTROL_PROTOCOL_ERROR'),
+    status: demandStatus(source.status) as AgentMuxDemand['status'],
+    priority: demandPriority(source.priority) as AgentMuxDemand['priority'],
+    projectId: source.projectId === null ? null : id(source.projectId, 'Control demand project is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    projectName: source.projectName === null ? null : text(source.projectName, 'Control demand project name', 'CONTROL_PROTOCOL_ERROR'),
+    sessionIds: arrayOfIds(source.sessionIds, 'Control demand Session ids'),
+    createdAt: finiteNumber(source.createdAt, 'Control demand created timestamp is invalid.'),
+    updatedAt: finiteNumber(source.updatedAt, 'Control demand updated timestamp is invalid.'),
+    source: source.source === 'default-topic' || source.source === 'session' ? source.source : (() => { throw new AgentMuxError('Control demand source is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   }
 }
-function parseTaskDecisions(value: unknown): AgentMuxDemandDecision[] {
-  if (!Array.isArray(value)) throw new AgentMuxError('Control task decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return value.map((item) => taskDecision(item))
+function parseDemandDecisions(value: unknown): AgentMuxDemandDecision[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Control demand decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value.map((item) => demandDecision(item))
 }
 
 function successReceipt(request: AgentMuxControlRequest, result: AgentMuxControlResult): AgentMuxControlSuccessReceipt {
@@ -611,14 +611,14 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (operation === 'task.list') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tasks: Array.isArray(result.tasks) ? result.tasks.map(parseTask) : (() => { throw new AgentMuxError('Control task list is invalid.', 'CONTROL_PROTOCOL_ERROR') })() } }
-  if (operation === 'task.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { task: result.task === null ? null : parseTask(result.task) } }
-  if (operation === 'task.create' || operation === 'task.update' || operation === 'task.link-session' || operation === 'task.link-project') {
-    const task = parseTask(result.task)
-    const receipt = object(result.receipt, 'Control task receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { task, receipt: { taskId: id(receipt.taskId, 'Control task receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'task.link-session' ? { sessionId: id(receipt.sessionId, 'Control task Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'task.link-project' ? { projectId: id(receipt.projectId, 'Control task project id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'task.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control task receipt timestamp is invalid.') } : {}), ...(operation === 'task.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control task receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
+  if (operation === 'demand.list') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demands: Array.isArray(result.demands) ? result.demands.map(parseDemand) : (() => { throw new AgentMuxError('Control demand list is invalid.', 'CONTROL_PROTOCOL_ERROR') })() } }
+  if (operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: result.demand === null ? null : parseDemand(result.demand) } }
+  if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.link-session' || operation === 'demand.link-project') {
+    const demand = parseDemand(result.demand)
+    const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: id(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
   }
-  if (operation === 'task.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { taskId: id(result.taskId, 'Control task id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseTaskDecisions(result.decisions) } }
+  if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
   if (operation === 'browser.run') {
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -1141,4 +1141,3 @@ export async function subscribeAgentMuxControl(
     })
   } catch (error) { dispose(); throw error }
 }
-
