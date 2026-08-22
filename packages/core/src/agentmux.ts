@@ -9,12 +9,12 @@ import { AgentMuxClient } from './client.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
-  AGENTMUX_TASK_PRIORITIES,
-  AGENTMUX_TASK_STATUSES,
+  AGENTMUX_DEMAND_PRIORITIES,
+  AGENTMUX_DEMAND_STATUSES,
   type AgentMuxControlCaller,
   type AgentMuxOpenDestination
-  , type AgentMuxTaskPriority
-  , type AgentMuxTaskStatus
+  , type AgentMuxDemandPriority
+  , type AgentMuxDemandStatus
 } from './control.js'
 import { requestAgentMuxControl, subscribeAgentMuxControl } from './control-host.js'
 import { diagnoseAgentMux } from './doctor.js'
@@ -263,29 +263,29 @@ async function taskCommand(args: readonly string[]): Promise<number> {
     const flags = parseFlags(args.slice(1), { '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value', '--risk': 'value', '--confirm': 'value', '--wiki-version': 'value' })
     const priority = flags.values.get('--priority')
     const status = flags.values.get('--status')
-    if (priority && !(AGENTMUX_TASK_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
-    if (status && !(AGENTMUX_TASK_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
+    if (priority && !(AGENTMUX_DEMAND_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
+    if (status && !(AGENTMUX_DEMAND_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
     const description = flags.values.get('--description'); const projectId = flags.values.get('--project')
     const risk = flags.values.get('--risk') ?? 'unknown'; const confirmation = flags.values.get('--confirm') ?? 'pending'
     if (!['low', 'medium', 'high', 'unknown'].includes(risk)) throw cliError(`Unknown task risk: ${risk}`)
     if (!['automatic', 'user', 'pending'].includes(confirmation)) throw cliError(`Unknown task confirmation: ${confirmation}`)
     const decision = { input: requiredData(flags, '--title', 'Task title'), candidates: projectId ? [{ projectId, reason: 'explicit CLI project' }] : [], selectedProjectId: projectId ?? null, risk: risk as 'low' | 'medium' | 'high' | 'unknown', confirmation: confirmation as 'automatic' | 'user' | 'pending', wikiVersion: flags.values.get('--wiki-version') ?? null, recordedAt: Date.now(), sourceSessionId: process.env.AGENTMUX_AGENT_SESSION_ID ?? null }
-    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.create', title: requiredData(flags, '--title', 'Task title'), ...(description === undefined ? {} : { description }), ...(projectId === undefined ? {} : { projectId }), ...(priority ? { priority: priority as AgentMuxTaskPriority } : {}), ...(status ? { status: status as AgentMuxTaskStatus } : {}), ...(flags.values.has('--session') ? { sessionIds: [identifier(flags.values.get('--session'), 'Agent Session id')] } : {}), decision })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.create', title: requiredData(flags, '--title', 'Task title'), ...(description === undefined ? {} : { description }), ...(projectId === undefined ? {} : { projectId }), ...(priority ? { priority: priority as AgentMuxDemandPriority } : {}), ...(status ? { status: status as AgentMuxDemandStatus } : {}), ...(flags.values.has('--session') ? { sessionIds: [identifier(flags.values.get('--session'), 'Agent Session id')] } : {}), decision })
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
   if (action === 'update') {
     const flags = parseFlags(args.slice(1), { '--task': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value' })
     const priority = flags.values.get('--priority'); const status = flags.values.get('--status')
-    if (priority && !(AGENTMUX_TASK_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
-    if (status && !(AGENTMUX_TASK_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
+    if (priority && !(AGENTMUX_DEMAND_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
+    if (status && !(AGENTMUX_DEMAND_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
     const patch: Record<string, unknown> = {}
     for (const [flag, key] of [['--title', 'title'], ['--description', 'description'], ['--project', 'projectId'], ['--priority', 'priority'], ['--status', 'status'], ['--session', 'sessionIds']] as const) {
       if (!flags.values.has(flag)) continue
       patch[key] = flag === '--session' ? [identifier(flags.values.get(flag), 'Agent Session id')] : flags.values.get(flag)
     }
     if (Object.keys(patch).length === 0) throw cliError('task update requires at least one patch option.')
-    const typedPatch = { ...patch, ...(typeof patch.priority === 'string' ? { priority: patch.priority as AgentMuxTaskPriority } : {}), ...(typeof patch.status === 'string' ? { status: patch.status as AgentMuxTaskStatus } : {}) }
+    const typedPatch = { ...patch, ...(typeof patch.priority === 'string' ? { priority: patch.priority as AgentMuxDemandPriority } : {}), ...(typeof patch.status === 'string' ? { status: patch.status as AgentMuxDemandStatus } : {}) }
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.update', taskId: identifier(flags.values.get('--task'), 'Task id'), patch: typedPatch })
     printSuccess(receipt.operation, receipt.result)
     return 0

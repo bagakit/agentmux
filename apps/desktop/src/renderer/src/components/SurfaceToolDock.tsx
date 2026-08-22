@@ -30,7 +30,7 @@ import {
   BROWSER_TOOLBAR_ITEM_ORDER,
   type BrowserToolbarItem
 } from '../lib/browser-toolbar'
-import { boardTaskColumns, projectBoardTasks, type BoardTaskStatus } from '../lib/global-task-board'
+import { demandColumns, projectDemands, type DemandStatus } from '../lib/global-task-board'
 import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import type { MainSurface } from '../store'
@@ -468,11 +468,11 @@ export function BoardToolList({ hostId }: { hostId: string }) {
   const boardRows = useBoardRows()
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
-  const boardTasks = useAppStore((state) => state.boardTasks)
-  const selectedTaskId = useAppStore((state) => state.selectedBoardTaskId)
-  const setSelectedTask = useAppStore((state) => state.setSelectedBoardTask)
-  const tasks = projectBoardTasks(config, sessions, boardTasks)
-  const columns = boardTaskColumns(tasks)
+  const demands = useAppStore((state) => state.demands)
+  const selectedDemandId = useAppStore((state) => state.selectedDemandId)
+  const setSelectedTask = useAppStore((state) => state.setSelectedDemand)
+  const tasks = projectDemands(config, sessions, demands)
+  const columns = demandColumns(tasks)
   if (tasks.length === 0 && boardRows.error && boardRows.rows.length === 0) {
     return <div className="surface-tool-error" role="alert">{boardRows.error}</div>
   }
@@ -481,8 +481,8 @@ export function BoardToolList({ hostId }: { hostId: string }) {
       <div className="board-tool-context"><span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span><em>{tasks.length} task{tasks.length === 1 ? '' : 's'}</em></div>
       {tasks.length === 0 && boardRows.rows.length > 0 ? boardRows.rows.slice(0, 5).map((row) => <div className="board-tool-row__empty" key={row.id}>{row.name}</div>) : null}
       {tasks.length === 0 && boardRows.rows.length === 0 ? <div className="board-tool-row__empty">No tasks yet. Use Default Session to create one.</div> : null}
-      {(['working', 'needs-you', 'inbox', 'done'] as BoardTaskStatus[]).flatMap((status) => columns[status].slice(0, 5).map((task) => (
-        <button className={`board-tool-task ${selectedTaskId === task.id ? 'selected' : ''}`} type="button" key={task.id} onClick={() => setSelectedTask(task.id)} title={task.title}>
+      {(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[]).flatMap((status) => columns[status].slice(0, 5).map((task) => (
+        <button className={`board-tool-task ${selectedDemandId === task.id ? 'selected' : ''}`} type="button" key={task.id} onClick={() => setSelectedTask(task.id)} title={task.title}>
           <StatusDot status={task.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
           <span><strong>{task.title}</strong><small>{task.projectName ?? 'Global'} · {status}</small></span>
         </button>

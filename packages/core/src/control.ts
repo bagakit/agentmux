@@ -205,24 +205,26 @@ export type AgentMuxControlStopRequest = RequestBase & {
   operation: 'stop'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
 }
 
-export const AGENTMUX_TASK_STATUSES = ['inbox', 'working', 'needs-you', 'done'] as const
-export type AgentMuxTaskStatus = typeof AGENTMUX_TASK_STATUSES[number]
-export const AGENTMUX_TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
-export type AgentMuxTaskPriority = typeof AGENTMUX_TASK_PRIORITIES[number]
-export type AgentMuxTask = {
+export const AGENTMUX_DEMAND_STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as const
+export type AgentMuxDemandStatus = typeof AGENTMUX_DEMAND_STATUSES[number]
+export const AGENTMUX_DEMAND_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
+export type AgentMuxDemandPriority = typeof AGENTMUX_DEMAND_PRIORITIES[number]
+export type AgentMuxDemand = {
   id: string
   title: string
   description: string
-  status: AgentMuxTaskStatus
-  priority: AgentMuxTaskPriority
+  status: AgentMuxDemandStatus
+  priority: AgentMuxDemandPriority
   projectId: string | null
   projectName: string | null
+  assigneeExecutorId?: string | null
+  activityLog?: string[]
   sessionIds: string[]
   createdAt: number
   updatedAt: number
   source: 'default-topic' | 'session'
 }
-export type AgentMuxTaskDecision = {
+export type AgentMuxDemandDecision = {
   input: string
   candidates: Array<{ projectId: string; reason: string }>
   selectedProjectId: string | null
@@ -232,27 +234,27 @@ export type AgentMuxTaskDecision = {
   recordedAt: number
   sourceSessionId: string | null
 }
-export type AgentMuxControlTaskListRequest = RequestBase & { operation: 'task.list' }
-export type AgentMuxControlTaskShowRequest = RequestBase & { operation: 'task.show'; taskId: string }
-export type AgentMuxControlTaskCreateRequest = RequestBase & {
+export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'task.list' }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'task.show'; taskId: string }
+export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'task.create'
   title: string
   description?: string
   projectId?: string
-  priority?: AgentMuxTaskPriority
-  status?: AgentMuxTaskStatus
+  priority?: AgentMuxDemandPriority
+  status?: AgentMuxDemandStatus
   sessionIds?: string[]
-  decision?: AgentMuxTaskDecision
+  decision?: AgentMuxDemandDecision
 }
-export type AgentMuxControlTaskUpdateRequest = RequestBase & {
+export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'task.update'
   taskId: string
-  patch: Partial<Pick<AgentMuxTask, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds'>>
-  decision?: AgentMuxTaskDecision
+  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds'>>
+  decision?: AgentMuxDemandDecision
 }
-export type AgentMuxControlTaskLinkSessionRequest = RequestBase & { operation: 'task.link-session'; taskId: string; sessionId: string }
-export type AgentMuxControlTaskLinkProjectRequest = RequestBase & { operation: 'task.link-project'; taskId: string; projectId: string }
-export type AgentMuxControlTaskDecisionLogRequest = RequestBase & { operation: 'task.decision-log'; taskId: string }
+export type AgentMuxControlDemandLinkSessionRequest = RequestBase & { operation: 'task.link-session'; taskId: string; sessionId: string }
+export type AgentMuxControlDemandLinkProjectRequest = RequestBase & { operation: 'task.link-project'; taskId: string; projectId: string }
+export type AgentMuxControlDemandDecisionLogRequest = RequestBase & { operation: 'task.decision-log'; taskId: string }
 /**
  * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
  *
@@ -383,13 +385,13 @@ export type AgentMuxControlRequest =
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
-  | AgentMuxControlTaskListRequest
-  | AgentMuxControlTaskShowRequest
-  | AgentMuxControlTaskCreateRequest
-  | AgentMuxControlTaskUpdateRequest
-  | AgentMuxControlTaskLinkSessionRequest
-  | AgentMuxControlTaskLinkProjectRequest
-  | AgentMuxControlTaskDecisionLogRequest
+  | AgentMuxControlDemandListRequest
+  | AgentMuxControlDemandShowRequest
+  | AgentMuxControlDemandCreateRequest
+  | AgentMuxControlDemandUpdateRequest
+  | AgentMuxControlDemandLinkSessionRequest
+  | AgentMuxControlDemandLinkProjectRequest
+  | AgentMuxControlDemandDecisionLogRequest
   | AgentMuxControlBrowserRunRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -461,13 +463,13 @@ export type AgentMuxControlResult =
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
-  | { operation: 'task.list'; tasks: AgentMuxTask[] }
-  | { operation: 'task.show'; task: AgentMuxTask | null }
-  | { operation: 'task.create'; task: AgentMuxTask; receipt: { taskId: string; createdAt: number } }
-  | { operation: 'task.update'; task: AgentMuxTask; receipt: { taskId: string; updatedAt: number } }
-  | { operation: 'task.link-session'; task: AgentMuxTask; receipt: { taskId: string; sessionId: string } }
-  | { operation: 'task.link-project'; task: AgentMuxTask; receipt: { taskId: string; projectId: string } }
-  | { operation: 'task.decision-log'; taskId: string; decisions: AgentMuxTaskDecision[] }
+  | { operation: 'task.list'; tasks: AgentMuxDemand[] }
+  | { operation: 'task.show'; task: AgentMuxDemand | null }
+  | { operation: 'task.create'; task: AgentMuxDemand; receipt: { taskId: string; createdAt: number } }
+  | { operation: 'task.update'; task: AgentMuxDemand; receipt: { taskId: string; updatedAt: number } }
+  | { operation: 'task.link-session'; task: AgentMuxDemand; receipt: { taskId: string; sessionId: string } }
+  | { operation: 'task.link-project'; task: AgentMuxDemand; receipt: { taskId: string; projectId: string } }
+  | { operation: 'task.decision-log'; taskId: string; decisions: AgentMuxDemandDecision[] }
   // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
   // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
   | {

@@ -23,7 +23,7 @@ describe('task CUI control contract', () => {
 
   it('parses stable JSON task receipts', () => {
     const receipt = parseAgentMuxControlReceipt({
-      ...base, ok: true, operation: 'task.list', result: { tasks: [{ id: 'task-1', title: 'One', description: '', status: 'inbox', priority: 'normal', projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' }] }
+      ...base, ok: true, operation: 'task.list', result: { tasks: [{ id: 'task-1', title: 'One', description: '', status: 'backlog', priority: 'normal', projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' }] }
     })
     expect(receipt.ok && receipt.result.tasks[0]?.id).toBe('task-1')
   })

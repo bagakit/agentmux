@@ -70,6 +70,7 @@ function DesktopApp() {
   const layouts = useAppStore((state) => state.layouts)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
+  const boardOwnsGlobalSurface = mainSurface === 'board'
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -230,15 +231,15 @@ function DesktopApp() {
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
-        className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}
+        className={`app-shell ${boardOwnsGlobalSurface || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
         aria-hidden={settingsRoute ? true : undefined}
         inert={Boolean(settingsRoute)}
       >
-      {projectRailOpen ? (
+      {!boardOwnsGlobalSurface && projectRailOpen ? (
         <ProjectRail
           onOpenSettings={openSettings}
         />
-      ) : (
+      ) : boardOwnsGlobalSurface ? null : (
         <ProjectRailToolbar
           collapsed
           onOpenSettings={openSettings}

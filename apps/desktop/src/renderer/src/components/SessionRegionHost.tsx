@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import type { BoardTaskArrangement } from '../lib/global-task-board'
+import type { DemandArrangement } from '../lib/global-task-board'
 
-export function sessionRegionHostClassName(arrangement: BoardTaskArrangement): string {
+export function sessionRegionHostClassName(arrangement: DemandArrangement): string {
   return `session-region-host session-region-host--${arrangement}`
 }
 
@@ -11,7 +11,7 @@ export function SessionRegionHost({
   children,
   className = ''
 }: {
-  arrangement: BoardTaskArrangement
+  arrangement: DemandArrangement
   children: ReactNode
   className?: string
 }) {

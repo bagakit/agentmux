@@ -28,7 +28,7 @@ function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: nu
   } as SessionSnapshot
 }
 
-describe('Global Agents attention inbox', () => {
+describe('Global Agents card board', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement

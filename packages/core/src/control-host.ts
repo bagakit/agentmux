@@ -24,13 +24,13 @@ import {
   type AgentMuxControlReceipt,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
-  type AgentMuxControlTaskUpdateRequest,
-  AGENTMUX_TASK_PRIORITIES,
-  AGENTMUX_TASK_STATUSES,
-  type AgentMuxTaskDecision,
-  type AgentMuxTask,
-  type AgentMuxTaskPriority,
-  type AgentMuxTaskStatus,
+  type AgentMuxControlDemandUpdateRequest,
+  AGENTMUX_DEMAND_PRIORITIES,
+  AGENTMUX_DEMAND_STATUSES,
+  type AgentMuxDemandDecision,
+  type AgentMuxDemand,
+  type AgentMuxDemandPriority,
+  type AgentMuxDemandStatus,
   type AgentMuxControlSuccessReceipt,
   type AgentMuxInspectedRegion,
   type AgentMuxMessageTarget,
@@ -160,19 +160,19 @@ function arrangeMode(value: unknown): AgentMuxArrangeMode {
   throw new AgentMuxError('Arrange mode is invalid.', 'INVALID_CONTROL_REQUEST')
 }
 
-function taskStatus(value: unknown): AgentMuxTaskStatus {
-  if ((AGENTMUX_TASK_STATUSES as readonly unknown[]).includes(value)) return value as AgentMuxTaskStatus
+function taskStatus(value: unknown): AgentMuxDemandStatus {
+  if ((AGENTMUX_DEMAND_STATUSES as readonly unknown[]).includes(value)) return value as AgentMuxDemandStatus
   throw new AgentMuxError('Task status is invalid.', 'INVALID_CONTROL_REQUEST')
 }
-function taskPriority(value: unknown): AgentMuxTaskPriority {
-  if ((AGENTMUX_TASK_PRIORITIES as readonly unknown[]).includes(value)) return value as AgentMuxTaskPriority
+function taskPriority(value: unknown): AgentMuxDemandPriority {
+  if ((AGENTMUX_DEMAND_PRIORITIES as readonly unknown[]).includes(value)) return value as AgentMuxDemandPriority
   throw new AgentMuxError('Task priority is invalid.', 'INVALID_CONTROL_REQUEST')
 }
 function arrayOfIds(value: unknown, label: string): string[] {
   if (!Array.isArray(value) || value.length > 128) throw new AgentMuxError(`${label} are invalid.`, 'INVALID_CONTROL_REQUEST')
   return value.map((item) => id(item, `${label} are invalid.`, 'INVALID_CONTROL_REQUEST'))
 }
-function taskDecision(value: unknown): AgentMuxTaskDecision {
+function taskDecision(value: unknown): AgentMuxDemandDecision {
   const source = object(value, 'Task decision is invalid.', 'INVALID_CONTROL_REQUEST')
   const candidates = Array.isArray(source.candidates) ? source.candidates.map((item) => {
     const candidate = object(item, 'Task decision candidate is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -289,7 +289,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   }
   if (source.operation === 'task.update') {
     const patchSource = object(source.patch, 'Task patch is invalid.', 'INVALID_CONTROL_REQUEST')
-    const patch: AgentMuxControlTaskUpdateRequest['patch'] = {}
+    const patch: AgentMuxControlDemandUpdateRequest['patch'] = {}
     if (patchSource.title !== undefined) patch.title = text(patchSource.title, 'Task title')
     if (patchSource.description !== undefined) patch.description = text(patchSource.description, 'Task description')
     if (patchSource.status !== undefined) patch.status = taskStatus(patchSource.status)
@@ -562,14 +562,14 @@ function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
   return result
 }
 
-function parseTask(value: unknown): AgentMuxTask {
+function parseTask(value: unknown): AgentMuxDemand {
   const source = object(value, 'Control task is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return {
     id: id(source.id, 'Control task id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     title: text(source.title, 'Control task title', 'CONTROL_PROTOCOL_ERROR'),
     description: text(source.description, 'Control task description', 'CONTROL_PROTOCOL_ERROR'),
-    status: taskStatus(source.status) as AgentMuxTask['status'],
-    priority: taskPriority(source.priority) as AgentMuxTask['priority'],
+    status: taskStatus(source.status) as AgentMuxDemand['status'],
+    priority: taskPriority(source.priority) as AgentMuxDemand['priority'],
     projectId: source.projectId === null ? null : id(source.projectId, 'Control task project is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     projectName: source.projectName === null ? null : text(source.projectName, 'Control task project name', 'CONTROL_PROTOCOL_ERROR'),
     sessionIds: arrayOfIds(source.sessionIds, 'Control task Session ids'),
@@ -578,7 +578,7 @@ function parseTask(value: unknown): AgentMuxTask {
     source: source.source === 'default-topic' || source.source === 'session' ? source.source : (() => { throw new AgentMuxError('Control task source is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   }
 }
-function parseTaskDecisions(value: unknown): AgentMuxTaskDecision[] {
+function parseTaskDecisions(value: unknown): AgentMuxDemandDecision[] {
   if (!Array.isArray(value)) throw new AgentMuxError('Control task decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value.map((item) => taskDecision(item))
 }

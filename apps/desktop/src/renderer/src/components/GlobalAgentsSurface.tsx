@@ -1,20 +1,21 @@
-import { AlertCircle, CheckCircle2, CircleDot, Inbox, PlayCircle, RotateCcw, Users } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Inbox, PanelRightClose, PlayCircle, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, type RosterRow } from '../lib/agent-roster'
 import { isNeedsYouState } from '../lib/attention-vocabulary'
+import { workspaceForSession } from '../lib/workbench-tabs'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
+import { SessionObservationRegions } from './SessionObservationRegions'
+import { DefaultSessionEntry } from './DefaultSessionEntry'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
-
-const BUCKET_META: Record<AgentBucket, { label: string; description: string; icon: typeof Inbox }> = {
-  'needs-you': { label: 'Needs you', description: 'Requests and blocked work waiting for a decision', icon: Inbox },
-  working: { label: 'Working', description: 'Agents currently producing work', icon: PlayCircle },
-  done: { label: 'Results', description: 'Completed work ready to inspect', icon: CheckCircle2 },
-  error: { label: 'Error', description: 'Agents that stopped with an error', icon: AlertCircle }
+const BUCKET_META = {
+  'needs-you': { label: 'Needs you', icon: Inbox },
+  working: { label: 'Working', icon: PlayCircle },
+  done: { label: 'Results', icon: CheckCircle2 },
+  error: { label: 'Error', icon: AlertCircle }
 }
-
 function bucketFor(row: RosterRow): AgentBucket {
   if (isNeedsYouState(row.state)) return 'needs-you'
   if (row.state === 'error') return 'error'
@@ -22,79 +23,55 @@ function bucketFor(row: RosterRow): AgentBucket {
   return 'working'
 }
 
-function AgentInboxRow({ row, onSelect, onInspect }: { row: RosterRow; onSelect: (id: string) => void; onInspect: (id: string) => void }) {
-  return (
-    <button
-      type="button"
-      className="global-agents-row"
-      data-session-id={row.sessionId}
-      data-attention={row.attention ?? undefined}
-      onClick={() => onSelect(row.sessionId)}
-      aria-label={`${row.label} · ${row.state}${row.awaitingReply ? ' · awaiting your reply' : ''}`}
-    >
-      <span className={`global-agents-row__status status status--${row.state}`} aria-hidden="true"><CircleDot size={12} /></span>
-      <span className="global-agents-row__identity">
-        <strong>{row.label}</strong>
-        <small>{agentProviderLabel(row.providerId)} · {row.workspacePath.split('/').filter(Boolean).slice(-2).join('/') || 'workspace'}</small>
-      </span>
-      {row.awaitingReply ? <span className="global-agents-row__reply">Reply</span> : null}
-      <AgentProviderIcon providerId={row.providerId} size={16} />
-      {row.awaitingReply || row.attention === 'needs-you' ? (
-        <span
-          role="button"
-          tabIndex={0}
-          className="global-agents-row__open"
-          onClick={(event) => { event.stopPropagation(); onInspect(row.sessionId) }}
-          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onInspect(row.sessionId) } }}
-        >Review here <RotateCcw size={12} /></span>
-      ) : <span className="global-agents-row__open" aria-hidden="true">Open <RotateCcw size={12} /></span>}
-    </button>
-  )
-}
-
 export function GlobalAgentsSurface() {
   const sessions = useAppStore((state) => state.sessions)
+  const config = useAppStore((state) => state.config)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
-  const selectSession = useAppStore((state) => state.selectSession)
-  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
+  const names = useAppStore((state) => state.agentNames)
+  const selectedId = useAppStore((state) => state.selectedAgentSessionId)
+  const setSelected = useAppStore((state) => state.setSelectedAgentSession)
+  const [query, setQuery] = useState('')
+  const [project, setProject] = useState('all')
+  const [requestId, setRequestId] = useState<string | null>(null)
   const rows = useMemo(() => buildAgentRoster({ sessions, providerCatalog }), [sessions, providerCatalog])
-  const groups = useMemo(() => {
-    const grouped: Record<AgentBucket, RosterRow[]> = { 'needs-you': [], working: [], done: [], error: [] }
-    for (const row of rows) grouped[bucketFor(row)].push(row)
-    return grouped
-  }, [rows])
-
-  return (
-    <section className="global-agents-surface" aria-label="Agents">
-      <header className="global-agents-header">
-        <div>
-          <span className="global-agents-eyebrow"><Users size={14} /> Global attention inbox</span>
-          <h1>Agents</h1>
-          <p>See who is working, who needs you, and which results are ready to review.</p>
+  const filtered = rows.filter((row) => {
+    const session = sessions.find((entry) => entry.id === row.sessionId)!
+    return (project === 'all' || workspaceForSession(config, session)?.id === project)
+      && `${names[row.sessionId] ?? row.label} ${row.workspacePath} ${row.providerId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+  })
+  const selected = rows.find((row) => row.sessionId === selectedId)
+  return <section className={`global-board-surface global-agents-board ${selectedId ? 'global-board-surface--task-open' : ''}`} aria-label="Agents">
+    <div className="global-board-main">
+      <header className="global-board-toolbar">
+        <div className="global-board-toolbar__scope"><Users size={14} /><strong>Agents</strong><span className="global-board-toolbar__crumb">Sessions · Global</span></div>
+        <div className="global-board-toolbar__controls">
+          <label className="global-board-search"><Search size={13} /><input aria-label="Search agents" placeholder="Search agents" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-select">Project<select aria-label="Agent project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
-        <span className="global-agents-count">{rows.length} {rows.length === 1 ? 'Agent' : 'Agents'}</span>
       </header>
-      {rows.length === 0 ? (
-        <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div>
-      ) : (
-        <div className="global-agents-groups">
-          {(Object.keys(BUCKET_META) as AgentBucket[]).map((bucket) => {
-            const meta = BUCKET_META[bucket]
-            const Icon = meta.icon
-            const bucketRows = groups[bucket]
-            if (bucketRows.length === 0) return null
-            return (
-              <section key={bucket} className="global-agents-group" data-bucket={bucket}>
-                <header className="global-agents-group__header"><span><Icon size={14} /><strong>{meta.label}</strong><small>{meta.description}</small></span><em>{bucketRows.length}</em></header>
-                <div className="global-agents-group__rows">
-                  {bucketRows.map((row) => <AgentInboxRow key={row.sessionId} row={row} onSelect={selectSession} onInspect={setSelectedRequestId} />)}
-                </div>
-              </section>
-            )
-          })}
-        </div>
-      )}
-      {selectedRequestId ? <AttentionRequestPanel sessionId={selectedRequestId} onClose={() => setSelectedRequestId(null)} /> : null}
-    </section>
-  )
+      {rows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global agent board">
+        {(Object.keys(BUCKET_META) as AgentBucket[]).map((bucket) => {
+          const meta = BUCKET_META[bucket]
+          const Icon = meta.icon
+          const grouped = filtered.filter((row) => bucketFor(row) === bucket)
+          return <section className="global-board-column global-agents-group" data-bucket={bucket} key={bucket}>
+            <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{grouped.length}</em></span></header>
+            <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-task-card ${selectedId === row.sessionId ? 'global-task-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => setSelected(row.sessionId)}>
+              <span className="global-task-card__topline"><AgentProviderIcon providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
+              <strong className="global-task-card__title">{names[row.sessionId] ?? row.label}</strong>
+              <span className="global-task-card__description">{row.workspacePath}</span>
+              {row.awaitingReply ? <span className="global-task-card__meta">Awaiting your reply</span> : null}
+            </button>)}{grouped.length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}</div>
+          </section>
+        })}
+      </div>}
+      <footer className="global-board-footer"><span>{filtered.length} of {rows.length} Agents</span><DefaultSessionEntry placement="board" /></footer>
+    </div>
+    {selectedId ? <aside className="global-task-workspace" aria-label="Agent workspace">
+      <header className="global-task-workspace__header"><div className="global-task-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
+      {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-task-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
+      <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />
+    </aside> : null}
+    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} /> : null}
+  </section>
 }
