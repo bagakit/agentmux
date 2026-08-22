@@ -360,10 +360,10 @@
 .project-activity__pulse i:nth-child(3) { animation-delay: -.8s; }
 @keyframes rail-activity { to { transform: scaleY(.4); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .project-activity__pulse i { animation: none; } }
-.project-activity-menu { width: min(360px, 90vw); max-width: min(90vw, 360px); padding: var(--sp-1); }
+.project-activity-menu { width: min(460px, calc(100vw - var(--sp-8))); max-width: min(460px, calc(100vw - var(--sp-8))); max-height: min(70vh, 560px); overflow-y: auto; padding: var(--sp-1); }
 /* 一行一条 <small>：主句吃剩余宽度并省略号截断，尾随事实靠右、不收缩、tabular 对齐，两段分列各占一侧扫得快。 */
-.project-activity-menu__item small { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.project-activity-menu__reason { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.project-activity-menu__item small { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.project-activity-menu__reason { min-width: 0; flex: 1 1 18ch; overflow-wrap: anywhere; }
 .project-activity-menu__meta { flex: 0 0 auto; color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* 关注度描色：卡在你身上的行与安静干活的行不该长一个样，取自共享 attentionAccentFor（同头像/快速切换器），只 needs-you/error 上色。 */
 .project-activity-menu__item[data-attention='needs-you'] small { color: var(--amber); }
@@ -379,7 +379,7 @@
 .project-activity-group--expanded .project-activity-group__disclosure svg { transform: rotate(90deg); }
 .project-activity-group__identity { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: var(--sp-1); }
 .project-activity-group__identity strong { overflow: hidden; color: var(--text); font-size: var(--fs-meta); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.project-activity-group__identity small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.project-activity-group__identity small { color: var(--text-3); font-size: var(--fs-micro); white-space: normal; overflow-wrap: anywhere; }
 .project-activity-group__identity em { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .project-activity-group__avatars { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-3); }
 .project-activity-group__avatars > span { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-3); }

@@ -1284,6 +1284,8 @@ export type AgentMuxDesktopApi = {
     create(workspaceId: string, input: CreateWorkspacePathInput): Promise<void>
     move(input: MoveWorkspacePathInput): Promise<WorkspacePathMoveResult>
     delete(workspaceId: string, path: string): Promise<void>
+    /** Open a local Workspace path with the host operating system's default handler. */
+    openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
   scratch: {

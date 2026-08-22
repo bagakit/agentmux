@@ -114,6 +114,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('files:create', workspaceId, input),
     move: (input: MoveWorkspacePathInput) => ipcRenderer.invoke('files:move', input),
     delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path),
+    openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
   scratch: {

@@ -77,6 +77,13 @@ export function sessionRecentActivity(
     return oneLine(request.kind === 'permission' ? request.title : request.questions.map((q) => q.prompt).join(' · '))
   }
 
+  // A connection/failure fact must not be hidden behind an old streaming tool item.
+  if (session.status.state === 'error' || session.status.state === 'disconnected') {
+    return session.status.detail?.trim() || (session.status.state === 'disconnected'
+      ? 'Connection lost; session retained'
+      : 'Failure reported; no details available')
+  }
+
   // 2) 最近一条 tool_call：用户问的「最近在改什么」。直接复用 stepTitle，不重造那套按工具取字段的逻辑。
   //    新旧判定：streaming 的那条**定义上就在此刻发生**，任何状态下都算最近；complete/failed 的那条只在
   //    Session 仍活跃（working/running/starting）时才算「正在干」，否则它是历史，落到状态答案更诚实。
@@ -95,6 +102,5 @@ export function sessionRecentActivity(
   // 4) 状态专属句，再退到裸状态。保持与旧 projectSessionReason 逐字一致，供 groupSummary 判「有没有比
   //    裸状态更具体的话」时命中同一分支。
   if (session.status.state === 'waiting') return 'Waiting for your reply in the terminal'
-  if (session.status.state === 'error') return 'Agent reported an error; open the terminal for details'
   return session.status.state
 }

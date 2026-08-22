@@ -456,6 +456,10 @@ export async function registerIpc(args: {
   handle('files:delete', async (workspaceId: string, path: string) => {
     await files.delete(workspace(config, workspaceId), path)
   })
+  handle('files:openSystem', async (workspaceId: string, path: string) => {
+    const error = await shell.openPath(await files.localPathForSystemOpen(workspace(config, workspaceId), path))
+    if (error) throw new Error(error)
+  })
   handle('files:reveal', async (workspaceId: string, path: string) => {
     shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
   })
