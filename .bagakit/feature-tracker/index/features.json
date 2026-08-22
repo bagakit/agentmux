@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 238
+    "next_cursor": 239
   },
   "features": [
     {
@@ -2004,6 +2004,16 @@
       "workspace_mode": "worktree",
       "branch": "feat/demand-code-namingf-29p8f8qwb",
       "worktree_name": "wt-f-29p8f8qwb",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29q8fbwba",
+      "title": "macOS 候选包签名与 canonical 安装",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
       "runtime_role": "standalone",
       "runtime_relations": []
     }
