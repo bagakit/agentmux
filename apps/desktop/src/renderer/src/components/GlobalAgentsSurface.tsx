@@ -39,7 +39,7 @@ function AgentInboxRow({ row, onSelect, onInspect }: { row: RosterRow; onSelect:
       </span>
       {row.awaitingReply ? <span className="global-agents-row__reply">Reply</span> : null}
       <AgentProviderIcon providerId={row.providerId} size={16} />
-      {row.awaitingReply ? (
+      {row.awaitingReply || row.attention === 'needs-you' ? (
         <span
           role="button"
           tabIndex={0}
