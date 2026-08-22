@@ -24,7 +24,7 @@
         "A production caller exists outside each renamed definition file."
       ],
       "verification": [
-        {"kind": "command", "ref": "node_modules/.bin/vitest run apps/desktop/test/global-task-board.test.ts apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/board-recovery.test.ts", "proves": "Demand projection and workspace behavior remain connected."},
+        {"kind": "command", "ref": "node_modules/.bin/vitest run apps/desktop/test/global-demand-board.test.ts apps/desktop/test/global-board-demand-workspace.test.tsx apps/desktop/test/board-recovery.test.ts", "proves": "Demand projection and workspace behavior remain connected."},
         {"kind": "command", "ref": "node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json", "proves": "Desktop Demand identifiers compile."}
       ],
       "source_refs": ["docs/reviews/demand-code-naming-2026-09-22.md"],
@@ -43,7 +43,7 @@
         "A mutation of the control dispatch makes core control tests fail."
       ],
       "verification": [
-        {"kind": "command", "ref": "node_modules/.bin/vitest run packages/core/test/task-control.test.ts apps/desktop/test/global-task-board.test.ts", "proves": "Demand control protocol and desktop dispatch are exercised."},
+        {"kind": "command", "ref": "node_modules/.bin/vitest run packages/core/test/demand-control.test.ts apps/desktop/test/global-demand-board.test.ts", "proves": "Demand control protocol and desktop dispatch are exercised."},
         {"kind": "command", "ref": "node_modules/.bin/tsc -p packages/core/tsconfig.build.json && node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json", "proves": "Core and desktop Demand protocol compile."}
       ],
       "source_refs": ["docs/reviews/demand-code-naming-2026-09-22.md"],
