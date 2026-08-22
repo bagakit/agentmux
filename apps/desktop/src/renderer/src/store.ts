@@ -3413,11 +3413,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ defaultSessionLauncherHidden: hidden })
   },
   createDemand(input) {
-    const id = `task:${crypto.randomUUID()}`
+    const id = `demand:${crypto.randomUUID()}`
     const now = Date.now()
     const record: DemandRecord = {
       id,
-      title: input.title.trim() || 'Untitled task',
+      title: input.title.trim() || 'Untitled demand',
       description: input.description?.trim() ?? '',
       status: input.status ?? 'backlog',
       priority: input.priority ?? 'normal',
