@@ -24,6 +24,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
+import { DefaultSessionEntry } from './components/DefaultSessionEntry'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -248,6 +249,7 @@ function DesktopApp() {
             <TopRowLeadingChrome />
             <div className="topbar__actions">
               <SurfaceSwitch />
+              <DefaultSessionEntry placement="topbar" respectHidden={false} />
             </div>
           </header>
         ) : null}

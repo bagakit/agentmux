@@ -41,6 +41,8 @@ import {
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
+import { SessionRegionHost } from './SessionRegionHost'
+import { DefaultSessionEntry } from './DefaultSessionEntry'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
@@ -729,14 +731,16 @@ function WorkbenchRegionLeaf({
       onKeyDown={openRegionMenuFromKeyboard}
       onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId, 'pointer')}
     >
-      <SurfaceContent
-        surface={surface}
-        tabId={tab.id}
-        groupId={groupId}
-        nativeSurfacesVisible={nativeSurfacesVisible}
-        interactiveResize={interactiveResize}
-        focus={focus}
-      />
+      <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
+        <SurfaceContent
+          surface={surface}
+          tabId={tab.id}
+          groupId={groupId}
+          nativeSurfacesVisible={nativeSurfacesVisible}
+          interactiveResize={interactiveResize}
+          focus={focus}
+        />
+      </SessionRegionHost>
       {canClose ? (
         <button
           type="button"
@@ -937,6 +941,7 @@ function PaneGroup({
           </WorkbenchTabStrip>
         </SortableContext>
         <div className="pane-tabbar__actions">
+          {isRootLeaf ? <DefaultSessionEntry placement="topbar" respectHidden={false} /> : null}
           {activeAgentSession ? (
             <div className="pane-view-toggle" aria-label="Agent view">
               <button

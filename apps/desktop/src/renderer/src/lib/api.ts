@@ -125,6 +125,7 @@ let mockFiles = new Map<string, string | null>([
   ['apps/desktop/src/renderer/src/App.tsx', 'export function App() { return null }\n'],
   ['docs', null]
 ])
+const mockWikiEnabled = new Map<string, boolean>()
 let mockRevisionSequence = 0
 let mockFileRevisions = new Map<string, string>(
   [...mockFiles.entries()].flatMap(([path, content]) =>
@@ -544,6 +545,7 @@ const mockApi: AgentMuxDesktopApi = {
           content: mockFiles.get(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`) ?? DEFAULT_TOPIC_WIKI,
           version: 'mock-topic-wiki',
           source: mockFiles.has(`${directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`) ? 'user' : 'default',
+          enabled: mockWikiEnabled.get(topicId) ?? true,
           updatedAt: null
         }
       }
@@ -586,6 +588,19 @@ const mockApi: AgentMuxDesktopApi = {
       )
       mockFileRevisions.set(topic.topicPath, `mock:${++mockRevisionSequence}`)
       queueMicrotask(() => invalidateMockFile(workspaceId, topic.topicPath))
+      return (await mockApi.scratch.readTopic(workspaceId, topicId))!
+    },
+    setWikiEnabled: async (workspaceId, topicId, enabled) => {
+      const topic = await mockApi.scratch.readTopic(workspaceId, topicId)
+      if (!topic) throw new Error('Scratch Topic no longer exists')
+      mockWikiEnabled.set(topicId, enabled)
+      return { ...topic, wiki: { ...topic.wiki!, enabled } }
+    },
+    resetWiki: async (workspaceId, topicId) => {
+      const topic = await mockApi.scratch.readTopic(workspaceId, topicId)
+      if (!topic) throw new Error('Scratch Topic no longer exists')
+      mockFiles.set(topic.wiki?.path ?? `${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, DEFAULT_TOPIC_WIKI)
+      mockWikiEnabled.set(topicId, true)
       return (await mockApi.scratch.readTopic(workspaceId, topicId))!
     }
   },

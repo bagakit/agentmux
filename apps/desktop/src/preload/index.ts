@@ -123,7 +123,11 @@ const api: AgentMuxPreloadApi = {
     ensureTopic: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:ensureTopic', workspaceId, topicId),
     renameTitle: (workspaceId: string, topicId: string, title: string) =>
-      ipcRenderer.invoke('scratch:renameTitle', workspaceId, topicId, title)
+      ipcRenderer.invoke('scratch:renameTitle', workspaceId, topicId, title),
+    setWikiEnabled: (workspaceId: string, topicId: string, enabled: boolean) =>
+      ipcRenderer.invoke('scratch:setWikiEnabled', workspaceId, topicId, enabled),
+    resetWiki: (workspaceId: string, topicId: string) =>
+      ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
   ui: {
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
