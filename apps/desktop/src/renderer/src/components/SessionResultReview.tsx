@@ -2,6 +2,8 @@ import { CheckCircle2, ExternalLink, FileDiff, Globe2, ListChecks, MessageCircle
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import { parseHttpLinkUrl, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { toolCallToDiff, parseUnifiedDiff } from '../lib/activity-diff'
+import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
+import { resolveWorkspaceRelativePath } from '../lib/terminal-path-link'
 import { workspaceForSession } from '../lib/workbench-tabs'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { useAppStore } from '../store'
@@ -21,6 +23,26 @@ function resultTargets(items: readonly AgentTimelineItem[]): { diffPath: string 
     }
   }
   return { diffPath, previewUrls }
+}
+
+/**
+ * Timeline tool inputs are normally Workspace-relative, while a provider may report the same file
+ * in the repository coordinate system used by Git. Keep the two cases explicit: only a path carrying
+ * this repository's prefix crosses the Git converter; all other forms use the existing Workspace
+ * confinement rules. An absolute path outside the Session Workspace and `../` are rejected rather
+ * than being sent to `openFileDiff` under a guessed root.
+ */
+function timelinePathForWorkspace(
+  path: string,
+  workspacePath: string,
+  repoRelativePrefix: string
+): string | null {
+  const candidate = path.replace(/^\.\//u, '')
+  const prefix = repoRelativePrefix.replace(/[\\/]+$/u, '')
+  if (prefix && (candidate === prefix || candidate.startsWith(`${prefix}/`))) {
+    return workspaceRelativeGitPath(candidate, repoRelativePrefix)
+  }
+  return resolveWorkspaceRelativePath(path, workspacePath)
 }
 
 export function SessionResultReview({
@@ -45,6 +67,28 @@ export function SessionResultReview({
   const git = useGitStatus(workspace?.id ?? null)
   if (!session || session.kind !== 'agent' || session.status.state !== 'done') return null
   const { diffPath, previewUrls } = resultTargets(items)
+  const repository = workspace && git.status?.kind === 'git-repository' && !git.error ? git.status : null
+  const reviewableChanges = repository
+    ? repository.changes.flatMap((change) => {
+        const path = workspaceRelativeGitPath(change.path, repository.repoRelativePrefix)
+        return path ? [{ change, path }] : []
+      })
+    : []
+  const timelineDiffPath = workspace && repository && diffPath
+    ? timelinePathForWorkspace(diffPath, workspace.path, repository.repoRelativePrefix)
+    : null
+  const uniqueTimelineDiffPath = timelineDiffPath && !reviewableChanges.some(({ path }) => path === timelineDiffPath)
+    ? timelineDiffPath
+    : null
+  const reviewState = !workspace
+    ? 'unknown-workspace'
+    : git.error
+      ? 'read-failed'
+      : git.status?.kind === 'not-a-git-repository'
+        ? 'not-a-git-repository'
+        : repository
+          ? reviewableChanges.length > 0 ? 'changes' : 'no-changes'
+          : git.loading ? 'loading' : 'unknown'
   return (
     <aside className="session-result-review" aria-label="Review Agent result">
       <div className="session-result-review__identity">
@@ -53,17 +97,19 @@ export function SessionResultReview({
       </div>
       <div className="session-result-review__actions">
         <button type="button" className="small-button" onClick={() => setViewMode(sessionId, 'activity')}><ListChecks size={12} /> Activity</button>
-        {workspace && git.status?.kind === 'git-repository' ? git.status.changes.map((change) => (
-          <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(change.path, workspace.id).catch(reportError)}><FileDiff size={12} /> {change.path}</button>
+        {workspace && repository ? reviewableChanges.map(({ change, path }) => (
+          <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(path, workspace.id).catch(reportError)}><FileDiff size={12} /> {path}</button>
         )) : null}
-        {diffPath && !workspace ? <button type="button" className="small-button" onClick={() => void openFileDiff(diffPath).catch(reportError)}><FileDiff size={12} /> Review changes</button> : null}
+        {workspace && uniqueTimelineDiffPath ? <button type="button" className="small-button" onClick={() => void openFileDiff(uniqueTimelineDiffPath, workspace.id).catch(reportError)}><FileDiff size={12} /> Review changes</button> : null}
         {previewUrls.map((previewUrl) => <button key={previewUrl} type="button" className="small-button" onClick={() => void openHttpLink(origin, previewUrl, 'tab').catch(reportError)}><Globe2 size={12} /> Preview <ExternalLink size={11} /></button>)}
         <button type="button" className="small-button" onClick={() => selectSession(session.id)}><MessageCircle size={12} /> Continue in Session</button>
-        {!diffPath && previewUrls.length === 0 && (!workspace || git.status?.kind !== 'git-repository' || git.status.changes.length === 0) ? <span className="session-result-review__waiting">Waiting for a Diff or Browser preview target.</span> : null}
       </div>
-      {workspace && git.error ? <span className="session-result-review__hint">Could not read changes for this workspace: {git.error}</span> : null}
-      {workspace && git.status?.kind === 'not-a-git-repository' ? <span className="session-result-review__hint">This Session workspace is not a Git repository.</span> : null}
-      {!workspace ? <span className="session-result-review__hint">The Session workspace could not be located; it remains available.</span> : null}
+      {reviewState === 'read-failed' ? <span className="session-result-review__hint">Could not read changes for this workspace: {git.error}</span> : null}
+      {reviewState === 'not-a-git-repository' ? <span className="session-result-review__hint">This Session workspace is not a Git repository.</span> : null}
+      {reviewState === 'no-changes' ? <span className="session-result-review__hint">No Git changes were found in this Session workspace.</span> : null}
+      {reviewState === 'loading' ? <span className="session-result-review__hint">Checking changes for this Session workspace…</span> : null}
+      {reviewState === 'unknown-workspace' ? <span className="session-result-review__hint">The Session workspace could not be located; it remains available.</span> : null}
+      {reviewState === 'unknown' ? <span className="session-result-review__hint">The Session workspace could not be checked for changes; it remains available.</span> : null}
       {!visible ? <span className="session-result-review__hint">Open this Session to review its result.</span> : null}
     </aside>
   )
