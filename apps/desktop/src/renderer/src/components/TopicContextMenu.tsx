@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, Pencil, Pin, PinOff } from 'lucide-react'
+import { Copy, Crosshair, NotebookText, Pencil, Pin, PinOff, RotateCcw, ToggleLeft, ToggleRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 /**
@@ -22,7 +22,11 @@ export function TopicContextMenu({
   onCopyPath,
   onRename,
   onReveal,
-  onTogglePin
+  onTogglePin,
+  onEditWiki,
+  onToggleWiki,
+  onResetWiki,
+  wikiEnabled
 }: {
   children: ReactNode
   pinned: boolean
@@ -30,6 +34,10 @@ export function TopicContextMenu({
   onRename(): void
   onReveal(): void
   onTogglePin(): void
+  onEditWiki(): void
+  onToggleWiki?: (() => void) | undefined
+  onResetWiki?: (() => void) | undefined
+  wikiEnabled?: boolean | undefined
 }) {
   return (
     <ContextMenu.Root>
@@ -69,6 +77,23 @@ export function TopicContextMenu({
             <Copy size={14} />
             <span>Copy Topic Path</span>
           </ContextMenu.Item>
+          <ContextMenu.Separator className="tab-context-menu__separator" />
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onEditWiki}>
+            <NotebookText size={14} />
+            <span>Edit Topic Wiki</span>
+          </ContextMenu.Item>
+          {onToggleWiki ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onToggleWiki}>
+              {wikiEnabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
+              <span>{wikiEnabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}</span>
+            </ContextMenu.Item>
+          ) : null}
+          {onResetWiki ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onResetWiki}>
+              <RotateCcw size={14} />
+              <span>Restore default Topic Wiki</span>
+            </ContextMenu.Item>
+          ) : null}
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

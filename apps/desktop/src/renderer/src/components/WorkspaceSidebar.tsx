@@ -17,7 +17,7 @@ import {
   type ProjectRailNode
 } from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
-import { workingAgentCount } from '../lib/project-board'
+import { idleAgentCount, workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { BrandIcon } from './BrandIcon'
@@ -106,6 +106,9 @@ export function WorkspaceSidebar({
     : 0
   const scratchWorkingAgentCount = scratch
     ? workingAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
+    : 0
+  const scratchIdleAgentCount = scratch
+    ? idleAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
     : 0
 
   async function chooseFolder(): Promise<void> {
@@ -196,10 +199,12 @@ export function WorkspaceSidebar({
     const attention = rowAttention(projectSessions)
     const attentionLabel = rowAttentionLabel(attention)
     const runningAgentCount = workingAgentCount(projectSessions)
-    const runningLabel = runningAgentCount > 0
-      ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
+    const workingLabel = runningAgentCount > 0
+      ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} working`
       : null
-    const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
+    const idleCount = idleAgentCount(projectSessions)
+    const idleLabel = idleCount > 0 ? `${idleCount} idle` : null
+    const rowStateLabel = [workingLabel, idleLabel, attentionLabel].filter(Boolean).join(' · ')
     const countTitle = [
       `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
       `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
@@ -249,6 +254,7 @@ export function WorkspaceSidebar({
           {project.hostId !== 'local' ? (
             <small><RadioTower size={9} /> {project.hostId}</small>
           ) : null}
+          {idleLabel ? <small className="project-rail-row__activity" aria-hidden="true">{idleLabel}</small> : null}
         </span>
       </button>
       </div>
@@ -301,8 +307,9 @@ export function WorkspaceSidebar({
             aria-label={[
               'Scratch',
               ...(scratchWorkingAgentCount > 0
-                ? [`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} running`]
-                : [])
+                ? [`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} working`]
+                : []),
+              ...(scratchIdleAgentCount > 0 ? [`${scratchIdleAgentCount} idle`] : [])
             ].join(' · ')}
             title={scratch.path}
             onClick={() => void selectWorkspace(scratch.id)}
@@ -310,6 +317,7 @@ export function WorkspaceSidebar({
             <span className="project-rail-row__icon scratch-workspace-row__icon"><BrandIcon size={16} /></span>
             <span className="project-rail-row__identity scratch-workspace-row__identity">
               <strong>Scratch</strong>
+              {scratchIdleAgentCount > 0 ? <small className="project-rail-row__activity" aria-hidden="true">{scratchIdleAgentCount} idle</small> : null}
             </span>
             <span
               className="scratch-workspace-row__meta"
@@ -452,9 +460,11 @@ function GroupHeader({
   const attention = rowAttention(groupSessions)
   const attentionLabel = rowAttentionLabel(attention)
   const running = workingAgentCount(groupSessions)
-  const runningLabel = running > 0
-    ? `${running} ${running === 1 ? 'Agent is' : 'Agents are'} running`
+  const workingLabel = running > 0
+    ? `${running} ${running === 1 ? 'Agent is' : 'Agents are'} working`
     : null
+  const idle = idleAgentCount(groupSessions)
+  const idleLabel = idle > 0 ? `${idle} idle` : null
   const topLevel = group.nodes.filter((node) => node.depth === 0).length
   const memberLabel = `${topLevel} ${topLevel === 1 ? 'project' : 'projects'}`
   // 与项目行同一条规则：attention 压过 running，因为 CSS 给同一个角标上色并挂 `?`/`!`。
@@ -467,7 +477,7 @@ function GroupHeader({
       // 在听觉上才真的无从区分。
       aria-label={[group.label, memberLabel, ...(attentionLabel ? [attentionLabel] : [])].join(' · ')}
       aria-expanded={!collapsed}
-      title={[group.groupPath, memberLabel, ...(runningLabel ? [runningLabel] : [])]
+      title={[group.groupPath, memberLabel, ...(workingLabel ? [workingLabel] : []), ...(idleLabel ? [idleLabel] : [])]
         .filter(Boolean)
         .join(' · ')}
       onClick={onToggle}

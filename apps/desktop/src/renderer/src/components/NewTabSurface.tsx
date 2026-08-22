@@ -1,3 +1,4 @@
+import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '../lib/composer-insertion'
 import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Paperclip, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -15,7 +16,7 @@ import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-subm
 import { formatRelativeAge } from '../lib/relative-age'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { InlineComposer } from './InlineComposer'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { LaunchRefine } from './LaunchOptionControls'
@@ -283,7 +284,7 @@ export function NewTabSurface({
                 className={`agent-pick ${executor.id === executorId ? 'agent-pick--selected' : ''}`}
                 onClick={() => setExecutorId(executor.id)}
               >
-                <span className="agent-pick__icon"><AgentProviderIcon providerId={executor.providerId} size={16} /></span>
+                <span className="agent-pick__icon"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
                 <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Ready</small></span>
                 {executor.id === executorId ? <span className="agent-pick__check"><Check size={10} strokeWidth={3} /></span> : null}
               </button>
@@ -318,7 +319,7 @@ export function NewTabSurface({
             <div className="agent-picks">
               {unavailableExecutors.map((executor) => (
                 <button type="button" key={executor.id} className="agent-pick agent-pick--unavailable" disabled>
-                  <span className="agent-pick__icon"><AgentProviderIcon providerId={executor.providerId} size={16} /></span>
+                  <span className="agent-pick__icon"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
                   <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Unavailable</small></span>
                 </button>
               ))}
@@ -452,7 +453,7 @@ export function NewTabSurface({
               className="tab-context-menu__item composer-menu__item"
               title={`${candidate.label}\n${candidate.workspacePath}`}
               onSelect={() => void recoverSession(candidate.agentSessionId)}>
-              <AgentProviderIcon providerId={candidate.providerId} size={13} />
+              <AgentAvatar label={candidate.label} providerId={candidate.providerId} size={13} />
               {/* label 是「执行器 · Workspace」，两个候选同源时它们完全相同——最后活跃时间是那时
                   唯一能把它们分开的东西，所以它和身份一起列，而不是一个可选的装饰。 */}
               <span>{candidate.label}<small>{candidate.workspacePath} · {formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</small></span>

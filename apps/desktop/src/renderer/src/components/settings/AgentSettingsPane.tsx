@@ -1,3 +1,5 @@
+import { AGENT_AVATAR_BADGE_IDS, AGENT_AVATAR_BADGE_LABELS } from '../../../../shared/contracts'
+import { AgentAvatar } from '../AgentAvatar'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,10 +13,10 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import parseArgsStringToArgv from 'string-argv'
-import type { AgentExecutorConfig, AppConfig } from '../../../../shared/contracts'
+import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { presentError } from '../../lib/error-presentation'
-import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
+import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { withYoloArgs } from '../../lib/executors'
 
@@ -25,6 +27,7 @@ type ExecutorDraft = {
   args: string
   env: string
   injectAgentMuxGuide: boolean
+  avatar?: AgentAvatarAppearance | undefined
 }
 
 function toDraft(config: AgentExecutorConfig): ExecutorDraft {
@@ -34,7 +37,8 @@ function toDraft(config: AgentExecutorConfig): ExecutorDraft {
     command: config.command,
     args: config.args.join('\n'),
     env: Object.entries(config.env).map(([name, value]) => `${name}=${value}`).join('\n'),
-    injectAgentMuxGuide: config.injectAgentMuxGuide
+    injectAgentMuxGuide: config.injectAgentMuxGuide,
+    avatar: config.avatar
   }
 }
 
@@ -96,8 +100,9 @@ export function parseExecutorArgs(text: string): string[] {
   return parseArgsStringToArgv(text)
 }
 
-export function AgentSettingsPane({ config, onSave }: {
+export function AgentSettingsPane({ config, onSave, executorId }: {
   config: AppConfig
+  executorId?: string | undefined
   onSave: (executors: Record<string, AgentExecutorConfig>) => Promise<void>
 }) {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -111,6 +116,15 @@ export function AgentSettingsPane({ config, onSave }: {
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Detection is a user-visible probe, not a subscription to every result update. Tying
+  // this effect to the result map retries a failed probe forever (a failed native call
+  // leaves one executor without a result, so every state update starts another probe).
+  // Re-run only when the host or the saved executor set changes; Refresh remains the
+  // explicit retry path after an environment failure.
+  const detectionTarget = useMemo(
+    () => Object.keys(config.executors).sort().join('\0'),
+    [config.executors]
+  )
   const executors = useMemo(() => Object.entries(drafts).map(([id, draft]) => ({
     id,
     draft,
@@ -123,10 +137,19 @@ export function AgentSettingsPane({ config, onSave }: {
   ]
 
   useEffect(() => {
-    const savedIds = Object.keys(config.executors)
-    if (savedIds.length === 0 || savedIds.every((id) => detections[executorDetectionKey(hostId, id)])) return
+    if (!detectionTarget) return
     void detectExecutors(hostId)
-  }, [config.executors, detections, detectExecutors, hostId])
+  }, [detectionTarget, detectExecutors, hostId])
+
+  useEffect(() => {
+    if (!executorId) return
+    const card = document.getElementById(`executor-settings-${executorId}`) as HTMLDetailsElement | null
+    if (card) { card.open = true; card.scrollIntoView?.({ block: 'nearest' }); card.focus() }
+  }, [executorId])
+
+  function updateAvatar(id: string, patch: AgentAvatarAppearance | undefined) {
+    update(id, { avatar: patch })
+  }
 
   function update(id: string, patch: Partial<ExecutorDraft>): void {
     setDrafts((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
@@ -140,7 +163,8 @@ export function AgentSettingsPane({ config, onSave }: {
     setDrafts(next)
     await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
       label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
-      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide
+      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
+      ...(draft.avatar ? { avatar: draft.avatar } : {})
     }])))
   }
 
@@ -152,7 +176,8 @@ export function AgentSettingsPane({ config, onSave }: {
     setDrafts(next)
     await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
       label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
-      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide
+      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
+      ...(draft.avatar ? { avatar: draft.avatar } : {})
     }])))
   }
 
@@ -188,7 +213,8 @@ export function AgentSettingsPane({ config, onSave }: {
           command: draft.command.trim(),
           args: parseExecutorArgs(draft.args),
           env: parseEnv(draft.env),
-          injectAgentMuxGuide: draft.injectAgentMuxGuide
+          injectAgentMuxGuide: draft.injectAgentMuxGuide,
+          ...(draft.avatar ? { avatar: draft.avatar } : {})
         }]
       }))
       if (Object.values(executors).some((executor) => !executor.label || !executor.command)) {
@@ -217,14 +243,24 @@ export function AgentSettingsPane({ config, onSave }: {
             {group.items.map(({ id, draft, detection }) => {
               const status = statusCopy(detection)
               return (
-                <details className="agent-settings-card" key={id}>
+                <details className="agent-settings-card" key={id} id={`executor-settings-${id}`} tabIndex={-1} {...(executorId === id ? { open: true } : {})}>
                   <summary>
-                    <span className="agent-provider-mark"><AgentProviderIcon providerId={draft.providerId} size={17} /></span>
+                    <span className="agent-provider-mark"><AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={draft.avatar ?? {}} size={18} /></span>
                     <span><strong>{draft.label}</strong><small>{agentProviderLabel(draft.providerId)} · {draft.command}</small></span>
                     <em className={`check-pill check-pill--${detection?.state ?? 'idle'}`}>{status.icon}{status.label}</em>
                     <ChevronDown className="settings-disclosure-icon" size={14} />
                   </summary>
                   <div className="agent-settings-fields">
+                    <div className="agent-avatar-settings__row">
+                      <span className="agent-avatar-settings__name"><strong>Avatar</strong><small>Provider mark with a small fixed icon</small></span>
+                      <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={draft.avatar?.tint ?? '#8ab4f8'}
+                        onChange={(event) => updateAvatar(id, { ...draft.avatar, tint: event.target.value })} /></label>
+                      <label>Icon<select aria-label={`${draft.label} avatar icon`} value={draft.avatar?.badge ?? ''}
+                        onChange={(event) => { const next = { ...draft.avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, Object.keys(next).length ? next : undefined) }}>
+                        <option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}
+                      </select></label>
+                      <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!draft.avatar} onClick={() => updateAvatar(id, undefined)}>Reset</button>
+                    </div>
                     <label><span>Name</span><input value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                     <label>
                       <span>Provider</span>
@@ -257,7 +293,7 @@ export function AgentSettingsPane({ config, onSave }: {
         </section>
       ) : null)}
       {executors.length === 0 ? <div className="agent-catalog__empty">No executors configured. Add one and choose its Provider.</div> : null}
-      {error ? <div className="dialog-error">{error}</div> : null}
+      {error ? <div className="dialog-error" role="alert">{error}</div> : null}
       <div className="settings-pane-actions"><span>Detection uses each saved executor command on the selected host.</span><button className="primary-button" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save executors'}</button></div>
     </div>
   )

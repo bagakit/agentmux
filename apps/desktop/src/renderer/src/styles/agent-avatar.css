@@ -1,13 +1,13 @@
 /* The Provider alpha owns the contour; status, custom badge and count each have one corner. */
 .agent-avatar {
-  width: 18px; height: 18px; padding: 0; gap: 0; position: relative;
+  width: var(--agent-avatar-size, 18px); height: var(--agent-avatar-size, 18px); padding: 0; gap: 0; position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
   flex-shrink: 0; overflow: visible; transition: transform .12s ease;
 }
 .agent-avatar__filters { position: absolute; pointer-events: none; }
 .agent-avatar__mark, .agent-avatar__contour { display: inline-flex; }
-.agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: 18px; height: 18px; }
+.agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: var(--agent-avatar-size, 18px); height: var(--agent-avatar-size, 18px); }
 .agent-avatar__contour { filter: none; }
 .agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: none; }
 .agent-avatar .agent-avatar__status { position: absolute; top: -2px; right: -2px; margin: 0; outline: 1px solid var(--surface-1); }
@@ -25,13 +25,15 @@
 button.agent-avatar { cursor: pointer; }
 button.agent-avatar:hover { background: var(--surface-3); }
 button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
-.composer-session-controls .composer-agent-identity { display: inline-flex; align-items: center; justify-content: center; min-width: var(--sp-8); padding: var(--sp-2); border: 0; background: transparent; cursor: pointer; }
-.composer-agent-identity:hover { background: var(--surface-3); }
-.composer-agent-identity:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
-.agent-identity-popover { position: fixed; position-area: top span-left; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2); max-width: min(320px, 90vw); }
-.agent-identity-popover dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); margin: var(--sp-3) 0; }
+.composer-agent-identity { display: inline-flex; align-items: center; padding: var(--sp-2); }
+.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.agent-identity-popover { position: fixed; z-index: 10000; width: 248px; max-width: calc(100vw - 16px); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2); font-size: var(--fs-caption); font-weight: 400; line-height: 1.45; text-align: left; }
+.agent-identity-popover header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.agent-identity-popover header strong { overflow-wrap: anywhere; font-size: inherit; font-weight: 600; }
+.agent-identity-popover dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); margin: var(--sp-2) 0 0; }
 .agent-identity-popover dt { color: var(--text-3); }
 .agent-identity-popover dd { margin: 0; overflow-wrap: anywhere; }
+.agent-identity-popover p { color: var(--text-2); margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }
 .agent-avatar-settings { display: grid; gap: var(--sp-5); padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 .agent-avatar-settings__row { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
 .agent-avatar-settings__name { flex: 1; min-width: 10ch; display: grid; }

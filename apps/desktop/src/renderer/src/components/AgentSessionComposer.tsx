@@ -94,7 +94,6 @@ export function AgentSessionComposer({
   // real render below, not inside the selector, so it does not defeat that reference check.
   const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
-  const avatarAppearances = useAppStore((state) => state.config?.appearance?.agentAvatars)
   const executors = useAppStore((state) => state.config?.executors)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
@@ -279,7 +278,7 @@ export function AgentSessionComposer({
       />}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
-        appearance={avatarAppearances?.[session.executorId]} /> : null}
+        appearance={executors?.[session.executorId]?.avatar} /> : null}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference

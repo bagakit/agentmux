@@ -21,7 +21,7 @@ import type {
   BrowserReplayPlan
 } from '../../../shared/browser-operation'
 import type { BrowserScriptRunReport } from '../../../shared/contracts'
-import { AgentProviderIcon } from './AgentProviderIcon'
+import { AgentAvatar } from './AgentAvatar'
 import { SemanticIcon } from './semantic-icons'
 
 /**
@@ -45,13 +45,18 @@ export function BrowserOperationRail({
   const operation = activity.operation
   if (!operation) {
     const agentControl = activity.control === 'agent'
+    // The Browser page is the primary surface.  A quiet human-owned tab has no operation fact to
+    // explain, so rendering a "ready" card here would turn a control hint into the only visible page.
+    // Keep the rail for an active handoff or a durable warning where it carries real information.
+    if (!agentControl && !activity.warning && !onOpenTimeline) return null
+    const quietHuman = !agentControl && !activity.warning
     return (
-      <div className="browser-rsi-rail browser-rsi-rail--idle" role="status" aria-label="Browser activity">
-        <CircleDot size={13} aria-hidden="true" />
-        <span className="browser-rsi-rail__copy">
+      <div className={`browser-rsi-rail browser-rsi-rail--idle${quietHuman ? ' browser-rsi-rail--quiet' : ''}`} role="status" aria-label="Browser activity">
+        {!quietHuman ? <CircleDot size={13} aria-hidden="true" /> : null}
+        {!quietHuman ? <span className="browser-rsi-rail__copy">
           <strong>{agentControl ? 'Agent control active' : 'Browser ready'}</strong>
           <small>{agentControl ? 'Activity details are loading…' : 'You have control'}</small>
-        </span>
+        </span> : null}
         {activity.warning ? <span className="browser-rsi-rail__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{activity.warning}</span> : null}
         {onOpenTimeline ? <span className="browser-rsi-rail__actions"><button type="button" className="browser-rsi-icon-button" aria-label="Open browser activity timeline" title="Open activity timeline" onClick={onOpenTimeline}><History size={13} aria-hidden="true" /></button></span> : null}
       </div>
@@ -69,7 +74,7 @@ export function BrowserOperationRail({
       aria-label={`Browser operation by ${operation.operator.name}`}
     >
       <span className="browser-rsi-rail__identity" title={`${operation.operator.name} · ${operation.operator.id}`}>
-        <AgentProviderIcon
+        <AgentAvatar label={operation.operator.name} sessionId={operation.operator.id}
           {...(operation.operator.providerId ? { providerId: operation.operator.providerId as AgentProviderId } : {})}
           size={18}
         />

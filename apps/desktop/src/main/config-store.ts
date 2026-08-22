@@ -44,7 +44,11 @@ const executorSchema = z
     command: z.string().min(1),
     args: z.array(z.string()),
     env: z.record(z.string(), z.string()),
-    injectAgentMuxGuide: z.boolean()
+    injectAgentMuxGuide: z.boolean(),
+    avatar: z.object({
+      tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+      badge: z.enum(AGENT_AVATAR_BADGE_IDS).optional()
+    }).strict().optional()
   })
   .strict()
 

@@ -134,7 +134,7 @@
   z-index: 1;
 }
 .workbench-tab--dragging { opacity: .22; }
-.workbench-tab__agent-mark { width: 14px; height: 14px; flex: none; position: relative; display: inline-flex; font-style: normal; }
+.workbench-tab__agent-mark { width: 16px; height: 16px; flex: none; position: relative; display: inline-flex; font-style: normal; }
 /*
  * 标签上的标记簇。
  *
@@ -169,8 +169,6 @@
 .workbench-tab--active .workbench-tab__marks {
   --tab-mark-seat: color-mix(in srgb, var(--text) 6%, var(--surface-1));
 }
-.workbench-tab__agent-mark > .status { position: absolute; right: -3px; bottom: -3px; padding:1px; border-radius: 50%; background: var(--tab-mark-seat); }
-.workbench-tab__agent-mark .status__dot { width: 5px; height: 5px; }
 /*
  * 正在被 Agent 驱动的那一格。用与「Agent 在跑」同一个绿（`.status--working` 的 --green），因为它
  * 说的是同一件事——有个 Agent 此刻正在动。图标已经换了形状（Bot 而非地球），颜色只是把它从一排
