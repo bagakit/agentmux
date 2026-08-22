@@ -1,0 +1,71 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/executor-avatar-enamel-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/reviews/executor-avatar-enamel-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Render executor marks as solid enamel contours",
+      "objective": "Replace the fluorescent avatar outline with a closed neutral backing, 1px clearance, and an opaque 1px tint rim around the combined Provider and badge mark.",
+      "outcome": "Hollow Provider marks remain legible, source colors stay intact, and no avatar or connecting surface emits a blur or status glow.",
+      "depends_on": [],
+      "acceptance": [
+        "The shared filter closes alpha holes, grows a neutral backing by 2px, and creates the tint rim from the 3px minus 2px alpha difference.",
+        "The original SourceGraphic is composited above the enamel surface; both production AgentAvatar and connecting surfaces use the shared filter.",
+        "Avatar contour and connecting CSS contain no drop-shadow or glow rules, and status remains in the shared status pip."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-avatar-outline.test.tsx test/agent-avatar-badge-icons.test.tsx test/agent-avatar-state-visual.test.tsx test/topic-agent-status.test.ts test/topic-agent-disconnected.test.tsx test/status-axis-reachability.test.ts test/composer-session-controls.test.tsx test/session-connecting-surface.test.tsx --maxWorkers=1",
+          "proves": "Enamel rendering and no-glow regression contract"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'AgentEnamelFilter' apps/desktop/src/renderer/src/components/AgentAvatar.tsx apps/desktop/src/renderer/src/components/SessionConnectingSurface.tsx",
+          "proves": "Shared filter is connected to both production surfaces"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/AgentEnamelFilter.tsx",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+        "apps/desktop/src/renderer/src/components/SessionConnectingSurface.tsx"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "Prove the shipped surface has no fluorescent contour",
+      "objective": "Keep the visual contract guarded against both the old source-covering tint and the old status glow.",
+      "outcome": "Mutation evidence shows removing the backing/rim or restoring drop-shadow turns the focused regression red.",
+      "depends_on": [
+        "T-001"
+      ],
+      "acceptance": [
+        "Changing the enamel alpha radii or adding a drop-shadow makes the focused test fail.",
+        "The production caller check finds both surfaces outside the shared filter definition."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "git diff --check",
+          "proves": "Candidate is clean for packaging"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'AgentEnamelFilter' apps/desktop/src/renderer/src/components/AgentAvatar.tsx apps/desktop/src/renderer/src/components/SessionConnectingSurface.tsx",
+          "proves": "Zero-caller check has two production callers"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/executor-avatar-enamel-2026-09-22.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}

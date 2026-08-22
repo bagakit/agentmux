@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 233
+    "next_cursor": 234
   },
   "features": [
     {
@@ -1900,7 +1900,7 @@
     {
       "feat_id": "f-29c8ftkwt",
       "title": "Project Rail pinned child styling and density",
-      "status": "done",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1930,7 +1930,7 @@
     {
       "feat_id": "f-29f8f7krj",
       "title": "Moshi 对照：Agent 注意力与结果审查闭环",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1940,7 +1940,7 @@
     {
       "feat_id": "f-29g8fagv4",
       "title": "Terminal and conversation restore",
-      "status": "done",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1950,7 +1950,17 @@
     {
       "feat_id": "f-29h8fh9d4",
       "title": "Plugin and naming contract",
-      "status": "in_progress",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29j8fx24v",
+      "title": "Executor avatar enamel contour correction",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

@@ -188,8 +188,8 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
       .filter(([, selector, body]) => selector!.includes('.agent-avatar__contour') && body!.includes('filter:'))
     expect(contours.length).toBeGreaterThan(0)
     for (const [, , body] of contours) {
-      expect(body).toContain('drop-shadow(')
-      expect(body).toContain('var(--status-ink)')
+      expect(body).toContain('filter: none')
+      expect(body).not.toContain('drop-shadow(')
     }
   })
 

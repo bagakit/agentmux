@@ -8,8 +8,8 @@
 .agent-avatar__filters { position: absolute; pointer-events: none; }
 .agent-avatar__mark, .agent-avatar__contour { display: inline-flex; }
 .agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: 18px; height: 18px; }
-.agent-avatar__contour { filter: drop-shadow(0 0 .65px var(--status-ink)); }
-.agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: drop-shadow(0 0 .65px var(--status-ink)) drop-shadow(0 0 2px var(--status-ink)); }
+.agent-avatar__contour { filter: none; }
+.agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: none; }
 .agent-avatar .agent-avatar__status { position: absolute; top: -2px; right: -2px; margin: 0; outline: 1px solid var(--surface-1); }
 .agent-avatar__badge, .agent-avatar__count {
   position: absolute; display: inline-flex; align-items: center; justify-content: center;
