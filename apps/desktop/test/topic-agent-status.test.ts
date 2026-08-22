@@ -240,16 +240,16 @@ describe('状态到颜色的映射只有一处定义', () => {
     const consumers = [...styles.matchAll(/([^{}]+)\{([^{}]*var\(--status-ink\)[^{}]*)\}/g)]
       .map(([, selector]) => selector.trim().replace(/\s+/g, ' '))
       .filter((selector) => !selector.includes('--status-ink:'))
-    // 点和头像两处都在读它；只有一个消费者说明另一处又自己挑了颜色。
+    // 状态墨水只由共享状态点消费；头像轮廓是身份层，不能再把状态色变成光晕。
     expect(consumers.some((selector) => selector.includes('.status__dot'))).toBe(true)
-    expect(consumers.some((selector) => selector.includes('.agent-avatar'))).toBe(true)
+    expect(consumers.some((selector) => selector.includes('.agent-avatar'))).toBe(false)
   })
 
   it('头像以图形透明轮廓读共享状态色，不给矩形容器画状态框', () => {
     const contour = styles.match(/(?:^|\n)\.agent-avatar__contour\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(contour.length).toBeGreaterThan(0)
-    expect(contour).toContain('drop-shadow(')
-    expect(contour).toContain('var(--status-ink)')
+    expect(contour).toContain('filter: none')
+    expect(contour).not.toContain('drop-shadow(')
     const avatarBase = styles.match(/(?:^|\n)\.agent-avatar\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(avatarBase.length).toBeGreaterThan(0)
     expect(avatarBase).toContain('border: 0')

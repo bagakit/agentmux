@@ -202,7 +202,7 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
   it('CONTOUR：Provider alpha描边与右上共享状态点可达，不重建矩形状态框', () => {
     const contour = rules.find((rule) => rule.selector === '.agent-avatar__contour')
     expect(contour, 'alpha轮廓规则缺失').toBeDefined()
-    expect(declValue(contour!.body, 'filter')).toMatch(/drop-shadow\([^;]*var\(--status-ink\)/u)
+    expect(declValue(contour!.body, 'filter')).toBe('none')
     const avatar = rules.find((rule) => rule.selector === '.agent-avatar')
     expect(avatar).toBeDefined()
     expect(declValue(avatar!.body, 'background')).toBe('transparent')
