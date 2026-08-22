@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
+import { AgentSettingsPane } from '../src/renderer/src/components/settings/AgentSettingsPane'
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AppearanceSettingsPane } from '../src/renderer/src/components/settings/AppearanceSettingsPane'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
+import { AgentAvatar, ExecutorIdentityContext } from '../src/renderer/src/components/AgentAvatar'
 import { SelectorPresence } from '../src/renderer/src/components/SelectorList'
 import { RegionMosaic } from '../src/renderer/src/components/TopicPresence'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
@@ -18,7 +19,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
-const executors = { ...composerConfig.executors, review: { ...composerConfig.executors.codex!, label: 'Reviewer' } }
+const executors: typeof composerConfig.executors = { ...composerConfig.executors, review: { ...composerConfig.executors.codex!, label: 'Reviewer' } }
 const appearances = { codex: { tint: '#ee7755', badge: 'spark' as const }, review: { tint: '#6688dd', badge: 'shield' as const } }
 async function change(label: string, value: string) {
   const input = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
@@ -37,35 +38,34 @@ async function chooseIcon(label: string, value: string) {
     input.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
+function customizedExecutors() { return { codex: { ...executors.codex!, avatar: appearances.codex }, review: { ...executors.review!, avatar: appearances.review } } }
 const badges = () => [...dom.container.querySelectorAll<HTMLElement>('[data-avatar-badge]')].map((node) => node.dataset.avatarBadge)
 
-it('previews per-executor changes, saves both entries, and restores the saved appearance when reopened', async () => {
-  const config = { ...composerConfig, executors }
-  let restored = config
-  const save = vi.fn(async (appearance: typeof config.appearance) => { restored = { ...config, appearance } })
-  await dom.render(<AppearanceSettingsPane appearance={config.appearance} executors={executors} onSave={save} />)
+it('edits avatars in Executor templates and preserves both through save and reopen', async () => {
+  let config = { ...composerConfig, executors }
+  const save = vi.fn(async (saved: typeof config.executors) => { config = { ...config, executors: saved } })
+  await dom.render(<AgentSettingsPane config={config} onSave={save} />)
   await change('Codex avatar tint', '#ee7755')
   await chooseIcon('Codex avatar icon', 'spark')
   await change('Reviewer avatar tint', '#6688dd')
   await chooseIcon('Reviewer avatar icon', 'shield')
   expect(badges()).toEqual(['spark', 'shield'])
-  expect([...dom.container.querySelectorAll('feFlood')].map((node) => node.getAttribute('flood-color')).filter((color) => color !== 'var(--surface-0)')).toEqual(['#ee7755', '#6688dd'])
   await dom.click('.settings-pane-actions button')
   expect(save).toHaveBeenCalledOnce()
-  expect(restored.appearance.agentAvatars).toEqual(appearances)
+  expect(config.executors.codex?.avatar).toEqual(appearances.codex)
+  expect(config.executors.review?.avatar).toEqual(appearances.review)
   await dom.render(null)
-  await dom.render(<AppearanceSettingsPane appearance={restored.appearance} executors={restored.executors} onSave={save} />)
+  await dom.render(<AgentSettingsPane config={config} onSave={save} />)
   expect(badges()).toEqual(['spark', 'shield'])
-  await dom.click('[aria-label="Codex avatar tint"]')
-  const reset = dom.container.querySelector<HTMLButtonElement>('[aria-label="Reset Codex avatar"]')!
-  await act(async () => reset.click())
+  await dom.click('[aria-label="Reset Codex avatar"]')
   expect(badges()).toEqual(['shield'])
   await dom.click('.settings-pane-actions button')
-  expect(restored.appearance.agentAvatars).toEqual({ review: appearances.review })
+  expect(config.executors.codex?.avatar).toBeUndefined()
+  expect(config.executors.review?.avatar).toEqual(appearances.review)
 })
 
-it('keeps save failures local without discarding unsaved avatar edits', async () => {
-  await dom.render(<AppearanceSettingsPane appearance={composerConfig.appearance} executors={executors}
+it('keeps failed Executor saves local without discarding unsaved avatar edits', async () => {
+  await dom.render(<AgentSettingsPane config={{ ...composerConfig, executors }}
     onSave={async () => { throw new Error('Settings write failed') }} />)
   await chooseIcon('Reviewer avatar icon', 'bolt')
   await dom.click('.settings-pane-actions button')
@@ -73,23 +73,35 @@ it('keeps save failures local without discarding unsaved avatar edits', async ()
   expect(badges()).toEqual(['bolt'])
 })
 
-it('projects executor identity through Session controls and keeps mailbox and identity as separate buttons', async () => {
-  useAppStore.setState({ config: { ...composerConfig, executors, appearance: { ...composerConfig.appearance, agentAvatars: appearances } },
-    sessions: [{ ...composerSession(), executorId: 'review' }] })
+it('shows details on hover and focus, then routes the settings action to the matching Executor', async () => {
+  const config = { ...composerConfig, executors: customizedExecutors() }
+  const session = { ...composerSession(), executorId: 'review', status: { ...composerSession().status, detail: 'Stopped by user' } }
+  useAppStore.setState({ config, sessions: [session] })
   const open = vi.fn()
-  await dom.render(<SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider>)
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config, sessions: [session] }}><SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider></ExecutorIdentityContext.Provider>)
   expect(badges()).toEqual(['shield'])
-  const identity = dom.container.querySelector<HTMLButtonElement>('.composer-agent-identity')!
+  const identity = dom.container.querySelector<HTMLElement>('.composer-agent-identity .agent-avatar')!
   const mailbox = dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
   expect(identity).not.toBeNull(); expect(mailbox).not.toBeNull()
-  expect(identity.contains(mailbox)).toBe(false); expect(mailbox.contains(identity)).toBe(false)
-  expect(identity.textContent).not.toContain('Reviewer')
-  const panel = dom.container.querySelector<HTMLDivElement>('.agent-identity-popover')!
+  expect(identity.contains(mailbox)).toBe(false)
+  expect(document.querySelector('.agent-identity-popover')).toBeNull()
+  await act(async () => identity.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  let panel = document.querySelector<HTMLDivElement>('.agent-identity-popover')!
   expect(panel.textContent).toContain('Reviewer · review')
-  expect(identity.getAttribute('popovertarget')).toBe(panel.id)
-  panel.hidePopover = vi.fn()
-  await dom.click('.agent-identity-popover button')
-  expect(open).toHaveBeenCalledExactlyOnceWith('appearance')
+  expect(panel.textContent).toContain('Stopped by user')
+  expect(identity.getAttribute('aria-describedby')).toBe(panel.id)
+  await act(async () => panel.querySelector<HTMLButtonElement>('button')!.click())
+  expect(open).toHaveBeenCalledExactlyOnceWith('agents', 'review')
+  expect(document.querySelector('.agent-identity-popover')).toBeNull()
+  await act(async () => identity.focus())
+  panel = document.querySelector<HTMLDivElement>('.agent-identity-popover')!
+  expect(panel.textContent).toContain('Reviewer · review')
+  await act(async () => window.dispatchEvent(new Event('resize')))
+  expect(document.querySelector('.agent-identity-popover')).toBeNull()
+  await act(async () => { identity.blur(); identity.focus() })
+  expect(document.querySelector('.agent-identity-popover')).not.toBeNull()
+  await act(async () => identity.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(document.querySelector('.agent-identity-popover')).toBeNull()
 })
 
 it('passes appearance and stack count through both shared presence paths', async () => {
@@ -109,7 +121,7 @@ it('groups Branch presence by executor and renders each executor customization',
   const urgent = runningAgentPresenceByWorktree([{ ...b, status: { ...b.status, state: 'waiting' } }, c]).get(worktreePresenceKey('local', '/repo'))
   expect(urgent?.map((item) => item.state)).toEqual(['waiting'])
 
-  useAppStore.setState({ config: { ...composerConfig, executors, appearance: { ...composerConfig.appearance, agentAvatars: appearances } }, sessions: [a, b, c] })
+  useAppStore.setState({ config: { ...composerConfig, executors: customizedExecutors() }, sessions: [a, b, c] })
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: '/repo',
     branches: [{ name: 'main', worktreePath: '/repo', workspaceId: 'workspace', isCurrent: true }] })
   await dom.render(<BranchesPanel workspace={composerConfig.workspaces[0]!} />)
@@ -126,17 +138,19 @@ it('clickable avatars select once without opening the containing row', async () 
   expect(dom.container.querySelector('.agent-avatar')?.getAttribute('data-attention')).toBe('needs-you')
 })
 
-it('SettingsPanel passes the configured executor inventory to Appearance', async () => {
+it('Appearance has no avatar controls and the Executor deep link opens the matching template', async () => {
   useAppStore.setState({ config: { ...composerConfig, executors } })
-  await dom.render(<SettingsPanel initialSection="appearance" onClose={() => {}} />)
-  expect(dom.container.querySelector('[aria-label="Codex avatar icon"]')).not.toBeNull()
+  await dom.render(<AppearanceSettingsPane appearance={composerConfig.appearance} onSave={async () => {}} />)
+  expect(dom.container.querySelectorAll('[aria-label$="avatar icon"]')).toHaveLength(0)
+  await dom.render(<SettingsPanel initialSection="agents" executorId="review" onClose={() => {}} />)
   expect(dom.container.querySelector('[aria-label="Reviewer avatar icon"]')).not.toBeNull()
+  expect(dom.container.querySelector<HTMLDetailsElement>('#executor-settings-review')?.open).toBe(true)
 })
 
 it('Topic presence reads the live Session executor rather than its Provider', async () => {
   const workspace = { ...composerConfig.workspaces[0]!, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/scratch' }
   const path = '/scratch/topic--view--review'
-  useAppStore.setState({ config: { ...composerConfig, executors, workspaces: [workspace], appearance: { ...composerConfig.appearance, agentAvatars: appearances } },
+  useAppStore.setState({ config: { ...composerConfig, executors: customizedExecutors(), workspaces: [workspace] },
     sessions: [{ ...composerSession(), executorId: 'review', workspacePath: path }] })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([{ id: 'view:review', directoryPath: path, topicPath: `${path}/topic.md`, title: 'Review', summary: '', collaborators: [] }])
   await dom.render(<WorkspaceTopicsPanel workspace={workspace} onRevealDirectory={() => {}} />)

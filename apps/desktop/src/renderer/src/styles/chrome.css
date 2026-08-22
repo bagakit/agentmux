@@ -150,6 +150,7 @@
 .project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
 .project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.project-rail-row__identity .project-rail-row__activity { color: var(--text-2); font-variant-numeric: tabular-nums; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
 .scratch-workspace-row__icon { background: transparent; }

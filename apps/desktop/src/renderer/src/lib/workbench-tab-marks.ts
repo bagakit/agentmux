@@ -1,4 +1,4 @@
-import type { SessionStatus } from '../../../shared/contracts'
+import type { AgentAvatarAppearance, SessionStatus } from '../../../shared/contracts'
 import {
   titleWorkbenchSurface,
   workbenchSurfaces,
@@ -19,7 +19,7 @@ import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-
  * 可读宽度。真正有区分度的是种类构成：「这里有终端 + 浏览器」。
  */
 export type WorkbenchTabMark =
-  | { kind: 'agent'; providerId: string; status: SessionStatus; regionId: string }
+  | { kind: 'agent'; providerId: string; status: SessionStatus; sessionId?: string; executorId?: string; appearance?: AgentAvatarAppearance; regionId: string }
   | { kind: 'terminal'; regionId: string }
   | { kind: 'file'; regionId: string }
   | { kind: 'launcher'; regionId: string }
@@ -42,7 +42,7 @@ export type WorkbenchTabMark =
  * 若这里自己按 kind 猜，去重键与真正画出来的东西就是两个判断，必然漂移：两个 agent Region 的 session
  * 都还没解析出来时，它们都画成同一个终端图标（逐像素相同），却会被按 sessionId 判成"可区分"而堆两个。
  */
-export type TabMarkAgentFacts = { providerId: string; status: SessionStatus }
+export type TabMarkAgentFacts = { providerId: string; status: SessionStatus; sessionId?: string; executorId?: string; appearance?: AgentAvatarAppearance }
 
 /**
  * 这个 Region 上的 Agent 是谁、什么状态——`workbenchTabMarks` 唯一的取值入口。
@@ -59,14 +59,22 @@ export type TabMarkAgentFacts = { providerId: string; status: SessionStatus }
  * 只有带 `sessionId` 的两种 surface 才可能解析出 session，其余 kind 一律没有 Agent 事实。
  */
 export function tabMarkAgentFactsFor(
-  sessions: readonly TabMarkSession[]
+  sessions: readonly TabMarkSession[],
+  executors?: Readonly<Record<string, { avatar?: AgentAvatarAppearance }>>
 ): (surface: WorkbenchSurface) => TabMarkAgentFacts | null {
   const sessionById = new Map(sessions.map((session) => [session.id, session]))
   return (surface) => {
     if (!isSessionSurface(surface)) return null
     const session = sessionById.get(surface.sessionId)
     if (session?.kind !== 'agent') return null
-    return { providerId: session.providerId, status: session.status }
+    const appearance = session.executorId ? executors?.[session.executorId]?.avatar : undefined
+    return {
+      providerId: session.providerId,
+      status: session.status,
+      sessionId: session.id,
+      ...(session.executorId ? { executorId: session.executorId } : {}),
+      ...(appearance ? { appearance } : {})
+    }
   }
 }
 
@@ -81,7 +89,7 @@ export function tabMarkAgentFactsFor(
  * 决定新那支在标签上算不算 Agent，而不是让它静默走进 null 分支。
  */
 export type TabMarkSession =
-  | { id: string; kind: 'agent'; providerId: string; status: SessionStatus }
+  | { id: string; kind: 'agent'; providerId: string; status: SessionStatus; sessionId?: string; executorId?: string }
   | { id: string; kind: 'terminal'; status: SessionStatus }
 
 /**
@@ -134,9 +142,12 @@ export function workbenchTabMarks(
  * regionId 一律不进 appearance：它逐 Region 必然不同，掺进来会让每个标记都"看起来不一样"，去重彻底失效。
  */
 export function markAppearance(mark: WorkbenchTabMark): string {
-  // agent 标记画的是 Provider 图标 + 状态点，所以这两样都进 appearance：换 Provider 或换状态都是
-  // 肉眼能分辨的差别。
-  if (mark.kind === 'agent') return `agent:${mark.providerId}:${mark.status.state}`
+  // Agent 标记画的是 Provider 图标、固定 Executor badge/tint 和状态点，所以这些都进 appearance：
+  // 两个同 Provider、同状态但不同 Executor 外观的头像仍然是两条可辨识信息。
+  if (mark.kind === 'agent') {
+    const appearance = mark.appearance
+    return `agent:${mark.providerId}:${mark.status.state}:${appearance?.tint ?? ''}:${appearance?.badge ?? ''}`
+  }
   // browser 标记按「有没有 Agent 在驱动它」分成两个外观。这一位**必须**进来：一张 Tab 上一个
   // Browser 在被驱动、另一个闲着时，不进来就会被折成一个标记，而「哪一格在被驱动」正是这次要
   // 让人看见的那条信息——折掉它等于这个功能没做。它也确实画得不一样（驱动态画 Bot，闲着画地球）。
@@ -155,6 +166,9 @@ function surfaceMark(
       kind: 'agent',
       providerId: agent.providerId,
       status: agent.status,
+      ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+      ...(agent.executorId ? { executorId: agent.executorId } : {}),
+      ...(agent.appearance ? { appearance: agent.appearance } : {}),
       regionId: surface.regionId
     }
   }

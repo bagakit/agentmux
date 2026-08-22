@@ -315,7 +315,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                     key: agent.executorId,
                     providerId: agent.providerId,
                     label: config?.executors[agent.executorId]?.label ?? agentProviderLabel(agent.providerId),
-                    appearance: config?.appearance.agentAvatars?.[agent.executorId],
+                    executorId: agent.executorId,
+                    appearance: config?.executors[agent.executorId]?.avatar,
                     // A stack uses the same urgency order as the roster; a live process is not always ready.
                     state: agent.state,
                     count: agent.count

@@ -89,6 +89,83 @@ function statusAfterProcessEvent(
 }
 
 describe('实时路径的进程状态投影', () => {
+  it('readiness observer failure after a stop stays exited instead of becoming a red error', () => {
+    const next = reduceRuntimeEvent(initialState(), core({
+      type: 'agent-error',
+      agentSessionId: session.id,
+      code: 'AGENT_RUN_EXITED',
+      message: 'Agent Run exited before its composer became ready.',
+      evidence: { source: 'terminal-output', observedAt: 5, run: session.control.run }
+    }))
+    expect(next.sessions[0]?.status).toMatchObject({
+      state: 'exited',
+      detail: 'Agent Run exited before its composer became ready.'
+    })
+    expect(next.sessions[0]?.status.state).not.toBe('error')
+  })
+
+  it('a late readiness observer cannot replace a Core crash fact', () => {
+    const crashed = reduceRuntimeEvent(initialState(), core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      state: 'exited',
+      pid: 42,
+      exitCode: 139,
+      exitSignal: 'SIGSEGV',
+      evidence: { source: 'run-process', observedAt: 9, run: session.control.run }
+    }))
+    const next = reduceRuntimeEvent(crashed, core({
+      type: 'agent-error',
+      agentSessionId: session.id,
+      code: 'AGENT_RUN_EXITED',
+      message: 'Agent Run exited before its composer became ready.',
+      evidence: { source: 'terminal-output', observedAt: 10, run: session.control.run }
+    }))
+    expect(next.sessions[0]?.status).toMatchObject({ state: 'error', detail: 'signal SIGSEGV' })
+  })
+
+  it('a readiness observer cannot turn a Runtime interruption into a stopped state', () => {
+    const interrupted = reduceRuntimeEvent(initialState(), core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      state: 'interrupted',
+      pid: 42,
+      interruptionReason: 'daemon_restart',
+      evidence: { source: 'run-process', observedAt: 9, run: session.control.run }
+    }))
+    const next = reduceRuntimeEvent(interrupted, core({
+      type: 'agent-error',
+      agentSessionId: session.id,
+      code: 'AGENT_RUN_EXITED',
+      message: 'Agent Run exited before its composer became ready.',
+      evidence: { source: 'terminal-output', observedAt: 10, run: session.control.run }
+    }))
+    expect(next.sessions[0]?.status).toMatchObject({ state: 'disconnected', detail: 'The Runtime restarted and interrupted this Run.' })
+  })
+
+  it('the Core process fact wins when its event arrives after the observer, even with an older timestamp', () => {
+    const observed = reduceRuntimeEvent(initialState(), core({
+      type: 'agent-error',
+      agentSessionId: session.id,
+      code: 'AGENT_RUN_EXITED',
+      message: 'Agent Run exited before its composer became ready.',
+      evidence: { source: 'terminal-output', observedAt: 10, run: session.control.run }
+    }))
+    const next = reduceRuntimeEvent(observed, core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      state: 'exited',
+      pid: 42,
+      exitCode: 139,
+      exitSignal: 'SIGSEGV',
+      evidence: { source: 'run-process', observedAt: 9, run: session.control.run }
+    }))
+    expect(next.sessions[0]?.status).toMatchObject({ state: 'error', detail: 'signal SIGSEGV' })
+  })
+
   it('keeps Runtime restart recoverable and a deliberate stop neutral on the live path', () => {
     expect(sessionAfterProcessEvent({ state: 'interrupted', interruptionReason: 'daemon_restart' }))
       .toMatchObject({ processState: 'interrupted', interruptionReason: 'daemon_restart', status: {

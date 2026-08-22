@@ -5,7 +5,7 @@ import type {
   AgentMuxAgentContinuityUnavailableReason,
   AgentCapabilities,
   AgentDisplayState,
-  AgentExecutorConfig,
+  AgentExecutorConfig as CoreAgentExecutorConfig,
   AgentExecutorId,
   AgentProviderId,
   LaunchOptionSelection,
@@ -116,7 +116,7 @@ export type SshHostConfig = {
 
 export type HostConfig = LocalHostConfig | SshHostConfig
 
-export type { AgentExecutorConfig, AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
+export type { AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
 
 /**
  * Every `WorkspaceRecord['kind']`, once, and the single source of truth for it. Iterate this (never a
@@ -355,7 +355,11 @@ export const AGENT_AVATAR_BADGE_LABELS: Record<AgentAvatarBadge, string> = {
 /** Desktop identity styling belongs to the executor, not the Provider or Runtime. */
 export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 
+/** Renderer-only Executor decoration; Core keeps its provider/launch contract UI-free. */
+export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvatarAppearance }
+
 export type AppearanceConfig = {
+  /** Executor-owned decoration, edited with its template; durable key stays stable. */
   agentAvatars?: Record<string, AgentAvatarAppearance>
   appAppearance?: AppAppearanceId
   terminalTheme: TerminalThemeId

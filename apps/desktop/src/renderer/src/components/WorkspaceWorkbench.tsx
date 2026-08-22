@@ -51,7 +51,7 @@ import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { regionSurfaceLabel } from '../lib/region-display-name'
 import { revealInFileManagerLabel } from '../lib/host-platform'
-import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
+import { TopRowLeadingChrome } from './TopRowChrome'
 import {
   groupIds,
   regionIds,
@@ -203,7 +203,7 @@ function SortableWorkbenchTab({
   // 标签上画的标记序列：一张 Tab 可以含多个 Region，标签要画出它的种类构成，而不是只画标题那一个。
   // 「谁是 Agent」的判断在 `tabMarkAgentFactsFor` 里，不在这里——这个文件在 node 里 import 不了（经
   // api.ts 的一个 vite define），留在这里的任何取值判断都无法被测试执行到。这里只剩一句转发。
-  const agentFactsFor = tabMarkAgentFactsFor(sessions)
+  const agentFactsFor = tabMarkAgentFactsFor(sessions, config?.executors)
   const marks = workbenchTabMarks(tab, agentFactsFor)
   // 标记簇在上限处截断且刻意不画 `+N`（标签宽度极紧）。折掉的种类改由 tooltip 兜住，两条 tooltip
   // 路径都取它——没有 Session 的多 Region Tab 同样需要（见 `surfaceTabTooltip`）。
@@ -846,7 +846,8 @@ function PaneGroup({
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize,
-  isRootLeaf
+  isRootLeaf,
+  showDefaultSessionEntry = true
 }: {
   group: TabGroup
   workspaceId: string
@@ -857,6 +858,7 @@ function PaneGroup({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   isRootLeaf?: boolean
+  showDefaultSessionEntry?: boolean
 }) {
   const tabsById = useAppStore((state) => state.tabs)
   const sessions = useAppStore((state) => state.sessions)
@@ -941,7 +943,7 @@ function PaneGroup({
           </WorkbenchTabStrip>
         </SortableContext>
         <div className="pane-tabbar__actions">
-          {isRootLeaf ? <DefaultSessionEntry placement="topbar" respectHidden={false} /> : null}
+          {isRootLeaf && showDefaultSessionEntry ? <DefaultSessionEntry placement="topbar" respectHidden={false} /> : null}
           {activeAgentSession ? (
             <div className="pane-view-toggle" aria-label="Agent view">
               <button
@@ -995,11 +997,6 @@ function PaneGroup({
             <Plus size={13} />
           </button>
         </div>
-        {isRootLeaf ? (
-          <div className="pane-tabbar__chrome pane-tabbar__chrome--trailing">
-            <SurfaceSwitch />
-          </div>
-        ) : null}
       </header>
       <div className="pane-body">
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
@@ -1061,7 +1058,8 @@ function SplitNode({
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize = false,
-  isRootLeaf = false
+  isRootLeaf = false,
+  showDefaultSessionEntry = true
 }: {
   node: TabGroupLayoutNode
   nodePath: string
@@ -1072,6 +1070,7 @@ function SplitNode({
   nativeSurfacesVisible: boolean
   interactiveResize?: boolean
   isRootLeaf?: boolean
+  showDefaultSessionEntry?: boolean
 }) {
   if (node.type === 'leaf') {
     const group = layout.groups.find((candidate) => candidate.id === node.groupId)
@@ -1085,6 +1084,7 @@ function SplitNode({
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
+        showDefaultSessionEntry={showDefaultSessionEntry}
       />
     ) : null
   }
@@ -1098,6 +1098,7 @@ function SplitNode({
       splitTarget={splitTarget}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
+      showDefaultSessionEntry={showDefaultSessionEntry}
     />
   )
 }
@@ -1110,7 +1111,8 @@ function SplitBranch({
   allLayout,
   splitTarget,
   nativeSurfacesVisible,
-  interactiveResize
+  interactiveResize,
+  showDefaultSessionEntry
 }: {
   node: Extract<TabGroupLayoutNode, { type: 'split' }>
   nodePath: string
@@ -1120,6 +1122,7 @@ function SplitBranch({
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  showDefaultSessionEntry: boolean
 }) {
   const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
   const [dragging, setDragging] = useState(false)
@@ -1152,6 +1155,7 @@ function SplitBranch({
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
+          showDefaultSessionEntry={showDefaultSessionEntry}
         />
       </Panel>
       <PanelResizeHandle
@@ -1171,6 +1175,7 @@ function SplitBranch({
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
+          showDefaultSessionEntry={showDefaultSessionEntry}
         />
       </Panel>
     </PanelGroup>
@@ -1201,7 +1206,8 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
-  visible = true
+  visible = true,
+  showDefaultSessionEntry = true
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1211,6 +1217,7 @@ export function WorkspaceWorkbench({
    * this seam to stop fit/bounds work until the slot is visible again.
    */
   visible?: boolean
+  showDefaultSessionEntry?: boolean
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
@@ -1301,7 +1308,6 @@ export function WorkspaceWorkbench({
         {rootIsLeaf ? null : (
           <div className="workbench-chromeline">
             <TopRowLeadingChrome />
-            <SurfaceSwitch />
           </div>
         )}
         <SplitNode
@@ -1314,6 +1320,7 @@ export function WorkspaceWorkbench({
           nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
+          showDefaultSessionEntry={showDefaultSessionEntry}
         />
       </div>
       <DragOverlay dropAnimation={null}>

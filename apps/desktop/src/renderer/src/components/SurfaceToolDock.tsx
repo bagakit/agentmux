@@ -1,3 +1,4 @@
+import { AgentAvatar } from './AgentAvatar'
 import {
   Activity,
   ArrowUpRight,
@@ -58,7 +59,7 @@ import { browserOpenError } from '../lib/browser-open-feedback'
 import { presentError } from '../lib/error-presentation'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
@@ -423,8 +424,7 @@ export function WorkspaceAgentsTool({
                     onClick={() => onOpen(session.id)}
                   >
                     <span className="workspace-agent-row__mark">
-                      <AgentProviderIcon providerId={session.providerId} size={15} />
-                      <StatusDot status={session.status} />
+                      <AgentAvatar sessionId={session.id} executorId={session.executorId} label={session.label} state={session.status.state} providerId={session.providerId} size={18} />
                     </span>
                     <span className="workspace-agent-row__identity">
                       <strong>{session.label}</strong>

@@ -94,8 +94,14 @@
 .workspace-topics-panel--index { padding:var(--sp-3); background: var(--surface-1); }
 /* 定位与背景归本面板；里面的排版走共享的 .selector-list__header（见 selector.css）。 */
 .workspace-topic-index-header { padding:0 var(--sp-1) 0 var(--sp-4); }
-.workspace-topic-list { width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-2); }
-.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; border-bottom: 1px solid var(--line-soft); }
+.workspace-topic-state { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px dashed var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: color-mix(in srgb, var(--surface-2) 48%, transparent); }
+.workspace-topic-state > span:not(.workspace-topic-state__icon) { min-width: 0; display: grid; gap: var(--sp-1); }
+.workspace-topic-state strong { color: var(--text-2); font-size: var(--fs-meta); }
+.workspace-topic-state small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.workspace-topic-state__icon { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); color: var(--green-2); background: var(--green-bg); }
+.workspace-topic-state .small-button { flex: 0 0 auto; margin-left: auto; }
+.workspace-topic-list { width: 100%; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); }
+.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .workspace-topic-item:last-child { border-bottom: 0; }
 /* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
    悬停还弱——此前它是 --surface-1，比 hover 的 --surface-3 更暗，全靠那根绿竖条撑住存在感。 */
@@ -106,8 +112,9 @@
    与摘要多长无关"）归共享层 `.selector-row`（selector.css）；这里只管本面板的内外边距、
    背景与状态色。此前这里自写一份 `auto minmax(0,1fr) auto` 三列网格，而 leading 可空——
    只来两段时簇被摆进摘要那一列，压在文字上（#467）。 */
-.workspace-topic-entry { min-width: 0; min-height: 40px; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
-.workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
+.workspace-topic-entry { min-width: 0; min-height: 42px; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-3); border: 0; color: var(--text-3); background: transparent; text-align: left; }
+.workspace-topic-item:hover:not(.current) { background: color-mix(in srgb, var(--surface-2) 72%, transparent); }
+.workspace-topic-item.current { box-shadow: inset 2px 0 0 var(--green); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
@@ -118,11 +125,16 @@
 .workspace-topic-entry .selector-row__identity { gap:var(--sp-1); }
 .workspace-topic-entry .selector-row__identity strong { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .workspace-topic-entry .selector-row__identity small { font-size: var(--fs-micro); }
+.workspace-topic-glyph { width: 22px; height: 22px; display: inline-grid; place-items: center; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-2); }
+.workspace-topic-item.current .workspace-topic-glyph { color: var(--green-2); border-color: var(--green-line); background: var(--green-bg); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
+.workspace-topic-actions { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2) 0 0; opacity: .55; transition: opacity var(--dur-fast) ease; }
+.workspace-topic-item:hover .workspace-topic-actions, .workspace-topic-item:focus-within .workspace-topic-actions, .workspace-topic-item.current .workspace-topic-actions { opacity: 1; }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
-.workspace-topic-wiki { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--green-2); cursor: pointer; }
+.workspace-topic-wiki { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 var(--sp-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--green-2); cursor: pointer; }
 .workspace-topic-wiki:hover { background: var(--surface-2); color: var(--text); }
+.workspace-topic-wiki--text { min-width: 28px; font-size: var(--fs-micro); }
 /* 已 pin 的静息态标记：品牌绿小 Pin，扫一眼列表就分辨得出（不靠 hover）。行首可空槽里的东西
    （同 leading spinner，只在 pinned 时占位），不是按钮——切换 pin 的动作在右键菜单里。 */
 .workspace-topic-entry__pin { flex: 0 0 auto; color: var(--green); }
@@ -197,15 +209,6 @@
 .file-context-menu__danger[data-highlighted] > svg { color: var(--red-text); }
 .file-context-menu__danger[data-highlighted] { color: var(--red-text); background: var(--red-wash); }
 .file-context-menu__danger > svg, .file-context-menu__danger[data-highlighted] > svg { color: currentColor; }
-/* Peripheral 5px marks (tab corner, rail row) can't seat a glyph and don't need one — colour plus
-   corner position already differentiates them. Higher specificity than the needs-you rule above, so
-   it restores the tight badge dot regardless of source order. */
-.workspace-agent-row__mark .status--waiting .status__dot,
-.workspace-agent-row__mark .status--blocked .status__dot,
-.workbench-tab__agent-mark .status--waiting .status__dot,
-.workbench-tab__agent-mark .status--blocked .status__dot { width: 5px; height: 5px; box-shadow: none; }
-.workspace-agent-row__mark .status__dot::after,
-.workbench-tab__agent-mark .status__dot::after { display: none; }
 .provenance { padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); letter-spacing: .06em; text-transform: uppercase; }
 .provenance--native-hook { color: var(--green); background: var(--green-bg); }
 .workspace-composer { padding:var(--sp-6); }

@@ -22,8 +22,7 @@ function pendingFixture(id = 'pending') {
   const tab = createWorkbenchTab('view', { regionId: 'region', kind: 'agent', phase: 'launching', workspaceId: 'workspace', sessionId: id })
   useAppStore.setState({
     config: { ...composerConfig, executors: { ...composerConfig.executors,
-      reviewer: { ...composerConfig.executors.codex!, label: 'Code reviewer' } },
-      appearance: { ...composerConfig.appearance, agentAvatars: { reviewer: { tint: '#009988', badge: 'shield' } } } },
+      reviewer: { ...composerConfig.executors.codex!, label: 'Code reviewer', avatar: { tint: '#009988', badge: 'shield' } } } },
     sessions: [composerSession('neighbor')], activeWorkspaceId: 'workspace',
     tabs: { view: tab }, layouts: { workspace: createWorkspaceLayout('pane', ['view']) },
     pendingAgentLaunches: { [id]: { events: [], overflowed: false, request: { executorId: 'reviewer', prompt } } }
@@ -63,12 +62,12 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
     await act(async () => useAppStore.setState({ agentComposerDrafts: { [id]: 'not submitted' } }))
     expect(dom.container.querySelector('pre')?.textContent).toBe(prompt)
     expect(dom.container.querySelector('.session-connecting__executor strong')?.textContent).toBe('Code reviewer')
-    expect(dom.container.querySelector('.session-connecting__executor-mark')?.getAttribute('aria-label')).toBe('Code reviewer')
-    expect(dom.container.querySelector('.session-connecting__executor-mark [data-agent-provider="codex"]')).not.toBeNull()
-    expect(dom.container.querySelector('.session-connecting__executor-badge')?.getAttribute('data-avatar-badge')).toBe('shield')
+    expect(dom.container.querySelector('.session-connecting__executor .agent-avatar')?.getAttribute('aria-label')).toBe('Code reviewer')
+    expect(dom.container.querySelector('.session-connecting__executor .agent-avatar [data-agent-provider="codex"]')).not.toBeNull()
+    expect(dom.container.querySelector('.agent-avatar__badge')?.getAttribute('data-avatar-badge')).toBe('shield')
     // A connecting surface has no Runtime status fact yet; it must not borrow a status dot from a
     // neighboring Agent or imply that this process is already running.
-    expect(dom.container.querySelector('.session-connecting__executor-mark .agent-avatar__status')).toBeNull()
+    expect(dom.container.querySelector('.session-connecting__executor .agent-avatar .agent-avatar__status')).toBeNull()
   } finally {
     await act(async () => { native.reject(new Error('fixture complete')); await settled })
   }

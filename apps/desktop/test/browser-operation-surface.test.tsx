@@ -53,6 +53,17 @@ const plan: BrowserReplayPlan = {
 }
 
 describe('BrowserOperationRail', () => {
+  it('leaves an idle human-owned Browser page unobscured', () => {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
+      activity: { operation: null, control: 'human' },
+      onOpenTimeline: vi.fn()
+    }))
+    expect(markup).toContain('browser-rsi-rail--quiet')
+    expect(markup).toContain('Open browser activity timeline')
+    expect(markup).not.toContain('Browser ready')
+    expect(markup).not.toContain('You have control')
+  })
+
   it('does not claim the Browser is idle while Agent control is active but activity is loading', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
       activity: { operation: null, control: 'agent' },

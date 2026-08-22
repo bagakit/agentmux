@@ -9,7 +9,7 @@ import {
 } from '../lib/quick-switch'
 import { tabGroupForTab } from '../lib/workbench-tabs'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
-import { AgentProviderIcon } from './AgentProviderIcon'
+import { AgentAvatar } from './AgentAvatar'
 import { StatusDot } from './StatusDot'
 import { useAppStore } from '../store'
 
@@ -22,7 +22,7 @@ import { useAppStore } from '../store'
 
 function KindGlyph({ item }: { item: QuickSwitchItem }) {
   if (item.kind === 'session') {
-    if (item.providerId) return <AgentProviderIcon providerId={item.providerId} size={14} />
+    if (item.providerId) return <AgentAvatar label={item.title} sessionId={item.target.kind === 'session' ? item.target.sessionId : undefined} state={item.state ?? undefined} providerId={item.providerId} size={14} />
     return <SquareTerminal size={13} />
   }
   // Non-session tab rows: file / browser / launcher get their own quiet kind glyph.
@@ -135,7 +135,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
                     <span className="quick-switch__row-title">{item.title}</span>
                     <span className="quick-switch__row-subtitle">{item.subtitle}</span>
                   </span>
-                  {item.state ? <StatusDot status={{ state: item.state, source: 'native-hook', observedAt: item.observedAt }} /> : null}
+                  {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook', observedAt: item.observedAt }} /> : null}
                 </button>
               ))
             )}
