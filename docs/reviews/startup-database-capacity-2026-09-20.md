@@ -19,7 +19,7 @@
 5. 已安装 App 成功出现工作区、项目、原 Tab 和历史终端内容。SDK runtimeInfo 确认 protocol 17、`services.persistent_state: 1`、`runtimeIdPersistence: state_dir`，runtimeId 仍为 `ae218ad9-c7f7-437e-83c7-a034b2f3447b`。
 6. UI 中旧 Agent 显示 interrupted 与 Resume；不能据此宣称 Agent 已自动恢复运行。启动阶段还出现 historical Run stop 和短暂 attachment ECONNREFUSED，故本轮只确认 App 启动及工作面可见。
 
-恢复目录（仅本机）：`/private/tmp/agentmux-startup-recovery-7vxletus/`；原库备份 `original-state.sqlite3`；未改动的压实副本 `state.sqlite3`；隔离启动结果 `probe-result.json`。
+恢复目录在临时隔离目录中；原库备份 `original-state.sqlite3`；未改动的压实副本 `state.sqlite3`；隔离启动结果 `probe-result.json`。
 
 诊断插曲：ctxmux CLI 的 ping 会自动启动无 state-dir 的 daemon，不能当成纯只读探针。该次创建的无 Run 临时 daemon 已精确停止；最终验证改用 SDK runtimeInfo，没有用空 Runtime 替换持久化 Runtime。
 

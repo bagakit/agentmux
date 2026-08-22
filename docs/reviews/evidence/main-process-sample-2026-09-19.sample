@@ -1,6 +1,6 @@
 Analysis of sampling AgentMux (pid 72361) every 1 millisecond
 Process:         AgentMux [72361]
-Path:            /Users/USER/*/AgentMux.app/Contents/MacOS/AgentMux
+Path:            AgentMux.app (main process)
 Load Address:    0x1042e8000
 Identifier:      dev.agentmux.desktop
 Version:         0.1.0 (0.1.0)

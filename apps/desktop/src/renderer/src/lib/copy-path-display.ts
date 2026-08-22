@@ -11,7 +11,7 @@
 /**
  * 把绝对路径开头的当前用户家目录换成 `~`；不匹配则原样返回。
  *
- * 边界必须是 `home` 本身或 `home + '/'`，**不是** `startsWith(home)`——否则 `/Users/bytedanceOTHER/x`
+ * 边界必须是 `home` 本身或 `home + '/'`，**不是** `startsWith(home)`——否则 `/tmp/alice-homeOTHER/x`
  * 会被剥成 `~OTHER/x`，一个看起来合法、实则不存在的路径（设计 SSOT 点名的反例）。所以只认两种：
  *   - `path === home`            → `~`
  *   - `path` 以 `home + '/'` 开头 → `~` + 其余部分（含那个 `/`）

@@ -9,7 +9,7 @@
   "base_ref": "main",
   "branch": "fix/topic-presence-integration-20260920",
   "worktree_name": "agentmux-region-topic-20260920",
-  "worktree_path": "../../../../../../private/tmp/agentmux-region-topic-20260920",
+  "worktree_path": "/tmp/agentmux-region-topic-20260920",
   "runtime_role": "standalone",
   "runtime_relations": [],
   "counters": {
@@ -42,7 +42,7 @@
     },
     {
       "action": "workspace_adopted",
-      "detail": "proposal_only:none@none -> worktree:fix/topic-presence-integration-20260920@../../../../../../private/tmp/agentmux-region-topic-20260920"
+      "detail": "proposal_only:none@none -> worktree:fix/topic-presence-integration-20260920@/tmp/agentmux-region-topic-20260920"
     },
     {
       "action": "task_started",

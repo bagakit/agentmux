@@ -77,11 +77,9 @@
    视觉、密度与控件语言写进 `docs/design/agentmux-surface-density.md`。这两份是设计 SSOT，
    用贴近用户原话的表述记录**约束**（"什么必须成立"），不记录实现步骤。
    同一件事只写在一处，另一处引用它。
-2. **建或更新 feature-tracker**。用
-   `/Users/bytedance/proj/priv/bagakit/bagakit/skills/co-work/orchestrate/execution/bagakit-feature-tracker/scripts/feature-tracker.sh`
-   驱动（走 `.sh`；`.py` 没有 shebang。这条路径上游会搬——失败时先
-   `find /Users/bytedance/proj/priv/bagakit -name feature-tracker.sh -not -path '*/node_modules/*'`
-   重新定位，并跳过 `.tmp/` 与 `-adopt-worktree` 下的副本）：新需求若与现有 Feature 的
+2. **建或更新 feature-tracker**。用 `feature-tracker.sh` 驱动（走 `.sh`；`.py` 没有 shebang。
+   脚本路径上游会搬——失败时先 `find` 名为 `feature-tracker.sh` 的文件，排除 `node_modules/`、
+   `.tmp/` 与 `-adopt-worktree` 下的副本后再定位）：新需求若与现有 Feature 的
    Closure 不同就 `create-feature`（`--tasks-file` 要
    `schema: "bagakit.feature-task-plan.v1"` + 已 approved 的 review artifact），
    同一 Closure 内则给现有 Feature 追加 task。每个 task 必须有可证伪的 acceptance 与

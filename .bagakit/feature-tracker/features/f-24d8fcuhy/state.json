@@ -9,7 +9,7 @@
   "base_ref": "main",
   "branch": "fix/composer-integration-regressions-20260920",
   "worktree_name": "agentmux-branch-pin-20260920",
-  "worktree_path": "../../../../../../private/tmp/agentmux-branch-pin-20260920",
+  "worktree_path": "/tmp/agentmux-branch-pin-20260920",
   "runtime_role": "standalone",
   "runtime_relations": [],
   "counters": {
@@ -53,7 +53,7 @@
     },
     {
       "action": "workspace_adopted",
-      "detail": "worktree:feat/f-24d8fcuhy@.worktrees/wt-f-24d8fcuhy -> worktree:fix/composer-integration-regressions-20260920@../../../../../../private/tmp/agentmux-branch-pin-20260920"
+      "detail": "worktree:feat/f-24d8fcuhy@.worktrees/wt-f-24d8fcuhy -> worktree:fix/composer-integration-regressions-20260920@/tmp/agentmux-branch-pin-20260920"
     },
     {
       "action": "task_started",

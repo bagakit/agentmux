@@ -1,6 +1,7 @@
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -1183,7 +1184,7 @@ describe('Browser 进度订阅：一问多答是独立的一支，一问一答�
   // 于是 subscribe 的签名改了（多一个参数、换个返回形状）之后这些测试照旧编译通过、照旧全绿，
   // 而生产代码那边已经对不上了。判据要靠 tsc 钉住，不是靠 cast 绕开。
   const serve = async (host: AgentMuxControlHost): Promise<{ server: AgentMuxControlServer; path: string }> => {
-    const root = await mkdtemp('/private/tmp/agentmux-subscribe-')
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-subscribe-'))
     roots.push(root)
     const path = join(root, 'control.sock')
     const server = new AgentMuxControlServer(host, path)
@@ -1228,7 +1229,7 @@ describe('Browser 进度订阅：一问多答是独立的一支，一问一答�
   it('一问一答那条路径没被放宽：读一条→回一条→关闭，尾随数据仍被拒', async () => {
     // 这一条守的是本 task 最大的回归面。用**普通操作**（send）在同一个 server 上验证，因为放宽
     // `readMessage` 的后果落在所有 14 个操作上，不只是 Browser 那几条。
-    const root = await mkdtemp('/private/tmp/agentmux-subscribe-framing-')
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-subscribe-framing-'))
     roots.push(root)
     const path = join(root, 'control.sock')
     let executions = 0

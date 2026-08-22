@@ -7,8 +7,8 @@
 - 此文本来自 Desktop RuntimeController.connectedClient / trackHostLifecycleOperation，是 hostReconfigurationReservations 的门禁，不是 ctxmux 的 Run 终局事实。
 - RuntimeController.dispose() 也把所有已配置 Host 加入该集合，再等待 waitForHostQuiescence；因此 App 退出期间同样会报“reconfigured”。源码与本机新安装的 out/main/index.js 均有这条路径。
 - prepare(config) 只为已存在且改变/删除的 Host 预留门禁。正常首次启动的空 controller 不会为 local 留下此标记。
-- `/private/tmp/inbox-package-install-final.log`：2026-09-20 17:48:18 安装因旧 App pids 68855/69844/69845/70237 未优雅退出而中止，未强杀。
-- `/private/tmp/inbox-install-retry.log`：17:54:52 安装成功，`quit_previous_instance=not_running`，`relaunched_pids=598`。这是其他正在进行的安装操作产生的结果，本次诊断未重装或重启 App。
+- 安装日志：首次安装因旧 App pids 未优雅退出而中止，未强杀。
+- 重试日志：稍后安装成功，`quit_previous_instance=not_running`，`relaunched_pids=598`。这是其他正在进行的安装操作产生的结果，本次诊断未重装或重启 App。
 - 检查 PID 598 的窗口：原项目/分屏可见，终端已接回，UI 显示 13 working。SDK 只读查询同一 ctxmux 得到 198 个 Run，其中 running 28；daemonInstanceId 仍为 `5d16ed0f-f8ef-4771-8598-f977aa1c2706`，runtimeIdPersistence 为 state_dir。运行事实不能被 attach 的 Desktop 门禁替代。
 
 ## 判断和未确认部分

@@ -1,6 +1,6 @@
 Analysis of sampling AgentMux Helper (Renderer) (pid 73291) every 1 millisecond
 Process:         AgentMux Helper (Renderer) [73291]
-Path:            /Users/USER/*/AgentMux.app/Contents/Frameworks/AgentMux Helper (Renderer).app/Contents/MacOS/AgentMux Helper (Renderer)
+Path:            AgentMux Helper (Renderer)
 Load Address:    0x100e34000
 Identifier:      dev.agentmux.desktop.helper.renderer
 Version:         ???
