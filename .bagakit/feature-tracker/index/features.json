@@ -1970,7 +1970,7 @@
     {
       "feat_id": "f-29k8fme4e",
       "title": "Agents 看板与 Board 需求流转（2026-09-22）",
-      "status": "done",
+      "status": "archived",
       "workspace_mode": "worktree",
       "branch": "feat/taskflow-board",
       "worktree_name": "agentmux-taskflow",
