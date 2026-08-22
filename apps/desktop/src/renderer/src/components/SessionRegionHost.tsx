@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { DemandArrangement } from '../lib/global-task-board'
+import type { DemandArrangement } from '../lib/global-demand-board'
 
 export function sessionRegionHostClassName(arrangement: DemandArrangement): string {
   return `session-region-host session-region-host--${arrangement}`

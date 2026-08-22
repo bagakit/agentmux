@@ -234,10 +234,10 @@ export type AgentMuxDemandDecision = {
   recordedAt: number
   sourceSessionId: string | null
 }
-export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'task.list' }
-export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'task.show'; taskId: string }
+export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'demand.list' }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
-  operation: 'task.create'
+  operation: 'demand.create'
   title: string
   description?: string
   projectId?: string
@@ -247,14 +247,14 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
-  operation: 'task.update'
-  taskId: string
+  operation: 'demand.update'
+  demandId: string
   patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds'>>
   decision?: AgentMuxDemandDecision
 }
-export type AgentMuxControlDemandLinkSessionRequest = RequestBase & { operation: 'task.link-session'; taskId: string; sessionId: string }
-export type AgentMuxControlDemandLinkProjectRequest = RequestBase & { operation: 'task.link-project'; taskId: string; projectId: string }
-export type AgentMuxControlDemandDecisionLogRequest = RequestBase & { operation: 'task.decision-log'; taskId: string }
+export type AgentMuxControlDemandLinkSessionRequest = RequestBase & { operation: 'demand.link-session'; demandId: string; sessionId: string }
+export type AgentMuxControlDemandLinkProjectRequest = RequestBase & { operation: 'demand.link-project'; demandId: string; projectId: string }
+export type AgentMuxControlDemandDecisionLogRequest = RequestBase & { operation: 'demand.decision-log'; demandId: string }
 /**
  * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
  *
@@ -463,13 +463,13 @@ export type AgentMuxControlResult =
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
-  | { operation: 'task.list'; tasks: AgentMuxDemand[] }
-  | { operation: 'task.show'; task: AgentMuxDemand | null }
-  | { operation: 'task.create'; task: AgentMuxDemand; receipt: { taskId: string; createdAt: number } }
-  | { operation: 'task.update'; task: AgentMuxDemand; receipt: { taskId: string; updatedAt: number } }
-  | { operation: 'task.link-session'; task: AgentMuxDemand; receipt: { taskId: string; sessionId: string } }
-  | { operation: 'task.link-project'; task: AgentMuxDemand; receipt: { taskId: string; projectId: string } }
-  | { operation: 'task.decision-log'; taskId: string; decisions: AgentMuxDemandDecision[] }
+  | { operation: 'demand.list'; demands: AgentMuxDemand[] }
+  | { operation: 'demand.show'; demand: AgentMuxDemand | null }
+  | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
+  | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
+  | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
+  | { operation: 'demand.link-project'; demand: AgentMuxDemand; receipt: { demandId: string; projectId: string } }
+  | { operation: 'demand.decision-log'; demandId: string; decisions: AgentMuxDemandDecision[] }
   // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
   // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
   | {
@@ -674,13 +674,13 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 开场帧，不是整条流**。流本身的存活由长连接路径自己管（socket 上没有"请求超时"可言：一个操作
   // 安静十分钟是正常的，不是超时）。若这里给长档，等于让一个只读本地状态的问答白等一分钟。
   'browser.subscribe': 'short'
-  , 'task.list': 'short'
-  , 'task.show': 'short'
-  , 'task.create': 'short'
-  , 'task.update': 'short'
-  , 'task.link-session': 'short'
-  , 'task.link-project': 'short'
-  , 'task.decision-log': 'short'
+  , 'demand.list': 'short'
+  , 'demand.show': 'short'
+  , 'demand.create': 'short'
+  , 'demand.update': 'short'
+  , 'demand.link-session': 'short'
+  , 'demand.link-project': 'short'
+  , 'demand.decision-log': 'short'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */

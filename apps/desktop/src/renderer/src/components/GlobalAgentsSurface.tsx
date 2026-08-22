@@ -40,7 +40,7 @@ export function GlobalAgentsSurface() {
       && `${names[row.sessionId] ?? row.label} ${row.workspacePath} ${row.providerId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
   })
   const selected = rows.find((row) => row.sessionId === selectedId)
-  return <section className={`global-board-surface global-agents-board ${selectedId ? 'global-board-surface--task-open' : ''}`} aria-label="Agents">
+  return <section className={`global-board-surface global-agents-board ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Agents">
     <div className="global-board-main">
       <header className="global-board-toolbar">
         <div className="global-board-toolbar__scope"><Users size={14} /><strong>Agents</strong><span className="global-board-toolbar__crumb">Sessions · Global</span></div>
@@ -56,20 +56,20 @@ export function GlobalAgentsSurface() {
           const grouped = filtered.filter((row) => bucketFor(row) === bucket)
           return <section className="global-board-column global-agents-group" data-bucket={bucket} key={bucket}>
             <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{grouped.length}</em></span></header>
-            <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-task-card ${selectedId === row.sessionId ? 'global-task-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => setSelected(row.sessionId)}>
-              <span className="global-task-card__topline"><AgentProviderIcon providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
-              <strong className="global-task-card__title">{names[row.sessionId] ?? row.label}</strong>
-              <span className="global-task-card__description">{row.workspacePath}</span>
-              {row.awaitingReply ? <span className="global-task-card__meta">Awaiting your reply</span> : null}
+            <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-session-card ${selectedId === row.sessionId ? 'global-session-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => setSelected(row.sessionId)}>
+              <span className="global-session-card__topline"><AgentProviderIcon providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
+              <strong className="global-session-card__title">{names[row.sessionId] ?? row.label}</strong>
+              <span className="global-session-card__description">{row.workspacePath}</span>
+              {row.awaitingReply ? <span className="global-session-card__meta">Awaiting your reply</span> : null}
             </button>)}{grouped.length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}</div>
           </section>
         })}
       </div>}
       <footer className="global-board-footer"><span>{filtered.length} of {rows.length} Agents</span><DefaultSessionEntry placement="board" /></footer>
     </div>
-    {selectedId ? <aside className="global-task-workspace" aria-label="Agent workspace">
-      <header className="global-task-workspace__header"><div className="global-task-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
-      {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-task-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
+    {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
+      <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
+      {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
       <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />
     </aside> : null}
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} /> : null}
