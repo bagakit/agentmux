@@ -33,8 +33,8 @@ describe('Agents / Session / Board navigation', () => {
     expect(buttons[0]?.classList.contains('selected')).toBe(true)
   })
 
-  it('does not create a TaskWorkspace when no Task is selected', async () => {
-    useAppStore.setState({ sessions: [], boardTasks: {}, selectedBoardTaskId: null, mainSurface: 'board' })
+  it('does not create a DemandWorkspace when no Task is selected', async () => {
+    useAppStore.setState({ sessions: [], demands: {}, selectedDemandId: null, mainSurface: 'board' })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
     expect(container.querySelector('.global-task-workspace')).toBeNull()

@@ -105,7 +105,7 @@ export function TopBreadcrumb() {
   if (mainSurface === 'board') {
     return (
       <div className="breadcrumbs">
-        <strong>Board</strong>
+        <strong>Board</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Demands</span>
         {project ? (
           <>
             <span className="breadcrumbs__sep" aria-hidden>/</span>
@@ -159,8 +159,8 @@ export function SurfaceSwitch() {
       </button>
       <button
         className={mainSurface === 'board' ? 'selected' : ''}
-        aria-label="Board: show Tasks and projects"
-        title="Board — show Tasks and projects"
+        aria-label="Board: show Demands"
+        title="Board — show Demands"
         onClick={() => setMainSurface('board')}
       >
         <LayoutDashboard size={13} /> Board

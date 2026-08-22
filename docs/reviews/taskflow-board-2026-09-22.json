@@ -1,0 +1,66 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/taskflow-board-2026-09-22.md"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/taskflow-board-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Agents 采用原 Board 卡片与同屏工作区",
+      "objective": "Agent Session 可搜索筛选、观察及原地处理请求。",
+      "outcome": "Agent Session 可搜索筛选、观察及原地处理请求。",
+      "acceptance": [
+        "卡片展示真实 Agent Session，点击保留 Agents 并打开同屏观察。",
+        "Needs you 原地处理入口保留；Agent 与 Task 选择独立。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/global-agents-board.test.tsx",
+          "proves": "Agent Session 可搜索筛选、观察及原地处理请求。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/taskflow-board-2026-09-22.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "Board 按独立 Demand流转并关联执行",
+      "objective": "需求可无 Session 创建，维护状态、负责人和活动，显式执行并关联多个 Session。",
+      "outcome": "需求可无 Session 创建，维护状态、负责人和活动，显式执行并关联多个 Session。",
+      "acceptance": [
+        "Session 不自动生成 Task，零会话和多会话需求均持久存在。",
+        "七个状态、编辑、分配、评论、关联与解除关联经 UI 生效；Session 退出不改变需求状态。",
+        "执行经既有启动路径关联精确 Session；失败与重启不清除需求、关联和选择。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm exec vitest run apps/desktop/test/taskflow-board.test.tsx apps/desktop/test/global-task-board.test.ts apps/desktop/test/board-recovery.test.ts",
+          "proves": "需求可无 Session 创建，维护状态、负责人和活动，显式执行并关联多个 Session。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/taskflow-board-2026-09-22.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}

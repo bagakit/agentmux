@@ -734,3 +734,12 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 - Restoring 使用和 Agent 启动相同的内容宽度、边框、阴影和字号；终端方块光标、绿色扫描线与“重放/接回”副文案是独有语言。Agent 启动保留执行器图形、加载 glyph 和“等待首段输出”文案，两者不共用同一 spinner。
 - Agent 与 Workspace 的显示名编辑使用紧凑的行内控件：名称文本优先，内部 ID 退到详情/诊断；成功后的新名称在 Tab、Region、Project rail 和 Skill 说明中即时一致。失败只在当前表面留下短服务窗，不撑高导航。
 - 插件目录、Skill 和命令入口沿用现有 Settings/Launcher 密度：清单先显示名称、版本和能力摘要，激活状态用一个小状态点表达；不为每个插件增加独立卡片、颜色或厂商专属控件。
+
+### Agents 看板与 Board 需求流转（2026-09-22）
+
+Agents 直接沿用原 Board 的工具栏、状态列、卡片和右半工作区设计。卡片以 Agent 显示名和 Executor 身份为主，观察与请求处理保留同屏上下文。Board 卡片先读需求标题、状态、负责人、Project 和优先级，Session 数量和运行状态是次级事实。零 Session 与多 Session 的需求具有相同地位。需求编辑与关联在固定详情区完成；行为约束见 interaction SSOT 同名小节。
+
+
+### Board Demand 的全局层级（2026-09-22）
+
+Board 是与 Project、Session 平级的最高级工作面。进入 Board 后 Project Rail 被 Board 连续 Surface 覆盖，不能在左侧继续显示 Project 树；Board 内的卡片、筛选、详情和右侧工作区以 Demand 为文案，Demand 才是需求身份，关联 Session 只作为执行事实。

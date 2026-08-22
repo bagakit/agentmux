@@ -30,7 +30,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  useAppStore.setState({ config, sessions: [makeSession()], boardTasks: {}, selectedBoardTaskId: null, mainSurface: 'board' })
+  useAppStore.setState({ config, sessions: [makeSession()], demands: { 'task:one': { id: 'task:one', title: 'Build auth flow', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' })
 })
 afterEach(async () => {
   await act(async () => root.unmount())
@@ -41,7 +41,7 @@ afterEach(async () => {
 describe('global Board task workspace', () => {
   it('keeps Board visible and opens the selected task in the same surface', async () => {
     await act(async () => root.render(createElement(GlobalBoardSurface)))
-    const card = container.querySelector('[data-task-id="session:session-1"]') as HTMLButtonElement
+    const card = container.querySelector('[data-task-id="task:one"]') as HTMLButtonElement
     expect(card).toBeTruthy()
     await act(async () => card.click())
     expect(container.querySelector('.global-board-columns')).toBeTruthy()
@@ -51,8 +51,8 @@ describe('global Board task workspace', () => {
   })
 
   it('keeps a persisted task visible when its Session is gone', async () => {
-    useAppStore.setState({ sessions: [], boardTasks: {
-      'task:recover': { id: 'task:recover', title: 'Recover the work surface', description: 'Keep context after restart', status: 'working', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['gone'], createdAt: 1, updatedAt: 3, source: 'default-topic' }
+    useAppStore.setState({ sessions: [], demands: {
+      'task:recover': { id: 'task:recover', title: 'Recover the work surface', description: 'Keep context after restart', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['gone'], createdAt: 1, updatedAt: 3, source: 'default-topic' }
     } })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('[data-task-id="task:recover"]')?.textContent).toContain('Recover the work surface')
