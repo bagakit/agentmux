@@ -150,10 +150,19 @@
   display: grid;
   place-items: center;
   color: var(--text-2);
-  background: var(--bg);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--line-soft) 34%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 24%, transparent) 1px, transparent 1px),
+    var(--bg);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(45deg, #000 0%, transparent 88%);
   pointer-events: none;
 }
 .terminal-agent-startup__content {
+  position: relative;
+  width: min(420px, calc(100% - (var(--sp-8) * 2)));
+  box-sizing: border-box;
+  overflow: hidden;
   display: grid;
   grid-template-columns: 16px auto;
   align-items: center;
@@ -165,11 +174,40 @@
   background: var(--surface-1);
   box-shadow: var(--elev-1);
 }
+.terminal-agent-startup__content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--blue), var(--purple), transparent);
+  animation: terminal-agent-scanline var(--dur-sweep) var(--ease-enter) infinite;
+}
+.terminal-agent-startup__content::after {
+  content: '';
+  position: absolute;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  width: 28px;
+  height: 18px;
+  border-right: 1px solid var(--blue);
+  border-bottom: 1px solid var(--blue);
+  opacity: .42;
+}
+@keyframes terminal-agent-scanline {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+.terminal-agent-startup__glyph { display: inline-flex; align-items: center; justify-content: center; color: var(--blue); }
 .terminal-agent-startup__content strong { font-size: var(--fs-meta); font-weight: 600; }
 .terminal-agent-startup__content span {
   grid-column: 2;
   color: var(--text-3);
   font-size: var(--fs-micro);
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-agent-startup__content::before { animation: none; }
 }
 /* 服务窗在终端投影里的落点（形态由 agent.css 的 .service-window 定义，这里只定位）。
    贴左下角、限宽、可点：它是告示不是遮挡，所以不铺满、不吃掉画布的指针事件。 */
@@ -191,10 +229,10 @@
   gap:var(--sp-3);
   padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
   transform: translateX(-50%);
-  border: 1px solid var(--amber-line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  color: var(--amber-text);
-  background: var(--overlay-surface);
+  color: var(--text-2);
+  background: var(--surface-2);
   box-shadow: var(--elev-2);
   font-size: var(--fs-micro);
   white-space: nowrap;
@@ -207,8 +245,8 @@
   padding:0 var(--sp-2);
   border: 0;
   border-radius: 3px;
-  color: var(--amber-text);
-  background: var(--wash-2);
+  color: var(--text-2);
+  background: var(--surface-3);
   font: inherit;
   cursor: pointer;
 }

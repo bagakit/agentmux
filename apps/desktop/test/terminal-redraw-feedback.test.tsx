@@ -44,4 +44,6 @@ it('TerminalView returns the real viewport outcome to the visible notice', () =>
   expect(redraw).toContain('const redrawn = await viewport.requestContentRedraw()')
   expect(redraw).toMatch(/return redrawn\b/)
   expect(source).toContain('onRedraw={redrawCurrentScreen}')
+  expect(source).toContain('setReplayGap(false)')
+  expect(source).toContain('A settled Region grid is a real current-screen confirmation')
 })

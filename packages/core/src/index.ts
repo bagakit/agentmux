@@ -1,4 +1,5 @@
 export * from './agent-provider.js'
+export * from './agent-plugin.js'
 export * from './agent-launch-option.js'
 export * from './agent-interaction.js'
 export * from './agent-message.js'

@@ -43,6 +43,10 @@ describe('Project Rail density is a durable, validated preference', () => {
     const saved = await store.save({ ...baseConfig, projectRailDensity: 'compact' })
     expect(saved.projectRailDensity).toBe('compact')
     expect((await store.get()).projectRailDensity).toBe('compact')
+
+    const dense = await store.save({ ...baseConfig, projectRailDensity: 'dense' })
+    expect(dense.projectRailDensity).toBe('dense')
+    expect((await store.get()).projectRailDensity).toBe('dense')
   })
 
   it('rejects an unknown density string rather than letting a typo silently take effect', async () => {

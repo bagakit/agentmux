@@ -468,6 +468,23 @@ View, Region, and split neighbors. Topic is deliberately absent: the Scratch \`t
 \`.agents/\` files on disk are the only source of truth for your Topic and collaborators, so
 read them rather than expecting a field here. A missing View is a normal answer.
 
+## Give the Agent and Workspace readable names
+
+Names shown to a person are display facts, not replacements for runtime identity. First run
+\`agentmux whoami\` and keep the reported Session id, Workspace id, and filesystem path unchanged.
+
+- To name yourself, ask the person for the label they want for this Agent, then use the Desktop
+  Agent details menu and choose **Rename agent**. The label is stored against this Agent Session and
+  is reused in its Tab, Region, conversation, and status surfaces.
+- To name the whole Workspace, ask for a project/workspace label and use **Settings → Workspaces →
+  Name** (the same field shown when creating or editing a Workspace). This changes the readable
+  project label everywhere the Workspace is shown; it does not rename the directory, branch, or
+  Workspace id.
+- If the Desktop naming control is unavailable, state the proposed Agent and Workspace names and
+  ask the person to apply them. Do not invent an \`agentmux rename\` command, edit ids in the Session
+  store, or rename the filesystem to make a display name. After the person applies a name, run
+  \`agentmux whoami\` or \`agentmux inspect --session self\` again and report the resulting labels.
+
 ## Inspect before acting
 
 \`\`\`bash
