@@ -1,0 +1,67 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/terminal-artifact-links-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/reviews/terminal-artifact-links-2026-09-22.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+    "apps/desktop/src/renderer/src/components/TerminalContextMenu.tsx",
+    "apps/desktop/src/main/workspace-files.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "系统文件打开出口与保守扩展名分类",
+      "objective": "为 Workspace 内系统可处理文件增加安全的 Main/preload/renderer typed seam，并让终端路径分类能识别这些扩展名。",
+      "outcome": "点击 `.dmg`、`.app` 等本地路径调用系统打开；普通源码路径仍调用 openFile；远端和越界路径不会被系统打开。",
+      "acceptance": [
+        "系统文件动作只接收 Workspace id 与规范化相对路径，Main 使用既有 WorkspaceFiles 根内校验后调用 shell.openPath，非零错误明确抛出。",
+        "artifact 分类为纯函数、大小写不敏感且不把普通源码路径误判为系统文件；至少覆盖 `.dmg`、`.app` 与一个 Windows/Linux 包格式。",
+        "TerminalView 的本地路径 provider 对系统文件走系统打开，对普通路径保留 openFile，二者不能共用一个无条件 openFile 分支。",
+        "变异测试能让系统打开分支或扩展名分类变红；生产调用者检查能在定义文件外找到真实接线。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-artifact-link.test.ts test/terminal-path-link.test.ts", "proves": "系统文件扩展名分类与普通路径分流。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "Main/preload/shared/renderer typed seam 完整编译。"}
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/terminal-path-link.ts",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/shared/contracts.ts",
+        "apps/desktop/src/preload/index.ts",
+        "apps/desktop/src/main/ipc.ts",
+        "apps/desktop/src/main/workspace-files.ts"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "终端路径右键揭示动作",
+      "objective": "在终端右键命中文件路径时显示平台对应的 Reveal 动作，并对系统文件显示 Open with system。",
+      "outcome": "用户无需先打开 Tab 就能从终端将文件定位到 Finder/File Explorer/File Manager；普通输出不增加空菜单项。",
+      "acceptance": [
+        "右键命中已识别路径显示平台对应 Reveal 文案，命中系统文件时显示系统打开动作；普通输出和无效路径不显示。",
+        "Reveal 与 Open 动作均复用 Workspace id + 相对路径的 Main seam，失败经 reportError 显式呈现。",
+        "菜单动作拥有可访问名称和完整 title，长路径不会把动作裁成不可用状态。",
+        "变异测试能让路径命中或菜单动作缺失变红；TerminalContextMenu 在 TerminalView 外有真实调用者。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-artifact-context-menu.test.tsx test/terminal-artifact-link.test.ts", "proves": "右键菜单命中、平台文案和动作接线。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "终端菜单与 API 接线完整编译。"}
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TerminalContextMenu.tsx",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/lib/host-platform.ts",
+        "apps/desktop/test/terminal-artifact-context-menu.test.tsx"
+      ],
+      "supersedes": []
+    }
+  ]
+}

@@ -502,6 +502,9 @@ const mockApi: AgentMuxDesktopApi = {
         }
       }
     },
+    openSystem: async (_workspaceId, path) => {
+      if (!mockFiles.has(path)) throw new Error(`Could not open ${path}`)
+    },
     reveal: async () => {}
   },
   scratch: {

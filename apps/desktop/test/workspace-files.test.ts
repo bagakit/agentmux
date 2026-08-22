@@ -284,6 +284,9 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(files.localPathForReveal(workspace, 'inside.txt')).resolves.toBe(
       await realpath(join(root, 'inside.txt'))
     )
+    await expect(files.localPathForSystemOpen(workspace, 'inside.txt')).resolves.toBe(
+      await realpath(join(root, 'inside.txt'))
+    )
     await expect(files.read(workspace, 'inside.txt')).resolves.toEqual({
       status: 'read',
       document: { path: 'inside.txt', content: 'inside', revision: revision('inside') }
@@ -302,6 +305,9 @@ describe('WorkspaceFiles root confinement', () => {
       content: 'stolen',
       expectedRevision: revision('secret')
     })).resolves.toMatchObject({ status: 'error', message: 'Path escapes the workspace root' })
+    await expect(files.localPathForSystemOpen(workspace, 'escape/secret.txt')).rejects.toThrow(
+      'Path escapes the workspace root'
+    )
     await expect(readFile(join(outside, 'secret.txt'), 'utf8')).resolves.toBe('secret')
   })
 
@@ -1034,6 +1040,9 @@ describe('WorkspaceFiles root confinement', () => {
 
     await expect(files.localPathForReveal(workspace, 'linked-secret')).rejects.toThrow(
       'Reveal in file manager is available only for local paths'
+    )
+    await expect(files.localPathForSystemOpen(workspace, 'linked-secret')).rejects.toThrow(
+      'Open with the system is available only for local paths'
     )
     await expect(files.read(workspace, 'linked-secret')).resolves.toMatchObject({ status: 'read' })
     await expect(files.write(workspace, {

@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 235
+    "next_cursor": 238
   },
   "features": [
     {
@@ -1974,6 +1974,36 @@
       "workspace_mode": "worktree",
       "branch": "feat/taskflow-board",
       "worktree_name": "agentmux-taskflow",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29m8fcnr5",
+      "title": "Terminal 系统文件链接与右键揭示",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29n8fr5u7",
+      "title": "Quiet idle status and compact Executor overlay",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29p8f8qwb",
+      "title": "Board Demand 代码命名收敛（2026-09-22）",
+      "status": "ready",
+      "workspace_mode": "worktree",
+      "branch": "feat/demand-code-namingf-29p8f8qwb",
+      "worktree_name": "wt-f-29p8f8qwb",
       "runtime_role": "standalone",
       "runtime_relations": []
     }

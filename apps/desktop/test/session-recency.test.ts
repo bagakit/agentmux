@@ -108,12 +108,21 @@ describe('sessionRecentActivity 优先级阶梯', () => {
   })
 
   // 第四级：状态专属句盖过裸状态。
+  it('keeps full failure and disconnection details ahead of a stale streaming tool', () => {
+    const detail = 'Connection failed at attachment handshake: ' + 'diagnostic '.repeat(20) + 'retry from this session';
+    const streaming = toolCall({ title: 'Bash', status: 'streaming' });
+    for (const state of ['error', 'disconnected'] as const) {
+      expect(sessionRecentActivity(agent({ state, detail }), [streaming])).toBe(detail)
+    }
+    expect(sessionRecentActivity(agent({ state: 'disconnected' }), [])).toBe('Connection lost; session retained')
+  })
+
   it('4) waiting 专属句', () => {
     expect(sessionRecentActivity(agent({ state: 'waiting' }), [])).toBe('Waiting for your reply in the terminal')
   })
 
   it('4) error 专属句', () => {
-    expect(sessionRecentActivity(agent({ state: 'error' }), [])).toBe('Agent reported an error; open the terminal for details')
+    expect(sessionRecentActivity(agent({ state: 'error' }), [])).toBe('Failure reported; no details available')
   })
 
   it('4) 没有专属句的状态退到裸状态', () => {

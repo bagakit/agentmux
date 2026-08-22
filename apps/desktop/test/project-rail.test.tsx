@@ -208,7 +208,8 @@ describe('Project Rail selection and running signals', () => {
     expect(rowFor(markup, 'Beta')).toContain('data-running="true"')
     // 数字在 aria-label 上（`__count` 是 aria-hidden 的字形，读屏只能听见这一份）。
     expect(markup).toContain('1 Working')
-    expect(markup).toContain('1 Running')
+    expect(rowFor(markup, 'Beta')).not.toContain('class="project-activity"')
+    expect(markup).not.toContain('1 Running')
   })
 
   it('prints the number once: the hover label carries the word only', () => {
@@ -229,7 +230,7 @@ describe('Project Rail selection and running signals', () => {
     expect(labels[0]).not.toMatch(/\d/)
     // 数字仍然在场，只是只在计数那一处（三个 Agent 里两个 working、一个 running，全在 working 列 = 3）。
     const counts = [...markup.matchAll(/class="project-activity__count"[^>]*>([^<]*)</g)].map((m) => m[1]!)
-    expect(counts).toEqual(['3'])
+    expect(counts).toEqual(['2'])
   })
 
   it('removes the repeated project icon while retaining Scratch identity', () => {
@@ -264,7 +265,7 @@ describe('Project Rail selection and running signals', () => {
     const alpha = rowFor(markup, 'Alpha')
     // 三个 worktree、两个在跑：徽章必须是 2。改回 workspaces.length 会让它变成 3。
     // 数字与词分居两处（`__count` 画数字、`__label` 画词），这里比的是 aria-label 上拼回的那一份。
-    expect(markup).toContain('2 Working')
+    expect(markup).toContain('1 Working')
     // 降级掉的事实不许消失，只许换位置。
     expect(alpha).toContain('3 worktrees')
     expect(alpha).toContain('3 sessions')

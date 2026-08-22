@@ -1,0 +1,53 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/demand-code-naming-2026-09-22.json"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/demand-code-naming-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Rename Board projection identifiers to Demand",
+      "objective": "Board source files, imports, selectors, and persisted API identifiers consistently use Demand naming.",
+      "outcome": "No Board-specific global-task module or task-named projection identifier remains.",
+      "acceptance": [
+        "The Board projection module is named global-demand-board and exports Demand-only identifiers.",
+        "Desktop Board state, selectors, and workspace references use demand naming while preserving zero/multiple Session behavior.",
+        "A mutation of the Demand projection makes the targeted Board tests fail.",
+        "A production caller exists outside each renamed definition file."
+      ],
+      "verification": [
+        {"kind": "command", "ref": "node_modules/.bin/vitest run apps/desktop/test/global-task-board.test.ts apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/board-recovery.test.ts", "proves": "Demand projection and workspace behavior remain connected."},
+        {"kind": "command", "ref": "node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json", "proves": "Desktop Demand identifiers compile."}
+      ],
+      "source_refs": ["docs/reviews/demand-code-naming-2026-09-22.md"],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "Rename Demand control protocol and CLI",
+      "objective": "Core control operations, receipts, parser names, and CLI use demand naming without task aliases.",
+      "outcome": "The public Board control surface is demand.list/show/create/update/link-session/link-project/decision-log and agentmux demand.",
+      "acceptance": [
+        "Core request and receipt types use demand operation literals, demandId, demand, and demands.",
+        "Desktop dispatch and CLI emit and consume demand operation names.",
+        "No Board-specific task.* operation or taskId alias remains in core or desktop control code.",
+        "A mutation of the control dispatch makes core control tests fail."
+      ],
+      "verification": [
+        {"kind": "command", "ref": "node_modules/.bin/vitest run packages/core/test/task-control.test.ts apps/desktop/test/global-task-board.test.ts", "proves": "Demand control protocol and desktop dispatch are exercised."},
+        {"kind": "command", "ref": "node_modules/.bin/tsc -p packages/core/tsconfig.build.json && node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json", "proves": "Core and desktop Demand protocol compile."}
+      ],
+      "source_refs": ["docs/reviews/demand-code-naming-2026-09-22.md"],
+      "supersedes": []
+    }
+  ]
+}

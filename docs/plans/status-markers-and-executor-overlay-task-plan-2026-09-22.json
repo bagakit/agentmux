@@ -1,0 +1,87 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "feature": {
+    "title": "Quiet idle status and compact Executor overlay",
+    "closure": "activity status markers, attention semantics, and Executor badge geometry"
+  },
+  "tasks": [
+    {
+      "id": "T-001",
+      "acceptance": [
+        "working renders an activity glyph",
+        "running/idle has no avatar marker",
+        "special attention and disconnected remain visible"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-avatar-state-visual.test.tsx test/attention-event.test.ts --maxWorkers=1",
+          "proves": "对应状态、布局或编译契约。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "对应状态、布局或编译契约。"
+        }
+      ],
+      "depends_on": [],
+      "objective": "Make working explicit and idle quiet",
+      "outcome": "working renders an activity glyph",
+      "source_refs": [
+        "docs/reviews/status-markers-and-executor-overlay-2026-09-22.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+        "apps/desktop/src/renderer/src/components/ProjectActivity.tsx"
+      ],
+      "supersedes": [],
+      "title": "Make working explicit and idle quiet"
+    },
+    {
+      "id": "T-002",
+      "acceptance": [
+        "badge is smaller and inside Provider mark",
+        "connecting surface uses same overlay",
+        "menu wraps and scrolls without clipping",
+        "error rows show concrete detail when available"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-avatar-settings.test.tsx test/agent-avatar-badge-icons.test.tsx test/session-connecting-surface.test.tsx test/project-activity-row.test.ts test/session-recency.test.ts --maxWorkers=1",
+          "proves": "对应状态、布局或编译契约。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "对应状态、布局或编译契约。"
+        }
+      ],
+      "depends_on": [
+        "T-001"
+      ],
+      "objective": "Overlay Executor badge and improve activity menu readability",
+      "outcome": "badge is smaller and inside Provider mark",
+      "source_refs": [
+        "docs/reviews/status-markers-and-executor-overlay-2026-09-22.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+        "apps/desktop/src/renderer/src/components/ProjectActivity.tsx"
+      ],
+      "supersedes": [],
+      "title": "Overlay Executor badge and improve activity menu readability"
+    }
+  ],
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/status-markers-and-executor-overlay-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/reviews/status-markers-and-executor-overlay-2026-09-22.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+    "apps/desktop/src/renderer/src/components/ProjectActivity.tsx"
+  ]
+}

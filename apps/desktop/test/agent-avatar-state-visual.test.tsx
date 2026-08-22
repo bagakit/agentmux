@@ -70,7 +70,17 @@ function visualSignals(markup: string): { statusClass: string; attention: string
 // Read the actual shared status rules selected by the rendered Avatar; class names alone are not evidence.
 function paintedAppearance(state: AgentDisplayState, styles: string): string {
   const markup = avatarMarkup(state)
-  expect(markup).toContain('agent-avatar__status status__dot')
+  const markerStates: AgentDisplayState[] = ['waiting', 'blocked', 'error', 'disconnected']
+  if (state === 'working') expect(markup).toContain('agent-avatar__status agent-avatar__status--working')
+  else if (markerStates.includes(state)) expect(markup).toContain('agent-avatar__status status__dot')
+  else {
+    expect(markup).not.toContain('agent-avatar__status')
+    return 'quiet'
+  }
+  if (state === 'working') {
+    expect(markup).toContain('lucide-activity')
+    return 'working-glyph'
+  }
   const { statusClass } = visualSignals(markup)
   const dot = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
     .filter(([, selector]) => selector!.split(',').some((member) =>
@@ -108,8 +118,8 @@ describe('AgentAvatar：每个状态各有可辨的外观（症状 1）', () => 
 
     // Only waiting/blocked intentionally share a presentation. Ready and working have different ink/shape.
     const FAMILIES: Record<string, readonly AgentDisplayState[]> = {
-      working: ['working'], running: ['running'], 'needs-you': ['waiting', 'blocked'],
-      done: ['done'], exited: ['exited'], starting: ['starting'], disconnected: ['disconnected'], error: ['error']
+      working: ['working'], quiet: ['starting', 'running', 'done', 'exited'],
+      'needs-you': ['waiting', 'blocked'], disconnected: ['disconnected'], error: ['error']
     }
     // 分组必须覆盖整个联合——漏一个状态，它的外观就无人质询。
     expect([...Object.values(FAMILIES)].flat().sort()).toEqual([...AGENT_DISPLAY_STATES].sort())
@@ -329,4 +339,3 @@ describe('AgentRoster.stateFor 在 DOM 层真的执行（症状 5）', () => {
     expect(errorDot, 'error 被画成了 working 的绿').not.toContain('status--working')
   })
 })
-

@@ -27,6 +27,47 @@ export type TerminalPathLink = {
 }
 
 /**
+ * Files that are meant to be handed to the host OS instead of opened as editor text. Keep this
+ * deliberately small and explicit: a false positive sends a source file to an unrelated app, while
+ * an omitted extension still remains available through the normal editor path. Matching is by the
+ * final path segment and is case-insensitive so terminal output from different platforms behaves the
+ * same way.
+ */
+const SYSTEM_ARTIFACT_EXTENSIONS = new Set([
+  '.app',
+  '.dmg',
+  '.pkg',
+  '.exe',
+  '.msi',
+  '.deb',
+  '.rpm',
+  '.appimage',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.tgz',
+  '.7z'
+])
+
+export function isSystemArtifactPath(path: string): boolean {
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  return [...SYSTEM_ARTIFACT_EXTENSIONS].some((extension) => name.endsWith(extension))
+}
+
+/** Return the path link containing a 1-based terminal cell column, if any. */
+export function terminalPathLinkAtCell(
+  text: string,
+  column: number,
+  workspaceRoot: string,
+  homeDir = ''
+): TerminalPathLink | null {
+  if (!Number.isFinite(column) || column < 1) return null
+  const match = detectTerminalPathLinks(text, workspaceRoot, homeDir).find((link) =>
+    column >= link.index + 1 && column <= link.index + link.length)
+  return match ?? null
+}
+
+/**
  * Path-token scanner.
  *   - The leading negative lookbehind anchors to a token start and, by excluding `/` and `:`,
  *     refuses to start inside a URL already owned by the http link provider, so the two providers

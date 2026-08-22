@@ -1,0 +1,13 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Demand code naming review",
+  "status": "approved",
+  "reviewer": "maintainer",
+  "decision": "Board demand semantics use Demand/demand identifiers throughout the Board projection and control protocol; generic task domains remain unchanged.",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/demand-code-naming-2026-09-22.md"
+  ]
+}

@@ -1238,3 +1238,20 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 - Board 是与 Project、Session 平级的最高级全局工作面；进入 Board 时 Project Rail 被工作面覆盖，不显示左侧 Project 导航。Board 内主实体不是泛意义的 task，而是 Demand（需求），按 Backlog、Todo、In progress、In review、Blocked、Done、Cancelled 流转。状态由显式操作维护，不从 Session 是否需要我、退出或报错推断完成。负责人、Project、优先级、描述与活动记录属于 Task；负责人可以未分配，分配 Executor 与关联 Session 是不同操作。
 - Backlog 可以先指定负责人而不启动；用户明确执行需求时通过既有 Core 启动路径创建并关联 Session，每次执行保留关联，失败保留需求与说明。需求可编辑、跨列流转、评论、关联或解除关联已有 Session，重启后仍成立。
 - Task 可以在没有 Session 时创建和持久存在，也可以关联多个 Session。没有显式关联的 Session 不自动生成 Board 卡片。快照缺失保留 Task、关联 ID 与当前选择，并区分尚未恢复和从未关联。
+
+### Demand 命名合同（2026-09-22）
+
+- Board 领域的代码名称统一使用 `Demand`：持久化字段、类型、选择器、组件、文件名和控制协议都以 `demand` 表达。Board 的 `Task` 只保留在泛义任务或其他独立领域的上下文中。
+- Demand 的控制操作使用 `demand.*`，请求与回执使用 `demandId`、`demands` 和 `demand`；CLI 入口使用 `agentmux demand`。不保留同一语义的 `task.*` 别名或兼容层，避免代码和用户模型继续把需求误读成 Session 任务。
+
+- **Terminal 中的系统文件路径必须保持系统文件语义。** 终端输出的工作区内 `.app`、`.dmg`、`.pkg`、`.exe`、`.msi`、`.deb`、`.rpm`、`.AppImage` 与常见压缩包等可由系统处理的文件，点击后交给当前操作系统打开，不得误送进编辑器或 Browser Tab。路径仍必须先经过既有 Workspace 根约束；远端 Workspace 没有本机系统打开出口，因此只提供可用的文件管理器揭示能力，不能画一个点击后必然失败的假按钮。
+- **终端路径的右键菜单要回答“去哪里找它”。** 指针停在已识别的文件路径上时，右键菜单提供平台对应的 `Reveal in Finder`、`Reveal in File Explorer` 或 `Reveal in File Manager`；系统可处理的文件额外提供打开动作。右键普通输出、拖选文本或无法归一化的路径不显示这些动作。揭示和打开都复用 Main 的 Workspace 文件安全边界，不能把绝对路径直接从 Renderer 交给系统。
+- **文件路径和 HTTP 链接是两条不同的出口。** HTTP(S) 仍进入 Browser 的目的地选择；只有归一化成功的本地 Workspace 文件路径才进入系统文件动作。系统动作失败必须以可读错误浮现，不能静默退回编辑器 Tab。
+
+### 工作状态与 Executor 叠加标记（2026-09-22）
+
+- `working` 必须有一个明确的活动字形，表达 Agent 正在产出；普通 `running`／idle 只表示进程仍可用，不在头像右上角放常驻标记。
+- 等待用户、阻塞、断联和真实错误属于需要用户知道的特殊事实，保留各自的提醒形状；错误行优先显示 Runtime 提供的具体原因，无法取得详情时才使用短的事实说明。
+- Executor 自定义图标与 Provider 图标先合成一个身份图，再应用共享的珐琅外轮廓。Executor 图标应小而紧，叠在 Provider 图标内部，不得成为围在外面的第二圈。
+- 状态语义只通过右上角的小型标记或活动字形表达；普通身份不使用外描边制造状态。
+- 活动菜单必须保留可读的原因、项目和 Provider 信息；长内容在有界菜单内换行或滚动，不能被固定宽度裁成看不懂的尾巴。

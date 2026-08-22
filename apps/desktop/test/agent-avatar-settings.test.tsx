@@ -49,7 +49,7 @@ it('previews per-executor changes, saves both entries, and restores the saved ap
   await change('Reviewer avatar tint', '#6688dd')
   await chooseIcon('Reviewer avatar icon', 'shield')
   expect(badges()).toEqual(['spark', 'shield'])
-  expect([...dom.container.querySelectorAll('feFlood')].map((node) => node.getAttribute('flood-color'))).toEqual(['#ee7755', '#6688dd'])
+  expect([...dom.container.querySelectorAll('feFlood')].map((node) => node.getAttribute('flood-color')).filter((color) => color !== 'var(--surface-0)')).toEqual(['#ee7755', '#6688dd'])
   await dom.click('.settings-pane-actions button')
   expect(save).toHaveBeenCalledOnce()
   expect(restored.appearance.agentAvatars).toEqual(appearances)
@@ -97,7 +97,7 @@ it('passes appearance and stack count through both shared presence paths', async
   await dom.render(<><SelectorPresence agents={[agent]} /><RegionMosaic cells={[{ regionId: 'r', agentSessionId: 'a', bounds: { x: 0, y: 0, width: 1, height: 1 } }]} agents={[agent]} /></>)
   expect(badges()).toEqual(['shield', 'shield'])
   expect([...dom.container.querySelectorAll('.agent-avatar__count')].map((node) => node.textContent)).toEqual(['3', '3'])
-  expect(dom.container.querySelectorAll('.agent-avatar__status.status__dot')).toHaveLength(2)
+  expect(dom.container.querySelectorAll('.agent-avatar__status')).toHaveLength(0)
   expect(dom.container.querySelectorAll('[data-agent-provider="codex"]')).toHaveLength(2)
 })
 

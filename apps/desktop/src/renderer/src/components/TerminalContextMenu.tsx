@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { Fragment } from 'react'
 import { terminalMenuChords } from '../lib/terminal-menu-chords'
 import { isMacPlatform } from '../lib/host-platform'
+import type { TerminalFileMenuAction } from '../lib/terminal-file-action'
 import type { TerminalIdentityMenuAction } from '../lib/terminal-identity-menu'
 import {
   terminalSelectionSuppressionHint,
@@ -24,6 +25,7 @@ export function TerminalContextMenu({
   hasSelection,
   identityActions,
   mouseTrackingMode,
+  pathActions,
   onClear,
   onCopy,
   onCopyScrollback,
@@ -46,6 +48,8 @@ export function TerminalContextMenu({
    * 两处各判一次就是同一个决定做了两遍，而漂移的那天不会有断言变红。
    */
   identityActions: TerminalIdentityMenuAction[]
+  /** Actions for the file path under the context-menu pointer, if one was hit. */
+  pathActions: TerminalFileMenuAction[]
   // xterm 此刻的鼠标上报模式（`terminal.modes.mouseTrackingMode`）。**这是复制三合一失效的根因入口**：
   // TUI 一开鼠标上报，xterm 就停用选区服务，平白左拖不再建选区，于是 getSelection() 恒空、右键
   // Copy 变灰、Ctrl/Cmd+C 全部落空（机制见 lib/terminal-selection-mode.ts）。菜单把这个模式喂给那个
@@ -128,6 +132,21 @@ export function TerminalContextMenu({
                   className="tab-context-menu__item"
                   key={action.key}
                   onSelect={() => void action.onSelect()}
+                >
+                  <action.icon size={14} /><span>{action.label}</span>
+                </ContextMenu.Item>
+              ))}
+            </Fragment>
+          ) : null}
+          {pathActions.length > 0 ? (
+            <Fragment>
+              <ContextMenu.Separator className="tab-context-menu__separator" />
+              {pathActions.map((action) => (
+                <ContextMenu.Item
+                  key={action.key}
+                  className="tab-context-menu__item"
+                  title={action.title}
+                  onSelect={action.onSelect}
                 >
                   <action.icon size={14} /><span>{action.label}</span>
                 </ContextMenu.Item>

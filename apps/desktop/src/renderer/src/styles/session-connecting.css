@@ -57,7 +57,7 @@
 .session-connecting__executor-mark { width: 28px; height: 28px; position: relative; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
 .session-connecting__executor-filters { position: absolute; pointer-events: none; }
 .session-connecting__executor-mark-contour { position: relative; display: inline-flex; filter: none; }
-.session-connecting__executor-badge { position: absolute; top: -4px; left: -5px; display: inline-flex; align-items: center; justify-content: center; width: 10px; height: 10px; border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); }
+.session-connecting__executor-badge { position: absolute; top: 2px; left: 2px; display: inline-flex; align-items: center; justify-content: center; width: 9px; height: 9px; border: 1px solid var(--surface-0); border-radius: 50%; color: var(--text); background: var(--surface-1); }
 .session-connecting__executor strong { color: var(--text-2); font-size: var(--fs-title); font-weight: 500; overflow-wrap: anywhere; }
 .session-connecting__prompt { border-top: 1px solid var(--line-soft); padding-top: var(--sp-5); min-width: 0; }
 .session-connecting__prompt-heading { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); min-height: 24px; }
