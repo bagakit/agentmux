@@ -11,7 +11,7 @@ import {
   type AgentMuxExecutorAvailability,
   type AgentMuxRegion
 } from '@agentmux/core/control'
-import type { AgentMuxTaskDecision } from '@agentmux/core/control'
+import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
@@ -156,7 +156,7 @@ import {
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
-import { projectBoardTasks, type BoardTaskArrangement, type BoardTaskPriority, type BoardTaskRecord, type BoardTaskStatus } from './lib/global-task-board'
+import { projectDemands, type DemandArrangement, type DemandPriority, type DemandRecord, type DemandStatus } from './lib/global-task-board'
 import { taskWriteDecision } from './lib/task-write-policy'
 import {
   activeWorkbenchSurface,
@@ -361,25 +361,29 @@ type AppState = {
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   /** Durable global Board task records. Session projections remain derived from Core snapshots. */
-  boardTasks: Record<string, BoardTaskRecord>
-  selectedBoardTaskId: string | null
-  boardTaskArrangement: BoardTaskArrangement
+  demands: Record<string, DemandRecord>
+  selectedAgentSessionId: string | null
+  setSelectedAgentSession(id: string | null): void
+  selectedDemandId: string | null
+  demandArrangement: DemandArrangement
   defaultSessionLauncherHidden: boolean
-  setSelectedBoardTask(id: string | null): void
-  setBoardTaskArrangement(arrangement: BoardTaskArrangement): void
+  setSelectedDemand(id: string | null): void
+  setDemandArrangement(arrangement: DemandArrangement): void
   setDefaultSessionLauncherHidden(hidden: boolean): void
-  createBoardTask(input: {
+  createDemand(input: {
     title: string
     description?: string
     projectId?: string | null
     projectName?: string | null
+    assigneeExecutorId?: string | null
+    activityLog?: readonly string[]
     sessionIds?: readonly string[]
-    priority?: BoardTaskPriority
-    status?: BoardTaskStatus
-    source?: BoardTaskRecord['source']
-    decisionLog?: readonly AgentMuxTaskDecision[]
+    priority?: DemandPriority
+    status?: DemandStatus
+    source?: DemandRecord['source']
+    decisionLog?: readonly AgentMuxDemandDecision[]
   }): string
-  updateBoardTask(id: string, patch: Partial<Pick<BoardTaskRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds' | 'decisionLog'>>): void
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds' | 'decisionLog'>>): void
   projectRailOpen: boolean
   /**
    * 折叠起来的 Project 分组，key 由 {@link projectGroupKey} 从 hostId + 父目录派生。
@@ -1469,9 +1473,10 @@ type PersistedAppState = {
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  boardTasks?: Record<string, BoardTaskRecord>
-  selectedBoardTaskId?: string | null
-  boardTaskArrangement?: BoardTaskArrangement
+  demands?: Record<string, DemandRecord>
+  selectedAgentSessionId?: string | null
+  selectedDemandId?: string | null
+  demandArrangement?: DemandArrangement
   defaultSessionLauncherHidden?: boolean
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
@@ -1727,9 +1732,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
-  boardTasks: {},
-  selectedBoardTaskId: null,
-  boardTaskArrangement: 'columns',
+  demands: {},
+  selectedAgentSessionId: null,
+  selectedDemandId: null,
+  demandArrangement: 'columns',
   defaultSessionLauncherHidden: false,
   projectRailOpen: true,
   collapsedProjectGroups: {},
@@ -2351,17 +2357,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
       }
     }
-    const taskRecord = (id: string): BoardTaskRecord => {
-      const task = projectBoardTasks(get().config, get().sessions, get().boardTasks).find((candidate) => candidate.id === id)
+    const demandRecord = (id: string): DemandRecord => {
+      const task = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
       if (!task) throw controlFailure('CONTROL_FAILED', `Task is not available: ${id}`)
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
       return record
     }
     if (request.operation === 'task.list') {
-      return { operation: request.operation, tasks: projectBoardTasks(get().config, get().sessions, get().boardTasks).map(({ sessions: _sessions, workspacePath: _workspacePath, ...task }) => task) }
+      return { operation: request.operation, tasks: projectDemands(get().config, get().sessions, get().demands).map(({ sessions: _sessions, workspacePath: _workspacePath, ...task }) => task) }
     }
     if (request.operation === 'task.show') {
-      const task = projectBoardTasks(get().config, get().sessions, get().boardTasks).find((candidate) => candidate.id === request.taskId)
+      const task = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === request.taskId)
       if (!task) return { operation: request.operation, task: null }
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
       return { operation: request.operation, task: record }
@@ -2376,7 +2382,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
       })
       if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Task routing is unresolved; choose a Project before writing.' : 'Task write requires explicit confirmation.')
-      const id = get().createBoardTask({
+      const id = get().createDemand({
         title: request.title,
         ...(request.description === undefined ? {} : { description: request.description }),
         projectId: request.projectId ?? null,
@@ -2386,33 +2392,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(request.sessionIds === undefined ? {} : { sessionIds: request.sessionIds }),
         ...(request.decision === undefined ? {} : { decisionLog: [request.decision] })
       })
-      const task = taskRecord(id)
+      const task = demandRecord(id)
       return { operation: request.operation, task, receipt: { taskId: id, createdAt: task.createdAt } }
     }
     if (request.operation === 'task.update') {
-      const current = taskRecord(request.taskId)
+      const current = demandRecord(request.taskId)
       const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
       const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      get().updateBoardTask(request.taskId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
-      const task = taskRecord(request.taskId)
+      get().updateDemand(request.taskId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
+      const task = demandRecord(request.taskId)
       return { operation: request.operation, task, receipt: { taskId: task.id, updatedAt: task.updatedAt } }
     }
     if (request.operation === 'task.link-session') {
-      const current = taskRecord(request.taskId)
+      const current = demandRecord(request.taskId)
       if (!get().sessions.some((session) => session.id === request.sessionId)) throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${request.sessionId}`)
       const sessionIds = current.sessionIds.includes(request.sessionId) ? current.sessionIds : [...current.sessionIds, request.sessionId]
-      get().updateBoardTask(request.taskId, { sessionIds })
-      return { operation: request.operation, task: taskRecord(request.taskId), receipt: { taskId: request.taskId, sessionId: request.sessionId } }
+      get().updateDemand(request.taskId, { sessionIds })
+      return { operation: request.operation, task: demandRecord(request.taskId), receipt: { taskId: request.taskId, sessionId: request.sessionId } }
     }
     if (request.operation === 'task.link-project') {
       const project = get().config?.workspaces.find((workspace) => workspace.id === request.projectId)
       if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      get().updateBoardTask(request.taskId, { projectId: project.id, projectName: project.name })
-      return { operation: request.operation, task: taskRecord(request.taskId), receipt: { taskId: request.taskId, projectId: project.id } }
+      get().updateDemand(request.taskId, { projectId: project.id, projectName: project.name })
+      return { operation: request.operation, task: demandRecord(request.taskId), receipt: { taskId: request.taskId, projectId: project.id } }
     }
     if (request.operation === 'task.decision-log') {
-      const task = taskRecord(request.taskId)
+      const task = demandRecord(request.taskId)
       return { operation: request.operation, taskId: request.taskId, decisions: task.decisionLog ?? [] }
     }
     if (request.operation === 'focus') {
@@ -3394,42 +3400,47 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setMainSurface(mainSurface) {
     set({ mainSurface })
   },
-  setSelectedBoardTask(id) {
-    set({ selectedBoardTaskId: id })
+  setSelectedAgentSession(id) {
+    set({ selectedAgentSessionId: id })
   },
-  setBoardTaskArrangement(arrangement) {
-    set({ boardTaskArrangement: arrangement })
+  setSelectedDemand(id) {
+    set({ selectedDemandId: id })
+  },
+  setDemandArrangement(arrangement) {
+    set({ demandArrangement: arrangement })
   },
   setDefaultSessionLauncherHidden(hidden) {
     set({ defaultSessionLauncherHidden: hidden })
   },
-  createBoardTask(input) {
+  createDemand(input) {
     const id = `task:${crypto.randomUUID()}`
     const now = Date.now()
-    const record: BoardTaskRecord = {
+    const record: DemandRecord = {
       id,
       title: input.title.trim() || 'Untitled task',
       description: input.description?.trim() ?? '',
-      status: input.status ?? 'inbox',
+      status: input.status ?? 'backlog',
       priority: input.priority ?? 'normal',
       projectId: input.projectId ?? null,
       projectName: input.projectName ?? null,
+      assigneeExecutorId: input.assigneeExecutorId ?? null,
+      activityLog: [...(input.activityLog ?? [])],
       sessionIds: [...(input.sessionIds ?? [])],
       createdAt: now,
       updatedAt: now,
       source: input.source ?? 'default-topic',
       ...(input.decisionLog && input.decisionLog.length > 0 ? { decisionLog: [...input.decisionLog] } : {})
     }
-    set((state) => ({ boardTasks: { ...state.boardTasks, [id]: record }, selectedBoardTaskId: id }))
+    set((state) => ({ demands: { ...state.demands, [id]: record }, selectedDemandId: id }))
     return id
   },
-  updateBoardTask(id, patch) {
+  updateDemand(id, patch) {
     set((state) => {
-      const current = state.boardTasks[id]
+      const current = state.demands[id]
       if (!current) return state
       return {
-        boardTasks: {
-          ...state.boardTasks,
+        demands: {
+          ...state.demands,
           [id]: { ...current, ...patch, updatedAt: Date.now() }
         }
       }
@@ -5218,9 +5229,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
-    boardTasks: state.boardTasks,
-    selectedBoardTaskId: state.selectedBoardTaskId,
-    boardTaskArrangement: state.boardTaskArrangement,
+    demands: state.demands,
+    selectedAgentSessionId: state.selectedAgentSessionId,
+    selectedDemandId: state.selectedDemandId,
+    demandArrangement: state.demandArrangement,
     defaultSessionLauncherHidden: state.defaultSessionLauncherHidden,
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
