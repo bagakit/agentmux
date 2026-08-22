@@ -37,7 +37,7 @@ describe('Agents / Session / Board navigation', () => {
     useAppStore.setState({ sessions: [], demands: {}, selectedDemandId: null, mainSurface: 'board' })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
-    expect(container.querySelector('.global-task-workspace')).toBeNull()
+    expect(container.querySelector('.global-demand-workspace')).toBeNull()
     expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Board')
     expect(container.querySelector('.global-board-toolbar')?.textContent).not.toContain('Agents')
   })
