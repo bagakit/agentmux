@@ -936,6 +936,21 @@ export class WorkspaceFiles {
     })).toString('utf8')
   }
 
+  /**
+   * Resolve a path for a host-application open. Unlike reveal, the target must exist: opening a
+   * missing artifact in the OS would otherwise produce a platform-specific no-op. System opens
+   * retain real-root confinement (unlike the Explorer's explicitly followed read-only links).
+   */
+  async localPathForSystemOpen(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
+    const host = this.hostFor(workspace.hostId)
+    if (host.kind !== 'local') throw new Error('Open with the system is available only for local paths')
+    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    return (await runLocalWorker(dirname(resolved.target), resolved.root, {
+      action: 'reveal',
+      name: basename(resolved.target)
+    })).toString('utf8')
+  }
+
   async readDirectory(
     workspace: WorkspaceRecord,
     requestedPath: string
