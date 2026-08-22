@@ -24,6 +24,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
+import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
 import { DefaultSessionEntry } from './components/DefaultSessionEntry'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
@@ -116,7 +117,7 @@ function DesktopApp() {
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
     fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
-  const toolsAvailable = mainSurface === 'board' || Boolean(workspace)
+  const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const renderedToolDockWidth = getRenderedToolDockWidth(toolDockWidth, projectRailOpen)
@@ -248,7 +249,6 @@ function DesktopApp() {
           <header className="topbar">
             <TopRowLeadingChrome />
             <div className="topbar__actions">
-              <SurfaceSwitch />
               <DefaultSessionEntry placement="topbar" respectHidden={false} />
             </div>
           </header>
@@ -291,6 +291,7 @@ function DesktopApp() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
+              {mainSurface === 'agents' ? <GlobalAgentsSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {workspace ? (
                 <div
@@ -334,6 +335,7 @@ function DesktopApp() {
       </main>
       <footer className="window-status-bar">
         <AgentStatusBar />
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch /></div>
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

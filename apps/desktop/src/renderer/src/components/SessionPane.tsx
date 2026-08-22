@@ -28,6 +28,7 @@ import {
   continuityRetryEnabled
 } from '../lib/continuity-failure-notice'
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
+import { SessionResultReview } from './SessionResultReview'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -357,6 +358,9 @@ export function SessionPane({
           />
         )}
       </div>
+      {session.kind === 'agent' ? (
+        <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} />
+      ) : null}
       <OpenDestinationPopover
         request={linkRequest}
         canSplit={canSplit}

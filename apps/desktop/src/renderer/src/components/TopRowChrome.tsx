@@ -3,7 +3,8 @@ import {
   PanelLeft,
   PanelsTopLeft,
   RadioTower,
-  SquareTerminal
+  SquareTerminal,
+  Users
 } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
@@ -28,7 +29,7 @@ export function TopRowLeadingChrome() {
   const { mainSurface, workspace } = useSurfaceIdentity()
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
-    && (mainSurface === 'board' || Boolean(workspace))
+    && (mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace)))
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
   return (
     <div
@@ -74,8 +75,8 @@ export function ToolsToggle() {
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const toolsAvailable =
-    mainSurface === 'board' || Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId))
-  const scope = mainSurface === 'board' ? 'board' : 'workspace'
+    mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId)))
+  const scope = mainSurface === 'board' ? 'board' : mainSurface === 'agents' ? 'agents' : 'workspace'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
@@ -98,6 +99,9 @@ export function ToolsToggle() {
 export function TopBreadcrumb() {
   const { mainSurface, workspace, project } = useSurfaceIdentity()
   const hostId = mainSurface === 'board' ? project?.hostId : workspace?.hostId
+  if (mainSurface === 'agents') {
+    return <div className="breadcrumbs"><strong>Agents</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Needs you and active Sessions</span></div>
+  }
   if (mainSurface === 'board') {
     return (
       <div className="breadcrumbs">
@@ -138,17 +142,25 @@ export function SurfaceSwitch() {
   return (
     <div className="surface-switch" role="group" aria-label="Main view">
       <button
+        className={mainSurface === 'agents' ? 'selected' : ''}
+        aria-label="Agents: show all Agent attention"
+        title="Agents — show all Agent attention"
+        onClick={() => setMainSurface('agents')}
+      >
+        <Users size={13} /> Agents
+      </button>
+      <button
         className={mainSurface === 'workbench' ? 'selected' : ''}
-        aria-label="Workspace: show terminal and file workbench"
-        title="Workspace — show terminal and file workbench"
+        aria-label="Session: show terminal and file workbench"
+        title="Session — show terminal and file workbench"
         onClick={() => setMainSurface('workbench')}
       >
-        <SquareTerminal size={13} /> Workspace
+        <SquareTerminal size={13} /> Session
       </button>
       <button
         className={mainSurface === 'board' ? 'selected' : ''}
-        aria-label="Board: show activity and conversation"
-        title="Board — show activity and conversation"
+        aria-label="Board: show Tasks and projects"
+        title="Board — show Tasks and projects"
         onClick={() => setMainSurface('board')}
       >
         <LayoutDashboard size={13} /> Board
