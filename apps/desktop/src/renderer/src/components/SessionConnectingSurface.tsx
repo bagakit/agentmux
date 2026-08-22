@@ -1,9 +1,10 @@
 import { Check, Copy, SquareDashed, TerminalSquare } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { AgentAvatarAppearance, AgentExecutorConfig } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { presentError } from '../lib/error-presentation'
+import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
 /**
@@ -17,17 +18,34 @@ function ConnectingExecutorMark({ executor, label, appearance }: {
   label: string
   appearance?: AgentAvatarAppearance | undefined
 }) {
+  const filterId = useId().replace(/:/g, '')
   return <span
     className="session-connecting__executor-mark"
     role="img"
     aria-label={label}
     title={label}
-    style={appearance?.tint ? { color: appearance.tint } : undefined}
   >
-    <span className="session-connecting__executor-mark-contour" aria-hidden="true">
+    {appearance?.tint ? <svg className="session-connecting__executor-filters" aria-hidden="true" width="0" height="0">
+      <defs><filter id={filterId} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="solidDilated" />
+        <feMorphology in="solidDilated" operator="erode" radius="4" result="solidAlpha" />
+        <feMorphology in="solidAlpha" operator="dilate" radius="1" result="expandedAlpha" />
+        <feComposite in="expandedAlpha" in2="solidAlpha" operator="out" result="outerAlpha" />
+        <feFlood floodColor={appearance.tint} floodOpacity="0.55" result="tintColor" />
+        <feComposite in="tintColor" in2="outerAlpha" operator="in" result="tintOutline" />
+        <feComposite in="SourceGraphic" in2="tintOutline" operator="over" />
+      </filter></defs>
+    </svg> : null}
+    <span
+      className="session-connecting__executor-mark-contour"
+      aria-hidden="true"
+      style={appearance?.tint ? { filter: `url(#${filterId})` } : undefined}
+    >
       <AgentProviderIcon providerId={executor.providerId} size={22} />
+      {appearance?.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
+        <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
+      </span> : null}
     </span>
-    {appearance?.badge ? <span className="session-connecting__executor-badge" aria-hidden="true">{appearance.badge}</span> : null}
   </span>
 }
 
