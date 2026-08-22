@@ -1,0 +1,104 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/status-browser-topic-executor-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/status-browser-topic-executor-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "修正停止态语义并显示 idle 计数",
+      "objective": "让停止/正常退出保持中性，将明确崩溃与断联分开，并在 Project/Scratch 树显示 idle Session 数量。",
+      "outcome": "Renderer 的状态投影、树行标签和聚合计数来自同一事实；停止后不会留下红色叹号。",
+      "acceptance": [
+        "用户停止或自然退出的 Agent 显示 exited/idle 等中性事实，明确崩溃才显示 error，连接断开显示 disconnected。",
+        "左侧 Project/Scratch 树在存在 idle Session 时显示数量，头像右上角不因 idle 常驻亮起。",
+        "已有 working、needs-user、blocked 和 crash 视觉回归保持可辨识。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/run-process-status-convergence.test.ts test/working-count-convergence.test.ts test/agent-attention.test.ts", "proves": "状态投影、working/idle 聚合和注意力分类行为"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/status-idle-browser-topic-executor-contract.test.ts", "proves": "来源扫描与非空契约覆盖树行和状态调用者"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/lib/session-state.ts", "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx"],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "保留 Browser 页面并收紧控制条",
+      "objective": "让 Browser ready/control 只作为真实操作或交接的辅助信息，不能覆盖或替代页面。",
+      "outcome": "空闲 Browser 仍显示 Main-owned 页面；active operation、timeline 和 control handoff 使用紧凑 rail。",
+      "acceptance": [
+        "没有 operation 且由用户控制时不显示大块 Browser ready/You have control 占位。",
+        "有 operation 或 Agent control handoff 时 rail 仍能展示状态、目标和动作，不拦截页面输入。",
+        "Browser error、about:blank、preview 和真实 WebContentsView 分支仍按原语义工作。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/browser-operation-surface.test.tsx test/browser-toolbar.test.tsx test/browser-view-manager.test.ts", "proves": "Browser rail 与页面承载分支"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/status-idle-browser-topic-executor-contract.test.ts", "proves": "ready/control 只由 active surface 调用且扫描命中非空"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx", "apps/desktop/src/renderer/src/components/BrowserPane.tsx"],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [],
+      "title": "重新设计 Scratch / Topic 列表",
+      "objective": "重建 Scratch 父行与 Topic 子行的导航结构、密度、空态和 hover/selected/open 表现。",
+      "outcome": "Topic 行紧凑、可读、可操作，和父级关系清晰，恢复和空列表都有明确反馈。",
+      "acceptance": [
+        "Topic 行比普通项目小一级并保持标题、状态和操作的可见性；hover 使用下划线/轻微 surface，不复制普通项目高亮。",
+        "Scratch 下的 Topic 缩进、连接线、选中态和打开状态统一，窄宽度下不裁掉核心信息。",
+        "空态、新建、恢复和 Topic 不可达状态都有稳定的可访问文本，不删除持久 Topic。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/scratch-topics.test.ts test/scratch-topic-layout.test.ts test/topic-agent-status.test.ts", "proves": "Topic 数据、布局和 Agent presence 投影"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/status-idle-browser-topic-executor-contract.test.ts", "proves": "Topic 样式来源和调用者扫描非空"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx", "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx", "apps/desktop/src/renderer/src/styles/chrome.css"],
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "统一 Executor identity 与 hover 设置入口",
+      "objective": "让所有 Executor 图标使用统一组件，统一叠加、状态和 hover 信息面板，并把头像设置转到 Executor 模板设置。",
+      "outcome": "顶部 Tab、树、Session/Board、Browser 等调用者不再各自绘制状态点或面板；设置动作不进入 Appearance。",
+      "acceptance": [
+        "所有现有 Executor 图标调用者都经过统一组件；Provider 图标、Executor 小图标和珐琅轮廓只组合一次。",
+        "hover/focus 即显示统一 tooltip 面板，字号、边距和动作区与现有面板一致；点击小设置按钮进入对应 Executor 模板设置。",
+        "Appearance 不再承载 Executor avatar 编辑入口，正常身份不显示外圈荧光或 idle 常驻标记。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-avatar-state-visual.test.tsx test/workbench-tab-marks.test.ts test/topic-agent-status.test.ts test/browser-operation-surface.test.tsx", "proves": "统一身份图、Tab/Topic/Browser 调用者和状态标记"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/status-idle-browser-topic-executor-contract.test.ts", "proves": "所有 Executor 图标来源、hover 面板和设置路由扫描有实际命中"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/AgentAvatar.tsx", "apps/desktop/src/renderer/src/components/AgentProviderIcon.tsx", "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx"],
+      "supersedes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": ["T-001", "T-002", "T-003", "T-004"],
+      "title": "整合回归、提交与打包安装",
+      "objective": "在完整候选上运行类型检查、定向回归、变异测试、零调用者检查和真实打包安装。",
+      "outcome": "主干提交包含设计、Tracker、实现和验证证据；最新 macOS 包已安装并可启动。",
+      "acceptance": [
+        "Focused tests 和 desktop typecheck 通过；每个行为 task 有一次变异使对应测试变红的证据。",
+        "零调用者检查确认新增统一组件和投影均接入生产调用，扫描契约断言命中非空来源。",
+        "打包来源是提交后的主干，安装候选可启动，已有工作面和 Browser/Topic 仍可恢复。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "Desktop TypeScript 类型边界"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop package:mac:install", "proves": "提交来源的真实 macOS 打包、安装与启动"}
+      ],
+      "source_refs": ["docs/reviews/status-browser-topic-executor-2026-09-22.md"],
+      "supersedes": []
+    }
+  ]
+}

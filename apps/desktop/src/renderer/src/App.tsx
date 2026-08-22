@@ -28,7 +28,6 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
 import { DefaultSessionEntry } from './components/DefaultSessionEntry'
 import { DefaultSessionFloatingPanel } from './components/DefaultSessionFloatingPanel'
-import { useDefaultSessionFloatingState } from './lib/default-session-floating'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -79,7 +78,6 @@ function DesktopApp() {
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
-  const [defaultFloating] = useDefaultSessionFloatingState()
   useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
@@ -121,8 +119,8 @@ function DesktopApp() {
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
   // untouched configured project does not allocate a hidden launcher/editor/browser tree at startup.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    candidate.id !== '__scratch__' || !defaultFloating.open
-  ) && (fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0))) ?? []
+    candidate.id !== '__scratch__' && (fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0))
+  )) ?? []
   const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
@@ -327,6 +325,7 @@ function DesktopApp() {
                   })}
                 </div>
               ) : null}
+              <DefaultSessionFloatingPanel />
             </section>
           </div>
         )}
@@ -346,7 +345,6 @@ function DesktopApp() {
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
-      <DefaultSessionFloatingPanel />
       <ShortcutsCheatSheet
         open={shortcutsHelpOpen}
         onClose={() => setShortcutsHelpOpen(false)}

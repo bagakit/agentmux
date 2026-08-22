@@ -1,3 +1,4 @@
+import { AgentAvatar } from './AgentAvatar'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
   Bot,
@@ -19,7 +20,7 @@ import { presentError } from '../lib/error-presentation'
 import { configuredExecutors } from '../lib/executors'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from './ComposerTextarea'
 
 export function BoardDiscussionCanvas({
@@ -181,7 +182,7 @@ export function BoardDiscussionCanvas({
                           aria-pressed={executor.id === executorId}
                           onClick={() => setExecutorId(executor.id)}
                         >
-                          <span><AgentProviderIcon providerId={executor.providerId} size={22} /></span>
+                          <span><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={22} /></span>
                           <strong>{executor.label}</strong>
                           <small>{agentProviderLabel(executor.providerId)} · Ready</small>
                         </button>

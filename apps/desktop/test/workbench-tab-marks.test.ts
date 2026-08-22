@@ -183,6 +183,16 @@ describe('workbenchTabMarks：画出来一样的只留一个', () => {
     ])
   })
 
+  it('同 Provider、同状态但 Executor 外观不同仍各画一个', () => {
+    const tab = tabWith(agentSurface('region-0', 'session-a'), agentSurface('region-1', 'session-b'))
+    const marks = workbenchTabMarks(tab, agentsBySession({
+      'session-a': { providerId: 'codex', executorId: 'default', appearance: { tint: '#ee7755', badge: 'spark' }, status: { state: 'working', source: 'native-hook', observedAt: 1 } },
+      'session-b': { providerId: 'codex', executorId: 'review', appearance: { tint: '#6688dd', badge: 'shield' }, status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+    }))
+    expect(marks).toHaveLength(2)
+    expect(marks.map((mark) => mark.kind === 'agent' ? mark.appearance?.badge : null)).toEqual(['spark', 'shield'])
+  })
+
   it('Agent 事实缺席的 agent Region 与终端 Region 折成同一个标记', () => {
     // 两者在渲染现场画的都是那个固定的终端图标。若按 surface.kind 分开去重，这里会堆两个一样的图标。
     const tab = tabWith(agentSurface('region-0', 'session-a'), terminalSurface('region-1', 'session-b'))
@@ -302,7 +312,8 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
       })
     )
     expect(html).toContain('workbench-tab__agent-mark')
-    expect(html).toContain('status__dot')
+    expect(html).toContain('agent-avatar__status--working')
+    expect(html).not.toContain('status__dot')
     // Provider 图标在场：codex 走的是内置 Provider 那一支，画的不是那个兜底的机器人。
     expect(html).not.toContain('lucide-square-terminal')
   })
@@ -363,6 +374,7 @@ describe('tabMarkAgentFactsFor：从 Session 解析「谁是 Agent」', () => {
     )
     expect(facts(agentSurface('region-0', 'session-a'))).toEqual({
       providerId: 'codex',
+      sessionId: 'session-a',
       status: working
     })
   })
@@ -374,6 +386,7 @@ describe('tabMarkAgentFactsFor：从 Session 解析「谁是 Agent」', () => {
     )
     expect(facts(terminalSurface('region-0', 'session-a'))).toEqual({
       providerId: 'claude',
+      sessionId: 'session-a',
       status: working
     })
   })
@@ -424,8 +437,8 @@ describe('tabMarkAgentFactsFor：从 Session 解析「谁是 Agent」', () => {
       )
     )
     expect(marks).toEqual([
-      { kind: 'agent', providerId: 'codex', status: working, regionId: 'region-0' },
-      { kind: 'agent', providerId: 'claude', status: working, regionId: 'region-1' }
+      { kind: 'agent', providerId: 'codex', status: working, sessionId: 'session-a', regionId: 'region-0' },
+      { kind: 'agent', providerId: 'claude', status: working, sessionId: 'session-b', regionId: 'region-1' }
     ])
   })
 })

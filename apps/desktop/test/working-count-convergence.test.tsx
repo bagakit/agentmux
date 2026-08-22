@@ -54,7 +54,7 @@ import {
   summarizeAgentAttention,
   summarizeProviderActivity
 } from '../src/renderer/src/lib/agent-attention.js'
-import { sessionBoardColumn, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
+import { idleAgentCount, sessionBoardColumn, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 
 const fixture = vi.hoisted(() => ({
   state: {
@@ -197,6 +197,17 @@ describe('窗口里每个「有几个在干活」的计数都用同一个判据'
     expect(renderedWorkingText(sessions)).toBe('3 working')
   })
 
+  it('idle count only includes quiet running Agents, not working, starting, or stopped sessions', () => {
+    const sessions = [
+      agentSession('quiet', 'running'),
+      agentSession('working', 'working'),
+      agentSession('starting', 'starting'),
+      agentSession('stopped', 'exited'),
+      agentSession('needs-you', 'waiting')
+    ]
+    expect(idleAgentCount(sessions)).toBe(1)
+  })
+
   it('四个消费者对同一批 Session 报出同一个数（跨投影一致性）', () => {
     // 用户实测的那一组：3 个在跑（含 running 与 starting）、1 个等你、1 个完成。
     // 缺陷形态下 rollup=1（只有真 working 那个）而另外三处=3。
@@ -318,7 +329,6 @@ function displayStateUnionMembers(): string[] {
  * 行号写在这里是给读的人定位用的。
  */
 const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
-  '/components/AgentAvatar.tsx': '仅决定工作活动字形；普通 running 不画头像角标，不参与计数',
   // 主按钮是 Stop 还是 Send。idle-running 的 Agent 没有在途回合可打断，故此处严格判 working 是对的。
   '/lib/composer-submit-mode.ts':
     '决定 Stop/Send，问的是"有在途回合吗"而不是"在 working 列吗"',

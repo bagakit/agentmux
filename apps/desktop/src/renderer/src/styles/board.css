@@ -403,7 +403,9 @@
 .discussion-canvas__footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); border-top: 1px solid var(--line); background: var(--surface-0); }
 .discussion-canvas__footer > span { margin-right:auto; display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 
-.default-session-floating { position: fixed; z-index: 45; min-width: 420px; min-height: 280px; border-radius: 10px; background: transparent; box-shadow: 0 4px 12px rgb(0 0 0 / 22%), 0 24px 64px rgb(0 0 0 / 32%); }
+.default-session-floating { position: fixed; z-index: 45; min-width: 420px; min-height: 280px; overflow: hidden; resize: both; border-radius: 10px; background: transparent; box-shadow: 0 4px 12px rgb(0 0 0 / 22%), 0 24px 64px rgb(0 0 0 / 32%); }
+.default-session-floating--main { position: absolute; z-index: 1; inset: 0; min-width: 0; min-height: 0; resize: none; border-radius: 0; box-shadow: none; }
+.default-session-floating--hidden { visibility: hidden; pointer-events: none; }
 .default-session-floating__shell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: 10px; background: var(--surface-1); }
 .default-session-floating__titlebar { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: grab; user-select: none; }
 .default-session-floating__titlebar:active, .default-session-floating__shell.is-dragging .default-session-floating__titlebar { cursor: grabbing; }
@@ -413,3 +415,5 @@
 .default-session-floating__actions button:hover { background: var(--surface-3); color: var(--text); }
 .default-session-floating__body { flex: 1; min-height: 0; overflow: hidden; }
 .default-session-floating__body > .workspace-workbench { width: 100%; height: 100%; }
+
+.default-session-floating--main .default-session-floating__shell { border: 0; border-radius: 0; background: var(--surface-0); }

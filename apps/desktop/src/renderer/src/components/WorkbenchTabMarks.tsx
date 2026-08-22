@@ -1,7 +1,6 @@
 import { Bot, FileCode2, Globe2, Sparkles, SquareTerminal } from 'lucide-react'
 import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
-import { AgentProviderIcon } from './AgentProviderIcon'
-import { StatusDot } from './StatusDot'
+import { AgentAvatar } from './AgentAvatar'
 
 /**
  * 标签上的标记簇：把 `workbenchTabMarks` 算出的标记序列画出来。
@@ -41,8 +40,7 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
     case 'agent':
       return (
         <i className="workbench-tab__agent-mark">
-          <AgentProviderIcon providerId={mark.providerId} size={13} />
-          <StatusDot status={mark.status} />
+          <AgentAvatar providerId={mark.providerId} sessionId={mark.sessionId} executorId={mark.executorId} appearance={mark.appearance} state={mark.status.state} detail={mark.status.detail} size={16} />
         </i>
       )
     case 'terminal':

@@ -1260,7 +1260,7 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 - 所有显示 Executor/Provider 身份的地方，包括顶部 Tab、Project/Topic 列表、Session、Board 和 Browser 操作条，都必须使用同一个可复用 Executor identity 组件。Provider 图标、较小的 Executor 自定义图标、珐琅式外轮廓和状态标记只能由这一组件组合，不能在调用方各自画点、描边或叠加。
 - Executor 面板在 hover 或键盘 focus 时以统一的 tooltip 信息面板出现，展示可读名称、Provider、当前状态和可用的上下文；不要求先点击才能看见。面板的字号、内边距、颜色和动作区与其他信息面板一致，不能因为来源不同出现另一套密度。
 - 自定义头像属于 Executor 配置，不属于 Appearance。面板只提供一个小型设置入口；点击后进入该 Executor 对应的模板设置，不能跳到 Appearance，也不能在信息面板内复制一套配置表单。身份 ID、Session 绑定和工作区事实保持稳定。
-- 已保存配置里仍存在的旧 Appearance 头像，读取时按相同 Executor ID 承接到 Executor 模板，再由下一次保存写入新的归属；不能在重排设置入口时静默丢掉可辨认的身份外观。找不到对应 Executor 的旧头像必须保留原配置并明确提示，不能猜测它属于哪个新身份。
+- 头像编辑归属 Executor 模板；移动设置入口不能改变已有身份外观、丢弃已存头像，或因头像问题阻断应用启动。仍存在的 Appearance 头像按原 Executor ID 继续显示，新的 Executor 编辑写入其稳定配置；未匹配的旧记录保留原样，不猜测新身份。
 
 ### 工作状态与 Executor 叠加标记（2026-09-22）
 
@@ -1277,3 +1277,5 @@ Default Session 的打开动作呈现为当前工作面上的浮窗，交互参�
 浮窗内容就是唯一 `launcher:default` Topic 的原生 Tab、Region、Agent 身份、输出和 composer。它不创建第二个 Session、PTY 或聊天产品；浮窗只是同一 Topic 工作面的附着投影。Board、Agents 和 Session 中的入口都打开/聚焦同一个浮窗，不能各自维护一份默认会话。
 
 浮窗的打开状态、位置和引用的 Topic 工作面属于持久 UI 状态。重启后先恢复浮窗和原有 Tab/Region，再尝试 reattach/resume；恢复握手、探测或浮窗渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。
+
+浮窗与主工作面分别拥有自己的导航焦点；浮窗内新建、关闭、文件与快捷键必须按该 Topic 的明确身份执行。默认 Topic 的可见性也必须进入现有终端泊车、内存预算与通知判定，不能一边显示一边回收。窗口支持缩放与最大化/还原；标题栏按钮不触发拖动，关闭只收起。旧的“跳到 Scratch 主路由”实现不能作为此行为的替代。

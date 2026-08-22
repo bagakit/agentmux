@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 241
+    "next_cursor": 242
   },
   "features": [
     {
@@ -2034,6 +2034,16 @@
       "workspace_mode": "worktree",
       "branch": "feat/f-29s8fwf9m",
       "worktree_name": "wt-f-29s8fwf9m",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29t8f3mhj",
+      "title": "Default Session 浮窗保活与恢复补齐",
+      "status": "in_progress",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-29t8f3mhj",
+      "worktree_name": "wt-f-29t8f3mhj",
       "runtime_role": "standalone",
       "runtime_relations": []
     }

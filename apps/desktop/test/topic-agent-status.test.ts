@@ -450,7 +450,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
   const styles = allStyleRules()
 
   it('身份由 Provider 图标给出，不是一排看不出谁是谁的抽象点', () => {
-    expect(avatar).toContain('<AgentProviderIcon providerId={providerId}')
+    expect(renderToStaticMarkup(createElement(AgentAvatar, { label: 'Agent', providerId: 'codex' }))).toContain('data-agent-provider="codex"')
   })
 
   it('点击走全局那一个 selectSession，不另开跳转路径', () => {
@@ -465,9 +465,10 @@ describe('Agent 头像：身份看图标，点击到人', () => {
   it('键盘可达：它是 button，Enter 天然等价于点击，并有 aria-label 与 tooltip', () => {
     expect(avatar).toContain("const Element = onOpen ? 'button' : 'span'")
     const markup = renderToStaticMarkup(createElement(AgentAvatar, { label: 'Agent', providerId: 'codex', state: 'running', onOpen: () => {} }))
-    expect(markup).toContain('aria-label="Agent · running"')
+    expect(markup).toContain('aria-label="Agent · Idle"')
     expect(markup).toContain('<button')
-    expect(avatar).toContain('title={`${label} · ${state}`}')
+    expect(avatar).toContain('onPointerEnter={show}')
+    expect(avatar).toContain('onFocus={show}')
   })
 
   it('悬停抬升并放大，且不推动同排其它头像', () => {

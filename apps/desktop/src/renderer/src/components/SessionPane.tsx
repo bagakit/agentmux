@@ -78,7 +78,7 @@ export function SessionPane({
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId)
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
-  const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.appearance.agentAvatars?.[connectingExecutorId] : undefined)
+  const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)

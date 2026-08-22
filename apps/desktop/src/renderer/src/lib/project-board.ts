@@ -146,6 +146,18 @@ export function workingAgentCount(sessions: readonly SessionSnapshot[]): number 
   )
 }
 
+/**
+ * `running` is the quiet, process-available state after the semantic activity projection has gone
+ * idle.  Keep this count beside workingAgentCount so the Project Rail and Board never invent their
+ * own status predicate.
+ */
+export function idleAgentCount(sessions: readonly SessionSnapshot[]): number {
+  return sessions.reduce(
+    (count, session) => count + (session.kind === 'agent' && session.status.state === 'running' ? 1 : 0),
+    0
+  )
+}
+
 function groupRuns(
   sessions: readonly SessionSnapshot[]
 ): Record<ProjectBoardColumn, SessionSnapshot[]> {
