@@ -177,6 +177,20 @@ describe('Message Tools three-state interaction', () => {
     expect(root).toBeDefined()
     expect(root!.body).toContain('grid-template-columns: auto minmax(0, 1fr) auto')
   })
+
+  it('一行态里那一行文字垂直居中，而工具/主动作控件仍锚在底部', () => {
+    // 用户原话「message tool 只有一行时，文字下对齐会导致视觉不均衡」。一行态是网格，行高由较高的
+    // 工具列（32px）决定，编辑区（≈24px）比它矮；根元素 align-items 决定编辑区落在哪里。
+    // 曾经是 end（沉底，上方留空档），改成 center 才均衡。编辑区那一格**不能**自己写 align-self，
+    // 否则会覆盖掉这份居中——所以两侧都判。
+    const root = ruleList.find(({ selector }) => selector === COLLAPSED)
+    expect(root).toBeDefined()
+    expect(root!.body, '一行态没有把内容垂直居中——那一行文字会沉到底部留出上方空档').toContain('align-items: center')
+    // 编辑区不覆写 align-self：它必须继承根元素的 center。
+    expect(collapsedOverrides.get('.composer__editor') ?? '').not.toMatch(/align-self:/)
+    // 而工具/主动作那两簇仍显式锚底——编辑区涨到多行时它们留在下缘才对，与文字居中不矛盾。
+    expect(collapsedOverrides.get('.composer__toolbar > div') ?? '').toContain('align-self: end')
+  })
 })
 
 
