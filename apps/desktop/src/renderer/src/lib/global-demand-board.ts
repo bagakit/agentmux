@@ -39,21 +39,21 @@ export function projectDemands(
   const sessionById = new Map(sessions.map((session) => [session.id, session]))
   return [...records]
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .map((task) => ({
-      ...task,
-      sessions: task.sessionIds.flatMap((sessionId) => {
+    .map((demand) => ({
+      ...demand,
+      sessions: demand.sessionIds.flatMap((sessionId) => {
         const session = sessionById.get(sessionId)
         return session ? [session] : []
       }),
-      workspacePath: task.sessionIds
+      workspacePath: demand.sessionIds
         .map((sessionId) => sessionById.get(sessionId)?.workspacePath ?? null)
         .find((path): path is string => Boolean(path)) ?? null
     }))
 }
 
-export function demandColumns(tasks: readonly DemandProjection[]): Record<DemandStatus, DemandProjection[]> {
+export function demandColumns(demands: readonly DemandProjection[]): Record<DemandStatus, DemandProjection[]> {
   return DEMAND_STATUS_IDS.reduce((columns, status) => {
-    columns[status] = tasks.filter((task) => task.status === status)
+    columns[status] = demands.filter((demand) => demand.status === status)
     return columns
   }, {} as Record<DemandStatus, DemandProjection[]>)
 }

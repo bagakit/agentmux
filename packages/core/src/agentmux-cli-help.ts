@@ -47,6 +47,7 @@ Intents:
   endpoint    Print the Control endpoint path and schema version without connecting.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents or active Agent Sessions from their owners.
+  demand      List and update Board Demands and their explicit Session links.
   open        Open typed content at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
@@ -358,6 +359,19 @@ or replied. Re-running with the same request id returns the same Thread and neve
 the Prompt.
 
 Cross-workspace delivery is refused. Remote targets are not supported yet.`],
+  ['demand', `Manage a Board Demand
+
+Usage:
+  agentmux demand list
+  agentmux demand show --demand <demand-id>
+  agentmux demand create --title <title> [--project <project-id>] [--status <status>] [--priority <priority>]
+  agentmux demand update --demand <demand-id> [--title <title>] [--status <status>] [--priority <priority>]
+  agentmux demand link-session --demand <demand-id> --session <session-id>
+  agentmux demand link-project --demand <demand-id> --project <project-id>
+  agentmux demand decision-log --demand <demand-id>
+
+Demand is the Board identity. Session links are explicit execution facts; a Demand can have zero,
+one, or multiple linked Sessions.`],
   ['handoff', `Hand a task and its ownership to another Agent Session
 
 Usage:

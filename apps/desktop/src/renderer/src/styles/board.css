@@ -18,11 +18,11 @@
 .session-region-host--balanced { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .workbench-session-region-host > .agent-surface { width: 100%; height: 100%; }
 
-/* Global Agents Board. The board is a continuous surface: columns provide rhythm, while task cards use
+/* Global Agents Board. The board is a continuous surface: columns provide rhythm, while demand cards use
    a quiet fill and a single selected signal. The right workspace is a sibling surface, never an overlay. */
 .global-board-surface { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--surface-0); color: var(--text); }
 .global-board-main { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
-.global-board-surface--task-open .global-board-main { flex-basis: 46%; flex-grow: 0; }
+.global-board-surface--demand-open .global-board-main, .global-board-surface--session-open .global-board-main { flex-basis: 46%; flex-grow: 0; }
 .global-board-toolbar { flex: none; min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: 0 var(--sp-5); border-bottom: 1px solid var(--line-soft); background: var(--surface-0); }
 .global-board-toolbar__scope, .global-board-toolbar__controls, .global-board-toolbar__scope > span, .global-board-select, .global-board-action, .global-board-icon-action, .global-board-footer, .global-default-session__button, .global-default-session__recover { display: inline-flex; align-items: center; }
 .global-board-toolbar__scope { gap: var(--sp-2); min-width: 0; white-space: nowrap; }
@@ -68,13 +68,38 @@
 .global-demand-card__meta span { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .global-demand-card__meta span:nth-child(2) { max-width: 100px; }
 .global-demand-card__sessions { text-transform: none; letter-spacing: 0; }
+.global-session-card { position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 10px 11px; border: 1px solid transparent; border-radius: var(--radius); background: var(--surface-1); color: var(--text); text-align: left; box-shadow: var(--hl); cursor: pointer; transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
+.global-session-card:hover { background: var(--surface-2); border-color: var(--line); transform: translateY(-1px); }
+.global-session-card:focus-visible { outline: 2px solid var(--green-2); outline-offset: 1px; }
+.global-session-card--selected { border-color: color-mix(in srgb, var(--green) 65%, var(--line)); background: color-mix(in srgb, var(--green) 7%, var(--surface-1)); }
+.global-session-card__topline, .global-session-card__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.global-session-card__topline { color: var(--text-3); font-size: var(--fs-micro); }
+.global-session-card__title { display: -webkit-box; overflow: hidden; color: var(--text); font-size: var(--fs-body); font-weight: 620; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.global-session-card__description, .global-session-card__meta { color: var(--text-3); font-size: var(--fs-micro); }
+.global-session-workspace { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface-1); animation: global-session-workspace-enter 180ms ease-out; }
+.global-session-workspace__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.global-session-workspace__identity { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.global-session-workspace__identity strong { overflow: hidden; color: var(--text); font-size: var(--fs-title); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.global-session-workspace__identity small { color: var(--text-3); font-size: var(--fs-meta); }
+.global-session-workspace__toolbar { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--line-soft); }
+.global-session-workspace__regions { min-height: 0; flex: 1 1 auto; display: grid; gap: 1px; background: var(--line); }
+.global-session-workspace__regions--columns { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.global-session-workspace__regions--balanced, .global-session-workspace__regions--grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.global-session-workspace__empty { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-6); color: var(--text-3); text-align: center; }
+.global-session-region { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; background: var(--surface-0); overflow: hidden; }
+.global-session-region__header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 32px; padding: 0 var(--sp-3); background: var(--surface-2); color: var(--text-2); }
+.global-session-region__name { min-width: 0; display: inline-flex; align-items: center; gap: 5px; overflow: hidden; font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.global-session-region__jump { display: inline-flex; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.global-session-region__body { min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.global-session-region__body > .agent-surface { height: 100%; min-height: 0; }
+@keyframes global-session-workspace-enter { from { opacity: .7; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
 .global-board-footer { flex: none; justify-content: space-between; gap: var(--sp-3); min-height: 34px; padding: 0 var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
 .global-board-footer__hint { flex: 1; text-align: center; }
-.board-tool-task { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
-.board-tool-task:hover, .board-tool-task.selected { background: var(--surface-2); color: var(--text); }
-.board-tool-task > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.board-tool-task strong { overflow: hidden; font-size: var(--fs-meta); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
-.board-tool-task small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-demand { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.board-tool-demand:hover, .board-tool-demand.selected { background: var(--surface-2); color: var(--text); }
+.board-tool-demand > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.board-tool-demand strong { overflow: hidden; font-size: var(--fs-meta); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-demand small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .global-default-session { position: relative; }
 .global-default-session__button, .global-default-session__recover { gap: 5px; border: 0; background: transparent; color: var(--green); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .global-default-session__button:hover, .global-default-session__recover:hover { color: var(--text); }
@@ -120,7 +145,7 @@
 @media (max-width: 960px) {
   .global-board-toolbar { align-items: flex-start; flex-direction: column; padding: var(--sp-3); }
   .global-board-toolbar__controls { width: 100%; justify-content: flex-start; overflow: auto; }
-  .global-board-surface--task-open .global-board-main { flex-basis: 42%; }
+  .global-board-surface--demand-open .global-board-main, .global-board-surface--session-open .global-board-main { flex-basis: 42%; }
   .global-board-columns { grid-template-columns: repeat(4, minmax(160px, 1fr)); }
 }
 /* The bake-off strip: which branches are racing on one prompt. Surface fill and a hairline carry it,
