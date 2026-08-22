@@ -73,6 +73,16 @@ function renderWithSpeakers(items: AgentTimelineItem[]): string {
 }
 
 describe('ActivityView 与两条对话轴的接线', () => {
+  it('Codex 对话模式逐条显示相邻的用户消息', () => {
+    const markup = render('complete-events', [
+      activity('u1', { kind: 'user_message', source: 'user', title: 'Prompt', content: '第一句', createdAt: 1 }),
+      activity('u2', { kind: 'user_message', source: 'user', title: 'Prompt', content: '第二句', createdAt: 2 })
+    ])
+    expect(markup.match(/class="log-turn" data-speaker-role="human"/g)).toHaveLength(2)
+    expect(markup).toContain('第一句')
+    expect(markup).toContain('第二句')
+  })
+
   it('两条轴都接上了，且各自只收自己那一类身份', () => {
     // 这条守的是**接线本身**。轴组件自己的验收在 conversation-axis-render.test.tsx，但那证明不了
     // ActivityView 真的渲染了它——一个组件写好却没人调用，两边的测试都会绿。

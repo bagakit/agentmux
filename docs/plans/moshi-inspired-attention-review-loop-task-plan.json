@@ -1,0 +1,313 @@
+{
+  "version": 2,
+  "feat_id": "f-29f8f7krj",
+  "plan_status": "reviewed",
+  "plan_revision": 4,
+  "supersedes_revision": 3,
+  "review_ref": "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/attention-review-loop-detail-2026-09-22.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-004",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-001",
+            "to": "T-004"
+          },
+          {
+            "from": "T-004",
+            "to": "T-003"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-004",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-004",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立 Agents 全局注意力收件箱",
+      "objective": "把已有 attention vocabulary、Agent roster 和 Session 导航组合成独立 Agents 工作面",
+      "outcome": "用户打开 Agents 时先看到 Needs you，并可点击进入同一 Session",
+      "acceptance": [
+        "Agents 面按 Needs you、working、done、error 分组并复用现有 attention 判定",
+        "每个 Agent 行点击都调用 selectSession(session.id)，不复制 Session 或 Runtime",
+        "底部中央只存在一组三项 Agents/Session/Board 导航，旧 workbench 持久值仍恢复为 Session",
+        "空集合和恢复失败状态有可见非阻断提示，不以空 every/some 断言替代行为"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.tsx test/store-persistence.test.ts --maxWorkers=1",
+          "proves": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.ts test/store-persistence.test.ts --maxWorkers=1"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "把结果审查入口接回同一 Session",
+      "objective": "在既有 SessionPane 组合工作区变更、明确地址预览和聚焦 Composer 的结果动作；复用 Git、openHttpLink 和已有布局，不建开发服务扫描器。",
+      "outcome": "用户从结果附近查看所属工作区的变更、选择明确地址打开预览，并回同一 Session 继续输入。",
+      "acceptance": [
+        "当前 Session 的 Workspace 决定 Git 数据来源，即使另一项目处于全局 active 状态也不能串项目；显示工作区变更，不声称这些改动都来自该 Agent。本地 Git 临时仓库验证有变更、无变更、非仓库、读取失败四种状态。",
+        "用户点击具体变更文件进入既有 Diff，返回保留原 Session、Region 和草稿；未知 Workspace 保留 Session 并说明不能定位，不选最近工作区。",
+        "预览只使用用户输入或从当前 Session 明确选择的 HTTP/HTTPS URL，复用 parseHttpLinkUrl/openHttpLink 与目的地选择；多个 URL 由用户选择，空值/其他 scheme 不启动 Browser。URL 存在不能证明服务在线。",
+        "至少用两个独立通用输入证明未过拟合：HTTP 地址由输入提供，HTTPS 地址由对话链接选择；主机和端口在 fixture 中生成，不依赖真实站点或固定开发端口。",
+        "继续追问只定位同一 Session 现有 Composer，不自动发送、不创建或隐式 resume；草稿与附件不被替换。Board 只读 Session 投影不因引入结果动作而获得发送或 lifecycle 权限。",
+        "SessionResultReview（计划新增组件）由 SessionPane 的真实产品路径挂载；无效地址、打开失败、Git 失败保留原工作面并显示可行动原因。执行者在隔离副本做块级变异：记录候选身份、修改块、原始通过/变异失败/恢复通过的命令与输出；空集合变异必须覆盖同一用例对集合的所有读取。任务完成前另记录逐符号生产调用者，排除定义文件和测试文件；挂载后的用户事件测试须证明该调用确实发生。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/session-result-review.test.tsx apps/desktop/test/session-result-review-routing.test.ts apps/desktop/test/editor-diff-store.test.ts apps/desktop/test/open-http-link-store.test.ts apps/desktop/test/task-session-region-host.test.tsx",
+          "proves": "前两个文件为本任务新增行为测试：真实挂载点击、工作区归属、Git fixture、HTTP/HTTPS 来源、继续输入与观察权限边界。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -s apps/desktop/src/renderer/src/components/SessionResultReview.tsx && rg -l 'SessionResultReview' apps/desktop/src --glob '*.ts' --glob '*.tsx' --glob '!**/SessionResultReview.tsx' --glob '!**/*test*' --glob '!**/*spec*'",
+          "proves": "精确符号的生产引用；显式排除定义文件、test/spec，零调用者命令失败，结合挂载事件测试证明接线。"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "结果动作与既有 Store/Browser/Git 类型合同。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-002-mutation.md",
+          "proves": "执行时产出候选绑定的变异红绿记录：删除结果组件挂载、将所属工作区换成 active、把无效 URL 放行；逐项红后恢复。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+        "apps/desktop/src/renderer/src/components/SessionPane.tsx",
+        "apps/desktop/src/renderer/src/components/ChangesPanel.tsx",
+        "apps/desktop/src/renderer/src/lib/open-destination.ts",
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "这是一个 Session 结果动作宿主的端到端接线，三个动作共享源 Session 与 Region 上下文；持续性与失败测试和该宿主一同闭合，不另造服务发现或 Runtime 层。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "Needs you 就地回答与下一项处理",
+      "objective": "在已有全局注意力列表上打开可交互的单请求详情，复用 AgentInteractionCard；不改活动 T-001 的导航或状态分组合同。",
+      "outcome": "用户在聚合入口就地回答当前请求，确认后继续下一项；失败和过期保留可解释状态。",
+      "acceptance": [
+        "从 T-001 的列表选择 A 时，详情显示 A 的稳定 Session、Workspace、请求摘要和 Core typed request；A/B 两个 Session 的请求互不串线。仅有 needs-you 状态而无 typed request 时提供定位原 Session，不能伪造审批按钮。",
+        "AttentionRequestPanel（计划新增组件）复用 AgentInteractionCard 和既有 respondInteraction/Core API；请求绑定 Session/Run/request，旧 Run 或已替换的 request 不接受旧回答。",
+        "点击回答后禁用重复提交；只有 Core 确认该请求已解决才进入下一项，失败保留原请求与可见原因，不自动重试，不以通道写入或请求从列表暂时消失冒充处理成功。",
+        "下一项顺序复用既有 attention ordering；末项完成后回到入口/空状态，未确认和恢复未知的请求保留身份，不能被当已处理静默清走。成功、失败、外部处理、被替换四条路径均有事件行为测试。",
+        "键盘可完成选中、回答、下一项和返回原工作面；焦点不因列表刷新跳到其他无关项目。现有一键跳转 Agent 能力保留，Board 的观察 Region 保持只读。",
+        "仅回答操作受缺失/过期事实限制，不停止或锁死健康 Agent。执行者在隔离副本做块级变异：记录候选身份、修改块、原始通过/变异失败/恢复通过的命令与输出；空集合变异必须覆盖同一用例对集合的所有读取。任务完成前另记录逐符号生产调用者，排除定义文件和测试文件；挂载后的用户事件测试须证明该调用确实发生。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/attention-request-panel.test.tsx apps/desktop/test/attention-request-resolution.test.ts apps/desktop/test/agent-interaction-card.test.tsx apps/desktop/test/next-attention-shortcut.test.ts packages/core/test/agent-interaction.test.ts",
+          "proves": "前两个文件由本任务新增：双 Session 真实挂载、点击回调、过期/失败/确认后下一项、键盘与精确 request 响应；不以静态 markup 代替点击。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -s apps/desktop/src/renderer/src/components/AttentionRequestPanel.tsx && rg -l 'AttentionRequestPanel' apps/desktop/src --glob '*.ts' --glob '*.tsx' --glob '!**/AttentionRequestPanel.tsx' --glob '!**/*test*' --glob '!**/*spec*'",
+          "proves": "全局入口对请求详情组件的精确生产调用，排除定义文件和测试。"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "复用既有交互与导航合同，不添加 Core 第二份待办状态。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-004-mutation.md",
+          "proves": "执行时产出删除聚合入口挂载、交换 A/B 目标、确认前跳下一项、整块待处理集合置空四类变异红绿证据。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+        "apps/desktop/src/renderer/src/components/AgentRoster.tsx",
+        "apps/desktop/src/renderer/src/components/AgentInteractionCard.tsx",
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "heavy": true,
+      "heavy_reason": "请求显示、回答确认与焦点收敛是同一交互事务；仅有纯函数或仅有卡片不是可交付路径。",
+      "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002",
+        "T-004"
+      ],
+      "title": "完成恢复与发布前证据闭环",
+      "objective": "集成结果动作与就地回答，在同一候选验证完整操作路径及真实进程重启恢复；保留原发布前证据边界，不扩大为远程或移动端发布。",
+      "outcome": "完整工作面在重启后可见可恢复，原 Session 被 reattach/resume，候选来源与实际运行包可以核对。",
+      "acceptance": [
+        "同一候选包含 T-001/T-002/T-004 的生产接线；端到端完成 Needs you 选择→回答确认→下一项→查看工作区 Diff/明确 URL 预览→回原 Session Composer，Board 观察投影无输入权限。",
+        "在隔离测试数据目录启动真实 Electron 主进程和 Renderer，布置两个 Session、Tab/Region split、草稿与附件并记录身份；终止应用进程后重启，布局/焦点/Session 引用仍可见且自动尝试 reattach/resume。组件 remount 或 Store 序列化测试不能冒充进程重启证据。",
+        "Runtime 短暂不可用、空启动 snapshot、Provider 探测/恢复握手超时的受控用例保留原工作面并显示服务窗；仅权威 retired/unknown 允许移除投影。reattach 保持 Run，确需 native resume 时保持 Session 并允许 Run 正常换代，不以固定 RunID 否定合法 resume。",
+        "整合候选 typecheck/build 通过；消费每个实现任务已有的候选绑定变异和零调用者证据，改了有关实现才重跑。源码扫描必须断言非空及两端锚点，集合真值测试必须有非空证明。",
+        "发布前先固定候选及真实配置/测试输入身份；在隔离安装目标核对 canonicalMatchesCandidate、canonicalMatchesCheckout、runningCanonical 和 mismatchCount。验收记录必须说明检查对象与结果，不以静态报告冒充真实启动；不在本次完善计划时打包、安装或重启用户应用。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/attention-review-loop.integration.test.tsx apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts apps/desktop/test/task-region-restart.test.ts apps/desktop/test/task-session-region-host.test.tsx",
+          "proves": "首文件为本任务新增的跨面交互 oracle；其他用例提供局部恢复及观察投影回归，不能替代进程重启。"
+        },
+        {
+          "kind": "command",
+          "ref": "node apps/desktop/scripts/probe-attention-review-restart.mjs --isolated --feature f-29f8f7krj",
+          "proves": "本任务需实现的真实进程探针：隔离用户数据与运行状态，退出非零表示任何身份/布局/恢复断言失败；必须记录至少一次实际进程退出与不同 PID 的重启，清理自建资源而不停止用户 Run。"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build",
+          "proves": "最终整合 Desktop 可构建；候选及构建身份存入执行证据。"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/vacuous-on-empty-predicate.test.ts apps/desktop/test/sliced-scan-surface-not-empty.test.ts apps/desktop/test/package-install-restart.test.ts",
+          "proves": "非空守卫和既有打包安装检查回归。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-003-candidate-proof.md",
+          "proves": "记录真实 UI 操作、重启前后身份/焦点、探针日志、包报告、候选/input digest、消费的变异与调用者证据及清理状态。没有实测不得 finish done。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/attention-review-loop-detail-2026-09-22.md",
+        "AGENTS.md",
+        "apps/desktop/test/package-install-restart.test.ts",
+        "apps/desktop/test/workbench-persistence.test.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "完整路径和真实进程重启是独立于组件测试的联合 oracle，必须在同一候选中贯通，不可用分散的 mock 验证替代。",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

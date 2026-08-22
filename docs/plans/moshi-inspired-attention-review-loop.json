@@ -1,0 +1,88 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "建立 Agents 全局注意力收件箱",
+      "objective": "把已有 attention vocabulary、Agent roster 和 Session 导航组合成独立 Agents 工作面",
+      "outcome": "用户打开 Agents 时先看到 Needs you，并可点击进入同一 Session",
+      "acceptance": [
+        "Agents 面按 Needs you、working、done、error 分组并复用现有 attention 判定",
+        "每个 Agent 行点击都调用 selectSession(session.id)，不复制 Session 或 Runtime",
+        "底部中央只存在一组三项 Agents/Session/Board 导航，旧 workbench 持久值仍恢复为 Session",
+        "空集合和恢复失败状态有可见非阻断提示，不以空 every/some 断言替代行为"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.tsx test/store-persistence.test.ts --maxWorkers=1",
+          "proves": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.ts test/store-persistence.test.ts --maxWorkers=1"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "把结果审查入口接回同一 Session",
+      "objective": "把已有 Diff 与 Browser preview 能力接到 Agent Session 的 attention 结果上",
+      "outcome": "用户处理完请求后可以在同一 Session 打开可用结果或看到明确等待状态",
+      "depends_on": [
+        "T-001"
+      ],
+      "acceptance": [
+        "结果审查条只消费现有 Session/Workspace 事实，不生成第二份结果状态",
+        "已有 Diff 或 Browser preview 可直接打开并保留原 Session 上下文",
+        "没有可审查事实时显示等待结果，不伪造链接、不阻断 Composer 或恢复",
+        "审查条在单 Region 下不制造空右栏或方向性布局动画"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.tsx test/store-persistence.test.ts --maxWorkers=1",
+          "proves": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/session-result-review.test.tsx test/board-single-surface-layout.test.tsx --maxWorkers=1"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "完成恢复与发布前证据闭环",
+      "objective": "验证三工作面、结果审查和持久布局在重启及打包候选中保持一致",
+      "outcome": "重启后面、Region 和 Session 仍可见可恢复，发布报告证明运行的是候选包",
+      "depends_on": [
+        "T-002"
+      ],
+      "acceptance": [
+        "persisted mainSurface=agents 重启后仍显示 Agents，旧 workbench 仍解释为 Session",
+        "恢复握手或 Provider 探测失败保留原 Tab/Region，并展示服务窗告示",
+        "clean tree package/install/report 通过 canonicalMatchesCandidate、canonicalMatchesCheckout、runningCanonical 和 mismatchCount 检查"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/agent-attention-inbox.test.tsx test/store-persistence.test.ts --maxWorkers=1",
+          "proves": "CI=true pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop test -- --runInBand"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/terminal-conversation-restore-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/reviews/terminal-conversation-restore-2026-09-22.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Keep output gaps out of the terminal screen",
+      "objective": "Represent bounded live-output loss as an out-of-band signal, keep the newest output flowing, and request one current-screen redraw when the Run is healthy.",
+      "outcome": "Terminal live output never writes the historical-gap diagnostic into xterm; TerminalView owns the gap notice and redraw convergence.",
+      "depends_on": [],
+      "acceptance": [
+        "A true byte gap returns a structured gap signal while writing only retained output; overlap and contiguous batches do not signal a gap.",
+        "TerminalView has a production caller for the structured signal, shows the service notice, requests redraw, and clears only after a successful current-screen repaint.",
+        "Mutation that removes the structured gap branch makes the focused tests fail."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cd apps/desktop && pnpm exec vitest run test/terminal-live-output.test.ts test/terminal-redraw-feedback.test.tsx --maxWorkers=1",
+          "proves": "Gap signal, live output wiring, and redraw feedback"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'composeTerminalLiveOutputWrite|replayGap|requestContentRedraw' apps/desktop/src/renderer/src --glob '!**/terminal-live-output.ts'",
+          "proves": "The gap capability is consumed outside its defining module"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/terminal-live-output.ts",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/test/terminal-live-output.test.ts"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Render all Codex user turns",
+      "objective": "Keep every persisted user_message visible in Codex conversation mode across live events and timeline snapshot resync.",
+      "outcome": "The conversation view renders at least two independent user rows in order and does not collapse later turns into the first prompt.",
+      "depends_on": [],
+      "acceptance": [
+        "Two user_message timeline items render as two user rows with their original text and order.",
+        "A timeline gap path resyncs from the authoritative snapshot without dropping later user messages.",
+        "Mutation that removes the later-message projection makes the focused renderer/store test fail."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cd apps/desktop && pnpm exec vitest run test/activity-view.test.tsx test/activity-timeline-rows.test.ts --maxWorkers=1",
+          "proves": "Multi-turn conversation projection"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'user_message|speakerOf|ActivityView' apps/desktop/src/renderer/src --glob '!**/ActivityView.tsx'",
+          "proves": "The timeline user-message capability has production callers"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/ActivityView.tsx",
+        "apps/desktop/src/renderer/src/store.ts"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Align restoring and redraw surfaces",
+      "objective": "Keep restoring as a high-quality Region stage with distinct replay semantics and make top redraw feedback converge after zoom or a successful repaint.",
+      "outcome": "Restoring and starting-agent surfaces share layout quality but remain distinguishable, and a confirmed current grid removes stale redraw feedback.",
+      "depends_on": [
+        "T-001"
+      ],
+      "acceptance": [
+        "Restoring copy and visual selectors describe replay/reattach, while starting-agent copy describes waiting for first output.",
+        "The redraw prompt is attached to the visible Region and is cleared by successful redraw or authoritative grid confirmation.",
+        "The focused surface contract test has a non-empty source scan and fails when the restoring distinction or top prompt rule is removed."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "cd apps/desktop && pnpm exec vitest run test/terminal-hydration-brand.test.ts test/terminal-redraw-feedback.test.tsx --maxWorkers=1",
+          "proves": "Restoring/startup distinction and redraw convergence"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/styles/terminal.css",
+        "apps/desktop/src/renderer/src/components/TerminalReplayGapNotice.tsx"
+      ]
+    }
+  ]
+}

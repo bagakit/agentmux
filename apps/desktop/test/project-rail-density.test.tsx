@@ -115,19 +115,19 @@ describe('Project Rail density is one tier across three dials', () => {
     expect(base.row, '.project-rail 没声明 --rail-row-min').not.toBeNull()
   })
 
-  it('the compact tier redefines all three dials together — no half tier', () => {
+  it.each(['compact', 'dense'] as const)('%s tier redefines all three dials together — no half tier', (tier) => {
     // 这是那句诉求的要害：三个拨盘必须**同一档一起变**。逐个断言「compact 档下这个拨盘存在」，
     // 任何一个漏改（半档）都当场红——变异「删掉 compact 档的 --rail-icon」会打红这里。
-    const compact = dialsOf(".project-rail[data-rail-density='compact']")
-    expect(compact.indent, 'compact 档没收紧每层缩进').not.toBeNull()
-    expect(compact.icon, 'compact 档没收紧行图标').not.toBeNull()
-    expect(compact.row, 'compact 档没收紧行高').not.toBeNull()
+    const tierValues = dialsOf(`.project-rail[data-rail-density='${tier}']`)
+    expect(tierValues.indent, `${tier} 档没收紧每层缩进`).not.toBeNull()
+    expect(tierValues.icon, `${tier} 档没收紧行图标`).not.toBeNull()
+    expect(tierValues.row, `${tier} 档没收紧行高`).not.toBeNull()
   })
 
-  it('every dial actually gets tighter in compact than in default', () => {
-    // 派生自样式表本身，不手抄期望值：把两档拨盘各自解析成 px 再比大小。
-    // --rail-indent/--rail-row-min 走 token 或 px，--rail-icon 是 px；两档都从同一张表读。
-    const tokenPx: Record<string, number> = { '--sp-3': 6, '--sp-4': 8, '--sp-5': 12, '--sp-6': 16 }
+  it('every dial actually gets tighter through compact to dense', () => {
+    // 派生自样式表本身，不手抄期望值：把三档拨盘各自解析成 px 再比大小。
+    // --rail-indent/--rail-row-min 走 token 或 px，--rail-icon 是 px；各档都从同一张表读。
+    const tokenPx: Record<string, number> = { '--sp-1': 2, '--sp-2': 4, '--sp-3': 6, '--sp-4': 8, '--sp-5': 12, '--sp-6': 16 }
     const resolve = (value: string): number => {
       const token = value.match(/var\((--sp-\d)\)/)?.[1]
       if (token) return tokenPx[token] ?? Number.NaN
@@ -135,11 +135,14 @@ describe('Project Rail density is one tier across three dials', () => {
     }
     const base = dialsOf('.project-rail')
     const compact = dialsOf(".project-rail[data-rail-density='compact']")
+    const dense = dialsOf(".project-rail[data-rail-density='dense']")
     for (const dial of ['indent', 'icon', 'row'] as const) {
       const b = resolve(base[dial]!)
       const c = resolve(compact[dial]!)
-      expect(Number.isFinite(b) && Number.isFinite(c), `${dial} 解析不出 px`).toBe(true)
+      const d = resolve(dense[dial]!)
+      expect(Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(d), `${dial} 解析不出 px`).toBe(true)
       expect(c, `compact 档的 ${dial}（${c}px）没有比默认档（${b}px）更紧`).toBeLessThan(b)
+      expect(d, `dense 档的 ${dial}（${d}px）没有比 compact 档（${c}px）更紧`).toBeLessThan(c)
     }
   })
 
@@ -171,12 +174,19 @@ describe('Project Rail density control lives next to the Plus button', () => {
     expect(absent).not.toContain('data-rail-density')
     expect(absent).toMatch(/aria-pressed="false"[^>]*>|aria-label="Use compact project spacing"/)
 
-    // compact 档：容器带属性，控件邀请切回默认且 pressed。
+    // compact 档：容器带属性，控件邀请切到 dense 且 pressed。
     fixture.state.config = { ...structuredClone(config), projectRailDensity: 'compact' }
     const compact = renderRail()
     expect(compact).toContain('data-rail-density="compact"')
-    expect(compact).toMatch(/aria-label="Use default project spacing"/)
+    expect(compact).toMatch(/aria-label="Use extra compact project spacing"/)
     expect(compact).toContain('aria-pressed="true"')
+
+    // dense 档：同一入口循环回默认，且保留当前档的可见标记。
+    fixture.state.config = { ...structuredClone(config), projectRailDensity: 'dense' }
+    const dense = renderRail()
+    expect(dense).toContain('data-rail-density="dense"')
+    expect(dense).toMatch(/aria-label="Use default project spacing"/)
+    expect(dense).toContain('aria-pressed="true"')
   })
 })
 
@@ -204,7 +214,27 @@ describe('Project Rail density is durable', () => {
     expect(savedConfigs.calls.at(-1)?.projectRailDensity, '点击没有把档位翻到 compact 并落盘').toBe('compact')
   })
 
-  it('exposes exactly the two tiers — few tiers, no continuous slider', () => {
-    expect([...PROJECT_RAIL_DENSITY_IDS]).toEqual(['default', 'compact'])
+  it('clicking from compact writes the extra compact tier', async () => {
+    const { api } = await import('../src/renderer/src/lib/api.js')
+    fixture.state.config = { ...structuredClone(config), projectRailDensity: 'compact' }
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() })))
+      const control = container.querySelector('[aria-label="Use extra compact project spacing"]') as HTMLButtonElement | null
+      expect(control, 'compact 档没有邀请切到更紧凑').not.toBeNull()
+      await act(async () => control!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+    expect(vi.mocked(api.config.save)).toHaveBeenCalled()
+    expect(savedConfigs.calls.at(-1)?.projectRailDensity, '点击没有把档位翻到 dense 并落盘').toBe('dense')
+  })
+
+  it('exposes exactly the three tiers — few tiers, no continuous slider', () => {
+    expect([...PROJECT_RAIL_DENSITY_IDS]).toEqual(['default', 'compact', 'dense'])
   })
 })

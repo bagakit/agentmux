@@ -1,0 +1,35 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agents-session-board-navigation-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "拆分 Agents、Session、Board 工作面并下移切换入口",
+      "objective": "让中心内容与三种产品事实一一对应，并消除未分屏时的左右方向错觉",
+      "outcome": "Board 只显示 Task，Agents/Session 各自显示对应聚合，底部中央切换器可恢复且未分屏保持全宽",
+      "acceptance": [
+        "Board 主卡不以 Session 作为主身份；关联 Session 只在 Task 详情 Region 中展示",
+        "Agents、Session、Board 三项只存在一组底部中央切换入口，键盘焦点和当前选择可恢复",
+        "无右侧详情时中心工作面不创建空右栏、不做右到左搬移动画；真实多 Region 仍复用现有 arrangement",
+        "Core 与 ctxmux 公共包无 Desktop 导航依赖"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/board-single-surface-layout.test.tsx && pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/board-single-surface-layout.test.tsx && pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agents-session-board-navigation-2026-09-22.md"
+      ]
+    }
+  ]
+}

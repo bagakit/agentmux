@@ -1,6 +1,6 @@
 import { ProjectIcon } from './ProjectIcon'
 import { ProjectActivity } from './ProjectActivity'
-import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower, Rows2, Rows3 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower, Rows2, Rows3, Rows4 } from 'lucide-react'
 import { useMemo, useState, Fragment, type CSSProperties, type ReactNode } from 'react'
 import { SCRATCH_WORKSPACE_ID, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import type { ProjectRailDensity } from '../../../shared/contracts'
@@ -73,7 +73,21 @@ export function WorkspaceSidebar({
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
   // 密度是看法不是数据：缺席即默认档，读处一律 `?? 'default'`，不改树结构/归属/选中/滚动位置。
   const railDensity: ProjectRailDensity = config?.projectRailDensity ?? 'default'
-  const nextDensity: ProjectRailDensity = railDensity === 'default' ? 'compact' : 'default'
+  const nextDensity: ProjectRailDensity = railDensity === 'default'
+    ? 'compact'
+    : railDensity === 'compact'
+      ? 'dense'
+      : 'default'
+  const densityControlLabel = nextDensity === 'compact'
+    ? 'Use compact project spacing'
+    : nextDensity === 'dense'
+      ? 'Use extra compact project spacing'
+      : 'Use default project spacing'
+  const densityTitle = nextDensity === 'compact'
+    ? 'Compact spacing'
+    : nextDensity === 'dense'
+      ? 'Extra compact spacing'
+      : 'Default spacing'
   async function toggleDensity(): Promise<void> {
     if (!config) return
     // 走 api.config.save 而非只改内存：这一档 durable，重启后仍是用户选的那一档。
@@ -160,7 +174,7 @@ export function WorkspaceSidebar({
         </button>
       )
       return (
-        <div className="project-rail-entry" key={`${scope}:${id}`}>
+        <div className="project-rail-entry project-rail-entry--pinned" key={`${scope}:${id}`} style={{ '--rail-depth': depth } as CSSProperties}>
           {branchPin ? (
             <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
               <span className="project-rail-row__collapse-spacer" aria-hidden="true" />
@@ -328,14 +342,14 @@ export function WorkspaceSidebar({
         <span>Projects</span>
         <div className="sidebar__heading-actions">
           {/* 密度就地切换：可见常驻控件，不进设置页——用户要在看着树的同时调（DEN
-              「Project Rail 与 Topic 行密度」）。两档轮换，不是无级滑块。 */}
+              「Project Rail 与 Topic 行密度」）。三档轮换，不是无级滑块。 */}
           <button
             className="icon-button"
             onClick={() => void toggleDensity()}
-            aria-label={nextDensity === 'compact' ? 'Use compact project spacing' : 'Use default project spacing'}
-            aria-pressed={railDensity === 'compact'}
-            title={nextDensity === 'compact' ? 'Compact spacing' : 'Default spacing'}
-          >{railDensity === 'compact' ? <Rows3 size={15} /> : <Rows2 size={15} />}</button>
+            aria-label={densityControlLabel}
+            aria-pressed={railDensity !== 'default'}
+            title={densityTitle}
+          >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
           <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
         </div>
       </div>

@@ -361,6 +361,23 @@ describe('Project Rail style contract', () => {
     expect(source).toContain('.project-activity')
     expect(source).toContain('.project-activity__pulse')
   })
+
+  it('gives pinned children smaller underline-only hover and a quiet dashed relation connector', () => {
+    const hover = source.match(/\.project-rail-row--pinned-child:hover,\s*\.project-rail-row--pinned-child:focus-visible\s*\{([^}]*)\}/)?.[1] ?? ''
+    const connector = source.match(/\.project-rail-entry--pinned::before,\s*\.project-rail-entry--pinned::after\s*\{([^}]*)\}/)?.[1] ?? ''
+    const title = source.match(/\.project-rail-row--pinned-child \.project-rail-row__identity strong\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(hover.length).toBeGreaterThan(0)
+    expect(connector.length).toBeGreaterThan(0)
+    expect(title.length).toBeGreaterThan(0)
+    expect(hover).toContain('background: transparent')
+    expect(hover).toContain('text-decoration-line: underline')
+    expect(hover).not.toContain('var(--surface-2)')
+    expect(connector).toContain('border-color: var(--line-soft)')
+    expect(connector).toContain('border-style: dashed')
+    expect(connector).toContain('pointer-events: none')
+    expect(title).toContain('font-size: var(--fs-micro)')
+    expect(title).toContain('font-weight: 560')
+  })
 })
 
 describe('Project Rail 的分组与嵌套', () => {
@@ -642,6 +659,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     expect(at).toBeGreaterThan(0)
     const prefix = markup.slice(0, at)
     expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:1"><span class="project-rail-row__collapse-spacer" aria-hidden="true"><\/span>$/)
+    expect(markup).toContain('project-rail-entry--pinned')
   })
 
   it('把 pinned Topic 挂在 Scratch 下；快照缺失时回落到 id 而不是消失', () => {
@@ -658,6 +676,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     const alphaAt = markup.indexOf('aria-label="Alpha"')
     expect(scratchAt).toBeLessThan(topicAt)
     expect(topicAt).toBeLessThan(alphaAt)
+    expect(markup).toContain('project-rail-entry--pinned')
   })
 
   it('不与 Scratch 行的静态 <Pin> 徽章相混——那是「此 workspace 被 pin」的另一个概念', () => {

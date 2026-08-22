@@ -5,7 +5,6 @@ import {
   composeTerminalLiveOutputWrite,
   takeTerminalLiveOutputBatch,
   TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES,
-  TERMINAL_LIVE_OUTPUT_GAP_NOTICE,
   type TerminalLiveOutputChunk
 } from '../src/renderer/src/lib/terminal-live-output'
 
@@ -67,9 +66,9 @@ describe('live 输出积压的上界', () => {
   })
 
   it('留下的那截内部连续——这是「恰好一条省略告示」的来源', () => {
-    // drain 是按「这一块的 startByte 对不上 cursor」发告示的。只要留下的部分内部连续，无论丢了
-    // 多少次、多少块，都只有队头那**一处**不连续，也就只发一条。若改成从中间挖掉一段，这条会红，
-    // 而用户会看到一屏里散落多条 [Output sequence gap] 告示。
+    // drain 是按「这一块的 startByte 对不上 cursor」返回缺口信号的。只要留下的部分内部连续，无论
+    // 丢了多少次、多少块，都只有队头那一处不连续，也就只触发一次重绘请求。若改成从中间挖掉一段，
+    // 这条会红，而用户会看到一屏里散落多个缺口状态。
     const { queue } = admitAll(Array.from({ length: 30 }, () => 200), 1_000)
     for (let index = 1; index < queue.length; index += 1) {
       expect(queue[index]!.startByte, '第 ' + index + ' 块与前一块之间出现了空洞').toBe(
@@ -137,7 +136,7 @@ describe('已写过的字节不重写，没缺的段不报缺', () => {
     // 回放写到第 6 字节；补送上来的那块从 0 开始、盖过 6。
     const composed = composeTerminalLiveOutputWrite([chunkOf(0, 'abcdefGHI')], 6)
     expect(composed.data, 'cursor 之前的字节被重写了一遍').toBe('GHI')
-    expect(composed.data, '没缺字节却报了缺').not.toContain('sequence gap')
+    expect(composed.gap, '没缺字节却报了缺').toBe(false)
     expect(composed.cursor).toBe(9)
   })
 
@@ -147,10 +146,11 @@ describe('已写过的字节不重写，没缺的段不报缺', () => {
     expect(composed.cursor).toBe(6)
   })
 
-  it('真缺一段才发告示，且告示只发一条', () => {
+  it('真缺一段只返回一次结构化缺口信号，数据本身保持干净', () => {
     // 队头起点在 cursor 之后 = 中间那段真的没有了，必须说。
     const composed = composeTerminalLiveOutputWrite([chunkOf(10, 'xyz'), chunkOf(13, 'w')], 6)
-    expect(composed.data).toBe(`${TERMINAL_LIVE_OUTPUT_GAP_NOTICE}xyzw`)
+    expect(composed.data).toBe('xyzw')
+    expect(composed.gap).toBe(true)
     expect(composed.cursor).toBe(14)
   })
 
@@ -167,16 +167,17 @@ describe('已写过的字节不重写，没缺的段不报缺', () => {
       5
     )
     // 第一块整块已有；第二块部分已有（写 'CC'，不报缺）；第三块真缺一段（报缺）。
-    expect(composed.data).toBe(`CC${TERMINAL_LIVE_OUTPUT_GAP_NOTICE}zz`)
+    expect(composed.data).toBe('CCzz')
+    expect(composed.gap).toBe(true)
     expect(composed.cursor).toBe(22)
   })
 
-  it('措辞与判据同住：告示里的 ESC 是真控制字节，不是被转义吃掉的字面量', () => {
-    // 本仓栽过「源码里落进裸 ESC 字节」与「测试手抄一份措辞」两种坑。这里钉住它真的是控制序列——
-    // 否则终端上会显示出 [33m 这样的可见垃圾，而拼接断言照旧全绿。
-    const esc = String.fromCharCode(27)
-    expect(TERMINAL_LIVE_OUTPUT_GAP_NOTICE).toContain(`${esc}[33m`)
-    expect(TERMINAL_LIVE_OUTPUT_GAP_NOTICE).toContain('Output sequence gap')
+  it('缺口信号不会把诊断文字或控制字节写进 xterm', () => {
+    const composed = composeTerminalLiveOutputWrite([chunkOf(10, 'xyz')], 6)
+    expect(composed.data).toBe('xyz')
+    expect(composed.data).not.toContain('Output sequence gap')
+    expect(composed.data).not.toContain(String.fromCharCode(27))
+    expect(composed.gap).toBe(true)
   })
 })
 
@@ -204,7 +205,7 @@ describe('TerminalView 真的经过了这道闸', () => {
     // 抽进 lib 只解决一半：内容变可测了，而那层壳有没有**用**它照旧要有人守。此前这段判定就
     // 内联在组件里，于是「部分重叠」那一支缺席也没有任何测试执行到。
     expect(source).toContain('composeTerminalLiveOutputWrite(taken.batch, cursor)')
-    // 措辞只许有一处来源。组件里再出现一次告示字面量，就意味着判定又被抄回来了一份。
+    // 缺口只能由结构化结果传给服务窗，组件里不再拥有一份会污染 xterm 的告示字面量。
     expect(source, '告示的措辞回到了组件里').not.toContain('Output sequence gap')
     // 逐块推进 cursor 的循环也不许留在壳里：留着就是第二个判定点。
     expect(source, '壳里又出现了逐块推进 cursor 的循环').not.toContain('nextCursor = output.endByte')

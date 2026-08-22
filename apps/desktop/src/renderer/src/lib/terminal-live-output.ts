@@ -67,15 +67,6 @@ export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
   return { queue, droppedBytes }
 }
 
-/**
- * 序列不连续时写进终端的告示。
- *
- * 是常量而不是就地字面量：判据（「什么时候该说」）与措辞必须同住，否则测试要手抄一份，
- * 而手抄的那份改了不会红。
- */
-export const TERMINAL_LIVE_OUTPUT_GAP_NOTICE =
-  '\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n'
-
 // 一个模块级的编解码器对：无状态（不用 stream 模式），所以共用是安全的，也避免了「同一份字节
 // 在两个各自新建的 decoder 之间往返」那类隐患。
 const utf8Encoder = new TextEncoder()
@@ -102,23 +93,25 @@ function dataAfterByte(chunk: TerminalLiveOutputChunk, afterByte: number): strin
  *   「earlier bytes are unavailable」——而那些字节其实一个没少——同时 cursor 之前的字节被
  *   **重写一遍**，屏幕上出现一段重复内容。回放交接处必然产生这种块：cursor 先被设成回放的
  *   末字节，随后 attach 前缓冲的 pending 事件才被补送，它们的起点就在那之前。
- * - **真的缺了一段**（`startByte > cursor`）：发告示，再写整块。省略是真的，必须说。
+ * - **真的缺了一段**（`startByte > cursor`）：返回 `gap: true`，再写整块。省略是真的，必须说，
+ *   但告示由终端外服务窗承载，不能把诊断文字写进 xterm。
  *
  * 与 CLI 侧的 follow 流同形（core 的 session-output-follow 做的是同样三分），两边不许只有一边对。
  */
 export function composeTerminalLiveOutputWrite(
   batch: readonly TerminalLiveOutputChunk[],
   cursor: number
-): { data: string; cursor: number } {
+): { data: string; cursor: number; gap: boolean } {
   const parts: string[] = []
   let nextCursor = cursor
+  let gap = false
   for (const chunk of batch) {
     if (chunk.endByte <= nextCursor) continue
-    if (chunk.startByte > nextCursor) parts.push(TERMINAL_LIVE_OUTPUT_GAP_NOTICE)
+    if (chunk.startByte > nextCursor) gap = true
     parts.push(dataAfterByte(chunk, nextCursor))
     nextCursor = chunk.endByte
   }
-  return { data: parts.join(''), cursor: nextCursor }
+  return { data: parts.join(''), cursor: nextCursor, gap }
 }
 
 /** Takes the largest ordered prefix that fits the visual batch budget. */

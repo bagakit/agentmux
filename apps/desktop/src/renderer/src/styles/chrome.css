@@ -25,8 +25,9 @@
    缺省档已比 2026-09-19 之前更紧（那时 16px 缩进 / 20px 图标框 / 28px 行高）。这三个属性只由 rail 行
    消费，px 值不落在任何被尺度合同扫描的属性上（它扫 font-size/间距/颜色/圆角，不扫 width/height/
    min-height 与自定义属性声明）。 */
-.project-rail { --rail-indent: var(--sp-4); --rail-icon: 16px; --rail-row-min: 26px; }
-.project-rail[data-rail-density='compact'] { --rail-indent: var(--sp-3); --rail-icon: 14px; --rail-row-min: 22px; }
+.project-rail { --rail-indent: var(--sp-3); --rail-icon: 15px; --rail-row-min: 24px; }
+.project-rail[data-rail-density='compact'] { --rail-indent: var(--sp-2); --rail-icon: 14px; --rail-row-min: 22px; }
+.project-rail[data-rail-density='dense'] { --rail-indent: var(--sp-1); --rail-icon: 12px; --rail-row-min: 20px; }
 .project-rail-titlebar {
   height: 36px;
   flex: 0 0 36px;
@@ -155,8 +156,14 @@
 /* Pinned Topic / Branch child rows: a sibling row one --rail-depth deeper, one type step smaller
    than the project name (--fs-meta → --fs-micro) so it reads as a child hanging under its parent,
    not another top-level entry. Everything else it inherits from .project-rail-row. */
-.project-rail-row--pinned-child { min-height: 22px; }
+.project-rail-row--pinned-child { min-height: calc(var(--rail-row-min) - 2px); text-decoration: none; text-underline-offset: var(--sp-1); text-decoration-thickness: 1px; }
 .project-rail-row--pinned-child .project-rail-row__identity strong { font-size: var(--fs-micro); font-weight: 560; }
+.project-rail-row--pinned-child:hover, .project-rail-row--pinned-child:focus-visible { color: var(--text-2); background: transparent; text-decoration-line: underline; }
+.project-rail-entry--pinned { position: relative; }
+.project-rail-entry--pinned::before, .project-rail-entry--pinned::after { position: absolute; z-index: 0; pointer-events: none; content: ''; border-color: var(--line-soft); border-style: dashed; opacity: .82; }
+.project-rail-entry--pinned::before { top: calc(-1 * var(--rail-row-min) + 50%); bottom: 50%; left: calc(var(--sp-4) + (var(--rail-depth) - 1) * var(--rail-indent) + var(--sp-2)); border-width: 0 0 0 1px; }
+.project-rail-entry--pinned::after { top: 50%; left: calc(var(--sp-4) + (var(--rail-depth) - 1) * var(--rail-indent) + var(--sp-2)); width: calc(var(--rail-indent) + var(--sp-5)); border-width: 1px 0 0; }
+.project-rail-entry--pinned > * { position: relative; z-index: 1; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
 .project-rail-toolbar {
   min-height: 32px;

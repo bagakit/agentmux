@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 227
+    "next_cursor": 233
   },
   "features": [
     {
@@ -1895,6 +1895,66 @@
       "worktree_name": "",
       "runtime_role": "standalone",
       "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29c8ftkwt",
+      "title": "Project Rail pinned child styling and density",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29d8fk466",
+      "title": "启动配置修复与持久诊断",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29e8fufey",
+      "title": "Agents Session Board 三工作面导航",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29f8f7krj",
+      "title": "Moshi 对照：Agent 注意力与结果审查闭环",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29g8fagv4",
+      "title": "Terminal and conversation restore",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29h8fh9d4",
+      "title": "Plugin and naming contract",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
       "runtime_relations": []
     }
   ]

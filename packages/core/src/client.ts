@@ -18,6 +18,7 @@ import {
   splitLaunchPromptByDelivery,
   type AgentProvider
 } from './agent-provider.js'
+import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn } from './agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from './agent-hook-command.js'
@@ -221,6 +222,8 @@ export type AgentMuxAgentAttachment = {
 
 export type AgentMuxClientOptions = {
   providers?: readonly AgentProvider[]
+  /** Optional plugin contributions. When providers are omitted, built-ins and these plugins share one registry. */
+  plugins?: readonly AgentMuxPlugin[]
   store?: AgentMuxAgentSessionStore
   /**
    * Installs the provider's managed Hook config before its first launch. Defaults to a `hooks`
@@ -557,7 +560,9 @@ export class AgentMuxClient {
   }
 
   constructor(options: AgentMuxClientOptions = {}) {
-    this.providers = new AgentProviderRegistry(options.providers)
+    this.providers = options.providers
+      ? new AgentProviderRegistry(options.providers)
+      : createDefaultAgentMuxPluginRegistry(options.plugins).providers
     this.store = options.store ?? new AgentMuxFileAgentSessionStore()
     this.registry = new AgentMuxAgentSessionRegistry(this.store)
     this.kernel = new CtxmuxRunAdapter()

@@ -1,0 +1,33 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/startup-config-diagnostics-plan.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "修复已安装配置并闭合启动失败诊断",
+      "objective": "恢复真实配置下启动并使同类失败可回看",
+      "outcome": "原数据与 Session 引用保留，启动错误持久记录，安装启动验证通过",
+      "acceptance": [
+        "已安装配置符合当前 schema，既有 Session 引用仍可解析",
+        "已捕获启动失败在退出前写入有界本地日志，包含阶段和包身份，日志失败不吞原始错误",
+        "对应行为测试与变异测试有效，生产接线可达，真实配置启动完成"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/startup-failure-exit.test.ts test/startup-diagnostics.test.ts test/startup-failure-notice.test.ts",
+          "proves": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/startup-failure-exit.test.ts test/startup-diagnostics.test.ts test/startup-failure-notice.test.ts"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/startup-config-diagnostics-plan.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/plugin-naming-contract-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/reviews/plugin-naming-contract-2026-09-22.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "packages/core/src/agent-provider.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose a typed plugin manifest",
+      "objective": "Let hosts register provider, skill, and command contributions through one host-neutral Core contract.",
+      "outcome": "Plugins can be validated, listed, and activated without editor/vendor branches or duplicate Runtime state.",
+      "depends_on": [],
+      "acceptance": [
+        "The manifest type is exported from Core and validates IDs, versions, and optional contributions.",
+        "The registry rejects duplicate plugin/provider IDs and exposes a deterministic catalog to the host.",
+        "A production caller uses the contract to build the default provider catalog; mutation of registration makes the focused test fail."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-plugin.test.ts --maxWorkers=1",
+          "proves": "Plugin manifest and registry behavior"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'createDefaultAgentMuxPluginRegistry|AgentMuxPlugin' packages/core/src/client.ts packages/core/src/index.ts",
+          "proves": "Plugin API is connected to production code"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agent-provider.ts",
+        "packages/core/src/providers/index.ts",
+        "packages/core/src/index.ts"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Document durable Agent and Workspace naming",
+      "objective": "Teach the Agent Skill how to choose readable self and workspace display names without changing stable IDs or paths.",
+      "outcome": "The generated Skill contains both naming workflows, constraints, and failure behavior.",
+      "depends_on": [],
+      "acceptance": [
+        "Skill text describes naming the current Agent and the containing Workspace separately.",
+        "Skill text states that display names persist while Session/Workspace IDs and paths remain stable, and it names the user-visible recovery path on failure.",
+        "The focused help test proves both naming instructions are present and fails when either is removed."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agentmux-cli-help.test.ts --maxWorkers=1",
+          "proves": "Skill naming guidance"
+        }
+      ],
+      "source_refs": [
+        "packages/core/src/agentmux-cli-help.ts",
+        "packages/core/src/agent-skills.ts"
+      ]
+    }
+  ]
+}

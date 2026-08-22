@@ -339,7 +339,7 @@ void _appLinkSchemeChoicesAreExactlyTheUnion
  * **追溯到一个 import 进来的元组**（`schema-enum-ssot.test.ts`），手抄一份 `z.enum(['default',...])`
  * 会在加档时静默丢值。类型直接派生自元组，加档两处一起变宽。
  */
-export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact'] as const
+export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact', 'dense'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 
 /** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
