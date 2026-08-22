@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
 
 const SOURCE = readFileSync(
-  new URL('../src/renderer/src/components/AgentAvatar.tsx', import.meta.url),
+  new URL('../src/renderer/src/components/AgentEnamelFilter.tsx', import.meta.url),
   'utf8'
 )
 
@@ -31,17 +31,17 @@ describe('Executor avatar badge icons', () => {
     }))
     expect(tinted).toContain('class="agent-avatar__mark" style="filter:url(')
     expect(tinted).toContain('data-avatar-badge="shield"')
-    const filterStart = SOURCE.indexOf('<filter id={filterId}')
+    const filterStart = SOURCE.indexOf('<filter id={id}')
     const filterEnd = SOURCE.indexOf('</filter>', filterStart)
     expect(filterStart).toBeGreaterThan(-1)
     expect(filterEnd).toBeGreaterThan(filterStart)
     const filter = SOURCE.slice(filterStart, filterEnd)
     expect(filter).toContain('in="SourceAlpha"')
     expect(filter).toContain('result="solidAlpha"')
-    expect(filter).toContain('result="outerAlpha"')
-    expect(SOURCE).toContain('<AgentProviderIcon providerId={providerId} size={14} />')
-    expect(SOURCE).toContain('<AgentAvatarBadgeIcon badge={appearance.badge} />')
-    expect(SOURCE).toContain('className="agent-avatar__mark"')
-    expect(SOURCE).not.toContain('> {appearance.badge} <')
+    expect(filter).toContain('result="backingAlpha"')
+    expect(filter).toContain('result="rimAlpha"')
+    expect(tinted).toContain('data-agent-provider="codex"')
+    expect(tinted).toContain('data-avatar-badge="shield"')
+    expect(SOURCE).not.toContain('drop-shadow(')
   })
 })

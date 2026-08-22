@@ -56,7 +56,7 @@ describe('#473 关闭的协作者不被画成在跑', () => {
     // done/exited retain the filled base dot; no private avatar rule can turn them into disconnected.
     expect(bodiesFor('.status--done .status__dot')).not.toContain('background: transparent')
     expect(bodiesFor('.status--exited .status__dot')).not.toContain('background: transparent')
-    expect(bodiesFor('.agent-avatar__contour')).toContain('drop-shadow(')
-    expect(bodiesFor('.agent-avatar__contour')).toContain('var(--status-ink)')
+    expect(bodiesFor('.agent-avatar__contour')).toContain('filter: none')
+    expect(bodiesFor('.agent-avatar__contour')).not.toContain('drop-shadow(')
   })
 })

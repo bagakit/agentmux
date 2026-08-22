@@ -3,6 +3,7 @@ import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentAvatarAppearance } from '../../../shared/contracts'
 import { attentionAccentFor } from '../lib/attention-event'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
+import { AgentEnamelFilter } from './AgentEnamelFilter'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
 /** Identity is the Provider mark, customization is executor-owned, status is one shared vocabulary. */
@@ -23,26 +24,20 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     role={onOpen ? undefined : 'img'} aria-label={`${label} · ${state}${count && count > 1 ? ` · ${count} Agents` : ''}`}
     title={`${label} · ${state}`} {...(attention ? { 'data-attention': attention } : {})}
     onClick={onOpen ? (event) => { event.stopPropagation(); onOpen() } : undefined}>
-    {appearance?.tint ? <svg className="agent-avatar__filters" aria-hidden="true" width="0" height="0">
-      <defs>
-        <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
-          <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="solidDilated" />
-          <feMorphology in="solidDilated" operator="erode" radius="4" result="solidAlpha" />
-          <feMorphology in="solidAlpha" operator="dilate" radius="1" result="expandedAlpha" />
-          <feComposite in="expandedAlpha" in2="solidAlpha" operator="out" result="outerAlpha" />
-          <feFlood floodColor={appearance.tint} floodOpacity="0.55" result="tintColor" />
-          <feComposite in="tintColor" in2="outerAlpha" operator="in" result="tintOutline" />
-          <feComposite in="SourceGraphic" in2="tintOutline" operator="over" />
-        </filter>
-      </defs>
-    </svg> : null}
     <span className="agent-avatar__contour" aria-hidden="true">
-      <span className="agent-avatar__mark" style={appearance?.tint ? { filter: `url(#${filterId})` } : undefined}>
-        <AgentProviderIcon providerId={providerId} size={14} />
-        {appearance?.badge ? <span className="agent-avatar__badge" aria-hidden="true" data-avatar-badge={appearance.badge}>
-          <AgentAvatarBadgeIcon badge={appearance.badge} />
-        </span> : null}
-      </span>
+      {appearance?.tint
+        ? <AgentEnamelFilter id={filterId} tint={appearance.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">
+            <AgentProviderIcon providerId={providerId} size={14} />
+            {appearance.badge ? <span className="agent-avatar__badge" data-avatar-badge={appearance.badge}>
+              <AgentAvatarBadgeIcon badge={appearance.badge} />
+            </span> : null}
+          </AgentEnamelFilter>
+        : <span className="agent-avatar__mark">
+            <AgentProviderIcon providerId={providerId} size={14} />
+            {appearance?.badge ? <span className="agent-avatar__badge" aria-hidden="true" data-avatar-badge={appearance.badge}>
+              <AgentAvatarBadgeIcon badge={appearance.badge} />
+            </span> : null}
+          </span>}
     </span>
     <span className="agent-avatar__status status__dot" aria-hidden="true" />
     {count && count > 1 ? <span className="agent-avatar__count" aria-hidden="true">{count}</span> : null}
