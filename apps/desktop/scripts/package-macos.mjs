@@ -1011,9 +1011,7 @@ async function main() {
     const stagedDmg = join(candidateRoot, `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`)
     await mkdir(candidateRoot, { recursive: true })
     await run('cp', ['-cR', electronApp, stagedApp], { capture: true })
-    // Electron's downloaded bundle can carry macOS provenance attributes. Preserving
-    // those attributes through the copy makes ad-hoc signing fail while replacing the
-    // nested Electron Framework signature, before the candidate can be verified.
+    // Normalize downloaded bundle metadata on the disposable candidate before signing.
     await run('xattr', ['-cr', stagedApp], { capture: true })
     await brandApplication(stagedApp)
     await copyRuntimeApplication(stagedApp, initialSource)
