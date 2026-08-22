@@ -34,6 +34,14 @@
 .global-agents-empty { max-width: 480px; margin: 15vh auto 0; display: grid; justify-items: center; gap: var(--sp-3); color: var(--text-3); text-align: center; }
 .global-agents-empty strong { color: var(--text); font-size: var(--fs-body); }
 .global-agents-empty span { font-size: var(--fs-meta); }
+.attention-request-panel { max-width: 900px; margin: var(--sp-6) auto 0; padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
+.attention-request-panel__header { display: flex; align-items: start; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-3); }
+.attention-request-panel__header > div:first-child { min-width: 0; display: grid; gap: 2px; }
+.attention-request-panel__header span { color: var(--amber); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .06em; }
+.attention-request-panel__header strong { color: var(--text); font-size: var(--fs-body); }
+.attention-request-panel__header small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.attention-request-panel__actions { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.attention-request-panel__empty { padding: var(--sp-4); color: var(--text-2); background: var(--surface-0); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
 .agent-provider-mark {
   width: 17px;
   height: 17px;
