@@ -23,7 +23,7 @@ function pendingFixture(id = 'pending') {
   useAppStore.setState({
     config: { ...composerConfig, executors: { ...composerConfig.executors,
       reviewer: { ...composerConfig.executors.codex!, label: 'Code reviewer' } },
-      appearance: { ...composerConfig.appearance, agentAvatars: { reviewer: { tint: '#009988', badge: 'R' } } } },
+      appearance: { ...composerConfig.appearance, agentAvatars: { reviewer: { tint: '#009988', badge: 'shield' } } } },
     sessions: [composerSession('neighbor')], activeWorkspaceId: 'workspace',
     tabs: { view: tab }, layouts: { workspace: createWorkspaceLayout('pane', ['view']) },
     pendingAgentLaunches: { [id]: { events: [], overflowed: false, request: { executorId: 'reviewer', prompt } } }
@@ -65,7 +65,7 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
     expect(dom.container.querySelector('.session-connecting__executor strong')?.textContent).toBe('Code reviewer')
     expect(dom.container.querySelector('.session-connecting__executor-mark')?.getAttribute('aria-label')).toBe('Code reviewer')
     expect(dom.container.querySelector('.session-connecting__executor-mark [data-agent-provider="codex"]')).not.toBeNull()
-    expect(dom.container.querySelector('.session-connecting__executor-badge')?.textContent).toBe('R')
+    expect(dom.container.querySelector('.session-connecting__executor-badge')?.getAttribute('data-avatar-badge')).toBe('shield')
     // A connecting surface has no Runtime status fact yet; it must not borrow a status dot from a
     // neighboring Agent or imply that this process is already running.
     expect(dom.container.querySelector('.session-connecting__executor-mark .agent-avatar__status')).toBeNull()

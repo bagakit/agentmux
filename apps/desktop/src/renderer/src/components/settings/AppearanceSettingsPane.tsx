@@ -1,7 +1,9 @@
 import { Palette, SquareTerminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppearanceConfig, AppAppearanceId, TerminalThemeId, AgentExecutorConfig, AgentAvatarAppearance } from '../../../../shared/contracts'
+import type { AppearanceConfig, AppAppearanceId, TerminalThemeId, AgentExecutorConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
 import {
+  AGENT_AVATAR_BADGE_IDS,
+  AGENT_AVATAR_BADGE_LABELS,
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN
@@ -44,6 +46,18 @@ export function AppearanceSettingsPane({ appearance, executors, onSave }: {
 
   function updateAvatar(id: string, patch: AgentAvatarAppearance): void {
     setAvatars((current) => ({ ...current, [id]: { ...current[id], ...patch } }))
+  }
+
+  function setAvatarBadge(id: string, badge: AgentAvatarBadge | undefined): void {
+    setAvatars((current) => {
+      const next = { ...current }
+      const avatar = { ...next[id] }
+      if (badge) avatar.badge = badge
+      else delete avatar.badge
+      if (Object.keys(avatar).length > 0) next[id] = avatar
+      else delete next[id]
+      return next
+    })
   }
 
   return (
@@ -130,15 +144,18 @@ export function AppearanceSettingsPane({ appearance, executors, onSave }: {
       </section>
       <section className="settings-group">
         <header><span>Agent avatars</span><small>Per executor</small></header>
-        <p className="settings-hint">Keep the Provider mark; add a tint and a small corner badge to distinguish your executors.</p>
+        <p className="settings-hint">Keep the Provider mark; add a tint and a fixed icon to distinguish your executors.</p>
         <div className="agent-avatar-settings">
           {Object.entries(executors).map(([id, executor]) => <div className="agent-avatar-settings__row" key={id}>
             <AgentAvatar label={executor.label} providerId={executor.providerId} state="running" appearance={avatars[id]} />
             <span className="agent-avatar-settings__name"><strong>{executor.label}</strong><small>{id}</small></span>
             <label>Tint{avatars[id]?.tint ? null : ' · off'}<input type="color" aria-label={`${executor.label} avatar tint`} value={avatars[id]?.tint ?? '#8ab4f8'}
               onChange={(event) => updateAvatar(id, { tint: event.target.value })} /></label>
-            <label>Badge<input type="text" aria-label={`${executor.label} avatar badge`} maxLength={4} placeholder="A"
-              value={avatars[id]?.badge ?? ''} onChange={(event) => updateAvatar(id, { badge: event.target.value })} /></label>
+            <label>Icon<select aria-label={`${executor.label} avatar icon`} value={avatars[id]?.badge ?? ''}
+              onChange={(event) => setAvatarBadge(id, (event.target.value || undefined) as AgentAvatarBadge | undefined)}>
+              <option value="">None</option>
+              {AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}
+            </select></label>
             <button type="button" className="small-button" aria-label={`Reset ${executor.label} avatar`} disabled={!avatars[id]} onClick={() => setAvatars((current) => {
               const next = { ...current }; delete next[id]; return next
             })}>Reset</button>

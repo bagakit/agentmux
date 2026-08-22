@@ -1,0 +1,47 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
+
+const SOURCE = readFileSync(
+  new URL('../src/renderer/src/components/AgentAvatar.tsx', import.meta.url),
+  'utf8'
+)
+
+describe('Executor avatar badge icons', () => {
+  it('renders a fixed icon beside the Provider mark without badge text', () => {
+    const markup = renderToStaticMarkup(createElement(AgentAvatar, {
+      label: 'Executor', providerId: 'codex', state: 'running', appearance: { badge: 'shield' }
+    }))
+    const markStart = markup.indexOf('class="agent-avatar__mark"')
+    const markEnd = markup.indexOf('</span></span>', markStart)
+    expect(markStart).toBeGreaterThan(-1)
+    expect(markEnd).toBeGreaterThan(markStart)
+    const mark = markup.slice(markStart, markEnd)
+    expect(mark).toContain('data-agent-provider="codex"')
+    expect(mark).toContain('data-avatar-badge="shield"')
+    expect(mark).toContain('<svg')
+    expect(mark).not.toContain('>shield<')
+  })
+
+  it('applies one combined contour source around Provider and badge', () => {
+    const tinted = renderToStaticMarkup(createElement(AgentAvatar, {
+      label: 'Executor', providerId: 'codex', state: 'running', appearance: { tint: '#8ab4f8', badge: 'shield' }
+    }))
+    expect(tinted).toContain('class="agent-avatar__mark" style="filter:url(')
+    expect(tinted).toContain('data-avatar-badge="shield"')
+    const filterStart = SOURCE.indexOf('<filter id={filterId}')
+    const filterEnd = SOURCE.indexOf('</filter>', filterStart)
+    expect(filterStart).toBeGreaterThan(-1)
+    expect(filterEnd).toBeGreaterThan(filterStart)
+    const filter = SOURCE.slice(filterStart, filterEnd)
+    expect(filter).toContain('in="SourceAlpha"')
+    expect(filter).toContain('result="solidAlpha"')
+    expect(filter).toContain('result="outerAlpha"')
+    expect(SOURCE).toContain('<AgentProviderIcon providerId={providerId} size={14} />')
+    expect(SOURCE).toContain('<AgentAvatarBadgeIcon badge={appearance.badge} />')
+    expect(SOURCE).toContain('className="agent-avatar__mark"')
+    expect(SOURCE).not.toContain('> {appearance.badge} <')
+  })
+})

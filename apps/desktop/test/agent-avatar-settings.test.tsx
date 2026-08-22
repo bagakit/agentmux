@@ -19,7 +19,7 @@ import { composerDOM, composerConfig, composerSession } from './helpers/composer
 
 const dom = composerDOM()
 const executors = { ...composerConfig.executors, review: { ...composerConfig.executors.codex!, label: 'Reviewer' } }
-const appearances = { codex: { tint: '#ee7755', badge: 'A' }, review: { tint: '#6688dd', badge: 'B' } }
+const appearances = { codex: { tint: '#ee7755', badge: 'spark' as const }, review: { tint: '#6688dd', badge: 'shield' as const } }
 async function change(label: string, value: string) {
   const input = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
   expect(input).not.toBeNull()
@@ -29,7 +29,15 @@ async function change(label: string, value: string) {
     input.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
-const badges = () => [...dom.container.querySelectorAll('.agent-avatar__badge')].map((node) => node.textContent)
+async function chooseIcon(label: string, value: string) {
+  const input = dom.container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
+  expect(input).not.toBeNull()
+  await act(async () => {
+    input.value = value
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+const badges = () => [...dom.container.querySelectorAll<HTMLElement>('[data-avatar-badge]')].map((node) => node.dataset.avatarBadge)
 
 it('previews per-executor changes, saves both entries, and restores the saved appearance when reopened', async () => {
   const config = { ...composerConfig, executors }
@@ -37,21 +45,21 @@ it('previews per-executor changes, saves both entries, and restores the saved ap
   const save = vi.fn(async (appearance: typeof config.appearance) => { restored = { ...config, appearance } })
   await dom.render(<AppearanceSettingsPane appearance={config.appearance} executors={executors} onSave={save} />)
   await change('Codex avatar tint', '#ee7755')
-  await change('Codex avatar badge', 'A')
+  await chooseIcon('Codex avatar icon', 'spark')
   await change('Reviewer avatar tint', '#6688dd')
-  await change('Reviewer avatar badge', 'B')
-  expect(badges()).toEqual(['A', 'B'])
+  await chooseIcon('Reviewer avatar icon', 'shield')
+  expect(badges()).toEqual(['spark', 'shield'])
   expect([...dom.container.querySelectorAll('feFlood')].map((node) => node.getAttribute('flood-color'))).toEqual(['#ee7755', '#6688dd'])
   await dom.click('.settings-pane-actions button')
   expect(save).toHaveBeenCalledOnce()
   expect(restored.appearance.agentAvatars).toEqual(appearances)
   await dom.render(null)
   await dom.render(<AppearanceSettingsPane appearance={restored.appearance} executors={restored.executors} onSave={save} />)
-  expect(badges()).toEqual(['A', 'B'])
+  expect(badges()).toEqual(['spark', 'shield'])
   await dom.click('[aria-label="Codex avatar tint"]')
   const reset = dom.container.querySelector<HTMLButtonElement>('[aria-label="Reset Codex avatar"]')!
   await act(async () => reset.click())
-  expect(badges()).toEqual(['B'])
+  expect(badges()).toEqual(['shield'])
   await dom.click('.settings-pane-actions button')
   expect(restored.appearance.agentAvatars).toEqual({ review: appearances.review })
 })
@@ -59,10 +67,10 @@ it('previews per-executor changes, saves both entries, and restores the saved ap
 it('keeps save failures local without discarding unsaved avatar edits', async () => {
   await dom.render(<AppearanceSettingsPane appearance={composerConfig.appearance} executors={executors}
     onSave={async () => { throw new Error('Settings write failed') }} />)
-  await change('Reviewer avatar badge', 'QA')
+  await chooseIcon('Reviewer avatar icon', 'bolt')
   await dom.click('.settings-pane-actions button')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('Settings write failed')
-  expect(badges()).toEqual(['QA'])
+  expect(badges()).toEqual(['bolt'])
 })
 
 it('projects executor identity through Session controls and keeps mailbox and identity as separate buttons', async () => {
@@ -70,7 +78,7 @@ it('projects executor identity through Session controls and keeps mailbox and id
     sessions: [{ ...composerSession(), executorId: 'review' }] })
   const open = vi.fn()
   await dom.render(<SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider>)
-  expect(badges()).toEqual(['B'])
+  expect(badges()).toEqual(['shield'])
   const identity = dom.container.querySelector<HTMLButtonElement>('.composer-agent-identity')!
   const mailbox = dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
   expect(identity).not.toBeNull(); expect(mailbox).not.toBeNull()
@@ -87,7 +95,7 @@ it('projects executor identity through Session controls and keeps mailbox and id
 it('passes appearance and stack count through both shared presence paths', async () => {
   const agent = { key: 'a', providerId: 'codex', state: 'running' as const, label: 'Review', appearance: appearances.review, count: 3 }
   await dom.render(<><SelectorPresence agents={[agent]} /><RegionMosaic cells={[{ regionId: 'r', agentSessionId: 'a', bounds: { x: 0, y: 0, width: 1, height: 1 } }]} agents={[agent]} /></>)
-  expect(badges()).toEqual(['B', 'B'])
+  expect(badges()).toEqual(['shield', 'shield'])
   expect([...dom.container.querySelectorAll('.agent-avatar__count')].map((node) => node.textContent)).toEqual(['3', '3'])
   expect(dom.container.querySelectorAll('.agent-avatar__status.status__dot')).toHaveLength(2)
   expect(dom.container.querySelectorAll('[data-agent-provider="codex"]')).toHaveLength(2)
@@ -105,7 +113,7 @@ it('groups Branch presence by executor and renders each executor customization',
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: '/repo',
     branches: [{ name: 'main', worktreePath: '/repo', workspaceId: 'workspace', isCurrent: true }] })
   await dom.render(<BranchesPanel workspace={composerConfig.workspaces[0]!} />)
-  await vi.waitFor(() => expect(badges()).toEqual(['A', 'B']))
+  await vi.waitFor(() => expect(badges()).toEqual(['spark', 'shield']))
   expect(dom.container.querySelector('.status--working .agent-avatar__count')?.textContent).toBe('2')
 })
 
@@ -121,8 +129,8 @@ it('clickable avatars select once without opening the containing row', async () 
 it('SettingsPanel passes the configured executor inventory to Appearance', async () => {
   useAppStore.setState({ config: { ...composerConfig, executors } })
   await dom.render(<SettingsPanel initialSection="appearance" onClose={() => {}} />)
-  expect(dom.container.querySelector('[aria-label="Codex avatar badge"]')).not.toBeNull()
-  expect(dom.container.querySelector('[aria-label="Reviewer avatar badge"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Codex avatar icon"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Reviewer avatar icon"]')).not.toBeNull()
 })
 
 it('Topic presence reads the live Session executor rather than its Provider', async () => {
@@ -132,5 +140,5 @@ it('Topic presence reads the live Session executor rather than its Provider', as
     sessions: [{ ...composerSession(), executorId: 'review', workspacePath: path }] })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([{ id: 'view:review', directoryPath: path, topicPath: `${path}/topic.md`, title: 'Review', summary: '', collaborators: [] }])
   await dom.render(<WorkspaceTopicsPanel workspace={workspace} onRevealDirectory={() => {}} />)
-  await vi.waitFor(() => expect(badges()).toEqual(['B']))
+  await vi.waitFor(() => expect(badges()).toEqual(['shield']))
 })

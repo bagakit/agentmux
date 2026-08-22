@@ -342,8 +342,18 @@ void _appLinkSchemeChoicesAreExactlyTheUnion
 export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 
+/** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
+export const AGENT_AVATAR_BADGE_IDS = ['spark', 'bolt', 'shield', 'flame'] as const
+export type AgentAvatarBadge = (typeof AGENT_AVATAR_BADGE_IDS)[number]
+export const AGENT_AVATAR_BADGE_LABELS: Record<AgentAvatarBadge, string> = {
+  spark: 'Spark',
+  bolt: 'Bolt',
+  shield: 'Shield',
+  flame: 'Flame'
+}
+
 /** Desktop identity styling belongs to the executor, not the Provider or Runtime. */
-export type AgentAvatarAppearance = { tint?: string; badge?: string }
+export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 
 export type AppearanceConfig = {
   agentAvatars?: Record<string, AgentAvatarAppearance>
