@@ -21,6 +21,8 @@ import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 export type SelectorPresenceAgent = {
   /** 用于 React key 与点击定位；Branch 侧按 executor 归并，Topic 侧是 sessionId。 */
   key: string
+  executorId?: string | undefined
+  sessionId?: string | undefined
   providerId: AgentProviderId
   appearance?: AgentAvatarAppearance | undefined
   /** tooltip 与可访问名里的人话。 */
@@ -70,6 +72,8 @@ export function SelectorPresence({
           <AgentAvatar
             label={agent.label}
             onOpen={agent.onOpen}
+            executorId={agent.executorId}
+            sessionId={agent.sessionId}
             providerId={agent.providerId}
             state={agent.state}
             appearance={agent.appearance}

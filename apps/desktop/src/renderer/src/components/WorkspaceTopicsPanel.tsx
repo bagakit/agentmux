@@ -63,9 +63,9 @@ export function WorkspaceTopicsPanel({
   const activeTabId = layout?.groups.find((group) => group.id === layout.activeGroupId)?.activeTabId
   const topicId = useAppStore((state) => activeTabId ? state.tabs[activeTabId]?.topicId : undefined)
   const tabs = useAppStore((state) => state.tabs)
-  const avatarAppearances = useAppStore((state) => state.config?.appearance.agentAvatars)
   const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
   const sessions = useAppStore((state) => state.sessions)
+  const config = useAppStore((state) => state.config)
   // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
   // 两份 store 状态：用户手改名与首条 prompt。不读它们，这枚头像就只能拿到兜底名——而同 provider、
   // 同目录的两个 Agent 兜底名逐字相同，于是 tooltip 与读屏都答不出「这是哪一个」。
@@ -113,7 +113,6 @@ export function WorkspaceTopicsPanel({
       })()
     : null
   const currentTopic = projected?.find((topic) => topic.id === topicId)
-  const compact = topics === null || topics.length > 0
   // 一次派生「哪些 Topic 有 Tab 开着」及其 Region 分屏几何，逐行只读它，不让每行各自扫 tabs
   // （scratch-topic-layout.ts 的学说：门禁与几何是同一事实的两半，投影一次）。
   const openMosaics = openTopicRegionMosaics(layout, tabs)
@@ -237,39 +236,41 @@ export function WorkspaceTopicsPanel({
   }
 
   return (
-    <section className={`surface-tool-summary workspace-topics-panel workspace-topics-panel--${compact ? 'index' : 'empty'}`}>
-      {compact ? (
-        <SelectorListHeader
-          className="workspace-topic-index-header"
-          title="Topics"
-          count={topics?.length ?? null}
-          actions={
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="Create new Topic"
-              title="Create new Topic"
-              disabled={pending !== null || topics === null}
-              onClick={() => void createTopic()}
-            >
-              {topics === null || pending === 'create'
-                ? <LoaderCircle className="spin" size={13} />
-                : <Plus size={14} />}
-            </button>
-          }
-        />
-      ) : (
-        <>
-          <div className="surface-tool-summary__icon"><NotebookText size={18} /></div>
-          <div className="eyebrow">Topics</div>
-          <h2>No Topics yet</h2>
-          <p>A Topic is a real shared directory for a goal, outcomes, references, and collaborating Agents.</p>
-          <button className="primary-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
-            {pending === 'create' ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}
-            {pending === 'create' ? 'Creating…' : 'Create new Topic'}
+    <section className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
+      <SelectorListHeader
+        className="workspace-topic-index-header"
+        title="Topics"
+        count={topics?.length ?? null}
+        actions={
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Create new Topic"
+            title="Create new Topic"
+            disabled={pending !== null || topics === null}
+            onClick={() => void createTopic()}
+          >
+            {topics === null || pending === 'create'
+              ? <LoaderCircle className="spin" size={13} />
+              : <Plus size={14} />}
           </button>
-        </>
-      )}
+        }
+      />
+      {topics === null ? (
+        <div className="workspace-topic-state" role="status">
+          <LoaderCircle className="spin" size={16} aria-hidden="true" />
+          <span><strong>Loading Topics</strong><small>Reading the Scratch workspace index…</small></span>
+        </div>
+      ) : projected?.length === 0 ? (
+        <div className="workspace-topic-state workspace-topic-state--empty">
+          <span className="workspace-topic-state__icon" aria-hidden="true"><NotebookText size={16} /></span>
+          <span><strong>No Topics yet</strong><small>Create a Topic to keep its goal, references and Agent sessions together.</small></span>
+          <button className="small-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
+            {pending === 'create' ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />}
+            {pending === 'create' ? 'Creating…' : 'Create Topic'}
+          </button>
+        </div>
+      ) : null}
       {projected && projected.length > 0 ? (
         <DndContext
           sensors={topicSensors}
@@ -299,6 +300,10 @@ export function WorkspaceTopicsPanel({
                 onRename={() => beginRename(topic)}
                 onReveal={() => onRevealDirectory(topic.directoryPath)}
                 onTogglePin={() => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id)}
+                onEditWiki={() => void openFile(`${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)}
+                onToggleWiki={topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined}
+                onResetWiki={topic.wiki ? () => void resetTopicWiki(topic) : undefined}
+                wikiEnabled={topic.wiki?.enabled}
               >
                 {editing ? (
                   <form
@@ -324,6 +329,8 @@ export function WorkspaceTopicsPanel({
                 ) : (
                   <div
                     className="workspace-topic-entry"
+                    data-topic-id={topic.id}
+                    {...(isCurrent ? { 'data-current': 'true' } : {})}
                     role="button"
                     tabIndex={pending !== null ? -1 : 0}
                     aria-disabled={pending !== null}
@@ -338,7 +345,7 @@ export function WorkspaceTopicsPanel({
                     {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
                         这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
                     <SelectorRow
-                      leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
+                      leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span> : undefined}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
@@ -353,7 +360,9 @@ export function WorkspaceTopicsPanel({
                             return {
                               key: agent.sessionId,
                               providerId: agent.providerId,
-                              appearance: agent.live ? avatarAppearances?.[agent.live.executorId] : undefined,
+                              executorId: agent.live?.executorId,
+                              sessionId: agent.live?.id,
+                              appearance: agent.live ? config?.executors[agent.live.executorId]?.avatar : undefined,
                               // 经命名链求值，不直接用 agent.live.label。那个 label 是 Main 建的
                               // `executorLabel · workspaceLabel`（链的最低一档），对「同 provider 多个
                               // Agent 同一目录」这个本条要解的场景逐字相同——两枚头像的 tooltip 与
@@ -377,48 +386,18 @@ export function WorkspaceTopicsPanel({
                     占一个常驻图标位是在跟标题抢宽度。
                     文案与 TopicContextMenu 那项必须同一句（见那里的注释）：这是在自家文件面板里
                     定位，不是打开系统文件管理器，所以不走 lib/host-platform 的三态文案。 */}
-                <button
-                  className="icon-button workspace-topic-reveal"
-                  type="button"
-                  aria-label={`Reveal ${topic.title} in Files`}
-                  title="Reveal in Files"
-                  disabled={pending !== null}
-                  onClick={() => onRevealDirectory(topic.directoryPath)}
-                >
-                  <Crosshair size={13} />
-                </button>
-                <button
-                  className="workspace-topic-wiki"
-                  type="button"
-                  aria-label={`Edit ${topic.title} Wiki`}
-                  title="Edit Topic Wiki"
-                  disabled={pending !== null}
-                  onClick={() => void openFile(`${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)}
-                >
-                  <NotebookText size={13} />
-                </button>
-                {topic.wiki ? <>
+                <span className="workspace-topic-actions">
                   <button
-                    className="workspace-topic-wiki"
+                    className="icon-button workspace-topic-reveal"
                     type="button"
-                    aria-label={`${topic.wiki.enabled ? 'Disable' : 'Enable'} ${topic.title} Wiki`}
-                    title={topic.wiki.enabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}
+                    aria-label={`Reveal ${topic.title} in Files`}
+                    title="Reveal in Files"
                     disabled={pending !== null}
-                    onClick={(event) => { event.stopPropagation(); void setTopicWikiEnabled(topic, !topic.wiki!.enabled) }}
+                    onClick={(event) => { event.stopPropagation(); onRevealDirectory(topic.directoryPath) }}
                   >
-                    {topic.wiki.enabled ? 'Off' : 'On'}
+                    <Crosshair size={13} />
                   </button>
-                  <button
-                    className="workspace-topic-wiki"
-                    type="button"
-                    aria-label={`Restore ${topic.title} Wiki defaults`}
-                    title="Restore default Topic Wiki"
-                    disabled={pending !== null}
-                    onClick={(event) => { event.stopPropagation(); void resetTopicWiki(topic) }}
-                  >
-                    Reset
-                  </button>
-                </> : null}
+                </span>
               </SortableTopicItem>
             )
           })}
@@ -445,7 +424,11 @@ function SortableTopicItem({
   onCopyPath,
   onRename,
   onReveal,
-  onTogglePin
+  onTogglePin,
+  onEditWiki,
+  onToggleWiki,
+  onResetWiki,
+  wikiEnabled
 }: {
   topicId: string
   isCurrent: boolean
@@ -455,6 +438,10 @@ function SortableTopicItem({
   onRename(): void
   onReveal(): void
   onTogglePin(): void
+  onEditWiki(): void
+  onToggleWiki?: (() => void) | undefined
+  onResetWiki?: (() => void) | undefined
+  wikiEnabled?: boolean | undefined
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: topicId
@@ -466,6 +453,10 @@ function SortableTopicItem({
       onRename={onRename}
       onReveal={onReveal}
       onTogglePin={onTogglePin}
+      onEditWiki={onEditWiki}
+      onToggleWiki={onToggleWiki}
+      onResetWiki={onResetWiki}
+      {...(wikiEnabled === undefined ? {} : { wikiEnabled })}
     >
       <div
         ref={setNodeRef}

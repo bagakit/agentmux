@@ -88,9 +88,10 @@ export function settingsNavGroups(
   })
 }
 
-export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
+export function SettingsPanel({ onClose, initialSection = 'workspaces', executorId }: {
   onClose: () => void
   initialSection?: SettingsSectionId
+  executorId?: string | undefined
 }) {
   const config = useAppStore((state) => state.config)
   const setConfig = useAppStore((state) => state.setConfig)
@@ -187,12 +188,12 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
         <header><div className="eyebrow">{groupTitle}</div><h2>{section.title}</h2><p>{section.description}</p></header>
         <div className="settings-content__scroll">
           {active === 'general' ? <GeneralSettingsPane /> : null}
-          {active === 'appearance' ? <AppearanceSettingsPane executors={config.executors} appearance={config.appearance} onSave={saveAppearance} /> : null}
+          {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {active === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
           {active === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
           {active === 'copy-paths' ? <CopyPathsSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
           {active === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
-          {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} /> : null}
+          {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}
           {active === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
           {active === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}
         </div>

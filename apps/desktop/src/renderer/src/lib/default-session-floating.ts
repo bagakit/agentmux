@@ -1,31 +1,44 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-const STORAGE_KEY = 'agentmux.default-session-floating.v1'
+const STORAGE_KEY = 'agentmux.default-session-floating.v2'
 const EVENT_NAME = 'agentmux:default-session-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }
 
 type FloatingState = {
   open: boolean
+  maximized: boolean
   position: { left: number; top: number }
   size: { width: number; height: number }
 }
 
 export type DefaultSessionFloatingState = FloatingState
 
+const defaultState = (): FloatingState => ({
+  open: false,
+  maximized: false,
+  position: { ...DEFAULT_POSITION },
+  size: { ...DEFAULT_SIZE }
+})
+
 function readState(): FloatingState {
-  if (typeof window === 'undefined') return { open: false, position: DEFAULT_POSITION, size: DEFAULT_SIZE }
+  if (typeof window === 'undefined') return defaultState()
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { open: false, position: DEFAULT_POSITION, size: DEFAULT_SIZE }
+    if (!raw) return defaultState()
     const value = JSON.parse(raw) as Partial<FloatingState>
     return {
       open: value.open === true,
-      position: value.position && Number.isFinite(value.position.left) && Number.isFinite(value.position.top) ? value.position : DEFAULT_POSITION,
-      size: value.size && Number.isFinite(value.size.width) && Number.isFinite(value.size.height) ? value.size : DEFAULT_SIZE
+      maximized: value.maximized === true,
+      position: value.position && Number.isFinite(value.position.left) && Number.isFinite(value.position.top)
+        ? { left: value.position.left, top: value.position.top }
+        : { ...DEFAULT_POSITION },
+      size: value.size && Number.isFinite(value.size.width) && Number.isFinite(value.size.height)
+        ? { width: value.size.width, height: value.size.height }
+        : { ...DEFAULT_SIZE }
     }
   } catch {
-    return { open: false, position: DEFAULT_POSITION, size: DEFAULT_SIZE }
+    return defaultState()
   }
 }
 
@@ -43,25 +56,40 @@ export function requestDefaultSessionFloatingClose(): void {
 
 export function useDefaultSessionFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
   const [state, setState] = useState<FloatingState>(() => readState())
+  const stateRef = useRef(state)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => {
     const onEvent = (event: Event): void => {
       const nextOpen = (event as CustomEvent<{ open?: boolean }>).detail?.open
       if (typeof nextOpen !== 'boolean') return
-      setState((current) => {
-        const next = { ...current, open: nextOpen }
-        writeState(next)
-        return next
-      })
+      const current = stateRef.current
+      if (nextOpen && !current.open) {
+        const active = document.activeElement
+        if (active instanceof HTMLElement && !active.closest('[data-default-session-floating]')) {
+          returnFocusRef.current = active
+        }
+      }
+      const next = { ...current, open: nextOpen }
+      stateRef.current = next
+      setState(next)
+      writeState(next)
+      if (!nextOpen) {
+        const target = returnFocusRef.current
+        returnFocusRef.current = null
+        if (target && document.contains(target)) {
+          requestAnimationFrame(() => target.focus({ preventScroll: true }))
+        }
+      }
     }
     window.addEventListener(EVENT_NAME, onEvent)
     return () => window.removeEventListener(EVENT_NAME, onEvent)
   }, [])
   const update = (next: Partial<FloatingState>): void => {
-    setState((current) => {
-      const resolved = { ...current, ...next }
-      writeState(resolved)
-      return resolved
-    })
+    const resolved = { ...stateRef.current, ...next }
+    stateRef.current = resolved
+    setState(resolved)
+    writeState(resolved)
   }
   return [state, update]
 }

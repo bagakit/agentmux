@@ -90,6 +90,16 @@ function acceptsAgentSessionTransition(
   return incoming.retiredRuns.some((run) => sameRun(run, session.control.run))
 }
 
+/**
+ * A readiness observer can finish after the Run has already gone away.  That event is useful
+ * evidence for the service window, but it is not a second crash fact: the process-state event owns
+ * the process projection.  Treat the explicit "Run exited" diagnostic as the neutral terminal state
+ * it names so a late observer rejection cannot paint a stopped Agent red.
+ */
+function displayStateForAgentError(code: string): SessionSnapshot['status']['state'] {
+  return code === 'AGENT_RUN_EXITED' ? 'exited' : 'error'
+}
+
 export function ownsSessionLaunch(
   surface: WorkbenchSurface | undefined,
   kind: 'agent' | 'terminal',
@@ -517,7 +527,13 @@ export function projectRuntimeEvent(
       ...state,
       sessions: state.sessions.map((item) =>
         ownsRunEvent(item, core.agentSessionId, core.run) &&
-        core.evidence.observedAt >= item.status.observedAt
+        // A readiness observer can report AGENT_RUN_EXITED just before the kernel's terminal
+        // event reaches the renderer.  The observer's wall clock may therefore be newer even
+        // though process-state is the authoritative fact.  Let that one neutral observer state
+        // be replaced by the process projection in either arrival order; otherwise a crash can
+        // remain hidden behind a stale, neutral "exited" status forever.
+        (core.evidence.observedAt >= item.status.observedAt ||
+          (item.status.source === 'terminal-output' && item.status.state === 'exited'))
           ? (() => {
               const { interruptionReason: _interruptionReason, ...current } = item
               return {
@@ -676,12 +692,17 @@ export function projectRuntimeEvent(
         ? {
             ...item,
             updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
-            status: {
-              state: 'error',
-              source: core.evidence.source,
-              observedAt: core.evidence.observedAt,
-              detail: core.message
-            }
+            // Once the process projection says the Run exited, a late readiness observer is
+            // advisory only.  Preserve the Core-owned crash signal/exit reason instead of
+            // replacing it with the generic "composer was not ready" detail.
+            status: core.code === 'AGENT_RUN_EXITED' && item.processState !== 'running'
+              ? item.status
+              : {
+                  state: displayStateForAgentError(core.code),
+                  source: core.evidence.source,
+                  observedAt: core.evidence.observedAt,
+                  detail: core.message
+                }
           }
         : item)
     } }

@@ -1,46 +1,10 @@
 import { Check, Copy, SquareDashed, TerminalSquare } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import type { AgentAvatarAppearance, AgentExecutorConfig } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { presentError } from '../lib/error-presentation'
-import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
-import { AgentEnamelFilter } from './AgentEnamelFilter'
-import { AgentProviderIcon } from './AgentProviderIcon'
-
-/**
- * An Executor is an identity anchor even before Core has published a Session status.  Reusing
- * AgentAvatar here would require manufacturing an AgentDisplayState (and therefore a status dot)
- * for a process whose Runtime state is still unknown.  Keep the provider mark and executor-owned
- * appearance, but leave the status axis empty until a real Session snapshot arrives.
- */
-function ConnectingExecutorMark({ executor, label, appearance }: {
-  executor: AgentExecutorConfig
-  label: string
-  appearance?: AgentAvatarAppearance | undefined
-}) {
-  const filterId = useId().replace(/:/g, '')
-  return <span
-    className="session-connecting__executor-mark"
-    role="img"
-    aria-label={label}
-    title={label}
-  >
-    {appearance?.tint
-      ? <AgentEnamelFilter id={filterId} tint={appearance.tint} className="session-connecting__executor-mark-contour" filterClassName="session-connecting__executor-filters">
-          <AgentProviderIcon providerId={executor.providerId} size={22} />
-          {appearance.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
-            <AgentAvatarBadgeIcon badge={appearance.badge} size={7} />
-          </span> : null}
-        </AgentEnamelFilter>
-      : <span className="session-connecting__executor-mark-contour" aria-hidden="true">
-          <AgentProviderIcon providerId={executor.providerId} size={22} />
-          {appearance?.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
-            <AgentAvatarBadgeIcon badge={appearance.badge} size={7} />
-          </span> : null}
-        </span>}
-  </span>
-}
+import { AgentAvatar } from './AgentAvatar'
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
 export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance }: {
@@ -86,7 +50,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
       </header>
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor
-          ? <ConnectingExecutorMark executor={executor} label={executorLabel} appearance={appearance} />
+          ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={26} />
           : <SquareDashed size={24} aria-label="Unknown executor" />}
         <div><span className="session-connecting__eyebrow">Executor</span><strong>{executorLabel}</strong></div>
       </div> : <div className="session-connecting__executor"><TerminalSquare size={24} /><strong>Terminal</strong></div>}

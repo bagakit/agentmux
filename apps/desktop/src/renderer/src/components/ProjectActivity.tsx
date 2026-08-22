@@ -17,7 +17,7 @@ import {
 } from '../lib/activity-groups'
 import { useAppStore } from '../store'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { AgentProviderIcon } from './AgentProviderIcon'
+import { AgentAvatar } from './AgentAvatar'
 import { SemanticIcon } from './semantic-icons'
 
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
@@ -150,7 +150,7 @@ export function ProjectActivity({
               {meta ? <em>{meta}</em> : null}
             </span>
             <span className="project-activity-group__avatars" aria-label={`${group.sessions.length} Agents in ${contextLabel(group)}`}>
-              {rosterRows.slice(0, 3).map((row) => <span key={row.sessionId} title={`${agentNames[row.sessionId] ?? row.label} · ${row.state}`}><AgentProviderIcon providerId={row.providerId} size={14} /></span>)}
+              {rosterRows.slice(0, 3).map((row) => <span key={row.sessionId} title={`${agentNames[row.sessionId] ?? row.label} · ${row.state}`}><AgentAvatar sessionId={row.sessionId} label={row.label} state={row.state} providerId={row.providerId} size={14} /></span>)}
               {rosterRows.length > 3 ? <em>+{rosterRows.length - 3}</em> : null}
             </span>
             </DropdownMenu.Item>

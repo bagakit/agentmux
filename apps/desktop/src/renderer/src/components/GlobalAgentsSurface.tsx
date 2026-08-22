@@ -1,10 +1,11 @@
+import { AgentAvatar } from './AgentAvatar'
 import { AlertCircle, CheckCircle2, Inbox, PanelRightClose, PlayCircle, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, type RosterRow } from '../lib/agent-roster'
 import { isNeedsYouState } from '../lib/attention-vocabulary'
 import { workspaceForSession } from '../lib/workbench-tabs'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
 import { DefaultSessionEntry } from './DefaultSessionEntry'
@@ -57,7 +58,7 @@ export function GlobalAgentsSurface() {
           return <section className="global-board-column global-agents-group" data-bucket={bucket} key={bucket}>
             <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{grouped.length}</em></span></header>
             <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-session-card ${selectedId === row.sessionId ? 'global-session-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => setSelected(row.sessionId)}>
-              <span className="global-session-card__topline"><AgentProviderIcon providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
+              <span className="global-session-card__topline"><AgentAvatar sessionId={row.sessionId} label={row.label} state={row.state} providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
               <strong className="global-session-card__title">{names[row.sessionId] ?? row.label}</strong>
               <span className="global-session-card__description">{row.workspacePath}</span>
               {row.awaitingReply ? <span className="global-session-card__meta">Awaiting your reply</span> : null}

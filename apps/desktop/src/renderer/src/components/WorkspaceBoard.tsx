@@ -1,3 +1,4 @@
+import { AgentAvatar } from './AgentAvatar'
 import {
   Activity,
   AlertTriangle,
@@ -36,7 +37,7 @@ import { observeAgentSession, observationSummary } from '../lib/agent-observatio
 import { formatRelativeAge } from '../lib/relative-age'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 
@@ -103,10 +104,10 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       onClick={onOpen}
       aria-label={`Open ${session.label}`}
     >
-      <span className="board-run-card__status" {...(observationTitle ? { title: observationTitle } : {})}><StatusDot status={session.status} /></span>
+      <span className="board-run-card__status" {...(observationTitle ? { title: observationTitle } : {})}><>{session.kind === 'agent' ? <AgentAvatar sessionId={session.id} executorId={session.executorId} providerId={session.providerId} label={session.label} state={session.status.state} detail={session.status.detail} /> : <StatusDot status={session.status} />}</></span>
       <span className="board-run-card__identity">
         <strong>{session.label}</strong>
-        <small>{session.providerId ? <><AgentProviderIcon providerId={session.providerId} size={11} /> {agentProviderLabel(session.providerId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
+        <small>{session.providerId ? <>{agentProviderLabel(session.providerId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
       </span>
       <span className="board-run-card__meta">
         <em>{session.status.state}</em>
