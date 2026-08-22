@@ -73,6 +73,6 @@ export function GlobalAgentsSurface() {
       {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
       <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />
     </aside> : null}
-    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} /> : null}
+    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={setSelected} /> : null}
   </section>
 }

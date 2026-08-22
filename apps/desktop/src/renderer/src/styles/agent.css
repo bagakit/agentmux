@@ -41,7 +41,9 @@
 .attention-request-panel__header strong { color: var(--text); font-size: var(--fs-body); }
 .attention-request-panel__header small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .attention-request-panel__actions { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.attention-request-panel__empty { padding: var(--sp-4); color: var(--text-2); background: var(--surface-0); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
+.attention-request-panel__empty { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); color: var(--text-2); background: var(--surface-0); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
+.attention-request-panel__error { margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3); color: var(--red); background: color-mix(in srgb, var(--red) 9%, var(--surface-0)); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
+.attention-request-panel__next { margin-top: var(--sp-3); }
 .agent-provider-mark {
   width: 17px;
   height: 17px;
