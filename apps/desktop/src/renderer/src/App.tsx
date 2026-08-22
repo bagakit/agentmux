@@ -1,3 +1,4 @@
+import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
 import {
   AlertTriangle,
@@ -26,6 +27,8 @@ import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
 import { DefaultSessionEntry } from './components/DefaultSessionEntry'
+import { DefaultSessionFloatingPanel } from './components/DefaultSessionFloatingPanel'
+import { useDefaultSessionFloatingState } from './lib/default-session-floating'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -53,8 +56,8 @@ export function App() {
 }
 
 function DesktopApp() {
-  const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
-  const openSettings = (section: SettingsSectionId): void => setSettingsRoute({ section })
+  const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId; executorId?: string | undefined } | null>(null)
+  const openSettings = (section: SettingsSectionId, executorId?: string): void => setSettingsRoute({ section, executorId })
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
@@ -66,6 +69,7 @@ function DesktopApp() {
   const dismissError = useAppStore((state) => state.dismissError)
   const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
+  const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
   const mainSurface = useAppStore((state) => state.mainSurface)
@@ -75,6 +79,7 @@ function DesktopApp() {
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
+  const [defaultFloating] = useDefaultSessionFloatingState()
   useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
@@ -116,8 +121,8 @@ function DesktopApp() {
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
   // untouched configured project does not allocate a hidden launcher/editor/browser tree at startup.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
-  )) ?? []
+    candidate.id !== '__scratch__' || !defaultFloating.open
+  ) && (fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0))) ?? []
   const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
@@ -227,6 +232,7 @@ function DesktopApp() {
 
   return (
     <SettingsNavigation.Provider value={{ open: openSettings }}>
+    <ExecutorIdentityContext.Provider value={{ config, sessions }}>
       <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
@@ -340,6 +346,7 @@ function DesktopApp() {
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
+      <DefaultSessionFloatingPanel />
       <ShortcutsCheatSheet
         open={shortcutsHelpOpen}
         onClose={() => setShortcutsHelpOpen(false)}
@@ -352,9 +359,11 @@ function DesktopApp() {
       {settingsRoute ? (
         <SettingsPanel
           initialSection={settingsRoute.section}
+          executorId={settingsRoute.executorId}
           onClose={() => setSettingsRoute(null)}
         />
       ) : null}
+    </ExecutorIdentityContext.Provider>
     </SettingsNavigation.Provider>
   )
 }
