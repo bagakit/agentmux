@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
+import { defaultAgentMuxControlSocketPath } from '../src/runtime-paths.js'
 
 const execFileAsync = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
@@ -13,6 +16,11 @@ const packageManifestUrl = new URL('../package.json', import.meta.url)
 async function run(args: readonly string[]): Promise<string> {
   return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024 })).stdout
 }
+/** 同 {@link run}，但带环境覆盖——`endpoint` 要证明它跟着 AGENTMUX_RUNTIME_DIRECTORY 走。 */
+async function runWithEnv(args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
+  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } })).stdout
+}
+
 async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
   try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } }) } catch (error) {
     const failure = error as { stdout: string; stderr: string; code: number }
@@ -64,6 +72,65 @@ describe('agentmux CLI discovery', () => {
     expect(help).toContain('arrange')
     expect(help).toContain('AGENTMUX_AGENT_SESSION_ID')
     expect(help).not.toContain('Composition:')
+  })
+
+
+  /**
+   * 端点发现：一个非 Node 客户端要能问出"往哪连、什么协议版本"，而不必读我们的 TS 源码复算哈希。
+   *
+   * 期望值取自 `defaultAgentMuxControlSocketPath()` **本身**，不是在这里再拼一遍
+   * `join(runtimeDir, 'control.sock')`：后者是第二份手抄，两份一起漂的时候它自己不会响。
+   */
+  it('endpoint 报出的路径与内部取值同源，并同时给出协议版本', async () => {
+    const printed = JSON.parse(await run(['endpoint'])) as {
+      ok: boolean
+      operation: string
+      result: { control: { path: string; transport: string; framing: string }; schemaVersion: number }
+    }
+    expect(printed.ok, 'endpoint 没能成功作答').toBe(true)
+    expect(printed.operation).toBe('endpoint')
+    expect(printed.result.control.path, '报出的路径与 defaultAgentMuxControlSocketPath() 不是同一个值')
+      .toBe(defaultAgentMuxControlSocketPath())
+    expect(printed.result.schemaVersion, '协议版本没报，或报的不是当前这一版')
+      .toBe(AGENTMUX_CONTROL_SCHEMA_VERSION)
+    // 承载方式也要说：客户端拿到一个路径但不知道是 unix socket + NDJSON，还是接不进来。
+    expect(printed.result.control.transport).toBe('unix-socket')
+    expect(printed.result.control.framing).toBe('ndjson')
+  })
+
+  it('endpoint 尊重 AGENTMUX_RUNTIME_DIRECTORY——不是只在默认环境下正确', async () => {
+    const relocated = join('/private/tmp', `amx-endpoint-${randomUUID()}`)
+    const printed = JSON.parse(await runWithEnv(['endpoint'], { AGENTMUX_RUNTIME_DIRECTORY: relocated })) as {
+      result: { control: { path: string } }
+    }
+    expect(printed.result.control.path, '换了 runtime 根，报出的路径没跟着换').toBe(join(relocated, 'control.sock'))
+    // 另一半：它**确实换了**。只判"等于 relocated 下那个"对"两边都返回同一个硬编码值"是瞎的。
+    expect(printed.result.control.path, '覆盖前后报出的是同一个路径').not.toBe(defaultAgentMuxControlSocketPath())
+  })
+
+  it('daemon 没起也答得出端点：发现不等于连接', async () => {
+    // 指向一个**空目录**——没有 control.sock，没有任何人监听。真实客户端的第一步正是这个状态。
+    const empty = await mkdtemp(join(tmpdir(), 'amx-endpoint-nobody-'))
+    try {
+      const printed = JSON.parse(await runWithEnv(['endpoint'], { AGENTMUX_RUNTIME_DIRECTORY: empty })) as {
+        ok: boolean
+        result: { control: { path: string } }
+      }
+      // 必须是成功的答案，而不是「没有端点」。要求先连上的实现会在这里失败退出。
+      expect(printed.ok, '没人监听时把"现在没人听"说成了"没有这个端点"').toBe(true)
+      expect(printed.result.control.path).toBe(join(empty, 'control.sock'))
+    } finally {
+      await rm(empty, { recursive: true, force: true })
+    }
+  })
+
+  it('endpoint 有自己那条 --help，并且说清它不连接', async () => {
+    const help = await run(['endpoint', '--help'])
+    expect(help, 'endpoint --help 被说成不存在').not.toContain('Unknown command')
+    expect(help).toContain('agentmux endpoint')
+    expect(help).toContain('does not connect')
+    expect(help).toContain('AGENTMUX_RUNTIME_DIRECTORY')
+    expect(await run(['--help']), '顶层 Intents 里没有 endpoint').toContain('endpoint')
   })
 
   it('documents typed targets and exact destinations without contacting owners', async () => {
@@ -652,9 +719,50 @@ describe('agentmux browser 顶层动词', () => {
     )
     const verb = await run(['browser', '--help'])
     expect(verb, 'browser --help 没讲它和 open browser 的分工').toContain('neither replaces the other')
-    expect(verb, 'browser --help 没有历史记录入口').toContain('browser history')
-    expect(verb, 'browser --help 没有回放入口').toContain('browser replay')
     expect(verb, 'browser --help 没有回放模式').toContain('--preview')
+  })
+
+  // 一级 usage 表必须覆盖**实现真的接的每一个子命令**，判据从 `browserCommand` 的 dispatch 反推，
+  // 不维护一份手写清单。此前这里是逐个手点 `history`/`replay` 两条——而 `follow` 加进实现时
+  // 没人提醒它没进表，敲 `agentmux browser --help` 的人看不到它存在（实测漏了一轮）。
+  // 手写清单必漏，漏的时候它自己不会响：这条改成从来源反推就是为了这个。
+  it('一级 usage 表覆盖实现接的每一个子命令', async () => {
+    const source = await readFile(new URL('../src/agentmux.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('async function browserCommand')
+    expect(start, 'browserCommand 起锚点不在场——切出来会是空串，下面每条断言都会恒真').toBeGreaterThan(-1)
+    const end = source.indexOf('async function readAllStdin', start)
+    expect(end, 'browserCommand 收尾锚点不在场').toBeGreaterThan(start)
+    const body = source.slice(start, end)
+
+    const dispatched = [...body.matchAll(/args\[0\] === '([a-z-]+)'/g)].map((m) => m[1]!)
+    // 兜底那条 `if (args[0] !== 'run') throw` 是 run 的分发形态，正则抓不到，单独认一次。
+    expect(body, 'run 的兜底分发形态变了，下面这条补充就失效了').toContain("args[0] !== 'run'")
+    const subcommands = [...new Set([...dispatched, 'run'])]
+    expect(subcommands.length, '一个子命令都没抠到＝正则漂了，空集合上每条断言都恒真').toBeGreaterThan(4)
+
+    const verb = await run(['browser', '--help'])
+    const usage = verb.slice(verb.indexOf('Usage:'), verb.indexOf('`open browser` opens one'))
+    expect(usage.length, 'usage 段抠成空串了').toBeGreaterThan(0)
+    const missing = subcommands.filter((name) => !usage.includes(`agentmux browser ${name}`))
+    expect(missing, `实现接了这些子命令但一级 usage 表没列：${missing.join(', ')}——敲 browser --help 的人看不到它们存在`).toEqual([])
+  })
+
+  // 每个子命令还要有自己那条 topic：一级表列了名字但 `browser X --help` 拿到的是讲别的命令的
+  // 那一份，等于没有帮助（见下一条 run 的回归）。
+  it('每个子命令都有自己的 help topic', async () => {
+    const source = await readFile(new URL('../src/agentmux.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('async function browserCommand')
+    const end = source.indexOf('async function readAllStdin', start)
+    const body = source.slice(start, end)
+    const subcommands = [...new Set([
+      ...[...body.matchAll(/args\[0\] === '([a-z-]+)'/g)].map((m) => m[1]!), 'run'
+    ])]
+    expect(subcommands.length, '空集合上 for 循环什么都不证明').toBeGreaterThan(4)
+    for (const name of subcommands) {
+      const topic = agentMuxCommandHelp(`browser.${name}`)
+      expect(topic, `browser ${name} 没有自己的 help topic`).toBeTruthy()
+      expect(topic!.length, `browser ${name} 的 topic 是空的`).toBeGreaterThan(80)
+    }
   })
 
   // operationPath 此前只对 `open` 做两级拼接。没有这条，把 browser 那一枝删掉后
@@ -695,10 +803,40 @@ describe('agentmux browser 顶层动词', () => {
 
       // 空程序（最常见成因：忘了接管道）必须被拒。放过去的话，回执是一份"跑完了，什么都没发生"的成功，
       // 与真的跑完一段空程序在回执上无法区分。空白不算内容，所以判的是 trim 后。
+      //
+      // **码是 INVALID_CONTROL_REQUEST 而不是 INVALID_CLI_ARGUMENT，这正是 T-002 要证的那件事**：
+      // 规则住在协议层，CLI 只是经过它的一条路。这个码等于一张收据——CLI 拿到的拒绝来自协议解析，
+      // 而不是它自己又判了一遍。若 CLI 悄悄把这条规则抄回去，码会翻回 INVALID_CLI_ARGUMENT，这条会红。
+      //
+      // 判在**子进程真跑一遍 CLI** 上，不是直接调 parse：那才能证明这条路上没有别的东西先把它拦掉。
+      // 协议层那句拒绝被删掉之后，这条必须红——它今天不再有 CLI 侧的第二道闸兜着。
       const empty = await runWithStdin(['browser', 'run', '--browser', 'browser-1'], '   \n', env)
       const emptyError = JSON.parse(empty.stderr)
-      expect(emptyError, `stderr=${empty.stderr}`).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+      expect(emptyError, `stderr=${empty.stderr}`).toMatchObject({
+        error: { code: 'INVALID_CONTROL_REQUEST' }, operation: 'browser.run'
+      })
       expect(emptyError.error.message, '拒绝空程序时没告诉人怎么喂程序').toContain('Pipe it in')
+      // 没连上运行时也要拒：证明它在**连接之前**就被判掉了。若拒绝发生在 Host 那一侧，这个空目录
+      // 环境会先给 CONTROL_UNAVAILABLE——那就说明每个客户端都得先能连上才拿得到这条规则。
+      expect(emptyError.error.code, '空程序是连上运行时之后才被拒的——规则没在请求解析层')
+        .not.toBe('CONTROL_UNAVAILABLE')
+
+      // 非法 step 同样只有协议那一个码。此前 CLI 用正则先判、拿 INVALID_CLI_ARGUMENT 拒掉，
+      // 于是同一个非法输入经 CLI 与经协议得到两个码。两种形态各判一次：CLI 的正则只拦非数字与 0，
+      // 小数 `1.5` 它其实放过（`/^\d+$/` 不匹配小数点，所以也拒）——重点是**码必须一致**。
+      for (const bad of ['0', '-1', '1.5', 'two']) {
+        const badStep = await runWithStdin(
+          ['browser', 'replay', '--browser', 'browser-1', '--operation', 'op-1', '--step', bad], '', env
+        )
+        expect(JSON.parse(badStep.stderr), `--step ${bad} 的拒绝码与协议不一致：${badStep.stderr}`)
+          .toMatchObject({ error: { code: 'INVALID_CONTROL_REQUEST' }, operation: 'browser.replay' })
+      }
+      // 反向的一半：合法 step 不再是参数错误，否则一个"--step 永远被拒"的实现也能让上面全绿。
+      const goodStep = await runWithStdin(
+        ['browser', 'replay', '--browser', 'browser-1', '--operation', 'op-1', '--step', '2'], '', env
+      )
+      expect(JSON.parse(goodStep.stderr), `合法 step 被判成非法：${goodStep.stderr}`)
+        .toMatchObject({ error: { code: 'CONTROL_UNAVAILABLE' } })
 
       // 反向的那一半：给了 --browser 和一段真程序，就**不再**是参数错误。没有这一条，一个"browser run
       // 永远报参数错误"的实现，或者一个根本不读 stdin 的实现，都能让上面三条全绿。
@@ -738,5 +876,39 @@ describe('agentmux browser 顶层动词', () => {
     expect(skill, '投递禁令仍然笼统，会把 browser run 一起吓退').toContain(
       'This is about how the payload is delivered, not about driving the page afterwards'
     )
+  })
+
+  /**
+   * 每一个真实存在的 browser 子命令都要有自己那条 --help。
+   *
+   * `operationPath` 把 `browser <verb>` 拼成 `browser.<verb>`，HELP 表里没有这一条时**不是**退回
+   * 上一级，而是一句 "Unknown command. Run agentmux --help."——一个真实存在、真能跑的命令被 --help
+   * 说成不存在。实测这曾是 `history` 与 `replay` 的状态。
+   *
+   * 子命令清单**从分发器反推**，不手写：手写清单会和源码一起漂，而漂的时候它自己不会响（加一个
+   * 子命令忘了加 help，清单里也没有它，判据照旧全绿）。
+   */
+  it('每个 browser 子命令都有自己那条 --help，不会被说成不存在', async () => {
+    const source = await readFile(fileURLToPath(new URL('../src/agentmux.ts', import.meta.url)), 'utf8')
+    // 取 browserCommand 那个函数体，再从里面捞 `args[0] === 'x'` 与 `args[0] !== 'x'`（最后那条
+    // run 走的是 `!==` 兜底）。两端都判一次：起锚点不在了 indexOf 给 -1，slice 会切出**空串**，
+    // 之后每一条断言恒真（MEMORY：indexOf 锚点没了就切出空串）。
+    const start = source.indexOf('async function browserCommand')
+    expect(start, 'browserCommand 不在源码里了——这条判据失去靶子').toBeGreaterThan(-1)
+    const end = source.indexOf('\nasync function readAllStdin', start)
+    expect(end, 'browserCommand 的结束锚点不在了').toBeGreaterThan(start)
+    const body = source.slice(start, end)
+    const verbs = [...body.matchAll(/args\[0\] [!=]==? '([a-z]+)'/g)].map((match) => match[1]!)
+    // 前提自检：真的捞到了子命令。捞空的话下面的循环一次都不跑，而"零个子命令全都有 help"恒真。
+    expect(verbs.length, '一个子命令都没捞到——下面的循环是死代码').toBeGreaterThan(3)
+    expect(verbs, 'run 没被捞到（它走 !== 兜底那条）').toContain('run')
+
+    for (const verb of verbs) {
+      const help = await run(['browser', verb, '--help'])
+      expect(help, `browser ${verb} 真能跑，但 --help 说它不存在`).not.toContain('Unknown command')
+      // 而且拿到的是**自己**那条，不是碰巧落到了别人的 help 上。每条 help 的 Usage 里都必须
+      // 出现这个子命令本身。
+      expect(help, `browser ${verb} --help 拿到的是别的命令的帮助`).toContain(`agentmux browser ${verb} `)
+    }
   })
 })

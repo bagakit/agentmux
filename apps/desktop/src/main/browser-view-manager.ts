@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_VIEWPORT_PRESETS,
@@ -16,6 +17,7 @@ import {
   type BrowserOperator,
   type BrowserActivityState
 } from '../shared/contracts.js'
+import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
@@ -30,7 +32,7 @@ import {
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
-import { runBrowserScript } from './browser-script-runner.js'
+import { BROWSER_PAGE_FUNCTION_NAMES, runBrowserScript } from './browser-script-runner.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
@@ -123,10 +125,37 @@ function startBrowserOperationStep(operation: BrowserOperation, method: string, 
   return step
 }
 
+/**
+ * 回放脚本里允许出现的动词。**白名单，不是黑名单**（「禁止清单必漏」）。
+ *
+ * 为什么必须有这道闸：`buildReplayScript` 把 `step.method` **原样拼进脚本源码**——
+ * `await ${step.method}(...)`。同一个函数里 target 和 args 都走 `JSON.stringify`，只有 method 是裸的。
+ * 而 method 的值来自子进程经 IPC 送回来的页面调用名（browser-script-runner.ts 的 `page-call`，
+ * 主进程侧 `onPageCall(String(call.name), …)`）：Agent 的程序跑在一个带 IPC 的普通 Node 子进程里，
+ * 自己 `process.send({kind:'page-call', name:'…'})` 就能把任意字符串送进来。派发层虽然会用
+ * `default` 分支拒绝这个名字，但 `startBrowserOperationStep` 是在**派发之前**记的步骤，所以那个
+ * 名字已经进了日志；持久化边界 `sanitizeReplay` 对 method 只 `clamp` 长度、不校验取值。
+ *
+ * 于是 `method = "click(''); await js('…'); //"` 在回放时会变成可执行语句，还能够到 `js`——
+ * 而 `js` 正是 `sanitizeReplay` 特意用 `blockedReason` 挡住的那条逃生口。挡了参数没挡动词，
+ * 等于没挡。
+ *
+ * 取值与注入给脚本的那份名单同源（`BROWSER_PAGE_FUNCTION_NAMES`）：能被回放的动词，
+ * 不可能多于能被调用的动词。手抄第二份会漂移，而漂移的那一份不报错，只是悄悄放宽了。
+ */
+const REPLAYABLE_METHODS: ReadonlySet<string> = new Set(BROWSER_PAGE_FUNCTION_NAMES)
+
 export function buildReplayScript(plan: BrowserReplayPlan): string {
   const expectedUrl = JSON.stringify(safeBrowserUrl(plan.url))
   const steps = plan.steps.map((step) => {
     if (step.blockedReason) return `throw new Error(${JSON.stringify(step.blockedReason)})`
+    // 不在名单里就不拼进源码，换成一句抛。说清是哪个名字——这一步本来就回放不了，
+    // 静默跳过会让回放"少做一步却报成功"，那比抛更糟。
+    if (!REPLAYABLE_METHODS.has(step.method)) {
+      return `throw new Error(${JSON.stringify(
+        `Recorded step "${step.method}" is not a replayable Browser page function; inspect the operation history before retrying.`
+      )})`
+    }
     if (step.target) {
       const target = JSON.stringify(step.target)
       const args = JSON.stringify(step.args)
@@ -173,27 +202,23 @@ const HUMAN_INPUT_EVENT_TYPES = new Set([
 ])
 
 /**
- * 接管之后被拒绝的页面函数。**只有动作在里面，观察一概放行。**
+ * 人工接管之后要拒绝的那些页面调用——**取自 core 的能力表，不在这里手抄**。
  *
- * 放行观察不是宽容，是诚实：程序被打断之后最该做的事就是「看一眼现在页面什么样」再决定怎么
- * 报告。把 snapshot 也拦掉，它只能瞎猜着退出。而观察不改页面，跟人不会打架。
+ * 此前这是本文件里一个手写的 9 个名字的 Set。它与真正注入的那份清单
+ * （`BROWSER_PAGE_FUNCTION_NAMES`）是同一份事实的两个副本，而副本漂移时**没有任何东西会红**：
+ * 新增一个动作类能力却忘了往这个 Set 里加，意味着人拿回页面之后 Agent 仍然能改它——一个
+ * 悄悄放宽了的闸门，不是一次报错。
  *
- * `js` 和 `cdp` 两个逃生口按动作算——它们能做任何事，漏掉任何一个都等于没拦。`cdp` 还有一层：
- * 它把方法名原样透传，所以 `cdp('Input.dispatchMouseEvent', …)` 能发出真的原生输入，从而让程序
- * **触发自己的接管判据**。这不是安全问题（程序本来就能为所欲为），代价也是可接受的：它踩的是
- * 自己，结局是一个 `stopped` 加一句说明，不是静默乱点。
+ * 现在按 `effect` 从能力表派生（`act` ∪ `navigate`）。放行观察不是宽容，是诚实：程序被打断
+ * 之后最该做的事就是「看一眼现在页面什么样」再决定怎么报告。把 snapshot 也拦掉，它只能瞎猜
+ * 着退出；而观察不改页面，跟人不会打架。
+ *
+ * `js` 和 `cdp` 在表里按 `act` 计，所以自动在内——它们能做任何事，漏掉任何一个都等于没拦。
+ * `cdp` 还有一层：它把方法名原样透传，所以 `cdp('Input.dispatchMouseEvent', …)` 能发出真的
+ * 原生输入，从而让程序**触发自己的接管判据**。这不是安全问题（程序本来就能为所欲为），
+ * 代价也可接受：它踩的是自己，结局是一个 `stopped` 加一句说明，不是静默乱点。
  */
-const BROWSER_ACTION_PAGE_CALLS = new Set([
-  'click',
-  'fillInput',
-  'typeText',
-  'pressKey',
-  'hover',
-  'scroll',
-  'gotoUrl',
-  'js',
-  'cdp'
-])
+const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
 
 /**
  * 被接管之后说给 Agent 听的那句话。说到**下一步**为止，而且那一步真能走通。
@@ -613,10 +638,22 @@ export class BrowserViewManager {
    * 特别是 `crashed` → `indeterminate`——进程死了意味着**做到哪一步不知道**，页面上可能已经点过
    * 一次了。把它报成普通失败，调用方就会重试，而那正是"下单被点两次"的来源。
    */
-  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string): Promise<BrowserScriptRunReport> {
+  /**
+   * @param operationId 这次操作的 identity，由调用方给（协议的 `browser.run` 可选字段）。
+   *   给了才可能「在飞期间凭 id 查询/取消」：Control 是一问一答，主进程铸的 id 只随终局回执露出，
+   *   那时已无可取消。缺席时由 journal 铸——**铸造点仍只有一处**（journal 的 `makeId`），
+   *   这里绝不再补一个 `randomUUID()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
+   *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
+   */
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
     if (entry.humanControl) {
-      throw new Error('Human control is still active for this Browser. Explicitly return control before running another Agent program.')
+      // 带类型化的码，不是一句散文：调用方要能把「人在用这一页」与「出故障了」分开，并且知道恢复
+      // 动作是**人明确交还控制**，不是重试。裸 Error 会让两者在机读侧长得一模一样。
+      throw Object.assign(
+        new Error('Human control is still active for this Browser. Explicitly return control before running another Agent program.'),
+        { code: 'BROWSER_HUMAN_CONTROL_ACTIVE' satisfies AgentMuxControlErrorCode }
+      )
     }
     if (entry.runInFlight || entry.activeRun) {
       throw new Error('Another Browser operation is already running. Wait for it to finish or stop it before starting another program.')
@@ -640,7 +677,14 @@ export class BrowserViewManager {
     const stopController = new AbortController()
     let stopRequested = false
     const localOperation: BrowserOperation = {
-      id: randomUUID(),
+      // 调用方给了 id 就用它；没给才由 journal 铸（`start` 的 `input.id?.trim() || this.makeId()`）。
+      // 这里不写 `?? randomUUID()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
+      // 不是同一个——查询按一个、记录按另一个，两边各自看起来都正常。
+      //
+      // 没有 journal 时（只在测试里）这个分支要给一个值才能构成 BrowserOperation，所以用空串占位，
+      // 由下面 `operation = ... : localOperation` 那条路承担。空串不会被当成合法 id：journal 的
+      // `input.id?.trim() ||` 对空串取假，正是靠这个落回铸造点。
+      id: operationId ?? '',
       browserId: id,
       operator: operator ?? { id: 'agent:unknown', name: 'Agent' },
       startedAt: Date.now(),
@@ -654,7 +698,7 @@ export class BrowserViewManager {
     try {
       operation = this.operationJournal
         ? await this.operationJournal.start({
-            id: localOperation.id,
+            ...(localOperation.id ? { id: localOperation.id } : {}),
             browserId: id,
             operator: localOperation.operator,
             summary: localOperation.summary,
@@ -774,30 +818,37 @@ export class BrowserViewManager {
           runOperation: operation
         }
       }
+      // 回放命中的目标是**按外观**认回来的，和 ref 自愈是同一件事，所以走同一个出口。
+      //
+      // 计划里存下来的身份只有 role+name+ordinal+count——快照本身就不含更稳的东西
+      // （backendNodeId 随 CDP 会话消亡，见 browser-ref-ledger.ts）。
+      //
+      // **只有同名元素多于一个时才降级**，这条边界是承重的：`count === 1` 时那个总数判据恰恰
+      // 证明了不存在第二个同名元素可以认错，此时它和按身份命中一样确定，报 `completed` 是诚实的。
+      // 而 `count > 1` 时闸门挡不住一类很常见的页面变化：列表里多一行、少一行，总数仍是 3、
+      // 序号仍是 2，闸门放行，点下去的却是**另一个** Delete。browser-ref-resolve.ts 刻意不做
+      // role/name 回退，理由正是"它会静默改打一个同名元素，还照常报成功"——回放不能自己破那条规矩。
+      //
+      // 挡不住就不许装作挡住了：降级成 `indeterminate`（先看一眼页面，别盲目重试），返回值照带。
+      // 反过来，把 `count === 1` 也一律降级，等于每一次回放都喊一声狼来了——那种警告会被学会忽略，
+      // 于是真正该看的那一次也没人看（AGENTS.md:32-52 要的是可分辨，不是一律保守）。
+      //
+      // **判在 `run.completed` 分叉之前**，与上面接管那一支同理（见那段注释「两条路必须汇到同一个
+      // 结局」）。写在 completed 臂里只能盖住「一路顺到底」的那次；而「按外观点下去了、后面某步
+      // 才抛」的那次 `completed` 为 false，整份 notes 会被静默丢掉，收据报 `script-failed`——
+      // 那句话对 Agent 的意思是"你代码写错了，改完重跑"，可此刻真实状态是**一个可能打在另一个
+      // 同名元素上的破坏性动作已经执行了**。照着 script-failed 整段重跑，那个动作就再来一次，
+      // 正是本文件反复点名的「下单点两次」。做没做成不确定，就得说不确定。
+      if (replayOf && operation.steps.some((step) => step.target && step.target.count > 1)) {
+        notes.push(
+          'This run replayed recorded steps onto elements that share their role and name with ' +
+            'others on the page. Replay re-finds those targets by name and position in a fresh ' +
+            'snapshot — a match by appearance, not identity — so a page whose contents shifted can ' +
+            'put the action on a different element of the same name. Look at the page before ' +
+            'treating this as done.'
+        )
+      }
       if (run.completed) {
-        // 回放命中的目标是**按外观**认回来的，和 ref 自愈是同一件事，所以走同一个出口。
-        //
-        // 计划里存下来的身份只有 role+name+ordinal+count——快照本身就不含更稳的东西
-        // （backendNodeId 随 CDP 会话消亡，见 browser-ref-ledger.ts）。
-        //
-        // **只有同名元素多于一个时才降级**，这条边界是承重的：`count === 1` 时那个总数判据恰恰
-        // 证明了不存在第二个同名元素可以认错，此时它和按身份命中一样确定，报 `completed` 是诚实的。
-        // 而 `count > 1` 时闸门挡不住一类很常见的页面变化：列表里多一行、少一行，总数仍是 3、
-        // 序号仍是 2，闸门放行，点下去的却是**另一个** Delete。browser-ref-resolve.ts 刻意不做
-        // role/name 回退，理由正是"它会静默改打一个同名元素，还照常报成功"——回放不能自己破那条规矩。
-        //
-        // 挡不住就不许装作挡住了：降级成 `indeterminate`（先看一眼页面，别盲目重试），返回值照带。
-        // 反过来，把 `count === 1` 也一律降级，等于每一次回放都喊一声狼来了——那种警告会被学会忽略，
-        // 于是真正该看的那一次也没人看（AGENTS.md:32-52 要的是可分辨，不是一律保守）。
-        if (replayOf && operation.steps.some((step) => step.target && step.target.count > 1)) {
-          notes.push(
-            'This run replayed recorded steps onto elements that share their role and name with ' +
-              'others on the page. Replay re-finds those targets by name and position in a fresh ' +
-              'snapshot — a match by appearance, not identity — so a page whose contents shifted can ' +
-              'put the action on a different element of the same name. Look at the page before ' +
-              'treating this as done.'
-          )
-        }
         // 自愈过就不是 `completed`。程序确实跑完了，但**它作用在什么上不确定**——role+name+nth
         // 能匹配到一个长得一样的邻居。这正是 `indeterminate` 的含义（先看一眼页面，别盲目重试），
         // 也是 `completed` 这一支承载不了的：它连一个放警告的字段都没有。返回值照常带回去——
@@ -826,6 +877,25 @@ export class BrowserViewManager {
       // `indeterminate` 被折进 `failed`：同一次崩溃，Agent 收到的收据说"做到哪一步不知道，先看
       // 一眼页面别重试"，而人在历史里看到的是"失败了，改完重跑"——两个相反的结论。phase 枚举里
       // 本来就有 `indeterminate`，这不是缺词，是映射错了。崩溃恰恰意味着页面动作可能做了一半。
+      //
+      // 但**这一支自己算出来的结局还不够**：程序抛之前可能已经按外观点下去了（自愈、或回放打在
+      // 同名元素上），那些告示就在 `notes` 里。一个"已经可能打错了对象"的运行报 `script-failed`
+      // 等于叫 Agent 改代码整段重跑，而重跑会把那个动作再做一次。有告示就以 `indeterminate`
+      // 收口，并且**把程序自己的失败原因一起带上**——那是排障的入口，不能被告示挤掉。
+      if (notes.length > 0) {
+        const failureReason = 'message' in outcome ? outcome.message : 'The Browser program failed.'
+        operation.phase = 'indeterminate'
+        operation.summary = replayOf ? 'Replay stopped after an appearance match' : 'Stopped after semantic ref healing'
+        operation.finishedAt = Date.now()
+        operation.warning = [...notes, failureReason].join('\n')
+        entry.activity = { operation, control: 'agent', warning: operation.warning }
+        return {
+          result: undefined,
+          logs: run.logs,
+          outcome: { kind: 'indeterminate', message: operation.warning },
+          runOperation: operation
+        }
+      }
       operation.phase = browserOperationPhaseFromOutcome(outcome.kind)
       operation.summary = 'message' in outcome ? outcome.message : 'Browser program failed'
       operation.finishedAt = Date.now()
@@ -875,10 +945,43 @@ export class BrowserViewManager {
     return await this.runScript(id, script, operator, plan.operationId)
   }
 
-  stopOperation(id: string): BrowserSnapshot {
-    const entry = this.require(id)
-    entry.activeRun?.stop()
-    return this.snapshot(entry)
+  /**
+   * 按 operationId 停一个操作，**与它跑在哪个 Browser 上无关**。这是取消的唯一入口。
+   *
+   * 这里曾经还有一条 `stopOperation(id)`（按 browserId 停「这一页上正在跑的那个」），服务 UI 上的
+   * 停止按钮。T-008 把那颗按钮收口到协议之后它没有调用方了，于是删掉——两条寻址落在同一个
+   * `activeRun.stop` 上，留着第二条只是给「哪一条才是真的」留一个将来会漂移的问题。
+   *
+   * 三种答案都是成功，一个都不抛：
+   *   - 还在飞 → 停下它，答出刚被改成 `stopped` 的那份事实。
+   *   - 已经结束 → 幂等成功，答出它的既有终局。正常时序下取消总会撞上刚结束的操作（人按下停止的
+   *     同一刻程序自己跑完了），把这个竞态报成失败等于让调用方分不出「我停晚了」和「出错了」。
+   *   - 查不到 → `null`。RED-LINES 第 2 类：我们查不到 ≠ 这个 Browser 坏了。所以这条路**不碰任何
+   *     entry 的状态**——尤其不清 activeRun，那会让一次查询失败变成一次真实的能力损失。
+   */
+  async stopOperationById(operationId: string): Promise<BrowserOperation | null> {
+    for (const entry of this.entries.values()) {
+      if (entry.activeRun?.operationId !== operationId) continue
+      entry.activeRun.stop()
+      // `stop()` 刚改的就是 `entry.activity.operation` 指的那个对象（runScript 里同一个引用），
+      // 所以这里读到的是最新的一份，不必等 stop 里那条 fire-and-forget 的 journal 写落盘。
+      const stopped = entry.activity.operation
+      if (stopped?.id === operationId) return stopped
+      break
+    }
+    // 不在飞：已结束或本就不认识。两者的答案都从 journal 来——不在这里维护第二份账。
+    return await this.getOperation(operationId)
+  }
+
+  /**
+   * 按 operationId 查一条操作。答案覆盖在跑、completed、stopped 与重启后被判为 indeterminate 四档，
+   * 因为它读的就是 journal 本身（`ready()` 在重载时把活着的操作转成 indeterminate），不是第二份投影。
+   *
+   * journal 缺席或读坏了都属于流程状态，不是 Browser 坏了：答「查不到」，这个 Browser 照样能接新操作。
+   * journal 本来就是 advisory 的。
+   */
+  async getOperation(operationId: string): Promise<BrowserOperation | null> {
+    return this.operationJournal ? await this.operationJournal.get(operationId) : null
   }
 
   returnControl(id: string): BrowserSnapshot {

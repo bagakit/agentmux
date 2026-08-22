@@ -127,11 +127,26 @@ export type BrowserOperationStepFinish = {
   target?: BrowserReplayTarget
 }
 
-export type BrowserOperationJournalListener = (
-  event: BrowserOperationEvent,
-  operation: BrowserOperation | null,
-  warning?: string
-) => void
+/**
+ * 一条订阅收到的事件，带上它在本 journal 生命周期内的序号。
+ *
+ * 序号由 journal 发号（一个单调计数器），**不是事件数组的下标**：那个数组会被 `trim()` 从头砍掉，
+ * 下标会随之整体左移，于是同一条事件在两次读取里有两个不同的"序号"——客户端的游标当场失效。
+ */
+export type BrowserOperationSequencedEvent = { sequence: number; event: BrowserOperationEvent }
+
+export type BrowserOperationSubscription = {
+  /** 订阅建立时那条操作的事实。查不到答 null——那不是故障。 */
+  operation: BrowserOperation | null
+  /**
+   * 客户端要的那段是不是已经被砍掉了。有值时 `droppedThrough` 是**最早还留着的那条的前一个序号**，
+   * 意思是"这个号（含）之前的都没了"。null 表示从游标之后一条不落。
+   */
+  gap: { droppedThrough: number } | null
+  /** 从游标之后、当下还留着的那些事件。订阅建立时一次性交出，之后的走回调。 */
+  backlog: BrowserOperationSequencedEvent[]
+  dispose(): void
+}
 
 type JournalOptions = {
   now?: () => number
@@ -139,7 +154,6 @@ type JournalOptions = {
   maxOperations?: number
   maxEvents?: number
   maxSteps?: number
-  onEvent?: BrowserOperationJournalListener
 }
 
 const ACTIVE_PHASES = new Set<BrowserOperationPhase>(['preparing', 'running', 'waiting', 'human'])
@@ -160,8 +174,19 @@ export class BrowserOperationJournal {
   private readonly maxOperations: number
   private readonly maxEvents: number
   private readonly maxSteps: number
-  private readonly onEvent: BrowserOperationJournalListener | undefined
   private warning: string | undefined
+  /**
+   * 事件发号器。每 publish 一条 +1，**本进程生命周期内**单调。
+   *
+   * 不把号写进事件对象：那是落盘格式（版本号钉住的），而号是进程内的概念——重启后事件从盘上读回来，
+   * 谈"接着上次的游标"没有意义（旧号属于上一个进程）。也不另存一份「号 → 事件」的边表：
+   * `trimOperations` 会按 operationId **从中间**滤掉事件（不只从头砍），边表与事件数组会当场错位，
+   * 而错位之后两边各自看起来都正常（本仓的「两个数据源一条生命周期＝鬼影」）。
+   */
+  private sequenced = 0
+  /** 活着的订阅。事件流不许成为控制路径上的闸，所以往它们投递时抛出的异常一律吞掉。 */
+  private readonly subscribers = new Map<number, { operationId: string; deliver: (event: BrowserOperationSequencedEvent) => void }>()
+  private nextSubscriberId = 1
 
   constructor(store: BrowserOperationJournalStore, options: JournalOptions = {}) {
     this.saveStore = store
@@ -170,7 +195,6 @@ export class BrowserOperationJournal {
     this.maxOperations = Math.max(1, Math.floor(options.maxOperations ?? MAX_BROWSER_OPERATIONS))
     this.maxEvents = Math.max(1, Math.floor(options.maxEvents ?? MAX_BROWSER_OPERATION_EVENTS))
     this.maxSteps = Math.max(1, Math.floor(options.maxSteps ?? MAX_BROWSER_OPERATION_STEPS))
-    this.onEvent = options.onEvent
   }
 
   /** Load once. Any unfinished operation is made explicitly indeterminate after a restart. */
@@ -326,6 +350,51 @@ export class BrowserOperationJournal {
     return this.warning
   }
 
+  /**
+   * 订阅一条操作的后续事件。
+   *
+   * **backlog 与实时流互不重叠**：建立订阅的这一刻把已有的事件一次性交出（`backlog`），之后的走
+   * 回调。这与本仓 attach 的 replay/live 取舍是同一条——重叠会让客户端收到重复，而中间留缝会让它
+   * 静默丢事件，两者都无从察觉。
+   *
+   * 缺口的判法是**数出来的，不是猜的**：`sequenced` 记着一共发过多少号，当下还留着多少条事件是
+   * 数组长度。一条在跑的操作若它最早那条事件已经被砍掉，那么"还留着的最早那条的号"必然大于
+   * `afterSequence + 1`，差额就是缺口。
+   *
+   * 查不到那条操作不是错误：答 `operation: null`、空 backlog，并且**仍然建立订阅**——那条 id 可能
+   * 属于一个马上就要开始的操作（调用方先给 id 再发起，正是本 Feature 的设计）。在这里拒绝等于让
+   * "先订阅再发起"这条顺序不可用。
+   */
+  async subscribe(
+    operationId: string,
+    afterSequence: number | undefined,
+    deliver: (event: BrowserOperationSequencedEvent) => void
+  ): Promise<BrowserOperationSubscription> {
+    await this.ready()
+    const id = this.nextSubscriberId++
+    this.subscribers.set(id, { operationId, deliver })
+    // 这条操作已经有过的事件，按它们当时拿到的号算：`document.events` 里属于它的那些，是本进程内
+    // 最后 N 条里的一部分。号从「总共发过 sequenced 个，现存 events.length 条」反推——现存的第 i 条
+    // （从 0 数）拿到的号是 `sequenced - events.length + i + 1`。
+    const total = this.document.events.length
+    const base = this.sequenced - total
+    const mine = this.document.events
+      .map((event, index) => ({ sequence: base + index + 1, event }))
+      .filter(({ event }) => event.operationId === operationId)
+    const cursor = afterSequence ?? 0
+    const backlog = mine.filter(({ sequence }) => sequence > cursor).map(({ sequence, event }) => ({ sequence, event: cloneEvent(event) }))
+    // 缺口：客户端要 cursor 之后的每一条，而我们手上最早的号是 base+1。base 比 cursor 还大，说明
+    // 中间那段（cursor+1 .. base）已经被砍掉了。cursor 为 0（"从头要"）时同样成立——那正是砍过之后
+    // 一个新客户端会遇到的情形。
+    const gap = base > cursor ? { droppedThrough: base } : null
+    return {
+      operation: this.find(operationId) ? cloneOperation(this.find(operationId) as BrowserOperation) : null,
+      gap,
+      backlog,
+      dispose: () => { this.subscribers.delete(id) }
+    }
+  }
+
   private async load(): Promise<void> {
     try {
       const loaded = await this.saveStore.load()
@@ -338,6 +407,8 @@ export class BrowserOperationJournal {
     } catch (error) {
       this.document = emptyDocument()
       this.warning = `Browser activity history is unavailable: ${error instanceof Error ? error.message : String(error)}`
+      // 这条早退臂不必补号：`emptyDocument()` 没有事件，而 `sequenced` 的初值本来就是 0，
+      // 两者已经一致。写一句 `this.sequenced = 0` 只是把同一个事实说两遍。
       return
     }
     let recovered = false
@@ -365,6 +436,14 @@ export class BrowserOperationJournal {
       this.trim()
       await this.persist()
     }
+    // 给从盘上读回来的那些事件补号。**这一步不能漏**：它们没走 `publish()`，所以一个号都没发过，
+    // 而 `subscribe()` 是按「总共发过 sequenced 个、现存 length 条」反推每条的号的——不补的话
+    // `sequenced` 是 0 而 length 是 N，反推出来的起始号是 -N+1，客户端收到一串负号，
+    // 而缺口判据（`base > cursor`）在负数上恒不成立，于是"缺了一段"这件事永远不会被说出来。
+    //
+    // 从 length 起算而不是试图续上上一个进程的号：号是进程内的概念。上一个进程砍掉过多少条，
+    // 这一个进程没有依据知道，所以不假装知道——它只说"我手上这 N 条是 1..N"。
+    this.sequenced = this.document.events.length
   }
 
   private find(operationId: string): BrowserOperation | undefined {
@@ -373,15 +452,17 @@ export class BrowserOperationJournal {
 
   private publish(event: BrowserOperationEvent): void {
     this.document.events.push(cloneEvent(event))
+    // 号从**单调计数器**取，不从 `document.events` 的长度取：号是"这条事件发生了"的标记，不是
+    // "它还留着"的标记。按存活数组算的话，一条刚发出就被 trim 砍掉的事件不占号，于是客户端按号
+    // 算出的缺口会少一条——而它正好是缺了的那条。（这两句与 `++` 和 `trim()` 的先后无关：计数器
+    // 不看数组，两种顺序行为相同。承重的是取号的来源。）
+    const sequence = ++this.sequenced
     this.trim()
-    try {
-      this.onEvent?.(
-        cloneEvent(event),
-        this.find(event.operationId) ? cloneOperation(this.find(event.operationId) as BrowserOperation) : null,
-        this.warning
-      )
-    } catch {
-      // An activity projection is a view of the Browser, never a gate in its control path.
+    for (const subscriber of [...this.subscribers.values()]) {
+      if (subscriber.operationId !== event.operationId) continue
+      // 每个订阅一份自己的拷贝，且各自 try：一个订阅者抛出来不许挡住别的订阅者，也不许挡住控制
+      // 路径——进度是 Browser 的一个视图，不是它的闸。
+      try { subscriber.deliver({ sequence, event: cloneEvent(event) }) } catch { /* 同上 */ }
     }
   }
 
@@ -436,9 +517,17 @@ function clamp(value: string): string {
  *
  * 只压平不删内容：这些字是排障唯一的依据，删了等于让 Agent 面对一次无从下手的失败。压平换行是
  * 因为多行文本能在日志里伪造出「新的一条记录」的样子，而那恰恰是注入想要的形状。
+ *
+ * **判据用 `\p{White_Space}` 而不是手列换行字符**（「禁止清单必漏」）。手列的那版漏了 NEL（U+0085）：
+ * 它不在 `[\r\n\u2028\u2029]` 里，`JSON.stringify` 也不转义它（落盘就是那一个裸字节），而终端和
+ * 多数日志查看器把它当换行渲染——伪造记录边界的能力原封不动地留着，只是换了个字符。
+ *
+ * 注意**连 `\s` 都不够**：`\s` 在 `u` 标志下照样不含 NEL（实测 `/\s/u.test('\u0085') === false`），
+ * 只有 Unicode 的 `White_Space` 属性覆盖得全。这一条不能靠直觉，得实测——这也是为什么这里
+ * 写死属性类而不是字符集。
  */
 function clampProse(value: string): string {
-  return clamp(value.replace(/[\r\n\u2028\u2029]+/gu, ' '))
+  return clamp(value.replace(/\p{White_Space}+/gu, ' ').trim())
 }
 
 function stripUrl(value: string): string {
@@ -486,7 +575,11 @@ function sanitizeStep(step: BrowserOperationStep): BrowserOperationStep {
 function sanitizeTarget(target: BrowserReplayTarget): BrowserReplayTarget {
   return {
     role: clamp(target.role),
-    name: clamp(target.name),
+    // `name` 是页面控制的（AX 可访问名，即 `aria-label`），所以走 `clampProse` 而不是 `clamp`。
+    // 上游 `browser-page-snapshot.ts` 的 `normalizeName` 已经在取值那一刻压平过一次，这里不是
+    // 重复：`sanitizeTarget` 也在 `normalizeDocument` 的路上跑，而那条路读的是**盘上那份**——
+    // 可能是旧版本写的，也可能是被人动过的。持久化边界不能假设写它的那一版有上游的守卫。
+    name: clampProse(target.name),
     ordinal: Number.isInteger(target.ordinal) && target.ordinal >= 1 ? target.ordinal : 1,
     count: Number.isInteger(target.count) && target.count >= 1 ? target.count : 1
   }

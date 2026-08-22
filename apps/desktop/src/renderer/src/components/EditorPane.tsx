@@ -4,6 +4,7 @@ import { AlertTriangle, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from
 import { useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import {
@@ -345,9 +346,8 @@ export function EditorPane({
           const currentKey = documentKey(surface.workspaceId, surface.path)
           const doc = state.documents[currentKey]
           if (!doc) return
-          const workspaceRoot = state.config?.workspaces.find(
-            (item) => item.id === surface.workspaceId
-          )?.path
+          const workspace = state.config?.workspaces.find((item) => item.id === surface.workspaceId)
+          const workspaceRoot = workspace?.path
           if (workspaceRoot === undefined) return
           const selection = ed.getSelection()
           const model = ed.getModel()
@@ -361,7 +361,14 @@ export function EditorPane({
             selectedText: selection && model ? model.getValueInRange(selection) : '',
             fenceLang: detectLanguage(doc.path)
           }
-          void copyTextToClipboard(action.buildText(input), state.reportError)
+          // 只有本机绝对路径动作才缩写 home；相对/行号/上下文块不含 home 前缀，套上去也是 no-op，
+          // 但对非本机 workspace 明确不缩写——本机 home 在对面不存在。
+          const built = action.buildText(input)
+          const text =
+            action.id === 'agentmux.copyAbsolutePath' && workspace?.hostId === 'local'
+              ? applyCopyPathStyle(built, { home: state.localHome, copyPathsAsAbsolute: state.config?.copyPathsAsAbsolute })
+              : built
+          void copyTextToClipboard(text, state.reportError)
         }
       })
     }

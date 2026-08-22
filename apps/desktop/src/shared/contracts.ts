@@ -460,6 +460,16 @@ export type AppConfig = {
    * 真的切了档时发生。密度是看法不是数据，补一次盘只是白写。
    */
   projectRailDensity?: ProjectRailDensity
+  /**
+   * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
+   * 选择的「我要绝对路径」这一档。用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」，
+   * 所以默认值就是缩写，这个开关是 opt-out。
+   *
+   * 可选且**不回填**（同 `appLinkSchemes` / `projectRailDensity`）：既有磁盘 config 没有它，缺席
+   * 与默认（缩写）语义完全一样，补一次盘只是白写；读处一律 `=== true` 判绝对档。落盘只在用户真的
+   * 勾了绝对路径时发生。
+   */
+  copyPathsAsAbsolute?: boolean
 }
 
 export type FileDocument = {
@@ -892,6 +902,14 @@ export type RuntimeSnapshot = {
   runtimeOwnershipWarnings?: string[]
   /** Non-secret, app-lifetime notice for incomplete local shell environment loading. */
   environmentWarning?: string
+  /**
+   * Absolute path of the local machine's home directory, merged in at the ipc layer (same shape as
+   * `environmentWarning`: a main-process fact, not something `RuntimeController` produces). The renderer
+   * has no `process`/`os` access, so this is how it learns the real home value — the one input the copy
+   * path abbreviation (`~`) is allowed to test against. Absent when unknown; the renderer then does not
+   * abbreviate rather than guessing.
+   */
+  localHome?: string
   sessions: SessionSnapshot[]
   timelines: Record<string, AgentTimelineSnapshot>
   recoveryCandidates: AgentSessionRecoveryCandidate[]
@@ -1401,12 +1419,32 @@ export type AgentMuxDesktopApi = {
      * 这是 Main 侧唯一对外暴露的驱动入口——页面能力（snapshot/click/...）是注入给那段程序的内部函数库，
      * 不在这个契约上，所以改它们不动这里。
      */
-    runScript(id: string, code: string, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
+    runScript(id: string, code: string, operator?: BrowserOperator, operationId?: string): Promise<BrowserScriptRunReport>
     listOperationHistory(): Promise<BrowserOperation[]>
+    /**
+     * 读一条操作的当下事实，凭 operationId。
+     *
+     * 与 `listOperationHistory` 的分工不是「一条 vs 多条」：后者按 Browser 列（要先知道是哪个
+     * Browser），这条只要 id。一条连接断了之后，另一条手上往往只有 id。
+     *
+     * 查不到答 `null`——那是一次成功的回答，不是错误：id 可能来自另一台机器，或早被日志轮转掉了。
+     */
+    getOperation(operationId: string): Promise<BrowserOperation | null>
+    /**
+     * 停下一个在飞的操作，凭 operationId，**与哪个 Browser、哪条连接无关**。
+     *
+     * **取消的唯一入口。** 这里曾经有第二条 `stopOperation(id)`（按 browserId 停「这一页上正在跑的
+     * 那个」，服务 UI 上的停止按钮）。它被删掉了：UI 那颗按钮现在经协议走同一条路，于是两套寻址
+     * 塌成一套。按 operationId 是承重的选择——一条操作的寿命长于任何一条连接，也长于那张 Tab，
+     * 而 browserId 只在「这一页还在」的时候有意义。
+     *
+     * 返回那条操作的当下事实：取消一个已经结束的操作也算成功，所以「成功」本身不足以告诉调用方
+     * 发生了什么——它需要知道停的是个在跑的（现在 stopped）还是撞上了刚跑完的（仍是 completed）。
+     */
+    stopOperationById(operationId: string): Promise<BrowserOperation | null>
     replayPlan(operationId: string): Promise<BrowserReplayPlan | null>
     runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
     returnControl(id: string): Promise<BrowserSnapshot>
-    stopOperation(id: string): Promise<BrowserSnapshot>
     selectElement(id: string): Promise<BrowserElementSelection | null>
     /**
      * 回答这一页上待答的那个应用链接提问。`remember` 为真时把这个答案按 scheme 记进

@@ -53,9 +53,10 @@ export const PRIVILEGED_SENDER_LABELS = {
   // 发送者都能在用户已登录的页面上做任意操作。
   'browser:runScript': 'Browser automation',
   'browser:listOperationHistory': 'Browser activity history',
+  'browser:getOperation': 'Browser activity history',
   'browser:replayPlan': 'Browser replay plan',
   'browser:returnControl': 'Browser handoff',
-  'browser:stopOperation': 'Browser handoff',
+  'browser:stopOperationById': 'Browser handoff',
   'browser:runReplay': 'Browser replay',
   [CONTROL_RESPONSE_CHANNEL]: 'control response'
 } as const

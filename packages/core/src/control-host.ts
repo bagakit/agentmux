@@ -14,6 +14,9 @@ import {
   type AgentMuxControlBrowserRunOutcome,
   type AgentMuxControlBrowserOperation,
   type AgentMuxControlBrowserReplayPlan,
+  type AgentMuxControlBrowserEvent,
+  type AgentMuxControlBrowserSubscribeRequest,
+  type AgentMuxControlBrowserSubscription,
   type AgentMuxControlHost,
   type AgentMuxControlErrorReceipt,
   type AgentMuxControlErrorCode,
@@ -49,7 +52,13 @@ function object(value: unknown, message: string, code: string): Record<string, u
 }
 
 function id(value: unknown, message: string, code: string): string {
-  if (typeof value !== 'string' || !value || Buffer.byteLength(value) > MAX_ID_BYTES || /[\0\r\n]/u.test(value)) {
+  // 纯空白与空串同罪，且判在**这一处**而不是某一条解析臂里：这个 helper 是全部 id 的必经之路
+  // （requestId、regionId、browserId、operationId……），在一条臂上补判等于给别的臂留同一个洞。
+  //
+  // 为什么空白不是"看起来不好看"而是真缺陷：下游按 `input.id?.trim() || mint()` 消费一个 id 时，
+  // `'  '` 会 trim 成空串从而落回铸造——调用方手上的 id 与记录里的那个不是同一个，而两边各自
+  // 看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > MAX_ID_BYTES || /[\0\r\n]/u.test(value)) {
     throw new AgentMuxError(message, code)
   }
   return value
@@ -253,14 +262,34 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     // caller 是可选的：CLI 直接发一条也合法（那时没有 managed caller）。没有 self 语义，所以不像别的
     // 操作那样需要"self 必须配 caller"那道闸——browserId 永远是显式的。
     const owner = optionalCaller(source.caller)
+    // 走 text 而不是 id：程序是多行的，`id` 会因为换行直接拒掉。上限同样是 MAX_MESSAGE_BYTES——
+    // 一段 256KB 的调试程序已经远超任何合理规模，再大应该写成文件。
+    const code = text(source.code, 'Browser script')
+    // **空程序在协议层就拒，不在 CLI 里。** 放它过去的话，回执是一份「跑完了、什么都没发生」的成功，
+    // 与真的跑完一段什么都不做的程序在回执上完全无法区分（AGENTS.md:32-52 明令不许发这种结局）。
+    // 规则住在这一层，CLI、编辑器、将来任何直连客户端就都经同一条；写在 CLI 里的话，只有走 CLI
+    // 那一条路被拦住，别的客户端照旧拿到那次不确定的成功。空白不算内容，所以判的是 trim 之后。
+    if (code.trim() === '') {
+      // 文案要对**两种调用方**都可执行，因为这一层两种都服务：走 CLI 的人忘了接管道，直连协议的
+      // 客户端把 `code` 设成了空串。给一种人看得懂的话，另一种人就只能猜——所以一句话点两条路。
+      throw new AgentMuxError(
+        'Browser script is empty. Pipe it in, for example: agentmux browser run --browser <id> < script.js — or set `code` to the program text.',
+        'INVALID_CONTROL_REQUEST'
+      )
+    }
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId,
       operation: source.operation,
       browserId: identity(source.browserId, 'Browser target is invalid.', 'INVALID_CONTROL_REQUEST'),
-      // 走 text 而不是 id：程序是多行的，`id` 会因为换行直接拒掉。上限同样是 MAX_MESSAGE_BYTES——
-      // 一段 256KB 的调试程序已经远超任何合理规模，再大应该写成文件。
-      code: text(source.code, 'Browser script'),
+      code,
+      // 调用方给的 identity（可选）。给了就用它，因为「在飞期间凭 id 查询/取消」要求调用方在请求发出去
+      // 之前就知道这个 id——一问一答的 framing 下，主进程铸的 id 只能随终局回执露出，那时已无可取消。
+      // 走 identity() 与 browser.stop / browser.operation 那两条同一条判据：三处读同一个 id，
+      // 校验必须只有一份，否则「发得进去但查不出来」这种分岔会静默存在。
+      ...(source.operationId === undefined
+        ? {}
+        : { operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(owner ? { caller: owner } : {})
     }
   }
@@ -278,11 +307,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (mode !== 'preview' && mode !== 'step' && mode !== 'run') {
       throw new AgentMuxError('Browser replay mode is invalid.', 'INVALID_CONTROL_REQUEST')
     }
-    const step = source.step === undefined
-      ? undefined
-      : finiteNumber(source.step, 'Browser replay step is invalid.')
-    if (step !== undefined && (!Number.isInteger(step) || step < 1)) {
-      throw new AgentMuxError('Browser replay step is invalid.', 'INVALID_CONTROL_REQUEST')
+    // step 的校验**只在这一处**。此前 CLI（agentmux.ts）也用正则各判一遍、拿自己的
+    // `INVALID_CLI_ARGUMENT` 拒同一个输入，于是同一个非法 step 经两条路得到两个错误码——机读侧
+    // 分不出「这是我给错了」还是「命令打错了」。CLI 现在只做 flag 形状解析（字符串转数字），
+    // 取值合法性归这里。
+    //
+    // 一次判完，不先过 `finiteNumber`：`Number.isInteger` 对 NaN / Infinity 同样为 false，
+    // 分两步只会让「非数字」落到 CONTROL_PROTOCOL_ERROR 而「0」落到 INVALID_CONTROL_REQUEST——
+    // 同一件事（你给的 step 不能用）长出两个码。
+    const step = source.step === undefined ? undefined : source.step
+    if (step !== undefined && (typeof step !== 'number' || !Number.isInteger(step) || step < 1)) {
+      throw new AgentMuxError('Browser replay step is invalid. It must be a whole number, 1 or greater.', 'INVALID_CONTROL_REQUEST')
     }
     if (mode === 'step' && step === undefined) {
       throw new AgentMuxError('Browser replay step is required for step mode.', 'INVALID_CONTROL_REQUEST')
@@ -296,6 +331,42 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       mode,
       ...(step === undefined ? {} : { step }),
       ...(owner ? { caller: owner } : {})
+    }
+  }
+  if (source.operation === 'browser.stop') {
+    const owner = optionalCaller(source.caller)
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      // 没有 browserId：id 本身定位到那一个操作。走 identity() 而不是 text()：id 是一个标识符，
+      // 换行和空白在里面没有意义，而 `self` 这类保留选择器同样要被拒——没有哪个操作叫 self。
+      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      ...(owner ? { caller: owner } : {})
+    }
+  }
+  if (source.operation === 'browser.operation') {
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+  }
+  if (source.operation === 'browser.subscribe') {
+    // 游标判在这一层，不在承载方：一个负数或小数序号根本不可能对应任何一条事件，让它穿过去的结果是
+    // 承载方拿它做比较，于是「从头开始发」和「什么都不发」取决于那边碰巧怎么写比较符——同一个非法
+    // 输入在两个实现上给出两种行为。`0` 是合法的（等于"从第一条开始"），所以判的是负与非整数。
+    const cursor = source.afterSequence
+    if (cursor !== undefined && (typeof cursor !== 'number' || !Number.isSafeInteger(cursor) || cursor < 0)) {
+      throw new AgentMuxError('Browser subscribe cursor is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      ...(cursor === undefined ? {} : { afterSequence: cursor })
     }
   }
   // 穷尽出口。此前 focus 是这条 if 链**没有条件的尾巴**，于是第 14 个操作（已过 membership 闸，因为它
@@ -482,7 +553,57 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       result: { mode, result: result.result, logs: scriptLogs(result.logs), outcome: browserRunOutcome(result.outcome), runOperation: browserOperation(result.runOperation) }
     }
   }
+  if (operation === 'browser.stop' || operation === 'browser.operation') {
+    // 两条的回执形状相同（一个可为 null 的 operation），所以合成一条臂：分开写两遍同样的解析是
+    // 第二份事实，改一处忘另一处时两条会对同一份 wire 数据给出不同答案。
+    //
+    // `null` 必须是**合法答案**而不是解析失败：查不到那条 id 是一次成功的回答（id 可能来自另一台机器、
+    // 或早被日志轮转掉了）。把它读成协议错误会让调用方以为 Browser 坏了——RED-LINES 第 2 类。
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      ok: true,
+      operation,
+      result: {
+        runOperation: result.runOperation === null || result.runOperation === undefined
+          ? null
+          : browserOperation(result.runOperation)
+      }
+    }
+  }
+  if (operation === 'browser.subscribe') {
+    // 不并进上面那条合成臂，尽管 `runOperation` 的读法一模一样：这一支多一个 `gap`，而 `gap` 的取舍
+    // 与 `runOperation` 的相反——缺席的 `runOperation` 是合法的「查不到」，缺席的 `gap` 必须读成
+    // `null`（没有缺口）**且不许缺省成一个假的缺口**。合到一起写的话，`gap` 只能靠一个可选字段挂在
+    // 那条臂上，于是 `browser.stop` 的回执里凭空出现一个 `gap` 字段——那是把两件事写进一个形状。
+    const gap = result.gap
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      ok: true,
+      operation,
+      result: {
+        runOperation: result.runOperation === null || result.runOperation === undefined
+          ? null
+          : browserOperation(result.runOperation),
+        // 缺席 = 没有缺口。有值时 `droppedThrough` 必须真的读出来并校验：这个数字是客户端判断
+        // 「我手上这份时间线不完整」的唯一依据，读不出来时**抛**而不是折成 null——把一个读不懂的
+        // 缺口标记折成"没有缺口"，等于替服务端撒一个它没说的谎。
+        gap: gap === null || gap === undefined
+          ? null
+          : { droppedThrough: sequence(object(gap, 'Control browser subscribe gap is invalid.', 'CONTROL_PROTOCOL_ERROR').droppedThrough) }
+      }
+    }
+  }
   return assertUnhandledReceipt(operation)
+}
+
+/** 事件序号的线上读法。非安全整数或负数都抛——游标算错的后果是静默丢事件，不是一次显眼的失败。 */
+function sequence(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new AgentMuxError('Control browser event sequence is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return value
 }
 
 function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
@@ -651,6 +772,16 @@ async function socketIsActive(path: string): Promise<boolean> {
 
 export class AgentMuxControlServer {
   private server: Server | null = null
+  /**
+   * 还开着的事件流 socket。
+   *
+   * 记这一份是因为 `server.close()` 只停止接受新连接，**并等已有连接自己结束**——而一条事件流按定义
+   * 不会自己结束（它等的是那个操作有进展）。于是不记这份账的话，`stop()` 永远不返回：应用关不掉，
+   * 测试也挂死。实测过（node 直接跑）：开一条订阅之后 `stop()` 一直不 resolve。
+   *
+   * 一问一答那些连接不进这个集合，它们本来就会立刻结束——把它们也记进来只会多一份要维护的账。
+   */
+  private readonly streams = new Set<Socket>()
   constructor(private readonly control: AgentMuxControlHost, readonly path = defaultAgentMuxControlSocketPath()) {}
 
   async start(): Promise<void> {
@@ -668,6 +799,11 @@ export class AgentMuxControlServer {
   async stop(): Promise<void> {
     const server = this.server; this.server = null
     if (!server) return
+    // 先关掉还开着的流，再等 close()。顺序是承重的：`close()` 等的是所有现有连接结束，而事件流
+    // 不会自己结束，所以反过来写就是永远等下去。销毁 socket 会触发它的 'close'，那条路上挂着
+    // 订阅的退订——所以承载方那侧也一起清掉，不留悬空监听。
+    for (const socket of [...this.streams]) socket.destroy()
+    this.streams.clear()
     await new Promise<void>((resolve) => server.close(() => resolve())); await rm(this.path, { force: true })
   }
 
@@ -684,6 +820,7 @@ export class AgentMuxControlServer {
       raw = await readMessage(socket)
       const request = parseAgentMuxControlRequest(raw)
       socket.setTimeout(agentMuxControlTimeoutMs(request.operation))
+      if (request.operation === 'browser.subscribe') { await this.stream(socket, request); return }
       receipt = successReceipt(request, await this.control.execute(request))
     } catch (error) {
       const identity = requestIdentity(raw)
@@ -704,6 +841,87 @@ export class AgentMuxControlServer {
       }
     }
     if (!socket.destroyed) socket.end(`${JSON.stringify(receipt)}\n`)
+  }
+
+  /**
+   * 一问多答那条路径。它是**独立的一支**，不是把上面那条改宽：`readMessage` 一个字节都没动，其余
+   * 14 个操作的 framing 假设（读到第一个换行就是全部、之后还有字节就是协议错）原样成立。
+   *
+   * 这里与上面那条的三处差别，每一处都有它非这样不可的理由：
+   *
+   * 1. **不设操作预算。** 上面每条请求都有超时，因为「等一个答案等太久」确实是故障。这里没有：
+   *    一个操作安静十分钟是正常的（页面在等人操作），把它判成超时会把健康的订阅杀掉。socket 的
+   *    存活由两端自己管——客户端不想要了就关，操作结束了服务端就关。
+   * 2. **开场帧之后不 `end()`。** `end()` 会发 FIN，客户端读到流结束就认为订阅没了。
+   * 3. **退订挂在 socket 的三个终止事件上，不只是 `close`。** 少挂一个的后果不是少清理一次：
+   *    承载方那边的监听留着，而它持有的是对已死 socket 的写入闭包，于是每条新事件都往一个关掉的
+   *    socket 写——EPIPE 会被 `try` 吃掉，看起来一切正常，实际上泄漏一条订阅。
+   */
+  private async stream(socket: Socket, request: AgentMuxControlBrowserSubscribeRequest): Promise<void> {
+    // 预算清零：`setTimeout(0)` 关掉超时（Node 的语义），不是"立刻超时"。
+    socket.setTimeout(0)
+    const write = (payload: unknown): void => {
+      // `destroyed` 判在写之前而不是靠 catch：写一个已销毁的 socket 在 Node 里是**异步**报错
+      // （'error' 事件），catch 抓不到它，于是"写失败了"这件事会绕过这里流到进程的未处理错误上。
+      if (socket.destroyed || socket.writableEnded) return
+      socket.write(`${JSON.stringify(payload)}\n`)
+    }
+    if (!this.control.subscribeBrowserOperation) {
+      // 能力协商的回答，不是故障：这个宿主不提供进度订阅。用一条错误回执答完就关——它是一问一答的
+      // 形状，因为这条连接根本没成为一条流。
+      const receipt: AgentMuxControlErrorReceipt = {
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: request.requestId,
+        ok: false,
+        operation: request.operation,
+        error: { code: 'BROWSER_SUBSCRIBE_UNSUPPORTED', message: 'Control owner does not provide Browser progress subscriptions.' }
+      }
+      if (!socket.destroyed) socket.end(`${JSON.stringify(receipt)}\n`)
+      return
+    }
+    let subscription: AgentMuxControlBrowserSubscription
+    try {
+      subscription = await this.control.subscribeBrowserOperation(request, (event) => {
+        write({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, event: 'progress', result: event })
+      })
+    } catch (error) {
+      // `MESSAGE_TARGET_NOT_UNIQUE` 要带 candidates 才是合法错误，而订阅路径上不可能产生它
+      // （它讲的是"哪个 Agent"不唯一，这里根本没有 target）。所以把它折到 CONTROL_FAILED，
+      // 而不是编一份空的 candidates 交出去——那会让客户端拿着一个空列表去消歧。
+      const raw = controlErrorCode(typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined)
+      const code = raw === 'MESSAGE_TARGET_NOT_UNIQUE' ? 'CONTROL_FAILED' : raw
+      const receipt: AgentMuxControlErrorReceipt = {
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: request.requestId,
+        ok: false,
+        operation: request.operation,
+        error: { code, message: error instanceof Error ? error.message : String(error) }
+      }
+      if (!socket.destroyed) socket.end(`${JSON.stringify(receipt)}\n`)
+      return
+    }
+    let disposed = false
+    const dispose = (): void => {
+      if (disposed) return
+      disposed = true
+      this.streams.delete(socket)
+      // **必须自己 destroy**，不能指望对方关了这条就没了：server 是 `allowHalfOpen: true` 建的，
+      // 所以客户端发来 FIN（'end'）之后这条 socket 仍然是可写的、仍然算一条活着的连接。一问一答那条
+      // 路径不受影响——它自己调 `socket.end()`。而流永远不调 end，于是不在这里 destroy 的话，
+      // 客户端退订之后服务端这一侧会**半开着挂到进程结束**，`server.close()` 跟着永远不返回。
+      if (!socket.destroyed) socket.destroy()
+      // 承载方的 dispose 抛出来不许冒泡：这是清理路径，而抛在这里会变成一个没人接的 socket 事件
+      // 处理器异常。订阅泄漏是个问题，但把它变成进程级未处理错误是更大的那个。
+      try { subscription.dispose() } catch { /* 清理失败不改变「这条连接已经结束」这个事实 */ }
+    }
+    socket.once('close', dispose); socket.once('end', dispose); socket.once('error', dispose)
+    this.streams.add(socket)
+    // 开场帧：缺口在这一帧就说出来，早于任何一条事件。客户端读到它才知道自己手上这份时间线完不完整。
+    write(successReceipt(request, {
+      operation: request.operation,
+      runOperation: subscription.runOperation,
+      gap: subscription.gap
+    }))
   }
 }
 
@@ -737,4 +955,84 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
     }
   )
   return receipt
+}
+
+/**
+ * 客户端侧的订阅读法。与 {@link requestAgentMuxControl} 是两个函数而不是一个带 flag 的：那条读**一条**
+ * 消息然后销毁 socket（`readMessage` 的语义就是这样），流要读到很多条。合成一个的话，那个 flag 会在
+ * 函数体里长出两条几乎不相交的路径，而其中一条会悄悄继承另一条的超时与销毁时机。
+ *
+ * 返回开场帧（含缺口）与一个退订函数。事件从 `onEvent` 出来。流结束（服务端关闭、操作收尾）走 `onEnd`。
+ *
+ * **不在这里重连**。断线之后该不该接着订、从哪个序号接着订，是调用方的决定——它手上才有"我还关心这条
+ * 操作吗"这个信息。在这一层偷偷重连会让一次网络断开变成一条看起来从未中断的流，而客户端已经错过了
+ * 中间那段事件却以为自己什么都没漏。
+ */
+export async function subscribeAgentMuxControl(
+  value: AgentMuxControlBrowserSubscribeRequest,
+  handlers: {
+    onEvent(event: AgentMuxControlBrowserEvent): void
+    onEnd?(reason: 'closed' | 'error', error?: Error): void
+  },
+  path = defaultAgentMuxControlSocketPath()
+): Promise<{ runOperation: AgentMuxControlBrowserOperation | null; gap: { droppedThrough: number } | null; dispose(): void }> {
+  const parsed = parseAgentMuxControlRequest(value)
+  if (parsed.operation !== 'browser.subscribe') throw new AgentMuxError('Control subscribe request is invalid.', 'INVALID_CONTROL_REQUEST')
+  const socket = createConnection(path)
+  // 开场帧之前有预算（连不上/对方不答要失败得干脆），拿到之后清零——见 stream() 里同一条理由。
+  socket.setTimeout(agentMuxControlTimeoutMs(parsed.operation), () => socket.destroy(new AgentMuxError('Control request timed out.', 'CONTROL_TIMEOUT')))
+  const dispose = (): void => { if (!socket.destroyed) socket.destroy() }
+  try {
+    return await new Promise((resolve, reject) => {
+      let opened = false
+      let buffer = ''
+      const fail = (error: Error): void => { socket.destroy(); if (opened) handlers.onEnd?.('error', error); else reject(error) }
+      socket.once('connect', () => socket.write(`${JSON.stringify(parsed)}\n`))
+      socket.once('error', (error: NodeJS.ErrnoException) => {
+        if (error instanceof AgentMuxError) fail(error)
+        else if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') fail(new AgentMuxError('Control owner is unavailable.', 'CONTROL_UNAVAILABLE'))
+        else if (error.code === 'EPIPE' || error.code === 'ECONNRESET') fail(new AgentMuxError('Control connection closed prematurely.', 'CONTROL_PROTOCOL_ERROR'))
+        else fail(error)
+      })
+      // 流结束是正常结局，不是错误：操作跑完了服务端就关。开场帧还没拿到就断掉才是失败。
+      socket.once('close', () => { if (opened) handlers.onEnd?.('closed'); else reject(new AgentMuxError('Control connection closed prematurely.', 'CONTROL_PROTOCOL_ERROR')) })
+      socket.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8')
+        // 按换行切，**逐行**处理：一次 TCP 读里可能带着好几条事件，也可能带着半条。把半条留在
+        // buffer 里等下一块——这正是 `readMessage` 不能复用的地方（它读到第一个换行就收工，
+        // 并且把后面的字节当协议错）。
+        let newline = buffer.indexOf('\n')
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline)
+          buffer = buffer.slice(newline + 1)
+          newline = buffer.indexOf('\n')
+          if (!line.trim()) continue
+          let frame: unknown
+          try { frame = JSON.parse(line) as unknown } catch { fail(new AgentMuxError('Control message is invalid JSON.', 'CONTROL_PROTOCOL_ERROR')); return }
+          const source = frame as Record<string, unknown>
+          if (!opened) {
+            // 第一帧走完整的回执解析（含错误回执：能力不支持就从这里抛出去）。
+            const receipt = parseAgentMuxControlReceipt(frame)
+            if (receipt.requestId !== parsed.requestId || receipt.operation !== parsed.operation) {
+              reject(new AgentMuxError('Control receipt does not match its request.', 'CONTROL_PROTOCOL_ERROR')); socket.destroy(); return
+            }
+            if (!receipt.ok) { reject(Object.assign(new AgentMuxError(receipt.error.message, receipt.error.code), { requestId: receipt.requestId, operation: receipt.operation })); socket.destroy(); return }
+            // 判在 `receipt.operation` 上而不是 `receipt.result`：`result` 的类型是 `Omit<…, 'operation'>`
+            // （判别键在外层），在它上面找 operation 是 TS2551。用字面量比较也顺手把上面那次
+            // `!== parsed.operation` 的收窄补齐——两处判的是同一件事，但只有这一处能收窄 result。
+            if (receipt.operation !== 'browser.subscribe') { reject(new AgentMuxError('Control receipt does not match its request.', 'CONTROL_PROTOCOL_ERROR')); socket.destroy(); return }
+            opened = true
+            socket.setTimeout(0)
+            resolve({ runOperation: receipt.result.runOperation, gap: receipt.result.gap, dispose })
+            continue
+          }
+          // 之后每一帧是一条事件。序号走同一个校验函数（`sequence`），不在这里另写一遍比较——
+          // 游标算错的后果是静默丢事件，而两处各判一遍正是它漂移的来路。
+          if (source.event !== 'progress') { fail(new AgentMuxError('Control stream frame is invalid.', 'CONTROL_PROTOCOL_ERROR')); return }
+          const result = object(source.result, 'Control stream frame is invalid.', 'CONTROL_PROTOCOL_ERROR')
+          handlers.onEvent({ sequence: sequence(result.sequence), event: result.event })
+        }
+      })
+    })
+  } catch (error) { dispose(); throw error }
 }

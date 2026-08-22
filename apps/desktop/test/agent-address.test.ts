@@ -296,7 +296,17 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       // 不是寻址失败，而且它的原始 message 已经点名了唯一那条下一步（"Turn it on in
       // Settings › Browser."，可达性由 browser-automation-setting-reachable.test.ts 单独证明）。
       // 再叠一句 addressingRecovery 的"换个地址试试"只会盖掉那句真能走的。
-      'BROWSER_AUTOMATION_DISABLED'
+      'BROWSER_AUTOMATION_DISABLED',
+      // 同上一条的理由：都不是寻址失败，而且各自的 message 已经点名了唯一那条下一步。
+      //
+      // `BROWSER_SUBSCRIBE_UNSUPPORTED` 是能力协商的答案——这一端不提供进度订阅，换个地址不会让它
+      // 提供。恢复动作在宿主那边（实现 `subscribeBrowserOperation`），不在调用方手上。
+      //
+      // `BROWSER_HUMAN_CONTROL_ACTIVE` 的恢复动作是**人明确交还控制**，这条由设计约束钉死
+      // （「恢复只能由人明确发起；Agent 不得靠重试静默夺回页面」）。给它叠一句"换个地址试试"
+      // 正好是在教 Agent 做那件被禁的事。
+      'BROWSER_SUBSCRIBE_UNSUPPORTED',
+      'BROWSER_HUMAN_CONTROL_ACTIVE'
     ]
 
     for (const code of AGENTMUX_CONTROL_ERROR_CODES) {
