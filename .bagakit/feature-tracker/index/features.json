@@ -1900,7 +1900,7 @@
     {
       "feat_id": "f-29c8ftkwt",
       "title": "Project Rail pinned child styling and density",
-      "status": "in_progress",
+      "status": "done",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1940,7 +1940,7 @@
     {
       "feat_id": "f-29g8fagv4",
       "title": "Terminal and conversation restore",
-      "status": "in_progress",
+      "status": "done",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
