@@ -569,7 +569,7 @@ type AppState = {
    * （`initialWorkbenchRegionId(fileTabId(...))`），所以这里在 openFile 之后据同一规则算出它、再 setEditorRegionMode，
    * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
    */
-  openFileDiff(path: string): Promise<void>
+  openFileDiff(path: string, workspaceId?: string): Promise<void>
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
@@ -3360,8 +3360,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async reloadRegionDiff(regionId, workspaceId, path) {
     await loadRegionDiff(regionId, workspaceId, path)
   },
-  async openFileDiff(path) {
-    const workspaceId = get().activeWorkspaceId
+  async openFileDiff(path, requestedWorkspaceId) {
+    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) return
     // 同 createNote：把开头解析出来的那一个显式传下去。下面 regionId 是按这个 workspaceId 派生的，
     // 若 openFile 自己重读活动 Workspace，两者就会指向不同的 Workspace——文件在 A 打开、diff 模式

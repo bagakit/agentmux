@@ -1,9 +1,10 @@
 import { AlertCircle, CheckCircle2, CircleDot, Inbox, PlayCircle, RotateCcw, Users } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, type RosterRow } from '../lib/agent-roster'
 import { isNeedsYouState } from '../lib/attention-vocabulary'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { AttentionRequestPanel } from './AttentionRequestPanel'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
 
@@ -21,7 +22,7 @@ function bucketFor(row: RosterRow): AgentBucket {
   return 'working'
 }
 
-function AgentInboxRow({ row, onSelect }: { row: RosterRow; onSelect: (id: string) => void }) {
+function AgentInboxRow({ row, onSelect, onInspect }: { row: RosterRow; onSelect: (id: string) => void; onInspect: (id: string) => void }) {
   return (
     <button
       type="button"
@@ -38,7 +39,15 @@ function AgentInboxRow({ row, onSelect }: { row: RosterRow; onSelect: (id: strin
       </span>
       {row.awaitingReply ? <span className="global-agents-row__reply">Reply</span> : null}
       <AgentProviderIcon providerId={row.providerId} size={16} />
-      <span className="global-agents-row__open" aria-hidden="true">Open <RotateCcw size={12} /></span>
+      {row.awaitingReply ? (
+        <span
+          role="button"
+          tabIndex={0}
+          className="global-agents-row__open"
+          onClick={(event) => { event.stopPropagation(); onInspect(row.sessionId) }}
+          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onInspect(row.sessionId) } }}
+        >Review here <RotateCcw size={12} /></span>
+      ) : <span className="global-agents-row__open" aria-hidden="true">Open <RotateCcw size={12} /></span>}
     </button>
   )
 }
@@ -47,6 +56,7 @@ export function GlobalAgentsSurface() {
   const sessions = useAppStore((state) => state.sessions)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const selectSession = useAppStore((state) => state.selectSession)
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const rows = useMemo(() => buildAgentRoster({ sessions, providerCatalog }), [sessions, providerCatalog])
   const groups = useMemo(() => {
     const grouped: Record<AgentBucket, RosterRow[]> = { 'needs-you': [], working: [], done: [], error: [] }
@@ -77,13 +87,14 @@ export function GlobalAgentsSurface() {
               <section key={bucket} className="global-agents-group" data-bucket={bucket}>
                 <header className="global-agents-group__header"><span><Icon size={14} /><strong>{meta.label}</strong><small>{meta.description}</small></span><em>{bucketRows.length}</em></header>
                 <div className="global-agents-group__rows">
-                  {bucketRows.map((row) => <AgentInboxRow key={row.sessionId} row={row} onSelect={selectSession} />)}
+                  {bucketRows.map((row) => <AgentInboxRow key={row.sessionId} row={row} onSelect={selectSession} onInspect={setSelectedRequestId} />)}
                 </div>
               </section>
             )
           })}
         </div>
       )}
+      {selectedRequestId ? <AttentionRequestPanel sessionId={selectedRequestId} onClose={() => setSelectedRequestId(null)} /> : null}
     </section>
   )
 }

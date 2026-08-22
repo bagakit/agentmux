@@ -49,4 +49,15 @@ describe('Session result review strip', () => {
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
     expect(container.textContent).toContain('Waiting for a Diff or Browser preview target.')
   })
+
+  it('offers each explicitly mentioned HTTP or HTTPS preview and routes to the existing Browser owner', async () => {
+    const openHttpLink = vi.fn(() => Promise.resolve())
+    useAppStore.setState({ openHttpLink: openHttpLink as never, config: { workspaces: [{ id: 'repo', path: '/repo', name: 'Repo', hostId: 'local', kind: 'folder' }] } as never })
+    const items = [{ id: 'assistant-1', kind: 'assistant_message', content: 'Preview http://127.0.0.1:4173 and https://preview.example.test', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
+    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    const previews = [...container.querySelectorAll('button')].filter((button) => button.textContent?.includes('Preview'))
+    expect(previews).toHaveLength(2)
+    await act(async () => previews[0]!.click())
+    expect(openHttpLink).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/^https?:\/\//), 'tab')
+  })
 })
