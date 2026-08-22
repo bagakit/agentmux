@@ -1209,7 +1209,7 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 ### Agents、Session 与 Board 的全局入口（2026-09-22）
 
 - 当前产品明确区分三种全局工作面：**Agents** 展示 Agent/Executor 的聚合与状态，**Session** 展示具体会话与它们的上下文，**Board** 展示 Demand 计划与执行关联。Demand 卡不能因为带有 Session 就改名成 Agent，Session 也不能作为 Board 的隐含主实体。
-- 三种工作面使用同一组全局切换入口，切换只改变中心工作面的投影，不改变当前 Project、Workspace 或 Session 的持久身份。底部中央是主切换位置；右上角不再放一套平级的 Agents/Session/Board 导航。
+- 三种工作面使用同一组全局切换入口，切换只改变中心工作面的投影，不改变当前 Project、Workspace 或 Session 的持久身份。底部中央是主切换位置；右上角不再放一套平级的 Agents/Session/Board 导航。 这条约束同样覆盖 Session 的单 Tab Group 标签栏与多 Tab Group 分屏顶栏，两者都不得再渲染主视图切换。
 - Board 选中 Demand 后可以在右侧展开关联 Session Region；这只是 Demand 的执行投影。Agents 与 Session 选中对象的详情沿用同一右侧工作区语义，不能通过“把右面板搬到左面板”来表达未分屏状态。
 - 没有分屏时，左右栏只表达真实存在的内容：没有右侧详情就保持主工作面全宽，不能把右侧内容视觉上推到左侧或反向滑入，造成方向与焦点错觉。分屏布局只在存在两个可见 Region 时启用对应的 arrangement。
 - 切换入口必须可键盘操作、保留当前选中项和可恢复焦点；重启恢复后先恢复三种工作面的选择，再尝试恢复其中引用的 Session/Demand 投影。
@@ -1249,6 +1249,19 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 - **终端路径的右键菜单要回答“去哪里找它”。** 指针停在已识别的文件路径上时，右键菜单提供平台对应的 `Reveal in Finder`、`Reveal in File Explorer` 或 `Reveal in File Manager`；系统可处理的文件额外提供打开动作。右键普通输出、拖选文本或无法归一化的路径不显示这些动作。揭示和打开都复用 Main 的 Workspace 文件安全边界，不能把绝对路径直接从 Renderer 交给系统。
 - **文件路径和 HTTP 链接是两条不同的出口。** HTTP(S) 仍进入 Browser 的目的地选择；只有归一化成功的本地 Workspace 文件路径才进入系统文件动作。系统动作失败必须以可读错误浮现，不能静默退回编辑器 Tab。
 
+### 状态投影、Browser 页面与 Scratch Topic 工作面（2026-09-22）
+
+- Agent 的进程已经停止、正常退出或退出原因未知时，不能因为流程告警或投递检查失败而显示成红色错误。只有 Core 给出真实崩溃、非零退出或明确故障事实时才进入 error；连接丢失单独显示为 disconnected。左侧 Project 树继续显示 idle Session 数量，头像和 Executor 角标不因此常驻亮起。
+- Browser 的控制权提示只是页面旁边的辅助信息。`Browser ready`、`You have control` 之类的提示不能替代、覆盖或把真实页面变成空白控制面；没有进行中的操作或控制权交接时不显示占位提示，页面仍由 Main-owned Browser surface 承载。
+- Scratch / Topic 列表是工作区导航的一等内容：Scratch 是父级工作面，Topic 是可辨识的子项。Topic 行采用更紧凑但完整的标题、更新时间/打开状态和可见操作区；选中、hover、空列表、新建和恢复状态都要有一致的反馈，不能依赖一张已经失效的装饰卡片。Topic 与对应工作区的关系在树中可追踪，重启后仍保持。
+
+### Executor 身份组件与信息面板（2026-09-22）
+
+- 所有显示 Executor/Provider 身份的地方，包括顶部 Tab、Project/Topic 列表、Session、Board 和 Browser 操作条，都必须使用同一个可复用 Executor identity 组件。Provider 图标、较小的 Executor 自定义图标、珐琅式外轮廓和状态标记只能由这一组件组合，不能在调用方各自画点、描边或叠加。
+- Executor 面板在 hover 或键盘 focus 时以统一的 tooltip 信息面板出现，展示可读名称、Provider、当前状态和可用的上下文；不要求先点击才能看见。面板的字号、内边距、颜色和动作区与其他信息面板一致，不能因为来源不同出现另一套密度。
+- 自定义头像属于 Executor 配置，不属于 Appearance。面板只提供一个小型设置入口；点击后进入该 Executor 对应的模板设置，不能跳到 Appearance，也不能在信息面板内复制一套配置表单。身份 ID、Session 绑定和工作区事实保持稳定。
+- 已保存配置里仍存在的旧 Appearance 头像，读取时按相同 Executor ID 承接到 Executor 模板，再由下一次保存写入新的归属；不能在重排设置入口时静默丢掉可辨认的身份外观。找不到对应 Executor 的旧头像必须保留原配置并明确提示，不能猜测它属于哪个新身份。
+
 ### 工作状态与 Executor 叠加标记（2026-09-22）
 
 - `working` 必须有一个明确的活动字形，表达 Agent 正在产出；普通 `running`／idle 只表示进程仍可用，不在头像右上角放常驻标记。
@@ -1256,3 +1269,11 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 - Executor 自定义图标与 Provider 图标先合成一个身份图，再应用共享的珐琅外轮廓。Executor 图标应小而紧，叠在 Provider 图标内部，不得成为围在外面的第二圈。
 - 状态语义只通过右上角的小型标记或活动字形表达；普通身份不使用外描边制造状态。
 - 活动菜单必须保留可读的原因、项目和 Provider 信息；长内容在有界菜单内换行或滚动，不能被固定宽度裁成看不懂的尾巴。
+
+### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
+
+Default Session 的打开动作呈现为当前工作面上的浮窗，交互参考成熟工作台的 floating workspace：有独立标题栏、拖动定位、最小化/关闭和明确焦点环。浮窗打开时保留用户正在看的 Agents、Session 或 Board 工作面，关闭后焦点回到打开前的控件；不能通过切换到 Scratch 主路由来冒充浮窗。
+
+浮窗内容就是唯一 `launcher:default` Topic 的原生 Tab、Region、Agent 身份、输出和 composer。它不创建第二个 Session、PTY 或聊天产品；浮窗只是同一 Topic 工作面的附着投影。Board、Agents 和 Session 中的入口都打开/聚焦同一个浮窗，不能各自维护一份默认会话。
+
+浮窗的打开状态、位置和引用的 Topic 工作面属于持久 UI 状态。重启后先恢复浮窗和原有 Tab/Region，再尝试 reattach/resume；恢复握手、探测或浮窗渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。

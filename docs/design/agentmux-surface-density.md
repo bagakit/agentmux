@@ -608,6 +608,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 主按钮占一个固定点击格：空闲上箭头，执行中实心方块并保持中性平面样式。行内图片高度跟随正文行高、宽度依内容比例，不强制方框。
 
 头像中央 Provider、左上自定义角标、右上状态、右下数量互不挤占；描边沿图形透明轮廓，不画外接矩形。运行状态不改变中央身份色。running 用安静蓝色空心标记，working 用绿色活动标记，颜色和形状同时可辨；正常结束保持中性，真实错误才红色。未读红点归独立信封。行为与执行器设置范围见交互 SSOT 同名小节。
+旧配置中承接到 Executor 的头像沿用同一套尺寸、角标和珐琅规则；未能唯一承接的旧外观不伪装成新身份，也不在界面上悄悄消失。
 
 ### Branch Pin 的层级与操作位（2026-09-20）
 
@@ -721,7 +722,7 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 
 ### Agents、Session 与 Board 的切换（2026-09-22）
 
-底部中央使用一组低高度的 segmented switcher，只有 `Agents`、`Session`、`Board` 三个平级项；当前项用单一底色／下划线和焦点环表达。顶部右侧保留搜索、筛选和当前工作面的动作，不重复放三项导航。
+底部中央使用一组低高度的 segmented switcher，只有 `Agents`、`Session`、`Board` 三个平级项；当前项用单一底色／下划线和焦点环表达。顶部右侧保留搜索、筛选和当前工作面的动作，不重复放三项导航。 Session 顶栏也遵循此规则；删除重复导航后不保留空的右侧占位容器。
 
 三种工作面有清晰的第一层信息：Agents 先读 Executor/Agent 状态，Session 先读 Session/Topic/Workspace，Board 先读 Demand/Project/状态。Board 的需求列不混入以 Session 为主身份的卡片；需要看执行 Session 时进入右侧 Region 工作区。
 
@@ -754,3 +755,20 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 ### 状态标记与 Executor 叠加密度（2026-09-22）
 
 工作中的 Agent 使用小型活动字形，避免用一个小绿点承担“正在产出”的含义；idle／普通 running 保持无标记的身份图。等待、阻塞、断联和错误只在确有提醒价值时显示右上角标记。Executor 角标缩小到 Provider 图标内部的叠加层，保留一圈很窄的底色隔离，不向外扩张，不和 Provider 身份图分开排布。活动详情菜单使用有限宽度、可换行和最大高度滚动，原因文本与时间、Project 元数据仍能同时读到。
+### 状态、Browser 与 Scratch / Topic 密度（2026-09-22）
+
+- Project 树中的 idle 数量使用一行内的 muted micro metadata，和 working/attention 信息同一基线；它不变成头像角标或红色强调。停止/退出态使用中性颜色，error 只使用于明确故障事实。
+- Browser 页面优先于控制提示。控制条是紧凑的 page-adjacent rail，只有 active operation、接管或交还时占用一行；空闲 Browser 不画大卡片或 `Browser ready / You have control` 占位文案，也不遮挡原生页面。
+- Scratch 父行与 Topic 子行共享 Project rail 的缩进和垂直节奏。Topic 的字号比普通项目小一级、行高更紧，标题允许省略但操作和选中态完整；hover 用细线/下划线和轻微 surface 变化表达，不使用厚重背景块。Topic 行的打开状态、更新时间或 Agent presence 用低对比度辅助信息表达，新增和空列表用明确但紧凑的引导。
+
+### Executor identity 的统一密度（2026-09-22）
+
+- Executor identity 组件在 Tab、树、Session、Board 和 Browser rail 中共享同一图标盒、状态点尺寸、珐琅外轮廓和 hover/focus 信息面板；调用方只提供尺寸上下文，不重写内部间距。
+- 自定义 Executor 图标是 Provider 图标内部的小型叠加，不能向外扩成第二圈。状态点只在 working、needs-user、blocked、disconnected 或明确 error 时显示，idle/正常停止不添加常驻装饰。
+- 信息面板使用现有 tooltip 的 micro/compact 字号和边距，内容分成身份、状态和一个小型设置动作；设置动作进入 Executor 模板设置，不把 Appearance 的控件复制进面板。
+
+### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
+
+Default Session 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放原生 Topic Tab/Region，底部保留现有 composer。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
+
+浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口按钮只显示一个紧凑的助手图标与未读提示，Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。

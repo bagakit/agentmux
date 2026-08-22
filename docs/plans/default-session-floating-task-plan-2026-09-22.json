@@ -1,0 +1,43 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/default-session-floating-2026-09-22.md"},
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/default-session-floating-2026-09-22.md"],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立 Default Session a mature workbench 风格浮窗",
+      "objective": "把默认 Topic 从内联入口改成当前工作面上的可拖动浮窗，并复用 Scratch workspace 的原生 Workbench。",
+      "outcome": "打开入口显示唯一 launcher:default Topic 的 Tab/Region/composer；关闭只隐藏浮窗并保留工作面状态。",
+      "acceptance": [
+        "浮窗具有标题栏、最小化/关闭按钮、拖动定位、dialog 语义和焦点返还；主工作面路由与当前焦点不被切换。",
+        "浮窗内容复用 WorkspaceWorkbench 与现有 Session/ctxmux 生命周期，不启动第二个 Agent/PTY，也不渲染第二套聊天控件。",
+        "Board、Agents、Session 的所有 Default Session 入口打开同一个浮窗，入口菜单不再显示内联聊天菜单。",
+        "浮窗打开状态与位置重启后可恢复，恢复失败保留入口和 Topic，不清空持久布局。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop exec vitest run test/default-session-floating.test.tsx test/default-topic-surface.test.tsx","proves":"Default Session 浮窗的打开、关闭、焦点、唯一 Topic 与持久化行为"},
+        {"kind":"command","ref":"CI=true pnpm --filter @agentmux/desktop typecheck","proves":"浮窗接入 App/Workbench 后的类型边界"}
+      ],
+      "source_refs":["apps/desktop/src/renderer/src/components/DefaultSessionEntry.tsx","apps/desktop/src/renderer/src/components/DefaultSessionFloatingPanel.tsx","apps/desktop/src/renderer/src/App.tsx"],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "完成 Default Session 浮窗接线与回归",
+      "objective": "让全部入口接入同一个浮窗控制器，并证明主工作面上下文与安装前端可用。",
+      "outcome": "Board/Agents/Session 入口只触发唯一浮窗；静态调用者扫描与变异测试覆盖所有生产调用点。",
+      "acceptance": [
+        "DefaultSessionEntry 的生产调用者命中非空且全部接入统一浮窗动作。",
+        "把浮窗挂载或 open 状态判定改坏时，对应测试变红；恢复后测试通过。",
+        "主工作树其他未提交修改未被覆盖，变更以小提交合入 main。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"CI=true pnpm --filter @agentmux/desktop exec vitest run test/default-session-floating-contract.test.ts","proves":"生产调用者、唯一 launcher Topic 与浮窗挂载契约"}
+      ],
+      "source_refs":["apps/desktop/test/default-session-floating-contract.test.ts"],
+      "supersedes": []
+    }
+  ]
+}

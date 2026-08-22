@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 239
+    "next_cursor": 241
   },
   "features": [
     {
@@ -2014,6 +2014,26 @@
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29r8fvgbg",
+      "title": "Status, Browser, Scratch Topic 与 Executor identity 收敛",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29s8fwf9m",
+      "title": "Default Session Orca 风格浮窗",
+      "status": "archived",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-29s8fwf9m",
+      "worktree_name": "wt-f-29s8fwf9m",
       "runtime_role": "standalone",
       "runtime_relations": []
     }
