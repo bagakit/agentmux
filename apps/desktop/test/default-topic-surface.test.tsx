@@ -8,8 +8,6 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 const state = {
   config: { workspaces: [{ id: '__scratch__', hostId: 'local', name: 'Scratch', path: '/scratch', kind: 'folder' }] },
   defaultSessionLauncherHidden: false,
-  selectWorkspace: vi.fn(async () => undefined),
-  openScratchTopic: vi.fn(async () => undefined),
   setWorkspaceTool: vi.fn(),
   setDefaultSessionLauncherHidden: vi.fn()
 }
@@ -42,9 +40,10 @@ describe('default Topic surface entry', () => {
     await act(async () => root.render(createElement(DefaultSessionEntry, { placement: 'topbar', respectHidden: false })))
     const button = container.querySelector('button[aria-label="Open Default Session"]') as HTMLButtonElement
     expect(button).toBeTruthy()
+    let requested = false
+    window.addEventListener('agentmux:default-session-floating', () => { requested = true }, { once: true })
     await act(async () => button.click())
-    expect(state.selectWorkspace).toHaveBeenCalledWith('__scratch__')
-    expect(state.openScratchTopic).toHaveBeenCalledWith('launcher:default')
+    expect(requested).toBe(true)
   })
 
   it('keeps a topbar entry available while the Board placement is hidden', async () => {

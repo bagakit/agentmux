@@ -620,7 +620,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   createScratchTopic(): Promise<ScratchTopicSnapshot>
-  openScratchTopic(topicId: string): Promise<void>
+  openScratchTopic(topicId: string, workspaceId?: string): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   /**
    * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
@@ -3770,18 +3770,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setScratchTopicOrder(order) {
     set({ scratchTopicOrder: [...order] })
   },
-  async openScratchTopic(topicId) {
+  async openScratchTopic(topicId, requestedWorkspaceId) {
     const state = get()
-    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    const workspaceId = requestedWorkspaceId ?? state.activeWorkspaceId
+    const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
-      throw new Error('Select the Scratch workspace first')
+      throw new Error('Scratch workspace is unavailable')
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
     let placementFailed = false
     set((current) => {
-      const layout = current.layouts[workspace.id]
-      if (!layout) return current
+      const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
       const boundTab = Object.values(current.tabs).find((tab) =>
         tab.workspaceId === workspace.id &&
         tab.topicId === topicId &&
