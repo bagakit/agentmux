@@ -31,7 +31,7 @@ createRoot(root).render(
     surfaceKind="agent"
     request={{ executorId: 'codex', prompt: ${JSON.stringify(PROMPT)} }}
     executor={{ label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }}
-    appearance={{ tint: '#8de3ae', badge: 'A' }}
+    appearance={{ tint: '#8de3ae', badge: 'spark' }}
   />
 )
 `

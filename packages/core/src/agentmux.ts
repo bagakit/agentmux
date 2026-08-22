@@ -9,8 +9,12 @@ import { AgentMuxClient } from './client.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
+  AGENTMUX_TASK_PRIORITIES,
+  AGENTMUX_TASK_STATUSES,
   type AgentMuxControlCaller,
   type AgentMuxOpenDestination
+  , type AgentMuxTaskPriority
+  , type AgentMuxTaskStatus
 } from './control.js'
 import { requestAgentMuxControl, subscribeAgentMuxControl } from './control-host.js'
 import { diagnoseAgentMux } from './doctor.js'
@@ -239,6 +243,68 @@ async function listCommand(args: readonly string[]): Promise<number> {
     const errors = results.flatMap((result) => result.status === 'rejected' ? [{ error: result.reason instanceof AgentMuxError ? { code: result.reason.code, message: result.reason.message } : { code: 'LIST_SESSION_FAILED', message: String(result.reason) } }] : [])
     printSuccess('list.sessions', { sessions, ...(errors.length ? { errors } : {}) }); return 0
   })
+}
+
+async function taskCommand(args: readonly string[]): Promise<number> {
+  const action = args[0]
+  if (action === 'list') {
+    parseFlags(args.slice(1), {})
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.list' })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'show') {
+    const flags = parseFlags(args.slice(1), { '--task': 'value' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.show', taskId: identifier(flags.values.get('--task'), 'Task id') })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'create') {
+    const flags = parseFlags(args.slice(1), { '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value', '--risk': 'value', '--confirm': 'value', '--wiki-version': 'value' })
+    const priority = flags.values.get('--priority')
+    const status = flags.values.get('--status')
+    if (priority && !(AGENTMUX_TASK_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
+    if (status && !(AGENTMUX_TASK_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
+    const description = flags.values.get('--description'); const projectId = flags.values.get('--project')
+    const risk = flags.values.get('--risk') ?? 'unknown'; const confirmation = flags.values.get('--confirm') ?? 'pending'
+    if (!['low', 'medium', 'high', 'unknown'].includes(risk)) throw cliError(`Unknown task risk: ${risk}`)
+    if (!['automatic', 'user', 'pending'].includes(confirmation)) throw cliError(`Unknown task confirmation: ${confirmation}`)
+    const decision = { input: requiredData(flags, '--title', 'Task title'), candidates: projectId ? [{ projectId, reason: 'explicit CLI project' }] : [], selectedProjectId: projectId ?? null, risk: risk as 'low' | 'medium' | 'high' | 'unknown', confirmation: confirmation as 'automatic' | 'user' | 'pending', wikiVersion: flags.values.get('--wiki-version') ?? null, recordedAt: Date.now(), sourceSessionId: process.env.AGENTMUX_AGENT_SESSION_ID ?? null }
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.create', title: requiredData(flags, '--title', 'Task title'), ...(description === undefined ? {} : { description }), ...(projectId === undefined ? {} : { projectId }), ...(priority ? { priority: priority as AgentMuxTaskPriority } : {}), ...(status ? { status: status as AgentMuxTaskStatus } : {}), ...(flags.values.has('--session') ? { sessionIds: [identifier(flags.values.get('--session'), 'Agent Session id')] } : {}), decision })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'update') {
+    const flags = parseFlags(args.slice(1), { '--task': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value' })
+    const priority = flags.values.get('--priority'); const status = flags.values.get('--status')
+    if (priority && !(AGENTMUX_TASK_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown task priority: ${priority}`)
+    if (status && !(AGENTMUX_TASK_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown task status: ${status}`)
+    const patch: Record<string, unknown> = {}
+    for (const [flag, key] of [['--title', 'title'], ['--description', 'description'], ['--project', 'projectId'], ['--priority', 'priority'], ['--status', 'status'], ['--session', 'sessionIds']] as const) {
+      if (!flags.values.has(flag)) continue
+      patch[key] = flag === '--session' ? [identifier(flags.values.get(flag), 'Agent Session id')] : flags.values.get(flag)
+    }
+    if (Object.keys(patch).length === 0) throw cliError('task update requires at least one patch option.')
+    const typedPatch = { ...patch, ...(typeof patch.priority === 'string' ? { priority: patch.priority as AgentMuxTaskPriority } : {}), ...(typeof patch.status === 'string' ? { status: patch.status as AgentMuxTaskStatus } : {}) }
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.update', taskId: identifier(flags.values.get('--task'), 'Task id'), patch: typedPatch })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'link-session' || action === 'link-project') {
+    const flags = parseFlags(args.slice(1), { '--task': 'value', [action === 'link-session' ? '--session' : '--project']: 'value' })
+    const receipt = action === 'link-session'
+      ? await requestAgentMuxControl({ ...requestBase(), operation: 'task.link-session', taskId: identifier(flags.values.get('--task'), 'Task id'), sessionId: identifier(flags.values.get('--session'), 'Agent Session id') })
+      : await requestAgentMuxControl({ ...requestBase(), operation: 'task.link-project', taskId: identifier(flags.values.get('--task'), 'Task id'), projectId: identifier(flags.values.get('--project'), 'Project id') })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'decision-log') {
+    const flags = parseFlags(args.slice(1), { '--task': 'value' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'task.decision-log', taskId: identifier(flags.values.get('--task'), 'Task id') })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  throw cliError('task requires list, show, create, update, link-session, link-project, or decision-log.')
 }
 
 function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller } {
@@ -728,6 +794,7 @@ async function main(): Promise<number> {
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
+  if (args[0] === 'task') return await taskCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'browser') return await browserCommand(args.slice(1))

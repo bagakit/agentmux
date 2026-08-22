@@ -11,6 +11,7 @@ import {
   type AgentMuxExecutorAvailability,
   type AgentMuxRegion
 } from '@agentmux/core/control'
+import type { AgentMuxTaskDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
@@ -155,7 +156,8 @@ import {
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
-import type { BoardTaskArrangement, BoardTaskPriority, BoardTaskRecord, BoardTaskStatus } from './lib/global-task-board'
+import { projectBoardTasks, type BoardTaskArrangement, type BoardTaskPriority, type BoardTaskRecord, type BoardTaskStatus } from './lib/global-task-board'
+import { taskWriteDecision } from './lib/task-write-policy'
 import {
   activeWorkbenchSurface,
   addWorkbenchRegion,
@@ -375,8 +377,9 @@ type AppState = {
     priority?: BoardTaskPriority
     status?: BoardTaskStatus
     source?: BoardTaskRecord['source']
+    decisionLog?: readonly AgentMuxTaskDecision[]
   }): string
-  updateBoardTask(id: string, patch: Partial<Pick<BoardTaskRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds'>>): void
+  updateBoardTask(id: string, patch: Partial<Pick<BoardTaskRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds' | 'decisionLog'>>): void
   projectRailOpen: boolean
   /**
    * 折叠起来的 Project 分组，key 由 {@link projectGroupKey} 从 hostId + 父目录派生。
@@ -2347,6 +2350,70 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
       }
     }
+    const taskRecord = (id: string): BoardTaskRecord => {
+      const task = projectBoardTasks(get().config, get().sessions, get().boardTasks).find((candidate) => candidate.id === id)
+      if (!task) throw controlFailure('CONTROL_FAILED', `Task is not available: ${id}`)
+      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
+      return record
+    }
+    if (request.operation === 'task.list') {
+      return { operation: request.operation, tasks: projectBoardTasks(get().config, get().sessions, get().boardTasks).map(({ sessions: _sessions, workspacePath: _workspacePath, ...task }) => task) }
+    }
+    if (request.operation === 'task.show') {
+      const task = projectBoardTasks(get().config, get().sessions, get().boardTasks).find((candidate) => candidate.id === request.taskId)
+      if (!task) return { operation: request.operation, task: null }
+      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
+      return { operation: request.operation, task: record }
+    }
+    if (request.operation === 'task.create') {
+      const project = request.projectId ? get().config?.workspaces.find((workspace) => workspace.id === request.projectId) : undefined
+      if (request.projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
+      const policy = taskWriteDecision({
+        mode: 'risk-confirm',
+        risk: request.decision?.risk ?? 'unknown',
+        projectKnown: Boolean(project),
+        hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
+      })
+      if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Task routing is unresolved; choose a Project before writing.' : 'Task write requires explicit confirmation.')
+      const id = get().createBoardTask({
+        title: request.title,
+        ...(request.description === undefined ? {} : { description: request.description }),
+        projectId: request.projectId ?? null,
+        projectName: project?.name ?? null,
+        ...(request.priority === undefined ? {} : { priority: request.priority }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+        ...(request.sessionIds === undefined ? {} : { sessionIds: request.sessionIds }),
+        ...(request.decision === undefined ? {} : { decisionLog: [request.decision] })
+      })
+      const task = taskRecord(id)
+      return { operation: request.operation, task, receipt: { taskId: id, createdAt: task.createdAt } }
+    }
+    if (request.operation === 'task.update') {
+      const current = taskRecord(request.taskId)
+      const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
+      const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
+      if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
+      get().updateBoardTask(request.taskId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
+      const task = taskRecord(request.taskId)
+      return { operation: request.operation, task, receipt: { taskId: task.id, updatedAt: task.updatedAt } }
+    }
+    if (request.operation === 'task.link-session') {
+      const current = taskRecord(request.taskId)
+      if (!get().sessions.some((session) => session.id === request.sessionId)) throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${request.sessionId}`)
+      const sessionIds = current.sessionIds.includes(request.sessionId) ? current.sessionIds : [...current.sessionIds, request.sessionId]
+      get().updateBoardTask(request.taskId, { sessionIds })
+      return { operation: request.operation, task: taskRecord(request.taskId), receipt: { taskId: request.taskId, sessionId: request.sessionId } }
+    }
+    if (request.operation === 'task.link-project') {
+      const project = get().config?.workspaces.find((workspace) => workspace.id === request.projectId)
+      if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
+      get().updateBoardTask(request.taskId, { projectId: project.id, projectName: project.name })
+      return { operation: request.operation, task: taskRecord(request.taskId), receipt: { taskId: request.taskId, projectId: project.id } }
+    }
+    if (request.operation === 'task.decision-log') {
+      const task = taskRecord(request.taskId)
+      return { operation: request.operation, taskId: request.taskId, decisions: task.decisionLog ?? [] }
+    }
     if (request.operation === 'focus') {
       if (request.target.kind === 'tab') {
         const tab = resolveWorkbenchControlTab(input(), request.target)
@@ -3349,7 +3416,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionIds: [...(input.sessionIds ?? [])],
       createdAt: now,
       updatedAt: now,
-      source: input.source ?? 'default-topic'
+      source: input.source ?? 'default-topic',
+      ...(input.decisionLog && input.decisionLog.length > 0 ? { decisionLog: [...input.decisionLog] } : {})
     }
     set((state) => ({ boardTasks: { ...state.boardTasks, [id]: record }, selectedBoardTaskId: id }))
     return id
