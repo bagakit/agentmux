@@ -1,0 +1,16 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=fail
+candidate_sha=5aed945377c4edfd9ff4bcb28b86bcc2543f36af
+worktree_digest=b316e5017f960992062a4894d6a42dbef6119733c17be8a6a221fd66efb918ea
+verification_digest=none
+dedup_key=c085fbe71f89d89f113168b435a5cd8c6c44efc33e88d7a4075e03861bda2ccf
+reasons:
+- task verification command failed: pnpm --filter @agentmux/desktop exec vitest run test/global-board-task-workspace.test.tsx test/board-surface-contract.test.ts
+- task verification command failed: pnpm --filter @agentmux/desktop typecheck
+commands:
+- pnpm --filter @agentmux/desktop exec vitest run test/global-board-task-workspace.test.tsx test/board-surface-contract.test.ts => fail (1)
+- pnpm --filter @agentmux/desktop typecheck => fail (1)
+- test -n "$(rg -n 'GlobalBoard|TaskWorkspace|TaskBoard' apps/desktop/src/renderer/src --glob '*.tsx' --glob '*.ts' | grep -v 'global-board-task-workspace' | grep -v 'board-surface-contract')" => pass (0)

@@ -27,6 +27,7 @@ import {
   continuityRefreshEnabled,
   continuityRetryEnabled
 } from '../lib/continuity-failure-notice'
+import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -56,6 +57,7 @@ export function SessionPane({
   interactiveResize,
   visible,
   parked = false,
+  readOnly = false,
   linkOrigin
 }: {
   sessionId: string
@@ -65,8 +67,11 @@ export function SessionPane({
   visible: boolean
   /** Long-hidden, replayable terminal views may release xterm/addons while keeping this Region alive. */
   parked?: boolean
+  /** Observation projection: no PTY input, Agent composer, interaction response or recovery. */
+  readOnly?: boolean
   linkOrigin: OpenHttpLinkOrigin
 }) {
+  const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
@@ -215,14 +220,14 @@ export function SessionPane({
   if (!session || !terminalThemeId) {
     return (
       <section className="agent-surface">
-        <SessionConnectingSurface key={`connecting:${sessionId}`}
+          <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate ? 'restore' : 'connect'}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
           executor={connectingExecutor}
           appearance={connectingAppearance}
         />
-        {surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -266,8 +271,9 @@ export function SessionPane({
                 session={session}
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
-                interactiveResize={interactiveResize}
+            interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
                 visible={visible}
+            readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
               />
             )}
@@ -285,7 +291,9 @@ export function SessionPane({
                   }</span>
                 </div>
                 <div className="terminal-recovery__actions">
-                  {session.kind === 'terminal' ? (
+                  {!projectionPolicy.allowsRecovery ? (
+                    <span className="terminal-recovery__readonly">Open this Session in its Project to recover it.</span>
+                  ) : session.kind === 'terminal' ? (
                     disconnected ? (
                       <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
                         <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
@@ -357,7 +365,7 @@ export function SessionPane({
         }
         onSelect={onProseLinkSelect}
       />
-      {surfaceKind === 'agent' && session.kind === 'agent' ? (
+      {projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent' ? (
         <div className="agent-input-stack">
           {session.pendingInteraction ? (
             <AgentInteractionCard

@@ -15,14 +15,14 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 4
+    "round_count": 7
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-001",
+    "last_task_id": "T-003",
     "last_check_commands": [
       {
-        "command": "CI=true pnpm exec vitest run apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/global-task-board.test.ts",
+        "command": "CI=true pnpm exec vitest run apps/desktop/test/default-topic-surface.test.tsx apps/desktop/test/topic-wiki-injection.test.ts apps/desktop/test/workspace-topics-panel.test.tsx apps/desktop/test/scratch-topic-layout.test.ts",
         "exit_code": 0,
         "status": "pass"
       },
@@ -32,20 +32,20 @@
         "status": "pass"
       },
       {
-        "command": "test -n \"$(rg -n 'GlobalBoard|TaskWorkspace|TaskBoard' apps/desktop/src/renderer/src --glob '*.tsx' --glob '*.ts' | grep -v 'global-board-task-workspace' | grep -v 'board-surface-contract')\"",
+        "command": "test -n \"$(rg -n 'TopicWiki|default.*Topic|wiki.*inject' apps/desktop/src/renderer/src apps/desktop/src/main packages/core/src --glob '*.tsx' --glob '*.ts' | grep -v 'topic-wiki-injection' | grep -v 'default-topic-surface')\"",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-27y8fzdf5/artifacts/gate-T-001-r4-0001.log",
+    "last_log_path": ".bagakit/feature-tracker/features/f-27y8fzdf5/artifacts/gate-T-003-r7-0001.log",
     "last_context": {
-      "candidate_sha": "5e70287c54edb61a43dda405724dd928e37f6154",
-      "worktree_digest": "0ff26fcc8a5e33e63e52399dc2365ffc03941461f9b68658fc428141a9ac4706",
+      "candidate_sha": "6445a10081abed0aedaaaa331ea6998c4eb00c6a",
+      "worktree_digest": "2223922194d9531dac9388d9ec600fdec39b5748d1d59ae51a3e8775f57fb686",
       "verification_digest": "none",
-      "dedup_key": "4079de36b5f756e8f688ba800cc62bc03cf3e7cf765b0625fd9496b15b81f463",
-      "source_key": "c42acecc787267d9e5839714d211d1399e5d05b2fa7127fc7d64658a28b2b64d",
+      "dedup_key": "c0493d6990dae18900df156e85ad8c060f233afd7f30f8021729977606d8b575",
+      "source_key": "64ad43132fe7e84c25cb3f40eccb7936938f4f1fa4607c67fdc32bc2ab151714",
       "artifact_digests": {},
-      "plan_revision": 2
+      "plan_revision": 3
     }
   },
   "history": [
@@ -128,6 +128,46 @@
     {
       "action": "task_finished",
       "detail": "T-001 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-003"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-003 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-003 => done"
     }
   ],
   "goal_contract": {

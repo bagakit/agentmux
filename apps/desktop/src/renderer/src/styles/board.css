@@ -12,6 +12,12 @@
 .board { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding:var(--sp-6) var(--sp-6) var(--sp-6); overflow: hidden; background: radial-gradient(circle at 74% 0%, var(--overlay-line), transparent 36%), var(--surface-0); }
 .board--empty { align-items: center; justify-content: center; }
 
+.session-region-host { min-width: 0; min-height: 0; width: 100%; height: 100%; }
+.session-region-host--columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.session-region-host--grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.session-region-host--balanced { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.workbench-session-region-host > .agent-surface { width: 100%; height: 100%; }
+
 /* Global Agents Board. The board is a continuous surface: columns provide rhythm, while task cards use
    a quiet fill and a single selected signal. The right workspace is a sibling surface, never an overlay. */
 .global-board-surface { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--surface-0); color: var(--text); }
@@ -75,6 +81,12 @@
 .global-default-session__menu { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 4; display: flex; flex-direction: column; min-width: 140px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: 0 8px 24px var(--scrim-2); }
 .global-default-session__menu button { padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .global-default-session__menu button:hover { background: var(--surface-3); color: var(--text); }
+.default-session-entry { position: relative; display: inline-flex; }
+.default-session-entry__button, .default-session-entry__recover { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.default-session-entry__button:hover, .default-session-entry__recover:hover { background: var(--surface-2); color: var(--text); }
+.default-session-entry__menu { position: absolute; right: 0; top: calc(100% + 5px); z-index: 60; display: flex; flex-direction: column; min-width: 140px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: 0 8px 24px var(--scrim-2); }
+.default-session-entry__menu button { padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.default-session-entry__menu button:hover { background: var(--surface-3); color: var(--text); }
 .global-task-workspace { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface-1); animation: global-task-workspace-enter 180ms ease-out; }
 .global-task-workspace__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) var(--sp-3); border-bottom: 1px solid var(--line-soft); }
 .global-task-workspace__identity { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

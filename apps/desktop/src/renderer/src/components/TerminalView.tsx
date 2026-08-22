@@ -138,6 +138,7 @@ export function TerminalView({
   interactiveResize,
   visible = true,
   autoFocus = true,
+  readOnly = false,
   linkOrigin
 }: {
   session: SessionSnapshot
@@ -153,10 +154,13 @@ export function TerminalView({
   visible?: boolean
   // The reusable terminal on the create page must not steal focus from the prompt.
   autoFocus?: boolean
+  readOnly?: boolean
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
@@ -716,13 +720,13 @@ export function TerminalView({
      */
     const sendInput = terminalInputSender({
       accepts: () =>
-        terminalAcceptsInput({
+        !readOnlyRef.current && terminalAcceptsInput({
           canControlRun: canControlRunRef.current,
           acceptsInput: acceptsInputRef.current,
           liveReady: readyForLiveOutput
         }),
       write: (data) => {
-        void api.sessions.write(session.control, data)
+        if (!readOnlyRef.current) void api.sessions.write(session.control, data)
       }
     })
     const input = subscribeTerminalInput(terminal, sendInput)

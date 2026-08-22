@@ -1,10 +1,9 @@
 {
-  "version": 2,
-  "feat_id": "f-27y8fzdf5",
-  "plan_status": "reviewed",
-  "plan_revision": 3,
-  "supersedes_revision": 2,
-  "review_ref": "docs/reviews/global-board-resume-2026-09-22.md",
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/global-board-resume-2026-09-22.md"
+  },
   "source_refs": [
     "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
     "docs/design/agentmux-desktop-interaction.md",
@@ -17,108 +16,6 @@
     "apps/desktop/src/renderer/src/styles/workbench.css",
     "packages/core/src/ctxmux-run-adapter.ts",
     "docs/reviews/global-board-resume-2026-09-22.md"
-  ],
-  "plan_history": [
-    {
-      "revision": 1,
-      "supersedes_revision": null,
-      "review_ref": "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
-      "source_refs": [
-        "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
-        "docs/design/agentmux-desktop-interaction.md",
-        "docs/design/agentmux-surface-density.md",
-        "docs/plans/global-board-task-inspector-mvp.md",
-        "packages/layout/src/workbench-view-layout.ts",
-        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx",
-        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
-        "apps/desktop/src/renderer/src/styles/tokens.css",
-        "apps/desktop/src/renderer/src/styles/workbench.css",
-        "packages/core/src/ctxmux-run-adapter.ts"
-      ],
-      "task_ids": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005"
-      ],
-      "superseded_task_ids": [],
-      "supersedes_by_task": {}
-    },
-    {
-      "revision": 2,
-      "supersedes_revision": 1,
-      "review_ref": "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
-      "source_refs": [
-        "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
-        "docs/design/agentmux-desktop-interaction.md",
-        "docs/design/agentmux-surface-density.md",
-        "docs/plans/global-board-task-inspector-mvp.md",
-        "packages/layout/src/workbench-view-layout.ts",
-        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx",
-        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
-        "apps/desktop/src/renderer/src/styles/tokens.css",
-        "apps/desktop/src/renderer/src/styles/workbench.css",
-        "packages/core/src/ctxmux-run-adapter.ts"
-      ],
-      "task_ids": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005"
-      ],
-      "superseded_task_ids": [],
-      "supersedes_by_task": {},
-      "dependency_changes": {
-        "added": [],
-        "removed": []
-      },
-      "command_corrections": [
-        "T-001"
-      ]
-    },
-    {
-      "revision": 3,
-      "supersedes_revision": 2,
-      "review_ref": "docs/reviews/global-board-resume-2026-09-22.md",
-      "source_refs": [
-        "docs/reviews/global-board-task-inspector-plan-2026-09-21.md",
-        "docs/design/agentmux-desktop-interaction.md",
-        "docs/design/agentmux-surface-density.md",
-        "docs/plans/global-board-task-inspector-mvp.md",
-        "packages/layout/src/workbench-view-layout.ts",
-        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx",
-        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
-        "apps/desktop/src/renderer/src/styles/tokens.css",
-        "apps/desktop/src/renderer/src/styles/workbench.css",
-        "packages/core/src/ctxmux-run-adapter.ts",
-        "docs/reviews/global-board-resume-2026-09-22.md"
-      ],
-      "task_ids": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005",
-        "T-006"
-      ],
-      "superseded_task_ids": [],
-      "supersedes_by_task": {},
-      "dependency_changes": {
-        "added": [
-          {
-            "from": "T-001",
-            "to": "T-006"
-          },
-          {
-            "from": "T-006",
-            "to": "T-003"
-          }
-        ],
-        "removed": []
-      }
-    }
   ],
   "tasks": [
     {
@@ -155,40 +52,10 @@
         "docs/design/agentmux-desktop-interaction.md",
         "docs/design/agentmux-surface-density.md"
       ],
-      "supersedes": [],
       "estimate_hours": 2.5,
       "heavy": true,
       "heavy_reason": "需要同时接入全局持久 view state、现有工作台 surface 和渲染器可访问交互。",
-      "introduced_in_revision": 1,
-      "status": "done",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "CI=true pnpm exec vitest run apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/global-task-board.test.ts",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "test -n \"$(rg -n 'GlobalBoard|TaskWorkspace|TaskBoard' apps/desktop/src/renderer/src --glob '*.tsx' --glob '*.ts' | grep -v 'global-board-task-workspace' | grep -v 'board-surface-contract')\"",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
-      "notes": [],
-      "last_gate_context": {
-        "candidate_sha": "5e70287c54edb61a43dda405724dd928e37f6154",
-        "worktree_digest": "0ff26fcc8a5e33e63e52399dc2365ffc03941461f9b68658fc428141a9ac4706",
-        "verification_digest": "none",
-        "dedup_key": "4079de36b5f756e8f688ba800cc62bc03cf3e7cf765b0625fd9496b15b81f463",
-        "source_key": "c42acecc787267d9e5839714d211d1399e5d05b2fa7127fc7d64658a28b2b64d",
-        "artifact_digests": {},
-        "plan_revision": 2
-      }
+      "supersedes": []
     },
     {
       "id": "T-002",
@@ -227,40 +94,10 @@
         "apps/desktop/src/renderer/src/components/TerminalView.tsx",
         "packages/core/src/ctxmux-run-adapter.ts"
       ],
-      "supersedes": [],
       "estimate_hours": 3.5,
       "heavy": true,
       "heavy_reason": "必须跨 Renderer layout、Terminal surface 和 Core ctxmux attachment 证明单一 Runtime 事实。",
-      "introduced_in_revision": 1,
-      "status": "done",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "CI=true pnpm exec vitest run apps/desktop/test/task-session-region-host.test.tsx apps/desktop/test/task-region-arrangement.test.ts packages/core/test/ctxmux-replay-gap.test.ts packages/core/test/ctxmux-run-current-size.test.ts",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "CI=true pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "test -n \"$(rg -n 'SessionRegionHost|task.*Region|arrange.*Region' apps/desktop/src/renderer/src packages/core/src --glob '*.tsx' --glob '*.ts' | grep -v 'task-session-region-host' | grep -v 'task-region-arrangement')\"",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
-      "notes": [],
-      "last_gate_context": {
-        "candidate_sha": "6445a10081abed0aedaaaa331ea6998c4eb00c6a",
-        "worktree_digest": "5adf441dc23cae4873dac2073ec7fbb45bb247feb748669dd5059a44cc173f50",
-        "verification_digest": "none",
-        "dedup_key": "c68aeb288acbd5f20e3fc28de96975aef7c719b17de6f9bddaa685397ea31836",
-        "source_key": "8cbfe09b47f22d9f5c5431c1b12993afb69aa8c83536344e803cb63bca858cfe",
-        "artifact_digests": {},
-        "plan_revision": 3
-      }
+      "supersedes": []
     },
     {
       "id": "T-003",
@@ -301,40 +138,10 @@
         "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
         "apps/desktop/src/renderer/src/lib/scratch-topic-layout.ts"
       ],
-      "supersedes": [],
       "estimate_hours": 3.0,
       "heavy": true,
       "heavy_reason": "需要在现有 Topic 文件快照、原生 Region 和恢复流程之间建立单一 Wiki 持久化事实。",
-      "introduced_in_revision": 1,
-      "status": "done",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "CI=true pnpm exec vitest run apps/desktop/test/default-topic-surface.test.tsx apps/desktop/test/topic-wiki-injection.test.ts apps/desktop/test/workspace-topics-panel.test.tsx apps/desktop/test/scratch-topic-layout.test.ts",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "test -n \"$(rg -n 'TopicWiki|default.*Topic|wiki.*inject' apps/desktop/src/renderer/src apps/desktop/src/main packages/core/src --glob '*.tsx' --glob '*.ts' | grep -v 'topic-wiki-injection' | grep -v 'default-topic-surface')\"",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
-      "notes": [],
-      "last_gate_context": {
-        "candidate_sha": "6445a10081abed0aedaaaa331ea6998c4eb00c6a",
-        "worktree_digest": "2223922194d9531dac9388d9ec600fdec39b5748d1d59ae51a3e8775f57fb686",
-        "verification_digest": "none",
-        "dedup_key": "c0493d6990dae18900df156e85ad8c060f233afd7f30f8021729977606d8b575",
-        "source_key": "64ad43132fe7e84c25cb3f40eccb7936938f4f1fa4607c67fdc32bc2ab151714",
-        "artifact_digests": {},
-        "plan_revision": 3
-      }
+      "supersedes": []
     },
     {
       "id": "T-004",
@@ -373,15 +180,10 @@
         "packages/core/src/control-host.ts",
         "apps/desktop/src/renderer/src/store.ts"
       ],
-      "supersedes": [],
       "estimate_hours": 3.0,
       "heavy": true,
       "heavy_reason": "需要贯通 CUI 命令、Core 权限边界、Task receipt 和 Topic 决策持久化。",
-      "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "supersedes": []
     },
     {
       "id": "T-005",
@@ -429,15 +231,10 @@
         "docs/design/agentmux-surface-density.md",
         "AGENTS.md"
       ],
-      "supersedes": [],
       "estimate_hours": 2.5,
       "heavy": true,
       "heavy_reason": "必须跨持久化、恢复、浏览器交互、性能和测试证据做唯一收敛。",
-      "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "supersedes": []
     },
     {
       "id": "T-006",
@@ -468,33 +265,7 @@
         "docs/reviews/global-board-resume-2026-09-22.md",
         "docs/design/agentmux-desktop-interaction.md"
       ],
-      "supersedes": [],
-      "estimate_hours": 0.5,
-      "introduced_in_revision": 3,
-      "status": "done",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "CI=true pnpm exec vitest run apps/desktop/test/topic-wiki-injection.test.ts apps/desktop/test/scratch-topics.test.ts apps/desktop/test/workspace-topics-panel.test.tsx",
-          "exit_code": 0,
-          "status": "pass"
-        },
-        {
-          "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
-      "notes": [],
-      "last_gate_context": {
-        "candidate_sha": "6445a10081abed0aedaaaa331ea6998c4eb00c6a",
-        "worktree_digest": "ef3dea6a50cde94d708737e21cc1c1c1f667f173902c22fb71fa0429e480da5b",
-        "verification_digest": "none",
-        "dedup_key": "3a608cc3feba07da68dc823d684d6219f3b942e7c437e75f5a25263d3aee3f84",
-        "source_key": "ea22d1830420a5bed4572a479634da2083a6dc685ebe957fb0bfc5a5b4117450",
-        "artifact_digests": {},
-        "plan_revision": 3
-      }
+      "estimate_hours": 0.5
     }
   ]
 }

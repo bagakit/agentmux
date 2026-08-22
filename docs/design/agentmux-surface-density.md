@@ -611,6 +611,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 ### 图标与打断按钮复查（2026-09-20）
 
 - Executor／Agent Provider 图形用很细的外轮廓描边，不得画背景光晕、模糊发光或状态扩散阴影。
+- 自定义 tint 只落在图形最外层的 1px alpha 轮廓：保留 Provider 图形本体和镂空，轮廓先按相对实面形状向外扩张后再合成；不能把 tint 铺满整枚图标，也不能在镂空内侧重复描边。
 - 可编辑的自定义角标固定左上；右上只表示状态，右下只表示数量，三者不得重叠。设置预览与菜单／实际 Agent 入口保持同一位置。
 - 打断仍为与发送共用同一点击格的实心方形，但不涂黄色底或独立强调色块；保持功能组的平面中性风格，hover／focus 仍清晰。此要求取代此前琥珀色提议。
 
@@ -688,3 +689,7 @@ Topic Wiki 注入只在原生 Topic chrome 里以一个轻量状态表达，例�
 Board、Task 工作区和 Topic Region 共享 AgentMux 原生 surface token：`surface-0` 作为工作面底，`surface-1` 作为卡片或 chrome 层，`surface-2` 只用于 hover、选中或临时控件。区域之间优先使用留白和 1px hairline；只有列间、Tab 边界、Region 头尾和真正的输入框保留线。
 
 Task 卡默认是无边框的面，选中只增加一处统一焦点信号；Task 工作区是右半边连续的 surface，Session terminal 是其中的内容面，不再用“抽屉卡 → 执行卡 → terminal 卡”的套娃结构。任何新增边框、圆角、阴影或颜色都必须对应一个交互状态，否则不进入实现。
+
+### 默认 Session 入口的原生复用（2026-09-22）
+
+默认入口只承担打开既有 `launcher:default` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。入口被收纳到 Board 后，Board 底部只保留一个小型恢复入口；顶栏和工作台根 Region 仍可提供同一默认 Topic 的原生入口，不能因为收纳而让能力消失。右键菜单只提供位置或 Topic 文件入口，不展开第二套聊天控件。

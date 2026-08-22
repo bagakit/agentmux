@@ -208,6 +208,34 @@ export function WorkspaceTopicsPanel({
     }
   }
 
+  async function setTopicWikiEnabled(topic: ScratchTopicSnapshot, enabled: boolean): Promise<void> {
+    if (pending) return
+    setPending(`wiki:${topic.id}`)
+    setError(null)
+    try {
+      const updated = await api.scratch.setWikiEnabled(workspace.id, topic.id, enabled)
+      setTopics((current) => current?.map((entry) => entry.id === updated.id ? updated : entry) ?? null)
+    } catch (cause) {
+      setError(presentError(cause))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function resetTopicWiki(topic: ScratchTopicSnapshot): Promise<void> {
+    if (pending) return
+    setPending(`wiki-reset:${topic.id}`)
+    setError(null)
+    try {
+      const updated = await api.scratch.resetWiki(workspace.id, topic.id)
+      setTopics((current) => current?.map((entry) => entry.id === updated.id ? updated : entry) ?? null)
+    } catch (cause) {
+      setError(presentError(cause))
+    } finally {
+      setPending(null)
+    }
+  }
+
   return (
     <section className={`surface-tool-summary workspace-topics-panel workspace-topics-panel--${compact ? 'index' : 'empty'}`}>
       {compact ? (
@@ -312,7 +340,7 @@ export function WorkspaceTopicsPanel({
                     <SelectorRow
                       leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
-                      subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className="workspace-topic-entry__wiki" title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>Wiki · {topic.wiki.version}</span> : null}</>}
+                      subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
                         <TopicPresence
@@ -369,6 +397,28 @@ export function WorkspaceTopicsPanel({
                 >
                   <NotebookText size={13} />
                 </button>
+                {topic.wiki ? <>
+                  <button
+                    className="workspace-topic-wiki"
+                    type="button"
+                    aria-label={`${topic.wiki.enabled ? 'Disable' : 'Enable'} ${topic.title} Wiki`}
+                    title={topic.wiki.enabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}
+                    disabled={pending !== null}
+                    onClick={(event) => { event.stopPropagation(); void setTopicWikiEnabled(topic, !topic.wiki!.enabled) }}
+                  >
+                    {topic.wiki.enabled ? 'Off' : 'On'}
+                  </button>
+                  <button
+                    className="workspace-topic-wiki"
+                    type="button"
+                    aria-label={`Restore ${topic.title} Wiki defaults`}
+                    title="Restore default Topic Wiki"
+                    disabled={pending !== null}
+                    onClick={(event) => { event.stopPropagation(); void resetTopicWiki(topic) }}
+                  >
+                    Reset
+                  </button>
+                </> : null}
               </SortableTopicItem>
             )
           })}
