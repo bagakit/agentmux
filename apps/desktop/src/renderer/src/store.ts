@@ -360,7 +360,7 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
-  /** Durable global Board task records. Session projections remain derived from Core snapshots. */
+  /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
   selectedAgentSessionId: string | null
   setSelectedAgentSession(id: string | null): void
@@ -2359,7 +2359,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const demandRecord = (id: string): DemandRecord => {
       const task = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
-      if (!task) throw controlFailure('CONTROL_FAILED', `Task is not available: ${id}`)
+      if (!task) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
       return record
     }
@@ -2381,7 +2381,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         projectKnown: Boolean(project),
         hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
       })
-      if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Task routing is unresolved; choose a Project before writing.' : 'Task write requires explicit confirmation.')
+      if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Demand routing is unresolved; choose a Project before writing.' : 'Demand write requires explicit confirmation.')
       const id = get().createDemand({
         title: request.title,
         ...(request.description === undefined ? {} : { description: request.description }),
