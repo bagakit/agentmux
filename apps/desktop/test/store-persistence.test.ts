@@ -50,6 +50,13 @@ afterEach(() => {
 })
 
 describe('Renderer persistence boundary', () => {
+  it('restores Agents as a durable main surface while keeping legacy workbench as Session', () => {
+    const agents = restorePersistedUiState(config, { mainSurface: 'agents' })
+    expect(agents.mainSurface).toBe('agents')
+    const session = restorePersistedUiState(config, { mainSurface: 'workbench' })
+    expect(session.mainSurface).toBe('workbench')
+  })
+
   it('round-trips the active surface and tool presentation fields with Workbench state', () => {
     useAppStore.setState({
       activeWorkspaceId: 'workspace-b',

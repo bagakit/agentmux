@@ -183,7 +183,7 @@ export function GlobalBoardSurface() {
     <section className={`global-board-surface ${selectedTask ? 'global-board-surface--task-open' : ''}`}>
       <div className="global-board-main">
         <header className="global-board-toolbar">
-          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Agents</strong><span className="global-board-toolbar__crumb">Global · Board</span></div>
+          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Board</strong><span className="global-board-toolbar__crumb">Tasks · Global</span></div>
           <div className="global-board-toolbar__controls">
             <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
             <label className="global-board-select"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as BoardTaskStatus | 'all')}><option value="all">All</option>{BOARD_TASK_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select><ChevronDown size={12} /></label>
