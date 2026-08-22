@@ -1940,7 +1940,7 @@
     {
       "feat_id": "f-29g8fagv4",
       "title": "Terminal and conversation restore",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -1950,7 +1950,7 @@
     {
       "feat_id": "f-29h8fh9d4",
       "title": "Plugin and naming contract",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
