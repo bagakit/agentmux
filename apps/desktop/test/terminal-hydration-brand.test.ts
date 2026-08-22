@@ -111,6 +111,15 @@ describe('整格覆盖层用品牌语言', () => {
       expect(rules).toContain(token)
     }
   })
+
+  it('兄弟启动态也有同等级的卡片质量，但使用蓝紫启动扫描线区分语义', () => {
+    const sibling = siblingRules()
+    expect(sibling).toContain('.terminal-agent-startup__content::before')
+    expect(sibling).toContain('var(--blue)')
+    expect(sibling).toContain('var(--purple)')
+    expect(sibling).toContain('var(--dur-sweep)')
+    expect(sibling).toContain('width: min(420px')
+  })
 })
 
 describe('动效不得是唯一的信息载体', () => {

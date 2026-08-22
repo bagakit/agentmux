@@ -560,6 +560,7 @@ export function TerminalView({
     let attachmentId: string | null = null
     let readyForLiveOutput = false
     let cursor = 0
+    let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
     const liveOutputQueue: TerminalLiveItem[] = []
     let liveDrain: Promise<void> | null = null
@@ -597,7 +598,13 @@ export function TerminalView({
         if (!disposed) setViewportSyncFailed(true)
         console.warn('[terminal] failed to synchronize PTY viewport', error)
       },
-      onResizeSuccess: () => { if (!disposed) setViewportSyncFailed(false) }
+      onResizeSuccess: () => {
+        if (disposed) return
+        setViewportSyncFailed(false)
+        // A settled Region grid is a real current-screen confirmation. Clear a stale replay/redraw
+        // prompt after zoom, split, or font changes even when the retained history remains truncated.
+        setReplayGap(false)
+      }
     })
     viewport.beginReplay()
     viewport.setInteractiveResize(interactiveResizeRef.current)
@@ -633,6 +640,13 @@ export function TerminalView({
         // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
         // 「部分已有」曾落到告示分支，于是无缺字节也报缺、且把已显示的内容重写一遍。
         const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
+        if (composed.gap) {
+          // A bounded queue can lose an old prefix. Keep that fact out of the PTY screen: injecting a
+          // diagnostic string changes TUI state and is exactly why the visible screen can look wrong.
+          // The service window owns the notice; a healthy Run gets one current-screen repaint below.
+          liveGapRedrawPending = true
+          if (!disposed) setReplayGap(true)
+        }
         if (composed.data.length === 0) {
           // 整批都已在屏上。cursor 仍要跟上（它只增不减），否则同一批会被反复认成新字节。
           cursor = composed.cursor
@@ -645,6 +659,15 @@ export function TerminalView({
         cursor = nextCursor
         acknowledger.queue(cursor)
         if (liveOutputQueue.length > 0) await yieldTerminalWork()
+      }
+      if (liveGapRedrawPending && canControlRunRef.current && !disposed) {
+        liveGapRedrawPending = false
+        try {
+          const redrawn = await viewport.requestContentRedraw()
+          if (redrawn) setReplayGap(false)
+        } catch (error) {
+          console.warn('[terminal] failed to redraw after live output gap', error)
+        }
       }
     }
 
@@ -1144,7 +1167,7 @@ export function TerminalView({
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
             <div className="terminal-agent-startup" role="status" aria-live="polite">
               <div className="terminal-agent-startup__content">
-                <LoaderCircle className="spin" size={14} />
+                <span className="terminal-agent-startup__glyph"><LoaderCircle className="spin" size={14} /></span>
                 <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
                 <span>Waiting for its first terminal output.</span>
               </div>

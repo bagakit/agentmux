@@ -15,6 +15,7 @@
  */
 
 import type { AgentTimelineItem } from '../../../shared/contracts'
+import { isConversationTurn } from './conversation-speaker'
 
 export type TimelineRow = {
   item: AgentTimelineItem
@@ -28,6 +29,10 @@ function carriesOutcome(item: AgentTimelineItem): boolean {
 
 /** 两条是不是「同一步/同一件事」——折叠只在这个前提下发生。 */
 function sameStep(left: AgentTimelineItem, right: AgentTimelineItem): boolean {
+  // Conversation turns are durable user/assistant messages, not repeated machine steps. Two prompts
+  // can legitimately share the same title and have no tool input; folding them is the "only first
+  // sentence is visible" failure. Keep every turn as its own row and reserve folding for machine data.
+  if (isConversationTurn(left) || isConversationTurn(right)) return false
   return left.kind === right.kind
     && left.title === right.title
     && left.toolInput === right.toolInput
