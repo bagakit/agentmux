@@ -41,11 +41,11 @@ afterEach(async () => {
 describe('global Board task workspace', () => {
   it('keeps Board visible and opens the selected task in the same surface', async () => {
     await act(async () => root.render(createElement(GlobalBoardSurface)))
-    const card = container.querySelector('[data-task-id="task:one"]') as HTMLButtonElement
+    const card = container.querySelector('[data-demand-id="task:one"]') as HTMLButtonElement
     expect(card).toBeTruthy()
     await act(async () => card.click())
     expect(container.querySelector('.global-board-columns')).toBeTruthy()
-    expect(container.querySelector('.global-task-workspace')).toBeTruthy()
+    expect(container.querySelector('.global-demand-workspace')).toBeTruthy()
     expect(container.querySelector('[data-test-session="session-1"]')?.textContent).toBe('terminal:session-1')
     expect(useAppStore.getState().mainSurface).toBe('board')
   })
@@ -55,8 +55,8 @@ describe('global Board task workspace', () => {
       'task:recover': { id: 'task:recover', title: 'Recover the work surface', description: 'Keep context after restart', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['gone'], createdAt: 1, updatedAt: 3, source: 'default-topic' }
     } })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
-    expect(container.querySelector('[data-task-id="task:recover"]')?.textContent).toContain('Recover the work surface')
-    await act(async () => (container.querySelector('[data-task-id="task:recover"]') as HTMLButtonElement).click())
-    expect(container.querySelector('.global-task-workspace')?.textContent).toContain('No Session linked yet')
+    expect(container.querySelector('[data-demand-id="task:recover"]')?.textContent).toContain('Recover the work surface')
+    await act(async () => (container.querySelector('[data-demand-id="task:recover"]') as HTMLButtonElement).click())
+    expect(container.querySelector('.global-demand-workspace')?.textContent).toContain('No Session linked yet')
   })
 })
