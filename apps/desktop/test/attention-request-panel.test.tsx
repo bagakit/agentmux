@@ -28,7 +28,8 @@ describe('Needs you request panel', () => {
 
   it('opens the typed request in place without switching away from Agents', async () => {
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
-    const review = container.querySelector('.global-agents-row__open') as HTMLElement
+    await act(async () => (container.querySelector('[data-session-id="attention-a"]') as HTMLElement).click())
+    const review = container.querySelector('.global-board-action') as HTMLElement
     await act(async () => review.click())
     expect(container.querySelector('.attention-request-panel')).toBeTruthy()
     expect(container.querySelector('[aria-label="Agent question"]')).toBeTruthy()
@@ -39,7 +40,8 @@ describe('Needs you request panel', () => {
     const respondInteraction = vi.fn(() => Promise.resolve())
     useAppStore.setState({ respondInteraction: respondInteraction as never })
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
-    await act(async () => (container.querySelector('.global-agents-row__open') as HTMLElement).click())
+    await act(async () => (container.querySelector('[data-session-id="attention-a"]') as HTMLElement).click())
+    await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
     const answer = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Stable')) as HTMLButtonElement
     await act(async () => answer.click())
     expect(respondInteraction).toHaveBeenCalledWith('attention-a', expect.objectContaining({ kind: 'question' }))

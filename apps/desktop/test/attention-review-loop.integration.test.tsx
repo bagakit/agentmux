@@ -57,7 +57,8 @@ describe('Agents attention and result review loop', () => {
   it('keeps the durable surface, opens Needs you in place, and routes a result back to its Session', async () => {
     expect(restorePersistedUiState(useAppStore.getState().config!, { mainSurface: 'agents' }).mainSurface).toBe('agents')
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
-    const review = container.querySelector('[data-session-id="attention-loop"] .global-agents-row__open') as HTMLElement
+    await act(async () => (container.querySelector('[data-session-id="attention-loop"]') as HTMLElement).click())
+    const review = container.querySelector('.global-board-action') as HTMLElement
     await act(async () => review.click())
     expect(container.querySelector('.attention-request-panel')).toBeTruthy()
     expect(useAppStore.getState().mainSurface).toBe(baseline.mainSurface)
