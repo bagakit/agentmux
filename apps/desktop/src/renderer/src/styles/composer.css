@@ -128,7 +128,7 @@
 
 /* One-line mode keeps the tool trigger, editor and primary action in separate columns.
    display:contents on the toolbar exposes its two groups to this grid without cloning controls. */
-.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
+.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__suggestions { grid-column: 1 / -1; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 2; grid-row: 1; min-width: 0; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: contents; }
@@ -190,7 +190,17 @@
 .composer-image { display: inline-block; vertical-align: middle; line-height: inherit; }
 .composer-image .md-conversation-image { vertical-align: middle; }
 .composer-image .md-conversation-image__thumb { width: auto; height: auto; max-height: 1lh; max-width: min(10em, 100%); object-fit: contain; }
-.launcher-composer .composer__editor { min-height: 6em; }
+/* 启动页的 message tool 是 `.launch-surface > *` 那条居中规则的一员，但它同时带 `.composer`，
+   而 `.composer` 的侧向 margin（Region 内的 inset）在同一特异度下后加载、把 margin-inline:auto
+   顶掉，于是 640px 的框被钉到左缘。这条把居中还回来，只作用于启动页那一处（会话 Composer 不带
+   .launcher-composer，其 Region inset 不受影响）。
+   高度走可编辑元素自己读的 --composer-input-height（.tiptap 在 :105 已在读它），而不是撑高不可
+   编辑的 .composer__editor 包裹层——后者会在下沿留一片点了没反应的死区（用户报的「无法输入」）。
+   单位必须是 rem 不能是 em：这个变量在这里声明、却在 .tiptap 上消费，而 .tiptap 自己把字号压到
+   --fs-meta(11px)，em 在**消费处**结算，6em 会变成 66px——比原来那个 96px 的框矮一截，等于顺手
+   把启动页输入框改小了。rem 按根字号(16px)结算，与原尺寸一致。真机量过：rem→96px、em→66px。
+   96px > --composer-input-max(132px) 为假，不会被 max-height 裁掉。 */
+.launcher-composer { margin-inline: auto; --composer-input-height: 6rem; }
 
 .composer-mailbox__heading, .composer-mailbox__messages header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .composer-mailbox__heading { margin-bottom: var(--sp-2); }
