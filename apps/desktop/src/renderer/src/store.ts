@@ -156,8 +156,8 @@ import {
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
-import { projectDemands, type DemandArrangement, type DemandPriority, type DemandRecord, type DemandStatus } from './lib/global-task-board'
-import { taskWriteDecision } from './lib/task-write-policy'
+import { projectDemands, type DemandArrangement, type DemandPriority, type DemandRecord, type DemandStatus } from './lib/global-demand-board'
+import { demandWriteDecision } from './lib/demand-write-policy'
 import {
   activeWorkbenchSurface,
   addWorkbenchRegion,
@@ -2358,24 +2358,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     const demandRecord = (id: string): DemandRecord => {
-      const task = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
-      if (!task) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
-      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
+      const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
+      if (!demand) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
+      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return record
     }
-    if (request.operation === 'task.list') {
-      return { operation: request.operation, tasks: projectDemands(get().config, get().sessions, get().demands).map(({ sessions: _sessions, workspacePath: _workspacePath, ...task }) => task) }
+    if (request.operation === 'demand.list') {
+      return { operation: request.operation, demands: projectDemands(get().config, get().sessions, get().demands).map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
     }
-    if (request.operation === 'task.show') {
-      const task = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === request.taskId)
-      if (!task) return { operation: request.operation, task: null }
-      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = task
-      return { operation: request.operation, task: record }
+    if (request.operation === 'demand.show') {
+      const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === request.demandId)
+      if (!demand) return { operation: request.operation, demand: null }
+      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
+      return { operation: request.operation, demand: record }
     }
-    if (request.operation === 'task.create') {
+    if (request.operation === 'demand.create') {
       const project = request.projectId ? get().config?.workspaces.find((workspace) => workspace.id === request.projectId) : undefined
       if (request.projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      const policy = taskWriteDecision({
+      const policy = demandWriteDecision({
         mode: 'risk-confirm',
         risk: request.decision?.risk ?? 'unknown',
         projectKnown: Boolean(project),
@@ -2392,34 +2392,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(request.sessionIds === undefined ? {} : { sessionIds: request.sessionIds }),
         ...(request.decision === undefined ? {} : { decisionLog: [request.decision] })
       })
-      const task = demandRecord(id)
-      return { operation: request.operation, task, receipt: { taskId: id, createdAt: task.createdAt } }
+      const demand = demandRecord(id)
+      return { operation: request.operation, demand, receipt: { demandId: id, createdAt: demand.createdAt } }
     }
-    if (request.operation === 'task.update') {
-      const current = demandRecord(request.taskId)
+    if (request.operation === 'demand.update') {
+      const current = demandRecord(request.demandId)
       const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
       const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      get().updateDemand(request.taskId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
-      const task = demandRecord(request.taskId)
-      return { operation: request.operation, task, receipt: { taskId: task.id, updatedAt: task.updatedAt } }
+      get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
+      const demand = demandRecord(request.demandId)
+      return { operation: request.operation, demand, receipt: { demandId: demand.id, updatedAt: demand.updatedAt } }
     }
-    if (request.operation === 'task.link-session') {
-      const current = demandRecord(request.taskId)
+    if (request.operation === 'demand.link-session') {
+      const current = demandRecord(request.demandId)
       if (!get().sessions.some((session) => session.id === request.sessionId)) throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${request.sessionId}`)
       const sessionIds = current.sessionIds.includes(request.sessionId) ? current.sessionIds : [...current.sessionIds, request.sessionId]
-      get().updateDemand(request.taskId, { sessionIds })
-      return { operation: request.operation, task: demandRecord(request.taskId), receipt: { taskId: request.taskId, sessionId: request.sessionId } }
+      get().updateDemand(request.demandId, { sessionIds })
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, sessionId: request.sessionId } }
     }
-    if (request.operation === 'task.link-project') {
+    if (request.operation === 'demand.link-project') {
       const project = get().config?.workspaces.find((workspace) => workspace.id === request.projectId)
       if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      get().updateDemand(request.taskId, { projectId: project.id, projectName: project.name })
-      return { operation: request.operation, task: demandRecord(request.taskId), receipt: { taskId: request.taskId, projectId: project.id } }
+      get().updateDemand(request.demandId, { projectId: project.id, projectName: project.name })
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, projectId: project.id } }
     }
-    if (request.operation === 'task.decision-log') {
-      const task = demandRecord(request.taskId)
-      return { operation: request.operation, taskId: request.taskId, decisions: task.decisionLog ?? [] }
+    if (request.operation === 'demand.decision-log') {
+      const demand = demandRecord(request.demandId)
+      return { operation: request.operation, demandId: request.demandId, decisions: demand.decisionLog ?? [] }
     }
     if (request.operation === 'focus') {
       if (request.target.kind === 'tab') {
