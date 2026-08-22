@@ -24,6 +24,7 @@ import {
 import type { SplitDirection } from '@agentmux/layout'
 import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
   workbenchSplitDirectionIcon,
   workbenchSplitMenuIcon,
@@ -107,6 +108,12 @@ export type WorkbenchTabFileActions = {
   workspaceRoot: string
   revealLabel: string
   onReveal(): Promise<void>
+  /**
+   * 本机 home（用于把绝对路径缩写成 `~`）与「要绝对路径」这一档。文件 Tab 只在本机 workspace 才有
+   * （WorkspaceWorkbench 对非本机返回 undefined），所以这里的绝对路径缩写无需再判主机。
+   */
+  home: string
+  copyPathsAsAbsolute: boolean | undefined
 }
 
 export function createWorkbenchTabCopyModel({
@@ -160,7 +167,13 @@ export function createWorkbenchTabCopyModel({
             label: 'Copy Path',
             icon: Copy,
             onSelect: async () =>
-              copy(formatPathsForCopy([file.path], 'absolute', file.workspaceRoot), 'Copy Path')
+              copy(
+                applyCopyPathStyle(formatPathsForCopy([file.path], 'absolute', file.workspaceRoot), {
+                  home: file.home,
+                  copyPathsAsAbsolute: file.copyPathsAsAbsolute
+                }),
+                'Copy Path'
+              )
           },
           copyRelativePath: {
             id: 'copy-relative-path' as const,

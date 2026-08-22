@@ -1364,6 +1364,65 @@ describe('ConfigStore 本地 prompt 库', () => {
   })
 })
 
+describe('ConfigStore copyPathsAsAbsolute（复制路径缩写开关）', () => {
+  // 用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」。所以默认（缺席）= 缩写档，这个
+  // 开关只在用户主动选绝对路径时落盘。与 appLinkSchemes / projectRailDensity 同路径：optional 且不回填。
+
+  it('字段缺席＝默认（缩写）档，且缺席 config 原样通过 strict schema、不因缺这个键而失败', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      workspaces: [{
+        id: SCRATCH_WORKSPACE_ID,
+        name: SCRATCH_WORKSPACE_NAME,
+        hostId: 'local',
+        path: join(tmpdir(), '.agentmux', 'scratch'),
+        kind: 'folder'
+      }],
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+      browser: { ...baseConfig.browser, agentAutomation: false }
+    }))
+    // 自证：fixture 真的没这个字段。
+    expect('copyPathsAsAbsolute' in JSON.parse(await readFile(path, 'utf8'))).toBe(false)
+
+    const loaded = await store.get()
+    // 缺席读成 undefined（读处一律 `=== true` 判绝对档，所以 undefined 就是缩写默认）。
+    expect(loaded.copyPathsAsAbsolute).toBeUndefined()
+  })
+
+  it('缺席不被回填落盘——absent 与默认同义，补盘只是白写', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      workspaces: [{
+        id: SCRATCH_WORKSPACE_ID,
+        name: SCRATCH_WORKSPACE_NAME,
+        hostId: 'local',
+        path: join(tmpdir(), '.agentmux', 'scratch'),
+        kind: 'folder'
+      }],
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
+      browser: { ...baseConfig.browser, agentAutomation: false }
+    }))
+
+    await store.get()
+
+    // 变异靶子 (c)：若 get() 把 copyPathsAsAbsolute 缺省补 false 落盘，这条红。
+    // 注意别的补齐（scratch/notifications/browserAutomation）本 fixture 已全部满足，所以这次 get()
+    // 不应触发任何写盘；即便触发，写回的对象也绝不该带上这个键。
+    const persisted = JSON.parse(await readFile(path, 'utf8'))
+    expect('copyPathsAsAbsolute' in persisted).toBe(false)
+  })
+
+  it('用户勾了绝对路径：true 原样存取', async () => {
+    const { store } = await storeFixture()
+    const saved = await store.save({ ...baseConfig, copyPathsAsAbsolute: true })
+    expect(saved.copyPathsAsAbsolute).toBe(true)
+    // 重新读一遍：strict schema 漏声明这个字段的话，整块配置在这里判失败而不是静默丢字段。
+    expect((await store.get()).copyPathsAsAbsolute).toBe(true)
+  })
+})
+
 describe('ConfigStore recoverability', () => {
   // 这一族守的是本 lane 的题眼：一次 config 写入要么可逆，要么响亮拒绝——不许静默。
   // 两条独立机制：

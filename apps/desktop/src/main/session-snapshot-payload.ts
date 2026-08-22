@@ -17,11 +17,18 @@ import type { RuntimeSnapshot } from '../shared/contracts.js'
  */
 export function sessionSnapshotPayload(
   snapshot: RuntimeSnapshot,
-  environmentWarning: string | undefined
+  environmentWarning: string | undefined,
+  localHome?: string
 ): RuntimeSnapshot {
   // 缺席时**不写这个键**，而不是写成 `environmentWarning: undefined`。`exactOptionalPropertyTypes` 下
   // 这两者的类型就不同，而且经 IPC 结构化克隆后前者是「没有这个字段」，后者是「字段在、值是 undefined」
   // ——渲染层用 `?? null` 兜底，两者恰好同果，但合同上只承诺了前者。
-  if (environmentWarning === undefined) return snapshot
-  return { ...snapshot, environmentWarning }
+  //
+  // `localHome` 与 `environmentWarning` 同族：都是主进程事实、`RuntimeController` 不产出、只能在这一层
+  // 合进去。缺席（拿不到本机 home）时同样不写键——渲染层据此不缩写，而不是拿一个空串去猜边界。
+  return {
+    ...snapshot,
+    ...(environmentWarning === undefined ? {} : { environmentWarning }),
+    ...(localHome === undefined ? {} : { localHome })
+  }
 }

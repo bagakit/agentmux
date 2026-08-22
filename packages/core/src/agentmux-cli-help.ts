@@ -1,3 +1,35 @@
+import { browserPageCapabilityNames } from './browser-page-capability.js'
+
+/**
+ * 页面能力名渲染成散文里的一串。**从能力表取，不在文本里手打。**
+ *
+ * Skill 与 help 是 Agent 唯一的用法真相，它们此前把这些名字手抄了两处
+ * （能力清单散文、`browser run` 那一节）。手抄的清单会漂：新增一个页面能力却忘了改这里，
+ * Agent 就永远不知道它存在——而 tsc 守不到，因为这是字符串。
+ *
+ * 传 `effect` 而不是自己列名字，是为了让「哪些算观察、哪些算操作」这件事也只有一个答案：
+ * 那个分类同时决定人工接管后拒绝谁（见 `browser-page-capability.ts`）。
+ */
+function capabilityList(effect: Parameters<typeof browserPageCapabilityNames>[0], separator = ' / '): string {
+  return browserPageCapabilityNames(effect)
+    .map((name) => `\`${name}\``)
+    .join(separator)
+}
+
+/**
+ * 三个例子——一个观察、一个动作、一个等待，用来在一句话里说明「有这类东西」。
+ *
+ * 取每类的**第一个**而不是写死位置下标：位置下标在有人重排能力表时会静默变成另一批名字，
+ * 而这里想说的是「每类各举一个」，不是「取第 0、第 4、第 11 个」。
+ * 空类别会被跳过而不是渲染出一个空的反引号对——那是「表被改坏了」该显形的地方，
+ * 下面 `agentmux-cli-help.test.ts` 有一条钉住这三类都非空。
+ */
+function capabilityExamples(): string {
+  return (['observe', 'act', 'wait'] as const)
+    .flatMap((effect) => browserPageCapabilityNames(effect).slice(0, 1))
+    .join(', ')
+}
+
 /**
  * 启动定向握手的动词名。启动引导（agent-outbound-message 的 runtime guide）指向它、CLI 分发注册它、
  * help/skill 记它的确切用法——名字只有这一处定义，改名时三处一起动，不各写一份等着漂移。
@@ -12,6 +44,7 @@ Usage: agentmux <intent> [options]
 Intents:
   whoami      Report your own Session, View, Region, Workspace, and available capabilities.
   doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
+  endpoint    Print the Control endpoint path and schema version without connecting.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents or active Agent Sessions from their owners.
   open        Open typed content at one exact spatial destination.
@@ -57,6 +90,24 @@ Region, and the neighbors you can split against. Topic is not reported here: the
 topic.md and .agents/ files on disk are its source of truth — read them to find your Topic
 and collaborators. Requires a managed Agent caller. No View attached is a normal answer,
 not a failure.`],
+  ['endpoint', `Print the Control endpoint so another client can connect
+
+Usage:
+  agentmux endpoint
+
+Answers "where do I connect, and which protocol version is this" for a client written in any
+language. The Control endpoint is a unix socket carrying newline-delimited JSON: one request
+object per line, one receipt object per line.
+
+The socket path is not guessable from outside — it is derived from the pinned runtime artifact
+digest, so it changes when that artifact changes. Ask for it here instead of recomputing it;
+an upgrade moves it and a recomputed copy would go stale silently.
+
+This command does not connect. It answers the same way whether or not an owner is currently
+listening, because a client needs the address before it can dial. "Nobody is listening right
+now" is a different question — ask 'agentmux doctor' for that. AGENTMUX_RUNTIME_DIRECTORY
+relocates the whole runtime root, and the answer follows it.
+`],
   ['inspect', `Inspect one exact owner identity without changing focus
 
 Usage:
@@ -127,26 +178,37 @@ itself leads to.`],
   ['browser', `Drive an already-open Browser
 
 Usage:
-  agentmux browser run --browser <browser-id> < program.js
+  agentmux browser run --browser <browser-id> [--operation <operation-id>] < program.js
   agentmux browser history [--browser <browser-id>]
+  agentmux browser operation --operation <operation-id>
+  agentmux browser stop --operation <operation-id>
+  agentmux browser follow --operation <operation-id> [--after-sequence <n>]
   agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
 
 \`open browser\` opens one; \`browser run\` drives one that is already open. Two different
-things, two commands — neither replaces the other.`],
+things, two commands — neither replaces the other.
+
+An operation outlives the connection that started it. Pass your own \`--operation <id>\` to
+\`browser run\` and that id is addressable before the program starts: another shell, another
+process, or this one after a reconnect can ask \`browser operation\` how it is going,
+\`browser follow\` to watch it as it happens, and \`browser stop\` to stop it. All three address
+the operation by id alone — you do not need to know which Browser it is running in.`],
   ['browser.run', `Run a program in an open Browser
 
 Usage:
-  agentmux browser run --browser <browser-id> < program.js
+  agentmux browser run --browser <browser-id> [--operation <operation-id>] < program.js
   echo 'return await snapshot()' | agentmux browser run --browser <browser-id>
   agentmux browser history [--browser <browser-id>]
+  agentmux browser operation --operation <operation-id>
+  agentmux browser stop --operation <operation-id>
   agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
 
 The program is read from stdin as a whole — there is no --code flag, because a real program
 contains quotes, backslashes and newlines that every shell layer would re-escape.
 
 It runs as an async function body in an isolated subprocess, so \`await\` and \`return\` both
-work, and a runaway program cannot take AgentMux down with it. Page functions (snapshot,
-click, waitForLoad, …) are injected into that subprocess; \`agentmux --skill\` lists them.
+work, and a runaway program cannot take AgentMux down with it. Page functions (${capabilityExamples()}, …)
+are injected into that subprocess; \`agentmux --skill\` lists them.
 Elements are addressed by the refs a snapshot hands you — never coordinates.
 
 A ref outlives the run that issued it: refs from an earlier \`browser run\`, even from before
@@ -163,6 +225,15 @@ ordered semantic steps, and a replay reference. Keep that id when refining a pro
 for the Browser activity timeline, the desktop operation journal, and later replay. Raw passwords, cookies,
 page text, coordinates, and opaque JavaScript/CDP arguments are never stored in replay facts; sensitive
 steps remain explicit review gates.
+
+That id only arrives with the final receipt, which is too late to ask about a program still
+running. Pass \`--operation <id>\` to choose it yourself, and it is addressable from the moment
+the program starts: \`agentmux browser operation --operation <id>\` says how it is going, and
+\`agentmux browser stop --operation <id>\` stops it. Neither needs the same connection, the same
+process, or the Browser id — the operation, not the request, is what those two address, so a
+disconnect does not take the operation with it. Asking about an id we have no record of is a
+successful answer of nothing, not a failure; stopping one that has already finished answers
+with its existing outcome.
 
 A person can take the page back at any time: a real click, keypress or scroll on that Browser
 hands ownership to them mid-run. Actions (click, fillInput, gotoUrl, js, cdp, …) are refused
@@ -183,6 +254,95 @@ including on failure), and \`outcome\`, which is one of four:
                  the process died partway (an action may already have been applied once), or a
                  ref from an earlier run was matched back by appearance and may have landed on a
                  look-alike. Either way, look at the page before retrying — do not blind-retry.`],
+  // 剩下四个 browser 子命令各有自己一条。`operationPath` 把 `browser <verb>` 拼成 `browser.<verb>`，
+  // 所以少一条不是"退回上一级"，而是一句 "Unknown command"——一个真实存在的命令被 --help 说成不存在。
+  // （`history` 与 `replay` 在此之前正是这个状态。）
+  ['browser.history', `Read what has already happened in a Browser
+
+Usage:
+  agentmux browser history [--browser <browser-id>]
+
+Lists past operations with their ids, operators, ordered steps and outcomes. Omit --browser to
+list every Browser on this machine — after a restart you may not remember which id you opened,
+and listing first is exactly what this serves.
+
+This is the only way to obtain an operation id after the fact, so it is the entry point for
+\`browser replay\`. It does not require Agent browser automation to be enabled: wanting to review
+what happened should not be blocked by the switch that lets a program drive the page — when
+something went wrong, turning automation off is the first thing a person does.`],
+  ['browser.operation', `Ask how one operation is going, by id
+
+Usage:
+  agentmux browser operation --operation <operation-id>
+
+Addresses the operation by id alone — no Browser id, no particular connection. A client that
+reconnects, or a different process entirely, can ask about an operation it did not start.
+
+The answer is one of four states, and they never collapse into each other: still running,
+completed, stopped, or indeterminate. The last one means the application restarted while the
+operation was live, so what actually happened is unknown — an action may already have been
+applied once. Do not blind-retry on it.
+
+An id we have no record of is answered with nothing, successfully: it may come from another
+machine, or have aged out of the journal. That is not a failure of the Browser.
+
+Use \`browser history\` when you do not have an id yet; this command when you do.`],
+  ['browser.stop', `Stop one operation, by id
+
+Usage:
+  agentmux browser stop --operation <operation-id>
+
+Stops the operation, not your request. Any connection can stop any operation it has the id for:
+the one that started it, another shell, or this one after a reconnect. Closing a connection
+never stops the operation it started.
+
+Stopping one that already finished answers with its existing outcome instead of failing — under
+real timing a stop almost always races a program that just finished, and reporting that race as
+an error would leave you unable to tell "I was too late" from "something broke". An id we have
+no record of is likewise answered with nothing, and takes nothing away from the Browser.
+
+A stopped operation's outcome is \`stopped\`, never \`script-failed\`: the program was fine, we cut
+it off. Actions before that point did happen; nothing after did.`],
+  ['browser.follow', `Watch one operation's progress as it happens
+
+Usage:
+  agentmux browser follow --operation <operation-id> [--after-sequence <n>]
+
+Prints a stream, not one receipt: an \`attached\` frame first, then one \`progress\` frame per event,
+then \`end\`. The envelope matches \`agentmux output --follow\`, so one parser reads both. Ctrl-C
+ends it; so does the operation finishing.
+
+The \`attached\` frame carries \`gap\`. Only a bounded number of events is retained, so "the stretch
+you asked for is already gone" is a state that will happen, not an anomaly — and it is said in
+the first frame rather than left for you to infer from a jump in sequence numbers. \`gap: null\`
+means nothing is missing. A \`droppedThrough\` value means everything up to and including that
+sequence is unavailable; the timeline you are holding is incomplete, and \`browser operation\`
+gives you a complete snapshot to realign against.
+
+Every event carries a \`sequence\`. Pass the last one you saw as --after-sequence to resume after
+a disconnect. Sequences are per-process: after a restart the numbers start over, because the
+owner has no basis for claiming to know what the previous process had already dropped.
+
+Watching does not require Agent browser automation to be enabled, and does not keep the
+operation alive — closing the stream stops the watching, never the work.`],
+  ['browser.replay', `Replay the steps recorded from an earlier operation
+
+Usage:
+  agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
+
+Replays a plan we recorded, not code you wrote — that is why it is not \`browser run\`. The plan
+generator re-checks page identity and each target as it goes, and keeps sensitive steps as
+explicit review gates. Those checks come from the owner; a program asked to replay itself would
+be vouching for its own targets.
+
+Three modes, three different jobs:
+  --preview    fetch the plan without touching the page — look before doing
+  --step <n>   perform only step n — pick up after a failure
+  --run        perform the whole plan (the default)
+
+A recorded ref is matched back onto the page by what it pointed at, not by identity, so a replay
+that relied on one is reported \`indeterminate\` rather than \`completed\` — it may have landed on a
+look-alike. Get operation ids from \`browser history\`.`],
   ['discuss', `Start a Discussion with a dedicated Agent
 
 Usage:
@@ -360,10 +520,10 @@ agentmux browser run --browser <browser-id> < program.js
 \`\`\`
 
 The program is read whole from stdin and runs in an isolated subprocess with page functions
-injected: \`snapshot\` / \`snapshotText\` / \`pageInfo\` / \`captureScreenshot\` to observe,
-\`click\` / \`fillInput\` / \`typeText\` / \`pressKey\` / \`hover\` / \`scroll\` to act,
-\`waitForElement\` / \`waitForLoad\` / \`waitForNetworkIdle\` / \`wait\` to wait, \`gotoUrl\` to
-navigate, and \`js\` / \`cdp\` as escape hatches. Write one program that does the whole loop —
+injected: ${capabilityList('observe')} to observe,
+${capabilityList('act', ' / ')} to act and as escape hatches,
+${capabilityList('wait')} to wait, and ${capabilityList('navigate')} to
+navigate. Write one program that does the whole loop —
 that is the point of the verb:
 
 \`\`\`js

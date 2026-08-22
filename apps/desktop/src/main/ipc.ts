@@ -574,7 +574,7 @@ export async function registerIpc(args: {
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
   handle('sessions:snapshot', async () => (
-    sessionSnapshotPayload(await args.runtime.snapshot(config), args.environmentWarning)
+    sessionSnapshotPayload(await args.runtime.snapshot(config), args.environmentWarning, app.getPath('home'))
   ))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
     const result = await args.runtime.launchAgent(input, config)
@@ -676,7 +676,13 @@ export async function registerIpc(args: {
    *
    * 拒绝要说清去哪开（AGENTS.md:32-52：不许静默、也不许给一句无法行动的拒绝）。
    */
-  handleWithEvent('browser:runScript', async (event, id: string, code: string, operator?: import('../shared/browser-operation.js').BrowserOperator) => {
+  handleWithEvent('browser:runScript', async (
+    event,
+    id: string,
+    code: string,
+    operator?: import('../shared/browser-operation.js').BrowserOperator,
+    operationId?: string
+  ) => {
     requireTrustedSender('browser:runScript', event)
     if (config.browser.agentAutomation !== true) {
       // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
@@ -688,11 +694,25 @@ export async function registerIpc(args: {
         { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
       )
     }
-    return await browsers.runScript(id, code, operator)
+    // 第四个位置是 `replayOf`，这条路上永远没有（回放走 `browser:runReplay`）。这个 undefined 洞
+    // 必须显式留着：少写一个位置就是把 operationId 喂进 replayOf，于是这次操作被记成"某个操作的
+    // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
+    return await browsers.runScript(id, code, operator, undefined, operationId)
   })
   handleWithEvent('browser:listOperationHistory', async (event) => {
     requireTrustedSender('browser:listOperationHistory', event)
     return await browsers.listOperationHistory()
+  })
+  handleWithEvent('browser:getOperation', async (event, operationId: string) => {
+    requireTrustedSender('browser:getOperation', event)
+    return await browsers.getOperation(operationId)
+  })
+  // 取消不过 `agentAutomation` 闸，而 runScript 过。这不是漏了：那个闸挡的是「让 Agent 去驱动页面」，
+  // 而这条是**停下**驱动。开关关掉之后仍然能停掉一个正在跑的操作，否则用户一旦关掉总开关就再也
+  // 停不了手上这一个——把一道拒绝新动作的闸变成了一次能力损失。
+  handleWithEvent('browser:stopOperationById', async (event, operationId: string) => {
+    requireTrustedSender('browser:stopOperationById', event)
+    return await browsers.stopOperationById(operationId)
   })
   handleWithEvent('browser:replayPlan', async (event, operationId: string) => {
     requireTrustedSender('browser:replayPlan', event)
@@ -701,10 +721,6 @@ export async function registerIpc(args: {
   handleWithEvent('browser:returnControl', async (event, id: string) => {
     requireTrustedSender('browser:returnControl', event)
     return browsers.returnControl(id)
-  })
-  handleWithEvent('browser:stopOperation', async (event, id: string) => {
-    requireTrustedSender('browser:stopOperation', event)
-    return browsers.stopOperation(id)
   })
   handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator) => {
     requireTrustedSender('browser:runReplay', event)
@@ -742,7 +758,40 @@ export async function registerIpc(args: {
   ) => await browsers.restore(id, input))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
-  const control = new AgentMuxControlServer({ execute: executeControl })
+  const control = new AgentMuxControlServer({
+    execute: executeControl,
+    /**
+     * 进度订阅直接接到 journal 上，**不经过 Renderer**。
+     *
+     * 与 `execute` 那条路不同是刻意的：`execute` 走 controlBridge 到 Renderer，因为那些操作要动
+     * 工作面（开 Tab、摘 Region、焦点），事实 owner 在那边。进度不是——它的事实 owner 就是这里的
+     * journal。绕一趟 Renderer 只会多一个会断的环节，而且断掉的时候订阅会连着没了。
+     *
+     * 也因此它不受 `requireActive()`（Tab 还在吗）约束：订阅存在的全部理由就是在别的连接、
+     * 别的时刻问同一条操作的进展。
+     */
+    subscribeBrowserOperation: async (request, onEvent) => {
+      const subscription = await browserOperationJournal.subscribe(
+        request.operationId,
+        request.afterSequence,
+        (sequenced) => onEvent({ sequence: sequenced.sequence, event: sequenced.event })
+      )
+      // backlog 在开场帧之后立刻投递，不混进开场帧本身：开场帧说的是"这条操作现在什么样、有没有
+      // 缺口"，backlog 是事件。合进去会让客户端要写两套解析（第一帧带一批、后续一条一条）。
+      // `queueMicrotask` 而不是同步 for：同步发的话，这些事件会在 `subscribeBrowserOperation`
+      // 返回之前就流出去——也就是在开场帧之前，而缺口必须先到。
+      queueMicrotask(() => { for (const event of subscription.backlog) onEvent({ sequence: event.sequence, event: event.event }) })
+      return {
+        // 原样交出，**不做映射**：`BrowserOperation` 与 core 的 `AgentMuxControlBrowserOperation`
+        // 形状刻意一致（contracts.ts 的 BrowserScriptRunReport 那段写了理由），browser.run 那条路
+        // 也是原样交。中间加一层映射，漏一个字段是静默的——而这里漏掉 `warning` 就等于把
+        // "这条记录不完整"这件事吞掉。
+        runOperation: subscription.operation,
+        gap: subscription.gap,
+        dispose: () => subscription.dispose()
+      }
+    }
+  })
   await control.start()
   return async () => {
     await runOwnerDisposals([

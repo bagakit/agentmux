@@ -320,3 +320,103 @@ describe('Topics 面板的 pin', () => {
     expect(rowByTitle('Topic A').tabIndex).toBe(0)
   })
 })
+
+/**
+ * 头像簇上显示的是**显示名**（经 resolveAgentName 那条唯一求值链），不是 session.label。
+ * session.label 是链的最低一档（Main 建的 `executorLabel · workspaceLabel`），对「同 provider、同目录
+ * 的多个 Agent」逐字相同——直接拿它当 aria-label/tooltip，两枚头像的读屏与悬浮提示就一模一样。
+ *
+ * 这一组把链的每一档钉在**真实渲染的 aria-label**（`AgentAvatar` 写成 `${label} · ${state}`）上。
+ * 除 fallback 档外，把生产代码那行改回 `label: agent.live?.label ?? agent.sessionId` 都会让对应用例变红。
+ */
+describe('Topic Agent 头像用显示名链，不是 session.label', () => {
+  /** 一个活着的 codex Agent session，落在给定 Topic 目录下。label 传入，作为链最低一档的 fallback。 */
+  function liveCodex(id: string, label: string, topicDir: string): AgentSessionSnapshot {
+    return {
+      id, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      capabilities: {
+        terminal: true, timeline: 'complete-events', permission: 'observe',
+        providerResume: true, replyCorrelation: 'none'
+      },
+      hostId: 'local', workspacePath: topicDir, label,
+      createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+      status: { state: 'working', source: 'run-process', observedAt: 1 },
+      control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
+    }
+  }
+
+  /** 一份最小 timeline：首条用户消息的 content 就是「首条 prompt」派生源（firstPromptFromTimeline 只读这个）。 */
+  function timelineWithPrompt(id: string, content: string): unknown {
+    return { agentSessionId: id, revision: 1, items: [{ id: `${id}-msg`, kind: 'user_message', content }] }
+  }
+
+  /** 取某 Topic 行里全部头像的 aria-label；自证查到了 `expected` 枚，避免空集合上断言恒真。 */
+  function avatarLabels(title: string, expected: number): string[] {
+    const avatars = [...rowByTitle(title).querySelectorAll<HTMLElement>('.agent-avatar')]
+    expect(avatars.length, `Topic「${title}」渲染出的头像数不符——判据落空，下面的断言会恒真`).toBe(expected)
+    return avatars.map((avatar) => avatar.getAttribute('aria-label') ?? '')
+  }
+
+  it('同 provider 同目录同兜底名的两个 Agent，改名后仍可区分（本条要解的缺陷）', async () => {
+    // 真实场景：Main 用 executor+workspace 派生 label，所以同 provider + 同路径 ⇒ 两个 session.label 逐字相同。
+    const shared = topic('view:pair', 'Pair Topic')
+    fixture.snapshot = [shared]
+    // 两个 session 的兜底 label **完全相同**——这正是缺陷复现的前提。
+    fixture.state.sessions = [
+      liveCodex('s1', 'Codex · scratch', shared.directoryPath),
+      liveCodex('s2', 'Codex · scratch', shared.directoryPath)
+    ]
+
+    // 先证前提：不给改名时，两枚头像的 aria-label 逐字相同。这条**不是**用来抓 mutation 的
+    // （mutation 下同样相同），而是证明这个 fixture 真的复现了缺陷，而非因别的原因偶然不同。
+    await mount()
+    const beforeRename = avatarLabels('Pair Topic', 2)
+    expect(beforeRename).toEqual(['Codex · scratch · working', 'Codex · scratch · working'])
+
+    // 各给一个用户改名（链最高档）。求值走链后，两枚头像必须**各不相同**且等于改名值。
+    // 把生产那行改回 `agent.live?.label ?? agent.sessionId`，改名被丢弃，两者又相同 ⇒ 本条即红。
+    fixture.state.agentNames = { s1: 'Alpha Renamed', s2: 'Beta Renamed' }
+    await mount()
+    const afterRename = avatarLabels('Pair Topic', 2)
+    expect(afterRename).toEqual(['Alpha Renamed · working', 'Beta Renamed · working'])
+    expect(afterRename[0]).not.toBe(afterRename[1])
+  })
+
+  it('链档次：用户改名压过 timeline 派生名', async () => {
+    // 同一 session 既有用户改名、又有首条 prompt。改名是最高档，必须赢——自动来源绝不越过用户意图。
+    // mutation 下 label 变回 session.label，既不是改名也不是派生名 ⇒ 本条即红。
+    const solo = topic('view:prec', 'Precedence Topic')
+    fixture.snapshot = [solo]
+    fixture.state.sessions = [liveCodex('s1', 'Codex · scratch', solo.directoryPath)]
+    fixture.state.agentNames = { s1: 'Chosen By User' }
+    fixture.state.timelines = { s1: timelineWithPrompt('s1', 'derive me from the prompt') }
+    await mount()
+
+    expect(avatarLabels('Precedence Topic', 1)).toEqual(['Chosen By User · working'])
+  })
+
+  it('timeline 派生名一路到达头像（无改名时）', async () => {
+    // 无用户改名、只有首条 prompt：应落到「派生」档。deriveNameFromPrompt 取首行、把内部空白压成单空格、
+    // 限长 48。这里的 prompt 短且只有多余空格，期望值即压平后的字面（不调用被测函数算，硬写常量）。
+    // mutation 下 label 变回 session.label ⇒ 拿不到派生名 ⇒ 本条即红。
+    const solo = topic('view:derive', 'Derive Topic')
+    fixture.snapshot = [solo]
+    fixture.state.sessions = [liveCodex('s1', 'Codex · scratch', solo.directoryPath)]
+    fixture.state.timelines = { s1: timelineWithPrompt('s1', 'Investigate   the   flaky   test') }
+    await mount()
+
+    expect(avatarLabels('Derive Topic', 1)).toEqual(['Investigate the flaky test · working'])
+  })
+
+  it('无改名、无 timeline 时落到兜底名 session.label（防过度纠正：链无输入时不能凭空造名）', async () => {
+    // 这条守的是相反方向的 mutation——「修复」不能在链一无所有时发明一个名字。它与把生产那行改回
+    // `agent.live?.label ?? agent.sessionId` **不可区分**（两者此时都产出 session.label），所以它
+    // 抓不到那次 revert，也不该假装能；它抓的是「fallback 档被改坏／被越过」这一类。
+    const solo = topic('view:fallback', 'Fallback Topic')
+    fixture.snapshot = [solo]
+    fixture.state.sessions = [liveCodex('s1', 'Codex · scratch', solo.directoryPath)]
+    await mount()
+
+    expect(avatarLabels('Fallback Topic', 1)).toEqual(['Codex · scratch · working'])
+  })
+})

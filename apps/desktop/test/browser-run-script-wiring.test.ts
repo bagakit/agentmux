@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { mkdtempSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -349,6 +350,96 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
     expect(seen, '放行的观察没真的执行').toEqual(['click', 'snapshot', 'pageInfo'])
   }, 30_000)
 
+  it('接管之后，能力表里每个改页面的能力都被拒，每个只读的都放行', async () => {
+    // **这条来自一次存活的变异。** 上面两条各自手挑了几个名字（click / js / cdp / snapshot /
+    // pageInfo），于是把 `navigate` 整类从接管拒绝集合里删掉——也就是「人把页面抢回去之后，
+    // Agent 仍然能 gotoUrl 把它导走」——44 个测试全绿，没有一条发现。手挑名字的判据只覆盖被挑中
+    // 的那几个，而漏掉的那一类恰恰是最容易在重构里丢掉的。
+    //
+    // 所以这里**遍历能力表**，按 `effect` 算期望：act ∪ navigate 必须被拒，observe 必须放行。
+    // 期望不是手写的第二份清单，而是从同一张表按类别算出来的；表变了这条自动跟着变。
+    //
+    // `wait` 不在内：等待既不读也不改，拦不拦它都没有可观察的差别，而 `wait(0)` 在替身上要真的
+    // 等——那只会让这条测试变慢，不会让它变准。
+    const { manager, contents } = await managerWithBrowser()
+
+    // 每个能力一次调用，参数给到能过派发层形参检查的最小形状。名字从表来，调用形状按名字给。
+    const callFor: Record<string, string> = {
+      snapshot: 'snapshot()',
+      snapshotText: 'snapshotText()',
+      pageInfo: 'pageInfo()',
+      captureScreenshot: 'captureScreenshot()',
+      click: 'click("@e1")',
+      fillInput: 'fillInput("@e1", "x")',
+      typeText: 'typeText("x")',
+      pressKey: 'pressKey("Enter")',
+      hover: 'hover("@e1")',
+      scroll: 'scroll("@e1")',
+      gotoUrl: 'gotoUrl("https://example.invalid/")',
+      js: 'js("1")',
+      cdp: 'cdp("Runtime.evaluate", {})'
+    }
+
+    // 判据的作用对象：表里 act/navigate/observe 三类的名字，且每一类都必须非空——某一类取空时
+    // 下面对它的断言一条不跑，而那正是本条要防的那个缺陷（MEMORY「空集合上的谓词断言恒成立」）。
+    const mustRefuse = [
+      ...browserPageCapabilityNames('act'),
+      ...browserPageCapabilityNames('navigate')
+    ].filter((name) => name in callFor)
+    const mustAllow = browserPageCapabilityNames('observe').filter((name) => name in callFor)
+    expect(browserPageCapabilityNames('act').length, 'act 类是空的——判据在对空气生效').toBeGreaterThan(0)
+    expect(
+      browserPageCapabilityNames('navigate').length,
+      'navigate 类是空的——正是这一类被删掉时本条必须红'
+    ).toBeGreaterThan(0)
+    expect(mustAllow.length, 'observe 类是空的——放行那一半没有作用对象').toBeGreaterThan(0)
+    // 表里每个名字都得有调用形状，否则新增能力会静默不被这条覆盖。`wait` 整类豁免——它们在替身上
+    // 要真的等，只会让这条变慢不会变准；豁免按**类别**算而不是点名 `'wait'` 这一个字面量，
+    // 否则 `waitForElement` 这些同类的名字会被当成"漏了调用形状"。
+    const waitClass = new Set(browserPageCapabilityNames('wait'))
+    expect(
+      BROWSER_PAGE_CAPABILITY_NAMES.filter((name) => !waitClass.has(name) && !(name in callFor)),
+      '能力表里有名字没给调用形状——它不在这条判据的覆盖面里'
+    ).toEqual([])
+
+    // 接管只在此刻挂上：`mockImplementationOnce` 是全局排队的，上面任一条断言抛出都会把这个
+    // 没被消费的实现留给**下一个测试**去取，于是隔壁 5 条会莫名变红而真凶在这里。
+    takeoverOnFirstCall(contents)
+
+    const probes = [...mustRefuse, ...mustAllow]
+    const report = await manager.runScript(
+      'b1',
+      `
+      await click("@e1")
+      const outcomes = []
+      for (const [label, run] of [
+${probes.map((name) => `        ['${name}', () => ${callFor[name]}]`).join(',\n')}
+      ]) {
+        try { await run(); outcomes.push(label + ':allowed') }
+        catch (error) { outcomes.push(label + ':' + (/took control/i.test(String(error && error.message)) ? 'refused' : 'other')) }
+      }
+      return outcomes
+    `
+    )
+
+    const got = new Map(
+      (report.result as string[]).map((entry) => {
+        const [name, verdict] = entry.split(':')
+        return [name!, verdict!]
+      })
+    )
+    // 非空自检：程序没跑到底的话 got 是空 Map，下面两个循环一条不跑。
+    expect(got.size, `程序没跑到底：${JSON.stringify(report.outcome)}`).toBe(probes.length)
+
+    for (const name of mustRefuse) {
+      expect(got.get(name), `${name} 会改页面，但人接管之后它没被拒——页面已经不是 Agent 的了`)
+        .toBe('refused')
+    }
+    for (const name of mustAllow) {
+      expect(got.get(name), `${name} 只是观察，接管之后不该拒——程序会瞎猜着退出`).toBe('allowed')
+    }
+  }, 30_000)
+
   it('程序把拒绝 try/catch 吞了照常 return，结局仍然是 stopped', async () => {
     // 这条是承重的，与 `endedReason` 那段注释里的是同一个陷阱：判在脚本层会被这个 catch 吃掉。
     const { manager, contents } = await managerWithBrowser()
@@ -439,6 +530,40 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
     manager.returnControl('b1')
     const resumed = await manager.runScript('b1', 'return "resumed"')
     expect(resumed.outcome.kind).toBe('completed')
+  }, 30_000)
+
+  /**
+   * 接管拒绝必须是**机器可判的**，不是一句散文。
+   *
+   * 设计约束原话：「这条拒绝要带类型化的原因，让协议客户端能把『人在用这一页』与『出故障了』
+   * 分开，而不是收到一句散文」。判码而不是判 message：正则匹配那句英文在改文案时会红，而在
+   * 「码丢了、文案没动」时**不会**——而后者正是机读侧唯一在乎的那个退化。
+   *
+   * 这一条同时守住「Agent 不得靠重试静默夺回页面」：重试的次数与拒绝的形态无关，所以下面连着
+   * 判三次，并且判它三次都是同一个码、页面始终没被夺回。
+   */
+  it('接管拒绝带类型化的码，且重试拿不回页面（人不交还就一直拒）', async () => {
+    const { manager, contents } = await managerWithBrowser()
+    takeoverOnFirstCall(contents)
+    expect((await manager.runScript('b1', 'await click("@e1"); return "done"')).outcome.kind).toBe('stopped')
+
+    const codes: unknown[] = []
+    for (const attempt of [1, 2, 3]) {
+      // 重试三次。Agent 靠重试夺回页面是被明确禁止的，所以三次必须**全部**被拒、且是同一个理由。
+      await expect(
+        manager.runScript('b1', `return "retry ${attempt}"`),
+        `第 ${attempt} 次重试没有被拒——Agent 靠重试夺回了页面`
+      ).rejects.toThrow()
+      const failure = await manager.runScript('b1', `return "retry ${attempt}"`).catch((error: unknown) => error)
+      codes.push((failure as { code?: unknown }).code)
+    }
+    // 钉死整份：只判"第一次带码"会放过"重试之后降级成裸 Error"。
+    expect(codes, '接管拒绝不是类型化的（或重试之后码变了/丢了）')
+      .toEqual(['BROWSER_HUMAN_CONTROL_ACTIVE', 'BROWSER_HUMAN_CONTROL_ACTIVE', 'BROWSER_HUMAN_CONTROL_ACTIVE'])
+
+    // 另一半：人明确交还之后照样能跑。缺这一半的话，「一直拒」与「彻底坏了」在判据眼里一样。
+    manager.returnControl('b1')
+    expect((await manager.runScript('b1', 'return "resumed"')).outcome.kind).toBe('completed')
   }, 30_000)
 })
 
@@ -674,6 +799,56 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     expect(replay.runOperation?.replayOf).toBe(original.runOperation!.id)
   }, 30_000)
 
+  it('按外观命中之后某一步抛了，告示不许跟着丢——失败臂和成功臂必须汇到同一个结局', async () => {
+    // 这是 `count > 1` 降级与自愈告示的**未闭合兄弟**：两处降级判据都写在 `if (run.completed)`
+    // 里，而一次「已经按外观点下去了、后面某步才抛」的运行 `completed` 为 false，于是整份 notes
+    // 被静默丢掉，收据报 `script-failed`。
+    //
+    // 为什么这个差别是承重的：`script-failed` 对 Agent 的意思是「你的程序写错了，改完重跑」，
+    // 而此刻真实状态是「一个可能打在另一个同名元素上的破坏性动作已经执行了」。Agent 照着
+    // script-failed 去整段重跑，那个动作就再执行一次——正是同文件反复点名的「下单点两次」。
+    //
+    // 同一份原则在接管那一支已经写明并兑现了（browser-view-manager.ts:749-759「两条路必须汇到
+    // 同一个结局」），这里只是没提上来。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const crowded = { role: 'button', name: 'Delete', ordinal: 2, count: 3 }
+    createDispatch.mockImplementationOnce((context) => async () => {
+      context.recordTarget?.(crowded)
+      return null
+    })
+    const original = await manager.runScript('b1', 'await click("@e2")')
+    const plan = await manager.replayPlan(original.runOperation!.id)
+
+    // 回放：click 真的落下去（并记下 count:3 的身份），随后一步抛。
+    createDispatch.mockImplementationOnce((context) => async (name) => {
+      if (name === 'pageInfo') return { url: 'https://example.invalid/' }
+      if (name === 'snapshot') {
+        return {
+          nodes: [
+            { ref: '@a', role: 'button', name: 'Delete' },
+            { ref: '@b', role: 'button', name: 'Delete' },
+            { ref: '@c', role: 'button', name: 'Delete' }
+          ]
+        }
+      }
+      if (name === 'click') {
+        context.recordTarget?.(crowded)
+        return null
+      }
+      throw new Error('the page changed under us')
+    })
+    // 走真实回放路径：计划里两步，第一步 click 落下去，第二步 hover 抛。
+    const twoStep = { ...plan!, steps: [plan!.steps[0]!, { ...plan!.steps[0]!, method: 'hover' }] }
+    const replay = await manager.runReplay('b1', twoStep)
+
+    expect(
+      replay.outcome.kind,
+      '破坏性动作已按外观落下去了，却报 script-failed——Agent 会改代码整段重跑，那个动作再来一次'
+    ).toBe('indeterminate')
+    expect(replay.runOperation?.phase).toBe('indeterminate')
+  }, 30_000)
+
   it('journal 写入失败不阻断健康 Browser，降级告示到达 receipt 和实际 renderer 事件', async () => {
     const journal = new BrowserOperationJournal({
       load: async () => null,
@@ -686,6 +861,207 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     expect(report.runOperation?.warning).toMatch(/could not be saved|unavailable/i)
     expect(sentEvents().at(-1)?.browser.activity.warning).toMatch(/could not be saved|unavailable/i)
     expect((await manager.listOperationHistory()).map((operation) => operation.id)).toEqual([report.runOperation!.id])
+  }, 30_000)
+})
+
+/**
+ * T-003/T-004/T-005：**operation 的寿命长于任何一条连接。**
+ *
+ * 这一族判的是「凭 operationId 查询 / 取消」这条能力，而它成立的前提是调用方在操作**开跑之前**
+ * 就有 id。三件事必须一起证，缺任何一件前两件只对已结束的操作有效：
+ *   - id 由调用方给，在飞期间就够得着（T-005）；
+ *   - 凭 id 能停，且走的是既有的那条 AbortController，不是第二套 kill（T-003）；
+ *   - 凭 id 能查，读的是既有 journal，不是第二份账（T-004）。
+ *
+ * 为什么判在 manager 这一层而不只在协议解析：解析层只证「这个请求长得对」，而这几条要证的是
+ * 「那次操作真的停下了」「那条事实真的还在」。协议侧的形状判据在 control-host.test.ts。
+ *
+ * `holdNextCall` 在下一个 describe 里定义，这里要自己挂住一次调用——两处的用途不同：那边是
+ * 「挂住以便观察交接事件」，这里是「挂住以便从另一个入口伸手进去」。
+ */
+describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连接无关', () => {
+  function fileJournal() {
+    const path = join(mkdtempSync(join(tmpdir(), 'agentmux-operation-lifecycle-')), 'operations.json')
+    return { path, journal: new BrowserOperationJournal(new BrowserOperationFileStore(path)) }
+  }
+
+  /** 挂住派发层的第一次调用，交出「已经进去了」和「放它走」两个把手。 */
+  function holdFirstCall() {
+    let release!: () => void
+    let arrived!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    const entered = new Promise<void>((resolve) => { arrived = resolve })
+    const calls: string[] = []
+    createDispatch.mockImplementationOnce(() => async (name: string) => {
+      calls.push(name)
+      if (calls.length === 1) {
+        arrived()
+        await released
+      }
+      return null
+    })
+    return { calls, entered, release }
+  }
+
+  it('调用方给的 id 就是记录里的 id，在飞期间凭它既查得到也停得下', async () => {
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const held = holdFirstCall()
+    // 调用方自己造 id，并在**开跑之前**就持有它。这是整条链子的前提：主进程铸的 id 只随终局
+    // 回执露出（Control 是一问一答），那时已无可取消。
+    const mine = 'op:caller-minted'
+    const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")', undefined, undefined, mine)
+    try {
+      await held.entered
+      // 查：拿到的是**同一个** identity，而且它还没结束。两个铸造点的话这里会查不到（journal 里
+      // 记的是它自己铸的那个），而两边各自看起来都正常。
+      const inFlight = await manager.getOperation(mine)
+      expect(inFlight?.id, '调用方给的 id 在 journal 里查不到——identity 分岔了').toBe(mine)
+      expect(
+        ['preparing', 'running', 'waiting'],
+        `在飞的操作被答成了终局：${inFlight?.phase}`
+      ).toContain(inFlight!.phase)
+      // 停：凭 id，不给 browserId。这条路必须真的把它停下来，不是记一笔"请求过取消"。
+      const stopped = await manager.stopOperationById(mine)
+      expect(stopped?.id).toBe(mine)
+      expect(stopped?.phase, '凭 id 取消没把它停下来').toBe('stopped')
+    } finally {
+      held.release()
+      await pending
+    }
+    const report = await pending
+    // 结局落在四分类里**正确**那一档：被我们截断的是 stopped，不是 script-failed（那会让 Agent
+    // 去改一段本来没错的程序），也不是 completed。
+    expect(report.outcome.kind, '被取消的操作结局不是 stopped').toBe('stopped')
+    expect(report.runOperation?.id, '终局回执里的 id 换人了').toBe(mine)
+    // 取消之后，第一次动作发生过、之后的一个都没有。
+    expect(held.calls).toEqual(['wait'])
+  }, 30_000)
+
+  it('另一个 Browser 上的操作也停得下：寻址按 operationId，不按哪一页', async () => {
+    // 这条是 T-003 的要害，T-008 之后更是唯一入口：协议调用方手上只有 id，它不知道也不该需要知道
+    // 那个操作跑在哪个 Browser 上。把实现改成只看某一个 entry（或要求 browserId），这条必红。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    await manager.create('b2', 'https://second.invalid/')
+    const held = holdFirstCall()
+    const mine = 'op:on-the-second-browser'
+    const pending = manager.runScript('b2', 'await wait(1000); await click("@e1")', undefined, undefined, mine)
+    try {
+      await held.entered
+      const stopped = await manager.stopOperationById(mine)
+      expect(stopped?.browserId, '停错了 Browser').toBe('b2')
+      expect(stopped?.phase, '第二个 Browser 上的操作停不下来——寻址被绑在某一页上了').toBe('stopped')
+    } finally {
+      held.release()
+      await pending
+    }
+    expect((await pending).outcome.kind).toBe('stopped')
+  }, 30_000)
+
+  it('取消一个已经结束的操作是幂等成功并答出它的既有终局，不抛', async () => {
+    // 正常时序下取消**总会**撞上刚结束的操作（人按下停止的同一刻程序自己跑完了）。把这个竞态
+    // 写成失败，调用方就分不出「我停晚了」和「出错了」。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const done = 'op:already-done'
+    const report = await manager.runScript('b1', 'return await snapshot()', undefined, undefined, done)
+    expect(report.outcome.kind).toBe('completed')
+
+    const late = await manager.stopOperationById(done)
+    expect(late?.id).toBe(done)
+    // 答出**既有**终局，而不是把一个跑完的操作改写成 stopped：那会让历史里的事实被一次迟到的
+    // 取消覆盖掉。
+    expect(late?.phase, '迟到的取消把一个已完成的操作改写了').toBe('completed')
+    // 再来一次仍是同一个答案——幂等不是"第一次成功"。
+    expect((await manager.stopOperationById(done))?.phase).toBe('completed')
+  }, 30_000)
+
+  it('未知 id 答 null 而不是抛，且这个 Browser 随后照样能跑', async () => {
+    // RED-LINES 第 2 类：我们查不到 ≠ Browser 坏了。id 可能来自另一台机器、或早被日志轮转掉了。
+    // 把它实现成动 entry 状态（例如顺手清掉 activeRun），后半句必红。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    await expect(manager.getOperation('op:never-existed')).resolves.toBeNull()
+    await expect(manager.stopOperationById('op:never-existed')).resolves.toBeNull()
+    // 能力没被这次查询失败拿走。
+    const after = await manager.runScript('b1', 'return await snapshot()')
+    expect(after.outcome.kind, '一次查不到把 Browser 的能力拿走了').toBe('completed')
+  }, 30_000)
+
+  it('重启后仍查得到，且那一档是 indeterminate——不许折进 failed 或 completed', async () => {
+    // T-004 的要害：事实必须活过进程。judge 的不是"内存里还在不在"，而是换一个 owner 从磁盘
+    // 读起来还在不在。把查询实现成从内存按连接找，这条必红。
+    const { path, journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const finished = 'op:before-restart'
+    await manager.runScript('b1', 'return await snapshot()', undefined, undefined, finished)
+    // 等最后一次写落盘再换 owner：读到中途那份 running 版本会被正确地恢复成 indeterminate，
+    // 然后把 completed 记录覆盖掉——那是竞态，不是被测的性质。
+    await vi.waitFor(async () => {
+      const document = JSON.parse(await readFile(path, 'utf8')) as { operations?: Array<{ id: string; phase: string }> }
+      expect(document.operations?.find((operation) => operation.id === finished)?.phase).toBe('completed')
+    })
+
+    // 进程重启：新 owner、新 manager，磁盘是唯一的桥。
+    const restartedJournal = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+    const { manager: restarted } = await managerWithBrowser(restartedJournal)
+    expect((await restarted.getOperation(finished))?.phase, '重启后查不到已完成的那条，或它的档位变了')
+      .toBe('completed')
+
+    // 另一档：重启时**活着**的操作。手写一条 running 记录进磁盘，再让新 owner 读它——这一步
+    // 必须真的经过 journal 重载，不是手造一条 indeterminate 记录来自证。
+    const live = JSON.parse(await readFile(path, 'utf8')) as {
+      version: number
+      operations: Array<Record<string, unknown>>
+      events: unknown[]
+    }
+    live.operations.push({
+      id: 'op:was-running', browserId: 'b1', operator: { id: 'agent:x', name: 'Agent' },
+      startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser',
+      url: 'https://example.invalid/', steps: []
+    })
+    await writeFile(path, JSON.stringify(live), 'utf8')
+    const { manager: afterCrash } = await managerWithBrowser(
+      new BrowserOperationJournal(new BrowserOperationFileStore(path))
+    )
+    const recovered = await afterCrash.getOperation('op:was-running')
+    // `indeterminate` 的意思是「这件事做到哪儿我们不知道」，调用方对它唯一正确的反应是**别盲目
+    // 重试**。折进 failed 会被读成"失败了，改完重跑"——而页面上那个动作可能已经做过一次了。
+    expect(recovered?.phase, '重启时活着的操作被折成了别的档——"分不清"这一档消失了')
+      .toBe('indeterminate')
+    // 四档互不折叠：同一个 owner 上两条记录必须给出两个不同的答案。
+    expect(
+      new Set([(await afterCrash.getOperation(finished))?.phase, recovered?.phase]).size,
+      '两条不同结局的操作被答成了同一档'
+    ).toBe(2)
+  }, 30_000)
+
+  it('journal 读坏了：查询答 null，而这个 Browser 照样接得住新操作', async () => {
+    // 流程状态，不是 Browser 坏了（RED-LINES 第 2 类）。journal 本来就是 advisory 的。
+    const broken = new BrowserOperationJournal({
+      load: async () => { throw new Error('journal unreadable') },
+      save: async () => {}
+    })
+    const { manager } = await managerWithBrowser(broken)
+    await expect(manager.getOperation('op:anything')).resolves.toBeNull()
+    const report = await manager.runScript('b1', 'return await snapshot()')
+    expect(report.outcome.kind, 'journal 读不了把 Browser 阻断了').toBe('completed')
+    // 而且降级要说出来，不许静默：用户有权知道自己在降级状态下工作。
+    expect(report.runOperation?.warning, 'journal 降级了却没有任何告示').toMatch(/unavailable|unreadable|could not/i)
+  }, 30_000)
+
+  it('查询与 history 指向同一条 operation，不是两份投影', async () => {
+    // 两个数据源一条生命周期＝鬼影。分岔时两边各自看起来都正常，所以判据要把两条路读同一条
+    // 记录的结果**逐字段**比一遍。
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    const id = 'op:one-truth'
+    await manager.runScript('b1', 'return await snapshot()', undefined, undefined, id)
+    const listed = (await manager.listOperationHistory()).find((operation) => operation.id === id)
+    expect(listed, 'history 里没有这条——下面的比对在对空气生效').toBeDefined()
+    expect(await manager.getOperation(id), '按 id 查和按 Browser 列给出了两份不同的事实')
+      .toEqual(listed)
   }, 30_000)
 })
 
@@ -731,12 +1107,16 @@ describe('Browser RSI：及时交接与单一运行者', () => {
   it('显式 Stop 立即交还控制并停止后续动作，直到人明确交还', async () => {
     const { manager, sentEvents } = await managerWithBrowser()
     const held = holdNextCall()
-    const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")')
+    // 寻址走 operationId（T-008 之后那是取消的唯一入口；按 browserId 的 `stopOperation` 已删）。
+    // 这条断言的不变量没变：人停下之后控制归人、后续动作不再发生、直到人明确交还。
+    const mine = 'op:explicit-stop'
+    const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")', undefined, undefined, mine)
     try {
       await held.entered
       const before = sentEvents().length
-      const stopped = manager.stopOperation('b1')
-      expect(stopped).toMatchObject({ driving: false, activity: { control: 'human' } })
+      const stopped = await manager.stopOperationById(mine)
+      expect(stopped?.phase, '显式停止没把这条操作判成 stopped').toBe('stopped')
+      // 控制交还给人这件事只在 snapshot 事件里可见（stopOperationById 答的是操作事实，不是页面快照）。
       expect(sentEvents().slice(before)).toEqual(expect.arrayContaining([
         expect.objectContaining({ browser: expect.objectContaining({ driving: false, activity: expect.objectContaining({ control: 'human' }) }) })
       ]))

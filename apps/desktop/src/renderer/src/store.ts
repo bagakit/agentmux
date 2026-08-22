@@ -272,6 +272,13 @@ type AppState = {
   runtimeOwnershipWarnings: string[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
   environmentWarning: string | null | undefined
+  /**
+   * Absolute path of the local machine's home directory, learned from the `sessions:snapshot` payload
+   * (the renderer has no `process`/`os`). Empty string means "not known yet" — copy-path abbreviation
+   * (`~`) does not fire until it is set, rather than guessing a boundary. Ephemeral (never persisted):
+   * it is re-supplied by the snapshot on every launch, so it must not live in `partialize`.
+   */
+  localHome: string
   /** Durable placement intent for healthy Agents whose requested Region vanished mid-launch.
    * Current notices derive from Session/layout facts; successful placement clears the marker.
    */
@@ -1732,6 +1739,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   runtimeOwnershipWarnings: undefined,
   environmentWarning: undefined,
+  localHome: '',
   displacedAgentSessionIds: [],
   error: null,
   lastError: null,
@@ -1818,6 +1826,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
         runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? []
       })
+      // 本机 home 从快照里学（渲染层没有 process/os）。拿不到就保留旧值——不缩写好过按空串猜边界。
+      if (initialSnapshotResult.status === 'fulfilled' && initialSnapshotResult.value.localHome !== undefined) {
+        set({ localHome: initialSnapshotResult.value.localHome })
+      }
       const startupWarnings: string[] = []
       let snapshot = initialSnapshotResult.status === 'fulfilled'
         ? initialSnapshotResult.value
@@ -2446,7 +2458,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 而这里只是今天唯一的一个调用方。放在这层的话，每多一个入口就要记得再写一遍同样的检查。
       const report = await api.browser.runScript(request.browserId, request.code, request.caller
         ? { id: request.caller.agentSessionId, name: `Agent ${request.caller.agentSessionId}` }
-        : undefined)
+        : undefined, request.operationId)
       requireActive()
       return {
         operation: request.operation,
@@ -2463,6 +2475,42 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         operation: request.operation,
         operations: request.browserId ? operations.filter((operation) => operation.browserId === request.browserId) : operations
       }
+    }
+    // browser.stop / browser.operation 这两条在这一层是**纯转发**，不在 Renderer 维护第二份状态机。
+    //
+    // 事实 owner 仍是 Main：取消走的是 `activeRun.stop`（那个 AbortController 只有 Main 持有），
+    // 查询读的是 Main 的 journal。Renderer 这一层没有「哪个操作在跑」的第二份账——它连 operationId
+    // 到 Browser 的映射都不知道，正是这个不知道保证了它不可能悄悄长出一份。
+    //
+    // 两条都不 `requireActive()`：这是刻意的，与上面几条不同。`requireActive` 是「这张 Tab 还在吗」
+    // 的闸，而**取消和查询恰恰要在工作面已经不在的时候仍然可用**——一条连接断了、Tab 被关了之后，
+    // 另一条连接拿着 id 来问「它怎么样了」是这两条存在的全部理由。在这里要求 Tab 还活着，等于把
+    // 「operation 的寿命长于任何一条连接」这条约束在最后一米取消掉。
+    if (request.operation === 'browser.stop') {
+      return {
+        operation: request.operation,
+        runOperation: await api.browser.stopOperationById(request.operationId)
+      }
+    }
+    if (request.operation === 'browser.operation') {
+      return {
+        operation: request.operation,
+        runOperation: await api.browser.getOperation(request.operationId)
+      }
+    }
+    // browser.subscribe 不走这一层。
+    //
+    // 它是整个联合里唯一一条**不经过 Renderer** 的操作：进度的事实 owner 是 Main 的 journal，
+    // 而 Main 的 control server 直接把它接到了那里（ipc.ts 的 `subscribeBrowserOperation`）。
+    // 所以这条路径上永远收不到它——能收到就说明有人把订阅改道成了走 Renderer，那会让订阅多一个
+    // 会断的环节，且 Tab 一关订阅就跟着没了，正好取消掉「operation 的寿命长于任何一条连接」。
+    //
+    // 抛而不是静默：这里不 return 的话，它会一路落进下面开东西的那条尾巴，被当成 open.browser
+    // 执行——**多开一个空白浏览器，而调用方等的是一条事件流**。这正是 browser.run 那条注释里
+    // 记下的同一个坑；tsc 也在这里报了两处 TS2339（destination / caller 不存在），说明这个分支
+    // 不是可选的。
+    if (request.operation === 'browser.subscribe') {
+      throw controlFailure('CONTROL_FAILED', 'Browser progress subscriptions are served by the Main Control owner, not the workbench.')
     }
     if (request.operation === 'browser.replay') {
       const plan = await api.browser.replayPlan(request.operationId)
