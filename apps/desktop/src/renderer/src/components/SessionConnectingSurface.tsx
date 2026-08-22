@@ -5,6 +5,7 @@ import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { presentError } from '../lib/error-presentation'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
+import { AgentEnamelFilter } from './AgentEnamelFilter'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
 /**
@@ -25,27 +26,19 @@ function ConnectingExecutorMark({ executor, label, appearance }: {
     aria-label={label}
     title={label}
   >
-    {appearance?.tint ? <svg className="session-connecting__executor-filters" aria-hidden="true" width="0" height="0">
-      <defs><filter id={filterId} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
-        <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="solidDilated" />
-        <feMorphology in="solidDilated" operator="erode" radius="4" result="solidAlpha" />
-        <feMorphology in="solidAlpha" operator="dilate" radius="1" result="expandedAlpha" />
-        <feComposite in="expandedAlpha" in2="solidAlpha" operator="out" result="outerAlpha" />
-        <feFlood floodColor={appearance.tint} floodOpacity="0.55" result="tintColor" />
-        <feComposite in="tintColor" in2="outerAlpha" operator="in" result="tintOutline" />
-        <feComposite in="SourceGraphic" in2="tintOutline" operator="over" />
-      </filter></defs>
-    </svg> : null}
-    <span
-      className="session-connecting__executor-mark-contour"
-      aria-hidden="true"
-      style={appearance?.tint ? { filter: `url(#${filterId})` } : undefined}
-    >
-      <AgentProviderIcon providerId={executor.providerId} size={22} />
-      {appearance?.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
-        <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
-      </span> : null}
-    </span>
+    {appearance?.tint
+      ? <AgentEnamelFilter id={filterId} tint={appearance.tint} className="session-connecting__executor-mark-contour" filterClassName="session-connecting__executor-filters">
+          <AgentProviderIcon providerId={executor.providerId} size={22} />
+          {appearance.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
+            <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
+          </span> : null}
+        </AgentEnamelFilter>
+      : <span className="session-connecting__executor-mark-contour" aria-hidden="true">
+          <AgentProviderIcon providerId={executor.providerId} size={22} />
+          {appearance?.badge ? <span className="session-connecting__executor-badge" data-avatar-badge={appearance.badge}>
+            <AgentAvatarBadgeIcon badge={appearance.badge} size={9} />
+          </span> : null}
+        </span>}
   </span>
 }
 
