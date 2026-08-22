@@ -1,0 +1,12 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+candidate_sha=6445a10081abed0aedaaaa331ea6998c4eb00c6a
+worktree_digest=ef3dea6a50cde94d708737e21cc1c1c1f667f173902c22fb71fa0429e480da5b
+verification_digest=none
+dedup_key=3a608cc3feba07da68dc823d684d6219f3b942e7c437e75f5a25263d3aee3f84
+commands:
+- CI=true pnpm exec vitest run apps/desktop/test/topic-wiki-injection.test.ts apps/desktop/test/scratch-topics.test.ts apps/desktop/test/workspace-topics-panel.test.tsx => pass (0)
+- CI=true pnpm --filter @agentmux/desktop typecheck => pass (0)
