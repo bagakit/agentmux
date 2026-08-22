@@ -358,7 +358,7 @@
         },
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/core typecheck && pnpm --filter @agentmux/desktop typecheck",
+          "ref": "pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck",
           "proves": "CLI/Core/Renderer contract。"
         },
         {
@@ -378,10 +378,35 @@
       "heavy": true,
       "heavy_reason": "需要贯通 CUI 命令、Core 权限边界、Task receipt 和 Topic 决策持久化。",
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm exec vitest run apps/desktop/test/default-session-board.test.tsx apps/desktop/test/task-write-policy.test.ts apps/desktop/test/topic-decision-log.test.ts packages/core/test/agentmux-cli-help.test.ts packages/core/test/control-host.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'task.*create|decision.*log|write.*policy|link.*session' packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'task-write-policy' | grep -v 'topic-decision-log')\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "ba9a47735ffef877496b9d9f4592be0dae2fe30f",
+        "worktree_digest": "eacb546b8d7d104e0a2fe8b943cbe45eaf37ecafbcf3b3c28323b0736c65cf73",
+        "verification_digest": "none",
+        "dedup_key": "d5eea8ee3806ea66e05caff7989820ac8650791bf0d41317b05b70fcef3b53ed",
+        "source_key": "76b0583d66cd0f22affd58a128ec0acdf27bc4387355540240c43aa399268db6",
+        "artifact_digests": {},
+        "plan_revision": 3
+      }
     },
     {
       "id": "T-005",
@@ -434,10 +459,40 @@
       "heavy": true,
       "heavy_reason": "必须跨持久化、恢复、浏览器交互、性能和测试证据做唯一收敛。",
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm exec vitest run apps/desktop/test/board-recovery.test.ts apps/desktop/test/task-region-restart.test.ts apps/desktop/test/default-topic-recovery.test.tsx apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/task-session-region-host.test.tsx apps/desktop/test/default-topic-surface.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm exec vitest run apps/desktop/test/vacuous-on-empty-predicate.test.ts apps/desktop/test/sliced-scan-surface-not-empty.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "rg -n 'GlobalBoard|TaskWorkspace|SessionRegionHost|TopicWiki|default.*Topic' apps/desktop/src/renderer/src packages/core/src --glob '*.ts' --glob '*.tsx' | tee /tmp/agentmux-board-calls.txt && test \"$(wc -l < /tmp/agentmux-board-calls.txt)\" -gt 5",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "ba9a47735ffef877496b9d9f4592be0dae2fe30f",
+        "worktree_digest": "eacb546b8d7d104e0a2fe8b943cbe45eaf37ecafbcf3b3c28323b0736c65cf73",
+        "verification_digest": "none",
+        "dedup_key": "7db603a90775b0befdc6f166e336e37c346a8b2b400aadb5d64f7583b375a82f",
+        "source_key": "1ec66a05f96d9815a354631766a40943ea3241a8183590fb7c719dfe61324667",
+        "artifact_digests": {},
+        "plan_revision": 3
+      }
     },
     {
       "id": "T-006",

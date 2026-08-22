@@ -165,7 +165,7 @@
         },
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/core typecheck && pnpm --filter @agentmux/desktop typecheck",
+          "ref": "pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck",
           "proves": "CLI/Core/Renderer contract。"
         },
         {
@@ -267,5 +267,6 @@
       ],
       "estimate_hours": 0.5
     }
-  ]
+  ],
+  "feat_id": "f-27y8fzdf5"
 }

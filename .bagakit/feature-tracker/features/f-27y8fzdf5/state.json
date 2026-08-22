@@ -4,7 +4,7 @@
   "title": "全局 Agents 任务看板重构",
   "slug": "global-agents-task-board",
   "goal": "将 Desktop 的 Agents 入口重构为全局 Agent 工作面：Board 作为默认主视图，采用 Multica 风格的任务卡片与状态列；Agent roster、Attempt、Session 和 Activity 集成到任务卡与全局 Agents 视图；任务跨 Project、Workspace、Branch、Topic 可见并保留明确上下文。现有 Workspace Board 的 Branch/Topic × Agent 状态矩阵不再作为目标产品模型。",
-  "status": "ready",
+  "status": "done",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -15,35 +15,40 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 7
+    "round_count": 10
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-003",
+    "last_task_id": "T-005",
     "last_check_commands": [
       {
-        "command": "CI=true pnpm exec vitest run apps/desktop/test/default-topic-surface.test.tsx apps/desktop/test/topic-wiki-injection.test.ts apps/desktop/test/workspace-topics-panel.test.tsx apps/desktop/test/scratch-topic-layout.test.ts",
+        "command": "CI=true pnpm exec vitest run apps/desktop/test/board-recovery.test.ts apps/desktop/test/task-region-restart.test.ts apps/desktop/test/default-topic-recovery.test.tsx apps/desktop/test/global-board-task-workspace.test.tsx apps/desktop/test/task-session-region-host.test.tsx apps/desktop/test/default-topic-surface.test.tsx",
         "exit_code": 0,
         "status": "pass"
       },
       {
-        "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
+        "command": "CI=true pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop build",
         "exit_code": 0,
         "status": "pass"
       },
       {
-        "command": "test -n \"$(rg -n 'TopicWiki|default.*Topic|wiki.*inject' apps/desktop/src/renderer/src apps/desktop/src/main packages/core/src --glob '*.tsx' --glob '*.ts' | grep -v 'topic-wiki-injection' | grep -v 'default-topic-surface')\"",
+        "command": "CI=true pnpm exec vitest run apps/desktop/test/vacuous-on-empty-predicate.test.ts apps/desktop/test/sliced-scan-surface-not-empty.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "rg -n 'GlobalBoard|TaskWorkspace|SessionRegionHost|TopicWiki|default.*Topic' apps/desktop/src/renderer/src packages/core/src --glob '*.ts' --glob '*.tsx' | tee /tmp/agentmux-board-calls.txt && test \"$(wc -l < /tmp/agentmux-board-calls.txt)\" -gt 5",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-27y8fzdf5/artifacts/gate-T-003-r7-0001.log",
+    "last_log_path": ".bagakit/feature-tracker/features/f-27y8fzdf5/artifacts/gate-T-005-r10-0001.log",
     "last_context": {
-      "candidate_sha": "6445a10081abed0aedaaaa331ea6998c4eb00c6a",
-      "worktree_digest": "2223922194d9531dac9388d9ec600fdec39b5748d1d59ae51a3e8775f57fb686",
+      "candidate_sha": "ba9a47735ffef877496b9d9f4592be0dae2fe30f",
+      "worktree_digest": "eacb546b8d7d104e0a2fe8b943cbe45eaf37ecafbcf3b3c28323b0736c65cf73",
       "verification_digest": "none",
-      "dedup_key": "c0493d6990dae18900df156e85ad8c060f233afd7f30f8021729977606d8b575",
-      "source_key": "64ad43132fe7e84c25cb3f40eccb7936938f4f1fa4607c67fdc32bc2ab151714",
+      "dedup_key": "7db603a90775b0befdc6f166e336e37c346a8b2b400aadb5d64f7583b375a82f",
+      "source_key": "1ec66a05f96d9815a354631766a40943ea3241a8183590fb7c719dfe61324667",
       "artifact_digests": {},
       "plan_revision": 3
     }
@@ -168,6 +173,34 @@
     {
       "action": "task_finished",
       "detail": "T-003 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-004"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-004 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-004 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => done"
     }
   ],
   "goal_contract": {

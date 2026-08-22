@@ -8,6 +8,7 @@ import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
   APP_LINK_SCHEME_CHOICES,
+  AGENT_AVATAR_BADGE_IDS,
   CONFIG_VERSION,
   PROJECT_RAIL_DENSITY_IDS,
   SCRATCH_WORKSPACE_ID,
@@ -74,7 +75,7 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 const appearanceSchema = z.object({
   agentAvatars: z.record(z.string().min(1), z.object({
     tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
-    badge: z.string().trim().max(4).optional()
+    badge: z.enum(AGENT_AVATAR_BADGE_IDS).optional()
   }).strict()).optional(),
   appAppearance: z.enum(APP_APPEARANCE_IDS).optional(),
   terminalTheme: z.enum(TERMINAL_THEME_IDS),

@@ -7,6 +7,7 @@
 }
 .agent-avatar__filters { position: absolute; pointer-events: none; }
 .agent-avatar__mark, .agent-avatar__contour { display: inline-flex; }
+.agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: 18px; height: 18px; }
 .agent-avatar__contour { filter: drop-shadow(0 0 .65px var(--status-ink)); }
 .agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: drop-shadow(0 0 .65px var(--status-ink)) drop-shadow(0 0 2px var(--status-ink)); }
 .agent-avatar .agent-avatar__status { position: absolute; top: -2px; right: -2px; margin: 0; outline: 1px solid var(--surface-1); }
@@ -15,7 +16,7 @@
   border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);
   font-size: var(--fs-micro); font-weight: 600; line-height: 1; white-space: nowrap; text-transform: none;
 }
-.agent-avatar__badge { top: -4px; left: -5px; max-width: 3ch; overflow: hidden; }
+.agent-avatar__badge { top: -4px; left: -5px; width: 10px; height: 10px; }
 .agent-avatar__count { bottom: -4px; right: -4px; padding: 1px; }
 button.agent-avatar { cursor: pointer; }
 button.agent-avatar:hover { background: var(--surface-3); }
@@ -35,4 +36,3 @@ button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outlin
 .agent-avatar-settings__row input[type='color'] { width: 36px; height: 26px; padding: var(--sp-1); }
 .agent-avatar-settings__row input[type='text'] { width: 6ch; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; }
 .agent-avatar-settings__row input:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
-

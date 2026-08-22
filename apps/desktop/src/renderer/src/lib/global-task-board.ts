@@ -1,4 +1,5 @@
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
+import type { AgentMuxTaskDecision } from '@agentmux/core/control'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { workspaceForSession } from './workbench-tabs'
 
@@ -21,6 +22,7 @@ export type BoardTaskRecord = {
   createdAt: number
   updatedAt: number
   source: 'default-topic' | 'session'
+  decisionLog?: AgentMuxTaskDecision[]
 }
 
 export type BoardTaskProjection = BoardTaskRecord & {

@@ -1,0 +1,13 @@
+project_type=ui
+execution_root=.
+workspace_mode=current_tree
+execution_detail=current_tree uses the tracker root
+result=pass
+candidate_sha=ba9a47735ffef877496b9d9f4592be0dae2fe30f
+worktree_digest=eacb546b8d7d104e0a2fe8b943cbe45eaf37ecafbcf3b3c28323b0736c65cf73
+verification_digest=none
+dedup_key=d5eea8ee3806ea66e05caff7989820ac8650791bf0d41317b05b70fcef3b53ed
+commands:
+- CI=true pnpm exec vitest run apps/desktop/test/default-session-board.test.tsx apps/desktop/test/task-write-policy.test.ts apps/desktop/test/topic-decision-log.test.ts packages/core/test/agentmux-cli-help.test.ts packages/core/test/control-host.test.ts => pass (0)
+- pnpm --filter @agentmux/core build && CI=true pnpm --filter @agentmux/desktop typecheck => pass (0)
+- test -n "$(rg -n 'task.*create|decision.*log|write.*policy|link.*session' packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'task-write-policy' | grep -v 'topic-decision-log')" => pass (0)

@@ -204,6 +204,55 @@ export type AgentMuxControlResumeRequest = RequestBase & {
 export type AgentMuxControlStopRequest = RequestBase & {
   operation: 'stop'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
 }
+
+export const AGENTMUX_TASK_STATUSES = ['inbox', 'working', 'needs-you', 'done'] as const
+export type AgentMuxTaskStatus = typeof AGENTMUX_TASK_STATUSES[number]
+export const AGENTMUX_TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
+export type AgentMuxTaskPriority = typeof AGENTMUX_TASK_PRIORITIES[number]
+export type AgentMuxTask = {
+  id: string
+  title: string
+  description: string
+  status: AgentMuxTaskStatus
+  priority: AgentMuxTaskPriority
+  projectId: string | null
+  projectName: string | null
+  sessionIds: string[]
+  createdAt: number
+  updatedAt: number
+  source: 'default-topic' | 'session'
+}
+export type AgentMuxTaskDecision = {
+  input: string
+  candidates: Array<{ projectId: string; reason: string }>
+  selectedProjectId: string | null
+  risk: 'low' | 'medium' | 'high' | 'unknown'
+  confirmation: 'automatic' | 'user' | 'pending'
+  wikiVersion: string | null
+  recordedAt: number
+  sourceSessionId: string | null
+}
+export type AgentMuxControlTaskListRequest = RequestBase & { operation: 'task.list' }
+export type AgentMuxControlTaskShowRequest = RequestBase & { operation: 'task.show'; taskId: string }
+export type AgentMuxControlTaskCreateRequest = RequestBase & {
+  operation: 'task.create'
+  title: string
+  description?: string
+  projectId?: string
+  priority?: AgentMuxTaskPriority
+  status?: AgentMuxTaskStatus
+  sessionIds?: string[]
+  decision?: AgentMuxTaskDecision
+}
+export type AgentMuxControlTaskUpdateRequest = RequestBase & {
+  operation: 'task.update'
+  taskId: string
+  patch: Partial<Pick<AgentMuxTask, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'sessionIds'>>
+  decision?: AgentMuxTaskDecision
+}
+export type AgentMuxControlTaskLinkSessionRequest = RequestBase & { operation: 'task.link-session'; taskId: string; sessionId: string }
+export type AgentMuxControlTaskLinkProjectRequest = RequestBase & { operation: 'task.link-project'; taskId: string; projectId: string }
+export type AgentMuxControlTaskDecisionLogRequest = RequestBase & { operation: 'task.decision-log'; taskId: string }
 /**
  * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
  *
@@ -334,6 +383,13 @@ export type AgentMuxControlRequest =
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
+  | AgentMuxControlTaskListRequest
+  | AgentMuxControlTaskShowRequest
+  | AgentMuxControlTaskCreateRequest
+  | AgentMuxControlTaskUpdateRequest
+  | AgentMuxControlTaskLinkSessionRequest
+  | AgentMuxControlTaskLinkProjectRequest
+  | AgentMuxControlTaskDecisionLogRequest
   | AgentMuxControlBrowserRunRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -405,6 +461,13 @@ export type AgentMuxControlResult =
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
+  | { operation: 'task.list'; tasks: AgentMuxTask[] }
+  | { operation: 'task.show'; task: AgentMuxTask | null }
+  | { operation: 'task.create'; task: AgentMuxTask; receipt: { taskId: string; createdAt: number } }
+  | { operation: 'task.update'; task: AgentMuxTask; receipt: { taskId: string; updatedAt: number } }
+  | { operation: 'task.link-session'; task: AgentMuxTask; receipt: { taskId: string; sessionId: string } }
+  | { operation: 'task.link-project'; task: AgentMuxTask; receipt: { taskId: string; projectId: string } }
+  | { operation: 'task.decision-log'; taskId: string; decisions: AgentMuxTaskDecision[] }
   // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
   // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
   | {
@@ -609,6 +672,13 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 开场帧，不是整条流**。流本身的存活由长连接路径自己管（socket 上没有"请求超时"可言：一个操作
   // 安静十分钟是正常的，不是超时）。若这里给长档，等于让一个只读本地状态的问答白等一分钟。
   'browser.subscribe': 'short'
+  , 'task.list': 'short'
+  , 'task.show': 'short'
+  , 'task.create': 'short'
+  , 'task.update': 'short'
+  , 'task.link-session': 'short'
+  , 'task.link-project': 'short'
+  , 'task.decision-log': 'short'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */
