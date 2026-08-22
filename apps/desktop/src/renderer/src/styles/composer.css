@@ -39,8 +39,7 @@
 .composer-send:hover:not(:disabled) { background: var(--surface-3); }
 .composer-send:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
 .composer-send:disabled { opacity: .35; cursor: default; }
-.composer-send--working { color: var(--amber); }
-.composer-send--working:hover:not(:disabled) { background: var(--amber-bg); }
+.composer-send--working { color: var(--text-2); }
 .composer-session-controls .composer__identity { padding-inline: 0; }
 .composer-session-controls .agent-avatar { background: transparent; box-shadow: none; }
 

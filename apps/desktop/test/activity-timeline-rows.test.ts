@@ -92,4 +92,14 @@ describe('时间轴折叠', () => {
   it('空时间轴给空列表，不报错', () => {
     expect(timelineRows([])).toEqual([])
   })
+
+  it('相邻的用户消息各自保留，不被同名的机器步骤折叠规则吃掉', () => {
+    const rows = timelineRows([
+      step({ id: 'prompt-1', kind: 'user_message', source: 'user', title: 'Prompt', toolInput: undefined, content: '第一句' }),
+      step({ id: 'prompt-2', kind: 'user_message', source: 'user', title: 'Prompt', toolInput: undefined, content: '第二句' })
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.item.content)).toEqual(['第一句', '第二句'])
+    expect(rows.every((row) => row.count === 1)).toBe(true)
+  })
 })
