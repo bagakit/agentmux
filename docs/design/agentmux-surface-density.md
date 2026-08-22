@@ -722,7 +722,7 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 
 底部中央使用一组低高度的 segmented switcher，只有 `Agents`、`Session`、`Board` 三个平级项；当前项用单一底色／下划线和焦点环表达。顶部右侧保留搜索、筛选和当前工作面的动作，不重复放三项导航。
 
-三种工作面有清晰的第一层信息：Agents 先读 Executor/Agent 状态，Session 先读 Session/Topic/Workspace，Board 先读 Task/Project/状态。Board 的任务列不混入以 Session 为主身份的卡片；需要看执行 Session 时进入右侧 Region 工作区。
+三种工作面有清晰的第一层信息：Agents 先读 Executor/Agent 状态，Session 先读 Session/Topic/Workspace，Board 先读 Demand/Project/状态。Board 的需求列不混入以 Session 为主身份的卡片；需要看执行 Session 时进入右侧 Region 工作区。
 
 未分屏时主工作面保持连续的全宽 Surface，切换不做左右互换或把内容从右边“搬到左边”的过渡。只有真实存在多个 Region 时，才使用现有分屏 arrangement；没有详情时不保留空的右侧框、占位线或方向性动画。
 

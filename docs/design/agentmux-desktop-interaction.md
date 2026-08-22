@@ -1207,17 +1207,17 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 
 ### Agents、Session 与 Board 的全局入口（2026-09-22）
 
-- 当前产品明确区分三种全局工作面：**Agents** 展示 Agent/Executor 的聚合与状态，**Session** 展示具体会话与它们的上下文，**Board** 展示 Task 计划与执行关联。Task 卡不能因为带有 Session 就改名成 Agent，Session 也不能作为 Board 的隐含主实体。
+- 当前产品明确区分三种全局工作面：**Agents** 展示 Agent/Executor 的聚合与状态，**Session** 展示具体会话与它们的上下文，**Board** 展示 Demand 计划与执行关联。Demand 卡不能因为带有 Session 就改名成 Agent，Session 也不能作为 Board 的隐含主实体。
 - 三种工作面使用同一组全局切换入口，切换只改变中心工作面的投影，不改变当前 Project、Workspace 或 Session 的持久身份。底部中央是主切换位置；右上角不再放一套平级的 Agents/Session/Board 导航。
-- Board 选中 Task 后可以在右侧展开关联 Session Region；这只是 Task 的执行投影。Agents 与 Session 选中对象的详情沿用同一右侧工作区语义，不能通过“把右面板搬到左面板”来表达未分屏状态。
+- Board 选中 Demand 后可以在右侧展开关联 Session Region；这只是 Demand 的执行投影。Agents 与 Session 选中对象的详情沿用同一右侧工作区语义，不能通过“把右面板搬到左面板”来表达未分屏状态。
 - 没有分屏时，左右栏只表达真实存在的内容：没有右侧详情就保持主工作面全宽，不能把右侧内容视觉上推到左侧或反向滑入，造成方向与焦点错觉。分屏布局只在存在两个可见 Region 时启用对应的 arrangement。
-- 切换入口必须可键盘操作、保留当前选中项和可恢复焦点；重启恢复后先恢复三种工作面的选择，再尝试恢复其中引用的 Session/Task 投影。
+- 切换入口必须可键盘操作、保留当前选中项和可恢复焦点；重启恢复后先恢复三种工作面的选择，再尝试恢复其中引用的 Session/Demand 投影。
 
 ### Board Demand 与 Session 关联边界（2026-09-22）
 
-- Board 的主实体是需求级 Task。Task 可以在没有任何 Session 时创建和持久存在，也可以关联多个 Session；Session 只是 Task 的执行上下文，不是 Task 卡片的身份。
-- 没有显式关联的 Session 不得自动生成 `session:*` Board 卡片。Agents 和 Session 工作面负责展示这些 Session；Board 只展示持久化 Task。
-- Task 详情显示零个、一个或多个关联 Session。Session 暂时不可见时保留 Task 和关联 ID，区分“尚未恢复”和“从未关联”，不能把 Task 降级成 Session 卡片。
+- Board 的主实体是 Demand。Demand 可以在没有任何 Session 时创建和持久存在，也可以关联多个 Session；Session 只是 Demand 的执行上下文，不是 Demand 卡片的身份。
+- 没有显式关联的 Session 不得自动生成 `session:*` Board 卡片。Agents 和 Session 工作面负责展示这些 Session；Board 只展示持久化 Demand。
+- Demand 详情显示零个、一个或多个关联 Session。Session 暂时不可见时保留 Demand 和关联 ID，区分“尚未恢复”和“从未关联”，不能把 Demand 降级成 Session 卡片。
 
 ### 对话消息、终端缺口与缩放重绘（2026-09-22）
 
@@ -1235,9 +1235,9 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 ### Agents 看板与 Board 需求流转（2026-09-22）
 
 - 用户确认「把 board 的设计照搬替换掉 Agents，同时 board 先照抄 multica 的业务逻辑」。Agents 使用原 Board 的紧凑工具栏、卡片、状态列和同屏右侧会话工作区，替换简单列表；主实体是 Agent Session，按 Needs you、Working、Results、Error 展示，普通终端归 Session。
-- Board 是与 Project、Session 平级的最高级全局工作面；进入 Board 时 Project Rail 被工作面覆盖，不显示左侧 Project 导航。Board 内主实体不是泛意义的 task，而是 Demand（需求），按 Backlog、Todo、In progress、In review、Blocked、Done、Cancelled 流转。状态由显式操作维护，不从 Session 是否需要我、退出或报错推断完成。负责人、Project、优先级、描述与活动记录属于 Task；负责人可以未分配，分配 Executor 与关联 Session 是不同操作。
+- Board 是与 Project、Session 平级的最高级全局工作面；进入 Board 时 Project Rail 被工作面覆盖，不显示左侧 Project 导航。Board 内主实体不是泛意义的 task，而是 Demand（需求），按 Backlog、Todo、In progress、In review、Blocked、Done、Cancelled 流转。状态由显式操作维护，不从 Session 是否需要我、退出或报错推断完成。负责人、Project、优先级、描述与活动记录属于 Demand；负责人可以未分配，分配 Executor 与关联 Session 是不同操作。
 - Backlog 可以先指定负责人而不启动；用户明确执行需求时通过既有 Core 启动路径创建并关联 Session，每次执行保留关联，失败保留需求与说明。需求可编辑、跨列流转、评论、关联或解除关联已有 Session，重启后仍成立。
-- Task 可以在没有 Session 时创建和持久存在，也可以关联多个 Session。没有显式关联的 Session 不自动生成 Board 卡片。快照缺失保留 Task、关联 ID 与当前选择，并区分尚未恢复和从未关联。
+- Demand 可以在没有 Session 时创建和持久存在，也可以关联多个 Session。没有显式关联的 Session 不自动生成 Board 卡片。快照缺失保留 Demand、关联 ID 与当前选择，并区分尚未恢复和从未关联。
 
 ### Demand 命名合同（2026-09-22）
 
