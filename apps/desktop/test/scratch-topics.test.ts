@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import {
+  DEFAULT_TOPIC_WIKI,
+  SCRATCH_TOPIC_WIKI_PATH,
+  SCRATCH_TOPIC_WIKI_STATE_PATH,
   SCRATCH_WORKSPACE_ID,
   scratchTopicDirectoryName,
   scratchTopicIdFromWorkspacePath,
@@ -40,8 +43,35 @@ describe('filesystem-backed Scratch Topics', () => {
       title: 'Untitled Topic'
     })
     expect(await readdir(join(workspace.path, first.directoryPath))).toEqual(
-      expect.arrayContaining(['.agents', 'outcome', 'refs', 'topic.md'])
+      expect.arrayContaining(['.agents', '.agentmux', 'outcome', 'refs', 'topic.md'])
     )
+  })
+
+  it('persists Wiki version, updatedAt, enabled state, and reset semantics', async () => {
+    const workspace = await scratchWorkspace()
+    const topics = new ScratchTopics()
+    const topic = await topics.ensure(workspace, 'view:wiki-state')
+    const wikiPath = join(workspace.path, topic.directoryPath, SCRATCH_TOPIC_WIKI_PATH)
+    const statePath = join(workspace.path, topic.directoryPath, SCRATCH_TOPIC_WIKI_STATE_PATH)
+    await writeFile(wikiPath, `${DEFAULT_TOPIC_WIKI}\nUser rule: keep receipts.\n`)
+
+    const edited = await topics.read(workspace, topic.id)
+    expect(edited?.wiki).toMatchObject({ source: 'user', enabled: true })
+    expect(edited?.wiki?.updatedAt).toEqual(expect.any(Number))
+    expect(edited?.wiki?.version).not.toBe(topic.wiki?.version)
+
+    const disabled = await topics.setWikiEnabled(workspace, topic.id, false)
+    expect(disabled.wiki?.enabled).toBe(false)
+    expect(await readFile(statePath, 'utf8')).toContain('false')
+    const preparedDisabled = await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'disabled' })
+    expect(preparedDisabled.prompt).toContain('Topic Wiki injection is disabled')
+    expect(preparedDisabled.prompt).not.toContain('User rule: keep receipts.')
+
+    const reset = await topics.resetWiki(workspace, topic.id)
+    expect(reset.wiki).toMatchObject({ source: 'default', enabled: true, content: DEFAULT_TOPIC_WIKI })
+    const preparedReset = await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'reset' })
+    expect(preparedReset.prompt).toContain(`Topic Wiki injection (version ${reset.wiki?.version}`)
+    expect(preparedReset.prompt).toContain('High-risk or ambiguous writes require user confirmation.')
   })
 
   it('lists every Topic directory from the Scratch filesystem without a View binding', async () => {

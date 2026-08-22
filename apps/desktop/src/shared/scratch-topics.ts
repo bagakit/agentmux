@@ -2,6 +2,7 @@ export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Scratch'
 export const SCRATCH_TOPIC_TITLE_MAX_LENGTH = 120
 export const SCRATCH_TOPIC_WIKI_PATH = '.agentmux/topic-wiki.md'
+export const SCRATCH_TOPIC_WIKI_STATE_PATH = '.agentmux/topic-wiki.json'
 export const DEFAULT_TOPIC_WIKI = `# AgentMux Default Topic Guide
 
 Use AgentMux capabilities through the existing Session and ctxmux Run. Keep Runtime and Project facts authoritative.
@@ -43,6 +44,7 @@ export type TopicWikiSnapshot = {
   content: string
   version: string
   source: 'default' | 'user'
+  enabled: boolean
   updatedAt: number | null
 }
 

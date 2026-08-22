@@ -70,10 +70,12 @@ export function agentComposerAvailability(
 export function AgentSessionComposer({
   sessionId,
   disabled = false,
+  readOnly = false,
   tabName
 }: {
   sessionId: string
   disabled?: boolean
+  readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
 }) {
@@ -150,7 +152,7 @@ export function AgentSessionComposer({
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
-  const submitMode = composerSubmitMode(session, disabled)
+  const submitMode = composerSubmitMode(session, disabled || readOnly)
 
   function submit(): void {
     if (!submitMode.canSubmit || !text.trim()) return

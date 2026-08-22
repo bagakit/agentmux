@@ -471,6 +471,12 @@ export async function registerIpc(args: {
   handle('scratch:renameTitle', async (workspaceId: string, topicId: string, title: string) =>
     await args.scratchTopics.renameTitle(workspace(config, workspaceId), topicId, title)
   )
+  handle('scratch:setWikiEnabled', async (workspaceId: string, topicId: string, enabled: boolean) =>
+    await args.scratchTopics.setWikiEnabled(workspace(config, workspaceId), topicId, enabled)
+  )
+  handle('scratch:resetWiki', async (workspaceId: string, topicId: string) =>
+    await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
+  )
   /**
    * 资源采样的订阅与退订。
    *
