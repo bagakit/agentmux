@@ -240,7 +240,7 @@ export type EditorRegionDiffState = {
   diff: GitFileDiff | null
   error: string | null
 }
-export type MainSurface = 'workbench' | 'board'
+export type MainSurface = 'agents' | 'workbench' | 'board'
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
   state: AsyncCheckState
@@ -1670,6 +1670,7 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
+  if (candidate === 'agents') return 'agents'
   return candidate === 'board' ? 'board' : 'workbench'
 }
 
