@@ -40,6 +40,17 @@ const report = { schema: 'agentmux.browser-ownership.v1' }
 
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 900, height: 700, show: true })
+  // 窗口是真显示的，于是**跑测试的人的真鼠标**飘过它就会往 webContents 里灌 mouseMove/mouseLeave，
+  // 把"Agent 动作零事件"那一条判红。观察到的那次噪声是 mouseMove,mouseMove,mouseMove,mouseLeave
+  // ——mouseLeave 只可能来自真光标离开窗口，Agent 的动作造不出它，所以病因是确定的。
+  // setIgnoreMouseEvents(true) 让窗口对 OS 命中测试透明，掐掉的正是这一路。
+  //
+  // 诚实标注**没证到的那一半**：本机构造不出真光标事件来做 A/B（CGWarpMouseCursorPosition 不发
+  // 事件；CGEventPost 在没有辅助功能授权时被静默丢弃——两种都让对照组也是空数组，那种绿是自证的）。
+  // 所以"噪声被消除"没有实测，只有病因推断。真机上证到的是**这个改动不会反噬**：加上它之后
+  // sendInputEvent 照样出声（它直接进 webContents 的原生输入入口，不经窗口命中测试），
+  // 也就是下面那条反向判据仍然承重，没有被悄悄调松。
+  window.setIgnoreMouseEvents(true)
   const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true } })
   window.contentView.addChildView(view)
   view.setBounds({ x: 0, y: 0, width: 900, height: 700 })

@@ -139,7 +139,7 @@ describe('组件把这些值渲染出去', () => {
   const file = ts.createSourceFile(COMPONENT, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 
   /** 一行菜单项：它的可见标签，以及它那个 `<kbd>` 的唯一子表达式（没有 kbd 则为 undefined）。 */
-  type MenuRow = { label: string | null; labelExpression: string | null; chord: string | null | undefined; source: string | null; handler: string | null }
+  type MenuRow = { label: string | null; labelExpression: string | null; chord: string | null | undefined; source: string | null; handler: string | null; dynamic: boolean }
 
   /** 一个 JSX 元素的唯一子表达式的源码文本。子节点不止一个、或不是表达式时为 null。 */
   function soleChildExpression(element: ts.JsxElement): string | null {
@@ -150,6 +150,32 @@ describe('组件把这些值渲染出去', () => {
     return only !== undefined && ts.isJsxExpression(only) && only.expression !== undefined
       ? only.expression.getText(file)
       : null
+  }
+
+  /**
+   * 这个节点是不是长在一次 `xs.map(...)` 迭代里——即它是**数据驱动的动态列表项**，而不是一行写死
+   * 标签的静态菜单项。
+   *
+   * 身份那一簇（Message this Agent / Copy Session Address）是 `identityActions.map(...)` 画出来的
+   * （`terminal-identity-menu.ts` 的数据 → JSX），它们**没有键位**：注册表里根本没有对应的和弦，
+   * 是右键菜单专属入口，其接线由 `terminal-context-menu-identity.test.ts` 单独守。所以按**结构**把
+   * 它们从这张「每行读自己那个 action 键位」的判据里排除——按结构（在不在 `.map` 里）而不是按标签
+   * 文案排除：钉标签文案会在 label 一改那天悄悄失守（记忆 test-pins-a-filename-the-rule-can-leave）。
+   *
+   * 这个判据两个方向都安全，靠下面的行数自检兜底：漏排（身份行漏进来）→ 静态行数 9≠8 红；
+   * 过排（把某个静态行也划成动态）→ 静态行数 <8，与 MENU_ROWS 对不上，红。
+   */
+  function isDynamicListItem(node: ts.Node): boolean {
+    for (let current = node.parent; current; current = current.parent) {
+      if (
+        ts.isCallExpression(current) &&
+        ts.isPropertyAccessExpression(current.expression) &&
+        current.expression.name.text === 'map'
+      ) {
+        return true
+      }
+    }
+    return false
   }
 
   /**
@@ -193,7 +219,7 @@ describe('组件把这些值渲染出去', () => {
           ts.forEachChild(child, scan)
         }
         ts.forEachChild(node, scan)
-        rows.push({ label, labelExpression, chord, source, handler })
+        rows.push({ label, labelExpression, chord, source, handler, dynamic: isDynamicListItem(node) })
       }
       ts.forEachChild(node, visit)
     }
@@ -207,13 +233,13 @@ describe('组件把这些值渲染出去', () => {
     // no registered shortcuts; check their actual label/handler source rather than ignoring unknown rows.
     const dynamic = discovered.filter((row) => row.labelExpression !== null)
     expect(dynamic).toEqual([{
-      label: null, labelExpression: 'action.label', chord: undefined,
+      label: null, labelExpression: 'action.label', chord: undefined, dynamic: true,
       source: 'identityActions.map', handler: '() => void action.onSelect()'
     }])
     const rows = discovered.filter((row) => row.labelExpression === null)
     // 在场自检：遍历坏掉（改 tag 名判据、走错文件）时整条断言会静默恒真
     // （记忆 false-green-gate-patterns「扫描根写错静默变绿」）。
-    expect(rows.length, '一个菜单项都没扫到——AST 遍历坏了，下面那些断言已经恒真').toBe(
+    expect(rows.length, '一个静态菜单项都没扫到——AST 遍历坏了，下面那些断言已经恒真').toBe(
       Object.keys(MENU_ROWS).length
     )
     // 标签集合必须恰好是那张表——多一行少一行都红，于是新加的行不会绕过下面的逐行判据。

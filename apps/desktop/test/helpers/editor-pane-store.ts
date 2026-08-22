@@ -33,6 +33,10 @@ export function editorPaneStoreState(): Record<string, unknown> {
     documentRevealTargets: {},
     regionCaretFocus: null,
     config: { workspaces: [] as unknown[] },
+    // `''` 不是"随便填个占位"：它是生产里"本机 home 还没从快照学到"的真实形状，
+    // 缩写在这个值下不触发（见 store.ts 的 localHome 说明）。给一个假 home 反而会让
+    // 复制路径的用例在替身里走上生产里要等快照才走的那条分支。
+    localHome: '',
     editorWordWrap: false,
     editorRegionModes: {},
     editorRegionDiffs: {},

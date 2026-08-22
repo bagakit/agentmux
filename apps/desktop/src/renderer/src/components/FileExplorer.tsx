@@ -46,6 +46,7 @@ import {
   joinWorkspacePath
 } from '../lib/workspace-paths'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import {
   FILE_TREE_GIT_STATUS_CLASS,
@@ -363,6 +364,8 @@ export function FileExplorer({
   const deletePath = useAppStore((state) => state.deletePath)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
   const reportError = useAppStore((state) => state.reportError)
+  const localHome = useAppStore((state) => state.localHome)
+  const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
   const setConfig = useAppStore((state) => state.setConfig)
   const activePaneId = useAppStore((state) => (
     state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
@@ -632,10 +635,13 @@ export function FileExplorer({
 
   async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
     if (!workspace) return
-    await copyTextToClipboard(
-      formatPathsForCopy(pathsForContext(node), kind, workspace.path),
-      reportError
-    )
+    // 缩写只对本机绝对路径做：相对路径不含 home，远程主机的路径套本机 home 会指向对面不存在的地方。
+    const formatted = formatPathsForCopy(pathsForContext(node), kind, workspace.path)
+    const text =
+      kind === 'absolute' && workspace.hostId === 'local'
+        ? applyCopyPathStyle(formatted, { home: localHome, copyPathsAsAbsolute })
+        : formatted
+    await copyTextToClipboard(text, reportError)
   }
 
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {

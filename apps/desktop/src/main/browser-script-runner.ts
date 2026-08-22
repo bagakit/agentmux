@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
 
 /**
  * 在独立 Node 子进程里跑一段 Agent 写的脚本。
@@ -23,48 +24,21 @@ const READY = 'AGENTMUX_BROWSER_SCRIPT_READY'
 /**
  * 注入脚本执行上下文的页面函数名。
  *
- * 这是**内部 API，不是对外协议**——这一条是整个方案相对「N 个 typed 动词」方案的分野所在。
- * 改名、改签名、加参数都不用动版本化的 Control 契约（`control.ts` 的 `AgentMuxControlRequest`
- * 联合、`OPERATION_BUDGET`、CLI 帮助文档都不收这些名字）。兼容负担从协议层挪到了库层，
- * 而库可以随便改：Agent 每一轮拿到的都是当前这一版。
+ * **清单本身住在 `@agentmux/core` 的 `browser-page-capability.ts`，那里是唯一事实来源。**
+ * 此前它是本文件里的一个手写数组，而同一份事实另有两处手抄（`browser-view-manager.ts` 的
+ * 动作子集、`agentmux-cli-help.ts` 的 Skill 散文）。三份分属两个包、不在同一条构建图上，
+ * tsc 一个都守不到；漂移时没有东西变红，只是 Agent 不知道新能力存在、或接管后仍能改页面。
  *
- * 动作类一律经 ref 派发，**不接受屏幕坐标**。参考实现提供 `page.mouse.click(x, y)` 和
- * selector 定位，这里两样都不要——「结构化 ref 寻址 ≠ 键鼠模拟」。ref 由我方快照发出，
- * 是闭环内自洽的把手；坐标和 selector 都会引入"Agent 以为的目标 vs 实际命中的元素"这条裂缝。
+ * 这里保留一个 re-export 而不是让调用方各自去 core 取：注入这件事是本文件的职责，
+ * 「注入的是哪些名字」应该在注入点读得到。
  *
- * `js` 与 `cdp` 是**必须项不是可选项**：库里没有的能力，Agent 自己就能补，不用等我们加函数。
- * 少了这两个逃生口，这个方案就退化成「动词清单更长的 N 动词方案」。
- *
- * **这张清单只放派发层真能服务的名字**。一个 AgentMux Browser 就是一个页面（一个
- * `WebContentsView`），它没有自己的标签页——所以早期设计里照抄参考实现的 `openOrReuseTab` /
- * `switchTab` / `listTabs` 不在这里。注入一个必定失败的名字比不注入更糟：Agent 会把它当成
- * 可用能力来规划，然后在半途撞上一句拒绝，而此时前面的动作已经做过了
- * （AGENTS.md:32-52：不许让人发现得太晚）。要另一个页面就 `agentmux open browser`。
+ * 这是**内部 API，不是对外协议**——改名、改签名、加参数都不用动版本化的 Control 契约
+ * （`control.ts` 的 `AgentMuxControlRequest` 联合、`OPERATION_BUDGET`、CLI 帮助都不收这些
+ * 名字）。兼容负担从协议层挪到了库层，而库可以随便改：Agent 每一轮拿到的都是当前这一版。
+ * 完整理由（含为什么不接受坐标/selector、为什么 `js`/`cdp` 是必须项、为什么没有标签页动词）
+ * 见 core 那份文件的头注释。
  */
-export const BROWSER_PAGE_FUNCTION_NAMES = [
-  // 观察
-  'snapshot',
-  'snapshotText',
-  'pageInfo',
-  'captureScreenshot',
-  // 动作（全部按 ref）
-  'click',
-  'fillInput',
-  'typeText',
-  'pressKey',
-  'hover',
-  'scroll',
-  // 等待
-  'waitForElement',
-  'waitForLoad',
-  'waitForNetworkIdle',
-  'wait',
-  // 导航。一个 Browser 一个页面，所以只有"去哪儿"，没有标签页动词。
-  'gotoUrl',
-  // 逃生口
-  'js',
-  'cdp'
-] as const
+export const BROWSER_PAGE_FUNCTION_NAMES = BROWSER_PAGE_CAPABILITY_NAMES
 
 /** 脚本没能跑完的三种结局。分开是因为它们对 Agent 意味着完全不同的下一步。 */
 export type BrowserScriptFailure =

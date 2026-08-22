@@ -186,6 +186,7 @@ function SortableWorkbenchTab({
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const config = useAppStore((state) => state.config)
+  const localHome = useAppStore((state) => state.localHome)
   const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
   // 键盘 Cmd+W 在单 Region Tab 上关整张 Tab 的意图：窗口监听够不着这里的确认流，所以它只投一个意图，
   // 由目标 Tab（intent 的 tabId 命中自己）跑既有的 requestTabsClose——与鼠标点 X 同一条路，含未保存/在跑
@@ -225,6 +226,8 @@ function SortableWorkbenchTab({
             path: surface.path,
             workspaceRoot: workspace.path,
             revealLabel: revealInFileManagerLabel(),
+            home: localHome,
+            copyPathsAsAbsolute: config?.copyPathsAsAbsolute,
             onReveal: async () => {
               try {
                 await api.files.reveal(surface.workspaceId, surface.path)

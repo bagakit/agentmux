@@ -12,10 +12,11 @@ import {
   type AgentMuxControlCaller,
   type AgentMuxOpenDestination
 } from './control.js'
-import { requestAgentMuxControl } from './control-host.js'
+import { requestAgentMuxControl, subscribeAgentMuxControl } from './control-host.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
+import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
@@ -530,7 +531,9 @@ async function browserCommand(args: readonly string[]): Promise<number> {
     const operationId = identifier(flags.values.get('--operation'), 'Browser operation id')
     if (flags.booleans.has('--preview') && flags.booleans.has('--run')) throw cliError('Choose one replay mode: --preview or --run.')
     const step = flags.values.get('--step')
-    if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1)) throw cliError('Replay --step must be a positive integer.')
+    // 取值合法性归协议层（control-host.ts 的 `browser.replay` 解析），这里只把 flag 的字符串转成数字。
+    // 此前两处各判一遍、用不同的码拒同一个输入。`Number` 对非数字给 NaN，协议那条会拿
+    // INVALID_CONTROL_REQUEST 拒掉它——与 0、负数、小数同一个码，因为对调用方是同一件事。
     const mode = flags.booleans.has('--preview') ? 'preview' : step !== undefined ? 'step' : 'run'
     const receipt = await requestAgentMuxControl({
       ...requestBase(), operation: 'browser.replay', browserId, operationId, mode,
@@ -539,16 +542,75 @@ async function browserCommand(args: readonly string[]): Promise<number> {
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
+  // 凭 operationId 停一个操作，与发起它的那条连接无关。取消的是 **operation**，不是请求：
+  // 这条命令可以在另一个 shell、另一台进程、CLI 断了之后重连再跑，只要手上有 id。
+  if (args[0] === 'stop') {
+    const flags = parseFlags(args.slice(1), { '--operation': 'value' })
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(),
+      operation: 'browser.stop',
+      operationId: identifier(flags.values.get('--operation'), 'Browser operation id')
+    })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  // 问一条操作现在怎么样了。与 history 的分工是寻址方式：history 按 Browser 列（要先知道是哪个
+  // Browser），这条按 operation 问（只知道 id 也够）。
+  if (args[0] === 'operation') {
+    const flags = parseFlags(args.slice(1), { '--operation': 'value' })
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(),
+      operation: 'browser.operation',
+      operationId: identifier(flags.values.get('--operation'), 'Browser operation id')
+    })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  // 跟着一条操作的进展看。这是唯一一条**一问多答**的 browser 子命令：它不打印一条回执就返回，
+  // 而是先印开场帧（含缺口），再逐条印事件，直到流结束。信封与 `output --follow` 是同一份
+  // （`printStream`），所以同一段解析代码能读两边。
+  if (args[0] === 'follow') {
+    const flags = parseFlags(args.slice(1), { '--operation': 'value', '--after-sequence': 'value' })
+    const operationId = identifier(flags.values.get('--operation'), 'Browser operation id')
+    const after = flags.values.get('--after-sequence')
+    // 取值合法性归协议层（control-host 的 `browser.subscribe` 解析）：负数、小数、NaN 在那里
+    // 用同一个码拒掉。这里只把 flag 的字符串转成数字——两处各判一遍正是它们漂移的来路。
+    let finish: (() => void) | null = null
+    const ended = new Promise<void>((resolve) => { finish = resolve })
+    const opened = await subscribeAgentMuxControl({
+      ...requestBase(), operation: 'browser.subscribe', operationId,
+      ...(after === undefined ? {} : { afterSequence: Number(after) })
+    }, {
+      onEvent: (event) => printStream('browser.subscribe', 'progress', event),
+      onEnd: () => finish?.()
+    })
+    // 缺口跟开场帧一起印，**不吞掉**：客户端凭它知道自己手上这份时间线不完整，可以改去读一次
+    // 完整快照（`agentmux browser operation`）。印成 `gap: null` 也是一条信息——"一条不落"。
+    printStream('browser.subscribe', 'attached', { runOperation: opened.runOperation, gap: opened.gap })
+    // Ctrl-C 是这条命令的正常退出方式（它本来就没有自然终点，除非那个操作结束）。
+    const interrupted = (): void => finish?.()
+    process.once('SIGINT', interrupted)
+    try { await ended } finally { process.off('SIGINT', interrupted); opened.dispose() }
+    printStream('browser.subscribe', 'end', { operationId })
+    return 0
+  }
   if (args[0] !== 'run') throw cliError('Unknown browser command. Run agentmux browser --help.')
-  const flags = parseFlags(args.slice(1), { '--browser': 'value' })
+  const flags = parseFlags(args.slice(1), { '--browser': 'value', '--operation': 'value' })
   const browserId = explicitSelectorId(flags.values.get('--browser'), 'Browser id')
   const code = await readAllStdin()
-  // 空程序不是一次合法请求。放它过去的话，回执会是一份"跑完了、什么都没发生"的成功——与真的跑完
-  // 一段什么都不做的程序完全无法区分（AGENTS.md:32-52）。最常见的成因是忘了接管道。
-  if (code.trim() === '') {
-    throw cliError('The program is empty. Pipe it in, for example: agentmux browser run --browser <id> < script.js')
-  }
-  const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'browser.run', browserId, code })
+  // 空程序不在这里判：规则住在协议层（control-host.ts 的 `browser.run` 解析），CLI 与任何直连客户端
+  // 经同一条。写在这里的话只有走 CLI 的那条路被拦住，别的客户端照旧拿到一次「跑完了、什么都没发生」
+  // 的成功——那个结局与真的跑完一段空程序无法区分（AGENTS.md:32-52）。协议层那句拒绝已经点了
+  // 「怎么把程序喂进来」，所以这里删掉不损失可执行性。
+  //
+  // `--operation` 可选：给了就是「我要在它跑的时候还能查它、停它」——那个 id 在这条命令返回之前
+  // 就已经对别的连接可用。不给也照样能跑，只是只能等终局回执才知道 id（那时已无可取消）。
+  // 取值合法性归协议层，这里只把 flag 取出来。
+  const operationId = flags.values.get('--operation')
+  const receipt = await requestAgentMuxControl({
+    ...requestBase(), operation: 'browser.run', browserId, code,
+    ...(operationId === undefined ? {} : { operationId })
+  })
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
@@ -629,6 +691,28 @@ async function doctorCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
+/**
+ * 报出控制端点的位置与协议版本，好让一个非 Node 客户端**不必读我们的 TS 源码复算哈希**就能连上。
+ *
+ * 这条**不是**协议操作，是本地只读动词。原因是个绕不开的循环：要问协议"端点在哪"，先得连上端点。
+ * 所以它只做两件事——把路径与版本从既有出口取出来印出来。
+ *
+ * `defaultAgentMuxControlSocketPath()` 是路径的唯一出口（control-host 的 server 与两个客户端函数
+ * 都默认取它）。这里**调它**而不是重算一遍 `join(runtimeDir, 'control.sock')`：重算出来的第二份
+ * 在今天与它一致，于是没有任何测试能分辨两者——直到有一天文件名改了，而这条发现能力还在报旧的。
+ *
+ * **不连接**。daemon 没起也照样作答：外部客户端正是要在连接之前知道往哪连。所以这里不报"活着吗"
+ * ——那是 `doctor` 的事，而且把两件事混在一起会让"现在没人监听"看起来像"没有这个端点"。
+ */
+async function endpointCommand(args: readonly string[]): Promise<number> {
+  if (args.length > 0) throw cliError('endpoint takes no arguments.')
+  printSuccess('endpoint', {
+    control: { transport: 'unix-socket', framing: 'ndjson', path: defaultAgentMuxControlSocketPath() },
+    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION
+  })
+  return 0
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') { process.stdout.write(`${AGENTMUX_CLI_HELP}\n`); return 0 }
@@ -641,6 +725,7 @@ async function main(): Promise<number> {
   }
   if (args[0] === AGENTMUX_SELF_CONTEXT_VERB) return await whoamiCommand(args.slice(1))
   if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
+  if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))

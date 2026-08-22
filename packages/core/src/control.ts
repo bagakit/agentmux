@@ -46,7 +46,21 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   // 用户没打开 Agent 驱动页面的总开关。既有 39 个码没有一个说得出这件事：`CONTROL_UNAVAILABLE` 是
   // "这条路现在走不通"（没人拥有屏幕），会让 Agent 去重试；这里重试一万次也没用，要去改设置。
   // 把"要你去做一个决定"说成"暂时不可用"，就是把一次明确拒绝降级成了一次疑似故障。
-  'BROWSER_AUTOMATION_DISABLED'
+  'BROWSER_AUTOMATION_DISABLED',
+  // 这个宿主不提供进度订阅（`subscribeBrowserOperation` 没实现）。既有的码没有一个说得对：
+  // `CONTROL_UNAVAILABLE` 是"现在走不通、回头再试"，而这件事重试到世界尽头也一样；
+  // `INVALID_CONTROL_REQUEST` 更糟——请求完全合法，是这一端没有这个能力。
+  // 与 `AGENT_RESUME_UNSUPPORTED` / `SIGNAL_UNSUPPORTED` 同族：能力协商的答案，不是故障。
+  'BROWSER_SUBSCRIBE_UNSUPPORTED',
+  // 人正在用这一页，Agent 的驱动请求被拒。这条必须与"出故障了"分得开——设计约束原话是
+  // 「这条拒绝要带类型化的原因，让协议客户端能把『人在用这一页』与『出故障了』分开，而不是
+  // 收到一句散文」。
+  //
+  // 为什么不复用既有的码：`CONTROL_UNAVAILABLE` 会让 Agent 去重试，而重试正是这条规则要禁的
+  // （「Agent 不得靠重试静默夺回页面」）；`BROWSER_AUTOMATION_DISABLED` 说的是用户关了总开关，
+  // 去改设置就能解，而这一条只能由人**明确交还控制**才解得开——两件事的恢复动作不一样，
+  // 折成一个码就等于告诉调用方去做一件没用的事。
+  'BROWSER_HUMAN_CONTROL_ACTIVE'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
@@ -202,7 +216,24 @@ export type AgentMuxControlStopRequest = RequestBase & {
  * 这也是它不叫 `open.*` 的原因。
  */
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
-  operation: 'browser.run'; browserId: string; code: string; caller?: AgentMuxControlCaller
+  operation: 'browser.run'
+  browserId: string
+  code: string
+  /**
+   * 这次操作的 identity，**由调用方给**。
+   *
+   * 为什么不由主进程铸：socket 是严格一问一答（一条请求 → 一条回执 → end），所以主进程铸出来的 id
+   * 只能随**终局**回执露出——而那时操作已经结束，无可查询也无可取消。于是「在飞期间凭 id 查询/取消」
+   * 在协议上不可达，`browser.stop` 与 `browser.operation` 只对已结束的操作有效，等于没有。
+   *
+   * 调用方给 id 是本仓既有的做法，不是新发明：core 的 `submitInputPlan` 收的 `submissionId` 就是
+   * 调用方传进来的 `operationId`，同 id 重投是一条设计好的幂等恢复路径。这里沿用同一套语义。
+   *
+   * 可选，因为不关心 identity 的调用方（发一次就等结果）不该被逼着造一个 uuid。缺席时由承载操作的
+   * 那一侧铸一个——铸造点仍只有一个（journal 的 `start`），不是两个：这里给的 id 只是**穿过**它。
+   */
+  operationId?: string
+  caller?: AgentMuxControlCaller
 }
 /**
  * 读回这个 Browser 上已经发生过的操作。
@@ -236,6 +267,59 @@ export type AgentMuxControlBrowserHistoryRequest = RequestBase & {
 export type AgentMuxControlBrowserReplayRequest = RequestBase & {
   operation: 'browser.replay'; browserId: string; operationId: string; mode?: 'preview' | 'step' | 'run'; step?: number; caller?: AgentMuxControlCaller
 }
+/**
+ * 停下一个在飞的操作，**凭 operationId，与发起它的那条连接无关**。
+ *
+ * 取消的是 operation，不是请求。这条区别是这个操作存在的全部理由，也是不走 JSON-RPC 的决定性理由：
+ * JSON-RPC / gRPC 的取消都是请求级的（「别做我刚让你做的那件事」），只有发起那一方、且只在自己那条
+ * 连接还活着的时候才能撤。这里要的是 operation 级：另一条连接、另一个进程、CLI 断了之后重连，
+ * 都能凭 id 停掉它。判据是「那次操作停下了吗」，不是「我这条请求被放弃了吗」。
+ *
+ * 对一个已经结束的操作取消是**幂等成功**并答出它的终局，不是失败：正常时序下取消总会撞上刚结束的
+ * 操作（人点停的同一刻程序自己跑完了），把竞态写成失败等于让调用方无法区分「我停晚了」和「出错了」。
+ *
+ * 没有 `browserId`：id 本身就定位到那一个操作。要求调用方同时给出 browserId 只会引入「两个参数
+ * 互相矛盾时听谁的」这条没必要的裂缝。
+ */
+export type AgentMuxControlBrowserStopRequest = RequestBase & {
+  operation: 'browser.stop'; operationId: string; caller?: AgentMuxControlCaller
+}
+/**
+ * 问一条操作现在怎么样了，凭 operationId。
+ *
+ * 与 `browser.history` 的分工不是「一条 vs 多条」那么简单：history 按 Browser 列（要先知道是哪个
+ * Browser），这条按 operation 问（只知道 id 也够）。一条连接断了之后，另一条连接手上往往只有 id——
+ * 它不知道、也不该需要知道那个操作跑在哪个 Browser 上。
+ *
+ * 答案覆盖四种状态，互不折叠：在跑、completed、stopped、以及重启后被判为 indeterminate。最后那一档
+ * 是承重的——进程重启时活着的操作会被转成 indeterminate（不是 failed，也不是 completed），意思是
+ * 「这件事做到哪儿我们不知道」，而调用方对它唯一正确的反应是**别盲目重试**。
+ *
+ * 查不到是一次成功的回答（`operation: null`），不是错误：id 可能来自另一台机器、或者早被日志轮转掉了。
+ * 把「我们查不到」报成失败会让调用方以为 Browser 出了问题——那是 RED-LINES 第 2 类。
+ */
+export type AgentMuxControlBrowserOperationRequest = RequestBase & {
+  operation: 'browser.operation'; operationId: string
+}
+/**
+ * 订阅一条操作的进度事件流。
+ *
+ * **它与上面所有操作的区别不在语义而在 framing**：其余 14 条都是一问一答（一条请求 → 一条回执 →
+ * 关闭），这一条是一问多答。所以它必须是 socket 上一条**明确的新长连接路径**，而不是就地放宽
+ * `readMessage` 的尾随数据检查——放宽的话，全部 14 个操作的 framing 假设会一起松掉，而它们的
+ * 正确性都建立在「读到第一个换行就是全部」这个前提上。
+ *
+ * 事件信封沿用 CLI 已有的那一份（`printStream` 的 `{ ..., event, result }`），不新造一套：
+ * 同一个客户端读 `output --follow` 与读这条流应该用同一段解析代码。
+ *
+ * `afterSequence` 是游标：客户端断线重连时报出自己收到的最后一条序号，服务端从那之后接着发。
+ * 缺席等于从当下开始。给了一个服务端已经不再持有的序号时，答案是**显式的 gap**，不是静默从最早
+ * 一条开始发——后者会让客户端拿到一份「看起来连续但中间少了一段」的流，而它无从察觉。
+ * 事件上限是承载方的既有上限（journal 的 512），本协议不复述那个数字，只要求缺口必须说出来。
+ */
+export type AgentMuxControlBrowserSubscribeRequest = RequestBase & {
+  operation: 'browser.subscribe'; operationId: string; afterSequence?: number
+}
 export type AgentMuxControlRequest =
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
@@ -253,6 +337,9 @@ export type AgentMuxControlRequest =
   | AgentMuxControlBrowserRunRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
+  | AgentMuxControlBrowserStopRequest
+  | AgentMuxControlBrowserOperationRequest
+  | AgentMuxControlBrowserSubscribeRequest
 
 /**
  * 一段 Agent 程序的结局——**四分类，不是布尔成败**。
@@ -344,6 +431,40 @@ export type AgentMuxControlResult =
       mode: 'preview'
       plan: AgentMuxControlBrowserReplayPlan
     }
+  /**
+   * 取消的回执**带出那条操作的当下事实**，不是一句 `{ ok: true }`。
+   *
+   * 理由是幂等：取消一个已经结束的操作也算成功，那么「成功」本身就不告诉调用方发生了什么——它需要
+   * 知道的是这次停的是个在跑的操作（现在 stopped），还是撞上了一个刚跑完的（仍是 completed）。
+   * 两种都是成功，但对调用方的意义完全不同：后者意味着程序的结果是真的、该去读它。
+   *
+   * 字段叫 `runOperation` 而不是 `operation`：这个联合的判别键就是 `operation`，同名字段会让 tsc 报
+   * Duplicate identifier 且判别键被覆盖后整个联合的收窄全部失效。`browser.run` 那一支已经因为同一个
+   * 原因这么命名了（见上），这里沿用同一个名字而不是另起一个——两个名字表达同一件事就是下一次漂移。
+   *
+   * 可为 null：id 查不到时取消是成功的（没有什么要停），但没有事实可报。
+   */
+  | { operation: 'browser.stop'; runOperation: AgentMuxControlBrowserOperation | null }
+  /** 问一条操作的当下事实。查不到答 null——那是一次成功的回答，不是错误。 */
+  | { operation: 'browser.operation'; runOperation: AgentMuxControlBrowserOperation | null }
+  /**
+   * 订阅的**开场帧**——不是终局回执。事件跟在它后面从同一条 socket 流出来。
+   *
+   * `gap` 是这一支存在的主要理由。承载方只保留有限条事件（journal 是 512 条），所以「客户端要的那段
+   * 已经不在了」是一个必然会发生的状态，不是异常。它必须在**第一帧就说出来**，而不是让客户端自己从
+   * 序号跳变里去猜：
+   *   - `null`：没有缺口，从 `afterSequence` 之后一条不落。
+   *   - 有值：`droppedThrough` 之前的事件已经不可得了，流从它之后开始。收到它的客户端知道自己手上
+   *     这份时间线是**不完整**的，可以改去读一次完整快照（`browser.operation`）来对齐。
+   *
+   * `runOperation` 可为 null：订阅一个查不到的 id 是成功的（没有什么可流），但没有事实可报。
+   * 这与 `browser.stop` / `browser.operation` 的取舍是同一条——「我们查不到」不是 Browser 坏了。
+   */
+  | {
+      operation: 'browser.subscribe'
+      runOperation: AgentMuxControlBrowserOperation | null
+      gap: { droppedThrough: number } | null
+    }
 
 type WithoutOperation<T> = T extends unknown ? Omit<T, 'operation'> : never
 type SuccessByOperation<Operation extends AgentMuxControlResult['operation']> = {
@@ -372,7 +493,44 @@ export type AgentMuxControlErrorReceipt = {
   error: AgentMuxControlError
 }
 export type AgentMuxControlReceipt = AgentMuxControlSuccessReceipt | AgentMuxControlErrorReceipt
-export interface AgentMuxControlHost { execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> }
+/**
+ * 一条流出去的进度事件。
+ *
+ * `sequence` 是本条流内单调递增的序号，客户端断线重连时把最后一个序号报回来（`afterSequence`）。
+ * `event` 的内容对 core 不透明——步骤词汇归 Desktop（与 {@link AgentMuxControlBrowserOperation}
+ * 的 `steps: unknown[]` 同一条取舍）。core 只负责序号、信封与缺口这三件它能负责的事。
+ */
+export type AgentMuxControlBrowserEvent = { sequence: number; event: unknown }
+
+/**
+ * 承载方向 core 交出的一条订阅。
+ *
+ * 形状是 push（`onEvent` + 一个退订函数）而不是 pull（异步迭代器）：承载方那边本来就是回调
+ * （journal 的 `onEvent`），做成 pull 要在中间加一层缓冲队列，而那层队列就是第二处会丢事件的地方。
+ *
+ * `gap` 在**建立订阅时**一次性给出，不做成事件流里的一条：缺口是「你要的那段已经不在了」这个事实，
+ * 它在第一帧之前就已经成立，放进流里等于让客户端先收几条再被告知前面缺了——那时它可能已经按
+ * 一份不完整的时间线做了判断。
+ */
+export type AgentMuxControlBrowserSubscription = {
+  runOperation: AgentMuxControlBrowserOperation | null
+  gap: { droppedThrough: number } | null
+  /** 退订。必须幂等：客户端断线与操作自己结束会同时到达。 */
+  dispose(): void
+}
+
+export interface AgentMuxControlHost {
+  execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+  /**
+   * 建立一条进度订阅。**可选**——不实现它的宿主照旧服务其余 14 个操作，订阅请求得到一个类型化的
+   * 「这个宿主不提供进度订阅」。这不是 fallback，是能力协商：一个没有 Browser 的宿主（比如只跑
+   * Agent 会话的那种）本来就没有进度可流，逼它实现一个空壳反而让「有没有这个能力」不可判。
+   */
+  subscribeBrowserOperation?(
+    request: AgentMuxControlBrowserSubscribeRequest,
+    onEvent: (event: AgentMuxControlBrowserEvent) => void
+  ): Promise<AgentMuxControlBrowserSubscription>
+}
 
 export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target: AgentMuxRegionTarget): AgentMuxRegion {
   if (new Set(regions.map(({ regionId }) => regionId)).size !== regions.length) throw new AgentMuxError('Open Region identity is ambiguous.', 'AMBIGUOUS_REGION_TARGET')
@@ -441,7 +599,16 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
   'browser.history': 'short',
-  'browser.replay': 'long'
+  'browser.replay': 'long',
+  // 取消只发一次 abort 就返回，不等被取消的那个操作真的收尾——等它等于把「停一个卡住的程序」变成
+  // 「跟着那个程序一起卡住」，而卡住恰恰是最需要取消的场景。所以是短档。
+  'browser.stop': 'short',
+  // 读一条 journal 记录，只碰本地状态。
+  'browser.operation': 'short',
+  // 开场帧同样只读本地状态就能答出来（那条操作在不在、有没有缺口），所以是短档——**这个预算管的是
+  // 开场帧，不是整条流**。流本身的存活由长连接路径自己管（socket 上没有"请求超时"可言：一个操作
+  // 安静十分钟是正常的，不是超时）。若这里给长档，等于让一个只读本地状态的问答白等一分钟。
+  'browser.subscribe': 'short'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */
