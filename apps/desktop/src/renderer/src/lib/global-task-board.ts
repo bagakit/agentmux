@@ -65,7 +65,13 @@ export function projectBoardTasks(
 ): BoardTaskProjection[] {
   const byId = new Map<string, BoardTaskRecord>()
   for (const task of Object.values(persisted)) byId.set(task.id, task)
+  // 一个 Session 只能在看板上出现一次。去重键是「这个 Session 被谁认领了」，不是「有没有同名的
+  // session: 行」——手写任务的 id 是 `task:<uuid>`，与派生行的 `session:<id>` 分属两个命名空间，
+  // 所以只查 `byId.has(derived.id)` 对「手写任务已经挂了这个 Session」完全失明：那个 Session 会
+  // 同时作为任务里的一格和它自己的一张卡出现两次。认领关系只存在于 sessionIds 里，必须问它。
+  const claimed = new Set(Object.values(persisted).flatMap((task) => task.sessionIds))
   for (const session of sessions) {
+    if (claimed.has(session.id)) continue
     const derived = projectTaskFromSession(config, session)
     if (!byId.has(derived.id)) byId.set(derived.id, derived)
   }

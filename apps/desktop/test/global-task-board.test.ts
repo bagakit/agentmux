@@ -55,4 +55,18 @@ describe('global task board projection', () => {
     expect(tasks[0]?.sessionIds).toEqual(['missing-session'])
     expect(tasks[0]?.sessions).toEqual([])
   })
+
+  // 去重的两侧都要钉死。只钉「被认领的那个不再单独出现」会放过「这一类一律不投影」——那种坏法
+  // 会把没人认领的 Session 也从看板上抹掉，而它在本用例里同样是绿的。所以同一个 it 里既断言
+  // 认领过的被吸收，也断言没认领的仍然在场，并把整个集合 toEqual 钉死而不是写 every/some。
+  it('a Session claimed by a hand-written task appears once, and an unclaimed Session still appears', () => {
+    const tasks = projectBoardTasks(config, [session('1', 'working'), session('2', 'working')], {
+      'task:mine': {
+        id: 'task:mine', title: 'Ship the board', description: '', status: 'working', priority: 'normal',
+        projectId: 'repo', projectName: 'Repo', sessionIds: ['1'], createdAt: 1, updatedAt: 20, source: 'default-topic'
+      }
+    })
+    expect(tasks.map((task) => task.id)).toEqual(['task:mine', 'session:2'])
+    expect(tasks[0]?.sessions.map((entry) => entry.id)).toEqual(['1'])
+  })
 })
