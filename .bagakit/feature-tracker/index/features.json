@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 234
+    "next_cursor": 235
   },
   "features": [
     {
@@ -1964,6 +1964,16 @@
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29k8fme4e",
+      "title": "Agents 看板与 Board 需求流转（2026-09-22）",
+      "status": "done",
+      "workspace_mode": "worktree",
+      "branch": "feat/taskflow-board",
+      "worktree_name": "agentmux-taskflow",
       "runtime_role": "standalone",
       "runtime_relations": []
     }
