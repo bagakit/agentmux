@@ -46,3 +46,12 @@
 ### Zero-caller evidence
 
 生产调用者扫描（排除定义文件和测试）命中：`AgentAvatar` 14 个调用文件；`idleAgentCount` 在 `WorkspaceSidebar` 的 Project、Scratch 和 group 三处使用；`BrowserOperationRail` 在 `BrowserPane` 挂载；`workspace-topic-actions` 同时命中 Topic JSX 与其 CSS。扫描契约本身还断言这些来源非空，避免空集合导致的 vacuous green。
+
+### Visual acceptance
+
+使用 `pnpm --filter @agentmux/desktop dev:web` 的真实页面预览检查了默认工作面、窄视口、空闲 Browser、Agents 面板和 Executor 设置：
+
+- 空闲 Browser 只留下右侧紧凑的历史入口，页面主体保持可见，没有 `Browser ready` 或 `You have control` 大块占位。
+- Agents 面板的 working/error 状态、Provider 图标和状态点层次清楚；悬停或键盘聚焦头像会出现统一 `Executor details` 面板，设置按钮实际进入 Agents/Executors 设置。
+- Executor 设置中的 Avatar、Tint、Icon 与稳定 Executor ID 同行，Appearance 页面不再出现头像编辑入口。
+- 窄视口下项目栏、工具栏和主内容仍保持可读，长内容通过现有裁剪与标题提示处理；未发现 Browser rail 遮挡原生页面的现象。

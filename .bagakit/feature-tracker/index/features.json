@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 242
+    "next_cursor": 243
   },
   "features": [
     {
@@ -2044,6 +2044,16 @@
       "workspace_mode": "worktree",
       "branch": "feat/f-29t8f3mhj",
       "worktree_name": "wt-f-29t8f3mhj",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29u8f9ntc",
+      "title": "Agents 看板注意力动作回接",
+      "status": "in_progress",
+      "workspace_mode": "worktree",
+      "branch": "featf-29u8f9ntc",
+      "worktree_name": "wt-f-29u8f9ntc",
       "runtime_role": "standalone",
       "runtime_relations": []
     }
