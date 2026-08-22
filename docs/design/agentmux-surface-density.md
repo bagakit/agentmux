@@ -739,7 +739,7 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 
 ### Agents 看板与 Board 需求流转（2026-09-22）
 
-Agents 直接沿用原 Board 的工具栏、状态列、卡片和右半工作区设计。卡片以 Agent 显示名和 Executor 身份为主，观察与请求处理保留同屏上下文。Board 卡片先读需求标题、状态、负责人、Project 和优先级，Session 数量和运行状态是次级事实。零 Session 与多 Session 的需求具有相同地位。需求编辑与关联在固定详情区完成；行为约束见 interaction SSOT 同名小节。
+Agents 直接沿用原 Board 的工具栏、状态列、卡片和右半工作区设计。卡片以 Agent 显示名和 Executor 身份为主，观察与请求处理保留同屏上下文；选中 Needs you 卡片后，详情区的“在这里查看请求”保持一个明确的次级动作位，不能把回答动作藏回旧列表行。没有 typed request 时只显示定位 Session 的动作。Board 卡片先读需求标题、状态、负责人、Project 和优先级，Session 数量和运行状态是次级事实。零 Session 与多 Session 的需求具有相同地位。需求编辑与关联在固定详情区完成；行为约束见 interaction SSOT 同名小节。
 
 
 ### Board Demand 的全局层级（2026-09-22）

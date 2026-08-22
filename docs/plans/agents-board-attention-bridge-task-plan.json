@@ -1,0 +1,91 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agents-board-attention-bridge-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agents-board-attention-bridge-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "把 Agents 卡片注意力动作接回固定详情区",
+      "depends_on": [],
+      "objective": "在新的 Board 风格 Agents 工作面里恢复 typed request 的就地查看、回答后轮转、失败保留和键盘焦点行为。",
+      "outcome": "Agents 卡片、请求面板和 Core response 形成可验证的单一 Session/request 闭环。",
+      "estimate_hours": 2,
+      "heavy": true,
+      "heavy_reason": "卡片布局、请求身份、异步 Core 回执和焦点轮转必须一起验证，拆开会重新产生旧列表与请求面板的漂移。",
+      "acceptance": [
+        "当前卡片选中后，Needs you 详情区有 Review here；typed request 进入同一 Session 的 AttentionRequestPanel，无 typed request 只显示打开原 Session。",
+        "回答成功等待 Session pendingInteraction 清除后才推进下一项；失败、旧 request 被替换或 Core 不可确认时保留当前请求和可见原因，不自动重试。",
+        "键盘可完成卡片选中、打开请求、回答和返回，列表刷新不把焦点跳到无关 Agent；Board 继续只读观察 Session。",
+        "测试覆盖当前卡片 DOM、空集合、两个 Session 隔离、成功/失败/替换、生产挂载；变异测试和零调用者检查均有证据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/attention-request-panel.test.tsx apps/desktop/test/attention-request-resolution.test.ts apps/desktop/test/attention-review-loop.integration.test.tsx apps/desktop/test/agents-session-board-navigation.test.tsx --maxWorkers=1",
+          "proves": "Agents 看板注意力入口、请求回答边界和跨面导航行为"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "AttentionRequestPanel 与 Store/Core 接线的完整类型验证"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29u8f9ntc/artifacts/T-001-mutation.md",
+          "proves": "删除固定详情 Review here 挂载、跳过 Core 确认或置空请求集合时的变异红绿证据"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agents-board-attention-bridge-2026-09-22.md",
+        "apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx",
+        "apps/desktop/src/renderer/src/components/AttentionRequestPanel.tsx"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "修正结果审查的 Workspace 归属与 Git 路径",
+      "depends_on": [],
+      "objective": "让 SessionResultReview 严格使用 Session 所属 Workspace 的 Git 事实，禁止未知 Workspace 回退到 active Workspace，并正确处理嵌套仓库的相对路径。",
+      "outcome": "结果审查中的 Diff 动作不会串项目；无变更、非 Git、读取失败和未知归属都能被区分并保留原 Session。",
+      "estimate_hours": 1,
+      "heavy": false,
+      "acceptance": [
+        "未知 Workspace 不渲染可执行 Review changes；只说明无法定位并保留 Continue in Session。",
+        "Git status 的 repo-relative path 经过既有 repoRelativePrefix 转换后再传给 openFileDiff；无变更、非仓库和读取失败分别呈现。",
+        "结果审查仍只使用当前 Session 明确的 HTTP/HTTPS URL，继续动作仍定位同一 Session。",
+        "测试覆盖四种 Git 状态、未知 Workspace、嵌套仓库路径和 production SessionPane 挂载；变异与零调用者证据可复查。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/session-result-review.test.tsx apps/desktop/test/session-result-review-routing.test.tsx apps/desktop/test/editor-diff-store.test.ts apps/desktop/test/open-http-link-store.test.ts --maxWorkers=1",
+          "proves": "结果审查的 Workspace 归属、Git 状态、URL 和生产挂载"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "结果审查与 Store 类型接线"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29u8f9ntc/artifacts/T-002-mutation.md",
+          "proves": "未知 Workspace fallback 和嵌套 repo path 变异红绿证据"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agents-board-attention-bridge-2026-09-22.md",
+        "apps/desktop/src/renderer/src/components/SessionResultReview.tsx",
+        "apps/desktop/src/renderer/src/components/ChangesPanel.tsx"
+      ],
+      "supersedes": []
+    }
+  ]
+}

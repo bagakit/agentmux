@@ -60,9 +60,9 @@
 ### Agents / Session / Board 与注意力闭环
 
 - 主工作面只有三项：Agents、Session、Board。三项切换位于窗口底部中央，顶行不再放一套平级导航；Session 是现有 terminal/workbench 的对外名称。
-- Agents 是全局注意力收件箱：先显示 Needs you，再显示工作中、已完成和错误的 Agent；每一行都能直接进入对应 Session，不能在这里复制一份 Session 或 Runtime 状态。
+- Agents 是全局注意力收件箱：先显示 Needs you，再显示工作中、已完成和错误的 Agent；卡片选中后在同屏右侧显示该 Session 的观察工作区，明确的“打开 Session”动作才导航到原工作台。Needs you 的 typed request 从同一详情区进入既有回答面板，不能在这里复制一份 Session 或 Runtime 状态。
 - Session 是具体 Agent Session 的 terminal/workbench；Agent 的请求、回复和恢复动作在同一 Session 内完成，处理后仍留在原 Session。
-- Board 的主实体是 Task。Task 卡片第一层显示 Task ID、Project 和状态，关联 Session 只作为执行事实；没有选中 Task 时不渲染 TaskWorkspace，也不保留空右栏。
+- Board 的主实体是 Demand。Demand 卡片第一层显示 Demand ID、Project 和状态，关联 Session 只作为执行事实；没有选中 Demand 时不渲染 DemandWorkspace，也不保留空右栏。
 - 一个决定完成后，Agents 面要能把用户带到同一 Session 的结果审查入口：已有 Diff 或 Browser preview 可直接打开，缺少结果时明确显示“等待结果”，不得用猜测替代 Runtime 事实。
 - 单工作面保持连续全宽。只有真实存在多个 Region 时才使用 arrangement；不能因为没有详情而把内容视觉上推到左侧、保留空右栏或播放方向性重排动画。
 - 进程重启先恢复 durable 的面、Tab、Region 与焦点，再尝试 reattach/resume Session。恢复探测、握手或 Provider 流程失败时保留原工作面并显示服务窗提醒；只有 Core 的终局事实允许移除投影。
@@ -1236,6 +1236,7 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 ### Agents 看板与 Board 需求流转（2026-09-22）
 
 - 用户确认「把 board 的设计照搬替换掉 Agents，同时 board 先照抄 multica 的业务逻辑」。Agents 使用原 Board 的紧凑工具栏、卡片、状态列和同屏右侧会话工作区，替换简单列表；主实体是 Agent Session，按 Needs you、Working、Results、Error 展示，普通终端归 Session。
+- Agents 卡片换成 Board 语言后，注意力动作仍然必须在同一张卡片的工作区内可达：选中 Needs you 的 Agent 后，固定详情区提供“在这里查看请求”；typed request 由同一个 Session 身份交给既有交互卡和 Core respond API。没有 typed request 时只能提供“打开 Session”定位动作，不能伪造回答控件。卡片、详情和请求面板都不得复制 Session、Run 或 pending request 真相。
 - Board 是与 Project、Session 平级的最高级全局工作面；进入 Board 时 Project Rail 被工作面覆盖，不显示左侧 Project 导航。Board 内主实体不是泛意义的 task，而是 Demand（需求），按 Backlog、Todo、In progress、In review、Blocked、Done、Cancelled 流转。状态由显式操作维护，不从 Session 是否需要我、退出或报错推断完成。负责人、Project、优先级、描述与活动记录属于 Demand；负责人可以未分配，分配 Executor 与关联 Session 是不同操作。
 - Backlog 可以先指定负责人而不启动；用户明确执行需求时通过既有 Core 启动路径创建并关联 Session，每次执行保留关联，失败保留需求与说明。需求可编辑、跨列流转、评论、关联或解除关联已有 Session，重启后仍成立。
 - Demand 可以在没有 Session 时创建和持久存在，也可以关联多个 Session。没有显式关联的 Session 不自动生成 Board 卡片。快照缺失保留 Demand、关联 ID 与当前选择，并区分尚未恢复和从未关联。
