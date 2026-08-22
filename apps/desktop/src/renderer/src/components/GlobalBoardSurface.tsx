@@ -11,7 +11,6 @@ import {
   PanelRightClose,
   Search,
   SlidersHorizontal,
-  Sparkles,
   SquareTerminal,
   UserRound,
   X
@@ -31,6 +30,8 @@ import {
 } from '../lib/global-task-board'
 import { workspaceForSession } from '../lib/workbench-tabs'
 import { SessionPane } from './SessionPane'
+import { SessionRegionHost } from './SessionRegionHost'
+import { DefaultSessionEntry } from './DefaultSessionEntry'
 import { StatusDot } from './StatusDot'
 import { agentProviderLabel } from './AgentProviderIcon'
 
@@ -116,7 +117,7 @@ function TaskWorkspace({ task, arrangement, onArrangement, onClose }: {
           <span>Use the Default Topic to route this task to a Project and attach a Session.</span>
         </div>
       ) : (
-        <div className={`global-task-workspace__regions ${arrangementClass}`}>
+        <SessionRegionHost arrangement={arrangement} className={`global-task-workspace__regions ${arrangementClass}`}>
           {sessions.map((session, index) => {
             const workspaceId = sessionWorkspaceId(config, session)
             const tabId = `task-workspace:${task.id}`
@@ -132,6 +133,7 @@ function TaskWorkspace({ task, arrangement, onArrangement, onClose }: {
                     sessionId={session.id}
                     surfaceKind={session.kind}
                     interactiveResize={false}
+                    readOnly
                     visible
                     linkOrigin={{ workspaceId, tabGroupId: `task-group:${task.id}`, tabId, regionId }}
                   />
@@ -140,59 +142,9 @@ function TaskWorkspace({ task, arrangement, onArrangement, onClose }: {
               </section>
             )
           })}
-        </div>
+        </SessionRegionHost>
       )}
     </aside>
-  )
-}
-
-function DefaultSessionLauncher({ hidden, onHiddenChange }: { hidden: boolean; onHiddenChange: (hidden: boolean) => void }) {
-  const config = useAppStore((state) => state.config)
-  const selectWorkspace = useAppStore((state) => state.selectWorkspace)
-  const openScratchTopic = useAppStore((state) => state.openScratchTopic)
-  const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
-  const [opening, setOpening] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const defaultTopicId = 'launcher:default'
-
-  async function openDefaultTopic(): Promise<void> {
-    if (opening) return
-    const scratch = config?.workspaces.find((workspace) => workspace.id === SCRATCH_WORKSPACE_ID)
-    if (!scratch) return
-    setOpening(true)
-    try {
-      await selectWorkspace(scratch.id)
-      await openScratchTopic(defaultTopicId)
-    } finally {
-      setOpening(false)
-    }
-  }
-
-  if (hidden) {
-    return (
-      <button type="button" className="global-default-session__recover" onClick={() => onHiddenChange(false)} title="Show Default Session launcher"><Sparkles size={13} /> Default Session</button>
-    )
-  }
-  return (
-    <div className="global-default-session">
-      <button
-        type="button"
-        className="global-default-session__button"
-        onClick={() => void openDefaultTopic()}
-        onContextMenu={(event) => { event.preventDefault(); setMenuOpen((value) => !value) }}
-        aria-label="Open Default Session"
-        title="Open Default Session"
-      >
-        <Sparkles size={14} />
-        <span>{opening ? 'Opening…' : 'Default Session'}</span>
-      </button>
-      {menuOpen ? (
-        <div className="global-default-session__menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => { onHiddenChange(true); setMenuOpen(false) }}>Hide launcher</button>
-          <button type="button" role="menuitem" onClick={() => { setWorkspaceTool('files-branches'); setMenuOpen(false) }}>Show Topic files</button>
-        </div>
-      ) : null}
-    </div>
   )
 }
 
@@ -205,8 +157,6 @@ export function GlobalBoardSurface() {
   const createBoardTask = useAppStore((state) => state.createBoardTask)
   const boardTaskArrangement = useAppStore((state) => state.boardTaskArrangement)
   const setBoardTaskArrangement = useAppStore((state) => state.setBoardTaskArrangement)
-  const defaultSessionLauncherHidden = useAppStore((state) => state.defaultSessionLauncherHidden)
-  const setDefaultSessionLauncherHidden = useAppStore((state) => state.setDefaultSessionLauncherHidden)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<BoardTaskStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
@@ -257,7 +207,7 @@ export function GlobalBoardSurface() {
             )
           })}
         </div>
-        <footer className="global-board-footer"><span>{filteredTasks.length} of {tasks.length} tasks</span><span className="global-board-footer__hint">Select a task to keep its context beside the board</span><DefaultSessionLauncher hidden={defaultSessionLauncherHidden} onHiddenChange={setDefaultSessionLauncherHidden} /></footer>
+        <footer className="global-board-footer"><span>{filteredTasks.length} of {tasks.length} tasks</span><span className="global-board-footer__hint">Select a task to keep its context beside the board</span><DefaultSessionEntry placement="board" /></footer>
       </div>
       {selectedTask ? <TaskWorkspace task={selectedTask} arrangement={boardTaskArrangement} onArrangement={setBoardTaskArrangement} onClose={() => setSelectedBoardTask(null)} /> : null}
     </section>
