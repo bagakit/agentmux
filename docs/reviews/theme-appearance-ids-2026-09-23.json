@@ -1,0 +1,16 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Appearance choices derive from one tuple",
+  "decision": "approved",
+  "acceptance": [
+    "The settings appearance choices, persistence validator and AppAppearanceId type derive from APP_APPEARANCE_IDS.",
+    "Adding an appearance member cannot leave the settings UI with an older hand-written list.",
+    "The change does not create a second theme runtime or change the data-appearance switching contract."
+  ],
+  "sources": [
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/shared/contracts.ts",
+    "apps/desktop/src/main/config-store.ts",
+    "apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPane.tsx"
+  ]
+}

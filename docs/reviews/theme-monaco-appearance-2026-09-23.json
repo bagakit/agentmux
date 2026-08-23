@@ -1,0 +1,16 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Monaco follows resolved application appearance",
+  "decision": "approved",
+  "acceptance": [
+    "Both editable and diff Monaco surfaces use the resolved App appearance instead of a fixed dark theme.",
+    "System appearance changes update mounted editors through the shared resolveAppAppearance function.",
+    "Terminal palette and persisted Session/Run/Layout facts remain independent."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/lib/app-appearance.ts",
+    "apps/desktop/src/renderer/src/components/EditorPane.tsx"
+  ]
+}

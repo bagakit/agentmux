@@ -1,0 +1,80 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/theme-appearance-ids-2026-09-23.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/theme-appearance-ids-2026-09-23.json"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "让设置页从共享外观元组派生选项",
+      "objective": "消除 AppearanceSettingsPane 中手写的 dark/light/system 列表，让设置 UI 与配置校验、类型共同追随 APP_APPEARANCE_IDS。",
+      "outcome": "设置页从 shared contract 导入 APP_APPEARANCE_IDS，并通过一个类型安全的显示名映射渲染全部选项。",
+      "acceptance": [
+        "AppearanceSettingsPane 不再出现独立的 dark/light/system 元组，渲染集合直接来自 APP_APPEARANCE_IDS。",
+        "每个共享元组成员都能得到可读标题和说明；新增成员缺少显示映射时 typecheck 或 focused contract test 失败。",
+        "删除 APP_APPEARANCE_IDS 的 UI 调用或恢复手写列表时，focused SSOT test 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/theme-appearance-ids.test.ts test/app-appearance.test.ts --maxWorkers=1",
+          "proves": "Appearance settings derive their options from the shared tuple and runtime resolution remains intact."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "The typed display mapping and settings component compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'APP_APPEARANCE_IDS' apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPane.tsx)\"",
+          "proves": "The shared appearance tuple has a production caller outside the contract test."
+        }
+      ],
+      "depends_on": [],
+      "source_refs": [
+        "apps/desktop/src/shared/contracts.ts",
+        "apps/desktop/src/main/config-store.ts",
+        "apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPane.tsx"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "让 Monaco 编辑器跟随 resolved App appearance",
+      "objective": "消除 EditorPane 和 DiffEditor 中固定的 vs-dark，让编辑器使用与 App chrome 相同的 dark/light 解析结果。",
+      "outcome": "Editor 与 DiffEditor 共享一个 Monaco theme helper；配置或系统偏好变化时，已挂载编辑器会更新。",
+      "acceptance": [
+        "EditorPane 不再写死 theme=\"vs-dark\"，编辑器和 diff 编辑器都读取同一个 resolved Monaco theme。",
+        "dark、light 和 system 三种 App appearance 映射到 vs-dark 或 vs，系统偏好变化会重新解析。",
+        "删除 EditorPane 对 helper 或 theme prop 的调用时，focused source contract test 变红；Terminal palette 和持久化工作面不受影响。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/monaco-theme.test.ts test/editor-theme-wiring.test.ts test/app-appearance.test.ts --maxWorkers=1",
+          "proves": "Monaco theme mapping, production wiring and system appearance resolution are covered."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "The editor theme lifecycle compiles cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'monacoThemeForAppAppearance' apps/desktop/src/renderer/src/components/EditorPane.tsx && rg -F -n 'theme={monacoTheme}' apps/desktop/src/renderer/src/components/EditorPane.tsx",
+          "proves": "The shared Monaco theme helper is connected to the production editor surface."
+        }
+      ],
+      "depends_on": ["T-001"],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/monaco-theme.ts",
+        "apps/desktop/src/renderer/src/components/EditorPane.tsx"
+      ]
+    }
+  ]
+}

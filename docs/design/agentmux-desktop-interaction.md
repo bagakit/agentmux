@@ -6,6 +6,8 @@
   通过同一入口生效；组件不得各自保存一份主题真值。
 - 主题值与语义映射属于 Surface SSOT，见
   [Surface 与密度合同《主题与样式 SSOT 规范》](./agentmux-surface-density.md#主题与样式-ssot-规范2026-09-23)。
+- Monaco 编辑器跟随 resolved App appearance；Terminal 继续使用独立的 Terminal palette。切换 App appearance
+  不得改变 Session、Run、Layout 或 Terminal palette 的持久化事实。
 - 未来的 utility CSS 或共享 primitives 只能消费语义 token；切换主题不能改变 Session、Run、Layout 或
   其他产品事实，也不能为同一事实创建第二套状态。
 
