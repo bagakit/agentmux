@@ -1,0 +1,41 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-tabs-visible-2026-09-22.md"
+  },
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "恢复 Topic 点击到可见 Tabs 的导航闭环",
+      "objective": "定位并修复 Topic 点击后右侧 Tabs 不可见",
+      "outcome": "已有 Tabs 可见且不被异步流程或隐藏表面干扰",
+      "acceptance": [
+        "已有 Topic 的 Tabs 点击即恢复且元数据读取失败不移除工作面",
+        "未开 Topic 正常创建绑定 Tab，Leader 准备不抢导航",
+        "变异测试变红、生产调用者非空、持久化恢复回归通过"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-navigation-visible.test.ts test/scratch-topic-layout.test.ts test/store-persistence.test.ts",
+          "proves": "导航、投影与恢复行为"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "类型边界"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "depends_on": []
+    }
+  ],
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-tabs-visible-2026-09-22.md"
+  ]
+}
