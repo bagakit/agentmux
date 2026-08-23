@@ -386,6 +386,7 @@ type AppState = {
     decisionLog?: readonly AgentMuxDemandDecision[]
   }): string
   updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds' | 'decisionLog'>>): void
+  deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
    * 折叠起来的 Project 分组，key 由 {@link projectGroupKey} 从 hostId + 父目录派生。
@@ -3440,6 +3441,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ...state.demands,
           [id]: { ...current, ...patch, updatedAt: Date.now() }
         }
+      }
+    })
+  },
+  deleteDemand(id) {
+    set((state) => {
+      if (!state.demands[id]) return state
+      const { [id]: _removed, ...demands } = state.demands
+      return {
+        demands,
+        ...(state.selectedDemandId === id ? { selectedDemandId: null } : {})
       }
     })
   },
