@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { allStyles } from './helpers/styles.js'
 
 const source = readFileSync(new URL('../src/renderer/src/components/ConversationMessage.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../src/renderer/src/styles/activity-conversation.css', import.meta.url), 'utf8')
+const styles = allStyles()
 
 describe('conversation message copy contract', () => {
   it('copies the complete message through the shared clipboard outlet', () => {
