@@ -9,6 +9,9 @@ import {
   SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_WIKI_STATE_PATH,
   DEFAULT_TOPIC_WIKI,
+  DEFAULT_PMO_TEAMS_TOPIC_WIKI,
+  PMO_TEAMS_TOPIC_ROLE,
+  PMO_TEAMS_TOPIC_ID,
   scratchTopicDirectoryName,
   scratchTopicIdFromDirectoryName,
   type ScratchTopicSnapshot
@@ -140,14 +143,14 @@ async function writeWikiState(path: string, state: TopicWikiState): Promise<void
   }
 }
 
-async function readOptionalWiki(path: string, statePath: string): Promise<{ content: string; updatedAt: number | null; source: 'default' | 'user'; enabled: boolean }> {
+async function readOptionalWiki(path: string, statePath: string, defaultContent: string): Promise<{ content: string; updatedAt: number | null; source: 'default' | 'user'; enabled: boolean }> {
   const state = await readWikiState(statePath)
   try {
     const [content, info] = await Promise.all([readRegularFile(path), stat(path)])
-    return { content, updatedAt: info.mtimeMs, source: content === DEFAULT_TOPIC_WIKI ? 'default' : 'user', enabled: state.enabled }
+    return { content, updatedAt: info.mtimeMs, source: content === defaultContent ? 'default' : 'user', enabled: state.enabled }
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') throw error
-    return { content: DEFAULT_TOPIC_WIKI, updatedAt: null, source: 'default', enabled: state.enabled }
+    return { content: defaultContent, updatedAt: null, source: 'default', enabled: state.enabled }
   }
 }
 
@@ -231,7 +234,12 @@ export class ScratchTopics {
     const content = await readRegularFile(join(resolved, 'topic.md'))
     const agentFiles = await readdir(join(resolved, '.agents'))
     const copy = topicCopy(content)
-    const wiki = await readOptionalWiki(join(resolved, SCRATCH_TOPIC_WIKI_PATH), join(resolved, SCRATCH_TOPIC_WIKI_STATE_PATH))
+    const defaultWiki = topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI
+    const wiki = await readOptionalWiki(
+      join(resolved, SCRATCH_TOPIC_WIKI_PATH),
+      join(resolved, SCRATCH_TOPIC_WIKI_STATE_PATH),
+      defaultWiki
+    )
     return {
       id: topicId,
       directoryPath: directoryName,
@@ -262,7 +270,7 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
     await ensureRegularFile(join(absolutePath, 'topic.md'), TOPIC_TEMPLATE)
-    await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), DEFAULT_TOPIC_WIKI)
+    await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
     return (await this.read(workspace, topicId))!
   }
@@ -295,7 +303,7 @@ export class ScratchTopics {
     const root = await realpath(workspace.path)
     const directory = join(root, snapshot.directoryPath)
     await ensureDirectory(join(directory, '.agentmux'))
-    await writeRegularFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), DEFAULT_TOPIC_WIKI)
+    await writeRegularFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await writeWikiState(join(directory, SCRATCH_TOPIC_WIKI_STATE_PATH), { enabled: true })
     return (await this.read(workspace, topicId))!
   }
@@ -331,12 +339,15 @@ export class ScratchTopics {
         ]
       },
       absolutePath,
-      prompt: snapshot.wiki?.enabled
+      prompt: [
+        ...(topicId === PMO_TEAMS_TOPIC_ID ? [PMO_TEAMS_TOPIC_ROLE] : []),
+        snapshot.wiki?.enabled
         ? topicPrompt(absolutePath, {
             content: snapshot.wiki.content,
             version: snapshot.wiki.version
           })
-        : `Scratch Topic context:\nYour working directory is the filesystem-backed Topic at ${absolutePath}.\nTopic Wiki injection is disabled for this Topic.`,
+        : `Scratch Topic context:\nYour working directory is the filesystem-backed Topic at ${absolutePath}.\nTopic Wiki injection is disabled for this Topic.`
+      ].join('\n\n'),
       identityPath,
       identityCreated
     }

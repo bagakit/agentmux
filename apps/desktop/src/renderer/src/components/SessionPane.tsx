@@ -16,6 +16,7 @@ import { api } from '../lib/api'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
+import type { ConversationAnnotation } from './ConversationMessage'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
@@ -81,6 +82,7 @@ export function SessionPane({
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
+  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
@@ -106,6 +108,11 @@ export function SessionPane({
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
   const respondInteraction = useAppStore((state) => state.respondInteraction)
+  const annotateMessage = (annotation: ConversationAnnotation): void => {
+    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+    const reference = `Regarding this message:\n> ${annotation.quote.replace(/\n/g, '\n> ')}\n\nNote: ${annotation.note}`
+    setAgentComposerDraft(sessionId, current.trim() ? `${current.trim()}\n\n${reference}` : reference)
+  }
   // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
   // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
   // from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch sessions still relativize
@@ -357,6 +364,7 @@ export function SessionPane({
             openWorkspaceFile={openWorkspaceFile}
             readPastedImage={readPastedImage}
             openHttpLink={onProseLinkClick}
+            onAnnotate={annotateMessage}
             describeSpeaker={describeSpeaker}
           />
         )}

@@ -32,6 +32,7 @@ import { workspaceForSession } from '../lib/workbench-tabs'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
+import { AgentTopologySummary } from './AgentTopologySummary'
 
 const STATUS_META: Record<DemandStatus, { label: string; icon: typeof Inbox }> = {
   backlog: { label: 'Backlog', icon: Inbox },
@@ -54,17 +55,19 @@ function sessionWorkspaceId(config: ReturnType<typeof useAppStore.getState>['con
   return workspaceForSession(config, session)?.id ?? SCRATCH_WORKSPACE_ID
 }
 
-function DemandCard({ demand, selected, onSelect }: { demand: DemandProjection; selected: boolean; onSelect: () => void }) {
+function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; onSelect: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
   const status = STATUS_META[demand.status]
   const Icon = status.icon
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={`global-demand-card ${selected ? 'global-demand-card--selected' : ''}`}
       data-demand-id={demand.id}
       data-demand-status={demand.status}
       aria-pressed={selected}
       onClick={onSelect}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
     >
       <span className="global-demand-card__topline">
         <span className="global-demand-card__id">{demand.id.startsWith('session:') ? 'SESSION' : demand.id.slice(0, 12).toUpperCase()}</span>
@@ -77,8 +80,8 @@ function DemandCard({ demand, selected, onSelect }: { demand: DemandProjection; 
         <span>{demand.projectName ?? 'Unassigned project'}</span>
         <span>{demand.sessions.length} Session{demand.sessions.length === 1 ? '' : 's'}</span>
       </span>
-      
-    </button>
+      {demand.sessionIds.length > 0 ? <AgentTopologySummary sessionIds={demand.sessionIds} sessions={sessions} tabs={tabs} config={config} /> : null}
+    </div>
   )
 }
 
@@ -116,7 +119,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
         <div className="global-demand-workspace__empty">
           <NotebookPen size={18} />
           <strong>No Session linked yet</strong>
-          <span>Use Leader Topic to route this demand to a Project and attach a Session.</span>
+          <span>Use PMO teams topic to route this demand to a Project and attach a Session.</span>
         </div>
       ) : (
         <SessionRegionHost arrangement={arrangement} className={`global-demand-workspace__regions ${arrangementClass}`}>
@@ -155,6 +158,7 @@ const EMPTY_EXECUTORS: Record<string, { label: string }> = {}
 export function GlobalBoardSurface() {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
+  const tabs = useAppStore((state) => state.tabs)
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
@@ -207,7 +211,7 @@ export function GlobalBoardSurface() {
               <section className="global-board-column" key={status} data-status={status}>
                 <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} demand`} aria-label={`Add ${meta.label} demand`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
                 <div className="global-board-column__cards">
-                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} onSelect={() => setSelectedDemand(demand.id)} />)}
+                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} onSelect={() => setSelectedDemand(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
                   {columns[status].length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}
                 </div>
               </section>

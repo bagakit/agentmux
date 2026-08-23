@@ -68,7 +68,7 @@ describe('切 Topic 就换那一组 Tab', () => {
     expect(shown.groups[0]!.tabOrder).not.toContain('a-1')
   })
 
-  it('product-owned Leader Topic can isolate unbound Scratch tabs', () => {
+  it('product-owned PMO teams topic can isolate unbound Scratch tabs', () => {
     const shown = layoutForActiveTopic(fullLayout(), tabs, 'launcher:leader', false)
     expect(shown.groups[0]!.tabOrder).toEqual([])
   })

@@ -8,7 +8,7 @@ import {
 } from '../src/shared/scratch-topics.js'
 
 describe('canonical Scratch Topic layout', () => {
-  it('round-trips the fixed Leader Topic directory', () => {
+  it('round-trips the fixed PMO teams topic directory', () => {
     const directory = scratchTopicDirectoryName('launcher:leader')
     expect(directory).toBe('topic--launcher--leader')
     expect(scratchTopicIdFromDirectoryName(directory)).toBe('launcher:leader')

@@ -7,7 +7,7 @@ import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('Agents / Session / Board navigation', () => {
+describe('Agents / Workspaces / Board navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -24,13 +24,19 @@ describe('Agents / Session / Board navigation', () => {
     useAppStore.setState(baseline, true)
   })
 
-  it('renders one three-item switch with Session as the workbench label', async () => {
+  it('renders one three-item switch with Workspaces as the workbench label', async () => {
     useAppStore.setState({ mainSurface: 'agents' })
     await act(async () => root.render(createElement(SurfaceSwitch)))
     const buttons = [...container.querySelectorAll('button')]
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Agents', 'Session', 'Board'])
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Agents', 'Workspaces', 'Board'])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
     expect(buttons[0]?.classList.contains('selected')).toBe(true)
+  })
+
+  it('keeps the Project Rail out of the global Agents surface', async () => {
+    const source = await (await import('node:fs/promises')).readFile(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
+    expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents'")
+    expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
 
   it('does not create a DemandWorkspace when no Task is selected', async () => {

@@ -18,7 +18,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   GripVertical,
-  MessagesSquare,
   Plus,
   Square,
   SquareTerminal,
@@ -867,8 +866,6 @@ function PaneGroup({
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
-  const setViewMode = useAppStore((state) => state.setViewMode)
-  const viewModes = useAppStore((state) => state.viewModes)
   const stopSession = useAppStore((state) => state.stopSession)
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
@@ -898,8 +895,6 @@ function PaneGroup({
     activeSurface?.kind === 'agent' || activeSurface?.kind === 'terminal'
       ? sessions.find((session) => session.id === activeSurface.sessionId)
       : null
-  const activeAgentSession = activeRuntimeSession?.kind === 'agent' ? activeRuntimeSession : null
-  const activeMode = activeAgentSession ? (viewModes[activeAgentSession.id] ?? 'terminal') : null
   const pendingStopSession = pendingStopSessionId
     ? sessions.find((session) => session.id === pendingStopSessionId) ?? null
     : null
@@ -942,26 +937,6 @@ function PaneGroup({
           </WorkbenchTabStrip>
         </SortableContext>
         <div className="pane-tabbar__actions">
-          {activeAgentSession ? (
-            <div className="pane-view-toggle" aria-label="Agent view">
-              <button
-                type="button"
-                className={activeMode === 'terminal' ? 'selected' : ''}
-                title="Terminal"
-                onClick={() => setViewMode(activeAgentSession.id, 'terminal')}
-              >
-                <SquareTerminal size={12} />
-              </button>
-              <button
-                type="button"
-                className={activeMode === 'activity' ? 'selected' : ''}
-                title="Activity"
-                onClick={() => setViewMode(activeAgentSession.id, 'activity')}
-              >
-                <MessagesSquare size={12} />
-              </button>
-            </div>
-          ) : null}
           {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
             <button
               type="button"
@@ -1210,7 +1185,7 @@ export function WorkspaceWorkbench({
 }: {
   workspaceId: string
   interactiveResize?: boolean
-  /** Optional explicit Topic projection used by product-owned surfaces such as Leader Topic. */
+  /** Optional explicit Topic projection used by product-owned surfaces such as PMO teams topic. */
   topicId?: string
   topicIsolation?: 'default' | 'bound-only'
   /**

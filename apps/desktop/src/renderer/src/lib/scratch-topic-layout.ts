@@ -113,7 +113,7 @@ function visibleTabPredicate(
   return (tabId: string): boolean => {
     const topicId = tabs[tabId]?.topicId
     // 普通 Scratch 投影保留未绑定 Tab，避免把用户的通用入口藏起来；产品拥有的
-    // Leader Topic 使用 bound-only，不能把当前 Scratch 的未绑定 Tab 带进固定表面。
+    // PMO teams topic 使用 bound-only，不能把当前 Scratch 的未绑定 Tab 带进固定表面。
     return (includeUnbound && topicId === undefined) || topicId === activeTopicId
   }
 }

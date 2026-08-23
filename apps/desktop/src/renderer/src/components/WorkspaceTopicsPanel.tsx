@@ -10,7 +10,7 @@ import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
-import { LEADER_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
 // 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
 import { resolveAgentName } from '../lib/display-name'
@@ -104,7 +104,7 @@ export function WorkspaceTopicsPanel({
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
   // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
-  const userTopics = topics?.filter((topic) => topic.id !== LEADER_TOPIC_ID) ?? null
+  const userTopics = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID) ?? null
   const projected = userTopics
     ? (() => {
         const withAgents = topicsWithAgents(userTopics, sessions, workspace)

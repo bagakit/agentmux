@@ -1,5 +1,5 @@
 /* Motion belongs to the registration marks, never to the identity or submitted text. */
-.session-connecting {
+.session-connecting:not(.full-page-loading) {
   position: relative;
   isolation: isolate;
   box-sizing: border-box;
@@ -14,7 +14,7 @@
   background: var(--surface-0);
 }
 /* Graphite grid is a quiet depth layer; it does not carry a state and never sits above text. */
-.session-connecting::before {
+.session-connecting:not(.full-page-loading)::before {
   content: '';
   position: absolute;
   z-index: -2;
@@ -28,7 +28,7 @@
   mask-image: linear-gradient(135deg, var(--mask-opaque) 0%, transparent 78%);
 }
 /* The offset frame gives the stage its asymmetric/deconstructed silhouette. */
-.session-connecting::after {
+.session-connecting:not(.full-page-loading)::after {
   content: '';
   position: absolute;
   z-index: -1;
@@ -72,14 +72,14 @@
 @keyframes session-connecting-slice { 0%, 100% { transform: skewX(-24deg) translateX(0); } 45% { transform: skewX(-24deg) translateX(16px); } 60% { transform: skewX(-24deg) translateX(12px); } }
 @keyframes session-connecting-scan { 0%, 100% { transform: rotate(24deg) translateX(0); opacity: 0.25; } 50% { transform: rotate(24deg) translateX(36px); opacity: 0.65; } }
 @container (max-width: 420px) {
-  .session-connecting { padding: var(--sp-5); }
+  .session-connecting:not(.full-page-loading) { padding: var(--sp-5); }
   .session-connecting__signal { margin-bottom: var(--sp-6); }
   .session-connecting__executor { margin: var(--sp-6) 0; }
   .session-connecting__heading h2 { font-size: var(--fs-title); }
 }
 @container (max-width: 320px) {
-  .session-connecting { padding: var(--sp-4); }
-  .session-connecting::after { inset: var(--sp-3); }
+  .session-connecting:not(.full-page-loading) { padding: var(--sp-4); }
+  .session-connecting:not(.full-page-loading)::after { inset: var(--sp-3); }
   .session-connecting__prompt-heading { align-items: flex-start; }
   .session-connecting__copy { min-width: 60px; padding-inline: var(--sp-3); }
 }

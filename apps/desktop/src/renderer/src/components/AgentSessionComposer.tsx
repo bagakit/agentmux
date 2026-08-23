@@ -96,6 +96,8 @@ export function AgentSessionComposer({
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useAppStore((state) => state.config?.executors)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  const setViewMode = useAppStore((state) => state.setViewMode)
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
   const timeline = useAppStore((state) => state.timelines?.[sessionId])
   const firstPrompt = useAppStore((state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
@@ -301,6 +303,7 @@ export function AgentSessionComposer({
         return item
       }}
       tools={<><AgentComposerTools disabled={!submitMode.canType} commands={commandCandidates}
+        viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={insertSemanticReference}
         onCommand={(command) => {
           const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''

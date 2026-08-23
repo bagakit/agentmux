@@ -22,8 +22,8 @@ import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
-import { LeaderTopicFloatingPanel } from './components/LeaderTopicFloatingPanel'
-import { LeaderTopicEntry } from './components/LeaderTopicEntry'
+import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
+import { PmoTeamsTopicEntry } from './components/PmoTeamsTopicEntry'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -70,7 +70,7 @@ function DesktopApp() {
   const layouts = useAppStore((state) => state.layouts)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const boardOwnsGlobalSurface = mainSurface === 'board'
+  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents'
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -218,15 +218,15 @@ function DesktopApp() {
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
-        className={`app-shell ${boardOwnsGlobalSurface || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
+        className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
         aria-hidden={settingsRoute ? true : undefined}
         inert={Boolean(settingsRoute)}
       >
-      {!boardOwnsGlobalSurface && projectRailOpen ? (
+      {!globalSurfaceOwnsProjectRail && projectRailOpen ? (
         <ProjectRail
           onOpenSettings={openSettings}
         />
-      ) : boardOwnsGlobalSurface ? null : (
+      ) : globalSurfaceOwnsProjectRail ? null : (
         <ProjectRailToolbar
           collapsed
           onOpenSettings={openSettings}
@@ -305,7 +305,7 @@ function DesktopApp() {
                   })}
                 </div>
               ) : null}
-              <LeaderTopicFloatingPanel />
+              <PmoTeamsTopicFloatingPanel />
             </section>
           </div>
         )}
@@ -321,7 +321,7 @@ function DesktopApp() {
       </main>
       <footer className="window-status-bar">
         <AgentStatusBar />
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch /><LeaderTopicEntry placement="compact" /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch /><PmoTeamsTopicEntry placement="compact" /></div>
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

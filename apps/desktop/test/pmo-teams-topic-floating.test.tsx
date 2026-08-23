@@ -3,22 +3,22 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  clampLeaderTopicFloatingState,
-  requestLeaderTopicFloatingClose,
-  requestLeaderTopicFloatingOpen,
-  useLeaderTopicFloatingState
-} from '../src/renderer/src/lib/leader-topic-floating.js'
+  clampPmoTeamsTopicFloatingState,
+  requestPmoTeamsTopicFloatingClose,
+  requestPmoTeamsTopicFloatingOpen,
+  usePmoTeamsTopicFloatingState
+} from '../src/renderer/src/lib/pmo-teams-topic-floating.js'
 
 function Harness() {
-  const [state] = useLeaderTopicFloatingState()
+  const [state] = usePmoTeamsTopicFloatingState()
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
-    createElement('div', { id: 'floating-panel', 'data-leader-topic-floating': true, tabIndex: -1 }),
+    createElement('div', { id: 'floating-panel', 'data-pmo-teams-topic-floating': true, tabIndex: -1 }),
     createElement('output', { 'data-open': String(state.open), 'data-placement': state.launcherPlacement, 'data-anchor': state.openAnchor ?? '' })
   )
 }
 
-describe('Leader Topic floating workspace state', () => {
+describe('PMO teams topic floating workspace state', () => {
   let root: Root
   let container: HTMLDivElement
 
@@ -39,7 +39,7 @@ describe('Leader Topic floating workspace state', () => {
   })
 
   it('clamps both the persisted window and draggable launcher inside the viewport', () => {
-    const next = clampLeaderTopicFloatingState({
+    const next = clampPmoTeamsTopicFloatingState({
       open: true,
       maximized: false,
       position: { left: 880, top: 680 },
@@ -56,25 +56,25 @@ describe('Leader Topic floating workspace state', () => {
     await act(async () => root.render(createElement(Harness)))
     const trigger = container.querySelector('#trigger') as HTMLButtonElement
     trigger.focus()
-    await act(async () => requestLeaderTopicFloatingOpen())
+    await act(async () => requestPmoTeamsTopicFloatingOpen())
     expect(container.querySelector('output')?.dataset.open).toBe('true')
-    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":true')
-    await act(async () => window.dispatchEvent(new CustomEvent('agentmux:leader-topic-floating', { detail: { launcherPlacement: 'compact' } })))
+    expect(window.localStorage.getItem('agentmux.pmo-teams-topic-floating.v1')).toContain('"open":true')
+    await act(async () => window.dispatchEvent(new CustomEvent('agentmux:pmo-teams-topic-floating', { detail: { launcherPlacement: 'compact' } })))
     expect(container.querySelector('output')?.dataset.placement).toBe('compact')
     trigger.focus()
-    await act(async () => requestLeaderTopicFloatingOpen())
+    await act(async () => requestPmoTeamsTopicFloatingOpen())
     expect(document.activeElement).toBe(container.querySelector('#floating-panel'))
-    await act(async () => requestLeaderTopicFloatingClose())
+    await act(async () => requestPmoTeamsTopicFloatingClose())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(container.querySelector('output')?.dataset.open).toBe('false')
     expect(document.activeElement).toBe(trigger)
-    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
+    expect(window.localStorage.getItem('agentmux.pmo-teams-topic-floating.v1')).toContain('"open":false')
   })
 
   it('carries the compact launcher anchor with the open request', async () => {
     await act(async () => root.render(createElement(Harness)))
-    await act(async () => requestLeaderTopicFloatingOpen({ anchor: 'compact' }))
+    await act(async () => requestPmoTeamsTopicFloatingOpen({ anchor: 'compact' }))
     expect(container.querySelector('output')?.dataset.anchor).toBe('compact')
-    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"openAnchor":"compact"')
+    expect(window.localStorage.getItem('agentmux.pmo-teams-topic-floating.v1')).toContain('"openAnchor":"compact"')
   })
 })
