@@ -10,6 +10,12 @@
 
 - Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同《Topic 点击必须打开可见 Tabs》。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
 
+### Agent 输入行密度（2026-09-23）
+
+- `AGENT INPUT` 行保持单行基线：左侧显示 Agent 用户名，右侧用弱化的小字号承载 Executor/Provider 与短 Session 标识；名称过长以省略号收窄，完整信息由 tooltip/读屏补全。
+- Terminal/Activity 视图切换使用一个 28px 左右的图标按钮，不使用常驻的双按钮分段控件；图标只表达下一步动作，焦点环和 tooltip 保留可发现性。
+- Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
+
 ## 保护原则
 
 本轮方向（2026-09-16）：技术架构延续原有成熟组件，视觉向 Workflow 的低干扰、分层观察语言靠拢。设计规则按「全局基础 → 观察组件 → 聊天表面」阅读；同一约束只在所属层定义，其他章节引用。产品交互和事实归属仍以 Desktop interaction 为准。
@@ -38,6 +44,26 @@
 - 无独立动作的聚合头像沿用相同身份和状态色，但不显示按钮手势或交互抬升；可定位到 Session 的头像保留现有悬停与键盘焦点表现。
 
 ## 尺度系统（字号、间距、颜色的唯一来源）
+
+### 主题与样式 SSOT 规范（2026-09-23）
+
+主题系统采用“运行时 CSS 真值 + 类型化语义边界 + 可选适配层”的三层结构：
+
+- `styles/tokens.css` 是全站主题值的唯一真值。颜色、字号、间距、圆角、阴影和动效都在这里定义；
+  其他样式表只能引用 token，不得再声明第二个 `:root` 或复制一套主题值。
+- 组件只依赖语义角色（例如 surface、text、line、success、danger、focus），不依赖具体色号或某个
+  页面名称。组件自己的几何规则留在所属 surface 文件，不能把业务状态写进主题 token。
+- `data-appearance="dark|light"` 是浏览器运行时的主题切换入口。React 状态、持久化配置和系统偏好只
+  负责决定这个属性的值，不再并行维护一套组件级 ThemeProvider 真值。
+- 如果未来引入 Tailwind 或其他 utility 层，只能通过 `@theme inline` 或等价的适配表把 utility 名称
+  映射到现有 CSS token；适配层不得写颜色、字号或间距的第二份值，也不能让 utility 绕过语义 token。
+- Terminal/Editor 的原生调色板属于独立渲染器契约，和 App chrome 主题分开保存；二者可以在设置界面并列，
+  不能互相读取或覆盖对方的 token。
+- 新增主题 token 必须同时满足三个条件：有真实调用者、有明确语义、能被契约测试从来源反推出；没有调用者
+  的“以后可能用到” token 应删除。
+
+这套规则吸收了现有 CSS 的单一入口、Multica 的语义映射和 a mature workbench 的类型边界，但不把任何宿主 UI 框架
+引入核心包。未来若把 primitives 抽到共享 UI 包，包只允许消费这组语义契约，不能拥有第二套主题值。
 
 设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
 藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
@@ -350,7 +376,7 @@ styles/
   surfaces.css    Settings、New Tab、Launch、Welcome
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
-  leader-topic.css  Leader Topic 的悬浮窗口、标题栏和 compact 入口
+  pmo-teams-topic.css  PMO Teams Topic 的悬浮窗口、标题栏和 compact 入口
   browser.css     Browser 工具与地址栏
   agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
   composer.css    Composer——Agent 那格底部的输入条

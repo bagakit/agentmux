@@ -1,0 +1,50 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/theme-style-ssot-2026-09-23.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/theme-style-ssot-2026-09-23.json"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "建立主题契约守卫与 utility 适配边界",
+      "objective": "让主题值、运行时切换入口和未来 utility 适配层各自只有一个 Owner，并用来源扫描测试守住边界。",
+      "outcome": "tokens.css 保持唯一主题真值，提供只引用现有 token 的 @theme inline 适配表；契约测试验证映射不写第二份值、appearance 入口仍由 data-appearance 驱动。",
+      "acceptance": [
+        "tokens.css 仍是唯一声明 :root 的文件，@theme inline 中每个 app chrome 映射都引用已存在的 CSS token，不包含第二份颜色、字号或间距值。",
+        "app-appearance.ts 仍通过 data-appearance 设置 dark/light，主题契约测试从源文件反推出实际映射并断言集合非空。",
+        "删除任一适配映射、把映射改成裸值或移除 data-appearance 写入时，focused contract test 变红。",
+        "主题契约模块不依赖 React、Electron、Core 或具体业务组件。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/theme-style-ssot-contract.test.ts test/stylesheet-organisation.test.ts --maxWorkers=1",
+          "proves": "Theme source, adapter mappings, runtime appearance entry and stylesheet ownership are enforced."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "The theme boundary compiles and the repository has no whitespace errors."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'themeToken|@theme inline|data-appearance' apps/desktop/src/renderer/src --glob '*.{ts,tsx,css}' | head -1)\"",
+          "proves": "The theme contract has a product caller/source outside its own test file."
+        }
+      ],
+      "depends_on": [],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/styles/tokens.css",
+        "apps/desktop/src/renderer/src/lib/app-appearance.ts"
+      ]
+    }
+  ]
+}

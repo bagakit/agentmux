@@ -1,5 +1,14 @@
 # AgentMux Desktop 交互设计合同
 
+## 主题切换与样式真值
+
+- App chrome 的主题只有一个运行时入口：根文档的 `data-appearance` 属性。设置、系统偏好与启动恢复都
+  通过同一入口生效；组件不得各自保存一份主题真值。
+- 主题值与语义映射属于 Surface SSOT，见
+  [Surface 与密度合同《主题与样式 SSOT 规范》](./agentmux-surface-density.md#主题与样式-ssot-规范2026-09-23)。
+- 未来的 utility CSS 或共享 primitives 只能消费语义 token；切换主题不能改变 Session、Run、Layout 或
+  其他产品事实，也不能为同一事实创建第二套状态。
+
 > 当前确认的导航、Tab、分屏和会话栏需求见
 > [`agentmux-project-rail-navigation.md`](../plans/agentmux-project-rail-navigation.md)。
 > Scratch 的 Topic 与 Wiki 合同见
@@ -16,6 +25,12 @@
 - 点击一个没有已绑定 Tab/Region 的 Scratch Topic 后，右侧必须进入该 Topic 的 Workbench，并在原来的落点启动一个 Terminal；只创建 Launcher 或只改变选中 Topic 都不算打开成功。
 - 已有该 Topic 工作面的点击仍只聚焦并复用原 Tab、Region 和 Session，不重复启动 Terminal；后台准备的固定 Topic 仍可显式要求不抢当前工作面。
 - Terminal 启动过程沿用统一的 launching/loading 反馈；启动失败必须保留 Topic 的可见工作面并显示原因与可重试动作，不能留下空白 Region。
+
+### Agent 输入行与视图切换（2026-09-23）
+
+- Agent 输入区的顶部行同时承担“这是哪个 Agent/Session”和“当前工作面是什么”的定位职责。主名称使用用户为该 Agent 设置的显示名（例如 `/name` 的结果），旁边以弱化元信息显示 Executor/Provider 与可辨认的 Session 标识；长文本必须截断，完整值放在 tooltip 与可访问名称中。
+- Terminal 与 Activity 只保留一个紧凑的图标切换按钮。按钮的图标、tooltip 和可访问名称说明点击后将进入的视图；切换沿用同一个 Session 的 `viewMode`，不创建第二个 Terminal、Activity 或 Session。
+- Scratch Topic 点击的成功条件是右侧存在可见的 Tab、Region 和内容面。若布局、会话或启动流程暂时不可用，原位置保留可操作的加载/失败表面与重试动作；不得以空白工作面表示正在加载或失败。
 
 ## 设计哲学
 

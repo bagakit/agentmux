@@ -6,6 +6,31 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
+/* Optional utility adapter. These names are consumable by Tailwind v4 or another
+ * utility layer, but the values remain owned by the semantic tokens below. Keep
+ * this block mapping-only: a literal here would create a second theme source. */
+@theme inline {
+  --color-app-bg: var(--bg);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-2);
+  --color-text-subtle: var(--text-3);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-success: var(--green);
+  --color-warning: var(--amber);
+  --color-danger: var(--red);
+  --color-focus: var(--focus-line);
+  --radius-app-sm: var(--radius-sm);
+  --radius-app-md: var(--radius);
+  --radius-app-lg: var(--radius-lg);
+  --font-app-sans: var(--font-sans);
+  --font-app-mono: var(--font-mono);
+}
+
 :root {
   color-scheme: dark;
   /* 底色脱离纯黑，给阴影留出向下的空间；五层 surface 拉开可辨明度阶梯 */
@@ -98,6 +123,7 @@
   --light-green: #267a48; --light-green-2: #2f965b; --light-amber: #9a6500; --light-red: #b33b37; --light-blue: #2869a7; --light-purple: #6244b8;
   --light-neutral-1: #c4cec7; --light-neutral-2: #87958b; --light-neutral-3: #5c6b61; --light-focus-line: #4b8b63;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --agent-avatar-size: 18px; /* AgentAvatar 的运行时尺寸覆盖默认值 */
   /* 动效刻度：节奏与曲线也是 token，不在各表面手写毫秒数（见 agentmux-surface-density.md《动效》）。
      按"这个动作是什么"选，不按"想显得多快"选——四档跨三个数量级，因为它们是三类不同的事：
@@ -128,7 +154,7 @@
   /* highlight：顶部内高光模拟受光面，是"高级感"的关键细节 */
   --hl: inset 0 1px 0 #ffffff0c;
   --hl-strong: inset 0 1px 0 #ffffff14;
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
   background: var(--bg);
   color: var(--text);

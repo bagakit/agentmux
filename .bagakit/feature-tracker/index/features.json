@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 265
+    "next_cursor": 267
   },
   "features": [
     {
@@ -2279,6 +2279,26 @@
       "feat_id": "f-2aj8fc75c",
       "title": "PMO Teams launcher interaction closure",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ak8fens6",
+      "title": "Theme and style SSOT contract",
+      "status": "done",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2am8fzg5u",
+      "title": "Agent 输入身份与 Scratch 可见工作面",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

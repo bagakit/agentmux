@@ -1,0 +1,17 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Theme and style SSOT contract",
+  "decision": "approved",
+  "acceptance": [
+    "tokens.css remains the only runtime source for app chrome theme values and the only stylesheet defining :root.",
+    "The runtime appearance switch is data-appearance; persistence and system preference only choose its value.",
+    "A future utility CSS layer can map semantic utility names to existing tokens but cannot introduce duplicate values.",
+    "Terminal and editor palettes remain separate renderer contracts and do not become app chrome tokens."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/styles/tokens.css",
+    "apps/desktop/src/renderer/src/lib/app-appearance.ts"
+  ]
+}
