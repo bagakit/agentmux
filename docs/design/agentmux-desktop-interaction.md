@@ -265,7 +265,7 @@
 - **文件树目录是可操作的项目入口**。目录右键菜单提供“作为项目打开”：把该目录注册为新项目并立即切换到该项目；动作只对目录显示，复用既有 Workspace 创建/选择 seam。失败时保留当前项目，并用持续可见的服务窗提示说明恢复动作。
 
 - macOS 红绿灯之后固定放 Projects 与 Workspace tools 两个开关，顺序和位置不随面板状态变化。
-- 单 Pane 时，根 Tabbar 与窗口顶行合并；分屏时保留全局 chrome 行，每个 Pane 使用自己的紧凑 Tabbar。
+- Session 的顶层 Tab 组始终直接占据窗口最上方的 Tabbar。单 Pane 时它与窗口顶行合并；分屏时也不再额外预留一条空的全局 chrome 行，由左上方的首个 Pane 承载一次必要的窗口 chrome，其余 Pane 只保留自己的紧凑 Tabbar。
 - Project Rail 底部并排放 Settings 与键盘帮助，展开和收起时均可直接访问。
 - **项目行回答三件事：哪个 Project、在跑几个 Agent、要不要你**。尾部的数字是**当前在跑的 Agent 数**，不是这个项目有几个 worktree——用户扫这一栏是在找"哪儿还有活在动"，仓库有几个 worktree 属于结构事实，答的不是同一个问题，进 tooltip。零不显示数字，只有真在跑才占位。Host 同理：本机是绝大多数情况，每行都写一遍 `This Mac` 不携带信息，只有远程 Host 才值得占一个位置。
 - **Branch/Worktree 条与 Topic 条是同一种交互，但不是同一份真相**。两者都是"挑一个条目 → 进到一组 Tab、每个 Tab 是一套 Region 分屏"，因此**表现层共用**（见密度合同《控件语言》）。但选中真相不同且必须保持不同：Branch 切换换掉的是 `activeWorkspaceId`——一个 worktree 本身就是一个 Workspace，天然拥有自己那份 layout；Topic 全部共享 Scratch 这一个 Workspace 的同一份 layout，切 Topic 是把它**投影**成只含该 Topic 的那组 Tab。不得为了"看起来统一"把 Topic 也提升成真实 store 字段，或把 Branch 降成投影——那会给同一件事造出第二份真相。
@@ -1137,6 +1137,8 @@ Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口�
 停靠入口按 `[Workspace] [Board] | [Default Session]` 排列，使用独立的助手图标、分隔和命中区，不能让两个按钮合并成一个不可区分的动作。右键菜单（含 Shift+F10/Menu 键）至少提供“打开默认 Session”“收纳到 Board／恢复浮动”“配置默认 Session”；默认 Session 未配置时，打开动作进入配置引导而不是创建一个未声明用途的临时 Session。位置、拖动锚点、用户是否收纳以及上次已读状态必须持久化，重启后先恢复入口位置再尝试恢复 Session。
 
 入口是全局 Chrome，不依赖当前是否正在浏览 Board；切换到 Workbench、Settings 或窄窗口后仍保留一个可见且可键盘聚焦的停靠入口。浮动入口被遮挡、拖动越界或窗口尺寸变化时自动夹回可用区域；停靠入口空间不足时保留图标和提示，不把 Board 挤出视口。通知栏、Agents roster 和入口不得各自复制一份未读计数，统一消费同一份注意力投影。
+
+浮动位置必须有一个看得见的紧凑助手按钮作为唯一打开入口：它固定在当前窗口工作面边缘，带有注意力提示，点击打开或聚焦同一个 `launcher:default` 浮窗；它不能因为 Session 分屏、切换到 Settings 或当前没有活动 Tab 而消失。用户明确把入口收纳到 Board 后，才由 Board 的恢复入口接管可见入口；在此之前不能只留下不可发现的顶栏动作。
 
 默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
 
