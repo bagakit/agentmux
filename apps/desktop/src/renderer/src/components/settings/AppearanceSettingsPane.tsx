@@ -1,13 +1,22 @@
 import { Palette, SquareTerminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppearanceConfig, AppAppearanceId, TerminalThemeId } from '../../../../shared/contracts'
 import {
+  APP_APPEARANCE_IDS,
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
-  TERMINAL_FONT_SIZE_MIN
+  TERMINAL_FONT_SIZE_MIN,
+  type AppearanceConfig,
+  type AppAppearanceId,
+  type TerminalThemeId
 } from '../../../../shared/contracts'
 import { presentError } from '../../lib/error-presentation'
 import { TERMINAL_THEME_CATALOG } from '../../lib/terminal-theme'
+
+const APP_APPEARANCE_COPY = {
+  dark: { title: 'Dark', description: 'Use dark surfaces' },
+  light: { title: 'Light', description: 'Use light surfaces' },
+  system: { title: 'Follow system', description: 'Match your operating system' }
+} satisfies Record<AppAppearanceId, { title: string; description: string }>
 
 export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
@@ -44,9 +53,9 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
       <section className="settings-group">
         <header><span>Application appearance</span><small>Chrome</small></header>
         <div className="terminal-theme-grid" role="radiogroup" aria-label="Application appearance">
-          {(['dark', 'light', 'system'] as const).map((mode) => (
+          {APP_APPEARANCE_IDS.map((mode) => (
             <button type="button" key={mode} className={`terminal-theme-choice ${appAppearance === mode ? 'terminal-theme-choice--selected' : ''}`} role="radio" aria-checked={appAppearance === mode} onClick={() => setAppAppearance(mode)}>
-              <span className="terminal-theme-choice__copy"><strong>{mode === 'system' ? 'Follow system' : mode === 'dark' ? 'Dark' : 'Light'}</strong><small>{mode === 'system' ? 'Match your operating system' : `Use ${mode} surfaces`}</small></span>
+              <span className="terminal-theme-choice__copy"><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small>{APP_APPEARANCE_COPY[mode].description}</small></span>
             </button>
           ))}
         </div>

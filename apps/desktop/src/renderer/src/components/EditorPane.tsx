@@ -1,7 +1,7 @@
 import '../monaco'
 import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react'
 import { AlertTriangle, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
@@ -16,6 +16,7 @@ import {
 } from '../lib/editor-copy-actions'
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
+import { monacoThemeForAppAppearance, type MonacoThemeId } from '../lib/monaco-theme'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
@@ -81,11 +82,13 @@ export async function revealFileInFileManager(
 function EditorDiffCanvas({
   diff,
   wordWrap,
-  language
+  language,
+  theme
 }: {
   diff: EditorRegionDiffState | undefined
   wordWrap: boolean
   language: string
+  theme: MonacoThemeId
 }) {
   if (!diff || (diff.loading && !diff.diff)) {
     return (
@@ -123,7 +126,7 @@ function EditorDiffCanvas({
       original={sides.original}
       modified={sides.modified}
       language={language}
-      theme="vs-dark"
+      theme={theme}
       options={{
         readOnly: true,
         // Monaco decides side-by-side vs inline from width; leaving renderSideBySide default lets its own
@@ -190,10 +193,23 @@ export function EditorPane({
   const regionDiff = useAppStore((state) => state.editorRegionDiffs[surface.regionId])
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
+  const appAppearance = useAppStore((state) => state.config?.appearance.appAppearance)
+  const [monacoTheme, setMonacoTheme] = useState<MonacoThemeId>(() => monacoThemeForAppAppearance(
+    appAppearance,
+    typeof window === 'undefined' ? true : window.matchMedia('(prefers-color-scheme: dark)').matches
+  ))
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = () => setMonacoTheme(monacoThemeForAppAppearance(appAppearance, media.matches))
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [appAppearance])
 
   // A file Region restored from persistence arrives with no document behind it: the surface is only
   // {regionId,kind,workspaceId,path}, and every other way a file Region appears loads its document as
@@ -463,7 +479,7 @@ export function EditorPane({
       ) : null}
       <div className="editor-canvas">
         {regionMode === 'diff' ? (
-          <EditorDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} />
+          <EditorDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
         ) : (
           <Editor
             path={`${surface.workspaceId}:${document.path}`}
@@ -484,7 +500,7 @@ export function EditorPane({
               consumeRevealTarget(editor)
               consumeCaretFocus()
             }}
-            theme="vs-dark"
+            theme={monacoTheme}
             options={{
               minimap: { enabled: false },
               fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
