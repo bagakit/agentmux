@@ -1,0 +1,106 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/session-floating-launcher-tab-chrome-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/session-floating-launcher-tab-chrome-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "task_key": "floating-launcher",
+      "title": "显示 Default Session 的稳定悬浮入口",
+      "objective": "让当前窗口工作面边缘始终有一个可见的 Default Session 悬浮入口。",
+      "outcome": "用户可以从任意 Session 分屏、Settings 或空 Tab 状态打开同一个 launcher:default 浮窗。",
+      "description": "在当前窗口工作面边缘显示一个紧凑、可键盘聚焦的 Default Session 助手按钮，打开或聚焦唯一 launcher:default 浮窗；保留收纳到 Board 后的恢复语义。",
+      "acceptance": [
+        "DefaultSessionFloatingPanel 的生产渲染树中存在稳定的 floating launcher，默认可见且不依赖是否分屏或当前是否有活动 Tab。",
+        "按钮只调用既有 default-session-floating seam，不创建第二个 Session、PTY、Runtime 或注意力计数；hidden 状态仍由 Board 恢复入口承接。",
+        "按钮有可访问名称、焦点样式、注意力提示钩子，且在浮窗打开后仍可用于聚焦/最小化。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run apps/desktop/test/default-session-floating-launcher.test.tsx apps/desktop/test/default-session-floating-contract.test.ts",
+          "proves": "悬浮入口的行为与生产渲染锚点。"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"DefaultSessionFloatingLauncher|default-session-floating-launcher\" apps/desktop/src/renderer/src | grep -v DefaultSessionEntry.tsx",
+          "proves": "悬浮入口存在定义文件之外的生产调用者。"
+        }
+      ],
+      "depends_on": []
+      ,"source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/DefaultSessionFloatingPanel.tsx"
+      ]
+    },
+    {
+      "id": "T-002",
+      "task_key": "top-level-tab-chrome",
+      "title": "移除分屏空顶行并让首个 Pane 承载 chrome",
+      "objective": "让 Session 的顶层 Tabbar 直接占据最上方，删除分屏时没有 Tab 的额外 chrome 行。",
+      "outcome": "并列 Session tabs 从同一顶边开始，首个 Pane 只承载一次必要的窗口 chrome。",
+      "description": "Session tabs 并列时直接从窗口顶边开始，删除没有 Tab 的 workbench-chromeline；只让首个/左上 Pane 承载一次必要的窗口 chrome，其他 Pane 不重复。",
+      "acceptance": [
+        "WorkspaceWorkbench 不再渲染 workbench-chromeline，也不为其保留 36px 空行。",
+        "单 Pane 与分屏都由顶层 Tabbar 作为第一行；首个 Pane 最多出现一次 TopRowLeadingChrome，secondary Pane 不渲染全局 chrome。",
+        "底部 Agents / Session / Board switch 仍是唯一全局表面切换入口。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run apps/desktop/test/workbench-tab-chrome.test.ts",
+          "proves": "分屏顶行不再渲染空的 workbench chrome，并且首个 Pane 承载一次全局 chrome。"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"workbench-chromeline\" apps/desktop/src/renderer/src apps/desktop/test",
+          "proves": "迁移后的源码与契约检查没有重新引入空顶行。"
+        }
+      ],
+      "depends_on": []
+      ,"source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx"
+      ]
+    },
+    {
+      "id": "T-003",
+      "task_key": "surface-regression",
+      "title": "回归验证两条工作面路径",
+      "objective": "用类型检查、契约测试和接线证据确认两个 UI 改动已接入产品。",
+      "outcome": "悬浮入口与顶行迁移都能被行为和结构测试证明，且保留并行工作树修改。",
+      "description": "用类型检查、契约测试和变异/零调用者证据确认悬浮入口与顶行改动接入了产品。",
+      "acceptance": [
+        "桌面 Renderer 类型检查通过，新增契约测试从源码读到非空的生产锚点并对关键缺失变异变红。",
+        "悬浮入口与首个 Pane chrome 均有生产调用者，定义文件之外的调用者检查不为空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Renderer 类型边界。"
+        },
+        {
+          "kind": "command",
+          "ref": "git diff --check",
+          "proves": "交付候选没有空白或冲突标记。"
+        }
+      ],
+      "depends_on": ["T-001", "T-002"]
+      ,"source_refs": [
+        "docs/reviews/session-floating-launcher-tab-chrome-2026-09-22.md",
+        "apps/desktop/test/default-session-floating-launcher.test.tsx",
+        "apps/desktop/test/workbench-tab-chrome.test.ts"
+      ]
+    }
+  ]
+}

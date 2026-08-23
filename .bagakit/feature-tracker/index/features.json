@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 244
+    "next_cursor": 245
   },
   "features": [
     {
@@ -2064,6 +2064,16 @@
       "workspace_mode": "worktree",
       "branch": "featf-29v8fx5jp",
       "worktree_name": "wt-f-29v8fx5jp",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29w8fmmts",
+      "title": "Default Session 悬浮入口与 Session 顶层 Tab Chrome",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
       "runtime_role": "standalone",
       "runtime_relations": []
     }

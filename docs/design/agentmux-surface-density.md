@@ -220,7 +220,7 @@
 ## 顶行与 Tabbar
 
 - Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
-- 单 Pane 时根 Tabbar 与窗口顶行合并为 36px；分屏时使用 36px 全局 chrome 行和每 Pane 31px Tabbar。
+- Session 顶层 Tabbar 是最上方的工作面平面：单 Pane 时与窗口顶行合并为 36px；分屏时由左上方首个 Pane 的 Tabbar 承载一次必要的窗口 chrome，其余 Pane 直接从同一顶边开始使用 31px Tabbar，不再给没有 Tab 的全局 chrome 行预留 36px。
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)。
@@ -712,7 +712,7 @@ Task 卡默认是无边框的面，选中只增加一处统一焦点信号；Tas
 
 ### 默认 Session 入口的原生复用（2026-09-22）
 
-默认入口只承担打开既有 `launcher:default` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。入口被收纳到 Board 后，Board 底部只保留一个小型恢复入口；顶栏和工作台根 Region 仍可提供同一默认 Topic 的原生入口，不能因为收纳而让能力消失。右键菜单只提供位置或 Topic 文件入口，不展开第二套聊天控件。
+默认入口只承担打开既有 `launcher:default` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。浮动位置显示一个 36px 级别的紧凑助手按钮，按钮本身是可键盘聚焦的稳定入口，并沿用同一份注意力提示；入口被收纳到 Board 后，Board 底部只保留一个小型恢复入口。Session chrome 不再额外画一套重复的内联入口。右键菜单只提供位置或 Topic 文件入口，不展开第二套聊天控件。
 
 ### 启动错误与 Executor 命名的表面（2026-09-22）
 
@@ -771,7 +771,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 
 ### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
 
-Default Session 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放原生 Topic Tab/Region，底部保留现有 composer。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
+Default Session 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放原生 Topic Tab/Region，底部保留现有 composer。浮动位置同时显示一个 36px 级别的紧凑助手按钮，按钮本身是可键盘聚焦的稳定入口，并沿用同一份注意力提示。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
 
 浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口按钮只显示一个紧凑的助手图标与未读提示，Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。
 
