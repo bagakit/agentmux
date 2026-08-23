@@ -82,10 +82,10 @@
 .welcome p { max-width: 420px; margin:0 0 var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 
 /* 全屏 Settings / Sidebar / Pane 内容模型。 */
-.settings-page { position: fixed; z-index: 90; inset: 0; display: grid; grid-template-columns: 252px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
+.settings-page { position: fixed; z-index: 90; inset: 0; display: grid; grid-template-columns: 268px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
 .settings-sidebar { min-width: 0; display: flex; flex-direction: column; padding-top:34px; border-right: 1px solid var(--line); background: var(--surface-1); }
-.settings-sidebar > header { height: 54px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
-.settings-sidebar > header > div { display: flex; align-items: center; gap:var(--sp-4); color: var(--green); }
+.settings-sidebar > header { height: 60px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.settings-sidebar__brand { display: flex; align-items: center; gap:var(--sp-4); color: var(--green); }
 .settings-sidebar > header span { display: flex; flex-direction: column; gap:1px; color: var(--text); }
 .settings-sidebar > header strong { font-size: var(--fs-meta); }
 .settings-sidebar > header small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; text-transform: uppercase; letter-spacing: .08em; }
@@ -94,10 +94,13 @@
 .settings-search input { width: 100%; padding:var(--sp-3) 28px var(--sp-3) 30px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font-size: var(--fs-meta); }
 .settings-search input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .settings-search button { position: absolute; right: 19px; display: flex; padding:var(--sp-1); border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
-.settings-sidebar nav { min-height: 0; flex: 1; padding:var(--sp-6) var(--sp-4); overflow: auto; }
+.settings-sidebar__context { display: grid; gap: var(--sp-1); padding: var(--sp-5) var(--sp-6) var(--sp-3); }
+.settings-sidebar__context > span { color: var(--green-2); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.settings-sidebar__context > p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
+.settings-sidebar nav { min-height: 0; flex: 1; padding:var(--sp-3) var(--sp-4) var(--sp-6); overflow: auto; }
 .settings-sidebar nav > p { margin:0 var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; text-transform: uppercase; letter-spacing: .13em; }
 .settings-sidebar nav > p:not(:first-child) { margin-top:var(--sp-6); }
-.settings-sidebar nav > button { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; }
+.settings-sidebar nav > button { width: 100%; min-height: 38px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; }
 .settings-sidebar nav > button:hover { color: var(--text-2); background: var(--surface-2); }
 /* 选中＝干净的 Surface 填充（与 Project Rail active 同语汇：surface-2 + 顶部高光），绿只落在图标上，
    不画整圈描边——侧栏本身就是 surface-1，往选中态填 surface-1 等于没填，于是此前 hover 反而比选中更"实"。 */
@@ -105,16 +108,21 @@
 .settings-sidebar nav > button.selected > svg { color: var(--green); }
 .settings-sidebar nav > button > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .settings-sidebar nav > button strong { font-size: var(--fs-body); }
-.settings-sidebar nav > button small { overflow: hidden; font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.settings-sidebar nav > button small { display: none; overflow: hidden; font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .settings-nav-empty { display: block; padding:var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .settings-sidebar > footer { height: 44px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-6); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
 .settings-sidebar > footer code { color: var(--green); font-size: var(--fs-micro); }
 .settings-content { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); padding-top:34px; background: var(--surface-0); }
 .settings-content > header { position: sticky; top: 34px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding:25px clamp(var(--sp-7), 5vw, 74px) var(--sp-6); border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface-0) 92%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .settings-content__title { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-4); }
-.settings-content__icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); }
+.settings-content__icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; margin-top: var(--sp-2); color: var(--text-3); }
+.settings-content__breadcrumb { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.settings-content__breadcrumb strong { color: var(--text-2); font-weight: 600; }
 .settings-content > header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
 .settings-content > header p { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
+.settings-content__actions { display: flex; align-items: center; gap: var(--sp-4); }
+.settings-content__hint { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.settings-content__hint kbd { min-width: 28px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1 var(--font-mono); text-align: center; }
 .settings-content__close { flex: 0 0 auto; }
 .settings-content__scroll { min-height: 0; padding:var(--sp-7) clamp(var(--sp-7), 5vw, 74px) 50px; overflow: auto; }
 .settings-pane-stack { max-width: 900px; display: grid; gap:var(--sp-5); animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
@@ -218,13 +226,14 @@
   .settings-sidebar nav > button { padding: var(--sp-3); }
   .settings-sidebar nav > button small { display: none; }
   .settings-content > header { padding-inline: var(--sp-6); }
-  .settings-content__icon { width: 32px; height: 32px; }
+  .settings-content__icon { width: auto; height: auto; }
 }
 
 @media (max-width: 560px) {
   .settings-page { display: flex; flex-direction: column; overflow: hidden; }
   .settings-sidebar { flex: 0 0 auto; max-height: 168px; padding-top: 34px; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-sidebar > header { flex: 0 0 46px; height: 46px; }
+  .settings-sidebar__context { display: none; }
   .settings-search { flex: 0 0 44px; height: 44px; }
   .settings-sidebar nav { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); overflow-x: auto; overflow-y: hidden; }
   .settings-sidebar nav > p { display: none; }
@@ -236,5 +245,6 @@
   .settings-content > header { position: relative; top: auto; padding: var(--sp-5) var(--sp-5) var(--sp-4); }
   .settings-content > header h2 { font-size: var(--fs-title); }
   .settings-content__icon { display: none; }
+  .settings-content__hint { display: none; }
   .settings-content__scroll { padding: var(--sp-5) var(--sp-5) 40px; }
 }

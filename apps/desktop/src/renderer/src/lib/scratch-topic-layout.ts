@@ -271,29 +271,57 @@ export function layoutForActiveTopic(
  * 用户切进这个 Topic 时会落到的那张（与 `layoutForActiveTopic` 的活动项选择同源）；没有活动那张时
  * 取文档序里第一张开着的。这只是一枚一眼可辨的提示，不是逐帧镜像，所以这个选择是确定的即可。
  */
-export type TopicRegionCell = RegionGeometry & { agentSessionId?: string }
+export type TopicRegionCell = RegionGeometry & {
+  agentSessionId?: string
+  surfaceKind?: WorkbenchTab['regions'][string]['kind']
+}
+
+export type TopicTabSurface = {
+  tabId: string
+  active: boolean
+  cells: readonly TopicRegionCell[]
+}
+
+/**
+ * Open Topic work surfaces in the same order the user sees them: Tab order inside each
+ * persisted group, then group order. The result is intentionally a projection only; it
+ * does not create a Topic registry or copy layout state.
+ */
+export function openTopicWorkSurfaces(
+  layout: WorkspaceLayout | undefined,
+  tabs: Readonly<Record<string, WorkbenchTab>>
+): ReadonlyMap<string, readonly TopicTabSurface[]> {
+  const byTopic = new Map<string, TopicTabSurface[]>()
+  if (!layout) return byTopic
+  for (const group of layout.groups) {
+    for (const tabId of group.tabOrder) {
+      const tab = tabs[tabId]
+      if (!tab?.topicId) continue
+      const cells = workbenchRegionBounds(tab.layout.root).map((cell) => {
+        const surface = tab.regions[cell.regionId]
+        return surface
+          ? {
+              ...cell,
+              surfaceKind: surface.kind,
+              ...(surface.kind === 'agent' ? { agentSessionId: surface.sessionId } : {})
+            }
+          : cell
+      })
+      const existing = byTopic.get(tab.topicId) ?? []
+      existing.push({ tabId, active: group.activeTabId === tabId, cells })
+      byTopic.set(tab.topicId, existing)
+    }
+  }
+  return byTopic
+}
 
 export function openTopicRegionMosaics(
   layout: WorkspaceLayout | undefined,
   tabs: Readonly<Record<string, WorkbenchTab>>
 ): ReadonlyMap<string, readonly TopicRegionCell[]> {
-  const byTopic = new Map<string, { active: boolean; cells: readonly TopicRegionCell[] }>()
-  if (!layout) return new Map()
-  for (const tab of Object.values(tabs)) {
-    if (tab.topicId === undefined) continue
-    const group = findGroupForTab(layout, tab.id)
-    if (group === null) continue
-    const active = group.activeTabId === tab.id
-    const existing = byTopic.get(tab.topicId)
-    // 活动那张优先；否则第一张开着的先占位，后来的不覆盖它。
-    if (existing && !active) continue
-    byTopic.set(tab.topicId, {
-      active,
-      cells: workbenchRegionBounds(tab.layout.root).map((cell) => {
-        const surface = tab.regions[cell.regionId]
-        return surface?.kind === 'agent' ? { ...cell, agentSessionId: surface.sessionId } : cell
-      })
-    })
-  }
-  return new Map([...byTopic].map(([topicId, entry]) => [topicId, entry.cells]))
+  const byTopic = openTopicWorkSurfaces(layout, tabs)
+  return new Map([...byTopic].map(([topicId, entries]) => {
+    const active = entries.find((entry) => entry.active) ?? entries[0]
+    return [topicId, active?.cells.map(({ surfaceKind: _surfaceKind, ...cell }) => cell) ?? []] as const
+  }))
 }

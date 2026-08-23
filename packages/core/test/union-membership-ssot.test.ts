@@ -118,6 +118,8 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   arrange: true,
   'promote.region': true,
   'list.agents': true,
+  'list.projects': true,
+  'list.active-agents': true,
   interrupt: true,
   resume: true,
   stop: true,
@@ -126,7 +128,18 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'browser.replay': true,
   'browser.stop': true,
   'browser.operation': true,
-  'browser.subscribe': true
+  'browser.subscribe': true,
+  'demand.list': true,
+  'demand.show': true,
+  'demand.create': true,
+  'demand.update': true,
+  'demand.assign': true,
+  'demand.start': true,
+  'demand.handoff': true,
+  'demand.delete': true,
+  'demand.link-session': true,
+  'demand.link-project': true,
+  'demand.decision-log': true
 }
 
 const PERMISSION_KIND_MEMBERS = Object.keys(PERMISSION_KIND_ANCHOR) as readonly PermissionOptionKind[]

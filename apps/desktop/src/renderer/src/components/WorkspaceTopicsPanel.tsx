@@ -14,7 +14,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
 // 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
 import { resolveAgentName } from '../lib/display-name'
-import { firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { firstPromptFromTimeline, tabDisplayName } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
@@ -34,13 +34,15 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, partitionPinned, reorderTopics } from '../lib/topic-order'
-import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
+import { openTopicRegionMosaics, openTopicWorkSurfaces } from '../lib/scratch-topic-layout'
+import { sessionRecentActivity } from '../lib/session-recency'
 import { presentError } from '../lib/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { TopicPresence } from './TopicPresence'
+import type { TopicTabDetail } from './TopicPresence'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 
 /**
@@ -117,6 +119,7 @@ export function WorkspaceTopicsPanel({
   // 一次派生「哪些 Topic 有 Tab 开着」及其 Region 分屏几何，逐行只读它，不让每行各自扫 tabs
   // （scratch-topic-layout.ts 的学说：门禁与几何是同一事实的两半，投影一次）。
   const openMosaics = openTopicRegionMosaics(layout, tabs)
+  const openWorkSurfaces = openTopicWorkSurfaces(layout, tabs)
   const tabOrder = layout?.groups.flatMap((group) => group.tabOrder) ?? []
   const sessionTabRank = new Map<string, number>()
   tabOrder.forEach((tabId, index) => {
@@ -124,6 +127,54 @@ export function WorkspaceTopicsPanel({
     const agentSurface = tab && Object.values(tab.regions).find((surface) => surface.kind === 'agent')
     if (agentSurface?.kind === 'agent') sessionTabRank.set(agentSurface.sessionId, index)
   })
+  const sessionById = new Map(sessions.map((session) => [session.id, session]))
+  const topicTabDetails = new Map<string, readonly TopicTabDetail[]>()
+  for (const [openTopicId, entries] of openWorkSurfaces) {
+    const details = entries.flatMap((entry, tabIndex) => {
+      const tab = tabs[entry.tabId]
+      if (!tab) return []
+      const title = tabDisplayName({
+        tab,
+        fallback: `Tab ${tabIndex + 1}`,
+        agentFactsFor: (sessionId) => {
+          const session = sessionById.get(sessionId)
+          if (!session || session.kind !== 'agent') return null
+          const executor = session.executorId ? config?.executors[session.executorId] : undefined
+          return {
+            userName: agentNames[sessionId],
+            firstPrompt: firstPromptFromTimeline(timelines[sessionId]),
+            fallbackLabel: session.label,
+            providerLabel: executor?.label ?? session.executorId ?? session.providerId
+          }
+        }
+      })
+      return [{
+        tabId: entry.tabId,
+        title,
+        active: entry.active,
+        regions: entry.cells.map((cell) => {
+          const surface = tab.regions[cell.regionId]
+          const session = surface && 'sessionId' in surface ? sessionById.get(surface.sessionId) : undefined
+          const executorLabel = surface?.kind === 'agent'
+            ? (session && session.kind === 'agent' && session.executorId
+              ? config?.executors[session.executorId]?.label ?? session.executorId
+              : 'Agent')
+            : surface?.kind === 'terminal' ? 'Terminal'
+              : surface?.kind === 'browser' ? 'Browser'
+                : surface?.kind === 'file' ? 'File'
+                  : 'Launcher'
+          const activity = session?.kind === 'agent'
+            ? (timelines[session.id]?.items.length || session.pendingInteraction || session.status.detail
+              ? sessionRecentActivity(session, timelines[session.id]?.items ?? [], workspace.path)
+              : 'No recent activity')
+            : surface?.kind === 'terminal' ? 'Terminal session'
+              : 'No recent activity'
+          return { ...cell, executorLabel, activity }
+        })
+      } satisfies TopicTabDetail]
+    })
+    topicTabDetails.set(openTopicId, details)
+  }
 
   useEffect(() => {
     let active = true
@@ -353,6 +404,7 @@ export function WorkspaceTopicsPanel({
                       presence={
                         <TopicPresence
                           cells={openMosaics.get(topic.id)}
+                          tabs={topicTabDetails.get(topic.id) ?? []}
                           agents={topic.agents
                             .filter((agent) => agent.live !== null && agent.live.processState === 'running')
                             .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))

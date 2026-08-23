@@ -21,6 +21,8 @@ import {
   type AgentMuxControlErrorReceipt,
   type AgentMuxControlErrorCode,
   type AgentMuxControlExecutor,
+  type AgentMuxControlProject,
+  type AgentMuxControlActiveAgent,
   type AgentMuxControlReceipt,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
@@ -172,6 +174,45 @@ function arrayOfIds(value: unknown, label: string): string[] {
   if (!Array.isArray(value) || value.length > 128) throw new AgentMuxError(`${label} are invalid.`, 'INVALID_CONTROL_REQUEST')
   return value.map((item) => id(item, `${label} are invalid.`, 'INVALID_CONTROL_REQUEST'))
 }
+
+function parseControlProjects(value: unknown): AgentMuxControlProject[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Control projects are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value.map((item) => {
+    const source = object(item, 'Control project is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return {
+      projectId: id(source.projectId, 'Control project id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      name: text(source.name, 'Control project name', 'CONTROL_PROTOCOL_ERROR'),
+      hostId: id(source.hostId, 'Control project host is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      path: text(source.path, 'Control project path', 'CONTROL_PROTOCOL_ERROR'),
+      kind: text(source.kind, 'Control project kind', 'CONTROL_PROTOCOL_ERROR'),
+      repoPath: source.repoPath === null ? null : text(source.repoPath, 'Control project repo path', 'CONTROL_PROTOCOL_ERROR'),
+      branch: source.branch === null ? null : text(source.branch, 'Control project branch', 'CONTROL_PROTOCOL_ERROR'),
+      activeAgentSessionIds: arrayOfIds(source.activeAgentSessionIds, 'Control project Agent Session ids')
+    }
+  })
+}
+
+function parseControlActiveAgents(value: unknown): AgentMuxControlActiveAgent[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Control active Agents are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value.map((item) => {
+    const source = object(item, 'Control active Agent is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const processState = source.processState
+    if (processState !== 'running' && processState !== 'exited' && processState !== 'interrupted') throw new AgentMuxError('Control Agent process state is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const status = source.status
+    if (status !== 'active' && status !== 'idle' && status !== 'unknown') throw new AgentMuxError('Control Agent status is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return {
+      agentSessionId: id(source.agentSessionId, 'Control Agent Session id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      projectId: source.projectId === null ? null : id(source.projectId, 'Control Agent project id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      projectName: source.projectName === null ? null : text(source.projectName, 'Control Agent project name', 'CONTROL_PROTOCOL_ERROR'),
+      workspacePath: text(source.workspacePath, 'Control Agent workspace path', 'CONTROL_PROTOCOL_ERROR'),
+      providerId: id(source.providerId, 'Control Agent provider id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      executorId: id(source.executorId, 'Control Agent executor id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      processState,
+      status,
+      updatedAt: finiteNumber(source.updatedAt, 'Control Agent timestamp is invalid.')
+    }
+  })
+}
 function demandDecision(value: unknown): AgentMuxDemandDecision {
   const source = object(value, 'Demand decision is invalid.', 'INVALID_CONTROL_REQUEST')
   const candidates = Array.isArray(source.candidates) ? source.candidates.map((item) => {
@@ -262,6 +303,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
+  if (source.operation === 'list.projects' || source.operation === 'list.active-agents') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
   if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
@@ -296,8 +340,28 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (patchSource.priority !== undefined) patch.priority = demandPriority(patchSource.priority)
     if (patchSource.projectId !== undefined) patch.projectId = patchSource.projectId === null ? null : id(patchSource.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST')
     if (patchSource.projectName !== undefined) patch.projectName = patchSource.projectName === null ? null : text(patchSource.projectName, 'Project name')
+    if (patchSource.assigneeExecutorId !== undefined) patch.assigneeExecutorId = patchSource.assigneeExecutorId === null ? null : id(patchSource.assigneeExecutorId, 'Demand assignee is invalid.', 'INVALID_CONTROL_REQUEST')
+    if (patchSource.tags !== undefined) patch.tags = Array.isArray(patchSource.tags) ? patchSource.tags.map((tag) => text(tag, 'Demand tag')) : (() => { throw new AgentMuxError('Demand tags are invalid.', 'INVALID_CONTROL_REQUEST') })()
+    if (patchSource.plannedStartAt !== undefined) patch.plannedStartAt = patchSource.plannedStartAt === null ? null : finiteNumber(patchSource.plannedStartAt, 'Demand planned start timestamp is invalid.')
+    if (patchSource.targetAt !== undefined) patch.targetAt = patchSource.targetAt === null ? null : finiteNumber(patchSource.targetAt, 'Demand target timestamp is invalid.')
+    if (patchSource.parentDemandId !== undefined) patch.parentDemandId = patchSource.parentDemandId === null ? null : id(patchSource.parentDemandId, 'Parent Demand id is invalid.', 'INVALID_CONTROL_REQUEST')
+    if (patchSource.phaseIndex !== undefined) patch.phaseIndex = patchSource.phaseIndex === null ? null : finiteNumber(patchSource.phaseIndex, 'Demand phase index is invalid.')
     if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch, ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
+  }
+  if (source.operation === 'demand.assign') {
+    if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : id(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(source.assigneeExecutorId === undefined ? {} : { assigneeExecutorId: source.assigneeExecutorId === null ? null : id(source.assigneeExecutorId, 'Demand assignee is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
+  }
+  if (source.operation === 'demand.start') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
+  }
+  if (source.operation === 'demand.handoff') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.assigneeExecutorId === undefined ? {} : { assigneeExecutorId: source.assigneeExecutorId === null ? null : id(source.assigneeExecutorId, 'Demand assignee is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
+  }
+  if (source.operation === 'demand.delete') {
+    if (source.confirmation !== 'delete') throw new AgentMuxError('Demand deletion requires explicit confirmation.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), confirmation: 'delete' }
   }
   if (source.operation === 'arrange') {
     const target = tabAnchor(source.target)
@@ -572,6 +636,12 @@ function parseDemand(value: unknown): AgentMuxDemand {
     priority: demandPriority(source.priority) as AgentMuxDemand['priority'],
     projectId: source.projectId === null ? null : id(source.projectId, 'Control demand project is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     projectName: source.projectName === null ? null : text(source.projectName, 'Control demand project name', 'CONTROL_PROTOCOL_ERROR'),
+    ...(source.assigneeExecutorId === undefined ? {} : { assigneeExecutorId: source.assigneeExecutorId === null ? null : id(source.assigneeExecutorId, 'Control demand assignee is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
+    ...(source.tags === undefined ? {} : { tags: Array.isArray(source.tags) ? source.tags.map((tag) => text(tag, 'Control demand tag', 'CONTROL_PROTOCOL_ERROR')) : (() => { throw new AgentMuxError('Control demand tags are invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
+    ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Control demand planned start timestamp is invalid.') }),
+    ...(source.targetAt === undefined ? {} : { targetAt: source.targetAt === null ? null : finiteNumber(source.targetAt, 'Control demand target timestamp is invalid.') }),
+    ...(source.parentDemandId === undefined ? {} : { parentDemandId: source.parentDemandId === null ? null : id(source.parentDemandId, 'Control parent Demand is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
+    ...(source.phaseIndex === undefined ? {} : { phaseIndex: source.phaseIndex === null ? null : finiteNumber(source.phaseIndex, 'Control demand phase index is invalid.') }),
     sessionIds: arrayOfIds(source.sessionIds, 'Control demand Session ids'),
     createdAt: finiteNumber(source.createdAt, 'Control demand created timestamp is invalid.'),
     updatedAt: finiteNumber(source.updatedAt, 'Control demand updated timestamp is invalid.'),
@@ -608,15 +678,17 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
   if (operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseExecutors(result.agents) } }
+  if (operation === 'list.projects') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { projects: parseControlProjects(result.projects) } }
+  if (operation === 'list.active-agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseControlActiveAgents(result.agents) } }
   if (operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'demand.list') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demands: Array.isArray(result.demands) ? result.demands.map(parseDemand) : (() => { throw new AgentMuxError('Control demand list is invalid.', 'CONTROL_PROTOCOL_ERROR') })() } }
   if (operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: result.demand === null ? null : parseDemand(result.demand) } }
-  if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.link-session' || operation === 'demand.link-project') {
+  if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.assign' || operation === 'demand.start' || operation === 'demand.handoff' || operation === 'demand.delete' || operation === 'demand.link-session' || operation === 'demand.link-project') {
     const demand = parseDemand(result.demand)
     const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: id(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: id(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
   if (operation === 'browser.run') {

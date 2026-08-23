@@ -54,6 +54,7 @@ import {
 } from '../lib/browser-bounds-sync'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 
 const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   responsive: 'Responsive',
@@ -558,10 +559,21 @@ export function BrowserPane({
   const timelineWarning = timelineOperation?.id === tab.activity?.operation?.id ? tab.activity?.warning : undefined
 
   if (released || restoring) {
+    if (restoring) {
+      return (
+        <FullPageLoadingSurface
+          scope="region"
+          phase="recovering"
+          eyebrow="Browser recovery"
+          title="Restoring browser"
+          detail="Rebuilding the Main-owned page surface before live navigation returns."
+        />
+      )
+    }
     return (
       <section className="surface-memory-released" role="status" aria-live="polite">
-        <strong>{restoring ? 'Restoring browser' : 'Browser parked'}</strong>
-        <span>{restoring ? 'Rebuilding the Main-owned page surface…' : 'Switch back to this tab to restore the browser.'}</span>
+        <strong>Browser parked</strong>
+        <span>Switch back to this tab to restore the browser.</span>
       </section>
     )
   }

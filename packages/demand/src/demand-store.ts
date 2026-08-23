@@ -39,14 +39,19 @@ function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string, optional: readonly string[] = []): void {
   const expectedSet = new Set(expected)
   for (const key of Object.keys(value)) {
     if (!expectedSet.has(key)) throw new Error(`${label} has unknown field ${key}`)
   }
+  const optionalSet = new Set(optional)
   for (const key of expected) {
-    if (!(key in value)) throw new Error(`${label} is missing ${key}`)
+    if (!(key in value) && !optionalSet.has(key)) throw new Error(`${label} is missing ${key}`)
   }
+}
+
+function optionalValue<T>(value: unknown, fallback: T): T {
+  return value === undefined ? fallback : value as T
 }
 
 function nonEmptyString(value: unknown, label: string): string {
@@ -109,16 +114,26 @@ function parseDemand(value: unknown, label: string): Demand {
     'projectId',
     'projectName',
     'executorId',
+    'tags',
+    'plannedStartAt',
+    'targetAt',
+    'parentDemandId',
+    'phaseIndex',
     'sessionIds',
     'activities',
     'decisions',
     'createdAt',
     'updatedAt',
-  ], label)
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
   if (!Array.isArray(record.decisions)) throw new Error(`${label}.decisions must be an array`)
+  const tags = record.tags === undefined ? [] : stringArray(record.tags, `${label}.tags`)
+  const plannedStartAt = record.plannedStartAt === undefined || record.plannedStartAt === null ? null : timestamp(record.plannedStartAt, `${label}.plannedStartAt`)
+  const targetAt = record.targetAt === undefined || record.targetAt === null ? null : timestamp(record.targetAt, `${label}.targetAt`)
+  const parentDemandId = record.parentDemandId === undefined ? null : nullableString(record.parentDemandId, `${label}.parentDemandId`)
+  const phaseIndex = record.phaseIndex === undefined || record.phaseIndex === null ? null : (typeof record.phaseIndex === 'number' && Number.isSafeInteger(record.phaseIndex) && record.phaseIndex >= 0 ? record.phaseIndex : (() => { throw new Error(`${label}.phaseIndex must be a non-negative integer`) })())
   return {
     id: nonEmptyString(record.id, `${label}.id`),
     title: nonEmptyString(record.title, `${label}.title`),
@@ -128,6 +143,11 @@ function parseDemand(value: unknown, label: string): Demand {
     projectId: nullableString(record.projectId, `${label}.projectId`),
     projectName: nullableString(record.projectName, `${label}.projectName`),
     executorId: nullableString(record.executorId, `${label}.executorId`),
+    tags,
+    plannedStartAt,
+    targetAt,
+    parentDemandId,
+    phaseIndex,
     sessionIds: stringArray(record.sessionIds, `${label}.sessionIds`),
     activities: record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`)),
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
@@ -251,6 +271,11 @@ export class DemandStore {
         projectId: input.projectId ?? null,
         projectName: input.projectName ?? null,
         executorId: input.executorId ?? null,
+        tags: [...(input.tags ?? [])],
+        plannedStartAt: input.plannedStartAt ?? null,
+        targetAt: input.targetAt ?? null,
+        parentDemandId: input.parentDemandId ?? null,
+        phaseIndex: input.phaseIndex ?? null,
         sessionIds: [...(input.sessionIds ?? [])],
         activities: [],
         decisions: [],
@@ -273,21 +298,26 @@ export class DemandStore {
       if (patch.projectId !== undefined) demand.projectId = patch.projectId
       if (patch.projectName !== undefined) demand.projectName = patch.projectName
       if (patch.executorId !== undefined) demand.executorId = patch.executorId
+      if (patch.tags !== undefined) demand.tags = [...patch.tags]
+      if (patch.plannedStartAt !== undefined) demand.plannedStartAt = patch.plannedStartAt
+      if (patch.targetAt !== undefined) demand.targetAt = patch.targetAt
+      if (patch.parentDemandId !== undefined) demand.parentDemandId = patch.parentDemandId
+      if (patch.phaseIndex !== undefined) demand.phaseIndex = patch.phaseIndex
       demand.updatedAt = Date.now()
       validateNewDemand(demand, this.storePath)
       return demand
     })
   }
 
-  async remove(id: string): Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; revision: number; demand: Demand }> {
+  async remove(id: string): Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; operationId: string; revision: number; demand: Demand }> {
     return this.mutate('remove', (snapshot) => {
       const index = snapshot.demands.findIndex((entry) => entry.id === id)
       if (index < 0) throw new DemandStoreError('NOT_FOUND', 'validate', this.storePath, `Demand ${id} was not found`)
       return snapshot.demands.splice(index, 1)[0]!
-    }) as Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; revision: number; demand: Demand }>
+    }) as Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; operationId: string; revision: number; demand: Demand }>
   }
 
-  async delete(id: string): Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; revision: number; demand: Demand }> {
+  async delete(id: string): Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; operationId: string; revision: number; demand: Demand }> {
     return this.remove(id)
   }
 
@@ -371,7 +401,7 @@ export class DemandStore {
         snapshot.revision += 1
         snapshot.updatedAt = Date.now()
         await this.writeSnapshot(snapshot)
-        const result = { schema: 'agentmux.demand-receipt.v1' as const, operation, revision: snapshot.revision, demand: clone(demand) }
+        const result = { schema: 'agentmux.demand-receipt.v1' as const, operation, operationId: `demand-op-${snapshot.revision}-${randomUUID()}`, revision: snapshot.revision, demand: clone(demand) }
         const published = clone(snapshot)
         for (const listener of this.listeners) listener(published)
         return result

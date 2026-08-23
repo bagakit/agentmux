@@ -21,6 +21,30 @@ export type AgentMuxPluginCommand = {
   description: string
 }
 
+export type AgentMuxPmoCapabilityEffect = 'observe' | 'plan' | 'act' | 'evaluate'
+export type AgentMuxPmoCapability = {
+  id: string
+  version: string
+  effect: AgentMuxPmoCapabilityEffect
+  inputSchema: Record<string, unknown>
+  outputSchema: Record<string, unknown>
+  requiredAuthority: string
+}
+export type AgentMuxPmoCapabilityReceipt = {
+  schemaVersion: 'agentmux.pmo-receipt.v1'
+  pluginId: string
+  capabilityId: string
+  version: string
+  requestId: string
+  operationId: string
+  phase: AgentMuxPmoCapabilityEffect
+  durationMs: number
+  inputSummary: Record<string, unknown>
+  outputSummary: Record<string, unknown>
+  evaluator: { status: 'passed' | 'failed' | 'pending'; detail: string }
+  rollbackTarget: string | null
+}
+
 /**
  * Host-neutral extension declaration. Providers are already normalized AgentProvider objects, so a
  * plugin never gets a second process/runtime abstraction hidden behind the editor.
@@ -31,6 +55,7 @@ export type AgentMuxPlugin = {
   providers?: readonly AgentProvider[]
   skills?: readonly AgentMuxPluginSkill[]
   commands?: readonly AgentMuxPluginCommand[]
+  pmoCapabilities?: readonly AgentMuxPmoCapability[]
 }
 
 export type AgentMuxPluginSummary = {
@@ -39,6 +64,7 @@ export type AgentMuxPluginSummary = {
   providerIds: readonly string[]
   skillIds: readonly string[]
   commandIds: readonly string[]
+  pmoCapabilityIds: readonly string[]
 }
 
 function assertContributionId(value: string, label: string): void {
@@ -64,6 +90,7 @@ function summarize(plugin: AgentMuxPlugin): AgentMuxPluginSummary {
     providerIds: (plugin.providers ?? []).map((provider) => provider.id),
     skillIds: (plugin.skills ?? []).map((skill) => skill.id),
     commandIds: (plugin.commands ?? []).map((command) => command.id)
+    , pmoCapabilityIds: (plugin.pmoCapabilities ?? []).map((capability) => capability.id)
   }
 }
 
@@ -84,6 +111,14 @@ function validatePlugin(plugin: AgentMuxPlugin): void {
   }
   uniqueContributionIds((plugin.skills ?? []).map((skill) => skill.id), 'plugin Skill id')
   uniqueContributionIds((plugin.commands ?? []).map((command) => command.id), 'plugin command id')
+  for (const capability of plugin.pmoCapabilities ?? []) {
+    assertContributionId(capability.id, 'PMO capability id')
+    assertContributionText(capability.version, 'PMO capability version')
+    if (!['observe', 'plan', 'act', 'evaluate'].includes(capability.effect)) throw new AgentMuxError(`PMO capability effect is invalid: ${capability.id}`, 'INVALID_PLUGIN_MANIFEST')
+    assertContributionText(capability.requiredAuthority, 'PMO capability authority')
+    if (!capability.inputSchema || typeof capability.inputSchema !== 'object' || !capability.outputSchema || typeof capability.outputSchema !== 'object') throw new AgentMuxError(`PMO capability schemas are invalid: ${capability.id}`, 'INVALID_PLUGIN_MANIFEST')
+  }
+  uniqueContributionIds((plugin.pmoCapabilities ?? []).map((capability) => capability.id), 'PMO capability id')
 }
 
 /**
@@ -95,6 +130,7 @@ export class AgentMuxPluginRegistry {
   private readonly plugins = new Map<string, AgentMuxPluginSummary>()
   private readonly skills = new Map<string, AgentMuxPluginSkill>()
   private readonly commands = new Map<string, AgentMuxPluginCommand>()
+  private readonly pmoCapabilities = new Map<string, AgentMuxPmoCapability>()
 
   constructor(plugins: readonly AgentMuxPlugin[] = []) {
     this.providers = new AgentProviderRegistry([])
@@ -119,10 +155,24 @@ export class AgentMuxPluginRegistry {
     for (const command of plugin.commands ?? []) {
       if (this.commands.has(command.id)) throw new AgentMuxError(`AgentMux command already registered: ${command.id}`, 'DUPLICATE_PLUGIN_CONTRIBUTION')
     }
+    for (const capability of plugin.pmoCapabilities ?? []) {
+      if (this.pmoCapabilities.has(capability.id)) throw new AgentMuxError(`PMO capability already registered: ${capability.id}`, 'DUPLICATE_PLUGIN_CONTRIBUTION')
+    }
     for (const provider of plugin.providers ?? []) this.providers.register(provider)
     for (const skill of plugin.skills ?? []) this.skills.set(skill.id, { ...skill })
     for (const command of plugin.commands ?? []) this.commands.set(command.id, { ...command })
+    for (const capability of plugin.pmoCapabilities ?? []) this.pmoCapabilities.set(capability.id, { ...capability, inputSchema: { ...capability.inputSchema }, outputSchema: { ...capability.outputSchema } })
     this.plugins.set(plugin.id, summarize(plugin))
+  }
+
+  unregister(pluginId: string): void {
+    const plugin = this.plugins.get(pluginId)
+    if (!plugin) return
+    for (const providerId of plugin.providerIds) this.providers.unregister(providerId)
+    for (const skillId of plugin.skillIds) this.skills.delete(skillId)
+    for (const commandId of plugin.commandIds) this.commands.delete(commandId)
+    for (const capabilityId of plugin.pmoCapabilityIds) this.pmoCapabilities.delete(capabilityId)
+    this.plugins.delete(pluginId)
   }
 
   list(): AgentMuxPluginSummary[] {
@@ -131,12 +181,22 @@ export class AgentMuxPluginRegistry {
       providerIds: [...plugin.providerIds],
       skillIds: [...plugin.skillIds],
       commandIds: [...plugin.commandIds]
+      , pmoCapabilityIds: [...plugin.pmoCapabilityIds]
     }))
   }
 
   skillsList(): AgentMuxPluginSkill[] { return [...this.skills.values()].map((skill) => ({ ...skill })) }
 
   commandsList(): AgentMuxPluginCommand[] { return [...this.commands.values()].map((command) => ({ ...command })) }
+
+  pmoCapabilitiesList(): AgentMuxPmoCapability[] { return [...this.pmoCapabilities.values()].map((capability) => ({ ...capability, inputSchema: { ...capability.inputSchema }, outputSchema: { ...capability.outputSchema } })) }
+
+  pmoReceipt(input: Omit<AgentMuxPmoCapabilityReceipt, 'schemaVersion' | 'version'>): AgentMuxPmoCapabilityReceipt {
+    const capability = this.pmoCapabilities.get(input.capabilityId)
+    if (!capability) throw new AgentMuxError(`Unknown PMO capability: ${input.capabilityId}`, 'UNKNOWN_PLUGIN_CONTRIBUTION')
+    if (capability.effect !== input.phase) throw new AgentMuxError(`PMO capability phase does not match: ${input.capabilityId}`, 'INVALID_PLUGIN_MANIFEST')
+    return { ...input, schemaVersion: 'agentmux.pmo-receipt.v1', version: capability.version, inputSummary: { ...input.inputSummary }, outputSummary: { ...input.outputSummary }, evaluator: { ...input.evaluator } }
+  }
 
   catalog(): AgentCatalogEntry[] { return this.providers.catalog() }
 }
