@@ -291,12 +291,24 @@ export function WorkspaceBoard() {
                 <div className="board-matrix__row" role="row" data-board-row={row.id} key={row.id}>
                   <header className="board-branch-head" role="rowheader">
                     <span className="board-branch-head__glyph"><RowIcon size={15} /></span>
-                    <span className="board-branch-head__identity"><strong>{row.name}</strong><small title={row.path ?? undefined}>{row.path ?? meta.emptyPathLabel}</small>{boardRowRecap(row) ? <small className="board-branch-head__recap">{boardRowRecap(row)}</small> : null}</span>
+                    <span
+                      className="board-branch-head__identity"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={row.kind === 'topic' ? `Open Topic ${row.name}` : `Open ${row.name}`}
+                      onClick={() => void openRow(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          void openRow(row)
+                        }
+                      }}
+                    ><strong>{row.name}</strong><small title={row.path ?? undefined}>{row.path ?? meta.emptyPathLabel}</small>{boardRowRecap(row) ? <small className="board-branch-head__recap">{boardRowRecap(row)}</small> : null}</span>
                     <span className="board-branch-head__meta">
                       {row.kind === 'branch' && row.branch.isCurrent ? <em>Current</em> : null}
                       <small>{row.sessions.length} run{row.sessions.length === 1 ? '' : 's'}</small>
                     </span>
-                    <button className="icon-button" type="button" title={row.kind === 'topic' ? 'Open Topic' : row.workspace ? 'Open workspace' : row.branch.worktreePath ? 'Open worktree' : 'Open Branches'} onClick={() => void openRow(row)}><ArrowUpRight size={12} /></button>
+                    <button className="icon-button" type="button" title={row.kind === 'topic' ? 'Open Topic' : row.workspace ? 'Open workspace' : row.branch.worktreePath ? 'Open worktree' : 'Open Branches'} onClick={(event) => { event.stopPropagation(); void openRow(row) }}><ArrowUpRight size={12} /></button>
                   </header>
                   {PROJECT_BOARD_COLUMNS.map((id) => (
                     <div className={`board-cell board-cell--${id}`} role="gridcell" data-board-column={id} key={id}>
