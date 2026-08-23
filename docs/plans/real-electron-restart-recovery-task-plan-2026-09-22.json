@@ -1,0 +1,59 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/real-electron-restart-recovery-2026-09-22.md"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/real-electron-restart-recovery-2026-09-22.md",
+    "apps/desktop/scripts/probe-attention-review-restart.mjs",
+    "apps/desktop/test/desktop-agent-continuity.integration.test.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "把真实 Electron 重启恢复变成可失败的证据",
+      "objective": "将旧的启动 smoke probe 改为隔离真实 Electron 主进程/Renderer 的重启探针，验证 durable Tab/Region/focus/draft 与 Session 身份，并保留恢复失败时的原工作面。",
+      "outcome": "发布前可以用一条可重复命令证明不同 Electron PID 从同一 userData 恢复工作面和 Session；任何缺失、串根目录或伪造 generation 都会失败。",
+      "acceptance": [
+        "探针真实启动两次 Electron，记录不同 PID、同一 userData/runtime 根目录，并通过 ready IPC/文件读取真实前后布局、焦点、草稿、Session/Run 身份，而不是读取手填 generation。",
+        "启动前布置的 Tab/Region/focus/draft 在第二次进程中仍可见；Session id 保持，Run 按 Core 事实 reattach/resume，Run 允许合法换代；snapshot 空、Provider 探测失败和握手超时保留投影并输出服务窗事实。",
+        "探针只清理自己创建的隔离目录；输出包含输入 digest、PID、身份摘要、恢复动作和清理结果，缺字段、PID 相同、userData 不同或身份漂移都会返回非零。",
+        "测试覆盖非空和空 snapshot 两条边界；变异 durable 身份校验或清理/失败保留分支会使对应测试变红；探针入口有脚本调用者且零调用者检查有结果。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm exec vitest run apps/desktop/test/desktop-agent-continuity.integration.test.ts apps/desktop/test/provider-identity-restart.integration.test.ts apps/desktop/test/store-persistence.test.ts apps/desktop/test/workbench-persistence.test.ts --maxWorkers=1",
+          "proves": "现有 Core/Store/布局局部恢复合同在真实探针改动后仍通过。"
+        },
+        {
+          "kind": "command",
+          "ref": "node apps/desktop/scripts/probe-attention-review-restart.mjs --isolated --feature f-29v8fx5jp",
+          "proves": "真实 Electron 不同 PID、同一持久化根目录、布局/焦点/草稿/Session 身份恢复与清理。"
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "探针和 Electron ready 接线的类型边界。"
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-29v8fx5jp/artifacts/T-001-mutation.md",
+          "proves": "真实探针身份校验、失败保留和清理边界的变异红绿证据。"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/real-electron-restart-recovery-2026-09-22.md",
+        "apps/desktop/scripts/probe-attention-review-restart.mjs",
+        "apps/desktop/test/desktop-agent-continuity.integration.test.ts",
+        "apps/desktop/test/provider-identity-restart.integration.test.ts"
+      ],
+      "supersedes": []
+    }
+  ]
+}

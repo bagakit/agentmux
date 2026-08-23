@@ -772,3 +772,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 Default Session 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放原生 Topic Tab/Region，底部保留现有 composer。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
 
 浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口按钮只显示一个紧凑的助手图标与未读提示，Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。
+
+### 真实重启恢复的表面密度（2026-09-22）
+
+真实重启后的第一帧先显示原有 Tab、Region 和焦点所属工作面；Runtime/Provider 恢复中的服务窗贴在受影响 Region 的边缘，不用全屏 loading 覆盖工作面。服务窗短标题说明失败阶段，正文说明当前保留的事实和恢复动作；恢复成功后收敛为轻量状态，不制造第二套恢复面板。验收证据必须来自不同的真实 Electron 进程和同一持久化根目录，不能用组件重挂载或静态启动标记代替。
