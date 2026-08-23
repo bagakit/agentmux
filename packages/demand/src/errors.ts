@@ -30,6 +30,9 @@ export class DemandStoreError extends Error {
   }
 }
 
+/** Public short name used by clients that do not need to mention the storage layer. */
+export const StoreError = DemandStoreError
+
 export function isDemandStoreError(error: unknown): error is DemandStoreError {
   return error instanceof DemandStoreError
 }
