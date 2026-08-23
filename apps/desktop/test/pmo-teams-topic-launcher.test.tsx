@@ -56,7 +56,7 @@ describe('PMO teams topic launcher', () => {
   })
 
   it('uses the avatar as the close toggle when the floating state is already open', async () => {
-    window.localStorage.setItem('agentmux.pmo-teams-topic-floating.v1', JSON.stringify({ open: true }))
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
     const button = container.querySelector('button[aria-label="Close PMO teams topic"]') as HTMLButtonElement
     expect(button).toBeTruthy()
