@@ -1,4 +1,5 @@
 import type { AppAppearanceId } from '../../../shared/contracts'
+import { APP_APPEARANCE_DATASET_KEY } from './theme-contract'
 
 export function resolveAppAppearance(id: AppAppearanceId | undefined, prefersDark: boolean): 'dark' | 'light' {
   if (id === 'light') return 'light'
@@ -10,7 +11,7 @@ export function applyAppAppearance(id: AppAppearanceId | undefined, host: Window
   const media = host.matchMedia('(prefers-color-scheme: dark)')
   const apply = () => {
     const mode = resolveAppAppearance(id, media.matches)
-    host.document.documentElement.dataset.appearance = mode
+    host.document.documentElement.dataset[APP_APPEARANCE_DATASET_KEY] = mode
     host.document.documentElement.style.colorScheme = mode
   }
   apply()

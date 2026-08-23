@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 const panel = readFileSync(new URL('../src/renderer/src/components/SettingsPanel.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../src/renderer/src/styles/surfaces.css', import.meta.url), 'utf8')
+const styles = allStyles()
 
 describe('settings workbench shell', () => {
   it('keeps a contextual header and a close action in the main work area', () => {
