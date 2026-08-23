@@ -2100,8 +2100,8 @@
     {
       "feat_id": "f-29z8fg88s",
       "title": "Filesystem Demand package and Leader Topic CLI",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
