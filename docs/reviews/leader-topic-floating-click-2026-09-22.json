@@ -1,0 +1,10 @@
+{
+  "schema": "bagakit.review.v1",
+  "status": "approved",
+  "feature": "Leader Topic floating click interaction",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "decision": "A floating Leader Topic click opens the visible interactive fixed Topic window; only a pointer movement beyond the drag threshold suppresses click."
+}

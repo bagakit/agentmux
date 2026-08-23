@@ -1,0 +1,32 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/leader-topic-floating-click-2026-09-22.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-floating-click-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "修复悬浮 Leader Topic 点击打开交互浮窗",
+      "objective": "让悬浮头像普通点击稳定打开并聚焦可交互浮窗，拖动仍只改变位置。",
+      "outcome": "悬浮入口点击后浮窗可见、可聚焦、可输入；拖动超过阈值不会误打开。",
+      "acceptance": [
+        "Leader Topic floating launcher 的普通点击分发 open 事件，浮窗不再保持 hidden，且 dialog 与 Workbench 可交互。",
+        "pointer drag 超过阈值只保存 launcherPosition 并抑制 click；阈值内点击仍打开浮窗。",
+        "固定 launcher:leader 身份、焦点返回和 compact 形态不回归。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-floating.test.tsx test/leader-topic-launcher.test.tsx test/leader-topic-floating-contract.test.ts --maxWorkers=1", "proves": "点击打开、状态同步、固定 Topic 和生产接线。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check", "proves": "桌面类型边界与候选格式。"},
+        {"kind": "command", "ref": "rg -n 'LeaderTopicFloatingPanel|LeaderTopicEntry' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicFloatingPanel.tsx' | grep -v 'components/LeaderTopicEntry.tsx'", "proves": "入口和浮窗存在定义文件之外的生产调用者。"}
+      ],
+      "depends_on": [],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+    }
+  ]
+}

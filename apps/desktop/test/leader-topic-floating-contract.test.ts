@@ -13,6 +13,7 @@ function sourceFiles(directory: string): string[] {
 it('keeps Leader Topic on one fixed floating/compact launcher and one canonical Topic', () => {
   const entry = readFileSync(join(renderer, 'components/LeaderTopicEntry.tsx'), 'utf8')
   const panel = readFileSync(join(renderer, 'components/LeaderTopicFloatingPanel.tsx'), 'utf8')
+  const styles = readFileSync(join(renderer, 'styles/leader-topic.css'), 'utf8')
   const app = readFileSync(join(renderer, 'App.tsx'), 'utf8')
   const workbench = readFileSync(join(renderer, 'components/WorkspaceWorkbench.tsx'), 'utf8')
   const shared = readFileSync(new URL('../src/shared/scratch-topics.ts', import.meta.url), 'utf8')
@@ -20,6 +21,9 @@ it('keeps Leader Topic on one fixed floating/compact launcher and one canonical 
   expect(entry).toContain('leader-topic-floating-launcher')
   expect(entry).toContain('leaderTopicAvatar')
   expect(entry).toContain('launcherPlacement')
+  expect(styles).toContain('.leader-topic-floating-launcher__button')
+  expect(styles).toContain('border-radius: 12px')
+  expect(styles).toContain('object-fit: contain')
   expect(panel).toContain('api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID)')
   expect(panel).toContain('api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID, LEADER_TOPIC_TITLE)')
   expect(panel).toContain('openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID)')
@@ -35,4 +39,10 @@ it('keeps Leader Topic on one fixed floating/compact launcher and one canonical 
     'App.tsx',
     'components/LeaderTopicFloatingPanel.tsx'
   ])
+})
+
+it('uses the shipped AgentMux dragon asset for the Leader Topic launcher', () => {
+  const launcherAsset = readFileSync(join(renderer, 'assets/leader-topic-avatar.png'))
+  const projectAsset = readFileSync(new URL('../resources/icon.png', import.meta.url))
+  expect(launcherAsset.equals(projectAsset)).toBe(true)
 })

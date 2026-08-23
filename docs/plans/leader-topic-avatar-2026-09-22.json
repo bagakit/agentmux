@@ -1,0 +1,32 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/leader-topic-avatar-2026-09-22.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-avatar-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "用项目龙头像替换 Leader Topic 头像并改为圆角矩形徽章",
+      "objective": "让浮动和收纳态使用同一份 AgentMux 龙头像，并让浮动入口在边缘一眼可见。",
+      "outcome": "两种入口都显示项目龙头像，浮动态为显眼圆角矩形徽章，保持点击、拖动和注意力角标行为。",
+      "acceptance": [
+        "Leader Topic 入口加载项目资源中的绿色 low-poly 龙头像，不再加载旧的独立角色头像。",
+        "浮动态和 compact 态的头像容器都是圆角矩形，浮动态尺寸和对比度足以在工作面边缘识别，图片保持不变形。",
+        "点击、拖动阈值、compact 切换、键盘焦点和注意力角标行为不回归。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-launcher.test.tsx test/leader-topic-floating.test.tsx test/leader-topic-floating-contract.test.ts --maxWorkers=1", "proves": "入口资源、状态和交互契约"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check", "proves": "桌面类型与格式"},
+        {"kind": "command", "ref": "test \"$(rg -l '<LeaderTopicEntry' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicEntry.tsx' | wc -l | tr -d ' ')\" -gt 0", "proves": "Leader Topic 入口已经接入定义文件之外的生产调用者"}
+      ],
+      "depends_on": [],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "bagakit.review.v1",
+  "status": "approved",
+  "feature": "Leader Topic project avatar badge",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-avatar-2026-09-22.md"
+  ],
+  "decision": "Reuse the existing AgentMux low-poly dragon icon inside a prominent rounded-rectangle badge for floating and compact Leader Topic launchers."
+}
