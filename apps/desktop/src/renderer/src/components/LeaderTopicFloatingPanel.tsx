@@ -30,6 +30,19 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
   const visible = floating.open
 
   useEffect(() => {
+    if (!floating.open || floating.openAnchor !== 'compact' || typeof window === 'undefined') return
+    const width = Math.max(420, Math.min(floating.size.width, Math.max(420, window.innerWidth - 32)))
+    const height = Math.max(280, Math.min(floating.size.height, Math.max(280, window.innerHeight - 48)))
+    const compactLeft = Math.max(16, Math.min(window.innerWidth - width - 16, window.innerWidth - width - 32))
+    const compactTop = Math.max(16, window.innerHeight - height - 64)
+    setFloating(clampLeaderTopicFloatingState({
+      ...floating,
+      position: { left: compactLeft, top: compactTop },
+      openAnchor: undefined
+    }))
+  }, [floating, setFloating])
+
+  useEffect(() => {
     if (!floating.open || !scratch) return
     void api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID)
       .then(async (snapshot) => {

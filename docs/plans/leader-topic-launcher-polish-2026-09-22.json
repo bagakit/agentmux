@@ -1,0 +1,32 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/leader-topic-launcher-polish-2026-09-22.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-launcher-polish-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "修正 Leader Topic 入口叠加控件与底边锚定",
+      "objective": "把三个点叠到头像上，改用毛玻璃徽章，修复浮动态点击，并让 compact 打开位置靠近底边入口。",
+      "outcome": "入口更紧凑且可理解，浮动与 compact 点击都打开同一面板，面板锚点稳定可预测。",
+      "acceptance": [
+        "更多操作按钮位于头像右上角叠加层，头像不再使用绿色描边而使用半透明毛玻璃和阴影。",
+        "浮动态头像点击稳定切换 open/close；事件层、pointer capture 和隐藏面板不会吞掉普通点击。",
+        "compact 态点击后，面板从底部入口附近出现并在视口内夹紧，不沿用随机的历史 position。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-launcher.test.tsx test/leader-topic-floating.test.tsx test/leader-topic-floating-contract.test.ts --maxWorkers=1", "proves": "叠加按钮、open/close 与锚定契约"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check", "proves": "桌面类型和格式"},
+        {"kind": "command", "ref": "test \"$(rg -l '<LeaderTopicFloatingPanel|<LeaderTopicEntry' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicFloatingPanel.tsx' | grep -v 'components/LeaderTopicEntry.tsx' | wc -l | tr -d ' ')\" -gt 0", "proves": "入口与面板仍有生产调用者"}
+      ],
+      "depends_on": [],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+    }
+  ]
+}

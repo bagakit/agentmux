@@ -1,0 +1,11 @@
+{
+  "schema": "bagakit.review.v1",
+  "status": "approved",
+  "feature": "Leader Topic launcher polish and anchored opening",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-launcher-polish-2026-09-22.md"
+  ],
+  "decision": "Overlay the more-actions control on the dragon badge, use a frosted badge, repair click toggling, and anchor compact opening near the bottom launcher."
+}

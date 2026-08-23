@@ -54,4 +54,17 @@ describe('Leader Topic launcher', () => {
     expect(avatar).toBeTruthy()
     expect(avatar.getAttribute('src')).toContain('leader-topic-avatar')
   })
+
+  it('uses the avatar as the close toggle when the floating state is already open', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
+    await act(async () => root.render(createElement(LeaderTopicEntry, { placement: 'floating' })))
+    const button = container.querySelector('button[aria-label="Close Leader Topic"]') as HTMLButtonElement
+    expect(button).toBeTruthy()
+    let closed = false
+    window.addEventListener('agentmux:leader-topic-floating', (event) => {
+      closed = (event as CustomEvent).detail?.open === false
+    }, { once: true })
+    await act(async () => button.click())
+    expect(closed).toBe(true)
+  })
 })
