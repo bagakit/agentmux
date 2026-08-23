@@ -8,6 +8,7 @@ import {
   useDefaultSessionFloatingState
 } from '../lib/default-session-floating'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import { DefaultSessionEntry } from './DefaultSessionEntry'
 
 const DRAG_THRESHOLD = 3
 
@@ -59,7 +60,7 @@ export function DefaultSessionFloatingPanel(): React.JSX.Element | null {
     return () => observer.disconnect()
   }, [floating.open, floating.maximized, floating.size.height, floating.size.width, setFloating])
 
-  if (!scratch) return null
+  if (!scratch) return <DefaultSessionEntry placement="floating" />
 
   const geometry = floating.maximized && typeof window !== 'undefined'
     ? { left: 16, top: 16, width: Math.max(420, window.innerWidth - 32), height: Math.max(280, window.innerHeight - 48) }
@@ -98,18 +99,20 @@ export function DefaultSessionFloatingPanel(): React.JSX.Element | null {
   }
 
   return (
-    <div
-      ref={panelRef}
-      className={`default-session-floating${floating.open ? '' : ' default-session-floating--main'}${visible ? '' : ' default-session-floating--hidden'}`}
-      role="dialog"
-      aria-modal="false"
-      aria-hidden={!visible}
-      aria-label="Default Session"
-      data-default-session-floating
-      tabIndex={-1}
-      style={floating.open || mainMode ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
-    >
-      <div className={`default-session-floating__shell${dragging ? ' is-dragging' : ''}`}>
+    <>
+      <DefaultSessionEntry placement="floating" />
+      <div
+        ref={panelRef}
+        className={`default-session-floating${floating.open ? '' : ' default-session-floating--main'}${visible ? '' : ' default-session-floating--hidden'}`}
+        role="dialog"
+        aria-modal="false"
+        aria-hidden={!visible}
+        aria-label="Default Session"
+        data-default-session-floating
+        tabIndex={-1}
+        style={floating.open || mainMode ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
+      >
+        <div className={`default-session-floating__shell${dragging ? ' is-dragging' : ''}`}>
         {floating.open ? (
           <div
             className="default-session-floating__titlebar"
@@ -128,10 +131,11 @@ export function DefaultSessionFloatingPanel(): React.JSX.Element | null {
             </div>
           </div>
         ) : null}
-        <div className="default-session-floating__body">
-          <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} visible={visible} interactiveResize={false} showDefaultSessionEntry={false} />
+          <div className="default-session-floating__body">
+            <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} visible={visible} interactiveResize={false} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

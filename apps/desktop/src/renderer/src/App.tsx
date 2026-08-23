@@ -26,7 +26,6 @@ import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
-import { DefaultSessionEntry } from './components/DefaultSessionEntry'
 import { DefaultSessionFloatingPanel } from './components/DefaultSessionFloatingPanel'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
@@ -253,9 +252,6 @@ function DesktopApp() {
         {!mergedTopRow ? (
           <header className="topbar">
             <TopRowLeadingChrome />
-            <div className="topbar__actions">
-              <DefaultSessionEntry placement="topbar" respectHidden={false} />
-            </div>
           </header>
         ) : null}
         {!workspace && mainSurface === 'workbench' ? (

@@ -112,6 +112,11 @@
 .default-session-entry__menu { position: absolute; right: 0; top: calc(100% + 5px); z-index: 60; display: flex; flex-direction: column; min-width: 140px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: 0 8px 24px var(--scrim-2); }
 .default-session-entry__menu button { padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .default-session-entry__menu button:hover { background: var(--surface-3); color: var(--text); }
+.default-session-floating-launcher { position: fixed; right: 24px; bottom: 52px; z-index: 70; display: inline-flex; }
+.default-session-floating-launcher__button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line)); border-radius: 50%; background: var(--surface-2); color: var(--green); box-shadow: 0 5px 18px var(--scrim-2), 0 0 0 1px color-mix(in srgb, var(--surface-0) 60%, transparent); cursor: pointer; }
+.default-session-floating-launcher__button:hover { background: var(--surface-3); color: var(--text); transform: translateY(-1px); }
+.default-session-floating-launcher__button:focus-visible { outline: 2px solid var(--green-2); outline-offset: 3px; }
+.default-session-floating-launcher__attention { position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border: 2px solid var(--surface-2); border-radius: 50%; background: var(--green); }
 .global-demand-workspace { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface-1); animation: global-demand-workspace-enter 180ms ease-out; }
 .global-demand-workspace__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) var(--sp-3); border-bottom: 1px solid var(--line-soft); }
 .global-demand-workspace__identity { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
