@@ -1,0 +1,17 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Filesystem Demand package review",
+  "status": "proposed",
+  "reviewer": "maintainer",
+  "decision": "Create a host-neutral @agentmux/demand package whose filesystem snapshot is the only Demand fact; Desktop Main, Board, Leader Topic, and the standalone CLI consume it while Core remains runtime-only.",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/filesystem-demand-package-2026-09-22.md",
+    "packages/core/src/control.ts",
+    "packages/core/src/agentmux.ts",
+    "apps/desktop/src/renderer/src/store.ts",
+    "apps/desktop/src/renderer/src/lib/global-demand-board.ts"
+  ]
+}

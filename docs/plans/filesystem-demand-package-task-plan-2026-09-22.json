@@ -1,0 +1,134 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "proposed",
+    "evidence_ref": "docs/reviews/filesystem-demand-package-2026-09-22.json"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/filesystem-demand-package-2026-09-22.md",
+    "packages/core/src/control.ts",
+    "packages/core/src/agentmux.ts",
+    "apps/desktop/src/renderer/src/store.ts",
+    "apps/desktop/src/renderer/src/lib/global-demand-board.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立 Demand 包的宿主无关类型与文件存储",
+      "objective": "在 packages/demand 提供不依赖 Core/Desktop 的 Demand 类型和严格 filesystem store。",
+      "outcome": "调用方可以在明确 root 下创建、列出、读取、更新 Demand，并显式关联零个、一个或多个 Session；快照损坏或锁失败不会被空状态覆盖。",
+      "acceptance": [
+        "@agentmux/demand 仅依赖 Node 标准库，导出 Demand、DemandStore、StoreError 和显式 root 打开函数；不导入 Electron、React、@agentmux/core 或 ctxmux。",
+        "store.json 使用 agentmux.demand-store.v1、单调 revision 和完整 Demand 数组；状态、优先级、ID、时间和关联数组严格校验，非法快照返回带阶段/路径的错误。",
+        "写入经过同进程串行化、跨进程独占锁、临时文件 fsync 与原子替换；锁超时和替换失败不会产生空快照。",
+        "Demand 可以无 Session 或关联多个 Session，Project/Executor 关联与 Session 关联是独立操作，状态只由显式更新改变。",
+        "删除/篡改 store 写入或 Session 关联实现后，package focused tests 必须变红；每个公开 store 符号至少有 definition file 之外的生产或 CLI caller。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/demand exec vitest run test/demand-store.test.ts test/demand-store-corruption.test.ts test/demand-store-concurrency.test.ts --maxWorkers=1", "proves": "Demand schema, zero/multiple Session links, corruption fail-closed, locking and atomic writes."},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/demand typecheck", "proves": "The package has no UI/Core dependency leak and its public API compiles."},
+        {"kind": "command", "ref": "test -n \"$(rg -n 'openDemandStore|DemandStore' packages/demand/src packages/demand/bin --glob '*.ts' | grep -v 'demand-store.ts' | grep -v 'demand-types.ts')\"", "proves": "The store API is connected to callers outside its definition files."}
+      ],
+      "source_refs": ["docs/reviews/filesystem-demand-package-2026-09-22.md"],
+      "estimate_hours": 3.0,
+      "heavy": true,
+      "heavy_reason": "Atomic cross-process writes, strict parsing and lock failure behavior form one inseparable persistence boundary.",
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "提供 Demand API 与独立 CLI",
+      "objective": "让其他 Client、Leader Topic 和脚本通过同一 package API/CLI 操作 Demand，不复制协议实现。",
+      "outcome": "agentmux-demand 在显式 root 上完成 list/show/create/update/link/unlink/decision-log，并输出稳定 JSON receipt。",
+      "acceptance": [
+        "CLI 只调用 @agentmux/demand API，支持 list/show/create/update/link-session/unlink-session/link-project/unlink-project/decision-log；不访问 Core control socket 或 Renderer Store。",
+        "CLI 要求 --root 或明确的 AGENTMUX_DEMAND_ROOT，输出包含 schemaVersion、operation、Demand/receipt，错误包含稳定 code、阶段和路径。",
+        "CLI 的 status/priority/关联参数使用 Demand 命名；不添加 task.* 或 taskId 兼容别名。",
+        "CLI/API 的 create、update、显式状态流转和多 Session 关联在独立进程测试中可重放；篡改命令路由后 focused CLI tests 变红。",
+        "agentmux-demand 的入口被 package bin 或测试 caller 实际调用，不能只在定义文件中存在。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/demand exec vitest run test/demand-cli.test.ts test/demand-cli-json.test.ts --maxWorkers=1", "proves": "Standalone Demand CLI command routing, stable JSON receipts and typed failures."},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/demand typecheck && pnpm --filter @agentmux/demand pack --dry-run", "proves": "The independently publishable package and bin are complete."},
+        {"kind": "command", "ref": "test -n \"$(rg -n 'runDemandCli|agentmux-demand' packages/demand/src packages/demand/bin packages/demand/test --glob '*.ts')\"", "proves": "The CLI entry is connected to the package implementation."}
+      ],
+      "source_refs": ["docs/reviews/filesystem-demand-package-2026-09-22.md"],
+      "estimate_hours": 2.0,
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": ["T-001", "T-002"],
+      "title": "让 Desktop Main、Board 与 Leader Topic 共用 Demand 包",
+      "objective": "把 package store 接到 Desktop Main IPC，令 Board 与固定 Leader Topic 读取同一份文件事实。",
+      "outcome": "Renderer 不再把 Demand 当作 Zustand durable domain；Board 和 Leader Topic 通过 Main adapter 消费快照/receipt，流程失败保留已读事实并显示服务窗。",
+      "acceptance": [
+        "Main 进程持有 @agentmux/demand store，Renderer 通过 typed IPC 获取 list/show/create/update/link/decision-log；Renderer 不直接读写文件或持久化 demands Record。",
+        "Board 的零 Session、多 Session、显式状态流转和历史 unknown Session 投影与 package snapshot 一致；Leader Topic 的 CUI/JSON Demand 操作调用同一 adapter，不在 Topic 目录另存任务记录。",
+        "文件读取、锁或 IPC 失败不会把现有 Board/Leader Topic Demand 投影替换为空列表；服务窗说明阶段、当前保留事实和恢复动作。",
+        "对 Board/Leader Topic 的写入口做块级变异时集成测试必须变红；Main adapter、Board 和 Leader Topic 都是 definition file 之外的真实 callers。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-main-adapter.test.ts test/global-demand-board.test.tsx test/leader-topic-demand.test.tsx --maxWorkers=1", "proves": "Desktop Main adapter, Board projection, Leader Topic access and failure retention."},
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop typecheck", "proves": "Typed IPC and Renderer projection compile without direct filesystem/Core Runtime coupling."},
+        {"kind": "command", "ref": "test -n \"$(rg -n 'demand.*(list|create|update)|openDemandStore' apps/desktop/src/main apps/desktop/src/renderer/src --glob '*.ts' --glob '*.tsx' | grep -v 'demand-main-adapter')\"", "proves": "Package-backed Demand behavior is wired into production surfaces."}
+      ],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/reviews/filesystem-demand-package-2026-09-22.md"],
+      "estimate_hours": 3.5,
+      "heavy": true,
+      "heavy_reason": "The adapter must preserve Main/Renderer IPC, Board projection and Leader Topic identity while moving durable truth out of Zustand.",
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": ["T-003"],
+      "title": "移除 Core/Renderer 的重复 Demand 真相",
+      "objective": "完成单一事实切换，删除 Core control handler 和 Renderer localStorage Demand domain，不留下 task/demand 双写。",
+      "outcome": "Core 只保留 Runtime 生命周期；Desktop UI selection/arrangement 可持久化，但 Demand records 只来自 @agentmux/demand。",
+      "acceptance": [
+        "Core control.ts、agentmux CLI 和 control-host 不再拥有 Demand domain CRUD 或通过 Core socket 代理 Demand；CLI 能力来自 @agentmux/demand，未保留同语义兼容别名。",
+        "Renderer partialize、store state 和 global projection 不再把完整 demands Record 写入 agentmux-workbench-v1；仅保留选中 Demand/视图偏好等 UI 投影。",
+        "Board 仍显示持久 Demand，零/多个 Session 关联和显式状态流转不依赖 Core Session 是否存活；重启恢复从 package store 先恢复 Demand 再尝试 Session。",
+        "删除 Core handler 或重新引入 localStorage Demand 写入后对应 contract/mutation tests 变红；零调用者检查命中 package adapter/CLI，而不是被测定义本身。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/core exec vitest run test/demand-removal-contract.test.ts test/control-host.test.ts --maxWorkers=1 && CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-persistence-boundary.test.ts test/global-demand-board.test.tsx --maxWorkers=1", "proves": "Core no longer owns Demand persistence and Desktop uses package truth."},
+        {"kind": "command", "ref": "pnpm typecheck", "proves": "Core, Demand package, Layout and Desktop boundaries compile together."},
+        {"kind": "command", "ref": "test -z \"$(rg -n 'demand.*Record|demands: state\\.demands|operation: .demand\\.' packages/core/src apps/desktop/src/renderer/src --glob '*.ts' --glob '*.tsx' | grep -v 'test')\"", "proves": "No duplicate Core/Renderer Demand domain or control write path remains."}
+      ],
+      "source_refs": ["AGENTS.md", "docs/reviews/filesystem-demand-package-2026-09-22.md"],
+      "estimate_hours": 2.5,
+      "supersedes": [],
+      "heavy": true,
+      "heavy_reason": "This is an exact cutover across Core protocol, Desktop persistence and restart projection; partial dual-write is explicitly disallowed."
+    },
+    {
+      "id": "T-005",
+      "depends_on": ["T-004"],
+      "title": "验证跨进程文件事实与真实重启恢复",
+      "objective": "证明 CLI、Leader Topic、Board 和新的 Electron 进程都读取同一个 Demand 文件快照。",
+      "outcome": "创建/更新/关联 Demand 后，关闭并启动不同进程仍能看到相同 revision、状态、Project 和零/多 Session 关联；运行期错误有可见服务窗。",
+      "acceptance": [
+        "测试使用临时 root 启动独立 CLI/Store 进程，再启动 Desktop Main/Renderer，确认所有消费者读取相同 store.json revision 和 Demand ID。",
+        "真实 Electron 进程退出后从同一 userData root 恢复 Demand/Board/Leader Topic 投影，再按 Core 事实尝试 Session reattach；不能用组件 remount 或空 Store 模拟成功。",
+        "文件快照缺失、锁占用、schema 损坏和 Provider/Runtime 恢复失败均保留 Demand 与 UI 工作面，并报告具体阶段/恢复动作。",
+        "删除 store write/read 或改用独立 Renderer Record 的变异必须让重启/CLI integration test 变红；最终零调用者扫描显示 package API 同时被 CLI、Main adapter、Board/Leader Topic 使用。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/demand exec vitest run test/demand-cross-process.test.ts --maxWorkers=1 && CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-restart-recovery.test.tsx test/leader-topic-demand.test.tsx --maxWorkers=1", "proves": "Cross-process package fact and real Desktop recovery."},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck && pnpm --filter @agentmux/demand typecheck", "proves": "Final integrated candidate compiles across all package boundaries."},
+        {"kind": "command", "ref": "test -n \"$(rg -n 'openDemandStore|agentmux-demand|demand.*adapter' packages/demand apps/desktop/src/main apps/desktop/src/renderer/src --glob '*.ts' --glob '*.tsx' | grep -v 'test')\"", "proves": "The filesystem Demand package is consumed by CLI and Desktop production paths."}
+      ],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/filesystem-demand-package-2026-09-22.md"],
+      "estimate_hours": 3.5,
+      "heavy": true,
+      "heavy_reason": "This is candidate-bound cross-process and Electron restart evidence, not a component-only test.",
+      "supersedes": []
+    }
+  ]
+}
