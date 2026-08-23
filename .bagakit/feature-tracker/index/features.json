@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 254
+    "next_cursor": 255
   },
   "features": [
     {
@@ -2161,6 +2161,16 @@
       "feat_id": "f-2a78fjf8u",
       "title": "Leader Topic launcher polish and anchored opening",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2a88fvpb2",
+      "title": "Project tree 状态槽统一",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

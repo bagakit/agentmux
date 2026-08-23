@@ -1,0 +1,42 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/project-tree-status-slot-2026-09-22.md"
+  },
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "统一 Project tree 状态槽为小图标加数字",
+      "objective": "让 idle、running/working、error 共享同一套行尾状态槽，并保留既有计数事实",
+      "outcome": "Project tree 扫描时状态列对齐，语义差异由 glyph、颜色和可访问名称表达",
+      "acceptance": [
+        "idle、running/working、error 的生产 DOM 都使用同一状态槽结构并显示对应数量",
+        "零数量不渲染槽位，长状态名称仅进入 tooltip/无障碍名称",
+        "契约测试扫描到真实非空来源，改坏任一状态槽会变红，生产调用者非空"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/project-tree-status-slot.test.tsx test/project-rail-density.test.tsx",
+          "proves": "状态槽结构、计数和密度契约"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "组件类型边界"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/ProjectRail.tsx",
+        "apps/desktop/src/renderer/src/styles/project-rail.css"
+      ],
+      "depends_on": []
+    }
+  ],
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/project-tree-status-slot-2026-09-22.md"
+  ]
+}
