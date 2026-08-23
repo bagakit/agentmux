@@ -110,9 +110,12 @@
 .settings-sidebar > footer { height: 44px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-6); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
 .settings-sidebar > footer code { color: var(--green); font-size: var(--fs-micro); }
 .settings-content { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); padding-top:34px; background: var(--surface-0); }
-.settings-content > header { padding:25px clamp(var(--sp-7), 5vw, 74px) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.settings-content > header { position: sticky; top: 34px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding:25px clamp(var(--sp-7), 5vw, 74px) var(--sp-6); border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface-0) 92%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.settings-content__title { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-4); }
+.settings-content__icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); }
 .settings-content > header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
 .settings-content > header p { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
+.settings-content__close { flex: 0 0 auto; }
 .settings-content__scroll { min-height: 0; padding:var(--sp-7) clamp(var(--sp-7), 5vw, 74px) 50px; overflow: auto; }
 .settings-pane-stack { max-width: 900px; display: grid; gap:var(--sp-5); animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
 /* 两层容器语汇（见 docs/design/agentmux-surface-density.md《Settings Pane》）。此前一条规则把
@@ -209,3 +212,29 @@
 
 @keyframes settings-pane-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes notification-dwell-breath { 50% { opacity: .62; } }
+
+@media (max-width: 760px) {
+  .settings-page { grid-template-columns: 208px minmax(0, 1fr); }
+  .settings-sidebar nav > button { padding: var(--sp-3); }
+  .settings-sidebar nav > button small { display: none; }
+  .settings-content > header { padding-inline: var(--sp-6); }
+  .settings-content__icon { width: 32px; height: 32px; }
+}
+
+@media (max-width: 560px) {
+  .settings-page { display: flex; flex-direction: column; overflow: hidden; }
+  .settings-sidebar { flex: 0 0 auto; max-height: 168px; padding-top: 34px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .settings-sidebar > header { flex: 0 0 46px; height: 46px; }
+  .settings-search { flex: 0 0 44px; height: 44px; }
+  .settings-sidebar nav { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); overflow-x: auto; overflow-y: hidden; }
+  .settings-sidebar nav > p { display: none; }
+  .settings-sidebar nav > button { flex: 0 0 auto; width: auto; min-width: 112px; grid-template-columns: 16px auto; padding: var(--sp-3); }
+  .settings-sidebar nav > button > span { display: block; }
+  .settings-sidebar nav > button strong { white-space: nowrap; }
+  .settings-sidebar > footer { display: none; }
+  .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
+  .settings-content > header { position: relative; top: auto; padding: var(--sp-5) var(--sp-5) var(--sp-4); }
+  .settings-content > header h2 { font-size: var(--fs-title); }
+  .settings-content__icon { display: none; }
+  .settings-content__scroll { padding: var(--sp-5) var(--sp-5) 40px; }
+}

@@ -1,25 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 
-const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
-const EVENT_NAME = 'agentmux:leader-topic-floating'
+const STORAGE_KEY = 'agentmux.pmo-teams-topic-floating.v1'
+const EVENT_NAME = 'agentmux:pmo-teams-topic-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }
 const LAUNCHER_SIZE = 36
 
-export type LeaderTopicLauncherPlacement = 'floating' | 'compact'
-export type LeaderTopicOpenAnchor = LeaderTopicLauncherPlacement
+export type PmoTeamsTopicLauncherPlacement = 'floating' | 'compact'
+export type PmoTeamsTopicOpenAnchor = PmoTeamsTopicLauncherPlacement
+export type PmoTeamsTopicPrompt = { id: string; text: string }
 
 type FloatingState = {
   open: boolean
   maximized: boolean
   position: { left: number; top: number }
   size: { width: number; height: number }
-  launcherPlacement: LeaderTopicLauncherPlacement
+  launcherPlacement: PmoTeamsTopicLauncherPlacement
   launcherPosition: { left: number; top: number }
-  openAnchor?: LeaderTopicOpenAnchor | undefined
+  openAnchor?: PmoTeamsTopicOpenAnchor | undefined
+  pendingPrompt?: PmoTeamsTopicPrompt | undefined
 }
 
-export type LeaderTopicFloatingState = FloatingState
+export type PmoTeamsTopicFloatingState = FloatingState
 
 function defaultLauncherPosition(): { left: number; top: number } {
   if (typeof window === 'undefined') return { left: 24, top: 24 }
@@ -67,15 +69,22 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestLeaderTopicFloatingOpen(options?: { anchor?: LeaderTopicOpenAnchor }): void {
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: true, ...(options?.anchor ? { openAnchor: options.anchor } : {}) } }))
+export function requestPmoTeamsTopicFloatingOpen(options?: { anchor?: PmoTeamsTopicOpenAnchor; prompt?: string }): void {
+  const prompt = options?.prompt?.trim()
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, {
+    detail: {
+      open: true,
+      ...(options?.anchor ? { openAnchor: options.anchor } : {}),
+      ...(prompt ? { pendingPrompt: { id: crypto.randomUUID(), text: prompt } } : {})
+    }
+  }))
 }
 
-export function requestLeaderTopicFloatingClose(): void {
+export function requestPmoTeamsTopicFloatingClose(): void {
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: false } }))
 }
 
-export function useLeaderTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
+export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
   const [state, setState] = useState<FloatingState>(() => readState())
   const stateRef = useRef(state)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -88,12 +97,12 @@ export function useLeaderTopicFloatingState(): [FloatingState, (next: Partial<Fl
       const current = stateRef.current
       if (nextOpen === true && !current.open) {
         const active = document.activeElement
-        if (active instanceof HTMLElement && !active.closest('[data-leader-topic-floating]')) {
+        if (active instanceof HTMLElement && !active.closest('[data-pmo-teams-topic-floating]')) {
           returnFocusRef.current = active
         }
       }
       if (nextOpen === true && current.open) {
-        document.querySelector<HTMLElement>('[data-leader-topic-floating]')?.focus({ preventScroll: true })
+        document.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')?.focus({ preventScroll: true })
       }
       const next = { ...current, ...detail }
       stateRef.current = next
@@ -120,7 +129,7 @@ export function useLeaderTopicFloatingState(): [FloatingState, (next: Partial<Fl
   return [state, update]
 }
 
-export function clampLeaderTopicFloatingState(state: FloatingState): FloatingState {
+export function clampPmoTeamsTopicFloatingState(state: FloatingState): FloatingState {
   if (typeof window === 'undefined') return state
   const launcherPosition = state.launcherPosition ?? defaultLauncherPosition()
   const width = Math.max(420, Math.min(state.size.width, Math.max(420, window.innerWidth - 32)))

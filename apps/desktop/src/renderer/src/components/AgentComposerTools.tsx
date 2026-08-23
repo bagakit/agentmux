@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Camera, LoaderCircle } from 'lucide-react'
+import { Camera, LoaderCircle, MessagesSquare, SquareTerminal } from 'lucide-react'
 import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
 import { presentError } from '../lib/error-presentation'
+import type { SessionViewMode } from '../lib/session-state'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
 
@@ -21,9 +22,11 @@ const NEXT_SHAPE = {
   expanded: { label: 'Collapse the composer to one line', icon: 'composer-collapse' }
 } as const
 
-export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, layoutControl = true }: {
+export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, layoutControl = true, viewMode, onViewModeChange }: {
   disabled: boolean
   layoutControl?: boolean
+  viewMode?: SessionViewMode
+  onViewModeChange?: (mode: SessionViewMode) => void
   commands: NonNullable<AgentCatalogEntry['composer']>['commands']
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
@@ -53,6 +56,14 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   }
 
   return <span className="composer-tools" data-mode={mode}>
+    {viewMode && onViewModeChange ? <span className="composer-tool-view-switch" role="group" aria-label="Agent view">
+      <button type="button" className={`composer-tool composer-tool--view${viewMode === 'terminal' ? ' selected' : ''}`}
+        aria-label="Show Terminal" title="Show Terminal" aria-pressed={viewMode === 'terminal'}
+        onClick={() => onViewModeChange('terminal')}><SquareTerminal size={14} /><span className="composer-tool__label">Terminal</span></button>
+      <button type="button" className={`composer-tool composer-tool--view${viewMode === 'activity' ? ' selected' : ''}`}
+        aria-label="Show Activity" title="Show Activity" aria-pressed={viewMode === 'activity'}
+        onClick={() => onViewModeChange('activity')}><MessagesSquare size={14} /><span className="composer-tool__label">Activity</span></button>
+    </span> : null}
     {layoutControl ? <button type="button" className="composer-tool composer-tool--mode"
       aria-label={next.label} title={next.label}
       onClick={() => setMode(nextToolDockPhase)}><SemanticIcon name={next.icon} size={14} /></button> : null}

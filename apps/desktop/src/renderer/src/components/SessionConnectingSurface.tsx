@@ -5,6 +5,7 @@ import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { presentError } from '../lib/error-presentation'
 import { AgentAvatar } from './AgentAvatar'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
 export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance }: {
@@ -34,7 +35,14 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     setCopying(false)
   }
 
-  return <div className="session-connecting">
+  return <FullPageLoadingSurface
+    className="session-connecting"
+    scope="region"
+    phase={phase === 'restore' ? 'recovering' : 'loading'}
+    eyebrow={phase === 'launch' ? 'Launch request' : 'Session connection'}
+    title={title}
+    detail={detail}
+  >
     <div className="session-connecting__body">
       <div className="session-connecting__signal" aria-hidden="true">
         <span className="session-connecting__slice" />
@@ -72,5 +80,5 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
         </div>
       </section> : null}
     </div>
-  </div>
+  </FullPageLoadingSurface>
 }

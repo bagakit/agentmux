@@ -13,7 +13,9 @@ export function FullPageLoadingSurface({
   eyebrow = 'AgentMux',
   title,
   detail,
-  actions
+  actions,
+  children,
+  className
 }: {
   phase: FullPageLoadingPhase
   scope: 'app' | 'region'
@@ -21,11 +23,13 @@ export function FullPageLoadingSurface({
   title: string
   detail: string
   actions?: ReactNode
+  children?: ReactNode
+  className?: string
 }) {
   const failed = phase === 'failed'
   return (
     <section
-      className={`full-page-loading full-page-loading--${scope} full-page-loading--${phase}`}
+      className={`full-page-loading full-page-loading--${scope} full-page-loading--${phase}${className ? ` ${className}` : ''}`}
       data-loading-phase={phase}
       data-loading-scope={scope}
       role={failed ? 'alert' : 'status'}
@@ -41,8 +45,7 @@ export function FullPageLoadingSurface({
         </div>
         <div className="full-page-loading__brand"><BrandIcon size={scope === 'app' ? 36 : 28} /></div>
         <p className="full-page-loading__eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p className="full-page-loading__detail">{detail}</p>
+        {children ?? <><h1>{title}</h1><p className="full-page-loading__detail">{detail}</p></>}
         {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
       </div>
     </section>

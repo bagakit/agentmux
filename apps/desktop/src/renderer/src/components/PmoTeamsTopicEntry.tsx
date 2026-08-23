@@ -1,20 +1,20 @@
 import { MoreHorizontal } from 'lucide-react'
 import type { CSSProperties, PointerEventHandler } from 'react'
-import leaderTopicAvatar from '../assets/leader-topic-avatar.png'
-import { LEADER_TOPIC_ID, LEADER_TOPIC_TITLE } from '../../../shared/scratch-topics'
+import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
+import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE } from '../../../shared/scratch-topics'
 import { categoryFor, isUrgentAttention } from '../lib/attention-event'
 import { topicIdForSession } from '../lib/workbench-tabs'
 import {
-  requestLeaderTopicFloatingOpen,
-  requestLeaderTopicFloatingClose,
-  useLeaderTopicFloatingState,
-  type LeaderTopicLauncherPlacement
-} from '../lib/leader-topic-floating'
+  requestPmoTeamsTopicFloatingOpen,
+  requestPmoTeamsTopicFloatingClose,
+  usePmoTeamsTopicFloatingState,
+  type PmoTeamsTopicLauncherPlacement
+} from '../lib/pmo-teams-topic-floating'
 import { useAppStore } from '../store'
 
 const EMPTY_SESSIONS = [] as const
 
-export function LeaderTopicEntry({
+export function PmoTeamsTopicEntry({
   placement,
   style,
   dragging = false,
@@ -25,7 +25,7 @@ export function LeaderTopicEntry({
   onOpen,
   attached = false
 }: {
-  placement: LeaderTopicLauncherPlacement
+  placement: PmoTeamsTopicLauncherPlacement
   style?: CSSProperties
   dragging?: boolean
   onPointerDown?: PointerEventHandler<HTMLDivElement>
@@ -35,31 +35,31 @@ export function LeaderTopicEntry({
   onOpen?: () => void
   attached?: boolean
 }) {
-  const [floating, setFloating] = useLeaderTopicFloatingState()
+  const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const config = useAppStore((state) => state.config ?? null)
   const sessions = useAppStore((state) => state.sessions ?? EMPTY_SESSIONS)
   if (floating.launcherPlacement !== placement) return null
 
   const needsAttention = sessions.some((session) =>
     session.kind === 'agent'
-      && topicIdForSession(config, session) === LEADER_TOPIC_ID
+      && topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID
       && isUrgentAttention(categoryFor(session.status.state))
   )
-  const className = placement === 'floating' ? 'leader-topic-floating-launcher' : 'leader-topic-compact-launcher'
-  const nextPlacement: LeaderTopicLauncherPlacement = placement === 'floating' ? 'compact' : 'floating'
-  const toggleLabel = placement === 'floating' ? 'More Leader Topic actions: move to bottom switcher' : 'More Leader Topic actions: restore floating button'
-  const openLabel = placement === 'floating' && floating.open ? `Close ${LEADER_TOPIC_TITLE}` : `Open ${LEADER_TOPIC_TITLE}`
+  const className = placement === 'floating' ? 'pmo-teams-topic-floating-launcher' : 'pmo-teams-topic-compact-launcher'
+  const nextPlacement: PmoTeamsTopicLauncherPlacement = placement === 'floating' ? 'compact' : 'floating'
+  const toggleLabel = placement === 'floating' ? 'More PMO teams topic actions: move to bottom switcher' : 'More PMO teams topic actions: restore floating button'
+  const openLabel = placement === 'floating' && floating.open ? `Close ${PMO_TEAMS_TOPIC_TITLE}` : `Open ${PMO_TEAMS_TOPIC_TITLE}`
   const defaultOpen = (): void => {
     if (floating.open) {
-      requestLeaderTopicFloatingClose()
+      requestPmoTeamsTopicFloatingClose()
       return
     }
-    requestLeaderTopicFloatingOpen({ anchor: placement })
+    requestPmoTeamsTopicFloatingOpen({ anchor: placement })
   }
   return (
     <div
       className={`${className}${dragging ? ' is-dragging' : ''}${attached ? ' is-attached' : ''}`}
-      data-leader-topic-launcher
+      data-pmo-teams-topic-launcher
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -73,9 +73,9 @@ export function LeaderTopicEntry({
         aria-label={openLabel}
         title={openLabel}
         aria-expanded={placement === 'floating' ? floating.open : undefined}
-        aria-controls={placement === 'floating' ? 'leader-topic-floating-panel' : undefined}
+        aria-controls={placement === 'floating' ? 'pmo-teams-topic-floating-panel' : undefined}
       >
-        <img src={leaderTopicAvatar} alt="" aria-hidden="true" draggable={false} />
+        <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" draggable={false} />
         {needsAttention ? <span className={`${className}__attention`} aria-hidden="true" /> : null}
       </button>
       <button
