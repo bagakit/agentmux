@@ -1,0 +1,41 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/agent-input-and-scratch-surface-2026-09-23.md"},
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "压缩视图切换并补齐 Agent 输入身份行",
+      "objective": "将 Terminal/Activity 切换改为一个紧凑按钮，并在 AGENT INPUT 行显示用户 Agent 名称、Session 与 Executor 元信息。",
+      "outcome": "窄栏下输入行保持单行可用，用户仍能识别当前 Agent 与 Session，并能在两个观察视图间切换。",
+      "acceptance": [
+        "AgentComposerTools 只渲染一个 Terminal/Activity view toggle，点击后切到另一个 viewMode，aria-label/title 描述目标视图。",
+        "SessionPane 的 AGENT INPUT 行展示 session.label（用户命名优先）与短 Session/Executor 元信息，完整值在 tooltip/可访问名称中。",
+        "切换控件和身份行在现有 Message Tool/SessionPane 生产路径中均有调用，扫描契约断言来源非空。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/message-tool-view-switch.test.tsx test/terminal-layer-clarity.test.ts test/session-pane-composer.test.tsx --maxWorkers=1", "proves": "视图切换、AGENT INPUT 行和生产接线。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "组件 props 与 Session 元信息类型边界。"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/AgentComposerTools.tsx", "apps/desktop/src/renderer/src/components/SessionPane.tsx", "apps/desktop/src/renderer/src/styles/composer.css", "apps/desktop/src/renderer/src/styles/agent.css"],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "修复 Scratch Topic 右侧空工作面",
+      "objective": "让 Scratch Topic 的所有点击入口都落到可见 Tab/Region/内容面，并在异步准备失败时保留可重试的失败表面。",
+      "outcome": "点击 Topic 后右侧不再无声空白；已有工作面被复用，新 Topic 进入 Terminal loading/attached/failed 的完整状态链。",
+      "acceptance": [
+        "Topic 点击会显式选择 Scratch workspace 和 Workbench，创建或复用 Topic 绑定 Tab，并保证目标 Region 可见。",
+        "新 Terminal 启动中使用统一 launching/loading 表面；启动失败不清掉 Topic Tab/Region，显示原因和 Retry。",
+        "Scratch workspace、Topic panel、Board 和 pinned Topic 入口共享同一 openScratchTopic 生产路径，零调用者扫描命中。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-navigation-visible.test.ts test/workspace-selection.test.ts test/tab-placement-loudness.test.ts test/scratch-topic-layout.test.ts --maxWorkers=1", "proves": "Scratch Topic 可见工作面、复用、失败保留和布局投影。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "Scratch navigation and loading surface types."}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/store.ts", "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx", "apps/desktop/src/renderer/src/components/WorkspaceBoard.tsx", "apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx"],
+      "depends_on": ["T-001"]
+    }
+  ],
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/agent-input-and-scratch-surface-2026-09-23.md"]
+}

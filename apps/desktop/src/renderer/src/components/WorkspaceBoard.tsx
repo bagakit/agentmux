@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
@@ -163,7 +164,7 @@ export function WorkspaceBoard() {
     setActionError(null)
     try {
       if (row.kind === 'topic') {
-        await openScratchTopic(row.id)
+        await openScratchTopic(row.id, SCRATCH_WORKSPACE_ID)
         return
       }
       if (row.workspace) {

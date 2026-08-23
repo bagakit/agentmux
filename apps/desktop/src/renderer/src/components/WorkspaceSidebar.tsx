@@ -340,7 +340,7 @@ export function WorkspaceSidebar({
           {pinnedChildRows(SCRATCH_WORKSPACE_ID, 1, (topicId) => ({
             label: scratchTopics?.find((topic) => topic.id === topicId)?.title ?? topicId,
             targetId: scratch.id,
-            onSelect: () => void openScratchTopic(topicId)
+            onSelect: () => void openScratchTopic(topicId, SCRATCH_WORKSPACE_ID).catch(reportError)
           }))}
         </div>
       ) : null}

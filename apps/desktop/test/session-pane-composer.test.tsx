@@ -37,6 +37,7 @@ const fixture = vi.hoisted(() => ({
     // workspace" case: absolute paths then resolve to nothing rather than to a guess.
     config: { appearance: { terminalTheme: 'graphite' }, workspaces: [], executors: {} },
     activeWorkspaceId: undefined as string | undefined,
+    agentNames: {} as Record<string, string>,
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
     recoverSession: vi.fn(async () => {}),
@@ -156,6 +157,7 @@ afterEach(() => {
   fixture.state.viewModes = {}
   fixture.state.config = { executors: {}, appearance: { terminalTheme: 'graphite' }, workspaces: [] }
   fixture.state.activeWorkspaceId = undefined
+  fixture.state.agentNames = {}
   captured.onProseLinkClick = null
   captured.onMenuSelect = null
   captured.menuCanSplit = null
@@ -215,6 +217,23 @@ describe('SessionPane Agent Composer ownership', () => {
 
     expect(markup).toContain('data-test-view="terminal"')
     expect(markup).toContain('data-test-agent-composer="enabled"')
+  })
+
+  it('keeps the user Agent name and compact Session identity in the input rail', () => {
+    fixture.state.sessions = [session('agent')]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+    fixture.state.agentNames = { 'agent-1': 'codex /name' }
+    fixture.state.config = {
+      executors: { codex: { label: 'Codex', providerId: 'codex' } },
+      appearance: { terminalTheme: 'graphite' },
+      workspaces: []
+    }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('codex /name')
+    expect(markup).toContain('Codex · agent-1')
+    expect(markup).toContain('Session agent-1')
   })
 
   it('shows the same Composer slot with an Agent Activity projection', () => {
