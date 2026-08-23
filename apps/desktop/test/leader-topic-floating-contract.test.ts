@@ -40,7 +40,7 @@ it('keeps Leader Topic on one fixed floating/compact launcher and one canonical 
   expect(styles).not.toContain('color-mix(in srgb, var(--green) 55%, var(--line))')
   expect(panel).toContain('api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID)')
   expect(panel).toContain('api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID, LEADER_TOPIC_TITLE)')
-  expect(panel).toContain('openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID)')
+  expect(panel).toContain('openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })')
   expect(panel).toContain('topicId={LEADER_TOPIC_ID}')
   expect(panel).toContain('if (floating.open)')
   expect(panel).toContain('requestLeaderTopicFloatingClose()')
