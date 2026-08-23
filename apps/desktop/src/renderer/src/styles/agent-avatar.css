@@ -1,13 +1,13 @@
 /* The Provider alpha owns the contour; status, custom badge and count each have one corner. */
 .agent-avatar {
-  width: var(--agent-avatar-size, 18px); height: var(--agent-avatar-size, 18px); padding: 0; gap: 0; position: relative;
+  width: var(--agent-avatar-size); height: var(--agent-avatar-size); padding: 0; gap: 0; position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
   flex-shrink: 0; overflow: visible; transition: transform .12s ease;
 }
 .agent-avatar__filters { position: absolute; pointer-events: none; }
 .agent-avatar__mark, .agent-avatar__contour { display: inline-flex; }
-.agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: var(--agent-avatar-size, 18px); height: var(--agent-avatar-size, 18px); }
+.agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: var(--agent-avatar-size); height: var(--agent-avatar-size); }
 .agent-avatar__contour { filter: none; }
 .agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: none; }
 .agent-avatar .agent-avatar__status { position: absolute; top: -2px; right: -2px; margin: 0; outline: 1px solid var(--surface-1); }

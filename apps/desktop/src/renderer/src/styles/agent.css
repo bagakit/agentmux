@@ -120,6 +120,24 @@
 /* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
 .agent-status-bar .status--working .status__dot { animation: none; }
 .agent-input-stack { min-width: 0; background: transparent; }
+.agent-input-stack[data-input-surface='terminal'] {
+  padding: 0 var(--sp-3) var(--sp-2);
+  border-top: 1px solid var(--line-soft);
+  background: var(--surface-1);
+}
+.agent-input-stack__rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--sp-6);
+  padding: var(--sp-1) var(--sp-1) 0;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.agent-input-stack__rail span:last-child { color: var(--neutral-1); letter-spacing: .02em; text-transform: none; }
+.agent-input-stack[data-input-surface='terminal'] .composer { margin: 0; border-color: var(--line-soft); background: var(--surface-0); }
 .session-result-review { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--hl); }
 .session-result-review__identity { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--green); }
 .session-result-review__identity span { display: grid; gap: var(--sp-1); }
