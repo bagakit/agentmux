@@ -5,7 +5,6 @@ import { api } from '../lib/api'
 import {
   clampLeaderTopicFloatingState,
   requestLeaderTopicFloatingClose,
-  requestLeaderTopicFloatingOpen,
   useLeaderTopicFloatingState
 } from '../lib/leader-topic-floating'
 import { useAppStore } from '../store'
@@ -13,6 +12,7 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { LeaderTopicEntry } from './LeaderTopicEntry'
 
 const DRAG_THRESHOLD = 3
+const ATTACHED_LAUNCHER_OFFSET = { left: 12, top: 4 }
 
 export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
@@ -99,7 +99,14 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
     const dy = event.clientY - drag.y
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
     drag.moved = true
-    setFloating(clampLeaderTopicFloatingState({ ...floating, position: { left: drag.left + dx, top: drag.top + dy } }))
+    const position = { left: drag.left + dx, top: drag.top + dy }
+    setFloating(clampLeaderTopicFloatingState({
+      ...floating,
+      position,
+      launcherPosition: floating.open
+        ? { left: position.left + ATTACHED_LAUNCHER_OFFSET.left, top: position.top + ATTACHED_LAUNCHER_OFFSET.top }
+        : floating.launcherPosition
+    }))
   }
   const onPanelPointerEnd = (event: React.PointerEvent<HTMLDivElement>): void => {
     const drag = panelDragRef.current
@@ -110,7 +117,10 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
 
   const onLauncherPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return
-    launcherDragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: floating.launcherPosition.left, top: floating.launcherPosition.top, moved: false }
+    const origin = floating.open
+      ? { left: floating.position.left, top: floating.position.top }
+      : floating.launcherPosition
+    launcherDragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: origin.left, top: origin.top, moved: false }
     suppressLauncherClickRef.current = false
     setLauncherDragging(true)
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -123,7 +133,14 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
     drag.moved = true
     suppressLauncherClickRef.current = true
-    setFloating(clampLeaderTopicFloatingState({ ...floating, launcherPosition: { left: drag.left + dx, top: drag.top + dy } }))
+    const position = { left: drag.left + dx, top: drag.top + dy }
+    setFloating(clampLeaderTopicFloatingState({
+      ...floating,
+      ...(floating.open ? {
+        position,
+        launcherPosition: { left: position.left + ATTACHED_LAUNCHER_OFFSET.left, top: position.top + ATTACHED_LAUNCHER_OFFSET.top }
+      } : { launcherPosition: position })
+    }))
   }
   const onLauncherPointerEnd = (event: React.PointerEvent<HTMLDivElement>): void => {
     const drag = launcherDragRef.current
@@ -136,14 +153,29 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
       suppressLauncherClickRef.current = false
       return
     }
-    requestLeaderTopicFloatingOpen()
+    if (floating.open) {
+      requestLeaderTopicFloatingClose()
+      return
+    }
+    const position = typeof window === 'undefined'
+      ? floating.position
+      : {
+          left: floating.launcherPosition.left - ATTACHED_LAUNCHER_OFFSET.left,
+          top: floating.launcherPosition.top > window.innerHeight / 2
+            ? floating.launcherPosition.top - floating.size.height - 8
+            : floating.launcherPosition.top + 42 + 8
+        }
+    setFloating(clampLeaderTopicFloatingState({ ...floating, open: true, position }))
   }
 
   return (
     <>
       <LeaderTopicEntry
         placement="floating"
-        style={{ left: floating.launcherPosition.left, top: floating.launcherPosition.top }}
+        style={floating.open
+          ? { left: geometry.left + ATTACHED_LAUNCHER_OFFSET.left, top: geometry.top + ATTACHED_LAUNCHER_OFFSET.top }
+          : { left: floating.launcherPosition.left, top: floating.launcherPosition.top }}
+        attached={floating.open}
         dragging={launcherDragging}
         onPointerDown={onLauncherPointerDown}
         onPointerMove={onLauncherPointerMove}
@@ -154,6 +186,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
       <div
         ref={panelRef}
         className={`leader-topic-floating${floating.open ? '' : ' leader-topic-floating--hidden'}`}
+        id="leader-topic-floating-panel"
         role="dialog"
         aria-modal="false"
         aria-hidden={!visible}
@@ -165,7 +198,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
         <div className={`leader-topic-floating__shell${dragging ? ' is-dragging' : ''}`}>
           {floating.open ? (
             <div
-              className="leader-topic-floating__titlebar"
+              className="leader-topic-floating__titlebar leader-topic-floating__titlebar--attached"
               onPointerDown={onPanelPointerDown}
               onPointerMove={onPanelPointerMove}
               onPointerUp={onPanelPointerEnd}
