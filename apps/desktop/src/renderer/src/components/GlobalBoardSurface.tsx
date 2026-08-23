@@ -13,6 +13,7 @@ import {
   Search,
   SlidersHorizontal,
   SquareTerminal,
+  Trash2,
   X
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -86,17 +87,24 @@ function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { de
   )
 }
 
-function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate, executors }: {
+function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate, onDelete, executors, allSessions, tabs }: {
   demand: DemandProjection
   arrangement: DemandArrangement
   onArrangement: (value: DemandArrangement) => void
   onClose: () => void
-  onUpdate: (patch: Partial<Pick<DemandProjection, 'status' | 'priority' | 'assigneeExecutorId' | 'activityLog'>>) => void
+  onUpdate: (patch: Partial<Pick<DemandProjection, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds'>>) => void
+  onDelete: () => void
   executors: Record<string, { label: string }>
+  allSessions: readonly SessionSnapshot[]
+  tabs: ReturnType<typeof useAppStore.getState>['tabs']
 }) {
   const config = useAppStore((state) => state.config)
   const selectSession = useAppStore((state) => state.selectSession)
   const sessions = demand.sessions
+  const [title, setTitle] = useState(demand.title)
+  const [description, setDescription] = useState(demand.description)
+  const [sessionToAdd, setSessionToAdd] = useState('')
+  useEffect(() => { setTitle(demand.title); setDescription(demand.description); setSessionToAdd('') }, [demand.id, demand.title, demand.description])
   const arrangementClass = arrangement === 'grid' ? 'global-demand-workspace__regions--grid' : arrangement === 'balanced' ? 'global-demand-workspace__regions--balanced' : 'global-demand-workspace__regions--columns'
   return (
     <aside className="global-demand-workspace" aria-label={`Demand workspace for ${demand.title}`}>
@@ -106,10 +114,21 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
           <strong>{demand.title}</strong>
           <small>{demand.projectName ?? 'Global demand'} · {demand.sessionIds.length} linked Session{demand.sessionIds.length === 1 ? '' : 's'}</small>
         </div>
-        <button type="button" className="icon-button" title="Close demand workspace" aria-label="Close demand workspace" onClick={onClose}><PanelRightClose size={15} /></button>
+        <div className="global-demand-workspace__header-actions"><button type="button" className="icon-button" title="Delete demand" aria-label="Delete demand" onClick={() => { if (window.confirm(`Delete demand “${demand.title}”?`)) onDelete() }}><Trash2 size={14} /></button><button type="button" className="icon-button" title="Close demand workspace" aria-label="Close demand workspace" onClick={onClose}><PanelRightClose size={15} /></button></div>
       </header>
+      <div className="global-demand-workspace__editor">
+        <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => onUpdate({ title })} /></label>
+        <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => onUpdate({ description })} rows={3} /></label>
+        <div className="global-demand-workspace__toolbar">
+          <label className="global-board-select">Status<select aria-label="Demand status" value={demand.status} onChange={(event) => onUpdate({ status: event.target.value as DemandStatus })}>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select></label>
+          <label className="global-board-select">Priority<select aria-label="Demand priority" value={demand.priority} onChange={(event) => onUpdate({ priority: event.target.value as DemandPriority })}>{Object.entries(PRIORITY_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+          <label className="global-board-select">Project<select aria-label="Demand project" value={demand.projectId ?? ''} onChange={(event) => { const project = config?.workspaces.find((workspace) => workspace.id === event.target.value); onUpdate({ projectId: project?.id ?? null, projectName: project?.name ?? null }) }}><option value="">Unassigned</option>{config?.workspaces.filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label className="global-board-select">Assignee<select aria-label="Demand assignee" value={demand.assigneeExecutorId ?? ''} onChange={(event) => onUpdate({ assigneeExecutorId: event.target.value || null })}><option value="">Unassigned</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
+        </div>
+        <div className="global-demand-workspace__assignment"><strong>Linked Sessions</strong><div className="global-demand-workspace__assignment-add"><select aria-label="Add Session to demand" value={sessionToAdd} onChange={(event) => setSessionToAdd(event.target.value)}><option value="">Choose a Session</option>{allSessions.filter((session) => !demand.sessionIds.includes(session.id)).map((session) => <option key={session.id} value={session.id}>{session.label} · {session.id.slice(0, 8)}</option>)}</select><button type="button" className="small-button" disabled={!sessionToAdd} onClick={() => { onUpdate({ sessionIds: [...demand.sessionIds, sessionToAdd] }); setSessionToAdd('') }}>Add</button></div>{demand.sessions.map((session) => <div className="global-demand-workspace__assignment-row" key={session.id}><span>{session.label}</span><button type="button" className="small-button" onClick={() => onUpdate({ sessionIds: demand.sessionIds.filter((id) => id !== session.id) })}>Remove</button></div>)}</div>
+        <AgentTopologySummary sessionIds={demand.sessionIds} sessions={allSessions} tabs={tabs} config={config} />
+      </div>
       <div className="global-demand-workspace__toolbar">
-        <span className="global-demand-workspace__fact">{demand.description || 'No demand description yet'}</span><label className="global-board-select">Status<select aria-label="Demand status" value={demand.status} onChange={(event) => onUpdate({ status: event.target.value as DemandStatus })}>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select></label><label className="global-board-select">Assignee<select aria-label="Demand assignee" value={demand.assigneeExecutorId ?? ''} onChange={(event) => onUpdate({ assigneeExecutorId: event.target.value || null })}><option value="">Unassigned</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
         <div className="global-demand-workspace__arrangement" role="group" aria-label="Session arrangement">
           <button type="button" className={arrangement === 'columns' ? 'is-active' : ''} onClick={() => onArrangement('columns')} title="Columns"><Columns3 size={13} /></button>
           <button type="button" className={arrangement === 'grid' ? 'is-active' : ''} onClick={() => onArrangement('grid')} title="Grid"><Grid2X2 size={13} /></button>
@@ -166,6 +185,7 @@ export function GlobalBoardSurface() {
   const demandArrangement = useAppStore((state) => state.demandArrangement)
   const setDemandArrangement = useAppStore((state) => state.setDemandArrangement)
   const updateDemand = useAppStore((state) => state.updateDemand)
+  const deleteDemand = useAppStore((state) => state.deleteDemand)
   const executorCatalog = useAppStore((state) => state.config?.executors)
   const executors = executorCatalog ?? EMPTY_EXECUTORS
   const [query, setQuery] = useState('')
@@ -224,7 +244,7 @@ export function GlobalBoardSurface() {
         </div>
         <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} demands</span><span className="global-board-footer__hint">Select a demand to keep its context beside the board</span></footer>
       </div>
-      {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} executors={executors} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
+      {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} onDelete={() => { deleteDemand(selectedDemand.id); setSelectedDemand(null) }} executors={executors} allSessions={sessions} tabs={tabs} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
     </section>
   )
 }
