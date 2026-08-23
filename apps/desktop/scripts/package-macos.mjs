@@ -38,6 +38,7 @@ const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
 const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const coreRoot = join(repositoryRoot, 'packages', 'core')
+const demandRoot = join(repositoryRoot, 'packages', 'demand')
 const releaseRoot = join(desktopRoot, 'release', 'mac')
 const outputApp = join(releaseRoot, `${PRODUCT_NAME}.app`)
 const outputDmg = join(
@@ -241,6 +242,23 @@ async function copyRuntimeApplication(appPath, source) {
     coreRoot,
     coreManifest.dependencies ?? {},
     join(coreRuntime, 'node_modules')
+  )
+  const demandRuntime = join(appResources, 'node_modules', '@agentmux', 'demand')
+  const demandManifest = JSON.parse(await readFile(join(demandRoot, 'package.json'), 'utf8'))
+  await mkdir(demandRuntime, { recursive: true })
+  await cp(join(demandRoot, 'dist'), join(demandRuntime, 'dist'), { recursive: true })
+  await writeFile(join(demandRuntime, 'package.json'), `${JSON.stringify({
+    name: demandManifest.name,
+    version: demandManifest.version,
+    type: demandManifest.type,
+    main: demandManifest.main,
+    exports: demandManifest.exports,
+    bin: demandManifest.bin
+  }, null, 2)}\n`)
+  await materializeDependencies(
+    demandRoot,
+    demandManifest.dependencies ?? {},
+    join(demandRuntime, 'node_modules')
   )
   await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
@@ -1000,6 +1018,7 @@ async function main() {
   // Build Core first so a clean checkout never asks Vite to resolve a dist file that has not
   // been emitted yet; the packaged runtime still copies the exact Core output from this build.
   await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: repositoryRoot })
+  await run('pnpm', ['--filter', '@agentmux/demand', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
