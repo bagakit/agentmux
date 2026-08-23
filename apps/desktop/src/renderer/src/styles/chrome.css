@@ -150,7 +150,6 @@
 .project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
 .project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
-.project-rail-row__identity .project-rail-row__activity { color: var(--text-2); font-variant-numeric: tabular-nums; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
 .scratch-workspace-row__icon { background: transparent; }
@@ -348,19 +347,15 @@
 .project-rail-group__header { gap: var(--sp-2); }
 .project-rail-row__icon img { width: 100%; height: 100%; object-fit: contain; }
 
-.project-activity { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp-1); border: 0; padding: var(--sp-1); border-radius: var(--radius-sm); color: var(--green); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
-.project-activity__count { min-width: 1.1em; font-variant-numeric: tabular-nums; text-align: center; }
-.project-activity__label { max-width: 0; overflow: hidden; opacity: 0; white-space: nowrap; transition: max-width var(--dur-fast) ease, opacity var(--dur-fast) ease; }
-.project-activity:hover .project-activity__label, .project-activity:focus-visible .project-activity__label { max-width: 9ch; opacity: 1; }
-.project-activity:hover { background: var(--surface-3); }
-.project-activity[data-category='needs-you'] { color: var(--amber); }
-.project-activity[data-category='error'] { color: var(--red-text); }
-.project-activity__pulse { display: inline-flex; height: 12px; align-items: center; gap: var(--sp-1); }
-.project-activity__pulse i { width: 2px; height: 8px; border-radius: var(--radius-sm); background: currentColor; animation: rail-activity 1.2s ease-in-out infinite alternate; }
-.project-activity__pulse i:nth-child(2) { height: 12px; animation-delay: -.4s; }
-.project-activity__pulse i:nth-child(3) { animation-delay: -.8s; }
-@keyframes rail-activity { to { transform: scaleY(.4); opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .project-activity__pulse i { animation: none; } }
+.project-activity { flex-shrink: 0; display: inline-flex; align-items: center; border: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
+.project-activity__metrics { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.project-activity__metric { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 22px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.project-activity__metric strong { min-width: 1.1em; text-align: center; font-size: var(--fs-micro); font-weight: 650; }
+.project-activity__metric--needs-you { color: var(--amber); }
+.project-activity__metric--error { color: var(--red-text); }
+.project-activity__metric--working { color: var(--green); }
+.project-activity__metric--idle { color: var(--text-3); }
+.project-activity:hover, .project-activity:focus-visible { background: var(--surface-3); }
 .project-activity-menu { width: min(460px, calc(100vw - var(--sp-8))); max-width: min(460px, calc(100vw - var(--sp-8))); max-height: min(70vh, 560px); overflow-y: auto; padding: var(--sp-1); }
 /* 一行一条 <small>：主句吃剩余宽度并省略号截断，尾随事实靠右、不收缩、tabular 对齐，两段分列各占一侧扫得快。 */
 .project-activity-menu__item small { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
