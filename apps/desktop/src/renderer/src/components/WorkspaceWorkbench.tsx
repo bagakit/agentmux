@@ -42,7 +42,6 @@ import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-to
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
-import { DefaultSessionEntry } from './DefaultSessionEntry'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
@@ -847,7 +846,7 @@ function PaneGroup({
   nativeSurfacesVisible,
   interactiveResize,
   isRootLeaf,
-  showDefaultSessionEntry = true
+  showWindowChrome = false
 }: {
   group: TabGroup
   workspaceId: string
@@ -858,7 +857,7 @@ function PaneGroup({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   isRootLeaf?: boolean
-  showDefaultSessionEntry?: boolean
+  showWindowChrome?: boolean
 }) {
   const tabsById = useAppStore((state) => state.tabs)
   const sessions = useAppStore((state) => state.sessions)
@@ -926,8 +925,8 @@ function PaneGroup({
       data-pane-group-id={group.id}
       onPointerDown={() => focusTabGroup(workspaceId, group.id)}
     >
-      <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''}`}>
-        {isRootLeaf ? (
+      <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
+        {isRootLeaf || showWindowChrome ? (
           <TopRowLeadingChrome />
         ) : null}
         <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
@@ -943,7 +942,6 @@ function PaneGroup({
           </WorkbenchTabStrip>
         </SortableContext>
         <div className="pane-tabbar__actions">
-          {isRootLeaf && showDefaultSessionEntry ? <DefaultSessionEntry placement="topbar" respectHidden={false} /> : null}
           {activeAgentSession ? (
             <div className="pane-view-toggle" aria-label="Agent view">
               <button
@@ -1059,7 +1057,7 @@ function SplitNode({
   nativeSurfacesVisible,
   interactiveResize = false,
   isRootLeaf = false,
-  showDefaultSessionEntry = true
+  showWindowChrome = false
 }: {
   node: TabGroupLayoutNode
   nodePath: string
@@ -1070,7 +1068,7 @@ function SplitNode({
   nativeSurfacesVisible: boolean
   interactiveResize?: boolean
   isRootLeaf?: boolean
-  showDefaultSessionEntry?: boolean
+  showWindowChrome?: boolean
 }) {
   if (node.type === 'leaf') {
     const group = layout.groups.find((candidate) => candidate.id === node.groupId)
@@ -1084,7 +1082,7 @@ function SplitNode({
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
-        showDefaultSessionEntry={showDefaultSessionEntry}
+        showWindowChrome={showWindowChrome}
       />
     ) : null
   }
@@ -1098,7 +1096,7 @@ function SplitNode({
       splitTarget={splitTarget}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
-      showDefaultSessionEntry={showDefaultSessionEntry}
+      showWindowChrome={showWindowChrome}
     />
   )
 }
@@ -1112,7 +1110,7 @@ function SplitBranch({
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize,
-  showDefaultSessionEntry
+  showWindowChrome
 }: {
   node: Extract<TabGroupLayoutNode, { type: 'split' }>
   nodePath: string
@@ -1122,7 +1120,7 @@ function SplitBranch({
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
-  showDefaultSessionEntry: boolean
+  showWindowChrome: boolean
 }) {
   const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
   const [dragging, setDragging] = useState(false)
@@ -1155,7 +1153,7 @@ function SplitBranch({
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
-          showDefaultSessionEntry={showDefaultSessionEntry}
+          showWindowChrome={showWindowChrome}
         />
       </Panel>
       <PanelResizeHandle
@@ -1175,7 +1173,7 @@ function SplitBranch({
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
-          showDefaultSessionEntry={showDefaultSessionEntry}
+          showWindowChrome={false}
         />
       </Panel>
     </PanelGroup>
@@ -1206,8 +1204,7 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
-  visible = true,
-  showDefaultSessionEntry = true
+  visible = true
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1215,9 +1212,8 @@ export function WorkspaceWorkbench({
    * Whether this window-level Workbench slot is currently on screen. The slot stays mounted while
    * false so SessionPane/xterm/ctxmux attachments survive Workspace navigation; native surfaces use
    * this seam to stop fit/bounds work until the slot is visible again.
-   */
+  */
   visible?: boolean
-  showDefaultSessionEntry?: boolean
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
@@ -1287,9 +1283,7 @@ export function WorkspaceWorkbench({
   }
 
   if (!layout) return null
-  // MERGE：不分屏时把全局 chrome 注入唯一 pane 的 tabbar（root tabbar）；
-  // 分屏时 tabbar 无法承载全局 chrome，改在 SplitNode 上方渲染一条惰性 chromeline
-  // （无 tab、无 data-pane-group-id，对 pointerWithin 完全透明，不影响 DnD 命中）。
+  // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
   return (
     <DndContext
@@ -1305,11 +1299,6 @@ export function WorkspaceWorkbench({
       autoScroll={false}
     >
       <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}>
-        {rootIsLeaf ? null : (
-          <div className="workbench-chromeline">
-            <TopRowLeadingChrome />
-          </div>
-        )}
         <SplitNode
           node={layout.root}
           nodePath=""
@@ -1320,7 +1309,7 @@ export function WorkspaceWorkbench({
           nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
-          showDefaultSessionEntry={showDefaultSessionEntry}
+          showWindowChrome={!rootIsLeaf}
         />
       </div>
       <DragOverlay dropAnimation={null}>
