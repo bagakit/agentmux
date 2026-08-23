@@ -52,6 +52,8 @@
   --sp-6: 16px;
   --sp-7: 24px;
   --sp-8: 32px;  /* 空态与页面级留白 */
+  --sp-page: 72px;      /* Global surface 的宽屏内边距上限 */
+  --sp-page-wide: 120px; /* Global surface 的宽屏横向内边距上限 */
   /* 状态色家族：每个语义色派生出「浅文字 / 深底 / 中边框」三件套。
      它们此前是手调出来的三十多个近似 hex——调一次基色传导不到任何一处。改用 color-mix
      从基色派生后，调 --red 就等于调整整个危险语汇，且深浅关系不会各自漂移。 */
@@ -73,6 +75,7 @@
   --scrim-1: #00000040;
   --scrim-2: #00000073;
   --scrim-3: #000000a6;
+  --mask-opaque: #000;
   --wash-1: #ffffff08;
   --wash-2: #ffffff14;
   --wash-3: #ffffff24;
