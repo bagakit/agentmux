@@ -385,4 +385,33 @@ describe('T-002 switching reuses the bound View', () => {
     // No third Tab created: the bound View was focused, not duplicated.
     expect(Object.keys(state.tabs).sort()).toEqual(['launcher:bound', 'launcher:other'])
   })
+
+  it('reveals the Topic workbench when user navigation starts from another main surface', async () => {
+    mountScratch([scratchTopicTab('launcher:bound', 'view:shared')])
+    useAppStore.setState({ mainSurface: 'board' })
+    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic('view:shared'))
+
+    await useAppStore.getState().openScratchTopic('view:shared', SCRATCH_WORKSPACE_ID)
+
+    const state = useAppStore.getState()
+    expect(state.mainSurface).toBe('workbench')
+    expect(state.activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBe('launcher:bound')
+  })
+
+  it('can prepare a background Topic without stealing the current surface', async () => {
+    mountScratch([scratchTopicTab('launcher:leader', 'launcher:leader')])
+    useAppStore.setState({ activeWorkspaceId: 'project-a', mainSurface: 'board' })
+    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic('launcher:leader'))
+
+    await useAppStore.getState().openScratchTopic(
+      'launcher:leader',
+      SCRATCH_WORKSPACE_ID,
+      { reveal: false }
+    )
+
+    const state = useAppStore.getState()
+    expect(state.mainSurface).toBe('board')
+    expect(state.activeWorkspaceId).toBe('project-a')
+  })
 })
