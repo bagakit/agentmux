@@ -758,6 +758,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 ### 状态、Browser 与 Scratch / Topic 密度（2026-09-22）
 
 - Project 树中的 idle 数量使用一行内的 muted micro metadata，和 working/attention 信息同一基线；它不变成头像角标或红色强调。停止/退出态使用中性颜色，error 只使用于明确故障事实。
+- working 与 idle 的计数口径归交互合同「活着和正在产出分开说」，本层只定义它们的视觉层级。
 - Browser 页面优先于控制提示。控制条是紧凑的 page-adjacent rail，只有 active operation、接管或交还时占用一行；空闲 Browser 不画大卡片或 `Browser ready / You have control` 占位文案，也不遮挡原生页面。
 - Scratch 父行与 Topic 子行共享 Project rail 的缩进和垂直节奏。Topic 的字号比普通项目小一级、行高更紧，标题允许省略但操作和选中态完整；hover 用细线/下划线和轻微 surface 变化表达，不使用厚重背景块。Topic 行的打开状态、更新时间或 Agent presence 用低对比度辅助信息表达，新增和空列表用明确但紧凑的引导。
 
@@ -766,6 +767,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 - Executor identity 组件在 Tab、树、Session、Board 和 Browser rail 中共享同一图标盒、状态点尺寸、珐琅外轮廓和 hover/focus 信息面板；调用方只提供尺寸上下文，不重写内部间距。
 - 自定义 Executor 图标是 Provider 图标内部的小型叠加，不能向外扩成第二圈。状态点只在 working、needs-user、blocked、disconnected 或明确 error 时显示，idle/正常停止不添加常驻装饰。
 - 信息面板使用现有 tooltip 的 micro/compact 字号和边距，内容分成身份、状态和一个小型设置动作；设置动作进入 Executor 模板设置，不把 Appearance 的控件复制进面板。
+- 既有头像的保留和 Reset 语义归交互合同「旧配置的 Executor 身份不能丢」；所有尺寸下的设置预览与实际身份图保持一致。
 
 ### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
 

@@ -55,3 +55,16 @@
 - Agents 面板的 working/error 状态、Provider 图标和状态点层次清楚；悬停或键盘聚焦头像会出现统一 `Executor details` 面板，设置按钮实际进入 Agents/Executors 设置。
 - Executor 设置中的 Avatar、Tint、Icon 与稳定 Executor ID 同行，Appearance 页面不再出现头像编辑入口。
 - 窄视口下项目栏、工具栏和主内容仍保持可读，长内容通过现有裁剪与标题提示处理；未发现 Browser rail 遮挡原生页面的现象。
+
+### Final review corrections
+
+- 修复了真实的重复计数：Project/Scratch/group 文案的 working 数量排除安静的 running Session，独立运行标记仍沿用 Board 的可用性投影。Project 行渲染测试明确区分 `1 Agent is working` 与 `1 idle`。
+- 旧 Appearance 头像进入 Executor 设置草稿，并参与 Tab 的视觉去重；明确 Reset 写入空的 Executor 外观覆盖。保存、重开设置与实际 AgentAvatar 都保持重置结果，旧记录没有被删除，Reset 在默认外观时禁用。
+- 修复后的定向回归为 `14 files / 216 tests passed`；另外 `project-rail` 的 35 条与 `session-connecting-surface` 的 9 条通过。恢复套件为 `7 files / 78 tests passed`，Desktop typecheck 通过。
+- 三个补充变异均按预期变红并恢复：反转 producing 的 running 排除项（Project 行三条断言红）；移除 Tab facts 的既有头像读取（两枚不同标记被错误合并，断言红）；Reset 删除空覆盖（持久化重置断言红）。
+- `producingAgentCount` 排除定义文件后的生产调用位是 WorkspaceSidebar 的 Scratch、Project 与 group 三处；Tab facts 的既有头像参数由 WorkspaceWorkbench 实际传入。
+- 测试依赖曾被外部临时安装目录的 symlink 替换而失效；已用项目现有锁文件离线重装依赖，未增加包或修改锁文件。T-005 先前 `-15` 只说明命令收到了 SIGTERM，没有证据把它归因为测试超时。
+
+### Bounded learning
+
+Provider 相同不等于 Executor 外观相同；所有去重都必须读实际渲染的外观。进程可用性与语义产出应在文案里说清楚，不能把 quiet Session 同时计入两个互斥描述。上述结论已归入本轮交互 SSOT；不另建知识或配置存储。

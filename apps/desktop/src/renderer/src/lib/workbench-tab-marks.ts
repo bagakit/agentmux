@@ -60,14 +60,17 @@ export type TabMarkAgentFacts = { providerId: string; status: SessionStatus; ses
  */
 export function tabMarkAgentFactsFor(
   sessions: readonly TabMarkSession[],
-  executors?: Readonly<Record<string, { avatar?: AgentAvatarAppearance }>>
+  executors?: Readonly<Record<string, { avatar?: AgentAvatarAppearance }>>,
+  legacyAvatars?: Readonly<Record<string, AgentAvatarAppearance>>
 ): (surface: WorkbenchSurface) => TabMarkAgentFacts | null {
   const sessionById = new Map(sessions.map((session) => [session.id, session]))
   return (surface) => {
     if (!isSessionSurface(surface)) return null
     const session = sessionById.get(surface.sessionId)
     if (session?.kind !== 'agent') return null
-    const appearance = session.executorId ? executors?.[session.executorId]?.avatar : undefined
+    const appearance = session.executorId
+      ? executors?.[session.executorId]?.avatar ?? legacyAvatars?.[session.executorId]
+      : undefined
     return {
       providerId: session.providerId,
       status: session.status,
