@@ -21,6 +21,9 @@ describe('window-owned Workspace Workbench registry', () => {
     expect(app).toContain('const mountedWorkspaces = config?.workspaces.filter')
     expect(app).toContain('layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)')
     expect(app).toContain('{mountedWorkspaces.map((candidate) =>')
+    // Scratch owns real Topic Tabs/Regions. Filtering its stable id leaves the right workbench
+    // surface empty after openScratchTopic has already selected it.
+    expect(app).not.toContain("candidate.id !== '__scratch__'")
     // A conditional active-only render is the exact regression that destroys xterm attachments.
     expect(app).not.toContain('<WorkspaceWorkbench\n                        workspaceId={workspace.id}')
   })
