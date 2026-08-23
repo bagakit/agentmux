@@ -1,0 +1,50 @@
+{
+  "name": "@agentmux/demand",
+  "version": "0.1.0",
+  "description": "Host-neutral filesystem Demand store and CLI for AgentMux",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/bagakit/agentmux.git",
+    "directory": "packages/demand"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./store": {
+      "types": "./dist/src/demand-store.d.ts",
+      "import": "./dist/src/demand-store.js"
+    },
+    "./types": {
+      "types": "./dist/src/demand-types.d.ts",
+      "import": "./dist/src/demand-types.js"
+    },
+    "./cli": {
+      "types": "./dist/src/cli.d.ts",
+      "import": "./dist/src/cli.js"
+    }
+  },
+  "bin": {
+    "agentmux-demand": "./dist/bin/agentmux-demand.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
