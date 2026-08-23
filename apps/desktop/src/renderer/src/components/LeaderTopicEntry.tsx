@@ -21,7 +21,8 @@ export function LeaderTopicEntry({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
-  onOpen
+  onOpen,
+  attached = false
 }: {
   placement: LeaderTopicLauncherPlacement
   style?: CSSProperties
@@ -31,6 +32,7 @@ export function LeaderTopicEntry({
   onPointerUp?: PointerEventHandler<HTMLDivElement>
   onPointerCancel?: PointerEventHandler<HTMLDivElement>
   onOpen?: () => void
+  attached?: boolean
 }) {
   const [floating, setFloating] = useLeaderTopicFloatingState()
   const config = useAppStore((state) => state.config ?? null)
@@ -44,10 +46,11 @@ export function LeaderTopicEntry({
   )
   const className = placement === 'floating' ? 'leader-topic-floating-launcher' : 'leader-topic-compact-launcher'
   const nextPlacement: LeaderTopicLauncherPlacement = placement === 'floating' ? 'compact' : 'floating'
-  const toggleLabel = placement === 'floating' ? 'Move Leader Topic to bottom switcher' : 'Restore Leader Topic as floating button'
+  const toggleLabel = placement === 'floating' ? 'More Leader Topic actions: move to bottom switcher' : 'More Leader Topic actions: restore floating button'
+  const openLabel = placement === 'floating' && floating.open ? `Close ${LEADER_TOPIC_TITLE}` : `Open ${LEADER_TOPIC_TITLE}`
   return (
     <div
-      className={`${className}${dragging ? ' is-dragging' : ''}`}
+      className={`${className}${dragging ? ' is-dragging' : ''}${attached ? ' is-attached' : ''}`}
       data-leader-topic-launcher
       style={style}
       onPointerDown={onPointerDown}
@@ -59,8 +62,10 @@ export function LeaderTopicEntry({
         type="button"
         className={`${className}__button`}
         onClick={onOpen ?? requestLeaderTopicFloatingOpen}
-        aria-label={`Open ${LEADER_TOPIC_TITLE}`}
-        title={`Open ${LEADER_TOPIC_TITLE}`}
+        aria-label={openLabel}
+        title={openLabel}
+        aria-expanded={placement === 'floating' ? floating.open : undefined}
+        aria-controls={placement === 'floating' ? 'leader-topic-floating-panel' : undefined}
       >
         <img src={leaderTopicAvatar} alt="" aria-hidden="true" draggable={false} />
         {needsAttention ? <span className={`${className}__attention`} aria-hidden="true" /> : null}

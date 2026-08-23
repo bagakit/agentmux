@@ -41,7 +41,7 @@ describe('Leader Topic launcher', () => {
     await act(async () => button.click())
     expect(requested).toBe(true)
 
-    const mode = container.querySelector('button[aria-label="Move Leader Topic to bottom switcher"]') as HTMLButtonElement
+    const mode = container.querySelector('button[aria-label="More Leader Topic actions: move to bottom switcher"]') as HTMLButtonElement
     await act(async () => mode.click())
     await act(async () => root.render(createElement(LeaderTopicEntry, { placement: 'compact' })))
     expect(container.querySelector('.leader-topic-compact-launcher')).toBeTruthy()
