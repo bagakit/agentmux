@@ -49,7 +49,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
         if (snapshot.title !== LEADER_TOPIC_TITLE) {
           await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID, LEADER_TOPIC_TITLE)
         }
-        await openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID)
+        await openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })
       })
       .catch(reportError)
   }, [floating.open, openScratchTopic, reportError, scratch])
