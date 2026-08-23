@@ -65,7 +65,10 @@ describe('Session result review strip', () => {
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
     expect(container.textContent).toContain('workspace could not be located')
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Review changes'))).toBe(false)
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
+      'Activity',
+      'Continue in Session'
+    ])
     expect(openFileDiff).not.toHaveBeenCalled()
   })
 
@@ -121,7 +124,10 @@ describe('Session result review strip', () => {
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: '../outside.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Review changes'))).toBe(false)
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
+      'Activity',
+      'Continue in Session'
+    ])
     expect(openFileDiff).not.toHaveBeenCalled()
   })
 
