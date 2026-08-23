@@ -25,12 +25,12 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run apps/desktop/test/default-session-floating-launcher.test.tsx apps/desktop/test/default-session-floating-contract.test.ts",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/default-session-floating-launcher.test.tsx test/default-session-floating-contract.test.ts",
           "proves": "悬浮入口的行为与生产渲染锚点。"
         },
         {
           "kind": "command",
-          "ref": "rg -n \"DefaultSessionFloatingLauncher|default-session-floating-launcher\" apps/desktop/src/renderer/src | grep -v DefaultSessionEntry.tsx",
+          "ref": "rg -n 'placement=.*floating' apps/desktop/src/renderer/src | grep -v DefaultSessionEntry.tsx",
           "proves": "悬浮入口存在定义文件之外的生产调用者。"
         }
       ],
@@ -56,12 +56,12 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run apps/desktop/test/workbench-tab-chrome.test.ts",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/workbench-tab-chrome.test.ts",
           "proves": "分屏顶行不再渲染空的 workbench chrome，并且首个 Pane 承载一次全局 chrome。"
         },
         {
           "kind": "command",
-          "ref": "rg -n \"workbench-chromeline\" apps/desktop/src/renderer/src apps/desktop/test",
+          "ref": "if rg -n 'workbench-chromeline' apps/desktop/src/renderer/src; then exit 1; else echo 'no legacy split chrome'; fi",
           "proves": "迁移后的源码与契约检查没有重新引入空顶行。"
         }
       ],

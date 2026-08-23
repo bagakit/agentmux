@@ -70,6 +70,9 @@ export function useDefaultSessionFloatingState(): [FloatingState, (next: Partial
           returnFocusRef.current = active
         }
       }
+      if (nextOpen && current.open) {
+        document.querySelector<HTMLElement>('[data-default-session-floating]')?.focus({ preventScroll: true })
+      }
       const next = { ...current, open: nextOpen }
       stateRef.current = next
       setState(next)

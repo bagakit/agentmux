@@ -13,6 +13,7 @@ function Harness() {
   const [state] = useDefaultSessionFloatingState()
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
+    createElement('div', { id: 'floating-panel', 'data-default-session-floating': true, tabIndex: -1 }),
     createElement('output', { 'data-open': String(state.open), 'data-maximized': String(state.maximized) })
   )
 }
@@ -50,6 +51,9 @@ describe('Default Session floating workspace state', () => {
     await act(async () => requestDefaultSessionFloatingOpen())
     expect(container.querySelector('output')?.dataset.open).toBe('true')
     expect(window.localStorage.getItem('agentmux.default-session-floating.v2')).toContain('"open":true')
+    trigger.focus()
+    await act(async () => requestDefaultSessionFloatingOpen())
+    expect(document.activeElement).toBe(container.querySelector('#floating-panel'))
     await act(async () => requestDefaultSessionFloatingClose())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(container.querySelector('output')?.dataset.open).toBe('false')
