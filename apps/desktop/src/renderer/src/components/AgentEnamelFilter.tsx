@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { themeVar } from '../lib/theme-contract'
 
 /**
  * Paints one Provider/badge mark like a small enamel badge: a closed neutral
@@ -23,7 +24,7 @@ export function AgentEnamelFilter({ id, tint, children, className, filterClassNa
           <feMorphology in="solidAlpha" operator="dilate" radius="2" result="backingAlpha" />
           <feMorphology in="solidAlpha" operator="dilate" radius="3" result="rimOuterAlpha" />
           <feComposite in="rimOuterAlpha" in2="backingAlpha" operator="out" result="rimAlpha" />
-          <feFlood floodColor="var(--surface-0)" floodOpacity="1" result="backingColor" />
+          <feFlood floodColor={themeVar('surface0')} floodOpacity="1" result="backingColor" />
           <feComposite in="backingColor" in2="backingAlpha" operator="in" result="enamelBacking" />
           <feFlood floodColor={tint} floodOpacity="1" result="rimColor" />
           <feComposite in="rimColor" in2="rimAlpha" operator="in" result="enamelRim" />
