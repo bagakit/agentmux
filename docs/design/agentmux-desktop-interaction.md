@@ -1437,3 +1437,7 @@ Board 必须有一个可恢复的路由队列入口，用于查看无 Project、
 
 Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态、优先级、Project/负责人、标签、日期、子 Demand 进度和关联 Session/Agent 摘要。完整描述、活动、决策、评论、执行日志、重试/停止和删除确认在固定详情工作区中完成；删除是明确的危险动作，取消优先于删除以保留历史。AgentMux 的 Demand 文件系统包、Core Runtime 和 ctxmux 事实边界保持不变。
 > 命名更新（2026-09-23）：此前文档中的 “Leader Topic” 统一以代码和产品现名 **PMO Teams Topic** 为准；其固定身份、浮窗和职责约束继续有效。
+
+### Scratch Topic 打开后的工作面渲染（2026-09-23）
+
+点击 Scratch Topic 后，Scratch workspace 的 Workbench 必须和普通 workspace 一样进入窗口级 registry 并显示对应 Tab/Region；Topic 只改变导航和绑定，不得因为 Scratch 是 wiki 工作区而留下空白右侧工作面。未准备完成时显示共享的 loading/失败服务窗，工作面本身不能被错误地过滤掉。

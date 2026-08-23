@@ -1,0 +1,48 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/scratch-topic-workbench-visibility-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/scratch-topic-workbench-visibility-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "把 Scratch 纳入窗口级 Workbench registry",
+      "objective": "修复打开 Scratch Topic 后右侧没有任何 Tab/Region/Terminal 内容的问题。",
+      "outcome": "Scratch workspace 在 active 或已有持久 Tab 时保持 Workbench slot，Topic 点击后显示对应工作面。",
+      "acceptance": [
+        "App 的 mountedWorkspaces 不再无条件排除 Scratch；active Scratch workspace 能渲染 WorkspaceWorkbench。",
+        "普通 workspace 的 parked registry、Settings inert 和 native surface 可见性语义保持不变。",
+        "删除 Scratch registry 成员或恢复无条件过滤时，focused contract test 变红；生产源码存在 WorkspaceWorkbench 的调用者。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-workbench-registry.test.ts test/topic-navigation-visible.test.ts test/workspace-topics-panel.test.tsx --maxWorkers=1",
+          "proves": "Scratch registry membership, Topic navigation and panel click behavior."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "App registry change and tests compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<WorkspaceWorkbench' apps/desktop/src/renderer/src/App.tsx | grep -v 'WorkspaceWorkbench.tsx' | head -1)\"",
+          "proves": "The Workbench registry remains connected from the product shell."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/App.tsx",
+        "apps/desktop/test/workspace-workbench-registry.test.ts",
+        "apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx"
+      ],
+      "depends_on": []
+    }
+  ]
+}

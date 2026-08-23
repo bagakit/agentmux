@@ -114,9 +114,11 @@ function DesktopApp() {
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
-  // untouched configured project does not allocate a hidden launcher/editor/browser tree at startup.
+  // untouched configured workspace does not allocate a hidden launcher/editor/browser tree at startup.
+  // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
+  // registry rule as a project instead of being filtered out after a Topic click.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    candidate.id !== '__scratch__' && (fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0))
+    fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
   const toolsVisible = toolsAvailable && toolsOpen

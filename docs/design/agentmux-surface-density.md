@@ -905,3 +905,7 @@ Demand 详情是连续的右侧 surface：标题和状态在短 header 中，属
 
 多 Session 投影继续复用现有 Region arrangement。卡片只显示可扫描的 Agent topology 摘要，完整 Topic/Branch/Tab/Region 层级在详情内可展开；unknown 或尚未恢复的事实占用同样的稳定槽位，不用空白或跳动布局掩盖缺口。
 > 命名更新（2026-09-23）：此前文档中的 “Leader Topic” 统一以代码和产品现名 **PMO Teams Topic** 为准；视觉与密度约束继续有效。
+
+### Scratch Topic 工作面可见性（2026-09-23）
+
+Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两块表面。打开 Topic 后，右侧必须保留普通 Workbench 的 Tab bar、Region 和 Terminal/Agent 内容；不得把 Scratch 从 Workbench registry 排除而只留下全幅空底。
