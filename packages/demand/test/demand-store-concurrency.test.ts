@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -20,8 +20,12 @@ describe('DemandStore locking', () => {
 
   it('reports a lock timeout and does not write an empty replacement', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'agentmux-demand-lock-timeout-'))
+    const seed = openDemandStore({ root })
+    await seed.create({ id: 'preserved', title: 'Keep me' })
     await writeFile(path.join(root, 'store.lock'), 'held', 'utf8')
     const store = openDemandStore({ root, lockTimeoutMs: 1, lockRetryMs: 1 })
-    await expect(store.create({ id: 'blocked', title: 'Blocked' })).rejects.toMatchObject({ code: 'LOCK_TIMEOUT', phase: 'lock' })
+    await expect(store.update('preserved', { title: 'Blocked' })).rejects.toMatchObject({ code: 'LOCK_TIMEOUT', phase: 'lock' })
+    await rm(path.join(root, 'store.lock'))
+    await expect(store.get('preserved')).resolves.toMatchObject({ title: 'Keep me' })
   })
 })
