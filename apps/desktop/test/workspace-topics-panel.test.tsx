@@ -146,7 +146,17 @@ describe('Topic live Agent presence', () => {
     await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })))
     expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
     await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-    expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:ime')
+    expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:ime', SCRATCH_WORKSPACE_ID)
+  })
+
+  it('opens a Topic from the row click and targets Scratch explicitly', async () => {
+    fixture.snapshot = [topic('view:click', 'Clickable Topic')]
+    await mount()
+    const row = rowByTitle('Clickable Topic').querySelector<HTMLElement>('.workspace-topic-entry')!
+
+    await act(async () => row.click())
+
+    expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:click', SCRATCH_WORKSPACE_ID)
   })
 
   it('renders only live Agents in layout tab order and opens the selected Session', async () => {

@@ -27,6 +27,7 @@
 - 点击一个没有已绑定 Tab/Region 的 Scratch Topic 后，右侧必须进入该 Topic 的 Workbench，并在原来的落点启动一个 Terminal；只创建 Launcher 或只改变选中 Topic 都不算打开成功。
 - 已有该 Topic 工作面的点击仍只聚焦并复用原 Tab、Region 和 Session，不重复启动 Terminal；后台准备的固定 Topic 仍可显式要求不抢当前工作面。
 - Terminal 启动过程沿用统一的 launching/loading 反馈；启动失败必须保留 Topic 的可见工作面并显示原因与可重试动作，不能留下空白 Region。
+- Topic 列表行和 Board 行的标题、摘要与主要内容区都必须可点击，并走同一条 Scratch Topic 导航；只有复制、定位、头像和右键菜单等独立动作阻止事件冒泡，不能让用户必须命中一个隐藏或孤立的小图标。
 
 ### Agent 输入行与视图切换（2026-09-23）
 

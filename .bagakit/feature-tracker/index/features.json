@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 267
+    "next_cursor": 268
   },
   "features": [
     {
@@ -2299,6 +2299,16 @@
       "feat_id": "f-2am8fzg5u",
       "title": "Agent 输入身份与 Scratch 可见工作面",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2an8fb26s",
+      "title": "Scratch Topic 主点击可达性",
+      "status": "done",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

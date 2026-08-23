@@ -1,0 +1,24 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/scratch-topic-click-surface-2026-09-23.md"},
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "让 Topic 主内容区可点击并显式路由到 Scratch",
+      "objective": "修复 Topics 面板和 Board 中 Topic 主内容点击无效或必须命中孤立图标的问题。",
+      "outcome": "点击标题、摘要或行内容即可切换到正确 Scratch Workbench；辅助动作不会重复导航。",
+      "acceptance": [
+        "WorkspaceTopicsPanel 的鼠标和键盘主行入口显式调用 openScratchTopic(topicId, SCRATCH_WORKSPACE_ID)。",
+        "WorkspaceBoard 的 Topic 标题/摘要区域可点击、可键盘触发，右侧图标不会重复触发。",
+        "回归测试覆盖真实行点击、Board 生产接线和 Scratch 导航类型边界。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-topics-panel.test.tsx test/scratch-topic-agents.test.ts test/workspace-board.test.ts test/topic-navigation-visible.test.ts --maxWorkers=1", "proves": "Topic 主点击、Board 接线和 Scratch 导航行为。"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "点击处理器和显式 workspace 参数类型正确。"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx", "apps/desktop/src/renderer/src/components/WorkspaceBoard.tsx", "docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"],
+      "depends_on": []
+    }
+  ],
+  "source_refs": ["docs/reviews/scratch-topic-click-surface-2026-09-23.md", "docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+}
