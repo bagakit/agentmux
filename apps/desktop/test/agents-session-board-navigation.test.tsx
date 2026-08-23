@@ -2,6 +2,8 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
@@ -34,7 +36,7 @@ describe('Agents / Workspaces / Board navigation', () => {
   })
 
   it('keeps the Project Rail out of the global Agents surface', async () => {
-    const source = await (await import('node:fs/promises')).readFile(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
+    const source = readFileSync(join(process.cwd(), 'src/renderer/src/App.tsx'), 'utf8')
     expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents'")
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
