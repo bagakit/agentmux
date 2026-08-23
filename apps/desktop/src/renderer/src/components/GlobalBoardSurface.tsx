@@ -32,7 +32,6 @@ import { workspaceForSession } from '../lib/workbench-tabs'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
-import { DefaultSessionEntry } from './DefaultSessionEntry'
 
 const STATUS_META: Record<DemandStatus, { label: string; icon: typeof Inbox }> = {
   backlog: { label: 'Backlog', icon: Inbox },
@@ -117,7 +116,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
         <div className="global-demand-workspace__empty">
           <NotebookPen size={18} />
           <strong>No Session linked yet</strong>
-          <span>Use the Default Topic to route this demand to a Project and attach a Session.</span>
+          <span>Use Leader Topic to route this demand to a Project and attach a Session.</span>
         </div>
       ) : (
         <SessionRegionHost arrangement={arrangement} className={`global-demand-workspace__regions ${arrangementClass}`}>
@@ -215,7 +214,7 @@ export function GlobalBoardSurface() {
             )
           })}
         </div>
-        <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} demands</span><span className="global-board-footer__hint">Select a demand to keep its context beside the board</span><DefaultSessionEntry placement="board" /></footer>
+        <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} demands</span><span className="global-board-footer__hint">Select a demand to keep its context beside the board</span></footer>
       </div>
       {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} executors={executors} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
     </section>

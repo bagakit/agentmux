@@ -25,7 +25,7 @@
     linear-gradient(90deg, color-mix(in srgb, var(--line-soft) 55%, transparent) 1px, transparent 1px),
     linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 40%, transparent) 1px, transparent 1px);
   background-size: 72px 72px;
-  mask-image: linear-gradient(135deg, #000 0%, transparent 78%);
+  mask-image: linear-gradient(135deg, var(--mask-opaque) 0%, transparent 78%);
 }
 /* The offset frame gives the stage its asymmetric/deconstructed silhouette. */
 .session-connecting::after {

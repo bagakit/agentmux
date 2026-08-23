@@ -1,4 +1,5 @@
 import { AgentAvatar } from './AgentAvatar'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import {
   Activity,
   AlertTriangle,
@@ -191,19 +192,11 @@ export function WorkspaceBoard() {
   }
 
   if (!scratch && !snapshot && loading) {
-    return (
-      <section className="board board--empty">
-        <div className="board-state"><LoaderCircle className="spin" size={22} /><strong>Loading branches</strong><span>Reading Git truth from {project?.name}.</span></div>
-      </section>
-    )
+    return <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Project board" title="Loading branches" detail={`Reading Git truth from ${project?.name ?? 'this project'}.`} />
   }
 
   if (!scratch && !snapshot && loadError) {
-    return (
-      <section className="board board--empty">
-        <div className="board-state board-state--error"><AlertTriangle size={22} /><strong>Branches unavailable</strong><span>{loadError}</span><button className="small-button" onClick={() => void refresh()}>Retry</button></div>
-      </section>
-    )
+    return <FullPageLoadingSurface scope="region" phase="failed" eyebrow="Project board" title="Branches unavailable" detail={loadError} actions={<button className="small-button" onClick={() => void refresh()}>Retry</button>} />
   }
 
   if (snapshot?.kind === 'not-a-git-repository') {
@@ -216,11 +209,7 @@ export function WorkspaceBoard() {
 
   // 快照还没到手是"还不知道"，不是"没有 Topic"——诚实地说在读，别渲染一个零行矩阵冒充空态。
   if (scratch && !topics && !topicsError) {
-    return (
-      <section className="board board--empty">
-        <div className="board-state"><LoaderCircle className="spin" size={22} /><strong>Loading Topics</strong><span>Reading Topics from {scratch.name}.</span></div>
-      </section>
-    )
+    return <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Scratch board" title="Loading Topics" detail={`Reading Topics from ${scratch.name}.`} />
   }
 
   const hostId = scratch?.hostId ?? project?.hostId ?? anchor.hostId
