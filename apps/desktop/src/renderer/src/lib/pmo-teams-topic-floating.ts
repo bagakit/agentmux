@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
-const STORAGE_KEY = 'agentmux.pmo-teams-topic-floating.v1'
+// Stable UI state key: renaming the code surface must not lose a user's saved position/size.
+const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
 const EVENT_NAME = 'agentmux:pmo-teams-topic-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }

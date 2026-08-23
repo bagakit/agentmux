@@ -54,10 +54,10 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       conversationInitializedRef.current = null
       return
     }
-    const leaderSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
-    if (leaderSession && conversationInitializedRef.current !== leaderSession.id) {
-      conversationInitializedRef.current = leaderSession.id
-      setViewMode(leaderSession.id, 'activity')
+    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    if (pmoTeamsSession && conversationInitializedRef.current !== pmoTeamsSession.id) {
+      conversationInitializedRef.current = pmoTeamsSession.id
+      setViewMode(pmoTeamsSession.id, 'activity')
     }
   }, [config, floating.open, sessions, setViewMode])
 
@@ -89,11 +89,11 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   useEffect(() => {
     const pending = floating.open ? floating.pendingPrompt : undefined
     if (!pending || deliveredPromptRef.current === pending.id || !scratch) return
-    const leaderSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
-    if (leaderSession) {
+    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    if (pmoTeamsSession) {
       deliveredPromptRef.current = pending.id
-      setViewMode(leaderSession.id, 'activity')
-      void api.sessions.submitPrompt(leaderSession.control, pending.text, pending.id)
+      setViewMode(pmoTeamsSession.id, 'activity')
+      void api.sessions.submitPrompt(pmoTeamsSession.control, pending.text, pending.id)
         .then(() => setFloating({ pendingPrompt: undefined }))
         .catch((error) => {
           deliveredPromptRef.current = null
@@ -101,15 +101,15 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
         })
       return
     }
-    const leaderTab = Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
+    const pmoTeamsTab = Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
     const layout = layouts[SCRATCH_WORKSPACE_ID]
-    const group = leaderTab && layout?.groups.find((entry) => entry.tabOrder.includes(leaderTab.id))
-    const regionId = leaderTab?.layout.activeRegionId
+    const group = pmoTeamsTab && layout?.groups.find((entry) => entry.tabOrder.includes(pmoTeamsTab.id))
+    const regionId = pmoTeamsTab?.layout.activeRegionId
     const executorId = Object.keys(config?.executors ?? {})[0]
-    if (!leaderTab || !group || !regionId || !executorId) return
+    if (!pmoTeamsTab || !group || !regionId || !executorId) return
     deliveredPromptRef.current = pending.id
     void launchAgent(executorId, pending.text, group.id, {
-      tabId: leaderTab.id,
+      tabId: pmoTeamsTab.id,
       regionId
     }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
       deliveredPromptRef.current = null

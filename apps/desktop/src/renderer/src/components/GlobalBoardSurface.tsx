@@ -33,6 +33,7 @@ import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
 import { AgentTopologySummary } from './AgentTopologySummary'
+import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 
 const STATUS_META: Record<DemandStatus, { label: string; icon: typeof Inbox }> = {
   backlog: { label: 'Backlog', icon: Inbox },
@@ -162,7 +163,6 @@ export function GlobalBoardSurface() {
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
-  const createDemand = useAppStore((state) => state.createDemand)
   const demandArrangement = useAppStore((state) => state.demandArrangement)
   const setDemandArrangement = useAppStore((state) => state.setDemandArrangement)
   const updateDemand = useAppStore((state) => state.updateDemand)
@@ -187,7 +187,11 @@ export function GlobalBoardSurface() {
 
   function createDemandCard(): void {
     const project = projectFilter !== 'all' ? projects.find(([id]) => id === projectFilter) : undefined
-    createDemand({ title: 'New demand', projectId: project?.[0] ?? null, projectName: project?.[1] ?? null })
+    const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
+    requestPmoTeamsTopicFloatingOpen({
+      anchor: 'floating',
+      prompt: `你现在从 AgentMux Board 的 New Demand 入口接到一条新需求。请先和用户对话澄清，不要先创建空 Demand。${projectContext}\n请确认需求标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力写入并返回 receipt。`
+    })
   }
 
   return (
