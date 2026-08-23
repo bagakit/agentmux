@@ -98,6 +98,7 @@
   --light-green: #267a48; --light-green-2: #2f965b; --light-amber: #9a6500; --light-red: #b33b37; --light-blue: #2869a7; --light-purple: #6244b8;
   --light-neutral-1: #c4cec7; --light-neutral-2: #87958b; --light-neutral-3: #5c6b61; --light-focus-line: #4b8b63;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --agent-avatar-size: 18px; /* AgentAvatar 的运行时尺寸覆盖默认值 */
   /* 动效刻度：节奏与曲线也是 token，不在各表面手写毫秒数（见 agentmux-surface-density.md《动效》）。
      按"这个动作是什么"选，不按"想显得多快"选——四档跨三个数量级，因为它们是三类不同的事：
      微交互要跟手、入场要有减速、长时状态要慢到不抢注意力。 */
