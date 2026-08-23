@@ -1,0 +1,17 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "PMO Teams launcher interaction closure",
+  "decision": "approved",
+  "acceptance": [
+    "头像在真实 pointer capture 后点击目标被父层接收时仍能打开或收起同一个 PMO Teams 浮窗。",
+    "浮动入口不再渲染右上角三个点；浮动/紧凑形态切换和收起动作由底部入口承载。",
+    "浮窗打开时底部入口显示明确的收起图标，紧凑形态保留头像打开动作和恢复浮动动作。",
+    "固定 Topic 身份、拖动阈值、焦点返回和底部锚定位置不回归。"
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/PmoTeamsTopicEntry.tsx",
+    "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx"
+  ]
+}

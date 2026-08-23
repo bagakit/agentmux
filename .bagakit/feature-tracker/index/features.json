@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 264
+    "next_cursor": 265
   },
   "features": [
     {
@@ -2270,6 +2270,16 @@
       "title": "Demand board extended future",
       "status": "proposal",
       "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2aj8fc75c",
+      "title": "PMO Teams launcher interaction closure",
+      "status": "archived",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

@@ -41,11 +41,18 @@ describe('PMO teams topic launcher', () => {
     await act(async () => button.click())
     expect(requested).toBe(true)
 
-    const mode = container.querySelector('button[aria-label="More PMO teams topic actions: move to bottom switcher"]') as HTMLButtonElement
-    await act(async () => mode.click())
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
+    const footer = document.createElement('div')
+    document.body.append(footer)
+    const footerRoot = createRoot(footer)
+    await act(async () => footerRoot.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
+    const collapse = footer.querySelector('button[aria-label="Collapse PMO teams topic to bottom switcher"]') as HTMLButtonElement
+    expect(collapse).toBeTruthy()
+    await act(async () => collapse.click())
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
     expect(container.querySelector('.pmo-teams-topic-compact-launcher')).toBeTruthy()
     expect(container.querySelector('button[aria-label="Open PMO teams topic"]')).toBeTruthy()
+    await act(async () => footerRoot.unmount())
+    footer.remove()
   })
 
   it('renders the project avatar and keeps the old hidden preference from removing the entry', async () => {
@@ -66,5 +73,29 @@ describe('PMO teams topic launcher', () => {
     }, { once: true })
     await act(async () => button.click())
     expect(closed).toBe(true)
+  })
+
+  it('opens when pointer capture retargets the click to the launcher wrapper', async () => {
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
+    const launcher = container.querySelector('[data-pmo-teams-topic-launcher]') as HTMLDivElement
+    expect(launcher).toBeTruthy()
+    await act(async () => launcher.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":true')
+  })
+
+  it('moves the control to the footer and exposes a collapse action while floating', async () => {
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
+    const collapse = container.querySelector('button[aria-label="Collapse PMO teams topic to bottom switcher"]') as HTMLButtonElement
+    expect(collapse).toBeTruthy()
+    await act(async () => collapse.click())
+    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"launcherPlacement":"compact"')
+    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
+  })
+
+  it('keeps the form switch beside the compact footer avatar without a floating three-dot control', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, launcherPlacement: 'compact' }))
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
+    expect(container.querySelector('.pmo-teams-topic-floating-launcher__mode-button')).toBeNull()
+    expect(container.querySelector('.pmo-teams-topic-compact-launcher__mode-button')).toBeTruthy()
   })
 })

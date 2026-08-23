@@ -1,0 +1,50 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/pmo-teams-launcher-interaction-2026-09-23.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/pmo-teams-launcher-interaction-2026-09-23.json"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "修复 PMO Teams 头像点击与底部收起入口",
+      "objective": "让头像点击在 pointer capture 重定向后仍可靠打开或收起浮窗，并把形态切换从头像右上角移到底部入口。",
+      "outcome": "浮动入口只有头像；底部入口根据形态显示打开头像、恢复浮动或收起图标；同一个 PMO Teams Topic 的状态、焦点和位置继续持久化。",
+      "acceptance": [
+        "点击头像按钮或被 pointer capture 重定向到 launcher wrapper 的 click 都能打开/收起同一个浮窗；拖动超过阈值仍只移动入口并抑制点击。",
+        "浮动入口不再包含右上角三个点；底部入口在 floating 形态显示明确的收起动作，compact 形态显示头像打开动作和恢复 floating 的动作。",
+        "固定 launcher:leader Topic、面板关闭后的焦点返回、compact 打开时靠近底边夹紧和注意力提示保持有效。",
+        "删除 wrapper click 兜底、错误恢复或底部形态分支中的任一关键路径时，focused interaction contract test 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/pmo-teams-topic-launcher.test.tsx test/pmo-teams-topic-floating.test.tsx test/pmo-teams-topic-floating-contract.test.ts test/pmo-teams-topic-surface.test.tsx --maxWorkers=1",
+          "proves": "PMO Teams click, close, pointer-retarget fallback, bottom collapse/mode controls and source contract."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Desktop event handlers, icon controls and styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<PmoTeamsTopicFloatingPanel|<PmoTeamsTopicEntry' apps/desktop/src/renderer/src --glob '*.tsx' | grep -v 'components/PmoTeamsTopicEntry.tsx' | head -1)\"",
+          "proves": "The PMO launcher capability remains connected outside its definition file."
+        }
+      ],
+      "depends_on": [],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/PmoTeamsTopicEntry.tsx",
+        "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx"
+      ]
+    }
+  ]
+}
