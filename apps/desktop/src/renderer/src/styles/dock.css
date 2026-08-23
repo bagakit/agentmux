@@ -95,6 +95,7 @@
 /* 定位与背景归本面板；里面的排版走共享的 .selector-list__header（见 selector.css）。 */
 .workspace-topic-index-header { padding:0 var(--sp-1) 0 var(--sp-4); }
 .workspace-topic-state { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px dashed var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: color-mix(in srgb, var(--surface-2) 48%, transparent); }
+.workspace-topic-state--empty { border-style: solid; color: var(--text-2); background: var(--surface-1); }
 .workspace-topic-state > span:not(.workspace-topic-state__icon) { min-width: 0; display: grid; gap: var(--sp-1); }
 .workspace-topic-state strong { color: var(--text-2); font-size: var(--fs-meta); }
 .workspace-topic-state small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
