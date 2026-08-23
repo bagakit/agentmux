@@ -278,14 +278,21 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
   const since = sinceValue === undefined ? undefined : Number(sinceValue)
   if (since !== undefined && !Number.isFinite(since)) throw cliError('--since must be a timestamp in milliseconds.')
 
-  const [projectsReceipt, agentsReceipt, demandsReceipt] = await Promise.all([
+  const [projectsReceipt, agentsReceipt, demandsReceipt] = await Promise.allSettled([
     requestAgentMuxControl({ ...requestBase(), operation: 'list.projects' }),
     requestAgentMuxControl({ ...requestBase(), operation: 'list.active-agents' }),
     requestAgentMuxControl({ ...requestBase(), operation: 'demand.list' })
   ])
-  const projects = projectsReceipt.operation === 'list.projects' ? projectsReceipt.result.projects : []
-  const agents = agentsReceipt.operation === 'list.active-agents' ? agentsReceipt.result.agents : []
-  const demands = demandsReceipt.operation === 'demand.list' ? demandsReceipt.result.demands : []
+  const unavailable: Array<{ surface: string; code: string; message: string; recovery: string }> = []
+  const failedObservation = (surface: string, result: PromiseSettledResult<unknown>): null => {
+    if (result.status === 'fulfilled') return null
+    const error = result.reason as { code?: unknown; message?: unknown }
+    unavailable.push({ surface, code: typeof error.code === 'string' ? error.code : 'OBSERVATION_UNAVAILABLE', message: typeof error.message === 'string' ? error.message : String(result.reason), recovery: 'Retry this surface after its owner reports ready.' })
+    return null
+  }
+  const projects = projectsReceipt.status === 'fulfilled' && projectsReceipt.value.operation === 'list.projects' ? projectsReceipt.value.result.projects : (failedObservation('projects', projectsReceipt), [])
+  const agents = agentsReceipt.status === 'fulfilled' && agentsReceipt.value.operation === 'list.active-agents' ? agentsReceipt.value.result.agents : (failedObservation('agents', agentsReceipt), [])
+  const demands = demandsReceipt.status === 'fulfilled' && demandsReceipt.value.operation === 'demand.list' ? demandsReceipt.value.result.demands : (failedObservation('demands', demandsReceipt), [])
   const projectId = flags.values.get('--project')
   const agentId = flags.values.get('--agent')
   const sessionId = flags.values.get('--session')
@@ -300,10 +307,10 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
     return results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   })
   const filteredSessions = sessions.filter((session) => (!sessionId || session.session.agentSessionId === sessionId) && (!status || String((session.session as unknown as { processState?: string }).processState ?? '') === status) && (since === undefined || session.session.updatedAt >= since)).slice(0, limit)
-  if (action === 'projects' || action === 'workspaces') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects }); return 0 }
-  if (action === 'agents') { printPmoSuccess('pmo.agents', { agents: filteredAgents }); return 0 }
-  if (action === 'sessions') { printPmoSuccess('pmo.sessions', { sessions: filteredSessions }); return 0 }
-  if (action === 'demands') { printPmoSuccess('pmo.demands', { demands: filteredDemands }); return 0 }
+  if (action === 'projects' || action === 'workspaces') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
+  if (action === 'agents') { printPmoSuccess('pmo.agents', { agents: filteredAgents, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
+  if (action === 'sessions') { printPmoSuccess('pmo.sessions', { sessions: filteredSessions, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
+  if (action === 'demands') { printPmoSuccess('pmo.demands', { demands: filteredDemands, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'topics') {
     // Topic truth lives in workspace files, not Core. Keep the boundary explicit
     // until a host-neutral topic reader is available rather than inventing a registry.
@@ -311,13 +318,13 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
   }
   if (action === 'activity') {
     const activity = filteredDemands.flatMap((demand) => (demand.activityLog ?? []).map((message) => ({ demandId: demand.id, message, updatedAt: demand.updatedAt }))).slice(-limit)
-    printPmoSuccess('pmo.activity', { activity }); return 0
+    printPmoSuccess('pmo.activity', { activity, ...(unavailable.length ? { unavailable } : {}) }); return 0
   }
   if (action === 'inspect') {
     const selected = demandId ? filteredDemands.find((demand) => demand.id === demandId) : agentId ? filteredAgents.find((agent) => agent.agentSessionId === agentId) : projectId ? filteredProjects.find((project) => project.projectId === projectId) : null
-    printPmoSuccess('pmo.inspect', { item: selected ?? null }); return 0
+    printPmoSuccess('pmo.inspect', { item: selected ?? null, ...(unavailable.length ? { unavailable } : {}) }); return 0
   }
-  printPmoSuccess('pmo.snapshot', { projects: filteredProjects.slice(0, limit), agents: filteredAgents.slice(0, limit), sessions: filteredSessions, demands: filteredDemands, topics: [], topicDiscovery: { code: 'TOPIC_FILESYSTEM_SCOPE_REQUIRED', message: 'Topic discovery requires an explicit workspace filesystem scope.' } })
+  printPmoSuccess('pmo.snapshot', { projects: filteredProjects.slice(0, limit), agents: filteredAgents.slice(0, limit), sessions: filteredSessions, demands: filteredDemands, topics: [], unavailable, topicDiscovery: { code: 'TOPIC_FILESYSTEM_SCOPE_REQUIRED', message: 'Topic discovery requires an explicit workspace filesystem scope.' } })
   return 0
 }
 
