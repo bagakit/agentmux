@@ -489,8 +489,8 @@ function boardColumnDelegationLines(sourceFile: ts.SourceFile): number[] {
 const BOARD_COLUMN_DELEGATIONS: Readonly<Record<string, number>> = {
   // 整窗 rollup（`:59`）与逐 Provider 汇总（`:97`）各一次。
   '/lib/agent-attention.ts': 2,
-  // `workingAgentCount`。裁决点本身那个 switch 不算委派，它就是被委派的那一方。
-  '/lib/project-board.ts': 1,
+  // `workingAgentCount` 与 `producingAgentCount`。裁决点本身那个 switch 不算委派，它就是被委派的那一方。
+  '/lib/project-board.ts': 2,
   // `groupProgress`。
   '/lib/fanout-group.ts': 1
 }
@@ -534,8 +534,8 @@ function workingLiteralLines(sourceFile: ts.SourceFile): number[] {
 const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: string }>> = {
   // ---- 唯一的裁决点，以及它的三个调用方 ----
   '/lib/project-board.ts': {
-    count: 4,
-    why: '裁决点本身：列名常量、switch 的 case 与返回值、workingAgentCount 读它的返回值'
+    count: 5,
+    why: '裁决点本身：列名常量、switch 的 case 与返回值；workingAgentCount 与 producingAgentCount 都读它的返回值'
   },
   '/lib/agent-attention.ts': { count: 2, why: '整窗 rollup 与逐 Provider 汇总，两处都读裁决点的返回值' },
   '/lib/agent-tree.ts': {

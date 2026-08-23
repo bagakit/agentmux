@@ -147,6 +147,26 @@ export function workingAgentCount(sessions: readonly SessionSnapshot[]): number 
 }
 
 /**
+ * Count Agents with a semantic turn in progress, excluding a live but quiet Session.
+ *
+ * The Board working column is the shared activity projection. `running` is the one member
+ * whose process is alive while its semantic turn is quiet, so this label count removes only
+ * that state instead of inventing a second map of all working states.
+ */
+export function producingAgentCount(sessions: readonly SessionSnapshot[]): number {
+  return sessions.reduce(
+    (count, session) => count + (
+      session.kind === 'agent' &&
+      sessionBoardColumn(session) === 'working' &&
+      session.status.state !== 'running'
+        ? 1
+        : 0
+    ),
+    0
+  )
+}
+
+/**
  * `running` is the quiet, process-available state after the semantic activity projection has gone
  * idle.  Keep this count beside workingAgentCount so the Project Rail and Board never invent their
  * own status predicate.

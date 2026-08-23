@@ -203,7 +203,7 @@ function SortableWorkbenchTab({
   // 标签上画的标记序列：一张 Tab 可以含多个 Region，标签要画出它的种类构成，而不是只画标题那一个。
   // 「谁是 Agent」的判断在 `tabMarkAgentFactsFor` 里，不在这里——这个文件在 node 里 import 不了（经
   // api.ts 的一个 vite define），留在这里的任何取值判断都无法被测试执行到。这里只剩一句转发。
-  const agentFactsFor = tabMarkAgentFactsFor(sessions, config?.executors)
+  const agentFactsFor = tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars)
   const marks = workbenchTabMarks(tab, agentFactsFor)
   // 标记簇在上限处截断且刻意不画 `+N`（标签宽度极紧）。折掉的种类改由 tooltip 兜住，两条 tooltip
   // 路径都取它——没有 Session 的多 Region Tab 同样需要（见 `surfaceTabTooltip`）。

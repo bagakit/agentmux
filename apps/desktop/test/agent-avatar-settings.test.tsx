@@ -64,6 +64,29 @@ it('edits avatars in Executor templates and preserves both through save and reop
   expect(config.executors.review?.avatar).toEqual(appearances.review)
 })
 
+it('shows legacy appearance in Executor settings and makes an explicit reset win', async () => {
+  const legacy = { ...composerConfig, appearance: { ...composerConfig.appearance, agentAvatars: { codex: appearances.codex } } }
+  let savedExecutors = legacy.executors
+  const save = vi.fn(async (next: typeof legacy.executors) => { savedExecutors = next })
+  await dom.render(<AgentSettingsPane config={legacy} onSave={save} />)
+  expect(badges()).toEqual(['spark'])
+
+  await dom.click('[aria-label="Reset Codex avatar"]')
+  expect(badges()).toEqual([])
+  await dom.click('.settings-pane-actions button')
+  expect(save).toHaveBeenCalledOnce()
+  expect(savedExecutors.codex?.avatar).toEqual({})
+  expect(legacy.appearance.agentAvatars?.codex).toEqual(appearances.codex)
+  const config = { ...legacy, executors: savedExecutors }
+  await dom.render(null)
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config, sessions: [] }}>
+    <AgentSettingsPane config={config} onSave={save} />
+    <AgentAvatar executorId="codex" />
+  </ExecutorIdentityContext.Provider>)
+  expect(badges()).toEqual([])
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Reset Codex avatar"]')?.disabled).toBe(true)
+})
+
 it('keeps failed Executor saves local without discarding unsaved avatar edits', async () => {
   await dom.render(<AgentSettingsPane config={{ ...composerConfig, executors }}
     onSave={async () => { throw new Error('Settings write failed') }} />)
