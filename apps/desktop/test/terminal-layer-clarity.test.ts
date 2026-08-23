@@ -15,7 +15,9 @@ describe('terminal content and input layers', () => {
     expect(sessionPane).toContain("data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}")
     expect(sessionPane).toContain('className="agent-input-stack__rail"')
     expect(sessionPane).toContain('Agent input')
-    expect(sessionPane).toContain('Runtime channel')
+    expect(sessionPane).toContain('agentInputIdentity')
+    expect(sessionPane).toContain('agentInputSessionId')
+    expect(sessionPane).toContain('Agent input for')
   })
 
   it('pins the geometry and separation rules that prevent terminal output from colliding with the composer', () => {
