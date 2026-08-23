@@ -1,0 +1,18 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/conversation-message-actions-2026-09-23.md"},
+  "tasks": [{
+    "id": "T-001",
+    "title": "重做对话消息样式并加入复制与标注",
+    "objective": "让用户消息右对齐、Agent 消息去掉左边竖线，并为每条消息提供复制和选区标注回复。",
+    "outcome": "对话更像可编辑的工作记录，用户能精确引用一段原文给当前 Agent。",
+    "acceptance": ["human/agent 的 DOM 和 CSS 结构表达两种不同对齐与身份，不再使用旧左边竖线。", "每条有内容消息都有可访问 Copy 动作并保留完整原文。", "选区标注带稳定消息 ID、引用和范围，失败保留草稿，发送复用当前 Session/Composer。"],
+    "verification": [
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-message-actions.test.tsx test/conversation-message-copy.test.tsx test/conversation-annotation.test.ts --maxWorkers=1", "proves": "消息布局、复制和标注行为。"},
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "消息动作与 Session/Composer 类型边界。"}
+    ],
+    "source_refs": ["apps/desktop/src/renderer/src/components/ConversationMessage.tsx", "apps/desktop/src/renderer/src/components/ActivityView.tsx", "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx", "apps/desktop/src/renderer/src/styles/activity-conversation.css"],
+    "depends_on": []
+  }],
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/conversation-message-actions-2026-09-23.md"]
+}

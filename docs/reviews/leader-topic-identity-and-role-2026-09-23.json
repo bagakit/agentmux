@@ -1,0 +1,21 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Leader Topic identity and role",
+  "decision": "The fixed launcher:leader Topic is a coordination Agent: clarify, inspect, propose and confirm before executing or writing.",
+  "constraints": [
+    "Enforce the role in the fixed Topic Wiki and launch-time AgentMux context.",
+    "Keep ordinary Scratch Topics on the generic Wiki.",
+    "Do not add a second Runtime or provider-specific path."
+  ],
+  "acceptance": [
+    "Leader and ordinary Topic prompts are distinct and tested.",
+    "Leader prompt names the confirm-before-write boundary and allowed global discovery.",
+    "Production launch path remains the fixed launcher:leader path."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/main/scratch-topics.ts",
+    "apps/desktop/src/shared/scratch-topics.ts"
+  ]
+}

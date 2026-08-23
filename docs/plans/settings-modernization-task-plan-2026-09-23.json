@@ -1,0 +1,18 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/settings-modernization-2026-09-23.md"},
+  "tasks": [{
+    "id": "T-001",
+    "title": "重做设置页工作台壳层",
+    "objective": "优化 SettingsPanel 的主区上下文、侧栏导航、响应式布局和保存反馈，不改变已有设置语义。",
+    "outcome": "设置页首屏更现代、层级更清楚，窄窗口和键盘访问仍可用。",
+    "acceptance": ["主区 header 明确当前分区与状态，保存动作在可见区域。", "侧栏导航和搜索保持可发现、可聚焦、可响应式收缩。", "现有保存 API、搜索过滤和草稿语义不变。"],
+    "verification": [
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/settings-search.test.ts test/settings-modernization.test.ts test/settings-lead-placement.test.ts --maxWorkers=1", "proves": "设置搜索、壳层契约和布局层级。"},
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "设置组件类型边界。"}
+    ],
+    "source_refs": ["apps/desktop/src/renderer/src/components/SettingsPanel.tsx", "apps/desktop/src/renderer/src/styles/surfaces.css"],
+    "depends_on": []
+  }],
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/settings-modernization-2026-09-23.md"]
+}

@@ -1,33 +1,65 @@
-import { Maximize2, Minus, Minimize2, X } from 'lucide-react'
+import { Maximize2, Minimize2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { LEADER_TOPIC_ID, LEADER_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import {
-  clampLeaderTopicFloatingState,
-  requestLeaderTopicFloatingClose,
-  useLeaderTopicFloatingState
-} from '../lib/leader-topic-floating'
+  clampPmoTeamsTopicFloatingState,
+  requestPmoTeamsTopicFloatingClose,
+  usePmoTeamsTopicFloatingState
+} from '../lib/pmo-teams-topic-floating'
+import { topicIdForSession } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
-import { LeaderTopicEntry } from './LeaderTopicEntry'
+import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
 
 const DRAG_THRESHOLD = 3
 const ATTACHED_LAUNCHER_OFFSET = { left: 12, top: 4 }
 
-export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
+export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
+  const launchAgent = useAppStore((state) => state.launchAgent)
+  const sessions = useAppStore((state) => state.sessions)
+  const tabs = useAppStore((state) => state.tabs)
+  const layouts = useAppStore((state) => state.layouts)
+  const setViewMode = useAppStore((state) => state.setViewMode)
   const reportError = useAppStore((state) => state.reportError)
-  const [floating, setFloating] = useLeaderTopicFloatingState()
+  const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const [dragging, setDragging] = useState(false)
   const [launcherDragging, setLauncherDragging] = useState(false)
+  const [opening, setOpening] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const panelDragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
   const launcherDragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
   const suppressLauncherClickRef = useRef(false)
   const restoreFrameRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
+  const deliveredPromptRef = useRef<string | null>(null)
+  const conversationInitializedRef = useRef<string | null>(null)
+  const wasOpenRef = useRef(false)
   const scratch = config?.workspaces.find((workspace) => workspace.id === SCRATCH_WORKSPACE_ID)
   const visible = floating.open
+
+  useEffect(() => {
+    if (floating.open && !wasOpenRef.current) {
+      setOpening(true)
+      const timer = window.setTimeout(() => setOpening(false), 220)
+      wasOpenRef.current = true
+      return () => window.clearTimeout(timer)
+    }
+    wasOpenRef.current = floating.open
+  }, [floating.open])
+
+  useEffect(() => {
+    if (!floating.open) {
+      conversationInitializedRef.current = null
+      return
+    }
+    const leaderSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    if (leaderSession && conversationInitializedRef.current !== leaderSession.id) {
+      conversationInitializedRef.current = leaderSession.id
+      setViewMode(leaderSession.id, 'activity')
+    }
+  }, [config, floating.open, sessions, setViewMode])
 
   useEffect(() => {
     if (!floating.open || floating.openAnchor !== 'compact' || typeof window === 'undefined') return
@@ -35,7 +67,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
     const height = Math.max(280, Math.min(floating.size.height, Math.max(280, window.innerHeight - 48)))
     const compactLeft = Math.max(16, Math.min(window.innerWidth - width - 16, window.innerWidth - width - 32))
     const compactTop = Math.max(16, window.innerHeight - height - 64)
-    setFloating(clampLeaderTopicFloatingState({
+    setFloating(clampPmoTeamsTopicFloatingState({
       ...floating,
       position: { left: compactLeft, top: compactTop },
       openAnchor: undefined
@@ -44,18 +76,49 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
 
   useEffect(() => {
     if (!floating.open || !scratch) return
-    void api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID)
+    void api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
       .then(async (snapshot) => {
-        if (snapshot.title !== LEADER_TOPIC_TITLE) {
-          await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID, LEADER_TOPIC_TITLE)
+        if (snapshot.title !== PMO_TEAMS_TOPIC_TITLE) {
+          await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE)
         }
-        await openScratchTopic(LEADER_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })
+        await openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })
       })
       .catch(reportError)
   }, [floating.open, openScratchTopic, reportError, scratch])
 
   useEffect(() => {
-    const onResize = (): void => setFloating(clampLeaderTopicFloatingState(floating))
+    const pending = floating.open ? floating.pendingPrompt : undefined
+    if (!pending || deliveredPromptRef.current === pending.id || !scratch) return
+    const leaderSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    if (leaderSession) {
+      deliveredPromptRef.current = pending.id
+      setViewMode(leaderSession.id, 'activity')
+      void api.sessions.submitPrompt(leaderSession.control, pending.text, pending.id)
+        .then(() => setFloating({ pendingPrompt: undefined }))
+        .catch((error) => {
+          deliveredPromptRef.current = null
+          reportError(error)
+        })
+      return
+    }
+    const leaderTab = Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
+    const layout = layouts[SCRATCH_WORKSPACE_ID]
+    const group = leaderTab && layout?.groups.find((entry) => entry.tabOrder.includes(leaderTab.id))
+    const regionId = leaderTab?.layout.activeRegionId
+    const executorId = Object.keys(config?.executors ?? {})[0]
+    if (!leaderTab || !group || !regionId || !executorId) return
+    deliveredPromptRef.current = pending.id
+    void launchAgent(executorId, pending.text, group.id, {
+      tabId: leaderTab.id,
+      regionId
+    }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
+      deliveredPromptRef.current = null
+      reportError(error)
+    })
+  }, [config, floating.open, floating.pendingPrompt, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
+
+  useEffect(() => {
+    const onResize = (): void => setFloating(clampPmoTeamsTopicFloatingState(floating))
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [floating, setFloating])
@@ -82,7 +145,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
   }, [floating.open, floating.maximized, floating.size.height, floating.size.width, setFloating])
 
   if (!scratch) {
-    return <LeaderTopicEntry placement="floating" />
+    return <PmoTeamsTopicEntry placement="floating" />
   }
 
   const geometry = floating.maximized && typeof window !== 'undefined'
@@ -113,7 +176,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
     drag.moved = true
     const position = { left: drag.left + dx, top: drag.top + dy }
-    setFloating(clampLeaderTopicFloatingState({
+    setFloating(clampPmoTeamsTopicFloatingState({
       ...floating,
       position,
       launcherPosition: floating.open
@@ -147,7 +210,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
     drag.moved = true
     suppressLauncherClickRef.current = true
     const position = { left: drag.left + dx, top: drag.top + dy }
-    setFloating(clampLeaderTopicFloatingState({
+    setFloating(clampPmoTeamsTopicFloatingState({
       ...floating,
       ...(floating.open ? {
         position,
@@ -167,7 +230,7 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
       return
     }
     if (floating.open) {
-      requestLeaderTopicFloatingClose()
+      requestPmoTeamsTopicFloatingClose()
       return
     }
     const position = typeof window === 'undefined'
@@ -178,12 +241,12 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
             ? floating.launcherPosition.top - floating.size.height - 8
             : floating.launcherPosition.top + 42 + 8
         }
-    setFloating(clampLeaderTopicFloatingState({ ...floating, open: true, position }))
+    setFloating(clampPmoTeamsTopicFloatingState({ ...floating, open: true, position }))
   }
 
   return (
     <>
-      <LeaderTopicEntry
+      <PmoTeamsTopicEntry
         placement="floating"
         style={floating.open
           ? { left: geometry.left + ATTACHED_LAUNCHER_OFFSET.left, top: geometry.top + ATTACHED_LAUNCHER_OFFSET.top }
@@ -198,36 +261,34 @@ export function LeaderTopicFloatingPanel(): React.JSX.Element | null {
       />
       <div
         ref={panelRef}
-        className={`leader-topic-floating${floating.open ? '' : ' leader-topic-floating--hidden'}`}
-        id="leader-topic-floating-panel"
+        className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}`}
+        id="pmo-teams-topic-floating-panel"
         role="dialog"
         aria-modal="false"
         aria-hidden={!visible}
-        aria-label={LEADER_TOPIC_TITLE}
-        data-leader-topic-floating
+        aria-label={PMO_TEAMS_TOPIC_TITLE}
+        data-pmo-teams-topic-floating
         tabIndex={-1}
         style={floating.open ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
       >
-        <div className={`leader-topic-floating__shell${dragging ? ' is-dragging' : ''}`}>
+        <div className={`pmo-teams-topic-floating__shell${dragging ? ' is-dragging' : ''}`}>
           {floating.open ? (
             <div
-              className="leader-topic-floating__titlebar leader-topic-floating__titlebar--attached"
+              className="pmo-teams-topic-floating__titlebar pmo-teams-topic-floating__titlebar--attached"
               onPointerDown={onPanelPointerDown}
               onPointerMove={onPanelPointerMove}
               onPointerUp={onPanelPointerEnd}
               onPointerCancel={onPanelPointerEnd}
             >
-              <strong>{LEADER_TOPIC_TITLE}</strong>
-              <span className="leader-topic-floating__topic">{LEADER_TOPIC_ID}</span>
-              <div className="leader-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
-                <button type="button" aria-label={floating.maximized ? `Restore ${LEADER_TOPIC_TITLE}` : `Maximize ${LEADER_TOPIC_TITLE}`} title={floating.maximized ? 'Restore' : 'Maximize'} onClick={toggleMaximized}>{floating.maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
-                <button type="button" aria-label={`Minimize ${LEADER_TOPIC_TITLE}`} title="Minimize" onClick={requestLeaderTopicFloatingClose}><Minus size={13} /></button>
-                <button type="button" aria-label={`Close ${LEADER_TOPIC_TITLE}`} title="Close" onClick={requestLeaderTopicFloatingClose}><X size={13} /></button>
+              <strong>{PMO_TEAMS_TOPIC_TITLE}</strong>
+              <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
+                <button type="button" aria-label={floating.maximized ? `Restore ${PMO_TEAMS_TOPIC_TITLE}` : `Maximize ${PMO_TEAMS_TOPIC_TITLE}`} title={floating.maximized ? 'Restore' : 'Maximize'} onClick={toggleMaximized}>{floating.maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
+                <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={requestPmoTeamsTopicFloatingClose}><X size={13} /></button>
               </div>
             </div>
           ) : null}
-          <div className="leader-topic-floating__body">
-            <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={LEADER_TOPIC_ID} topicIsolation="bound-only" visible={visible} interactiveResize={false} />
+          <div className="pmo-teams-topic-floating__body">
+            <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" visible={visible} interactiveResize={false} />
           </div>
         </div>
       </div>

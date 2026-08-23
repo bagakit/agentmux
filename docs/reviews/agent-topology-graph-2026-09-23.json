@@ -1,0 +1,17 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Agent topology graph",
+  "decision": "Create a separate future Feature for a global Agents topology graph; ship only the navigation naming and hierarchy correction now.",
+  "constraints": [
+    "Agents hides the Project Rail while active.",
+    "Active Agents are central; inactive Agents remain visible but muted.",
+    "Same Project or Demand creates proximity; Project groups receive polygon boundaries.",
+    "Use existing Session/Agent/Project/Demand facts and status vocabulary.",
+    "Design an accessible non-graph fallback and reduced-motion behavior before implementation."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx"
+  ]
+}

@@ -16,6 +16,7 @@ describe('full-page loading production callers', () => {
     expect(callers.length).toBeGreaterThanOrEqual(2)
     expect(callers.map((file) => file.replace(`${root}/`, '')).sort()).toEqual([
       'App.tsx',
+      'components/TerminalView.tsx',
       'components/WorkspaceBoard.tsx'
     ])
   })

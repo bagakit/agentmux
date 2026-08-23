@@ -7,9 +7,9 @@ const state = { config: null, sessions: [] }
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: (selector: (value: typeof state) => unknown) => selector(state)
 }))
-import { LeaderTopicEntry } from '../src/renderer/src/components/LeaderTopicEntry.js'
+import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry.js'
 
-describe('compact Leader Topic surface', () => {
+describe('compact PMO teams topic surface', () => {
   let root: ReturnType<typeof createRoot>
   let container: HTMLDivElement
   beforeEach(() => {
@@ -24,9 +24,9 @@ describe('compact Leader Topic surface', () => {
     container.remove()
   })
   it('keeps a separate compact control beside the surface switcher', async () => {
-    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 }, launcherPlacement: 'compact', launcherPosition: { left: 100, top: 100 } }))
-    await act(async () => root.render(createElement(LeaderTopicEntry, { placement: 'compact' })))
-    expect(container.querySelector('.leader-topic-compact-launcher')).toBeTruthy()
-    expect(container.querySelector('button[aria-label="Open Leader Topic"]')).toBeTruthy()
+    window.localStorage.setItem('agentmux.pmo-teams-topic-floating.v1', JSON.stringify({ open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 }, launcherPlacement: 'compact', launcherPosition: { left: 100, top: 100 } }))
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
+    expect(container.querySelector('.pmo-teams-topic-compact-launcher')).toBeTruthy()
+    expect(container.querySelector('button[aria-label="Open PMO teams topic"]')).toBeTruthy()
   })
 })

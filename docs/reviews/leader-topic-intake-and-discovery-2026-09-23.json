@@ -1,0 +1,18 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Leader Topic Demand / Idea intake and global discovery",
+  "status": "approved",
+  "reviewer": "agent scope review grounded in user request",
+  "decision": "Scope correction: ideas means record in ideas/index.md, not a New Idea product. Intake and discovery have a distinct closure from filesystem persistence and are tracked separately. Existing five persistence tasks are unchanged.",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "ideas/index.md",
+    "docs/reviews/filesystem-demand-package-2026-09-22.md",
+    "packages/core/src/agentmux.ts",
+    "packages/core/src/control.ts",
+    "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx",
+    "apps/desktop/src/renderer/src/components/LeaderTopicFloatingPanel.tsx"
+  ]
+}

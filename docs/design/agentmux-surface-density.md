@@ -682,6 +682,8 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 全局 Board 的任务卡以任务标题和目标 Project 为第一层信息，任务状态、最近 Attempt/Agent 和 Session 上下文为第二层；不要把同一 Session 复制成多条 Agent 行。跨项目上下文用简短的 Project/Workspace/Branch/Topic 路径表达，窄窗优先保留任务标题、状态和目标 Project。行为约束见 desktop-interaction 的“全局 Board 与可配置默认 Session”。
 
+Board 的 `New Demand` 使用紧凑文字图标按钮，打开居中的 Leader Topic 对话浮窗；入口行为归交互 SSOT，不增加空卡表单。
+
 ### Leader Topic 入口的浮动与收纳（2026-09-22）
 
 浮动入口使用单一紧凑按钮、轻阴影和清晰焦点环，拖动只改变停靠位置，不改变 Leader Topic 身份或注意力语义。收起后，入口缩小并与底部 Agents / Session / Board 按钮同组，保持独立的命中区、间距和 tooltip；不能用一个叠加图标同时承担“打开 Board”和“打开 Leader Topic”。窄窗中优先保留两个图标和未读提示，文字标签可以隐藏；空间不足时保留图标，不把入口删除。
@@ -807,6 +809,44 @@ Leader Topic 的头像、三个点和展开面板使用一个连续的浮动面�
 
 Demand 由与 Core 平行的文件系统包提供，Board 和 Leader Topic 只消费同一份 Demand 投影。界面中的 Demand 卡第一层显示标题、状态和目标 Project，关联 Session / Attempt 作为第二层执行 rail；不在卡片内复制一套 Session 状态机或把 Agent 行伪装成 Demand。CLI/API 的失败沿用服务窗语言，保留已读到的 Demand，不用空列表覆盖工作面。
 
+### Demand 管理与业务流程表面（2026-09-23）
+
+Demand 详情必须有可编辑的描述、优先级、状态、目标 Project、Executor 和关联 Session 列表；每个编辑动作沿用紧凑的行内控件与 receipt，不把详情做成空白表单或信息堆。关联 Session 使用稳定 ID 和 Agent/Project 摘要，提供添加、移除和进入原工作面的动作；删除 Demand 放在明确的危险动作菜单里，要求确认并保留审计信息。
+
+Demand 卡片的执行 rail 使用统一的“Agent 工作拓扑摘要”组件：先显示 Topic/Branch，再按 Tab 展示其全部分栏，分栏内显示 Region 类型、Agent 名称、Provider/Executor 和运行状态。Tab/Region 信息采用紧凑树形层级，可折叠但不能默认只剩计数；组件在 Agents、Session、Demand 详情中复用同一间距、身份 glyph 和状态槽。
+
+Leader Topic 浮窗承担“提出需求”和“分配上下文”的对话入口，Board 承担扫描、编辑和审计；两者共享同一 Demand 事实。一个流程从浮窗开始时，Board 不提前画空卡；确认写入后卡片立即显示描述、Project、状态和 Session 数量。CUI 查询与 UI 详情使用相同字段顺序和稳定 ID，Agent 可以完成与人相同的提出、分配、推进和删除流程。
+
 ### 真实重启恢复的表面密度（2026-09-22）
 
 真实重启后的第一帧先显示原有 Tab、Region 和焦点所属工作面；Runtime/Provider 恢复中的服务窗贴在受影响 Region 的边缘，不用全屏 loading 覆盖工作面。服务窗短标题说明失败阶段，正文说明当前保留的事实和恢复动作；恢复成功后收敛为轻量状态，不制造第二套恢复面板。验收证据必须来自不同的真实 Electron 进程和同一持久化根目录，不能用组件重挂载或静态启动标记代替。
+
+### Leader 一体式对话面（2026-09-23）
+
+Leader 浮窗使用清晰中性细边框、外阴影与实色内容底，标题和内容同底色。标题区收紧至 36px，头像融入同一行，不显示内部 Topic ID，不重复放最小化和关闭这两个相同动作。展开头像缩至适配标题行的尺寸；毛玻璃保留在独立悬浮入口，不牺牲正文可读性。默认对话模式的行为归交互 SSOT。
+
+Leader 内容区的身份提示采用一条短的职责说明和一个明确的“先澄清、再分配、经确认才写入”状态槽，不增加高大的客服式欢迎卡。对话内容、Composer 和工作区事实仍沿用普通 Topic 的密度；职责约束由固定 Leader Wiki 提供，普通 Topic 不显示这条额外提示。
+
+### 全局加载表面（2026-09-23）
+
+应用级和 Region 级加载只保留一套 graphite grid / sweep / registration mark 语言。首次装载显示全幅动画；局部刷新保留已有事实，只在原位显示轻量忙碌信号。任何新的等待态先复用 `FullPageLoadingSurface`，再决定是否需要额外上下文，不另起一套 spinner 视觉。
+
+### 设置页现代化密度（2026-09-23）
+
+设置页使用“窄侧栏导航 + 宽内容画布 + sticky 上下文头”的工作台布局。侧栏导航项保持清楚的图标、标题和一行说明；主区卡片只抬起可编辑内容，信息说明贴底，保存动作在可视区域内稳定可见。主色只用于选中、成功和唯一主操作，避免整页卡片化和彩色装饰。
+
+### Message Tool 内的 Agent 视图切换（2026-09-23）
+
+Terminal / Activity 切换从 Pane 顶栏移到 Message Tool 的工具带，和 Skills、Commands、Capture 共用紧凑按钮语言。顶栏保留 Tab、Workspace、Agent 生命周期和分屏动作；切换按钮必须在窄栏仍可发现，当前模式用 selected/focus 语义表达，不用额外大标题。
+
+### 对话消息的视觉语言（2026-09-23）
+
+消息流采用编辑器式阅读布局：用户消息靠右、宽度收窄、使用柔和的 surface 色块和圆角；Agent 消息靠左但无左边竖线，依靠身份小标、字号和段落留白建立层级。复制、标注等动作默认隐身，hover/focus 时在消息头部出现，保持内容优先。选中文本后的标注浮层贴近选区并在视口内夹紧，提交区使用现有 Message Tool 的输入与发送语言。
+
+PMO 团队的浮窗标题、入口 tooltip 和无障碍名称统一使用 `PMO teams topic`；紧凑团队称呼为 `PMO teams`。名称和职责见交互 SSOT「PMO teams topic 名称与职责」，保留龙头像和现有紧凑窗口语言，不额外增加占空间的角色说明栏。
+
+PMO Teams 展开使用短促的位移、缩放与淡入，起点对齐触发头像，结束时头像与面板接合；不要从无关的屏幕角落弹出。标题栏只保留最大化/还原与一个收起动作，按钮语义见交互 SSOT「PMO Teams 从入口展开」。
+
+### Workspaces 与 Agents 全局工作面（2026-09-23）
+
+底部三项切换器使用 `Agents`、`Workspaces`、`Board`。`Workspaces` 只表达工作台集合，不把 Session 生命周期误当作顶级导航。Agents 和 Board 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。

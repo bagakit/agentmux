@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 255
+    "next_cursor": 260
   },
   "features": [
     {
@@ -2172,6 +2172,56 @@
       "title": "Project tree 状态槽统一",
       "status": "archived",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2a98fqxek",
+      "title": "全局加载表面统一盘点",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2aa8fqy9f",
+      "title": "设置页现代化工作台",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ab8fr5m6",
+      "title": "Message Tool 内 Agent 视图切换",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ac8fhvwu",
+      "title": "对话消息阅读、复制与标注",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ad8fyees",
+      "title": "Agent topology graph for global Agents",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

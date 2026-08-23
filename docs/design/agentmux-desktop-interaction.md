@@ -73,7 +73,7 @@
 
 ### Agents / Session / Board 与注意力闭环
 
-- 主工作面只有三项：Agents、Session、Board。三项切换位于窗口底部中央，顶行不再放一套平级导航；Session 是现有 terminal/workbench 的对外名称。
+- 主工作面只有三项：Agents、Workspaces、Board。三项切换位于窗口底部中央，顶行不再放一套平级导航；Workspaces 是现有 terminal/workbench 工作面的对外名称，Session 只表示其中运行的 Agent/terminal 生命周期。
 - Agents 是全局注意力收件箱：先显示 Needs you，再显示工作中、已完成和错误的 Agent；卡片选中后在同屏右侧显示该 Session 的观察工作区，明确的“打开 Session”动作才导航到原工作台。Needs you 的 typed request 从同一详情区进入既有回答面板，不能在这里复制一份 Session 或 Runtime 状态。
 - Session 是具体 Agent Session 的 terminal/workbench；Agent 的请求、回复和恢复动作在同一 Session 内完成，处理后仍留在原 Session。
 - Board 的主实体是 Demand。Demand 卡片第一层显示 Demand ID、Project 和状态，关联 Session 只作为执行事实；没有选中 Demand 时不渲染 DemandWorkspace，也不保留空右栏。
@@ -1150,7 +1150,13 @@ Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口�
 
 用户可以直接与默认 Session 讨论需求。Session 分析后可以在全局 Board 创建任务，并为任务标记应执行的 Project；创建结果、目标 Project、分析依据和关联 Session 必须在对话与任务卡上可追踪，不能把跨项目的创建变成不可见的副作用。无法确定目标 Project 时保留待确认状态，不猜测归属，也不阻断 Session 继续对话。
 
+Board 的“New Demand”直接在窗口中央打开固定 Leader Topic 浮窗，并注入本次需求讨论的提示词，让 Leader Agent 开始和人澄清目标及项目归属。入口携带当前 Project 筛选上下文，不创建空白 Demand；后续 Demand 写入遵守既有确认策略。
+
 入口只负责打开/聚焦 Leader Topic，不代替 Board 的全局浏览入口。Leader Topic 恢复状态未知时，入口仍保留并打开恢复提示；不能因启动握手或读取快照失败清空全局 Board。浮动入口的视觉和位置约束见 surface-density SSOT 的同名小节。
+
+点击 Leader 头像后必须在同一个入口内呈现可见的 Leader Topic 工作面：头像打开的是已经准备好的固定 Topic 浮窗，浮窗必须有可见的 Workbench、Tab/Region 和可输入的 Composer；若 Topic 准备仍在进行，先显示全幅恢复/加载表面，准备完成后自动切换到内容，不能留下空白浮层或只更新隐藏状态。准备失败时保留浮窗并在其中显示服务窗式失败说明与重试动作。
+
+点击 Leader 头像后必须在同一个入口内呈现可见的 Leader Topic 工作面：头像打开的是已经准备好的固定 Topic 浮窗，浮窗必须有可见的 Workbench、Tab/Region 和可输入的 Composer；若 Topic 准备仍在进行，先显示全幅恢复/加载表面，准备完成后自动切换到内容，不能留下空白浮层或只更新隐藏状态。准备失败时保留浮窗并在其中显示服务窗式失败说明与重试动作。
 
 ### Leader Topic 入口的浮动与收纳（2026-09-22）
 
@@ -1172,6 +1178,8 @@ Leader Topic 入口必须使用 AgentMux 项目现有的绿色 low-poly 龙头�
 
 默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
 
+`agentmux` CLI 必须能让 Agent 查到当前所有已注册项目，以及各项目中的其他活跃 Agent；返回稳定 Project/Workspace/Session ID、路径、Provider/Executor 和真实状态。未打开 Tab 的活跃 Agent 仍可发现，未知或查询失败不能伪装成空列表。
+
 ### Leader Topic 与任务写入确认（2026-09-22）
 
 项目调度 Agent 适合作为一个固定的 Leader Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，但使用产品固定的 `launcher:leader` 身份，不进入用户 Scratch Topic 的选择投影，也不随着用户当前 Scratch Topic 改变。
@@ -1189,6 +1197,19 @@ Demand 是与 Project、Session 平级的长期产品事实，不属于 Core 的
 Leader Topic 默认通过该包的 CLI/API 访问 Demand。Leader Topic 可以分析、建议和提交 Demand，但不能在 Topic 目录或 Renderer 中另存一套任务记录；Board 读取同一份文件事实并投影状态。Core 继续只拥有 Provider、Session、Run、PTY 和 ordered bytes 的生命周期事实，Demand 包不得启动或管理 Agent 进程。
 
 Demand 包的文件格式、锁、原子替换、损坏恢复和 CLI 输出协议必须独立可测试，未来其他 Client 也能在不依赖 Electron、React 或 AgentMux Desktop 的情况下使用。Demand 与 Session 的关联保存稳定 ID 和可验证引用；不存在的 Session 只能显示为历史关联或 unknown，不能伪造成当前运行状态。
+
+### Demand 的完整业务闭环（2026-09-23）
+
+Demand 不能只是一张标题卡。完整闭环至少包括四条可从 UI 和 CUI 重放的流程：
+
+1. **提出需求**：用户点击 `New Demand`，中央打开 Leader Topic 浮窗并注入来源、当前 Project 筛选和“先澄清再写入”的提示；Leader Agent 通过对话补齐标题、描述、优先级、目标 Project、风险和下一步，用户确认后才创建 Demand。
+2. **分配执行上下文**：用户或 Leader Agent 从可见 Project/活跃 Agent 摘要中选择目标 Project，并把零个、一个或多个已有 Session 关联到 Demand；Project 归属和 Session 关联是两个独立动作，不能用当前选中 Session 猜测。
+3. **管理与推进**：Board 详情可以编辑标题、描述、优先级、状态、Project、Executor 和 Session 关联，能查看 Activity/Decision receipt；删除 Demand 是显式、可确认、可审计的动作，删除不能删掉 Session 或 Project。
+4. **恢复与审计**：重启或 CLI 跨进程读取后，Demand、描述、Project、状态、Session IDs 和 receipt 仍一致；文件/Runtime 查询失败时保留已读内容并显示服务窗，不把 Demand 变成空卡。
+
+Demand 卡片的执行摘要必须能读出实际工作拓扑：关联 Agent 的 Topic/Branch 上下文、所有打开的 Tab、每个 Tab 的分栏/Region，以及每个分栏当前运行的 Agent。不能只显示“n 个 Session”后要求用户再去猜 Session 在哪个工作面；没有 Tab、分栏或 Agent 时明确显示缺失事实。该拓扑摘要由统一的可复用组件提供，Demand、Agents、Session 和详情面板只传入投影数据，不各自重建一套卡片结构。
+
+UI 和 CUI 必须共享同一组语义动作：`demand.list/show/create/update/delete/link-project/unlink-project/link-session/unlink-session/decision-log/activity`。UI 不得拥有 CUI 没有的第二套写入逻辑；CUI 也不能绕过 UI 使用的确认、稳定 ID、权限和 receipt 约束。
 
 ### 全局 Board 的成熟产品界面（2026-09-21）
 
@@ -1328,3 +1349,44 @@ Default Session 的打开动作呈现为当前工作面上的浮窗，交互参�
 重启验收必须启动隔离的真实 Electron 主进程和 Renderer，记录应用进程身份、持久化布局身份、焦点、草稿以及 Session/Run/Provider-native handle；至少发生一次真实退出，再由不同进程从同一 userData 根目录恢复。组件 remount、Store 序列化或只比较启动文件不能替代这条证据。恢复先重建 Tab/Region/focus，再尝试 reattach/resume 原 Session；Run 可以依法换代，但 Session、工作面和草稿不能被伪造成新对象。
 
 Runtime snapshot 为空、恢复握手超时、Provider 探测失败或布局暂时不可读时，原工作面继续可见并显示服务窗，记录失败步骤与下一步；只有 Core 明确给出 retired/unknown 等终局事实时才移除投影。探针只能操作自己创建的隔离资源，必须记录不同 PID 和前后身份匹配，并在结束时清理临时目录，不得停止用户已有 Run。
+
+### Leader 对话浮窗的清晰度（2026-09-23）
+
+Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端。外缘在复杂工作面上必须清晰可辨；标题与内容是一体的紧凑表面，不能用高大的 Leader Topic 标题行重复占位。固定 Topic、原 Session、拖动、收纳和重启恢复保持同一事实。
+
+### Leader Topic 的身份与职责（2026-09-23）
+
+- `launcher:leader` 是 AgentMux 的协调者 Topic，不是普通 Project Agent 的替身。它的默认职责是理解需求、澄清缺口、提出 Project/Topic/Session 分配方案、记录 Demand 决策并跟踪进展。
+- Leader 默认先对话后执行：没有用户明确确认和目标 Agent 分配时，不自行修改业务文件、不替用户完成编码任务、不把“帮我推进”默认为“自己直接实现”。它可以读取全局 Project、Tab、Region、Session 和 Agent 摘要，用于做出可检查的分配建议。
+- Leader 的身份必须同时写入固定 Topic 的默认 Wiki 和启动时的 AgentMux context；用户消息、Runtime/权限/Session/Project 事实优先于 Wiki。普通 Topic 继续使用通用 Topic Wiki，不得误把 Leader 角色传播给其他 Topic。
+- Leader 需要实际执行工作时，先把目标、承担者、Project、Session、风险和验收写成待确认方案；用户确认后再通过公开 Demand/CUI 能力分配或触发工作。确认前的工具调用只能用于观察、澄清和准备，不得产生不可逆业务写入。
+
+### 全局加载过程的统一入口盘点（2026-09-23）
+
+所有会让用户暂时失去主内容的过程都必须使用同一个可复用的加载/恢复表面：应用启动、工作面恢复、固定 Topic 准备、Session 连接、Terminal replay/hydration、Browser/文件/差异内容首次装载。局部刷新（例如列表重新取数）可以保留上一份事实并使用行内忙碌标记，但不能把整页替换成另一套 spinner。加载、恢复、失败和重试的语义由共享组件统一表达，并遵守减少动态效果设置。
+
+### 设置页的信息架构（2026-09-23）
+
+设置页要像一个现代工作台：侧栏只负责快速定位，主区首屏明确当前设置对象、当前状态和唯一主操作；可编辑内容与只读说明分层，重复说明收起到次级层。搜索、键盘导航、窄窗口和保存反馈必须保持可见且可恢复，切换分区不能丢弃未保存草稿。
+
+### Agent 内部视图切换归 Message Tool（2026-09-23）
+
+顶部 Chrome 只表达工作区、当前工作面和 Agent 生命周期汇总。Terminal 与对话/Activity 是单个 Agent 内部的交互模式，必须收进该 Agent 的 Message Tool 区域；切换不应占用工作区顶栏，也不能改变 Session、Tab 或 Region 的生命周期。切换控件要和消息工具同一套命中区、焦点、禁用和窄栏规则。
+
+### 对话消息的阅读、复制与标注（2026-09-23）
+
+对话模式不是左右两张客服卡。用户自己发出的消息靠右对齐，用独立但克制的身份样式表达；Agent 消息保持阅读流宽度，不使用左侧单像素竖线或大面积卡片阴影。每条消息都必须有可发现的复制动作，复制的是该消息的完整原文（含纯文本降级）。
+
+用户可以在消息正文中选择一段文字，打开就地标注入口，输入留言后把“引用原文 + 留言 + 当前 Agent/Session”作为一次可追踪的回复请求发送。标注必须保留引用文本、来源消息稳定 ID 和范围信息；选区消失、消息切换或发送失败时不丢留言草稿。没有选区时不显示标注入口，避免把普通点击变成额外 chrome。
+
+### PMO teams topic 名称与职责（2026-09-23）
+
+固定协调 Topic 正式显示为 `PMO teams topic`，紧凑的团队称呼使用 `PMO teams`。这个名字表达的是和人讨论需求、组织执行 Agent、分配工作并持续跟进结果；底层仍是同一个 Topic，改名不创建新 Topic，不改变已存在的 Session、对话、文件目录和布局身份。用户已明确授权的分配与推进直接执行，不重复索要确认；默认把项目实现交给执行 Agent，只有用户明确要求 PMO 亲自实现时才承担该项实现。普通 Topic 不继承 PMO 身份。
+
+### PMO Teams 从入口展开（2026-09-23）
+
+用户点击浮动态 PMO Teams 头像时，面板从头像所在位置快速展开，展开后头像紧贴面板边缘并随面板拖动。点击头像和面板唯一的收起按钮都只收起同一个 Topic；不同时放置语义相同的关闭和最小化按钮。减少动态效果开启时直接显示最终位置。改名同时覆盖组件、函数、类型、源码文件名、样式和测试，持久 Topic 身份不变。
+
+### Agents 全局层级与拓扑图（2026-09-23）
+
+Agents 与 Workspaces、Board 位于同一组全局工作面。Agents 打开时 Project Rail 被遮挡，Project 只作为 Agent 的归属事实和未来拓扑图的分组边界，不再在左侧重复出现。Agents 当前先保留可用的分组/详情表面；引力图是独立 Feature：活跃 Agent 居中，不活跃 Agent 灰度保留；同一 Project 或 Demand 的 Agent 距离更近，Project 关联范围形成多边形区域。图中的节点、边和状态必须复用现有 Session/Project/Demand 事实，不能建立第二套 Agent registry。

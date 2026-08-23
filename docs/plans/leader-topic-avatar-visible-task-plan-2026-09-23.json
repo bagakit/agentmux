@@ -1,0 +1,22 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "feature_slug": "leader-topic-avatar-visible",
+  "title": "Leader Topic 头像打开可见工作面",
+  "goal": "点击 Leader 头像后稳定呈现可见、可交互的固定 Leader Topic 工作面，不留下空白浮层。",
+  "tasks": [
+    {
+      "task_key": "visible-surface",
+      "title": "让 Leader 头像打开路径保留可见准备态并呈现 Workbench",
+      "objective": "把头像点击、Topic 准备、加载/失败状态和 bound-only Workbench 连接成一个可观察的工作面。",
+      "acceptance": [
+        "头像普通点击后浮窗不继续 hidden；准备未完成时显示共享全幅加载/恢复表面。",
+        "准备成功后显示固定 Leader Topic 的 Tab/Region/Composer；准备失败保留浮窗并显示可重试的服务窗提示。",
+        "floating 与 compact 两个生产入口仍指向同一个固定 Topic，不新增 Session 或第二套状态。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-avatar-visible.test.tsx test/leader-topic-floating.test.tsx test/leader-topic-launcher.test.tsx --maxWorkers=1", "proves": "头像点击、准备态、失败保留和固定 Topic 接线。"},
+        {"kind": "command", "ref": "rg -n '<LeaderTopicEntry|<LeaderTopicFloatingPanel' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicEntry.tsx' | grep -v 'components/LeaderTopicFloatingPanel.tsx'", "proves": "浮动与 compact 入口存在定义文件之外的生产调用者。"}
+      ]
+    }
+  ]
+}

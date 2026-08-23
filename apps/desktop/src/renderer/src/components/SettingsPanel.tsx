@@ -185,7 +185,13 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
         <footer><span>Core API</span><code>@agentmux/core</code></footer>
       </aside>
       <main className="settings-content">
-        <header><div className="eyebrow">{groupTitle}</div><h2>{section.title}</h2><p>{section.description}</p></header>
+        <header className="settings-content__header">
+          <div className="settings-content__title">
+            <span className="settings-content__icon" aria-hidden="true"><section.icon size={18} /></span>
+            <div><div className="eyebrow">{groupTitle}</div><h2>{section.title}</h2><p>{section.description}</p></div>
+          </div>
+          <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+        </header>
         <div className="settings-content__scroll">
           {active === 'general' ? <GeneralSettingsPane /> : null}
           {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}

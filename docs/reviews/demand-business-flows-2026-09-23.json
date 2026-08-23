@@ -1,0 +1,16 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Demand complete business flows",
+  "status": "approved",
+  "reviewer": "maintainer",
+  "decision": "Demand must be proposed through Leader Topic, assigned to Project and zero or more Sessions, managed with a complete UI/CUI action set, and replayable across processes and restart.",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "ideas/index.md",
+    "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx",
+    "packages/core/src/control.ts",
+    "packages/demand/src/demand-types.ts"
+  ]
+}

@@ -8,6 +8,7 @@ import { workspaceForSession } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
+import { AgentTopologySummary } from './AgentTopologySummary'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
 const BUCKET_META = {
@@ -26,6 +27,7 @@ function bucketFor(row: RosterRow): AgentBucket {
 export function GlobalAgentsSurface() {
   const sessions = useAppStore((state) => state.sessions)
   const config = useAppStore((state) => state.config)
+  const tabs = useAppStore((state) => state.tabs)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const names = useAppStore((state) => state.agentNames)
   const selectedId = useAppStore((state) => state.selectedAgentSessionId)
@@ -70,6 +72,7 @@ export function GlobalAgentsSurface() {
     {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
       <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
       {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
+      <AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} />
       <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />
     </aside> : null}
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={setSelected} /> : null}

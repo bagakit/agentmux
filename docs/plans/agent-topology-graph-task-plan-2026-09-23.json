@@ -1,0 +1,97 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "feat_id": null,
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agent-topology-graph-2026-09-23.json"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/reviews/agent-topology-graph-2026-09-23.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "建立 Agent topology graph projection",
+      "objective": "从现有 Session、Project、Demand 事实生成稳定的 Agent 节点和关系边。",
+      "outcome": "纯投影可表达活跃/非活跃、同 Project、同 Demand 和缺失关联。",
+      "acceptance": [
+        "同 Project 或同 Demand 的 Agent 关系由稳定 ID 推导，不能复制一份 registry。",
+        "活跃、idle、unknown 和 error 复用现有状态词汇，缺失事实不被猜测。",
+        "投影的 mutation test 在删掉任一关系来源时变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agent-topology-graph.test.ts --maxWorkers=1",
+          "proves": "Stable graph nodes and edges are projected from existing facts."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-topology-graph-2026-09-23.md"
+      ],
+      "estimate_hours": 2,
+      "heavy": false,
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "实现 Agents 引力图与 Project 区域边界",
+      "objective": "在全局 Agents 表面展示中心活跃节点、周边灰度节点、关系连线和 Project 多边形区域。",
+      "outcome": "Agents 图可扫描、可点选、可回到现有详情和 Session 工作面。",
+      "acceptance": [
+        "同 Project 或 Demand 的节点距离更近，Project 相关范围显示可读的多边形区域。",
+        "活跃 Agent 保持中心视觉权重，不活跃 Agent 灰度但仍可见。",
+        "节点点击复用既有 Agent 详情/Session 导航，不创建第二套生命周期。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-agents-topology.test.tsx --maxWorkers=1",
+          "proves": "Graph interaction and hierarchy are wired to the existing Agent surface."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-topology-graph-2026-09-23.md"
+      ],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "Physics/layout, accessible fallback, and existing workbench navigation must converge in one surface.",
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "验证 Agent 图的可访问性、恢复与动效降级",
+      "objective": "证明图在重启、窄窗、键盘和减少动态效果设置下仍可用。",
+      "outcome": "图与列表 fallback 共享事实，恢复失败保留节点，动效可关闭。",
+      "acceptance": [
+        "减少动态效果时不依赖持续物理动画才能读懂状态。",
+        "键盘和无障碍树可以访问每个 Agent、Project 区域和关系摘要。",
+        "重启或布局失败不清空 Agent 节点；服务窗说明降级原因。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/agent-topology-graph-recovery.test.tsx --maxWorkers=1",
+          "proves": "Graph fallback and recovery preserve Agent facts."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/agent-topology-graph-2026-09-23.md"
+      ],
+      "estimate_hours": 2,
+      "heavy": false,
+      "supersedes": []
+    }
+  ]
+}

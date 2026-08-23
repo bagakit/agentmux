@@ -1,0 +1,18 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status": "approved", "evidence_ref": "docs/reviews/message-tool-view-switch-2026-09-23.md"},
+  "tasks": [{
+    "id": "T-001",
+    "title": "把 Agent 视图切换放进 Message Tool",
+    "objective": "将单个 Agent 的 Terminal/Activity 切换从 Pane 顶栏移到消息工具带。",
+    "outcome": "顶部只保留 Workspace/Tab/生命周期/分屏操作，Agent 内部模式在 Message Tool 内切换。",
+    "acceptance": ["Terminal 与 Activity 按钮由 AgentComposerTools 渲染并调用现有 setViewMode。", "顶部不再渲染 per-Agent view toggle。", "窄栏、焦点和禁用语义保持可用。"],
+    "verification": [
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/message-tool-view-switch.test.tsx test/agent-composer-tools.test.ts test/session-pane-composer.test.tsx --maxWorkers=1", "proves": "Message Tool 视图切换和生产接线。"},
+      {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "组件 props 与 store action 类型边界。"}
+    ],
+    "source_refs": ["apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx", "apps/desktop/src/renderer/src/components/SessionPane.tsx", "apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx", "apps/desktop/src/renderer/src/components/AgentComposerTools.tsx"],
+    "depends_on": []
+  }],
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/message-tool-view-switch-2026-09-23.md"]
+}

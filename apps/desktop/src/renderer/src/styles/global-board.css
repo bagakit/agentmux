@@ -54,6 +54,24 @@
 .global-demand-card__meta span { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .global-demand-card__meta span:nth-child(2) { max-width: 100px; }
 .global-demand-card__sessions { text-transform: none; letter-spacing: 0; }
+.agent-topology-summary { margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); }
+.agent-topology-summary__header, .agent-topology-summary__topic-line, .agent-topology-summary__tab-line, .agent-topology-summary__region { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.agent-topology-summary__header { color: var(--text-2); font-size: var(--fs-meta); }
+.agent-topology-summary__header span, .agent-topology-summary__tab-line span { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
+.agent-topology-summary__tree { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.agent-topology-summary__topic { padding: var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-1); }
+.agent-topology-summary__topic-line { color: var(--text); font-size: var(--fs-meta); }
+.agent-topology-summary__topic-line span { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+.agent-topology-summary__tab { margin-top: var(--sp-2); padding-left: var(--sp-3); border-left: 1px solid var(--line); }
+.agent-topology-summary__tab-line { color: var(--text-2); font-size: var(--fs-micro); }
+.agent-topology-summary__regions { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-1); }
+.agent-topology-summary__region { min-height: 24px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-micro); }
+.agent-topology-summary__region-kind { color: var(--text-3); text-transform: capitalize; }
+.agent-topology-summary__agent { overflow: hidden; max-width: 150px; color: var(--text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.agent-topology-summary__agent--unknown { color: var(--text-3); font-weight: 400; }
+.agent-topology-summary__provider, .agent-topology-summary__status { color: var(--text-3); }
+.agent-topology-summary__status { margin-left: auto; }
+.agent-topology-summary__empty { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-micro); }
 .global-session-card { position: relative; display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; padding: var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); background: var(--surface-1); color: var(--text); text-align: left; box-shadow: var(--hl); cursor: pointer; transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
 .global-session-card:hover { background: var(--surface-2); border-color: var(--line); transform: translateY(-1px); }
 .global-session-card:focus-visible { outline: 2px solid var(--green-2); outline-offset: 1px; }

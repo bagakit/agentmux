@@ -215,20 +215,6 @@
 .pane-action--split > svg:last-child { margin-left:-1px; opacity: .65; }
 .pane-split-menu { min-width: 148px; max-height: var(--radix-dropdown-menu-content-available-height); }
 .pane-action--stop:hover { color: var(--red); }
-.pane-view-toggle { display: flex; padding:var(--sp-1); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
-.pane-view-toggle button {
-  width: 24px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 3px;
-  color: var(--text-3);
-  background: transparent;
-  cursor: pointer;
-}
-.pane-view-toggle button.selected { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
 /* 一个 pane 里所有 Tab 的内容都在这儿，彼此叠放，只有活动的那层可见。
    这是"切回终端不再重放"的结构前提：隐藏的 Tab 仍在 DOM 里，xterm 实例因此活着。 */
 .pane-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
