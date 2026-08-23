@@ -6,6 +6,7 @@ import { categoryFor, isUrgentAttention } from '../lib/attention-event'
 import { topicIdForSession } from '../lib/workbench-tabs'
 import {
   requestLeaderTopicFloatingOpen,
+  requestLeaderTopicFloatingClose,
   useLeaderTopicFloatingState,
   type LeaderTopicLauncherPlacement
 } from '../lib/leader-topic-floating'
@@ -48,6 +49,13 @@ export function LeaderTopicEntry({
   const nextPlacement: LeaderTopicLauncherPlacement = placement === 'floating' ? 'compact' : 'floating'
   const toggleLabel = placement === 'floating' ? 'More Leader Topic actions: move to bottom switcher' : 'More Leader Topic actions: restore floating button'
   const openLabel = placement === 'floating' && floating.open ? `Close ${LEADER_TOPIC_TITLE}` : `Open ${LEADER_TOPIC_TITLE}`
+  const defaultOpen = (): void => {
+    if (floating.open) {
+      requestLeaderTopicFloatingClose()
+      return
+    }
+    requestLeaderTopicFloatingOpen({ anchor: placement })
+  }
   return (
     <div
       className={`${className}${dragging ? ' is-dragging' : ''}${attached ? ' is-attached' : ''}`}
@@ -61,7 +69,7 @@ export function LeaderTopicEntry({
       <button
         type="button"
         className={`${className}__button`}
-        onClick={onOpen ?? requestLeaderTopicFloatingOpen}
+        onClick={onOpen ?? defaultOpen}
         aria-label={openLabel}
         title={openLabel}
         aria-expanded={placement === 'floating' ? floating.open : undefined}
