@@ -480,7 +480,7 @@ export function BoardToolList({ hostId }: { hostId: string }) {
     <section className="board-tool-list" aria-label="Global demand index">
       <div className="board-tool-context"><span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span><em>{demands.length} demand{demands.length === 1 ? '' : 's'}</em></div>
       {demands.length === 0 && boardRows.rows.length > 0 ? boardRows.rows.slice(0, 5).map((row) => <div className="board-tool-row__empty" key={row.id}>{row.name}</div>) : null}
-      {demands.length === 0 && boardRows.rows.length === 0 ? <div className="board-tool-row__empty">No demands yet. Use Default Session to create one.</div> : null}
+      {demands.length === 0 && boardRows.rows.length === 0 ? <div className="board-tool-row__empty">No demands yet. Use PMO Teams Topic to create one.</div> : null}
       {(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[]).flatMap((status) => columns[status].slice(0, 5).map((demand) => (
         <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
           <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />

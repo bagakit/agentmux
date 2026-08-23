@@ -157,6 +157,7 @@ import {
   type WorkspaceTool
 } from './lib/surface-tool-dock'
 import { projectDemands, type DemandArrangement, type DemandPriority, type DemandRecord, type DemandStatus } from './lib/global-demand-board'
+import type { Demand as FilesystemDemand } from '@agentmux/demand'
 import { demandWriteDecision } from './lib/demand-write-policy'
 import {
   activeWorkbenchSurface,
@@ -378,6 +379,11 @@ type AppState = {
     projectId?: string | null
     projectName?: string | null
     assigneeExecutorId?: string | null
+    tags?: readonly string[]
+    plannedStartAt?: number | null
+    targetAt?: number | null
+    parentDemandId?: string | null
+    phaseIndex?: number | null
     activityLog?: readonly string[]
     sessionIds?: readonly string[]
     priority?: DemandPriority
@@ -385,7 +391,7 @@ type AppState = {
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
   }): string
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds' | 'decisionLog'>>): void
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog'>>): void
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -820,6 +826,32 @@ function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): 
   return session.control.kind === control.kind &&
     session.control.hostId === control.hostId &&
     session.control.run.runId === control.run.runId
+}
+
+function demandRecordFromFilesystem(demand: FilesystemDemand): DemandRecord {
+  return {
+    id: demand.id,
+    title: demand.title,
+    description: demand.description,
+    status: demand.status,
+    priority: demand.priority,
+    projectId: demand.projectId,
+    projectName: demand.projectName,
+    assigneeExecutorId: demand.executorId,
+    tags: [...demand.tags],
+    plannedStartAt: demand.plannedStartAt,
+    targetAt: demand.targetAt,
+    parentDemandId: demand.parentDemandId,
+    phaseIndex: demand.phaseIndex,
+    activityLog: demand.activities.map((activity) => `${activity.kind}: ${activity.message}`),
+    activities: demand.activities,
+    decisions: demand.decisions,
+    sessionIds: [...demand.sessionIds],
+    createdAt: demand.createdAt,
+    updatedAt: demand.updatedAt,
+    source: 'default-topic',
+    decisionLog: []
+  }
 }
 
 function hasAttachedSessionView(tabs: Readonly<Record<string, WorkbenchTab>>, sessionId: string): boolean {
@@ -1476,7 +1508,6 @@ type PersistedAppState = {
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  demands?: Record<string, DemandRecord>
   selectedAgentSessionId?: string | null
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
@@ -1826,10 +1857,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // are narrower runtime observations: either can be temporarily unavailable while the saved
       // Workbench and an already-running Agent remain usable. Keep those failures scoped to a visible
       // startup notice instead of letting Promise.all turn them into a full-window connection error.
-      const [configResult, initialSnapshotResult, providerCatalogResult] = await Promise.allSettled([
+      const [configResult, initialSnapshotResult, providerCatalogResult, demandResult] = await Promise.allSettled([
         api.config.get(),
         api.sessions.snapshot(),
-        api.providers.list()
+        api.providers.list(),
+        api.demands.list()
       ])
       if (configResult.status === 'rejected') throw configResult.reason
       const config = configResult.value
@@ -1864,6 +1896,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           providerCatalogResult.reason,
           'Existing Sessions remain usable; restart startup to restore Provider choices for new Agents.'
         ))
+      }
+      if (demandResult.status === 'rejected') {
+        startupWarnings.push(startupWorkflowWarning(
+          'Demand filesystem snapshot',
+          demandResult.reason,
+          'The saved Board Demand projection remains visible; retry the Demand store when the filesystem is available.'
+        ))
+      } else if (demandResult.value.length > 0) {
+        set({ demands: Object.fromEntries(demandResult.value.map((demand) => [demand.id, demandRecordFromFilesystem(demand)])) })
       }
       const readCanonicalSnapshot = async (step: string): Promise<RuntimeSnapshot | null> => {
         try {
@@ -2358,6 +2399,39 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
       }
     }
+    if (request.operation === 'list.projects' || request.operation === 'list.active-agents') {
+      const state = get()
+      const workspaces = state.config?.workspaces ?? []
+      const projectForSession = (workspacePath: string) => workspaces.find((workspace) => workspace.path === workspacePath || workspace.repoPath === workspacePath)
+      const activeAgents = state.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent').map((session) => {
+        const project = projectForSession(session.workspacePath)
+        return {
+          agentSessionId: session.id,
+          projectId: project?.id ?? null,
+          projectName: project?.name ?? null,
+          workspacePath: session.workspacePath,
+          providerId: session.providerId,
+          executorId: session.executorId,
+          processState: session.processState,
+          status: session.processState === 'running' ? 'active' as const : session.processState === 'exited' ? 'idle' as const : 'unknown' as const,
+          updatedAt: session.updatedAt
+        }
+      })
+      if (request.operation === 'list.active-agents') return { operation: request.operation, agents: activeAgents }
+      return {
+        operation: request.operation,
+        projects: workspaces.map((workspace) => ({
+          projectId: workspace.id,
+          name: workspace.name,
+          hostId: workspace.hostId,
+          path: workspace.path,
+          kind: workspace.kind,
+          repoPath: workspace.repoPath ?? null,
+          branch: workspace.branch ?? null,
+          activeAgentSessionIds: activeAgents.filter((agent) => agent.projectId === workspace.id && agent.status === 'active').map((agent) => agent.agentSessionId)
+        }))
+      }
+    }
     const demandRecord = (id: string): DemandRecord => {
       const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
       if (!demand) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
@@ -2404,6 +2478,62 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
       const demand = demandRecord(request.demandId)
       return { operation: request.operation, demand, receipt: { demandId: demand.id, updatedAt: demand.updatedAt } }
+    }
+    const appendDemandActivity = (demandId: string, message: string) => {
+      const current = demandRecord(demandId)
+      get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
+    }
+    const startDemand = async (demandId: string, sessionId?: string) => {
+      const current = demandRecord(demandId)
+      let attachedSessionId = sessionId ?? current.sessionIds.at(-1) ?? null
+      if (attachedSessionId) {
+        const session = get().sessions.find((candidate) => candidate.id === attachedSessionId)
+        if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
+        await api.sessions.submitPrompt(session.control, current.description.trim() || current.title, crypto.randomUUID())
+      } else {
+        if (!current.projectId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to a Project before starting.')
+        if (!current.assigneeExecutorId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to an Agent before starting.')
+        const before = new Set(get().sessions.map((candidate) => candidate.id))
+        await get().launchBoardAgent(current.projectId, current.assigneeExecutorId, current.description.trim() || current.title)
+        const created = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && !before.has(candidate.id) && candidate.executorId === current.assigneeExecutorId).at(-1)
+        attachedSessionId = created?.id ?? null
+        if (attachedSessionId) get().updateDemand(demandId, { sessionIds: [...current.sessionIds, attachedSessionId] })
+      }
+      get().updateDemand(demandId, { status: 'in_progress' })
+      appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
+      return { sessionId: attachedSessionId, demand: demandRecord(demandId) }
+    }
+    if (request.operation === 'demand.assign') {
+      const current = demandRecord(request.demandId)
+      const projectId = request.projectId === undefined ? current.projectId : request.projectId
+      const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
+      if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
+      get().updateDemand(request.demandId, { projectId, projectName: project?.name ?? null, assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId })
+      appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
+      if (request.start) {
+        const started = await startDemand(request.demandId)
+        return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: true } }
+      }
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
+    }
+    if (request.operation === 'demand.start') {
+      const started = await startDemand(request.demandId, request.sessionId)
+      return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, startedAt: Date.now(), sessionId: started.sessionId } }
+    }
+    if (request.operation === 'demand.handoff') {
+      const current = demandRecord(request.demandId)
+      get().updateDemand(request.demandId, { assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId, ...(request.sessionId && !current.sessionIds.includes(request.sessionId) ? { sessionIds: [...current.sessionIds, request.sessionId] } : {}) })
+      appendDemandActivity(request.demandId, `Handoff to ${request.assigneeExecutorId ?? 'unassigned'}${request.sessionId ? ` with Session ${request.sessionId}` : ''}.`)
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, handedOffAt: Date.now(), sessionId: request.sessionId ?? null } }
+    }
+    if (request.operation === 'demand.delete') {
+      const demand = demandRecord(request.demandId)
+      await api.demands.delete(request.demandId)
+      set((state) => {
+        const { [request.demandId]: _removed, ...demands } = state.demands
+        return { demands, ...(state.selectedDemandId === request.demandId ? { selectedDemandId: null } : {}) }
+      })
+      return { operation: request.operation, demand, receipt: { demandId: request.demandId, deletedAt: Date.now() } }
     }
     if (request.operation === 'demand.link-session') {
       const current = demandRecord(request.demandId)
@@ -3422,6 +3552,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       projectId: input.projectId ?? null,
       projectName: input.projectName ?? null,
       assigneeExecutorId: input.assigneeExecutorId ?? null,
+      tags: [...(input.tags ?? [])],
+      plannedStartAt: input.plannedStartAt ?? null,
+      targetAt: input.targetAt ?? null,
+      parentDemandId: input.parentDemandId ?? null,
+      phaseIndex: input.phaseIndex ?? null,
       activityLog: [...(input.activityLog ?? [])],
       sessionIds: [...(input.sessionIds ?? [])],
       createdAt: now,
@@ -3430,9 +3565,61 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(input.decisionLog && input.decisionLog.length > 0 ? { decisionLog: [...input.decisionLog] } : {})
     }
     set((state) => ({ demands: { ...state.demands, [id]: record }, selectedDemandId: id }))
+    void api.demands.create({
+      id,
+      title: record.title,
+      description: record.description,
+      status: record.status,
+      priority: record.priority,
+      projectId: record.projectId,
+      projectName: record.projectName,
+      executorId: record.assigneeExecutorId ?? null,
+      ...(record.tags === undefined ? {} : { tags: record.tags }),
+      ...(record.plannedStartAt === undefined ? {} : { plannedStartAt: record.plannedStartAt }),
+      ...(record.targetAt === undefined ? {} : { targetAt: record.targetAt }),
+      ...(record.parentDemandId === undefined ? {} : { parentDemandId: record.parentDemandId }),
+      ...(record.phaseIndex === undefined ? {} : { phaseIndex: record.phaseIndex }),
+      sessionIds: record.sessionIds
+    }).catch((error) => get().reportError(error))
+    if (record.decisionLog?.length) {
+      const decision = record.decisionLog.at(-1)
+      if (decision) void api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '', rationale: decision.candidates.map((candidate) => candidate.reason).join('; '), actorId: decision.sourceSessionId }).catch((error) => get().reportError(error))
+    }
     return id
   },
   updateDemand(id, patch) {
+    const current = get().demands[id]
+    if (current) {
+      const { sessionIds } = patch
+      void api.demands.update(id, {
+        ...(patch.title === undefined ? {} : { title: patch.title }),
+        ...(patch.description === undefined ? {} : { description: patch.description }),
+        ...(patch.status === undefined ? {} : { status: patch.status }),
+        ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+        ...(patch.projectId === undefined ? {} : { projectId: patch.projectId }),
+        ...(patch.projectName === undefined ? {} : { projectName: patch.projectName }),
+        ...(patch.assigneeExecutorId === undefined ? {} : { executorId: patch.assigneeExecutorId }),
+        ...(patch.tags === undefined ? {} : { tags: patch.tags }),
+        ...(patch.plannedStartAt === undefined ? {} : { plannedStartAt: patch.plannedStartAt }),
+        ...(patch.targetAt === undefined ? {} : { targetAt: patch.targetAt }),
+        ...(patch.parentDemandId === undefined ? {} : { parentDemandId: patch.parentDemandId }),
+        ...(patch.phaseIndex === undefined ? {} : { phaseIndex: patch.phaseIndex }),
+      }).catch((error) => get().reportError(error))
+      if (sessionIds !== undefined) {
+        const previous = new Set(current.sessionIds)
+        const next = new Set(sessionIds)
+        for (const sessionId of sessionIds) if (!previous.has(sessionId)) void api.demands.linkSession(id, sessionId).catch((error) => get().reportError(error))
+        for (const sessionId of current.sessionIds) if (!next.has(sessionId)) void api.demands.unlinkSession(id, sessionId).catch((error) => get().reportError(error))
+      }
+      if (patch.activityLog && patch.activityLog.length > (current.activityLog?.length ?? 0)) {
+        const message = patch.activityLog.at(-1)
+        if (message) void api.demands.activity(id, { kind: 'board', message, actorId: null }).catch((error) => get().reportError(error))
+      }
+      if (patch.decisionLog && patch.decisionLog.length > (current.decisionLog?.length ?? 0)) {
+        const decision = patch.decisionLog.at(-1)
+        if (decision) void api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '', rationale: decision.candidates.map((candidate) => candidate.reason).join('; '), actorId: decision.sourceSessionId }).catch((error) => get().reportError(error))
+      }
+    }
     set((state) => {
       const current = state.demands[id]
       if (!current) return state
@@ -3445,6 +3632,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   deleteDemand(id) {
+    void api.demands.delete(id).catch((error) => get().reportError(error))
     set((state) => {
       if (!state.demands[id]) return state
       const { [id]: _removed, ...demands } = state.demands
@@ -3788,6 +3976,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    const priorTabIds = new Set(Object.keys(state.tabs))
     let placementFailed = false
     set((current) => {
       const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
@@ -3821,6 +4010,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
+    // A filesystem Topic with no existing View is still expected to open a usable work
+    // surface. Keep the launcher as the durable owner and replace its active Region through
+    // the same lifecycle path used by the New Tab Terminal action. Background preparation (the
+    // fixed PMO Teams Topic) deliberately stops at the launcher so it cannot steal the user's focus
+    // or start a duplicate terminal.
+    const liveState = get()
+    const liveLayout = liveState.layouts[workspace.id]
+    const createdLauncher = liveLayout
+      ? Object.values(liveState.tabs).find((tab) => (
+        tab.workspaceId === workspace.id &&
+        tab.topicId === topicId &&
+        !priorTabIds.has(tab.id) &&
+        tabGroupForTab(liveLayout, tab.id) !== null &&
+        titleWorkbenchSurface(tab).kind === 'launcher'
+      ))
+      : undefined
+    if (createdLauncher && reveal && liveLayout) {
+      await get().launchTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
+        tabId: createdLauncher.id,
+        regionId: createdLauncher.layout.activeRegionId
+      })
+    }
   },
   async renameScratchTopic(topicId, title) {
     const state = get()
@@ -5240,7 +5451,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
-    demands: state.demands,
     selectedAgentSessionId: state.selectedAgentSessionId,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,

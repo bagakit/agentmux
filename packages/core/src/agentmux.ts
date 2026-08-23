@@ -147,6 +147,9 @@ function writeJson(value: unknown, stream: NodeJS.WritableStream = process.stdou
 function printSuccess(operation: string, result: unknown): void {
   writeJson({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID, ok: true, operation, result })
 }
+function printPmoSuccess(operation: string, result: unknown): void {
+  writeJson({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID, ok: true, operation, observedAt: Date.now(), result })
+}
 function printStream(operation: string, event: string, result: unknown): void {
   writeJson({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID, ok: true, operation, event, result })
 }
@@ -228,10 +231,20 @@ async function roleCommand(args: readonly string[]): Promise<number> {
 }
 
 async function listCommand(args: readonly string[]): Promise<number> {
-  if (args[0] !== 'agents' && args[0] !== 'sessions') throw cliError('list requires agents or sessions.')
+  if (args[0] !== 'agents' && args[0] !== 'sessions' && args[0] !== 'projects' && args[0] !== 'active-agents') throw cliError('list requires agents, sessions, projects, or active-agents.')
   parseFlags(args.slice(1), {})
   if (args[0] === 'agents') {
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'list.agents' })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (args[0] === 'projects') {
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'list.projects' })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (args[0] === 'active-agents') {
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'list.active-agents' })
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
@@ -245,12 +258,79 @@ async function listCommand(args: readonly string[]): Promise<number> {
   })
 }
 
+/**
+ * PMO Teams needs one bounded, machine-readable observation surface instead of
+ * scraping several human-oriented commands. Each projection remains owned by
+ * its existing Core/Control owner; this command only joins the receipts.
+ */
+async function pmoCommand(args: readonly string[]): Promise<number> {
+  const action = args[0] ?? 'snapshot'
+  if (action !== 'snapshot' && action !== 'projects' && action !== 'workspaces' && action !== 'topics' && action !== 'agents' && action !== 'sessions' && action !== 'demands' && action !== 'activity' && action !== 'inspect') {
+    throw cliError('pmo requires snapshot, projects, workspaces, topics, agents, sessions, demands, activity, or inspect.')
+  }
+  const flags = parseFlags(args.slice(1), {
+    '--project': 'value', '--workspace': 'value', '--topic': 'value', '--agent': 'value', '--session': 'value', '--demand': 'value', '--executor': 'value', '--status': 'value', '--since': 'value', '--limit': 'value'
+  })
+  const limitValue = flags.values.get('--limit')
+  const limit = limitValue === undefined ? 100 : Number(limitValue)
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw cliError('--limit must be an integer between 1 and 1000.')
+  const sinceValue = flags.values.get('--since')
+  const since = sinceValue === undefined ? undefined : Number(sinceValue)
+  if (since !== undefined && !Number.isFinite(since)) throw cliError('--since must be a timestamp in milliseconds.')
+
+  const [projectsReceipt, agentsReceipt, demandsReceipt] = await Promise.all([
+    requestAgentMuxControl({ ...requestBase(), operation: 'list.projects' }),
+    requestAgentMuxControl({ ...requestBase(), operation: 'list.active-agents' }),
+    requestAgentMuxControl({ ...requestBase(), operation: 'demand.list' })
+  ])
+  const projects = projectsReceipt.operation === 'list.projects' ? projectsReceipt.result.projects : []
+  const agents = agentsReceipt.operation === 'list.active-agents' ? agentsReceipt.result.agents : []
+  const demands = demandsReceipt.operation === 'demand.list' ? demandsReceipt.result.demands : []
+  const projectId = flags.values.get('--project')
+  const agentId = flags.values.get('--agent')
+  const sessionId = flags.values.get('--session')
+  const demandId = flags.values.get('--demand')
+  const executorId = flags.values.get('--executor')
+  const status = flags.values.get('--status')
+  const filteredProjects = projectId ? projects.filter((project) => project.projectId === projectId) : projects
+  const filteredAgents = agents.filter((agent) => (!projectId || agent.projectId === projectId) && (!agentId || agent.agentSessionId === agentId) && (!sessionId || agent.agentSessionId === sessionId) && (!executorId || agent.executorId === executorId) && (!status || agent.status === status))
+  const filteredDemands = demands.filter((demand) => (!projectId || demand.projectId === projectId) && (!sessionId || demand.sessionIds.includes(sessionId)) && (!demandId || demand.id === demandId) && (!executorId || demand.assigneeExecutorId === executorId) && (!status || demand.status === status) && (since === undefined || demand.updatedAt >= since)).slice(0, limit)
+  const sessions = await withClient(async (client) => {
+    const results = await Promise.allSettled(client.agentSessions().map(async (session) => await client.statusAgent(session.agentSessionId)))
+    return results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+  })
+  const filteredSessions = sessions.filter((session) => (!sessionId || session.session.agentSessionId === sessionId) && (!status || String((session.session as unknown as { processState?: string }).processState ?? '') === status) && (since === undefined || session.session.updatedAt >= since)).slice(0, limit)
+  if (action === 'projects' || action === 'workspaces') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects }); return 0 }
+  if (action === 'agents') { printPmoSuccess('pmo.agents', { agents: filteredAgents }); return 0 }
+  if (action === 'sessions') { printPmoSuccess('pmo.sessions', { sessions: filteredSessions }); return 0 }
+  if (action === 'demands') { printPmoSuccess('pmo.demands', { demands: filteredDemands }); return 0 }
+  if (action === 'topics') {
+    // Topic truth lives in workspace files, not Core. Keep the boundary explicit
+    // until a host-neutral topic reader is available rather than inventing a registry.
+    printPmoSuccess('pmo.topics', { topics: [], unavailable: { code: 'TOPIC_FILESYSTEM_SCOPE_REQUIRED', message: 'Topic discovery requires an explicit workspace filesystem scope.' } }); return 0
+  }
+  if (action === 'activity') {
+    const activity = filteredDemands.flatMap((demand) => (demand.activityLog ?? []).map((message) => ({ demandId: demand.id, message, updatedAt: demand.updatedAt }))).slice(-limit)
+    printPmoSuccess('pmo.activity', { activity }); return 0
+  }
+  if (action === 'inspect') {
+    const selected = demandId ? filteredDemands.find((demand) => demand.id === demandId) : agentId ? filteredAgents.find((agent) => agent.agentSessionId === agentId) : projectId ? filteredProjects.find((project) => project.projectId === projectId) : null
+    printPmoSuccess('pmo.inspect', { item: selected ?? null }); return 0
+  }
+  printPmoSuccess('pmo.snapshot', { projects: filteredProjects.slice(0, limit), agents: filteredAgents.slice(0, limit), sessions: filteredSessions, demands: filteredDemands, topics: [], topicDiscovery: { code: 'TOPIC_FILESYSTEM_SCOPE_REQUIRED', message: 'Topic discovery requires an explicit workspace filesystem scope.' } })
+  return 0
+}
+
 async function demandCommand(args: readonly string[]): Promise<number> {
   const action = args[0]
   if (action === 'list') {
-    parseFlags(args.slice(1), {})
+    const flags = parseFlags(args.slice(1), { '--status': 'value', '--project': 'value', '--executor': 'value', '--session': 'value', '--limit': 'value' })
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.list' })
-    printSuccess(receipt.operation, receipt.result)
+    if (receipt.operation !== 'demand.list') throw new AgentMuxError('Demand list receipt operation does not match.', 'CONTROL_PROTOCOL_ERROR')
+    const limit = flags.values.get('--limit') === undefined ? 100 : Number(flags.values.get('--limit'))
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw cliError('--limit must be an integer between 1 and 1000.')
+    const filtered = receipt.result.demands.filter((demand) => (!flags.values.has('--status') || demand.status === flags.values.get('--status')) && (!flags.values.has('--project') || demand.projectId === flags.values.get('--project')) && (!flags.values.has('--executor') || demand.assigneeExecutorId === flags.values.get('--executor')) && (!flags.values.has('--session') || demand.sessionIds.includes(identifier(flags.values.get('--session'), 'Agent Session id')))).slice(0, limit)
+    printSuccess(receipt.operation, { demands: filtered })
     return 0
   }
   if (action === 'show') {
@@ -290,6 +370,31 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
+  if (action === 'assign') {
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--project': 'value', '--executor': 'value', '--start': 'boolean' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.assign', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--project') ? { projectId: identifier(flags.values.get('--project'), 'Project id') } : {}), ...(flags.values.has('--executor') ? { assigneeExecutorId: identifier(flags.values.get('--executor'), 'Agent id') } : {}), start: flags.booleans.has('--start') })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'start') {
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--session': 'value' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.start', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--session') ? { sessionId: identifier(flags.values.get('--session'), 'Agent Session id') } : {}) })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'handoff') {
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--executor': 'value', '--session': 'value' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.handoff', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--executor') ? { assigneeExecutorId: identifier(flags.values.get('--executor'), 'Agent id') } : {}), ...(flags.values.has('--session') ? { sessionId: identifier(flags.values.get('--session'), 'Agent Session id') } : {}) })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
+  if (action === 'delete') {
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--confirm': 'value' })
+    if (flags.values.get('--confirm') !== 'delete') throw cliError('demand delete requires --confirm delete.')
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.delete', demandId: identifier(flags.values.get('--demand'), 'Demand id'), confirmation: 'delete' })
+    printSuccess(receipt.operation, receipt.result)
+    return 0
+  }
   if (action === 'link-session' || action === 'link-project') {
     const flags = parseFlags(args.slice(1), { '--demand': 'value', [action === 'link-session' ? '--session' : '--project']: 'value' })
     const receipt = action === 'link-session'
@@ -304,7 +409,7 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
-  throw cliError('demand requires list, show, create, update, link-session, link-project, or decision-log.')
+  throw cliError('demand requires list, show, create, update, assign, start, handoff, delete, link-session, link-project, or decision-log.')
 }
 
 function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller } {
@@ -794,6 +899,7 @@ async function main(): Promise<number> {
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
+  if (args[0] === 'pmo') return await pmoCommand(args.slice(1))
   if (args[0] === 'demand') return await demandCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))

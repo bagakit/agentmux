@@ -101,7 +101,7 @@
 .workspace-topic-state small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .workspace-topic-state__icon { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); color: var(--green-2); background: var(--green-bg); }
 .workspace-topic-state .small-button { flex: 0 0 auto; margin-left: auto; }
-.workspace-topic-list { width: 100%; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); }
+.workspace-topic-list { width: 100%; margin-top: var(--sp-2); overflow: visible; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); }
 .workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .workspace-topic-item:last-child { border-bottom: 0; }
 /* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
@@ -115,7 +115,6 @@
    只来两段时簇被摆进摘要那一列，压在文字上（#467）。 */
 .workspace-topic-entry { min-width: 0; min-height: 42px; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-3); border: 0; color: var(--text-3); background: transparent; text-align: left; }
 .workspace-topic-item:hover:not(.current) { background: color-mix(in srgb, var(--surface-2) 72%, transparent); }
-.workspace-topic-item.current { box-shadow: inset 2px 0 0 var(--green); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
@@ -152,6 +151,28 @@
   overflow: hidden;
 }
 .topic-presence { display: flex; align-items: center; gap: var(--sp-2); }
+.topic-work-surface-summary { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 22px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-2); cursor: default; outline: none; }
+.topic-work-surface-summary:hover,
+.topic-work-surface-summary:focus-visible { color: var(--text); background: var(--surface-3); }
+.topic-work-surface-summary__count { color: var(--text); font: var(--fs-micro)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.topic-work-surface-summary__label { font-size: var(--fs-micro); }
+.topic-work-surface-summary__popover { position: absolute; z-index: 30; right: 0; bottom: calc(100% + var(--sp-2)); display: none; width: 300px; max-width: min(300px, 70vw); padding: var(--sp-4); border-radius: var(--radius); color: var(--text); background: var(--overlay-surface); box-shadow: var(--elev-3), var(--hl); pointer-events: none; }
+.topic-work-surface-summary:hover .topic-work-surface-summary__popover,
+.topic-work-surface-summary:focus-visible .topic-work-surface-summary__popover,
+.topic-work-surface-summary:focus-within .topic-work-surface-summary__popover { display: grid; gap: var(--sp-3); }
+.topic-work-surface-summary__popover > strong { color: var(--text-2); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.topic-work-surface-summary__tab { display: grid; gap: var(--sp-2); min-width: 0; padding-top: var(--sp-3); border-top: 1px solid var(--overlay-line); }
+.topic-work-surface-summary__tab-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.topic-work-surface-summary__tab-head > b { flex: 0 0 auto; color: var(--text-3); font: var(--fs-micro)/1 var(--font-mono); font-weight: 500; }
+.topic-work-surface-summary__tab-head > strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.topic-work-surface-summary__tab-head > em { flex: 0 0 auto; margin-left: auto; color: var(--green); font-size: var(--fs-micro); font-style: normal; }
+.topic-work-surface-summary__regions { position: relative; display: block; height: 34px; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); }
+.topic-work-surface-summary__region { position: absolute; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-1); border: 1px solid var(--surface-0); color: var(--text-2); background: var(--surface-3); font-size: var(--fs-micro); text-align: center; }
+.topic-work-surface-summary__region > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic-work-surface-summary__activity { display: grid; gap: var(--sp-1); overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.topic-work-surface-summary__activity-item { min-width: 0; display: flex; gap: var(--sp-2); overflow: hidden; }
+.topic-work-surface-summary__activity-item strong { flex: 0 0 auto; color: var(--text-2); font-weight: 600; }
+.topic-work-surface-summary__activity-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-region-mosaic__cell {
   position: absolute;
   display: grid;

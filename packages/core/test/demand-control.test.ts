@@ -14,7 +14,7 @@ describe('demand control contract', () => {
       }
     })
     expect(request.operation).toBe('demand.create')
-    expect(request.decision?.selectedProjectId).toBe('repo')
+    expect('decision' in request && request.decision?.selectedProjectId).toBe('repo')
   })
 
   it('rejects unknown demand status before it reaches a host', () => {
@@ -25,6 +25,26 @@ describe('demand control contract', () => {
     const receipt = parseAgentMuxControlReceipt({
       ...base, ok: true, operation: 'demand.list', result: { demands: [{ id: 'task-1', title: 'One', description: '', status: 'backlog', priority: 'normal', projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' }] }
     })
-    expect(receipt.ok && receipt.result.demands[0]?.id).toBe('task-1')
+    expect(receipt.ok && 'demands' in receipt.result && receipt.result.demands[0]?.id).toBe('task-1')
+  })
+
+  it('parses assignment and handoff as explicit Demand operations', () => {
+    const assigned = parseAgentMuxControlRequest({ ...base, operation: 'demand.assign', demandId: 'task-1', projectId: 'repo', assigneeExecutorId: 'agent-a', start: false })
+    expect(assigned.operation).toBe('demand.assign')
+    expect('start' in assigned && assigned.start).toBe(false)
+    const handoff = parseAgentMuxControlRequest({ ...base, operation: 'demand.handoff', demandId: 'task-1', assigneeExecutorId: 'agent-b', sessionId: 'session-b' })
+    expect(handoff.operation).toBe('demand.handoff')
+    expect('sessionId' in handoff && handoff.sessionId).toBe('session-b')
+    const receipt = parseAgentMuxControlReceipt({
+      ...base,
+      ok: true,
+      operation: 'demand.start',
+      result: {
+        demand: { id: 'task-1', title: 'One', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', assigneeExecutorId: 'agent-a', sessionIds: ['session-a'], createdAt: 1, updatedAt: 2, source: 'default-topic' },
+        receipt: { demandId: 'task-1', startedAt: 2, sessionId: 'session-a' }
+      }
+    })
+    expect(receipt.ok && 'demand' in receipt.result && receipt.result.demand?.status).toBe('in_progress')
+    expect(() => parseAgentMuxControlRequest({ ...base, operation: 'demand.delete', demandId: 'task-1', confirmation: 'no' })).toThrow(/explicit confirmation/)
   })
 })
