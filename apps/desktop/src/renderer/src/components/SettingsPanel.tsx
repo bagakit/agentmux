@@ -168,15 +168,22 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
     <div className="settings-page">
       <div className="window-drag-region" />
       <aside className="settings-sidebar">
-        <header><div><Boxes size={17} /><span><strong>AgentMux</strong><small>Settings</small></span></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={16} /></button></header>
+        <header>
+          <div className="settings-sidebar__brand"><Boxes size={17} /><span><strong>AgentMux</strong><small>Settings</small></span></div>
+          <button className="icon-button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+        </header>
         <label className="settings-search"><Search size={14} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
+        <div className="settings-sidebar__context">
+          <span>Control plane</span>
+          <p>Shape how AgentMux works on this machine.</p>
+        </div>
         <nav>
           {navGroups.map((group) => (
             <Fragment key={group.id}>
               <p>{group.title}</p>
               {group.items.map((item) => {
                 const Icon = item.icon
-                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>
+                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} title={item.description} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>
               })}
             </Fragment>
           ))}
@@ -187,10 +194,17 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
       <main className="settings-content">
         <header className="settings-content__header">
           <div className="settings-content__title">
-            <span className="settings-content__icon" aria-hidden="true"><section.icon size={18} /></span>
-            <div><div className="eyebrow">{groupTitle}</div><h2>{section.title}</h2><p>{section.description}</p></div>
+            <span className="settings-content__icon" aria-hidden="true"><section.icon size={17} /></span>
+            <div>
+              <div className="settings-content__breadcrumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{groupTitle}</strong></div>
+              <h2>{section.title}</h2>
+              <p>{section.description}</p>
+            </div>
           </div>
-          <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+          <div className="settings-content__actions">
+            <span className="settings-content__hint"><kbd>Esc</kbd><span>Close</span></span>
+            <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+          </div>
         </header>
         <div className="settings-content__scroll">
           {active === 'general' ? <GeneralSettingsPane /> : null}

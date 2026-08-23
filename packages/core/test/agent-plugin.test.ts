@@ -16,11 +16,13 @@ describe('AgentMux plugin boundary', () => {
       providers: [reviewProvider],
       skills: [{ id: 'review', name: 'Review', description: 'Review a change' }],
       commands: [{ id: 'review.open', description: 'Open a review task' }]
+      , pmoCapabilities: [{ id: 'review.observe', version: '1.0.0', effect: 'observe', inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, requiredAuthority: 'pmo.read' }]
     }])
     // This test deliberately uses a fresh provider id below; built-in duplicate validation is a separate guard.
     expect(registry.list().map((plugin) => plugin.id)).toEqual(['agentmux.builtins', 'example.review'])
     expect(registry.skillsList()).toEqual([{ id: 'review', name: 'Review', description: 'Review a change' }])
     expect(registry.commandsList()).toEqual([{ id: 'review.open', description: 'Open a review task' }])
+    expect(registry.pmoCapabilitiesList()).toEqual([{ id: 'review.observe', version: '1.0.0', effect: 'observe', inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, requiredAuthority: 'pmo.read' }])
     expect(registry.catalog().map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex', 'example-review']))
   })
 
@@ -46,5 +48,19 @@ describe('AgentMux plugin boundary', () => {
         { id: 'same', name: 'Two', description: 'Two' }
       ]
     })).toThrow('Duplicate plugin Skill id')
+  })
+
+  it('unregisters every contribution so a candidate plugin can be rolled back', () => {
+    const registry = new AgentMuxPluginRegistry()
+    registry.register({ id: 'candidate', version: '1.0.0', skills: [{ id: 'candidate.skill', name: 'Candidate', description: 'Candidate' }], pmoCapabilities: [{ id: 'candidate.observe', version: '1.0.0', effect: 'observe', inputSchema: {}, outputSchema: {}, requiredAuthority: 'pmo.read' }] })
+    registry.unregister('candidate')
+    expect(registry.list()).toEqual([])
+    expect(registry.skillsList()).toEqual([])
+    expect(registry.pmoCapabilitiesList()).toEqual([])
+  })
+
+  it('emits a bounded, evaluator-aware PMO receipt for an active capability', () => {
+    const registry = new AgentMuxPluginRegistry([{ id: 'candidate', version: '1.0.0', pmoCapabilities: [{ id: 'candidate.observe', version: '1.0.0', effect: 'observe', inputSchema: {}, outputSchema: {}, requiredAuthority: 'pmo.read' }] }])
+    expect(registry.pmoReceipt({ pluginId: 'candidate', capabilityId: 'candidate.observe', requestId: 'req-1', operationId: 'op-1', phase: 'observe', durationMs: 4, inputSummary: { count: 1 }, outputSummary: { count: 1 }, evaluator: { status: 'passed', detail: 'bounded' }, rollbackTarget: 'candidate@0.9.0' })).toMatchObject({ schemaVersion: 'agentmux.pmo-receipt.v1', version: '1.0.0', rollbackTarget: 'candidate@0.9.0' })
   })
 })

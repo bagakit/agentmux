@@ -102,6 +102,7 @@ import { rebindLocalFolder } from './workspace-rebind.js'
 import { insertOrGetWorkspace } from './workspace-location.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
+import { openDemandStore } from '@agentmux/demand'
 
 function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
@@ -135,6 +136,7 @@ export async function registerIpc(args: {
   })
   args.runtime.commit(await args.runtime.prepare(config))
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
+  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const git = new GitService((id) => args.runtime.executionHost(id))
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
@@ -481,6 +483,16 @@ export async function registerIpc(args: {
   handle('scratch:resetWiki', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
+  handle('demands:list', async () => await demands.list())
+  handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput) => await demands.create(input))
+  handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput) => await demands.update(id, patch))
+  handle('demands:delete', async (id: string) => await demands.delete(id))
+  handle('demands:linkSession', async (id: string, sessionId: string) => await demands.linkSession(id, sessionId))
+  handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
+  handle('demands:linkProject', async (id: string, projectId: string, projectName?: string | null) => await demands.linkProject(id, projectId, projectName))
+  handle('demands:unlinkProject', async (id: string) => await demands.unlinkProject(id))
+  handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>) => await demands.addActivity(id, input))
+  handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   /**
    * 资源采样的订阅与退订。
    *

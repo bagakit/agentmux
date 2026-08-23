@@ -334,6 +334,8 @@ export class AgentProviderRegistry {
 
   replace(provider: AgentProvider): void { this.providers.set(provider.id, provider) }
 
+  unregister(id: AgentProviderId): void { this.providers.delete(id) }
+
   get(id: AgentProviderId): AgentProvider {
     const provider = this.providers.get(id)
     if (!provider) throw new AgentMuxError(`Unknown agent provider: ${id}`, 'UNKNOWN_PROVIDER')
