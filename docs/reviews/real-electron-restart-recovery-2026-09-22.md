@@ -9,6 +9,8 @@ Review: approved — 现有 attention/result successor 已恢复当前 Board 合
 - Runtime snapshot 暂时为空、Provider 探测失败或恢复握手超时只产生服务窗并保留原布局；只有明确 retired/unknown 才移除投影。探针不触碰用户已有 Run，只清理自己的临时目录。
 - 现有 `desktop-agent-continuity`、store/workbench persistence 和 provider identity 测试继续作为局部 oracle，但不能替代真实 Electron 进程证据。
 
+证据边界：Electron probe 本身只读取 Renderer 的 durable Workbench projection 与 Core-owned Session store，并报告两次真实进程的身份匹配；它不另起一套 Runtime，也不冒充执行 reattach。Run/attachment reattach、Provider 恢复失败和终局收敛由同一候选中的 continuity/provider/store 测试分别验证。
+
 ## 非目标
 
 - 不新增第二套 Session/Run/PTY、布局或持久化实现。
