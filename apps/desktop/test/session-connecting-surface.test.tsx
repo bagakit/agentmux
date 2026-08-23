@@ -162,15 +162,10 @@ it('keeps reduced motion and readable prompt constraints on the actual imported 
   expect(promptStyle).toContain('user-select: text')
 })
 
-it('keeps both state stages full-Region and gives Terminal recovery the same static reduced-motion frame', () => {
-  const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/terminal.css'), 'utf8')
-  const connectingStart = styles.indexOf('.terminal-hydration {')
-  const connectingEnd = styles.indexOf('}', connectingStart)
-  expect(connectingStart).toBeGreaterThan(-1)
-  expect(connectingEnd).toBeGreaterThan(connectingStart)
-  const hydration = styles.slice(connectingStart, connectingEnd)
-  expect(hydration).toContain('inset: 0')
-  expect(hydration).toContain('background-size: 72px 72px')
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?terminal-hydration__content::before[\s\S]*?animation:\s*none/)
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?terminal-hydration__cursor[\s\S]*?animation:\s*none/)
+it('keeps both state stages full-Region and gives Terminal recovery the shared static frame', () => {
+  const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/full-page-loading.css'), 'utf8')
+  expect(styles).toContain('.full-page-loading--region')
+  expect(styles).toContain('.full-page-loading--region')
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__grid::before[\s\S]*?animation:\s*none/)
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__signal i[\s\S]*?animation:\s*none/)
 })
