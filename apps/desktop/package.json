@@ -15,7 +15,6 @@
     "build": "electron-vite build && node scripts/build-renderer-release.mjs",
     "package:mac": "node scripts/package-macos.mjs",
     "package:mac:install": "node scripts/package-macos.mjs --install",
-    "package:mac:install": "node scripts/package-macos.mjs --install",
     "probe:file-editing": "node scripts/probe-file-editing.mjs",
     "report:package": "node scripts/report-desktop-package.mjs",
     "audit:features": "node scripts/audit-feature-history.mjs",
