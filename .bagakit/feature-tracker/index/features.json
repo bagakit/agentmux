@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 245
+    "next_cursor": 248
   },
   "features": [
     {
@@ -2072,6 +2072,36 @@
       "title": "Default Session 悬浮入口与 Session 顶层 Tab Chrome",
       "status": "archived",
       "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29x8fvhsy",
+      "title": "Full-page loading 与启动大屏统一",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29y8fmh9y",
+      "title": "Leader Topic floating launcher",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-29z8fg88s",
+      "title": "Filesystem Demand package and Leader Topic CLI",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",

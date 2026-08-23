@@ -55,6 +55,13 @@
   进程、文件系统或网络实现拖进浏览器 bundle。打包 Gate 将 Renderer 构建失败视为
   候选不可发布，而不是用 externalize 或缓存产物掩盖它。
 
+### 全页加载与启动大屏（2026-09-22）
+
+- AgentMux 启动、重启恢复和任何覆盖整个工作面的加载阶段都使用同一个可复用的 `FullPageLoadingSurface` 语义组件；调用方只提供阶段、短说明和可选恢复动作，不各自造一套 spinner、空白页或品牌动画。
+- 大屏动画是非阻断的过程提示：它必须说明当前阶段和已知的下一步，不能把 Provider 探测、恢复握手或页面加载失败伪装成终局错误。底层 Agent/Session 仍健康时，加载提示停在旁边或允许进入可用工作面。
+- 动画结束后保留真实工作面状态；加载层不能清空 durable Tab、Region、焦点、草稿或 Session 引用。组件只提供 failed 阶段的告示骨架，持久失败由调用方接入既有服务窗并给出恢复动作，只有 Core 的终局事实允许移除投影。
+- 动效要尊重系统减少动态效果设置；降级为静态大屏构图时仍保留阶段、Executor/Provider 身份和可访问文本。动画不得依赖具体站点、Provider 文案或不可复用的启动路径。
+
 ## 产品对象
 
 ### Agents / Session / Board 与注意力闭环
@@ -1120,37 +1127,45 @@ Readiness 是 Provider 输入框的观测证据，不是健康 Run 的永久发�
 - 所有代表具体 Agent 的图标都显示其 Executor 标识，不再只显示 Provider 标识；同 Provider 不同 Executor 可区分。Provider 图形作为未自定义时的默认底图。纯 Provider 能力目录仍表示 Provider，不凭空关联 Executor。
 - 菜单、Tab／Region、Topic、列表、消息工具与设置预览消费同一 Executor 标识；状态角标与身份保持独立。此约束取代此前放在显示设置下的方案，视觉轮廓仍遵循密度 SSOT。
 
-### 全局 Board 与可配置默认 Session（2026-09-21）
+### 全局 Board 与固定 Leader Topic（2026-09-22）
 
 用户确认：Board 不作为 Agents 的默认主视图。Board 是全局任务面，跨 Project、Workspace、Branch、Topic 可见；它承载任务卡、任务状态、目标项目和与 Agent 执行的关联，不再以当前 Workspace 的 Branch/Topic × Agent 状态矩阵作为产品模型。任务状态与 Agent/Attempt/Session 状态是不同事实，不能用同一个列或状态字段互相替代。
 
-Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口。点击入口展开或聚焦一个用户可配置的默认 Agent Session；该 Session 是正常的 AgentSession，必须通过 Core 的公开生命周期能力运行，不建立隐藏的第二套 Runtime。默认配置使它能够读取全局项目目录与 Board，并在上下文中明确当前目标项目。
+Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口。这个入口叫 **Leader Topic**，点击后展开或聚焦一个固定、产品拥有的 Topic；Topic 里的 Session 仍是正常的 AgentSession，必须通过 Core 的公开生命周期能力运行，不建立隐藏的第二套 Runtime。它可以读取全局项目目录与 Board，但不复用用户当前 Scratch Topic，也不跟随 Scratch 当前选中的 Topic。
 
 用户可以直接与默认 Session 讨论需求。Session 分析后可以在全局 Board 创建任务，并为任务标记应执行的 Project；创建结果、目标 Project、分析依据和关联 Session 必须在对话与任务卡上可追踪，不能把跨项目的创建变成不可见的副作用。无法确定目标 Project 时保留待确认状态，不猜测归属，也不阻断 Session 继续对话。
 
-浮动入口只负责打开/聚焦默认 Session，不代替 Board 的全局浏览入口。默认 Session 未配置、已失效或恢复状态未知时，入口仍可打开配置/恢复提示并保留已有任务与 Session 投影；不能因启动握手或读取快照失败清空全局 Board。浮动入口的视觉和位置约束见 surface-density SSOT 的同名小节。
+入口只负责打开/聚焦 Leader Topic，不代替 Board 的全局浏览入口。Leader Topic 恢复状态未知时，入口仍保留并打开恢复提示；不能因启动握手或读取快照失败清空全局 Board。浮动入口的视觉和位置约束见 surface-density SSOT 的同名小节。
 
-### 默认 Session 入口的浮动与收纳（2026-09-21）
+### Leader Topic 入口的浮动与收纳（2026-09-22）
 
-“隐藏浮动按钮”表示把入口**收纳到 Board 旁**，不表示彻底移除默认 Session 的入口。入口只有两种持久位置：`floating`（浮动在工作面边缘）或 `topbar`（停靠在全局顶栏右侧的 Board 入口旁）；两种位置都能打开/聚焦同一个默认 Session，都保留未读/需要用户处理的提示。用户可通过右键菜单、Command Palette 或设置在两种位置间切换。MVP 不提供会让入口真正不可达的“彻底隐藏”。
+“收起”表示把 Leader Topic 入口**收纳到底部的三项工作面切换器旁边**，不表示彻底移除入口。入口只有两种持久位置：`floating`（浮动在当前工作面边缘）或 `compact`（与底部 Agents / Session / Board 组件同组）；两种位置都能打开/聚焦同一个 Leader Topic，并保留未读/需要用户处理的提示。用户可通过入口操作菜单在两种位置间切换。MVP 不提供让入口真正不可达的“彻底隐藏”。
 
-停靠入口按 `[Workspace] [Board] | [Default Session]` 排列，使用独立的助手图标、分隔和命中区，不能让两个按钮合并成一个不可区分的动作。右键菜单（含 Shift+F10/Menu 键）至少提供“打开默认 Session”“收纳到 Board／恢复浮动”“配置默认 Session”；默认 Session 未配置时，打开动作进入配置引导而不是创建一个未声明用途的临时 Session。位置、拖动锚点、用户是否收纳以及上次已读状态必须持久化，重启后先恢复入口位置再尝试恢复 Session。
+紧凑入口与三个工作面按钮保持独立的助手图标、分隔和命中区，不能让两个动作合并。入口操作菜单（含键盘菜单键）至少提供“打开 Leader Topic”“收起到下方／恢复悬浮”；浮动入口支持直接拖动，拖动锚点与收纳位置必须持久化。重启后先恢复入口位置和形态，再尝试恢复固定 Topic 的 Session。
 
 入口是全局 Chrome，不依赖当前是否正在浏览 Board；切换到 Workbench、Settings 或窄窗口后仍保留一个可见且可键盘聚焦的停靠入口。浮动入口被遮挡、拖动越界或窗口尺寸变化时自动夹回可用区域；停靠入口空间不足时保留图标和提示，不把 Board 挤出视口。通知栏、Agents roster 和入口不得各自复制一份未读计数，统一消费同一份注意力投影。
 
-浮动位置必须有一个看得见的紧凑助手按钮作为唯一打开入口：它固定在当前窗口工作面边缘，带有注意力提示，点击打开或聚焦同一个 `launcher:default` 浮窗；它不能因为 Session 分屏、切换到 Settings 或当前没有活动 Tab 而消失。用户明确把入口收纳到 Board 后，才由 Board 的恢复入口接管可见入口；在此之前不能只留下不可发现的顶栏动作。
+浮动位置必须有一个看得见的紧凑助手按钮作为唯一打开入口：它固定在当前窗口工作面边缘，带有注意力提示，点击打开或聚焦同一个 `leader:topic` 浮窗；它不能因为 Session 分屏、切换到 Settings 或当前没有活动 Tab 而消失。用户收起后，入口移动到底部三项切换器旁；不能只留下不可发现的顶栏动作。按钮必须支持拖动改变悬浮位置，并在窗口尺寸变化时夹回可用区域。
 
 默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
 
-### 默认 Topic 与任务写入确认（2026-09-21）
+### Leader Topic 与任务写入确认（2026-09-22）
 
-项目调度 Agent 适合作为一个默认 Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 任务、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，不另建一套“知识库 Agent”生命周期。
+项目调度 Agent 适合作为一个固定的 Leader Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，但使用产品固定的 `leader:topic` 身份，不进入用户 Scratch Topic 的选择投影，也不随着用户当前 Scratch Topic 改变。
 
 Task 写入策略必须是用户可配置的开关，默认值为“按风险确认”。明确且低风险的单项目请求可以直接创建，并在对话和 Board 中产生可追踪的 Task receipt；涉及跨项目路由、目标不明确、不可逆或高影响动作时，先展示来源与依据、候选 Project、风险和待确认项，不能静默写入。用户也可以切换为“全部确认”或“默认直接创建”，设置的改变必须持久化并在入口可见。
 
 每次用户确认、修改目标 Project、接受/拒绝风险判断或撤销 Task，都要作为该默认 Topic 的结构化决策记录进入全局知识库。记录至少包含原始请求、候选与最终 Project、风险判断、用户选择、Task/operationId、时间和来源 Session；不能把完整聊天转储冒充可检索知识。默认 Topic 可以根据这些记录学习风险与路由建议，但学习只改变建议和默认排序，不能绕过用户当前设置、确认闸门或既有事实；当证据不足时仍显示“无法确定”，让用户决定。
 
 该知识库的读取、写入、检索和增量订阅必须通过通用版本化 CUI/JSON 能力暴露给调度 Agent；Provider 不拥有知识库语义，也不能通过 Provider 配置暗中改变 Board 的写入规则。
+
+### Demand 文件事实与独立包（2026-09-22）
+
+Demand 是与 Project、Session 平级的长期产品事实，不属于 Core 的 Agent Runtime，也不属于 Desktop Store 的临时 UI 状态。Demand 管理能力放在一个与 `packages/core` 平行的独立包中，包同时提供宿主无关的 TypeScript API 与 CLI；它以文件系统作为唯一持久化事实，负责 Demand 的创建、读取、状态流转、关联 Project / Session / Attempt、索引和原子写入。
+
+Leader Topic 默认通过该包的 CLI/API 访问 Demand。Leader Topic 可以分析、建议和提交 Demand，但不能在 Topic 目录或 Renderer 中另存一套任务记录；Board 读取同一份文件事实并投影状态。Core 继续只拥有 Provider、Session、Run、PTY 和 ordered bytes 的生命周期事实，Demand 包不得启动或管理 Agent 进程。
+
+Demand 包的文件格式、锁、原子替换、损坏恢复和 CLI 输出协议必须独立可测试，未来其他 Client 也能在不依赖 Electron、React 或 AgentMux Desktop 的情况下使用。Demand 与 Session 的关联保存稳定 ID 和可验证引用；不存在的 Session 只能显示为历史关联或 unknown，不能伪造成当前运行状态。
 
 ### 全局 Board 的成熟产品界面（2026-09-21）
 

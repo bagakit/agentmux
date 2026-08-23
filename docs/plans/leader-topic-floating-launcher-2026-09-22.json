@@ -1,0 +1,131 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/leader-topic-floating-launcher-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-floating-launcher-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "task_key": "fixed-leader-topic",
+      "title": "把入口改成固定的 Leader Topic",
+      "objective": "让入口始终投影产品固定的 leader:topic，不跟随用户当前 Scratch Topic，并统一用户可见与代码命名。",
+      "outcome": "浮窗与 Scratch 用户 Topic 隔离，产品拥有的 Topic 不出现在用户 Topic 列表，入口和标题均显示 Leader Topic。",
+      "acceptance": [
+        "生产代码只通过 LEADER_TOPIC_ID 绑定固定 Topic，并在首次打开前确保该 Topic 存在。",
+        "Leader Topic 浮窗传入固定 topicId 投影，普通 Scratch 当前 Topic 变化不会改变浮窗内容。",
+        "用户可见入口、标题、ARIA 文案和相关文件/符号不再使用 Default Session 语义；三项 SurfaceSwitch 仍保持不变。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-fixed.test.ts test/leader-topic-contract.test.ts --maxWorkers=1",
+          "proves": "固定身份、隔离投影与用户可见命名。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -z \"$(rg -n 'DefaultSession|default-session|launcher:default' apps/desktop/src | grep -v 'LeaderTopic')\"",
+          "proves": "旧产品命名与旧固定 topic 没有留在生产接线中。"
+        }
+      ],
+      "depends_on": []
+      ,"source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "apps/desktop/src/shared/scratch-topics.ts",
+        "apps/desktop/src/renderer/src/components/DefaultSessionFloatingPanel.tsx"
+      ]
+    },
+    {
+      "id": "T-002",
+      "task_key": "launcher-placement-drag",
+      "title": "实现悬浮拖动与 compact 收起切换",
+      "objective": "让 Leader Topic 入口支持持久化拖动坐标，并可切换为底部紧凑入口。",
+      "outcome": "用户能拖动浮动头像、收起到三个切换按钮旁、再恢复浮动；两种状态重启后保持。",
+      "acceptance": [
+        "floating 入口使用 pointer capture 与阈值区分点击/拖动，拖动坐标写入 durable 状态并在 resize 时夹回视口。",
+        "compact 入口与 SurfaceSwitch 相邻但独立，点击打开或聚焦同一浮窗；浮动与 compact 形态可通过可访问操作菜单互相切换。",
+        "收起或关闭只改变入口/浮窗可见性，不卸载 Topic、Session、Region、草稿或注意力事实。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-launcher.test.tsx test/leader-topic-floating.test.tsx test/agents-session-board-navigation.test.tsx --maxWorkers=1",
+          "proves": "拖动、形态切换、焦点与三项切换器没有回归。"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'LeaderTopicEntry|placement=.(floating|compact)' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicEntry.tsx'",
+          "proves": "新入口在定义文件之外有真实生产调用者。"
+        }
+      ],
+      "depends_on": ["T-001"]
+      ,"source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "apps/desktop/src/renderer/src/components/TopRowChrome.tsx",
+        "apps/desktop/src/renderer/src/lib/default-session-floating.ts"
+      ]
+    },
+    {
+      "id": "T-003",
+      "task_key": "leader-topic-avatar",
+      "title": "接入项目专属 low-poly 头像",
+      "objective": "生成并接入一个适合 24–36px 按钮使用的 low-poly Leader Topic 头像。",
+      "outcome": "头像资源在仓库内可复现引用，按钮在紧凑尺寸仍清晰可辨。",
+      "acceptance": [
+        "头像由内置 image generation workflow 生成后复制到仓库资源目录，代码直接引用仓库文件。",
+        "头像无文字、无厂商标记，使用低多边形的深色中性基底与项目强调色，并有可访问的 Leader Topic 名称。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-avatar.test.ts test/leader-topic-contract.test.ts --maxWorkers=1",
+          "proves": "资源存在且被入口生产代码引用。"
+        },
+        {
+          "kind": "command",
+          "ref": "test -s apps/desktop/src/renderer/src/assets/leader-topic-avatar.png && git diff --check",
+          "proves": "最终候选包含非空头像资源且没有空白错误。"
+        }
+      ],
+      "depends_on": ["T-001"]
+      ,"source_refs": [
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/src/renderer/src/components/DefaultSessionEntry.tsx"
+      ]
+    },
+    {
+      "id": "T-004",
+      "task_key": "restart-package-acceptance",
+      "title": "完成重启、变异、接线与安装验收",
+      "objective": "证明 Leader Topic 的持久状态、固定身份和入口接线在真实候选中成立。",
+      "outcome": "定向测试、类型检查、变异测试、零调用者检查、重启可见性和安装候选均有证据。",
+      "acceptance": [
+        "固定 Topic、拖动坐标和 placement 在不同 renderer 重启后仍能恢复，恢复握手失败不会清空入口。",
+        "至少一个实现变异让对应测试变红并已恢复；每个新生产符号都有定义文件之外的调用者。",
+        "桌面类型检查和定向测试通过，完成 macOS 打包安装并报告候选的 source/tree/运行一致性。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "桌面类型边界和交付候选格式。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm package:mac:install",
+          "proves": "最终代码进入可运行安装候选。"
+        }
+      ],
+      "depends_on": ["T-002", "T-003"]
+      ,"source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ]
+    }
+  ]
+}

@@ -154,6 +154,13 @@
   keyframe 都会被冻在首帧。所以静态那一帧本身必须读得出"正在工作"（可见的绿色扫描位置 + 文案），
   而不是冻成一张看不出状态的静图。这条对所有新动效成立，不只恢复态。
 
+### 全页加载大屏（2026-09-22）
+
+- 启动、恢复、全页导航和大块数据加载共用一个 `FullPageLoadingSurface` 组件；视觉语言统一为 Graphite 深底、低对比网格/切片、非对称注册标记和一处清晰阶段标题。调用方不重复实现全屏 spinner 或品牌 splash。
+- 大屏的前景层保持稳定可读，包含 AgentMux 品牌、阶段标题、短说明和当前可用动作；扫描线、错位框线和微动效只作用于中景，不闪烁整屏、不遮蔽错误文案。
+- loading、recovering、ready 和 blocked/failed 共享同一几何与密度预算，状态只改变语义色、图标和动作，不改变页面结构。真实工作面出现后加载层卸载，不留下空的 chrome 行。
+- `prefers-reduced-motion` 下停止扫描与位移，保留静态切片、边框和阶段状态；所有大屏必须提供可访问的 live 文本和不会因动画变化而重复播报的标签。
+
 ## Surface 层级
 
 重启恢复是工作面的一等状态：恢复期间保留原 Tab、Tab Group 和 Region 的几何位置，不用空白欢迎页替换它们。流程故障以停在旁边的服务窗提示，提示包含失败步骤、当前按什么状态运行以及恢复动作；只有 Core 确认 Session 退休时才收掉对应 Region。冲突提示必须区分“旧 owner 仍存活”和“租约可回收”，不能把一次重启后的 stale lease 画成健康 Session 被其他进程占用。
@@ -654,17 +661,17 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 具体 Agent 的图标在各处保留同一 Executor 颜色／角标与默认底图，密度变化只调整尺寸，不丢身份定制。标识编辑控件嵌入该 Executor 配置，不归全局外观；行为归属见交互 SSOT 同名条目。
 
-### 全局 Board 与默认 Session 浮动入口（2026-09-21）
+### 全局 Board 与 Leader Topic 浮动入口（2026-09-22）
 
-浮动入口是低干扰、可拖动、始终可达的单一控件；它与全局通知入口分开，不用状态颜色替代身份，也不因打开 Session 改变工作区布局。入口展开后复用普通 Session 的对话表面，用户能看见当前默认 Session 的 Executor 身份、运行状态与恢复提示。
+浮动入口是低干扰、可拖动、始终可达的单一 Leader Topic 控件；它与全局通知入口分开，不用状态颜色替代身份，也不因打开 Topic 改变工作区布局。入口展开后复用普通 Session 的对话表面，用户能看见 Leader Topic 的 Executor 身份、运行状态与恢复提示。
 
 全局 Board 的任务卡以任务标题和目标 Project 为第一层信息，任务状态、最近 Attempt/Agent 和 Session 上下文为第二层；不要把同一 Session 复制成多条 Agent 行。跨项目上下文用简短的 Project/Workspace/Branch/Topic 路径表达，窄窗优先保留任务标题、状态和目标 Project。行为约束见 desktop-interaction 的“全局 Board 与可配置默认 Session”。
 
-### 默认 Session 入口的浮动与收纳（2026-09-21）
+### Leader Topic 入口的浮动与收纳（2026-09-22）
 
-浮动入口使用单一紧凑按钮、轻阴影和清晰焦点环，拖动只改变停靠位置，不改变其身份或注意力语义。收纳到 Board 后，助手按钮与 Board 按钮保持独立的命中区、间距和 tooltip；不能用一个叠加图标同时承担“打开 Board”和“打开默认 Session”。窄窗中优先保留两个图标和未读提示，文字标签可以隐藏；空间不足时进入顶栏 overflow，不把助手入口删除。
+浮动入口使用单一紧凑按钮、轻阴影和清晰焦点环，拖动只改变停靠位置，不改变 Leader Topic 身份或注意力语义。收起后，入口缩小并与底部 Agents / Session / Board 按钮同组，保持独立的命中区、间距和 tooltip；不能用一个叠加图标同时承担“打开 Board”和“打开 Leader Topic”。窄窗中优先保留两个图标和未读提示，文字标签可以隐藏；空间不足时保留图标，不把入口删除。
 
-未读/需要处理提示只使用一个静态角标或数字，不使用持续动画；与系统通知、Agents roster 共用颜色和形状语义。行为约束见 desktop-interaction 的“默认 Session 入口的浮动与收纳”。
+未读/需要处理提示只使用一个静态角标或数字，不使用持续动画；与系统通知、Agents roster 共用颜色和形状语义。行为约束见 desktop-interaction 的“Leader Topic 入口的浮动与收纳”。
 
 ### 全局 Board 的三栏任务闭环（2026-09-21）
 
@@ -712,7 +719,7 @@ Task 卡默认是无边框的面，选中只增加一处统一焦点信号；Tas
 
 ### 默认 Session 入口的原生复用（2026-09-22）
 
-默认入口只承担打开既有 `launcher:default` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。浮动位置显示一个 36px 级别的紧凑助手按钮，按钮本身是可键盘聚焦的稳定入口，并沿用同一份注意力提示；入口被收纳到 Board 后，Board 底部只保留一个小型恢复入口。Session chrome 不再额外画一套重复的内联入口。右键菜单只提供位置或 Topic 文件入口，不展开第二套聊天控件。
+Leader Topic 入口只承担打开既有 `leader:topic` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。浮动位置显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示；拖动坐标和 floating/compact 形态持久化。收起后与底部三项切换器同组，不再占用顶栏空位。Session chrome 不再额外画一套重复的内联入口。入口操作菜单只提供位置切换和 Topic 文件入口，不展开第二套聊天控件。
 
 ### 启动错误与 Executor 命名的表面（2026-09-22）
 
@@ -769,11 +776,15 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 - 信息面板使用现有 tooltip 的 micro/compact 字号和边距，内容分成身份、状态和一个小型设置动作；设置动作进入 Executor 模板设置，不把 Appearance 的控件复制进面板。
 - 既有头像的保留和 Reset 语义归交互合同「旧配置的 Executor 身份不能丢」；所有尺寸下的设置预览与实际身份图保持一致。
 
-### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
+### Leader Topic 的 a mature workbench 风格浮窗（2026-09-22）
 
-Default Session 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放原生 Topic Tab/Region，底部保留现有 composer。浮动位置同时显示一个 36px 级别的紧凑助手按钮，按钮本身是可键盘聚焦的稳定入口，并沿用同一份注意力提示。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
+Leader Topic 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放固定 `leader:topic` 的原生 Topic Tab/Region，底部保留现有 composer。浮动位置同时显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
 
-浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口按钮只显示一个紧凑的助手图标与未读提示，Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。
+浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口可切换为与底部三项同组的 compact 形态；Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。
+
+### Demand 包与 Leader Topic 投影（2026-09-22）
+
+Demand 由与 Core 平行的文件系统包提供，Board 和 Leader Topic 只消费同一份 Demand 投影。界面中的 Demand 卡第一层显示标题、状态和目标 Project，关联 Session / Attempt 作为第二层执行 rail；不在卡片内复制一套 Session 状态机或把 Agent 行伪装成 Demand。CLI/API 的失败沿用服务窗语言，保留已读到的 Demand，不用空列表覆盖工作面。
 
 ### 真实重启恢复的表面密度（2026-09-22）
 
