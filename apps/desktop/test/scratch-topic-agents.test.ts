@@ -362,7 +362,7 @@ describe('T-002 Topic panel projects each Topic’s Agents from the filesystem',
       'utf8'
     )
     expect(source).toContain('await openScratchTopic(nextTopicId)')
-    expect(source).toContain('topicsWithAgents(topics, sessions, workspace)')
+    expect(source).toContain('topicsWithAgents(userTopics, sessions, workspace)')
   })
 })
 
