@@ -2060,7 +2060,7 @@
     {
       "feat_id": "f-29v8fx5jp",
       "title": "真实 Electron 重启恢复闭环",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "worktree",
       "branch": "featf-29v8fx5jp",
       "worktree_name": "wt-f-29v8fx5jp",
