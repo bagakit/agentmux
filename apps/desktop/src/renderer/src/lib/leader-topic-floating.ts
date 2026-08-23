@@ -7,6 +7,7 @@ const DEFAULT_SIZE = { width: 720, height: 520 }
 const LAUNCHER_SIZE = 36
 
 export type LeaderTopicLauncherPlacement = 'floating' | 'compact'
+export type LeaderTopicOpenAnchor = LeaderTopicLauncherPlacement
 
 type FloatingState = {
   open: boolean
@@ -15,6 +16,7 @@ type FloatingState = {
   size: { width: number; height: number }
   launcherPlacement: LeaderTopicLauncherPlacement
   launcherPosition: { left: number; top: number }
+  openAnchor?: LeaderTopicOpenAnchor | undefined
 }
 
 export type LeaderTopicFloatingState = FloatingState
@@ -65,8 +67,8 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestLeaderTopicFloatingOpen(): void {
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: true } }))
+export function requestLeaderTopicFloatingOpen(options?: { anchor?: LeaderTopicOpenAnchor }): void {
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: true, ...(options?.anchor ? { openAnchor: options.anchor } : {}) } }))
 }
 
 export function requestLeaderTopicFloatingClose(): void {
