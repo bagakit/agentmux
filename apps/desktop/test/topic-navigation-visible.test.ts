@@ -79,7 +79,21 @@ describe('Topic navigation reveals the visible workbench', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBe('launcher:shared')
   })
 
-  it('keeps the durable work surface when Topic metadata cannot be read', async () => {
+  it('resolves a Scratch Topic to Scratch even when another Project is active', async () => {
+    mount()
+    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(snapshot)
+
+    // Pinned Topic rows are available while a Project is selected and historically called the
+    // action without a workspace argument. The Topic identity itself must route that click.
+    await useAppStore.getState().openScratchTopic(snapshot.id)
+
+    const state = useAppStore.getState()
+    expect(state.activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(state.mainSurface).toBe('workbench')
+    expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBe('launcher:shared')
+  })
+
+  it('keeps the Scratch workbench visible when Topic metadata cannot be read', async () => {
     mount()
     const before = useAppStore.getState()
     vi.spyOn(api.scratch, 'readTopic').mockRejectedValue(new Error('metadata unavailable'))
@@ -87,9 +101,9 @@ describe('Topic navigation reveals the visible workbench', () => {
     await expect(useAppStore.getState().openScratchTopic(snapshot.id, SCRATCH_WORKSPACE_ID)).rejects.toThrow('metadata unavailable')
 
     const after = useAppStore.getState()
-    expect(after.activeWorkspaceId).toBe(before.activeWorkspaceId)
-    expect(after.mainSurface).toBe(before.mainSurface)
-    expect(after.layouts).toEqual(before.layouts)
+    expect(after.activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(after.mainSurface).toBe('workbench')
+    expect(after.layouts[SCRATCH_WORKSPACE_ID]).toEqual(before.layouts[SCRATCH_WORKSPACE_ID])
     expect(after.tabs).toEqual(before.tabs)
   })
 

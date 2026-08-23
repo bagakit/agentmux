@@ -46,7 +46,7 @@ describe('T-001 Topic rows are wired into the one Board', () => {
     // Canvas 把 Topic 身份交给 store，不自己拼 workspacePath 或 scratchTopicId。
     expect(canvas).toContain('launchBoardAgent(anchor.id, executorId, prompt.trim(), row.id)')
     // store 复用 openScratchTopic 完成绑定——不是第二条 Topic 绑定路径。
-    expect(store).toContain('if (topicId) await get().openScratchTopic(topicId)')
+    expect(store).toContain('if (topicId) await get().openScratchTopic(topicId, undefined, { reveal: false })')
     // 绑定没落到预期 Topic 上就失败关闭，不静默起一个不带 Topic 的 Agent。
     expect(store).toContain("throw new Error('Scratch Topic View is unavailable')")
   })

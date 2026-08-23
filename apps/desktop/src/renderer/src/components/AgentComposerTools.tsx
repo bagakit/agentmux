@@ -56,13 +56,16 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   }
 
   return <span className="composer-tools" data-mode={mode}>
-    {viewMode && onViewModeChange ? <span className="composer-tool-view-switch" role="group" aria-label="Agent view">
-      <button type="button" className={`composer-tool composer-tool--view${viewMode === 'terminal' ? ' selected' : ''}`}
-        aria-label="Show Terminal" title="Show Terminal" aria-pressed={viewMode === 'terminal'}
-        onClick={() => onViewModeChange('terminal')}><SquareTerminal size={14} /><span className="composer-tool__label">Terminal</span></button>
-      <button type="button" className={`composer-tool composer-tool--view${viewMode === 'activity' ? ' selected' : ''}`}
-        aria-label="Show Activity" title="Show Activity" aria-pressed={viewMode === 'activity'}
-        onClick={() => onViewModeChange('activity')}><MessagesSquare size={14} /><span className="composer-tool__label">Activity</span></button>
+    {viewMode && onViewModeChange ? <span className="composer-tool-view-switch">
+      <button
+        type="button"
+        className="composer-tool composer-tool--view-toggle"
+        aria-label={viewMode === 'terminal' ? 'Show Activity' : 'Show Terminal'}
+        title={viewMode === 'terminal' ? 'Show Activity' : 'Show Terminal'}
+        onClick={() => onViewModeChange(viewMode === 'terminal' ? 'activity' : 'terminal')}
+      >
+        {viewMode === 'terminal' ? <MessagesSquare size={14} /> : <SquareTerminal size={14} />}
+      </button>
     </span> : null}
     {layoutControl ? <button type="button" className="composer-tool composer-tool--mode"
       aria-label={next.label} title={next.label}

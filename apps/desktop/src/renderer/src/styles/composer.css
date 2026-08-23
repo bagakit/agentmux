@@ -123,10 +123,9 @@
 }
 
 .composer-tool--mode { min-width: 28px; }
-.composer-tool-view-switch { display: inline-flex; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); }
-.composer-tool-view-switch .composer-tool { min-width: 28px; justify-content: center; }
-.composer-tool-view-switch .composer-tool.selected { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
-.composer-tool-view-switch .composer-tool:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.composer-tool-view-switch { display: inline-flex; align-items: center; }
+.composer-tool-view-switch .composer-tool--view-toggle { min-width: 28px; justify-content: center; }
+.composer-tool-view-switch .composer-tool--view-toggle:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .composer__editor-fallback { display: none; }
 
 /* One-line mode keeps the tool trigger, editor and primary action in separate columns.
