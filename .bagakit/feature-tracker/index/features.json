@@ -736,8 +736,8 @@
     {
       "feat_id": "f-24b8f37dv",
       "title": "主题切换：多套完整外观与跟随系统",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "archived",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
