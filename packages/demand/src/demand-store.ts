@@ -228,6 +228,10 @@ export class DemandStore {
     return demand ? clone(demand) : null
   }
 
+  async read(id: string): Promise<Demand | null> {
+    return this.get(id)
+  }
+
   async create(input: CreateDemandInput): Promise<DemandReceipt> {
     return this.mutate('create', (snapshot) => {
       const title = inputString(input.title, 'title')
@@ -283,6 +287,10 @@ export class DemandStore {
     }) as Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; revision: number; demand: Demand }>
   }
 
+  async delete(id: string): Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; revision: number; demand: Demand }> {
+    return this.remove(id)
+  }
+
   async linkSession(id: string, sessionId: string): Promise<DemandReceipt> {
     return this.mutate('link-session', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -327,6 +335,10 @@ export class DemandStore {
     })
   }
 
+  async appendActivity(id: string, input: Omit<DemandActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
+    return this.addActivity(id, input)
+  }
+
   async addDecision(id: string, input: Omit<DemandDecision, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
     return this.mutate('decision-log', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -343,6 +355,10 @@ export class DemandStore {
       demand.updatedAt = Date.now()
       return demand
     })
+  }
+
+  async appendDecision(id: string, input: Omit<DemandDecision, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
+    return this.addDecision(id, input)
   }
 
   private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand): Promise<DemandReceipt> {
