@@ -441,6 +441,22 @@ describe('tabMarkAgentFactsFor：从 Session 解析「谁是 Agent」', () => {
       { kind: 'agent', providerId: 'claude', status: working, sessionId: 'session-b', regionId: 'region-1' }
     ])
   })
+
+  it('旧版 appearance 没有迁移到 Executor 时仍参与 Tab 标记去重', () => {
+    const tab = tabWith(agentSurface('region-0', 'session-a'), agentSurface('region-1', 'session-b'))
+    const marks = workbenchTabMarks(
+      tab,
+      tabMarkAgentFactsFor(
+        sessions(
+          { id: 'session-a', kind: 'agent', providerId: 'codex', executorId: 'codex', status: working },
+          { id: 'session-b', kind: 'agent', providerId: 'codex', executorId: 'review', status: working }
+        ),
+        { codex: {}, review: {} },
+        { codex: { tint: '#ee7755', badge: 'spark' }, review: { tint: '#6688dd', badge: 'shield' } }
+      )
+    )
+    expect(marks.map((mark) => mark.kind === 'agent' ? mark.appearance?.badge : null)).toEqual(['spark', 'shield'])
+  })
 })
 
 describe('tabRegionSummary：折掉的种类必须还能被找到', () => {

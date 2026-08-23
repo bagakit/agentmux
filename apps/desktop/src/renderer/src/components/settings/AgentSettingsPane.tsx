@@ -30,7 +30,7 @@ type ExecutorDraft = {
   avatar?: AgentAvatarAppearance | undefined
 }
 
-function toDraft(config: AgentExecutorConfig): ExecutorDraft {
+function toDraft(config: AgentExecutorConfig, legacyAvatar?: AgentAvatarAppearance): ExecutorDraft {
   return {
     label: config.label,
     providerId: config.providerId,
@@ -38,7 +38,10 @@ function toDraft(config: AgentExecutorConfig): ExecutorDraft {
     args: config.args.join('\n'),
     env: Object.entries(config.env).map(([name, value]) => `${name}=${value}`).join('\n'),
     injectAgentMuxGuide: config.injectAgentMuxGuide,
-    avatar: config.avatar
+    // Read the pre-Executor appearance by stable id into the draft so the settings card shows
+    // what the user already sees. A later explicit reset stores `{}` on the Executor, which
+    // wins over the preserved legacy record without deleting that durable record.
+    avatar: config.avatar ?? legacyAvatar
   }
 }
 
@@ -112,7 +115,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   const initialHost = config.workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.hostId ?? 'local'
   const [hostId, setHostId] = useState(initialHost)
   const [drafts, setDrafts] = useState<Record<string, ExecutorDraft>>(() =>
-    Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => [id, toDraft(executor)]))
+    Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => [id, toDraft(executor, config.appearance.agentAvatars?.[id])]))
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -256,10 +259,10 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
                       <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={draft.avatar?.tint ?? '#8ab4f8'}
                         onChange={(event) => updateAvatar(id, { ...draft.avatar, tint: event.target.value })} /></label>
                       <label>Icon<select aria-label={`${draft.label} avatar icon`} value={draft.avatar?.badge ?? ''}
-                        onChange={(event) => { const next = { ...draft.avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, Object.keys(next).length ? next : undefined) }}>
+                        onChange={(event) => { const next = { ...draft.avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, Object.keys(next).length ? next : (config.appearance.agentAvatars?.[id] ? {} : undefined)) }}>
                         <option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}
                       </select></label>
-                      <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!draft.avatar} onClick={() => updateAvatar(id, undefined)}>Reset</button>
+                      <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!draft.avatar?.tint && !draft.avatar?.badge} onClick={() => updateAvatar(id, config.appearance.agentAvatars?.[id] ? {} : undefined)}>Reset</button>
                     </div>
                     <label><span>Name</span><input value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                     <label>
