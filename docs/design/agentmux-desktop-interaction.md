@@ -5,6 +5,12 @@
 > Scratch 的 Topic 与 Wiki 合同见
 > [`agentmux-wiki-first-scratch.md`](../plans/agentmux-wiki-first-scratch.md)。
 
+### Topic 点击必须打开可见 Tabs（2026-09-22）
+
+- 用户点击 Topic 后，右侧必须显示该 Topic 已有的 Tabs、Region 和焦点；不能只改后台选中项而让工作面留在 Board 或 Agents。
+- 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。文件读取失败必须明确展示，不能清空 Tabs 或另建 Session。
+- Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
+
 ## 设计哲学
 
 - AgentMux 是 Agent-first、terminal-first 的桌面 Client。Agent 状态、用户输入、终端输出和恢复动作必须靠近它们影响的 View。
@@ -1157,6 +1163,8 @@ Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口�
 ### Leader Topic 入口头像（2026-09-22）
 
 Leader Topic 入口必须使用 AgentMux 项目现有的绿色 low-poly 龙头像作为身份图标，不再使用另一套独立生成的角色头像。浮动态入口采用显眼的圆角矩形徽章承载龙头像，点击命中区包含整个徽章；收纳到下方切换器时沿用同一头像，只缩小徽章，不改变身份。头像只表达“这是 AgentMux 的 Leader Topic”，运行、未读和需要处理等状态继续由独立角标表达。
+
+浮动入口的头像与展开面板是一个连续控件：三个点操作按钮必须紧贴头像并与其共用一块面板边界，不能漂在远处让人猜测含义。点击头像打开面板，再次点击同一头像收起面板；打开状态下头像仍是可操作的收起开关。面板打开和收起不得创建第二个 Topic、Session 或入口状态。
 
 默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
 

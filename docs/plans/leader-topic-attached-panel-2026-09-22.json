@@ -1,0 +1,32 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/leader-topic-attached-panel-2026-09-22.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-attached-panel-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "把 Leader Topic 面板接到头像并支持头像收起",
+      "objective": "让头像成为展开/收起主开关，让展开内容与头像和更多操作按钮形成连续浮动面板。",
+      "outcome": "点击头像打开，第二次点击头像收起；面板贴着头像显示，三个点紧邻且有明确语义。",
+      "acceptance": [
+        "Leader Topic floating launcher 的头像点击按 open/close 状态切换，不创建第二个 Topic 或 Session。",
+        "浮窗打开时，头像、更多操作按钮与 Topic 内容共享连续的面板 surface 和定位；头像和面板不会相距很远。",
+        "更多操作按钮紧贴头像，拥有明确的 aria-label/title；拖动和 compact 切换不回归。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-launcher.test.tsx test/leader-topic-floating.test.tsx test/leader-topic-floating-contract.test.ts --maxWorkers=1", "proves": "头像 toggle、面板状态与生产接线"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check", "proves": "桌面类型与格式"},
+        {"kind": "command", "ref": "test \"$(rg -l '<LeaderTopicFloatingPanel|<LeaderTopicEntry' apps/desktop/src/renderer/src | grep -v 'components/LeaderTopicFloatingPanel.tsx' | grep -v 'components/LeaderTopicEntry.tsx' | wc -l | tr -d ' ')\" -gt 0", "proves": "attached panel and launcher have production callers"}
+      ],
+      "depends_on": [],
+      "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md"]
+    }
+  ]
+}

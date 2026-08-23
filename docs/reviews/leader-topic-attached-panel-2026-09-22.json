@@ -1,0 +1,11 @@
+{
+  "schema": "bagakit.review.v1",
+  "status": "approved",
+  "feature": "Leader Topic attached panel interaction",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/leader-topic-attached-panel-2026-09-22.md"
+  ],
+  "decision": "Attach the open Leader Topic panel to the avatar surface, make the avatar a toggle, and clarify the adjacent more-actions control."
+}

@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 251
+    "next_cursor": 253
   },
   "features": [
     {
@@ -2131,6 +2131,26 @@
       "feat_id": "f-2a48fampc",
       "title": "Leader Topic project avatar badge",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2a58fb2us",
+      "title": "Leader Topic attached panel interaction",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2a68fvjyj",
+      "title": "Topic 点击后恢复可见 Tabs",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
