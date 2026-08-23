@@ -1,0 +1,824 @@
+{
+  "version": 2,
+  "feat_id": "f-2ag8fy3y3",
+  "plan_status": "reviewed",
+  "plan_revision": 3,
+  "supersedes_revision": 2,
+  "review_ref": "docs/reviews/demand-board-pmo-product-closure-2026-09-23-r3.json",
+  "source_refs": [
+    "AGENTS.md",
+    "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+    "docs/reviews/multica-demand-board-comparison-2026-09-23.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "packages/core/src/agent-plugin.ts"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+        "docs/reviews/multica-demand-board-comparison-2026-09-23.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "packages/core/src/agent-plugin.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/demand-board-pmo-product-closure-2026-09-23-r2.json",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+        "docs/reviews/multica-demand-board-comparison-2026-09-23.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "packages/core/src/agent-plugin.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/demand-board-pmo-product-closure-2026-09-23-r3.json",
+      "source_refs": [
+        "AGENTS.md",
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+        "docs/reviews/multica-demand-board-comparison-2026-09-23.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "packages/core/src/agent-plugin.ts"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "[P0] PMO 全局观察与精确下钻 CLI",
+      "objective": "让 PMO Teams 在不读取 Renderer 或猜测焦点的情况下，获得全局项目、工作台、Topic、Agent、Session、Demand 和最近活动摘要，并能按稳定 ID 下钻。",
+      "outcome": "agentmux pmo 提供 snapshot、projects、workspaces、topics、agents、sessions、demands、activity、inspect；默认稳定 JSON，关系和 unknown 语义完整。",
+      "acceptance": [
+        "每个查询返回 schemaVersion、requestId、operation、observedAt 和稳定 ID；项目/工作台/Topic/Agent/Session/Demand 的关联通过显式 ID 表达。",
+        "agents 与 sessions 查询支持 --project、--demand、--status、--limit；demands 支持 --status、--project、--executor、--session；activity 支持 --since 和 --demand；inspect 要求精确 ID。",
+        "默认只返回有界摘要，不把完整 transcript 或 Renderer Store 当成事实；active/idle/unknown 与来源字段可被 PMO 复现。",
+        "Control/协议失败返回稳定 code、phase、恢复动作，并保留可读到的部分结果；未知不能静默变成空数组。",
+        "删除任一查询路由、关系字段或 unknown 分支时 focused CLI contract/mutation test 变红，且 CLI 有定义文件之外的生产调用者。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/core exec vitest run test/agentmux-cli-global-discovery.test.ts test/control-host.test.ts --maxWorkers=1",
+          "proves": "PMO global query routes, stable JSON receipts, filters and unknown preservation."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "Typed PMO CLI and Control contracts compile."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'pmo (snapshot|projects|workspaces|topics|agents|sessions|demands|activity|inspect)|list/.projects|list/.active-agents' packages/core/src --glob '*.ts' | grep -v 'agentmux.ts' | head -1)\"",
+          "proves": "PMO CLI capability is connected beyond its dispatch definition."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+        "packages/core/src/agentmux.ts",
+        "packages/core/src/control.ts",
+        "packages/core/src/control-host.ts",
+        "packages/core/src/agentmux-cli-help.ts",
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-007"
+      ],
+      "supersedes": [],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "The read model must join existing Core and Desktop facts without creating a second registry.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/core exec vitest run test/agentmux-cli-global-discovery.test.ts test/control-host.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'pmo (snapshot|projects|workspaces|topics|agents|sessions|demands|activity|inspect)|list/.projects|list/.active-agents' packages/core/src --glob '*.ts' | grep -v 'agentmux.ts' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "3e3b0cb4fc65474989507d06e078c0f26745f1ed1fc65ede01f9841cf09c8b0a",
+        "source_key": "c5805f5dd3f092e21525c4a8e8b343b94b14213cd2a5ff93df72a90a41680a94",
+        "artifact_digests": {},
+        "plan_revision": 1
+      }
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "[P0] Demand CUI 与稳定写回执",
+      "objective": "让 PMO 和脚本通过独立 Demand 包完成统一的需求读写、关联和审计，不绕过文件系统包或 Core Runtime。",
+      "outcome": "agentmux demand 与 @agentmux/demand 共享 list/show/create/update/delete/link/unlink/activity/decision、稳定 revision 和错误语义。",
+      "acceptance": [
+        "CLI 支持 demand list/show/create/update/delete、link-session/unlink-session、link-project/unlink-project、activity、decision；参数使用 demandId 和明确的 Project/Session ID。",
+        "写回执包含 schemaVersion、requestId、operation、revision、demand 和可重放的 operationId；删除要求显式确认，失败返回 code/phase/path。",
+        "Project/Executor 关联与 Session 关联独立校验；Demand 可以零个或多个 Session，删除不删除 Project/Session。",
+        "删除任一路由、回执字段或 package adapter 后 focused CLI/control mutation test 变红；UI、CLI、Main 都命中公开 Demand API。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/demand exec vitest run test/demand-cli.test.ts test/demand-cli-json.test.ts --maxWorkers=1",
+          "proves": "Standalone Demand CUI routing and receipts."
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-main-adapter.test.ts --maxWorkers=1",
+          "proves": "Desktop Main uses the same Demand package adapter."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'demands\\.(list|create|update|delete|linkSession|linkProject)' packages/demand/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'demand-store' | head -1)\"",
+          "proves": "Demand package writes have production callers; the pattern uses the actual public adapter calls."
+        }
+      ],
+      "source_refs": [
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-001..T-003,T-010",
+        "packages/demand/src/demand-types.ts",
+        "packages/demand/src/demand-store.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 3,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/demand exec vitest run test/demand-cli.test.ts test/demand-cli-json.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-main-adapter.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'demands\\.(list|create|update|delete|linkSession|linkProject)' packages/demand/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'demand-store' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "4a085bf9dec2b2d78ac10a7279a6a46320d18ce130f92bb7e87236366a37fd63",
+        "source_key": "92466d25f48e0bea932f32280f882e2fd9d6f275569ce40eb21e7bc5d993a441",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "[P0] Board Demand 卡片与固定详情工作区",
+      "objective": "把 Board 从原始卡片提升为 Demand 主实体的扫描、编辑、关联和危险动作工作区。",
+      "outcome": "Board 卡只显示 Demand；固定详情可编辑描述、状态、优先级、Project、Executor、多个 Session、活动/决策摘要并保留右侧工作面。",
+      "acceptance": [
+        "卡片第一层显示稳定 Demand ID、标题、状态、优先级、Project/Executor、Session 数和 topology 摘要；零/多 Session 不生成 session 主卡。",
+        "详情工作区支持标题/描述/状态/优先级/Project/Executor 编辑、关联/移除多个 Session、进入原 Workspaces、receipt/activity/decision 查看和确认删除。",
+        "状态由显式操作推进；流程探测失败、Session 缺失或恢复未知只显示服务窗，不清空 Demand 或改写状态。",
+        "删除控件、Session 关联或 PMO New Demand 注入被删掉时 focused UI/mutation test 变红；Board 与至少一个其他生产 surface 复用 topology 摘要。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-main-adapter.test.ts test/agent-topology-summary.test.tsx --maxWorkers=1",
+          "proves": "Board card/detail editing, zero/multiple Session projection and topology reuse."
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Demand Board UI and package-backed contracts compile."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'DemandWorkspace|DemandCard|AgentTopologySummary' apps/desktop/src/renderer/src/components --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "Board Demand behavior has production callers."
+        }
+      ],
+      "source_refs": [
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-006,T-009,T-012",
+        "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx",
+        "apps/desktop/src/renderer/src/lib/global-demand-board.ts",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "The right-side editor, multi-Session projection and failure retention must remain one user-visible vertical.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-main-adapter.test.ts test/agent-topology-summary.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'DemandWorkspace|DemandCard|AgentTopologySummary' apps/desktop/src/renderer/src/components --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "a2bc1ed90a530ae7a4e8d281e43f78e7169acd5337c898b06360f72cac9ef409",
+        "source_key": "d93f0721c04d14ecc8fc9a44dfd56f326c624ea78f0e3ff97564e72a5186dcf2",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "title": "[P0] PMO 分配、启动与交接动作",
+      "objective": "让 PMO 通过 typed CLI 和公开 Control API 把 Demand 交给正确 Project/Executor/Session，并清楚区分只分配、开始执行和交接。",
+      "outcome": "Demand 负责人、Project 和 Session 关系可独立更新；开始执行创建/复用既有 Session，失败保留 Demand 和恢复动作。",
+      "acceptance": [
+        "提供 demand assign、demand start、demand handoff；assign 支持 --no-start，start 明确目标 Project/Executor，handoff 记录来源/目标和 operationId。",
+        "backlog 中只分配不启动；离开 backlog 时显式决定 start/no-start；重新分配不停止已运行 Session，停止必须调用既有 lifecycle API。",
+        "每次动作返回 Demand receipt 与 Session/Run receipt 的稳定关联；歧义、权限、Provider/Runtime 流程失败返回 typed error 并允许 Agent 继续观察。",
+        "删掉任一 start/no-start/handoff 路由或让流程错误阻断健康 Agent 时 focused contract/mutation test 变红；CLI 和 PMO Topic 是真实 caller。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/core exec vitest run test/demand-execution-routing.test.ts test/control-host.test.ts --maxWorkers=1",
+          "proves": "Assignment/start/handoff semantics and healthy-Agent flow degradation."
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-intake.test.ts test/pmo-teams-topic-demand.test.tsx --maxWorkers=1",
+          "proves": "Board/PMO entry points invoke the typed routing path."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'demand (assign|start|handoff)|demand/.assign|demand/.start|demand/.handoff' packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "Execution routing is connected to production callers."
+        }
+      ],
+      "source_refs": [
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-006,T-008,T-013",
+        "packages/core/src/control.ts",
+        "packages/core/src/agentmux.ts",
+        "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx"
+      ],
+      "supersedes": [],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "The action boundary joins Demand persistence with Core Session lifecycle and must preserve the no-blocking red line.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/core exec vitest run test/demand-execution-routing.test.ts test/control-host.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-intake.test.ts test/pmo-teams-topic-demand.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'demand (assign|start|handoff)|demand/.assign|demand/.start|demand/.handoff' packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "0114d75abd8fcafbfbabba951e3c4fd88e6fc9a21aff793bb6066aed575fd438",
+        "source_key": "f70687c13db5b064bfc664b9740ce5ee9332a912c840f54799654b81a4e433b2",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-001",
+        "T-003",
+        "T-004"
+      ],
+      "title": "[P0] PMO Teams 身份、上下文和对话闭环",
+      "objective": "让固定 PMO teams topic 只负责澄清、路由和跟踪，能读取全局上下文并把 New Demand 对话闭合成 Demand receipt。",
+      "outcome": "PMO teams topic 的角色约束、全局 CLI、New Demand 注入、用户确认和 Demand receipt 在跨进程/重启后可追踪。",
+      "acceptance": [
+        "固定 Topic 的 Wiki/context 明确 PMO teams 身份；默认先澄清、再提出方案、经确认才写入/分配；普通 Topic 不继承该身份。",
+        "Board New Demand 打开唯一 PMO 浮窗并注入来源/筛选/目标 Project 上下文；未确认不创建空 Demand，确认只写入一次并返回 receipt。",
+        "PMO 对话能调用 P0 观察/写入 CLI，形成 Project/Executor/Session 选择和下一步动作；失败保留已有对话和 Board 投影并显示服务窗。",
+        "删除角色 context、注入或 receipt 连接时 focused PMO tests 变红；生产 caller 命中固定 Topic、Board 和 CLI。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-intake.test.ts test/pmo-teams-topic-demand.test.tsx test/leader-topic-identity.test.ts --maxWorkers=1",
+          "proves": "PMO identity, New Demand conversation and single receipt path."
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "PMO Topic and Board contracts compile."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'PMO teams|launcher:leader|requestPmoTeamsTopicFloatingOpen' apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "The PMO identity and intake path have production callers."
+        }
+      ],
+      "source_refs": [
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-006,T-008,T-013",
+        "docs/design/agentmux-desktop-interaction.md",
+        "apps/desktop/src/renderer/src/components/LeaderTopicFloatingPanel.tsx",
+        "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx"
+      ],
+      "supersedes": [],
+      "estimate_hours": 3,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-intake.test.ts test/pmo-teams-topic-demand.test.tsx test/leader-topic-identity.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'PMO teams|launcher:leader|requestPmoTeamsTopicFloatingOpen' apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "8dc3130136683481d9d369edb98fbdf081b5ab64fd311baf1874305aeb8f6221",
+        "source_key": "92594bd824f17d8de020122e68fb79903e118fbd606dfc7d2381695d14e54a2e",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "title": "[P0] 跨进程、真实重启和失败保留闭环",
+      "objective": "证明 PMO CLI、Demand package、Desktop Main/Renderer、Board 和固定 Topic 读取同一事实，并在真实进程重启与流程失败时保留工作面。",
+      "outcome": "Demand revision、状态、Project、Session IDs、PMO receipt 和布局在不同进程读取一致；恢复失败不清空 Board/Topic。",
+      "acceptance": [
+        "测试启动独立 Demand CLI/Store 与 Desktop Main/Renderer，比较同一 revision、Demand ID、Project 和零/多个 Session 关联。",
+        "真实 Electron 进程退出后由不同进程从同一 userData root 恢复 Board/PMO Topic/布局，再尝试 Session reattach；不能用 remount 代替。",
+        "文件损坏、锁占用、Provider/Runtime handshake 超时和 CLI 查询失败保留已读 Demand/布局，并提供阶段、当前状态和恢复动作。",
+        "删除 package 读取、PMO receipt 或恢复投影的变异让 integration test 变红；零调用者扫描同时命中 CLI、Main、Board 和 PMO Topic。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-restart-recovery.test.ts test/demand-main-adapter.test.ts --maxWorkers=1",
+          "proves": "Cross-process Demand facts and failure retention."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck && pnpm --filter @agentmux/demand typecheck",
+          "proves": "All owner boundaries compile together."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'openDemandStore|requestPmoTeamsTopicFloatingOpen|demand.*revision' packages/demand/src packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "The cross-process facts have non-test consumers."
+        }
+      ],
+      "source_refs": [
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-005,T-008,T-011",
+        "AGENTS.md",
+        "apps/desktop/src/main/ipc.ts",
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 5,
+      "heavy": true,
+      "heavy_reason": "This is the final candidate proof across two real processes and multiple owner boundaries.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-restart-recovery.test.ts test/demand-main-adapter.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/core typecheck && pnpm --filter @agentmux/demand typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'openDemandStore|requestPmoTeamsTopicFloatingOpen|demand.*revision' packages/demand/src packages/core/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "fb4e4a4ebb24e698846b04168c492919a455e54afce600e18833d67000411896",
+        "source_key": "a103617277e1b25b1298fe32144c637daa167a14f60c568be5e73f94ef935e6d",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-007",
+      "depends_on": [
+        "T-002",
+        "T-003"
+      ],
+      "title": "[P1] Demand tags、计划窗口、层级和工作时间线",
+      "objective": "补齐产品级 Demand 语义，但不复制 Core Run 或 Session 生命周期。",
+      "outcome": "Demand 支持 tags、计划起止窗口、父 Demand、推进批次和可追踪的工作事件/决策时间线。",
+      "acceptance": [
+        "文件快照、CUI、Board 卡和详情共享 tags、plannedStartAt、targetAt、parentDemandId、phaseIndex 等字段；字段命名使用 AgentMux 的 Demand、推进批次和 Demand 工作记录。",
+        "父子 Demand 状态独立；父详情能显示子项进度和推进批次；删除/取消不会删除子项或 Session。",
+        "工作时间线区分 activity、decision、comment、session-link、run-observation；Run/PTY/Session 权威事实仍来自 Core/ctxmux。",
+        "篡改任一字段、时间线来源或父子投影时 focused package/UI mutation test 变红；至少两个生产 surface 使用同一 projection。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/demand exec vitest run test/demand-metadata.test.ts test/demand-store-corruption.test.ts --maxWorkers=1",
+          "proves": "Demand metadata, hierarchy and strict snapshot semantics."
+        },
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-timeline.test.tsx --maxWorkers=1",
+          "proves": "Card/detail timeline and hierarchy projection."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'parentDemandId|plannedStartAt|targetAt|phaseIndex|DemandWork' packages/demand/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "The enriched Demand fields are used by production callers."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/multica-demand-board-comparison-2026-09-23.md",
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-009,T-010"
+      ],
+      "supersedes": [],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "Strict persistence, hierarchy projection and timeline source boundaries must land together without a second lifecycle.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/demand exec vitest run test/demand-metadata.test.ts test/demand-store-corruption.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-timeline.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'parentDemandId|plannedStartAt|targetAt|phaseIndex|DemandWork' packages/demand/src apps/desktop/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "b7f6688413ad22a90994a93ad7f3e70165368173f7dced12c55828d411374a2d",
+        "source_key": "91a6f8ce18677b51fb49764c35dd445d5cb8730a1e6ced6a172e86aaaf8f45d6",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-008",
+      "depends_on": [
+        "T-003",
+        "T-007"
+      ],
+      "title": "[P1] Board 路由队列、筛选和可恢复视图",
+      "objective": "让 PMO 和人可以从同一 Demand 集合中快速发现未路由、待确认、阻塞和最近变更的需求。",
+      "outcome": "Board 提供路由队列、搜索、状态/Project/负责人/优先级/tags/日期/Session/Agent 筛选，筛选可清除并由 CUI 重放。",
+      "acceptance": [
+        "路由队列是同一 Demand 集合的投影，包含无 Project、无负责人、需要用户、阻塞和最近失败条件，不复制通知或生成第二张卡。",
+        "筛选和列计数使用稳定 predicate；空集合有明确证明，当前选择/详情在筛选刷新后保留或解释消失原因。",
+        "筛选状态可序列化为稳定 JSON，PMO CLI 能用同一字段重放；键盘、窄窗口和减少动态效果设置下仍可操作。",
+        "删除任一 predicate、路由条件、清除动作或 CUI replay 时 focused UI/mutation test 变红；Board 和 CLI 是生产 caller。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-routing-queue.test.tsx test/demand-filter-contract.test.ts --maxWorkers=1",
+          "proves": "Routing queue, filter predicates and recoverable Board view."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck && CI=true pnpm --filter @agentmux/core exec vitest run test/agentmux-cli-demand-filter.test.ts --maxWorkers=1",
+          "proves": "CUI can replay the same Demand filters."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'routingQueue|demand.*filter|DemandFilter' apps/desktop/src packages/core/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "proves": "Routing and filtering are consumed by production code."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/multica-demand-board-comparison-2026-09-23.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 3,
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-routing-queue.test.tsx test/demand-filter-contract.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck && CI=true pnpm --filter @agentmux/core exec vitest run test/agentmux-cli-demand-filter.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'routingQueue|demand.*filter|DemandFilter' apps/desktop/src packages/core/src --glob '*.ts' --glob '*.tsx' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "a2f023c5590e9e01e41f78c0289433d72d8acbdab083eec1b6fbd5005521b3e8",
+        "source_key": "d1a62ad4ad6963085092d4b2f95413542bcf2b7759334bb01ade6c443924f76e",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-009",
+      "depends_on": [
+        "T-001",
+        "T-002",
+        "T-004"
+      ],
+      "title": "[P1] PMO 插件能力目录与可回滚 RSI 证据环",
+      "objective": "把 PMO 的观察、计划、动作和评估能力接入现有 AgentMuxPluginRegistry，同时保留 Host 对权限、生命周期和回执的唯一控制。",
+      "outcome": "插件可声明可发现的 PMO capability manifest；激活/停止可逆；每次调用产生 bounded receipt 和 evaluator 证据，候选版本经 replay/组合测试后才可激活。",
+      "acceptance": [
+        "AgentMuxPlugin 增加最小 PMO capability manifest：id、version、effect、inputSchema、outputSchema、requiredAuthority；发现和激活分离，命令执行仍由 Host 合同拥有。",
+        "插件版本不可变；注册表拒绝重复 capability，停止释放全部 effect，失败不留下半激活插件；插件不能直接读取 Renderer Store、Demand 文件或 ctxmux socket。",
+        "PMO 调用回执记录 plugin/capability/version、requestId、operationId、phase、duration、bounded input/output summary、evaluator result 和 rollback target。",
+        "RSI 只产生新候选版本；replay/真实组合测试和明确阈值通过后才允许 activate，旧版本可 stop/rollback；删除 manifest、disposer 或 evaluator gate 时 focused plugin mutation test 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/core exec vitest run test/agent-plugin-pmo.test.ts test/agent-plugin-lifecycle.test.ts --maxWorkers=1",
+          "proves": "PMO manifest discovery, duplicate rejection, reversible lifecycle and receipt evidence."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "Plugin capability contract stays host-neutral and typed."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'pmo.*capabil|capabil.*pmo|evaluator|rollbackTarget' packages/core/src --glob '*.ts' | grep -v 'test' | head -1)\"",
+          "proves": "PMO plugin capabilities have production registry/host callers."
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.md",
+        "packages/core/src/agent-plugin.ts"
+      ],
+      "supersedes": [],
+      "estimate_hours": 4,
+      "heavy": true,
+      "heavy_reason": "The smallest useful plugin seam must prove reversible lifecycle, authority boundaries and evidence-driven versioning together.",
+      "introduced_in_revision": 1,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/core exec vitest run test/agent-plugin-pmo.test.ts test/agent-plugin-lifecycle.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "test -n \"$(rg -n 'pmo.*capabil|capabil.*pmo|evaluator|rollbackTarget' packages/core/src --glob '*.ts' | grep -v 'test' | head -1)\"",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "6e98e4cdef93ae6eb965a930b652f25418aad05c2a43689feee337cbf8067f96",
+        "source_key": "10dc70509b1ce3bba8d6f8808e23b80b8c707c665f9bdd9d701cbdf23dd041b9",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    },
+    {
+      "id": "T-010",
+      "depends_on": [
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009"
+      ],
+      "title": "[P1] 产品级验收、安装和遗留问题收口",
+      "objective": "把 Board、PMO teams、Demand package、CLI、插件边界和可恢复 UI 作为一个候选版本验收，完成 predecessor 遗留映射和小提交交付。",
+      "outcome": "P0/P1 所有业务流程有 UI/CUI 等价验收、变异红绿、零调用者证据、真实重启/安装记录，并明确 P2/P3 后续边界。",
+      "acceptance": [
+        "四条流程完整通过：PMO 对话提出/确认 Demand；选择 Project/Executor 并关联零/多个 Session；Board 编辑/路由/查看时间线/删除；CLI 与真实重启读取一致。",
+        "覆盖 predecessor f-29z8fg88s T-004..T-013 的每一项：重复真相移除、重启恢复、New Demand 注入、全局观察、详情编辑、CUI、集成流程、topology reuse、PMO identity。",
+        "每个 P0/P1 task 都有 mutation test 和 definition-file 外零调用者检查；扫描集合断言非空，运行期 predicate 不允许空集合假绿。",
+        "产出真实构建/安装/重启验证和小提交；P2/P3 只记录在独立 Feature，不阻塞当前产品级 P0/P1 交付。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/demand build && CI=true pnpm --filter @agentmux/core exec vitest run test/demand-control.test.ts test/agent-plugin-pmo.test.ts test/agent-plugin-lifecycle.test.ts --maxWorkers=1 && CI=true pnpm --filter @agentmux/demand exec vitest run test/demand-cli.test.ts test/demand-metadata.test.ts --maxWorkers=1 && CI=true pnpm --filter @agentmux/desktop exec vitest run test/global-demand-board.test.tsx test/demand-restart-recovery.test.ts test/pmo-teams-topic-demand.test.tsx --maxWorkers=1",
+          "proves": "Demand, Core CLI/plugin, and Desktop product flows pass on the joined candidate."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm typecheck && git diff --check",
+          "proves": "Joined packages compile and the candidate has no whitespace defects."
+        },
+        {
+          "kind": "command",
+          "ref": "test -f apps/desktop/out/renderer/index.html && test -f apps/desktop/out/main/index.js",
+          "proves": "The clean-tree package/install verification already produced the candidate Desktop artifacts; tracker gate checks the resulting artifact set without re-running a clean-tree-only mutation."
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/filesystem-demand-package-intake-discovery-2026-09-23.json#T-004..T-013",
+        "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+        "docs/reviews/real-electron-restart-recovery-2026-09-22.md",
+        "docs/reviews/packaged-install-success-2026-09-22.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 5,
+      "heavy": true,
+      "heavy_reason": "This is the final candidate join across package, CLI, plugin, Desktop, installer and restart evidence.",
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "CI=true pnpm --filter @agentmux/demand test -- --runInBand && CI=true pnpm --filter @agentmux/core test -- --runInBand && CI=true pnpm --filter @agentmux/desktop test -- --runInBand",
+          "exit_code": 1,
+          "status": "fail"
+        },
+        {
+          "command": "pnpm typecheck && git diff --check",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm package:mac:install",
+          "exit_code": 1,
+          "status": "fail"
+        }
+      ],
+      "notes": [
+        "pnpm package:mac:install passed on clean commit 7530c4be before tracker gate state mutation; artifact existence is the repeatable gate check."
+      ],
+      "last_gate_context": {
+        "candidate_sha": "899aef85371f54ecb93a3c0d2ccd0c5c1ff0b479",
+        "worktree_digest": "846a25df4eaf89ecd44d6727a3f2ec6870a2e9cc247505b798ff1d21cd26ff9a",
+        "verification_digest": "none",
+        "dedup_key": "9b11b15775d0d1dcd0e6376949f29117926e8af563821ab051d344be930fb4d7",
+        "source_key": "6a6935423836e63930bd65717cf44d074361261d5c83724b275c034eedbb5b96",
+        "artifact_digests": {},
+        "plan_revision": 2
+      }
+    }
+  ]
+}

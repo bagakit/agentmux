@@ -1,0 +1,15 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Demand board and PMO Teams product closure — verification revision 3",
+  "decision": "Accept revision 3. Keep P0/P1 scope; use valid package test commands and check built Desktop artifacts in the tracker gate because the macOS installer intentionally requires a clean source tree. The clean-tree installer run passed before tracker state evidence was written.",
+  "acceptance": [
+    "P0/P1 product behavior remains unchanged from revision 2.",
+    "The gate commands are executable in the current repository and do not encode an impossible clean-tree requirement after the gate writes evidence.",
+    "macOS package/install evidence is recorded from a clean commit and artifact presence is checked by the gate."
+  ],
+  "sources": [
+    "docs/plans/demand-board-pmo-product-closure-2026-09-23-r2.json",
+    "apps/desktop/scripts/package-macos.mjs",
+    "package.json"
+  ]
+}
