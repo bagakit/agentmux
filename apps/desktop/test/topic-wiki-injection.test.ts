@@ -15,7 +15,7 @@ describe('Topic Wiki injection', () => {
     roots.push(path)
     const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Scratch', hostId: 'local', path, kind: 'folder' }
     const topics = new ScratchTopics()
-    const topic = await topics.ensure(workspace, 'launcher:default')
+    const topic = await topics.ensure(workspace, 'launcher:leader')
     const wikiPath = join(path, topic.directoryPath, SCRATCH_TOPIC_WIKI_PATH)
     await writeFile(wikiPath, `${DEFAULT_TOPIC_WIKI}\nUse a receipt.\n`)
     const edited = await topics.read(workspace, topic.id)

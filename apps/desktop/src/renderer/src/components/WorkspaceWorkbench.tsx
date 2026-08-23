@@ -1204,10 +1204,15 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
-  visible = true
+  visible = true,
+  topicId,
+  topicIsolation = 'default'
 }: {
   workspaceId: string
   interactiveResize?: boolean
+  /** Optional explicit Topic projection used by product-owned surfaces such as Leader Topic. */
+  topicId?: string
+  topicIsolation?: 'default' | 'bound-only'
   /**
    * Whether this window-level Workbench slot is currently on screen. The slot stays mounted while
    * false so SessionPane/xterm/ctxmux attachments survive Workspace navigation; native surfaces use
@@ -1222,9 +1227,9 @@ export function WorkspaceWorkbench({
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const layout = useMemo(
     () => storedLayout
-      ? layoutForActiveTopic(storedLayout, tabs, activeTopicIdFromLayout(storedLayout, tabs))
+      ? layoutForActiveTopic(storedLayout, tabs, topicId ?? activeTopicIdFromLayout(storedLayout, tabs), topicIsolation !== 'bound-only')
       : storedLayout,
-    [storedLayout, tabs]
+    [storedLayout, tabs, topicId, topicIsolation]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)

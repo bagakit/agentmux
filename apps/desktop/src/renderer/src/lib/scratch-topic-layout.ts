@@ -107,12 +107,14 @@ export function tabEligibilityForActiveTopic(
  */
 function visibleTabPredicate(
   tabs: Readonly<Record<string, WorkbenchTab>>,
-  activeTopicId: string
+  activeTopicId: string,
+  includeUnbound = true
 ): (tabId: string) => boolean {
   return (tabId: string): boolean => {
     const topicId = tabs[tabId]?.topicId
-    // 未绑定 Topic 的 Tab 始终可见：它不属于任何 Topic，藏起来就再也找不回了。
-    return topicId === undefined || topicId === activeTopicId
+    // 普通 Scratch 投影保留未绑定 Tab，避免把用户的通用入口藏起来；产品拥有的
+    // Leader Topic 使用 bound-only，不能把当前 Scratch 的未绑定 Tab 带进固定表面。
+    return (includeUnbound && topicId === undefined) || topicId === activeTopicId
   }
 }
 
@@ -204,12 +206,13 @@ export function moveTabWithinActiveTopic(
 export function layoutForActiveTopic(
   layout: WorkspaceLayout,
   tabs: Readonly<Record<string, WorkbenchTab>>,
-  activeTopicId: string | null
+  activeTopicId: string | null,
+  includeUnbound = true
 ): WorkspaceLayout {
   // 没有选中 Topic 就不做无谓的隐藏。
   if (!activeTopicId) return layout
 
-  const visible = visibleTabPredicate(tabs, activeTopicId)
+  const visible = visibleTabPredicate(tabs, activeTopicId, includeUnbound)
 
   const groups = layout.groups.map((group) => {
     const tabOrder = group.tabOrder.filter(visible)

@@ -366,10 +366,8 @@ type AppState = {
   setSelectedAgentSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
-  defaultSessionLauncherHidden: boolean
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
-  setDefaultSessionLauncherHidden(hidden: boolean): void
   createDemand(input: {
     title: string
     description?: string
@@ -1477,7 +1475,6 @@ type PersistedAppState = {
   selectedAgentSessionId?: string | null
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
-  defaultSessionLauncherHidden?: boolean
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
@@ -1736,7 +1733,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   selectedAgentSessionId: null,
   selectedDemandId: null,
   demandArrangement: 'columns',
-  defaultSessionLauncherHidden: false,
   projectRailOpen: true,
   collapsedProjectGroups: {},
   explorerCollapsed: {},
@@ -3408,9 +3404,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setDemandArrangement(arrangement) {
     set({ demandArrangement: arrangement })
-  },
-  setDefaultSessionLauncherHidden(hidden) {
-    set({ defaultSessionLauncherHidden: hidden })
   },
   createDemand(input) {
     const id = `demand:${crypto.randomUUID()}`
@@ -5233,7 +5226,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     selectedAgentSessionId: state.selectedAgentSessionId,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
-    defaultSessionLauncherHidden: state.defaultSessionLauncherHidden,
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。

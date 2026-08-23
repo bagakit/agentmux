@@ -1,5 +1,8 @@
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Scratch'
+/** Product-owned Topic used by the Leader Topic launcher. It is never the user's active Scratch Topic. */
+export const LEADER_TOPIC_ID = 'launcher:leader'
+export const LEADER_TOPIC_TITLE = 'Leader Topic'
 export const SCRATCH_TOPIC_TITLE_MAX_LENGTH = 120
 export const SCRATCH_TOPIC_WIKI_PATH = '.agentmux/topic-wiki.md'
 export const SCRATCH_TOPIC_WIKI_STATE_PATH = '.agentmux/topic-wiki.json'
@@ -50,6 +53,10 @@ export type TopicWikiSnapshot = {
 
 export function isScratchTopicId(topicId: string): boolean {
   return SCRATCH_TOPIC_ID.test(topicId)
+}
+
+export function isLeaderTopicId(topicId: string): boolean {
+  return topicId === LEADER_TOPIC_ID
 }
 
 export function scratchTopicDirectoryName(topicId: string): string {

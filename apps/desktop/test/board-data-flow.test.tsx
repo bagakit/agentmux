@@ -68,7 +68,7 @@ describe('Board request ownership', () => {
   it('shows read failure in both surfaces instead of an empty Board or endless loading', async () => {
     vi.mocked(api.workspaces.listBranches).mockRejectedValue(new Error('Git read failed'))
     await renderBoard()
-    expect(container.querySelector('.board-state--error')!.textContent).toContain('Git read failed')
+    expect(container.querySelector('[data-loading-phase="failed"]')!.textContent).toContain('Git read failed')
     expect(container.querySelector('[role="alert"]')!.textContent).toContain('Git read failed')
     expect(container.textContent).not.toContain('No branches yet')
   })
