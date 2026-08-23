@@ -1,0 +1,18 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {"status":"approved","evidence_ref":"docs/reviews/global-work-surface-hierarchy-2026-09-23.json"},
+  "source_refs": ["AGENTS.md","docs/reviews/global-work-surface-hierarchy-2026-09-23.md","apps/desktop/src/renderer/src/components/TopRowChrome.tsx","apps/desktop/src/renderer/src/App.tsx"],
+  "tasks": [{
+    "id":"T-001",
+    "depends_on":[],
+    "title":"修正全局工作面命名与 Agents 层级",
+    "objective":"将底部 Session 改为 Workspaces，并令 Agents 与 Board 一样拥有全局工作面层级。",
+    "outcome":"三项切换标签统一，Agents 打开时 Project Rail 不占空间，现有 Workspace/Session 事实不变。",
+    "acceptance":["Footer switch labels are exactly Agents, Workspaces, Board.","Agents and Board hide Project Rail while active.","Tests prove the hierarchy condition and existing switch has one selected item."],
+    "verification":[{"kind":"command","ref":"CI=true pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/surface-switch-placement.test.ts --maxWorkers=1","proves":"Global switch naming and Project Rail ownership are correct."},{"kind":"command","ref":"pnpm --filter @agentmux/desktop typecheck","proves":"Navigation hierarchy compiles."},{"kind":"command","ref":"test -n \"$(rg -n 'Workspaces|globalSurfaceOwnsProjectRail' apps/desktop/src/renderer/src --glob '*.tsx' | grep -v 'test')\"","proves":"The naming and hierarchy have production callers."}],
+    "source_refs":["docs/reviews/global-work-surface-hierarchy-2026-09-23.md"],
+    "estimate_hours":1,
+    "heavy":false,
+    "supersedes":[]
+  }]
+}

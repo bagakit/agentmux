@@ -1,0 +1,15 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Global work-surface hierarchy",
+  "decision": "Rename Session to Workspaces and make Agents a global surface that hides Project Rail; defer the Agent topology graph to its own Feature.",
+  "acceptance": [
+    "Footer switch labels are exactly Agents, Workspaces, Board.",
+    "Agents and Board hide Project Rail while active.",
+    "Existing Workspace/Session lifecycle and navigation facts remain unchanged."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "apps/desktop/src/renderer/src/components/TopRowChrome.tsx",
+    "apps/desktop/src/renderer/src/App.tsx"
+  ]
+}
