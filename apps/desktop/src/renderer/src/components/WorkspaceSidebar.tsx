@@ -254,7 +254,6 @@ export function WorkspaceSidebar({
           {project.hostId !== 'local' ? (
             <small><RadioTower size={9} /> {project.hostId}</small>
           ) : null}
-          {idleLabel ? <small className="project-rail-row__activity" aria-hidden="true">{idleLabel}</small> : null}
         </span>
       </button>
       </div>
@@ -317,7 +316,6 @@ export function WorkspaceSidebar({
             <span className="project-rail-row__icon scratch-workspace-row__icon"><BrandIcon size={16} /></span>
             <span className="project-rail-row__identity scratch-workspace-row__identity">
               <strong>Scratch</strong>
-              {scratchIdleAgentCount > 0 ? <small className="project-rail-row__activity" aria-hidden="true">{scratchIdleAgentCount} idle</small> : null}
             </span>
             <span
               className="scratch-workspace-row__meta"
