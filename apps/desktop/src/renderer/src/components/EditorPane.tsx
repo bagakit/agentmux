@@ -193,7 +193,7 @@ export function EditorPane({
   const regionDiff = useAppStore((state) => state.editorRegionDiffs[surface.regionId])
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
-  const appAppearance = useAppStore((state) => state.config?.appearance.appAppearance)
+  const appAppearance = useAppStore((state) => state.config?.appearance?.appAppearance)
   const [monacoTheme, setMonacoTheme] = useState<MonacoThemeId>(() => monacoThemeForAppAppearance(
     appAppearance,
     typeof window === 'undefined' ? true : window.matchMedia('(prefers-color-scheme: dark)').matches
