@@ -105,7 +105,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     })
     return { receipt, demand: receipt.demand, revision: receipt.revision }
   }
-  if (command === 'remove') {
+  if (command === 'remove' || command === 'delete') {
     const receipt = await store.remove(required(options, 'id'))
     return { receipt, demand: receipt.demand, revision: receipt.revision }
   }
