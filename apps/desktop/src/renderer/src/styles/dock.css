@@ -227,4 +227,4 @@
 .workspace-settings-list strong { font-size: var(--fs-meta); }
 .workspace-settings-list small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .workspace-settings-list em { color: var(--text-3); font-size: var(--fs-micro); font-style: normal; }
-.workspace-topic-entry__wiki { margin-left: 6px; color: var(--green-2); font-size: var(--fs-micro); }
+.workspace-topic-entry__wiki { margin-left: var(--sp-3); color: var(--green-2); font-size: var(--fs-micro); }

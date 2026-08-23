@@ -159,7 +159,7 @@
 .browser-rsi-rail--human { border-bottom-color: var(--amber-line); }
 .browser-rsi-rail--failed, .browser-rsi-rail--indeterminate { border-bottom-color: var(--red-line); }
 .browser-rsi-rail--idle { color: var(--text-3); }
-.browser-rsi-rail--quiet { min-height: 26px; justify-content: flex-end; padding-block: 2px; background: transparent; border-bottom-color: transparent; }
+.browser-rsi-rail--quiet { min-height: 26px; justify-content: flex-end; padding-block: var(--sp-1); background: transparent; border-bottom-color: transparent; }
 .browser-rsi-rail__identity, .browser-rsi-rail__target, .browser-rsi-rail__copy { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); }
 .browser-rsi-rail__identity > span:not(.agent-avatar), .browser-rsi-rail__target > span, .browser-rsi-rail__copy { display: grid; gap: 1px; }
 .browser-rsi-rail__identity { flex: 0 1 170px; }

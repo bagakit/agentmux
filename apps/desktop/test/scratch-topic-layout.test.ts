@@ -68,6 +68,11 @@ describe('切 Topic 就换那一组 Tab', () => {
     expect(shown.groups[0]!.tabOrder).not.toContain('a-1')
   })
 
+  it('product-owned Leader Topic can isolate unbound Scratch tabs', () => {
+    const shown = layoutForActiveTopic(fullLayout(), tabs, 'launcher:leader', false)
+    expect(shown.groups[0]!.tabOrder).toEqual([])
+  })
+
   it('没有选中 Topic 时显示全部——不做无谓的隐藏', () => {
     const shown = layoutForActiveTopic(fullLayout(), tabs, null)
     expect(shown.groups[0]!.tabOrder).toEqual(['a-1', 'a-2', 'b-1', 'loose'])

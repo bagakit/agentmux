@@ -27,7 +27,7 @@ button.agent-avatar:hover { background: var(--surface-3); }
 button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
 .composer-agent-identity { display: inline-flex; align-items: center; padding: var(--sp-2); }
 .agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
-.agent-identity-popover { position: fixed; z-index: 10000; width: 248px; max-width: calc(100vw - 16px); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2); font-size: var(--fs-caption); font-weight: 400; line-height: 1.45; text-align: left; }
+.agent-identity-popover { position: fixed; z-index: 10000; width: 248px; max-width: calc(100vw - 16px); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2); font-size: var(--fs-meta); font-weight: 400; line-height: 1.45; text-align: left; }
 .agent-identity-popover header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .agent-identity-popover header strong { overflow-wrap: anywhere; font-size: inherit; font-weight: 600; }
 .agent-identity-popover dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); margin: var(--sp-2) 0 0; }

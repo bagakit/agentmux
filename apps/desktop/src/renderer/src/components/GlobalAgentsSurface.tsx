@@ -8,7 +8,6 @@ import { workspaceForSession } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
-import { DefaultSessionEntry } from './DefaultSessionEntry'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
 const BUCKET_META = {
@@ -66,7 +65,7 @@ export function GlobalAgentsSurface() {
           </section>
         })}
       </div>}
-      <footer className="global-board-footer"><span>{filtered.length} of {rows.length} Agents</span><DefaultSessionEntry placement="board" /></footer>
+      <footer className="global-board-footer"><span>{filtered.length} of {rows.length} Agents</span></footer>
     </div>
     {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
       <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
