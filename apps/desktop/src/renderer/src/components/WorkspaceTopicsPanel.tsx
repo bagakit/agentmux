@@ -211,7 +211,10 @@ export function WorkspaceTopicsPanel({
     setPending(nextTopicId)
     setError(null)
     try {
-      await openScratchTopic(nextTopicId)
+      // The panel is rendered only for Scratch, so pass the workspace identity explicitly. This
+      // keeps the click independent from the currently selected Project while the workbench is
+      // being revealed.
+      await openScratchTopic(nextTopicId, SCRATCH_WORKSPACE_ID)
     } catch (cause) {
       setError(presentError(cause))
     } finally {

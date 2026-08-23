@@ -361,7 +361,7 @@ describe('T-002 Topic panel projects each Topic’s Agents from the filesystem',
       new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
       'utf8'
     )
-    expect(source).toContain('await openScratchTopic(nextTopicId)')
+    expect(source).toContain('await openScratchTopic(nextTopicId, SCRATCH_WORKSPACE_ID)')
     expect(source).toContain('topicsWithAgents(userTopics, sessions, workspace)')
   })
 })
