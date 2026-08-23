@@ -2080,7 +2080,7 @@
     {
       "feat_id": "f-29x8fvhsy",
       "title": "Full-page loading 与启动大屏统一",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2110,7 +2110,7 @@
     {
       "feat_id": "f-2a28fus24",
       "title": "Leader Topic floating click interaction",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
