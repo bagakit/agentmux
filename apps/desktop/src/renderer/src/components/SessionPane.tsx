@@ -30,6 +30,8 @@ import {
 } from '../lib/continuity-failure-notice'
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
+import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { agentProviderLabel } from './AgentProviderIcon'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -82,12 +84,26 @@ export function SessionPane({
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
+  const timelineSnapshot = useAppStore((state) => state.timelines[sessionId])
+  const userName = useAppStore((state) => state.agentNames?.[sessionId])
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  const agentInputIdentity = session?.kind === 'agent'
+    ? agentDisplayName({
+        userName,
+        firstPrompt: firstPromptFromTimeline(timelineSnapshot),
+        fallbackLabel: session.label,
+        providerLabel: agentProviderLabel(session.providerId)
+      })
+    : undefined
+  const agentInputExecutor = session?.kind === 'agent'
+    ? (connectingExecutor?.label ?? session.executorId)
+    : undefined
+  const agentInputSessionId = session?.kind === 'agent' ? session.id : undefined
   // 说话人身份 → 「叫什么、画哪个 provider」。这一层是唯一持有 Session 的地方，所以查 store 归这里；
   // ActivityView 与两条轴都保持受控，可以在无 DOM 的测试里直接求值。
   //
@@ -387,9 +403,22 @@ export function SessionPane({
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
           {session.kind === 'agent' && viewMode === 'terminal' ? (
-            <div className="agent-input-stack__rail" aria-hidden="true">
-              <span>Agent input</span>
-              <span>Runtime channel</span>
+            <div
+              className="agent-input-stack__rail"
+              aria-label={agentInputIdentity
+                ? `Agent input for ${agentInputIdentity}; ${agentInputExecutor ?? 'Executor unavailable'}; Session ${agentInputSessionId}`
+                : 'Agent input'}
+            >
+              <span className="agent-input-stack__identity">
+                <span className="agent-input-stack__eyebrow">Agent input</span>
+                <strong title={agentInputIdentity}>{agentInputIdentity ?? 'Agent'}</strong>
+              </span>
+              <span
+                className="agent-input-stack__meta"
+                title={agentInputSessionId ? `Session ${agentInputSessionId}` : undefined}
+              >
+                {agentInputExecutor ?? 'Executor unavailable'}{agentInputSessionId ? ` · ${agentInputSessionId.slice(0, 8)}` : ''}
+              </span>
             </div>
           ) : null}
           {session.pendingInteraction ? (

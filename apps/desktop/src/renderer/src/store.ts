@@ -45,6 +45,7 @@ import type {
 } from '../../shared/git-contracts'
 import {
   isScratchTopicId,
+  SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
@@ -3968,11 +3969,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async openScratchTopic(topicId, requestedWorkspaceId, options) {
     const state = get()
-    const workspaceId = requestedWorkspaceId ?? state.activeWorkspaceId
+    // A Topic is a Scratch identity, so navigation must not depend on whichever Project happens
+    // to be active when the click arrives. Pinned Topic rows remain visible while another Project
+    // is selected; using activeWorkspaceId here made those clicks reject before the right workbench
+    // could be revealed, leaving the user looking at an unchanged or empty surface.
+    const workspaceId = requestedWorkspaceId ?? (
+      isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
+    )
     const reveal = options?.reveal ?? true
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
+    }
+    // Reveal the durable Scratch shell before reading Topic metadata. Filesystem reads are a
+    // preparation step, not permission to hide the workbench: if the read is slow or fails, the
+    // user must still see the Scratch work surface and its error/retry path instead of an empty
+    // right side. Background preparation explicitly keeps the current surface untouched.
+    if (reveal) {
+      set((current) => ({
+        activeWorkspaceId: workspace.id,
+        mainSurface: 'workbench',
+        layouts: current.layouts[workspace.id]
+          ? current.layouts
+          : { ...current.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
+      }))
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')

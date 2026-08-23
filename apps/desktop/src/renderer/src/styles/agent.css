@@ -136,7 +136,10 @@
   letter-spacing: .04em;
   text-transform: uppercase;
 }
-.agent-input-stack__rail span:last-child { color: var(--neutral-1); letter-spacing: .02em; text-transform: none; }
+.agent-input-stack__identity { display: inline-flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.agent-input-stack__eyebrow { flex: 0 0 auto; }
+.agent-input-stack__identity strong { min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; letter-spacing: 0; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
+.agent-input-stack__meta { min-width: 0; overflow: hidden; color: var(--neutral-1); letter-spacing: .02em; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .agent-input-stack[data-input-surface='terminal'] .composer { margin: 0; border-color: var(--line-soft); background: var(--surface-0); }
 .session-result-review { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--hl); }
 .session-result-review__identity { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--green); }
