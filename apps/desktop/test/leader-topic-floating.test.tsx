@@ -14,7 +14,7 @@ function Harness() {
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
     createElement('div', { id: 'floating-panel', 'data-leader-topic-floating': true, tabIndex: -1 }),
-    createElement('output', { 'data-open': String(state.open), 'data-placement': state.launcherPlacement })
+    createElement('output', { 'data-open': String(state.open), 'data-placement': state.launcherPlacement, 'data-anchor': state.openAnchor ?? '' })
   )
 }
 
@@ -69,5 +69,12 @@ describe('Leader Topic floating workspace state', () => {
     expect(container.querySelector('output')?.dataset.open).toBe('false')
     expect(document.activeElement).toBe(trigger)
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
+  })
+
+  it('carries the compact launcher anchor with the open request', async () => {
+    await act(async () => root.render(createElement(Harness)))
+    await act(async () => requestLeaderTopicFloatingOpen({ anchor: 'compact' }))
+    expect(container.querySelector('output')?.dataset.anchor).toBe('compact')
+    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"openAnchor":"compact"')
   })
 })
