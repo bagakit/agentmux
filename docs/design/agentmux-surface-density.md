@@ -780,6 +780,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 ### 状态、Browser 与 Scratch / Topic 密度（2026-09-22）
 
 - Project 树中的 idle 数量使用一行内的 muted micro metadata，和 working/attention 信息同一基线；它不变成头像角标或红色强调。停止/退出态使用中性颜色，error 只使用于明确故障事实。
+- Project 树的 idle、running/working、error 统一为同一宽度的“小图标 + 数字”状态槽；只换 glyph 和语义色，不换控件结构。完整状态名称进入 tooltip/无障碍名称，避免长文案破坏树的列对齐。
 - working 与 idle 的计数口径归交互合同「活着和正在产出分开说」，本层只定义它们的视觉层级。
 - Browser 页面优先于控制提示。控制条是紧凑的 page-adjacent rail，只有 active operation、接管或交还时占用一行；空闲 Browser 不画大卡片或 `Browser ready / You have control` 占位文案，也不遮挡原生页面。
 - Scratch 父行与 Topic 子行共享 Project rail 的缩进和垂直节奏。Topic 的字号比普通项目小一级、行高更紧，标题允许省略但操作和选中态完整；hover 用细线/下划线和轻微 surface 变化表达，不使用厚重背景块。Topic 行的打开状态、更新时间或 Agent presence 用低对比度辅助信息表达，新增和空列表用明确但紧凑的引导。
