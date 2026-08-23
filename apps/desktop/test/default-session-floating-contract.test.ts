@@ -16,19 +16,21 @@ it('keeps Default Session on one floating launcher and one canonical Topic', () 
   const app = readFileSync(join(renderer, 'App.tsx'), 'utf8')
   const workbench = readFileSync(join(renderer, 'components/WorkspaceWorkbench.tsx'), 'utf8')
   expect(entry).toContain('requestDefaultSessionFloatingOpen()')
+  expect(entry).toContain("placement?: 'topbar' | 'board' | 'floating'")
+  expect(entry).toContain('default-session-floating-launcher')
   expect(entry).not.toContain('__menu')
+  expect(panel).toContain('<DefaultSessionEntry placement="floating" />')
   expect(panel).toContain("openScratchTopic('launcher:default', SCRATCH_WORKSPACE_ID)")
   expect(panel).toContain('<WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID}')
   expect(panel).toContain('visible={visible}')
-  expect(panel).toContain('showDefaultSessionEntry={false}')
+  expect(panel).not.toContain('showDefaultSessionEntry')
   expect(app).toContain("candidate.id !== '__scratch__'")
   expect(app).toContain('<DefaultSessionFloatingPanel />')
-  expect(workbench).toContain('showDefaultSessionEntry?: boolean')
+  expect(workbench).not.toContain('showDefaultSessionEntry')
   const callers = sourceFiles(renderer).filter((file) => readFileSync(file, 'utf8').includes('<DefaultSessionEntry'))
   expect(callers.map((file) => relative(renderer, file)).sort()).toEqual([
-    'App.tsx',
+    'components/DefaultSessionFloatingPanel.tsx',
     'components/GlobalAgentsSurface.tsx',
-    'components/GlobalBoardSurface.tsx',
-    'components/WorkspaceWorkbench.tsx'
+    'components/GlobalBoardSurface.tsx'
   ])
 })
