@@ -23,3 +23,7 @@
 ## Review decision
 
 状态：**approved**。实现边界只覆盖全页 loading 的复用和视觉统一，不复制 Runtime 状态，也不替换局部行内 spinner。
+
+## 复审：Restoring 也使用全幅动画（2026-09-22）
+
+用户补充确认：Restoring 与启动、全页加载使用同一个可复用大屏，不再保留终端恢复专用的居中卡片。终端输出恢复的状态事实、服务窗与失败动作仍由 TerminalView 持有；大屏只负责过程呈现。

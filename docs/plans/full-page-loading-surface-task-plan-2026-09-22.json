@@ -16,15 +16,25 @@
       "objective": "提供统一的全页 loading/recovering/failed 结构、视觉语言、可访问文本和 reduced-motion 降级。",
       "outcome": "各调用方只传通用阶段事实，不重复实现大屏 DOM、动画和状态文案。",
       "acceptance": [
-        "组件在 loading、recovering、failed 三种状态下保持同一 DOM 骨架并显示阶段与说明；ready 时由调用方卸载组件。",
+        "组件在 loading、recovering、failed 三种状态下保持同一 DOM 骨架并显示阶段与说明。",
         "组件不创建或删除 Session、Run、布局或持久化状态；可选动作由调用方传入。",
         "prefers-reduced-motion 下动画停止但静态构图和 live 文本仍可读。"
       ],
       "verification": [
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-surface.test.tsx", "proves": "统一组件的状态、可访问性和动作行为"},
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-contract.test.ts", "proves": "样式来源、状态骨架和非空调用者契约"}
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-surface.test.tsx",
+          "proves": "统一组件的状态、可访问性和动作行为"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-contract.test.ts",
+          "proves": "样式来源、状态骨架和非空调用者契约"
+        }
       ],
-      "source_refs": ["apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx"],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx"
+      ],
       "depends_on": []
     },
     {
@@ -38,11 +48,24 @@
         "真实 Electron 启动页面检查能看见大屏并在工作面 ready 后卸载。"
       ],
       "verification": [
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/startup-loading-surface.test.tsx test/recovery-loading-surface.test.tsx", "proves": "启动与恢复接线"},
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "启动/恢复组件类型边界"}
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/startup-loading-surface.test.tsx test/recovery-loading-surface.test.tsx",
+          "proves": "启动与恢复接线"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "启动/恢复组件类型边界"
+        }
       ],
-      "source_refs": ["apps/desktop/src/renderer/src/App.tsx", "apps/desktop/src/renderer/src/components/StartupSurface.tsx"],
-      "depends_on": ["T-001"]
+      "source_refs": [
+        "apps/desktop/src/renderer/src/App.tsx",
+        "apps/desktop/src/renderer/src/components/StartupSurface.tsx"
+      ],
+      "depends_on": [
+        "T-001"
+      ]
     },
     {
       "id": "T-003",
@@ -55,11 +78,23 @@
         "全页加载调用者零调用者检查非空，且源码契约扫描断言扫描有收获。"
       ],
       "verification": [
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-contract.test.ts test/loading-surface-callers.test.ts", "proves": "全页入口迁移与非空调用者"},
-        {"kind": "command", "ref": "rg -n \"FullPageLoadingSurface\" apps/desktop/src/renderer/src | grep -v FullPageLoadingSurface.tsx", "proves": "生产调用者存在"}
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/full-page-loading-contract.test.ts test/loading-surface-callers.test.ts",
+          "proves": "全页入口迁移与非空调用者"
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"FullPageLoadingSurface\" apps/desktop/src/renderer/src | grep -v FullPageLoadingSurface.tsx",
+          "proves": "生产调用者存在"
+        }
       ],
-      "source_refs": ["apps/desktop/src/renderer/src"],
-      "depends_on": ["T-001"]
+      "source_refs": [
+        "apps/desktop/src/renderer/src"
+      ],
+      "depends_on": [
+        "T-001"
+      ]
     },
     {
       "id": "T-004",
@@ -72,11 +107,55 @@
         "变异测试能使对应行为红，Desktop typecheck 和最终安装包来源检查通过。"
       ],
       "verification": [
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "最终类型检查"},
-        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop package:mac:install", "proves": "最终安装候选可启动"}
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "最终类型检查"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop package:mac:install",
+          "proves": "最终安装候选可启动"
+        }
       ],
-      "source_refs": ["docs/reviews/full-page-loading-surface-2026-09-22.md"],
-      "depends_on": ["T-001", "T-002", "T-003"]
+      "source_refs": [
+        "docs/reviews/full-page-loading-surface-2026-09-22.md"
+      ],
+      "depends_on": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "把 Terminal Restoring 接入统一全幅动画",
+      "objective": "让终端重放恢复阶段复用 FullPageLoadingSurface，保持输出恢复和服务窗事实不变。",
+      "outcome": "启动、工作面加载和 Restoring 只有一个可复用的大屏视觉语言。",
+      "acceptance": [
+        "TerminalView 的 restoring 阶段挂载 scope=region、phase=recovering 的 FullPageLoadingSurface，ready 后卸载。",
+        "PTY 输出、replay gap、服务窗和失败路径仍由 TerminalView 控制，不清空 Session/Tab/Region。",
+        "窄栏与 reduced-motion 契约通过，删除统一调用者后测试变红，生产调用者扫描非空。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-restoring-loading-surface.test.ts test/full-page-loading-contract.test.ts",
+          "proves": "Restoring 统一大屏接线与动画契约"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "TerminalView 组件类型边界"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx"
+      ],
+      "depends_on": [
+        "T-004"
+      ]
     }
   ]
 }
