@@ -1,0 +1,61 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/terminal-layer-clarity-2026-09-22.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/terminal-layer-clarity-2026-09-22.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "确认 Terminal 与 Composer 的真实层级",
+      "objective": "用源码和 DOM 几何确认 xterm、状态层、服务窗与 Composer 的 owner、尺寸和 z-index 边界。",
+      "outcome": "知道点阵/重影来自哪一层，并保留可复现的契约测试。",
+      "acceptance": [
+        "契约扫描非空，明确 terminal-view、agent-terminal-stage、agent-body、agent-input-stack 和 composer 的关系。",
+        "测试断言 xterm 是内容层、Composer 是独立输入层，冷停/不可见状态不接收指针。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-layer-clarity.test.ts", "proves": "Terminal 层级契约"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/components/TerminalView.tsx", "apps/desktop/src/renderer/src/components/SessionPane.tsx"],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "修复渲染边界与窄栏表现",
+      "objective": "让真实 xterm 画布、恢复层、服务窗和 Composer 在窄栏、隐藏/切回及失败时保持清晰分层。",
+      "outcome": "输出连续可读，装饰不穿透，Composer 不被终端背景污染。",
+      "acceptance": [
+        "Terminal 内容区与输入区有稳定分隔，xterm 不溢出到 Composer；恢复层只在无可见输出时占满内容区。",
+        "隐藏/冷停 surface 不接收指针，切回后由同一 viewport owner 重新测量，不创建第二个画布。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-layer-clarity.test.ts test/terminal-viewport-sync.test.ts", "proves": "边界与几何回归"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "组件类型边界"}
+      ],
+      "source_refs": ["apps/desktop/src/renderer/src/styles/terminal.css", "apps/desktop/src/renderer/src/styles/agent.css"],
+      "depends_on": ["T-001"]
+    },
+    {
+      "id": "T-003",
+      "title": "视觉与变异验收",
+      "objective": "用真实页面、窄栏和 reduced-motion 检查终端输出的品位与可读性，并完成变异和零调用者证据。",
+      "outcome": "问题可复现、修复可证明、安装版不再带脏乱层级。",
+      "acceptance": [
+        "真实页面检查能看到连续终端输出、独立 Composer 和不遮挡的服务窗；窄栏仍可读。",
+        "移除关键边界规则后测试变红，生产调用者扫描非空；最终安装包能启动并记录来源。"
+      ],
+      "verification": [
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-layer-clarity.test.ts test/surface-scale-contract.test.ts", "proves": "视觉契约与 token 规则"},
+        {"kind": "command", "ref": "pnpm --filter @agentmux/desktop package:mac:install", "proves": "安装候选"}
+      ],
+      "source_refs": ["docs/reviews/terminal-layer-clarity-2026-09-22.md"],
+      "depends_on": ["T-001", "T-002"]
+    }
+  ]
+}

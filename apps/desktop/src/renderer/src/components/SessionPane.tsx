@@ -220,7 +220,7 @@ export function SessionPane({
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
   if (!session || !terminalThemeId) {
     return (
-      <section className="agent-surface">
+      <section className="agent-surface" data-agent-surface-mode="connecting">
           <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate ? 'restore' : 'connect'}
           surfaceKind={surfaceKind}
@@ -258,7 +258,10 @@ export function SessionPane({
   }
 
   return (
-    <section className="agent-surface">
+    <section
+      className="agent-surface"
+      data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
+    >
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' ? (
           <div className="agent-terminal-stage">
@@ -370,7 +373,17 @@ export function SessionPane({
         onSelect={onProseLinkSelect}
       />
       {projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent' ? (
-        <div className="agent-input-stack">
+        <div
+          className="agent-input-stack"
+          data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
+          aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
+        >
+          {session.kind === 'agent' && viewMode === 'terminal' ? (
+            <div className="agent-input-stack__rail" aria-hidden="true">
+              <span>Agent input</span>
+              <span>Runtime channel</span>
+            </div>
+          ) : null}
           {session.pendingInteraction ? (
             <AgentInteractionCard
               request={session.pendingInteraction}
