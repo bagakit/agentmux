@@ -241,6 +241,10 @@ export type EditorRegionDiffState = {
   error: string | null
 }
 export type MainSurface = 'agents' | 'workbench' | 'board'
+type OpenScratchTopicOptions = {
+  /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
+  reveal?: boolean
+}
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
   state: AsyncCheckState
@@ -618,7 +622,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   createScratchTopic(): Promise<ScratchTopicSnapshot>
-  openScratchTopic(topicId: string, workspaceId?: string): Promise<void>
+  openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   /**
    * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
@@ -3763,9 +3767,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setScratchTopicOrder(order) {
     set({ scratchTopicOrder: [...order] })
   },
-  async openScratchTopic(topicId, requestedWorkspaceId) {
+  async openScratchTopic(topicId, requestedWorkspaceId, options) {
     const state = get()
     const workspaceId = requestedWorkspaceId ?? state.activeWorkspaceId
+    const reveal = options?.reveal ?? true
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
@@ -3783,6 +3788,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (boundTab) {
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
+          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
           // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout——激活该 Topic 的
           // Tab 就够了，当前 Topic 由活动 Tab 派生（scratch-topic-layout.ts），不另存一份。
           layouts: {
@@ -3798,6 +3804,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return current
       }
       return {
+        ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
         tabs: { ...current.tabs, [tab.id]: tab },
         layouts: { ...current.layouts, [workspace.id]: nextLayout }
       }
@@ -4009,7 +4016,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Topic 行的 Inbox 带 Topic 上下文起 Agent。绑定不在这里重造：`openScratchTopic` 已经是
     // 「找到或新建一个绑到该 Topic 的 View」的唯一路径，走它一遍，新 Agent 的 workspacePath 与
     // scratchTopicId 就与从 Topic 面板起的完全一致——Board 不是第二条 Topic 绑定路径。
-    if (topicId) await get().openScratchTopic(topicId)
+    if (topicId) await get().openScratchTopic(topicId, undefined, { reveal: false })
     const layout = get().layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
     const group = findGroup(layout, layout.activeGroupId)
