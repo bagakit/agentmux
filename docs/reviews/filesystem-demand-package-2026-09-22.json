@@ -1,7 +1,7 @@
 {
   "schema": "bagakit.review.v1",
   "title": "Filesystem Demand package review",
-  "status": "proposed",
+  "status": "approved",
   "reviewer": "maintainer",
   "decision": "Create a host-neutral @agentmux/demand package whose filesystem snapshot is the only Demand fact; Desktop Main, Board, Leader Topic, and the standalone CLI consume it while Core remains runtime-only.",
   "source_refs": [

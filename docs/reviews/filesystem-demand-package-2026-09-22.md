@@ -73,6 +73,7 @@ handler，而不是加一层 `task.*` 或双写兼容协议。
 Demand 不会被隐式迁移，以及跨进程锁的故障处理；两者都必须在实现测试和
 服务窗中明确可见。
 
-**Review status: proposed.** 该边界与现有设计 SSOT 一致，但在 materialize
-Feature 前仍需维护者确认“旧 localStorage Demand 是否另立迁移 Feature”以及
-聚合 CLI 是否由后续包负责。
+**Review status: approved.** 按项目“不保留向后兼容”的原则，不隐式迁移旧
+Renderer localStorage；若未来需要保留旧数据，另立迁移 Feature。CLI 先提供独立
+`agentmux-demand`；若未来需要 `agentmux demand` 聚合入口，只做薄转发，不在 Core
+复制 Demand 领域逻辑。

@@ -1,7 +1,8 @@
 {
   "schema": "bagakit.feature-task-plan.v1",
+  "feat_id": "f-29z8fg88s",
   "review": {
-    "status": "proposed",
+    "status": "approved",
     "evidence_ref": "docs/reviews/filesystem-demand-package-2026-09-22.json"
   },
   "source_refs": [
