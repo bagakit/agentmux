@@ -17,7 +17,7 @@ import {
   type ProjectRailNode
 } from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
-import { idleAgentCount, workingAgentCount } from '../lib/project-board'
+import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { BrandIcon } from './BrandIcon'
@@ -105,7 +105,7 @@ export function WorkspaceSidebar({
     ? sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)).length
     : 0
   const scratchWorkingAgentCount = scratch
-    ? workingAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
+    ? producingAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
     : 0
   const scratchIdleAgentCount = scratch
     ? idleAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
@@ -198,9 +198,9 @@ export function WorkspaceSidebar({
     // collapsed project can no longer hide an Agent that is waiting on you.
     const attention = rowAttention(projectSessions)
     const attentionLabel = rowAttentionLabel(attention)
-    const runningAgentCount = workingAgentCount(projectSessions)
-    const workingLabel = runningAgentCount > 0
-      ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} working`
+    const producingCount = producingAgentCount(projectSessions)
+    const workingLabel = producingCount > 0
+      ? `${producingCount} ${producingCount === 1 ? 'Agent is' : 'Agents are'} working`
       : null
     const idleCount = idleAgentCount(projectSessions)
     const idleLabel = idleCount > 0 ? `${idleCount} idle` : null
@@ -236,7 +236,7 @@ export function WorkspaceSidebar({
         // 缩进只表达"这个 Project 在上一个 Project 的目录里"。深度走自定义属性而不是内联
         // padding：具体几像素归样式表（密度合同《Project Rail Nesting Indent》），这里只报层数。
         {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
-        {...(runningAgentCount > 0 ? { 'data-running': 'true' } : {})}
+        {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
         onClick={() => {
           if (!preferred) return
           const keepBoardOpen = mainSurface === 'board'
@@ -459,9 +459,9 @@ function GroupHeader({
   )
   const attention = rowAttention(groupSessions)
   const attentionLabel = rowAttentionLabel(attention)
-  const running = workingAgentCount(groupSessions)
-  const workingLabel = running > 0
-    ? `${running} ${running === 1 ? 'Agent is' : 'Agents are'} working`
+  const producing = producingAgentCount(groupSessions)
+  const workingLabel = producing > 0
+    ? `${producing} ${producing === 1 ? 'Agent is' : 'Agents are'} working`
     : null
   const idle = idleAgentCount(groupSessions)
   const idleLabel = idle > 0 ? `${idle} idle` : null

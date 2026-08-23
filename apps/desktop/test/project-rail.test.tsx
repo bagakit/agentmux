@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
-import { workingAgentCount } from '../src/renderer/src/lib/project-board.js'
+import { producingAgentCount, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
@@ -151,6 +151,16 @@ describe('workingAgentCount', () => {
       session('terminal', _hygiene_fixturePath("alpha"), 'running', 'terminal')
     ])).toBe(3)
   })
+
+  it('separates semantic production from a quiet live Session', () => {
+    expect(producingAgentCount([
+      session('starting', _hygiene_fixturePath("alpha"), 'starting'),
+      session('working', _hygiene_fixturePath("alpha"), 'working'),
+      session('running', _hygiene_fixturePath("alpha"), 'running'),
+      session('waiting', _hygiene_fixturePath("alpha"), 'waiting'),
+      session('terminal', _hygiene_fixturePath("alpha"), 'running', 'terminal')
+    ])).toBe(2)
+  })
 })
 
 describe('Project Rail selection and running signals', () => {
@@ -166,9 +176,10 @@ describe('Project Rail selection and running signals', () => {
     expect(runningRows).toHaveLength(2)
     expect(markup).toContain('project-rail-row--active')
     expect(markup).toContain('class="project-activity__pulse"')
-    expect(markup).toContain('Alpha · 1 Agent is running')
-    expect(markup).toContain('Beta · 1 Agent is running')
-    expect(markup).not.toContain('Gamma · 1 Agent is running')
+    expect(markup).toContain('Alpha · 1 Agent is working')
+    expect(markup).toContain('Beta · 1 idle')
+    expect(markup).not.toContain('Beta · 1 Agent is working')
+    expect(markup).not.toContain('Gamma · 1 Agent is working')
   })
 
   it('keeps selected and running independent across all four combinations', () => {
@@ -183,7 +194,7 @@ describe('Project Rail selection and running signals', () => {
     fixture.state.activeWorkspaceId = 'project-a'
     markup = renderRail()
     expect(markup.match(/data-running="true"/g) ?? []).toHaveLength(1)
-    expect(markup).toContain('Alpha · 1 Agent is running')
+    expect(markup).toContain('Alpha · 1 Agent is working')
 
     fixture.state.sessions = []
     fixture.state.activeWorkspaceId = 'project-a'
