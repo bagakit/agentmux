@@ -11,6 +11,12 @@
 - 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。文件读取失败必须明确展示，不能清空 Tabs 或另建 Session。
 - Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
 
+### Scratch Topic 首次打开必须有可用 Terminal（2026-09-23）
+
+- 点击一个没有已绑定 Tab/Region 的 Scratch Topic 后，右侧必须进入该 Topic 的 Workbench，并在原来的落点启动一个 Terminal；只创建 Launcher 或只改变选中 Topic 都不算打开成功。
+- 已有该 Topic 工作面的点击仍只聚焦并复用原 Tab、Region 和 Session，不重复启动 Terminal；后台准备的固定 Topic 仍可显式要求不抢当前工作面。
+- Terminal 启动过程沿用统一的 launching/loading 反馈；启动失败必须保留 Topic 的可见工作面并显示原因与可重试动作，不能留下空白 Region。
+
 ## 设计哲学
 
 - AgentMux 是 Agent-first、terminal-first 的桌面 Client。Agent 状态、用户输入、终端输出和恢复动作必须靠近它们影响的 View。
@@ -65,6 +71,7 @@
 
 - AgentMux 启动、重启恢复和任何覆盖整个工作面的加载阶段都使用同一个可复用的 `FullPageLoadingSurface` 语义组件；调用方只提供阶段、短说明和可选恢复动作，不各自造一套 spinner、空白页或品牌动画。
 - Terminal 的 Restoring 也属于覆盖整个 Region 的恢复阶段，必须直接使用 `FullPageLoadingSurface` 的 `scope="region"` / `phase="recovering"`；恢复事实、输出重放、缺口和服务窗仍由 TerminalView 持有，组件不复制终端状态。
+- Browser 恢复和 Agent Terminal attach 同样使用这套 Region 级 loading/recovering 表面；恢复期间保留原 Tab/Region，完成后卸载加载层，失败由原有错误/服务窗承接。
 - 大屏动画是非阻断的过程提示：它必须说明当前阶段和已知的下一步，不能把 Provider 探测、恢复握手或页面加载失败伪装成终局错误。底层 Agent/Session 仍健康时，加载提示停在旁边或允许进入可用工作面。
 - 动画结束后保留真实工作面状态；加载层不能清空 durable Tab、Region、焦点、草稿或 Session 引用。组件只提供 failed 阶段的告示骨架，持久失败由调用方接入既有服务窗并给出恢复动作，只有 Core 的终局事实允许移除投影。
 - 动效要尊重系统减少动态效果设置；降级为静态大屏构图时仍保留阶段、Executor/Provider 身份和可访问文本。动画不得依赖具体站点、Provider 文案或不可复用的启动路径。
@@ -112,6 +119,9 @@
 - Topic 行的动作按频次分层：**定位到该 Topic 的目录**是高频、留在行上（图标要表达"聚焦定位"而不是"打开文件夹"，因为它不离开 AgentMux）；**改名**是低频，收进行的右键菜单，不在行上常驻一个图标——每多一个常驻图标，行的可读宽度就少一分。
 - Topic 行**不用左侧竖条表达选中**。选中态是单一几何信号（干净的 Surface 填充），与全局控件语言一致；行首也不放没有区分意义的装饰图标——一列全同的图标不携带任何信息，只在消耗宽度。
 - **Topic 行的 Agent 呈现为一组头像**，不是一排抽象的点。每个 Agent 用缩小的 Provider 图标（用户据此一眼看出这一行里跑着谁）；头像**默认不画常驻边框**，只有确实处于 `working`/`running` 的 Agent 才显示外描边/发光，其他状态用灰度处理，避免把静态身份误读成正在运行。悬停有轻量抬升与 tooltip 给出名字与状态，点击直接定位到该 Agent。这三件事——身份、状态、导航——过去要用户读完整行文字才知道，头像列把它们压进一个可点的小方块里。
+- **Topic 行必须能看懂它的工作面结构。** presence 组件在一行内给出该 Topic 当前可见的 Tab 数量；hover 时显示每个 Tab 的顺序/标题、Region 的分屏结构，以及每个 Region 当前绑定的 Executor。每个 Region 的摘要必须能定位到对应 Tab，不把多个 Tab 的内容压成一个无法操作的总数。
+- **Region hover 要回答“最近在做什么”。** Agent Region 使用最近一条可读的用户/Agent活动摘要；没有可读摘要时明确显示 `No recent activity`，不能编造或用 Session id 冒充工作内容。摘要来源复用已有 timeline/first prompt 投影，Topic 行只负责呈现，不维护第二份活动状态。
+- Topic presence 的 Tab/Region 结构由一个可复用组件渲染，Branch/Topic 等同形列表只注入数据与定位动作；组件必须保留键盘可达的等价信息，hover 只是加速阅读，不是唯一入口。
 - **旧配置的 Executor 身份不能丢**。头像设置迁移到 Executor 后，旧 `Appearance` 中按 Executor ID 保存的 tint/badge 仍先显示在对应模板与所有头像簇/Tab 标记中；用户明确点击 Reset 才写入一个空的 Executor 覆盖，不能静默删除旧记录或把它误认成默认 Provider。
 - Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
@@ -487,6 +497,9 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **Topic 与 Branch 一样有 Inbox**。Inbox 是矩阵第一列和带上下文的创建入口，不是 Tools 中的重复页面——Branch Inbox 带 Branch 上下文，Topic Inbox 带 Topic 上下文，走同一个创建路径。
 - **Board 工具的次级面板是工作清单，不是说明页**。它列出当前 Board 的行与行内 Agent，可展开、可点击定位——用户来这里是找一条具体的工作线，不是读一段介绍 Board 是什么的文案。图例式的静态说明只在没有任何行时作为空态出现。清单的行与 Agent 状态点复用共享状态语汇，不发明第二套。**行必须与 Board 主视图同源**：一份行来源分叉（Scratch 出 Topic 行、Git 项目出 Branch 行）、一份排序，由 `useBoardRows` 持有，两处都调它。让面板自己再查一遍 topics/branches，就等于给"这个 Board 有哪些行"开第二份答案——两处会在筛选、排序、加载时序上各自漂移，而漂移时谁都不会响。行数超出时其余折叠为可展开的一条，不无限撑长也不截断丢弃。守护：`surface-tool-dock.test.tsx`。
 - Settings 按可操作资源优先组织为 Workspaces、Hosts、Agents、Appearance、General；默认打开第一个可操作分区。
+- **Settings 是一个控制工作面，不是卡片墙。** 左侧只承担搜索和分区导航，条目保持单行、标题优先；当前分区的说明只在主区头部出现一次。主区先给出当前上下文和可用动作，再进入设置内容，避免同一标题/描述在侧栏和正文重复。
+- **可操作内容与只读说明分层。** 能修改配置的区块使用抬起的 Surface；运行时说明、来源和隐私提示落在页面底色上，用留白和发丝线分隔，不使用装饰性品牌图标格伪装成主操作。
+- Settings 的关闭动作始终在主区头部可见，Escape 在非输入控件聚焦时关闭；窄窗口将导航变为可横向滚动的紧凑条，不能牺牲分区可见性或滚动内容。
 - Agent Detection 以 Host 为键，由 Core discovery 统一投影到 Settings、Launcher 和状态面。
 
 ### 状态栏
@@ -1390,3 +1403,16 @@ Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端
 ### Agents 全局层级与拓扑图（2026-09-23）
 
 Agents 与 Workspaces、Board 位于同一组全局工作面。Agents 打开时 Project Rail 被遮挡，Project 只作为 Agent 的归属事实和未来拓扑图的分组边界，不再在左侧重复出现。Agents 当前先保留可用的分组/详情表面；引力图是独立 Feature：活跃 Agent 居中，不活跃 Agent 灰度保留；同一 Project 或 Demand 的 Agent 距离更近，Project 关联范围形成多边形区域。图中的节点、边和状态必须复用现有 Session/Project/Demand 事实，不能建立第二套 Agent registry。
+
+### Demand 管理闭环（2026-09-23）
+
+Demand 保留目标、背景、验收、负责人、状态和讨论；每次 Agent 执行、失败、重试或取消作为独立的 Demand 工作记录和既有 Session/Run 事实挂在 Demand 上。执行结束不能直接推断 Demand 完成，`done` 由显式确认或明确的外部事实推进。
+
+Demand 需要同时支持未分配、只分配不启动、明确开始执行和重新分配。负责人（谁跟进）与 Project（共享目标和资源）与 Session（一次执行上下文）是三个独立关系；一个 Demand 可以没有 Session，也可以有多个 Session，改负责人或状态不会隐式停止已经开始的 Session。`backlog` 只表示暂不启动，离开它时才出现是否开始的明确动作。
+
+Demand 详情与卡片共享同一组可编辑属性：标题、描述、状态、优先级、Project、负责人、标签、计划起止日期、父 Demand/推进批次和活动记录。父子 Demand 的状态不互相伪造；推进批次只用于解释一批子 Demand 的推进。活动、决策、评论和执行日志按来源区分，并在详情内按时间顺序可追踪。
+
+Board 必须有一个可恢复的路由队列入口，用于查看无 Project、无负责人、未确认或需要用户处理的 Demand；路由队列不改变 Demand 的生命周期状态。顶部搜索、状态、Project、负责人、优先级、标签、日期和 Session/Agent 筛选作用于同一批 Demand，当前筛选可以清除、复制或由 CUI 重放。看板、列表或表格只是同一 Demand 集合的不同投影，不得各自维护数据。
+
+Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态、优先级、Project/负责人、标签、日期、子 Demand 进度和关联 Session/Agent 摘要。完整描述、活动、决策、评论、执行日志、重试/停止和删除确认在固定详情工作区中完成；删除是明确的危险动作，取消优先于删除以保留历史。AgentMux 的 Demand 文件系统包、Core Runtime 和 ctxmux 事实边界保持不变。
+> 命名更新（2026-09-23）：此前文档中的 “Leader Topic” 统一以代码和产品现名 **PMO Teams Topic** 为准；其固定身份、浮窗和职责约束继续有效。

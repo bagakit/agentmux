@@ -111,6 +111,29 @@ export type AgentMuxControlExecutor = {
   availability: AgentMuxExecutorAvailability
 }
 
+export type AgentMuxControlProject = {
+  projectId: string
+  name: string
+  hostId: string
+  path: string
+  kind: string
+  repoPath: string | null
+  branch: string | null
+  activeAgentSessionIds: string[]
+}
+
+export type AgentMuxControlActiveAgent = {
+  agentSessionId: string
+  projectId: string | null
+  projectName: string | null
+  workspacePath: string
+  providerId: string
+  executorId: string
+  processState: 'running' | 'exited' | 'interrupted'
+  status: 'active' | 'idle' | 'unknown'
+  updatedAt: number
+}
+
 /**
  * 发现某个 Executor 在一台目标 Host 上的可用性——**四态，唯一一处拼写。**
  *
@@ -194,6 +217,8 @@ export type AgentMuxControlPromoteRegionRequest = RequestBase & {
   operation: 'promote.region'; target: AgentMuxRegionAnchor; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlListAgentsRequest = RequestBase & { operation: 'list.agents' }
+export type AgentMuxControlListProjectsRequest = RequestBase & { operation: 'list.projects' }
+export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 'list.active-agents' }
 export type AgentMuxSessionSelector = AgentMuxSelfAnchor | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxControlInterruptRequest = RequestBase & {
   operation: 'interrupt'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
@@ -218,6 +243,11 @@ export type AgentMuxDemand = {
   projectId: string | null
   projectName: string | null
   assigneeExecutorId?: string | null
+  tags?: string[]
+  plannedStartAt?: number | null
+  targetAt?: number | null
+  parentDemandId?: string | null
+  phaseIndex?: number | null
   activityLog?: string[]
   sessionIds: string[]
   createdAt: number
@@ -249,8 +279,31 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'demand.update'
   demandId: string
-  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds'>>
+  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>>
   decision?: AgentMuxDemandDecision
+}
+export type AgentMuxControlDemandAssignRequest = RequestBase & {
+  operation: 'demand.assign'
+  demandId: string
+  projectId?: string | null
+  assigneeExecutorId?: string | null
+  start: boolean
+}
+export type AgentMuxControlDemandStartRequest = RequestBase & {
+  operation: 'demand.start'
+  demandId: string
+  sessionId?: string
+}
+export type AgentMuxControlDemandHandoffRequest = RequestBase & {
+  operation: 'demand.handoff'
+  demandId: string
+  assigneeExecutorId?: string | null
+  sessionId?: string
+}
+export type AgentMuxControlDemandDeleteRequest = RequestBase & {
+  operation: 'demand.delete'
+  demandId: string
+  confirmation: 'delete'
 }
 export type AgentMuxControlDemandLinkSessionRequest = RequestBase & { operation: 'demand.link-session'; demandId: string; sessionId: string }
 export type AgentMuxControlDemandLinkProjectRequest = RequestBase & { operation: 'demand.link-project'; demandId: string; projectId: string }
@@ -382,6 +435,8 @@ export type AgentMuxControlRequest =
   | AgentMuxControlArrangeRequest
   | AgentMuxControlPromoteRegionRequest
   | AgentMuxControlListAgentsRequest
+  | AgentMuxControlListProjectsRequest
+  | AgentMuxControlListActiveAgentsRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
@@ -389,6 +444,10 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandShowRequest
   | AgentMuxControlDemandCreateRequest
   | AgentMuxControlDemandUpdateRequest
+  | AgentMuxControlDemandAssignRequest
+  | AgentMuxControlDemandStartRequest
+  | AgentMuxControlDemandHandoffRequest
+  | AgentMuxControlDemandDeleteRequest
   | AgentMuxControlDemandLinkSessionRequest
   | AgentMuxControlDemandLinkProjectRequest
   | AgentMuxControlDemandDecisionLogRequest
@@ -460,6 +519,8 @@ export type AgentMuxControlResult =
   // own Tab, or the request was stale) is NOT reported here — it raises a typed CONTROL_FAILED instead.
   | { operation: 'promote.region'; tabId: string; regionId: string; workspaceId: string }
   | { operation: 'list.agents'; agents: AgentMuxControlExecutor[] }
+  | { operation: 'list.projects'; projects: AgentMuxControlProject[] }
+  | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
@@ -467,6 +528,10 @@ export type AgentMuxControlResult =
   | { operation: 'demand.show'; demand: AgentMuxDemand | null }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
+  | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
+  | { operation: 'demand.start'; demand: AgentMuxDemand; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
+  | { operation: 'demand.handoff'; demand: AgentMuxDemand; receipt: { demandId: string; handedOffAt: number; sessionId: string | null } }
+  | { operation: 'demand.delete'; demand: AgentMuxDemand; receipt: { demandId: string; deletedAt: number } }
   | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
   | { operation: 'demand.link-project'; demand: AgentMuxDemand; receipt: { demandId: string; projectId: string } }
   | { operation: 'demand.decision-log'; demandId: string; decisions: AgentMuxDemandDecision[] }
@@ -656,6 +721,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 促升只动本地布局状态（摘一格、新建一张 Tab），不等本进程之外的任何东西——和 arrange 同档。
   'promote.region': 'short',
   'list.agents': 'short',
+  'list.projects': 'short',
+  'list.active-agents': 'short',
   interrupt: 'short',
   resume: 'long',
   stop: 'long',
@@ -678,6 +745,10 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.show': 'short'
   , 'demand.create': 'short'
   , 'demand.update': 'short'
+  , 'demand.assign': 'short'
+  , 'demand.start': 'long'
+  , 'demand.handoff': 'short'
+  , 'demand.delete': 'short'
   , 'demand.link-session': 'short'
   , 'demand.link-project': 'short'
   , 'demand.decision-log': 'short'

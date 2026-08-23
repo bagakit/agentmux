@@ -988,6 +988,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       // 那条路径上没有任何 api.sessions.* 调用），所以它和 arrange 同档。
       'promote.region': 'short',
       'list.agents': 'short',
+      'list.projects': 'short',
+      'list.active-agents': 'short',
       // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
       // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
       interrupt: 'short',
@@ -1010,6 +1012,17 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       // 流本身：流的存活由长连接路径自己管，socket 上没有"请求超时"可言——一个操作安静十分钟是正常的。
       // 给长档等于让一次只读本地状态的问答白等一分钟。
       'browser.subscribe': 'short'
+      , 'demand.list': 'short'
+      , 'demand.show': 'short'
+      , 'demand.create': 'short'
+      , 'demand.update': 'short'
+      , 'demand.assign': 'short'
+      , 'demand.start': 'long'
+      , 'demand.handoff': 'short'
+      , 'demand.delete': 'short'
+      , 'demand.link-session': 'short'
+      , 'demand.link-project': 'short'
+      , 'demand.decision-log': 'short'
     }
     const entries = Object.entries(EXPECTED_BUDGET) as [AgentMuxControlRequest['operation'], 'long' | 'short'][]
     // 自检：表空了下面的循环就是死代码。条数由 tsc 钉住，这里只防「Object.entries 拿到空」这种失灵。

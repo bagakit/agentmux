@@ -1,0 +1,17 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Demand board extended future",
+  "status": "approved",
+  "scope": "P2/P3 only; proposal-only follow-up after f-2ag8fy3y3",
+  "acceptance": [
+    "P2/P3 work is kept out of the P0/P1 product closure tracker.",
+    "Each future item has an explicit user outcome, evidence command, and a boundary against duplicating Demand, Session, Run, or ctxmux truth.",
+    "No future item is activated until the P0/P1 tracker is complete and reviewed against actual product evidence."
+  ],
+  "sources": [
+    "docs/reviews/demand-board-pmo-product-closure-2026-09-23.json",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "packages/core/src/agent-plugin.ts"
+  ]
+}

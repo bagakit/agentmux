@@ -1227,13 +1227,13 @@ export function TerminalView({
             />
           ) : null}
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
-            <div className="terminal-agent-startup" role="status" aria-live="polite">
-              <div className="terminal-agent-startup__content">
-                <span className="terminal-agent-startup__glyph"><LoaderCircle className="spin" size={14} /></span>
-                <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
-                <span>Waiting for its first terminal output.</span>
-              </div>
-            </div>
+            <FullPageLoadingSurface
+              scope="region"
+              phase="loading"
+              eyebrow="Terminal attach"
+              title={`Starting ${agentProviderLabel(session.providerId)}`}
+              detail="Waiting for the first terminal output before handing the Region to the Agent."
+            />
           ) : null}
           {/* 服务窗（原则 11）：揭示是被 deadline 逼出来的时，绝不静默——画布已交还，同时说清
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，

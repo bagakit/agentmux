@@ -130,6 +130,18 @@ const api: AgentMuxPreloadApi = {
     resetWiki: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
+  demands: {
+    list: () => ipcRenderer.invoke('demands:list'),
+    create: (input) => ipcRenderer.invoke('demands:create', input),
+    update: (id, patch) => ipcRenderer.invoke('demands:update', id, patch),
+    delete: (id) => ipcRenderer.invoke('demands:delete', id),
+    linkSession: (id, sessionId) => ipcRenderer.invoke('demands:linkSession', id, sessionId),
+    unlinkSession: (id, sessionId) => ipcRenderer.invoke('demands:unlinkSession', id, sessionId),
+    linkProject: (id, projectId, projectName) => ipcRenderer.invoke('demands:linkProject', id, projectId, projectName),
+    unlinkProject: (id) => ipcRenderer.invoke('demands:unlinkProject', id),
+    activity: (id, input) => ipcRenderer.invoke('demands:activity', id, input),
+    decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
+  },
   ui: {
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),

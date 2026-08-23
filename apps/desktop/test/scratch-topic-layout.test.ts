@@ -12,6 +12,7 @@ import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/w
 import {
   activeTopicIdFromLayout,
   layoutForActiveTopic,
+  openTopicWorkSurfaces,
   openTopicRegionMosaics,
   tabEligibilityForActiveTopic
 } from '../src/renderer/src/lib/scratch-topic-layout.js'
@@ -325,6 +326,18 @@ describe('当前 Topic 由活动 Tab 的绑定派生', () => {
 // 裸扫 tabs 会犯的错。缩略图与门禁是同一份投影（openTopicRegionMosaics）的两半。
 
 describe('哪些 Topic 有 Tab 开着（行尾缩略图的门禁）', () => {
+  it('projects every visible Tab and its Region layout for Topic presence details', () => {
+    const first = launcher('detail-a', 'topic-a')
+    const second = launcher('detail-b', 'topic-a')
+    const layout = createWorkspaceLayout('group', [first.id, second.id])
+    const projected = openTopicWorkSurfaces(layout, { [first.id]: first, [second.id]: second })
+    const details = projected.get('topic-a')
+    expect(details?.map((entry) => entry.tabId)).toEqual(['detail-a', 'detail-b'])
+    expect(details?.every((entry) => entry.cells.length === 1)).toBe(true)
+    expect(details?.[0]?.active).toBe(true)
+    expect(details?.[0]?.cells[0]?.surfaceKind).toBe('launcher')
+  })
+
   it('恰好是有 Tab 落在某个 group 里的那些 Topic', () => {
     // fullLayout 里 a-1/a-2(topic-a)、b-1(topic-b)、loose(无 Topic) 全在 group 中。
     expect([...openTopicRegionMosaics(fullLayout(), tabs).keys()].sort()).toEqual(['topic-a', 'topic-b'])

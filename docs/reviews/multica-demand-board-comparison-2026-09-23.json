@@ -1,0 +1,33 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Multica-inspired Demand board management",
+  "decision": "Borrow Multica's Demand/Attempt separation, triage, property editing, assignment boundaries, activity/execution logs and shared filtering model; keep AgentMux Demand filesystem truth, Core/ctxmux boundaries and zero/multiple Session semantics.",
+  "acceptance": [
+    "Demand remains the Board primary entity and can exist with zero or multiple Sessions.",
+    "Board cards, fixed detail workspace, CUI and filesystem receipts share the same Demand fields and explicit status transitions.",
+    "Triage, assignment without start, explicit start, activity/execution history and destructive delete semantics are observable and testable.",
+    "The comparison names exact Multica reference files and exact AgentMux landing modules without copying vendor implementation or protocols.",
+    "PMO Teams has a stable JSON CLI for global observation, Demand control and explicit assignment/start/handoff actions.",
+    "P0/P1 are owned by this Feature; P2/P3 are recorded in a separate Feature and do not widen the active closure.",
+    "Plugin contributions are inspectable, versioned, reversible and evaluated from bounded execution evidence before activation."
+  ],
+  "sources": [
+    "multica/apps/docs/content/docs/issues.zh.mdx",
+    "multica/apps/docs/content/docs/tasks.zh.mdx",
+    "multica/apps/docs/content/docs/assigning-issues.zh.mdx",
+    "multica/apps/docs/content/docs/projects.zh.mdx",
+    "multica/packages/views/issues/components/board-card.tsx",
+    "multica/packages/views/issues/components/board-view.tsx",
+    "multica/packages/views/issues/components/issue-detail.tsx",
+    "multica/packages/views/inbox/components/inbox-page.tsx",
+    "multica/packages/views/inbox/components/inbox-list-item.tsx",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+    ,"deepseek-harness/packages/boot/plugin-manager/README.zh.md"
+    ,"deepseek-harness/packages/extensions/cordis-host-runner/README.zh.md"
+    ,"deepseek-harness/packages/extensions/cordis-host-runner/src/registry.ts"
+    ,"deepseek-harness/packages/extensions/cordis-host-runner/src/lifecycle.ts"
+    ,"deepseek-harness/packages/extensions/cordis-host-runner/src/types.ts"
+    ,"deepseek-harness/packages/extensions/cordis-host-runner/tests/composition.spec.ts"
+  ]
+}

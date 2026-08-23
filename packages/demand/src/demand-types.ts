@@ -42,6 +42,11 @@ export type Demand = {
   projectId: string | null
   projectName: string | null
   executorId: string | null
+  tags: string[]
+  plannedStartAt: number | null
+  targetAt: number | null
+  parentDemandId: string | null
+  phaseIndex: number | null
   sessionIds: string[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
@@ -65,17 +70,23 @@ export type CreateDemandInput = {
   projectId?: string | null
   projectName?: string | null
   executorId?: string | null
+  tags?: readonly string[]
+  plannedStartAt?: number | null
+  targetAt?: number | null
+  parentDemandId?: string | null
+  phaseIndex?: number | null
   sessionIds?: readonly string[]
 }
 
 export type UpdateDemandInput = Partial<Pick<
   Demand,
-  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId'
+  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex'
 >>
 
 export type DemandReceipt = {
   schema: typeof DEMAND_RECEIPT_SCHEMA
   operation: string
+  operationId: string
   revision: number
   demand: Demand
 }

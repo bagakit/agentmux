@@ -46,7 +46,8 @@ Intents:
   doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
   endpoint    Print the Control endpoint path and schema version without connecting.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
-  list        List configured agents or active Agent Sessions from their owners.
+  list        List configured agents, projects, or active Agent Sessions from their owners.
+  pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
   open        Open typed content at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
@@ -122,14 +123,28 @@ Usage:
 Session/Run/native inspection reads Core truth. Tab/Region inspection requires the
 Desktop Control Host. Inspect --tab returns every closed-union Region surface and
 normalized bounds. Missing, stale, or ambiguous self fails closed.`],
-  ['list', `List configured Agents or active Agent Sessions
+  ['list', `List configured Agents, Projects, or active Agent Sessions
 
 Usage:
   agentmux list agents
+  agentmux list projects
+  agentmux list active-agents
   agentmux list sessions
 
-Agents are Desktop-configured executors with availability. Sessions are Core-owned live
+Agents are Desktop-configured executors with availability. Projects are configured workspaces.
+Active Agents are live Session projections grouped by Project. Sessions are Core-owned live
 or historical Agent Session status entries. Never infer a target from order.`],
+  ['pmo', `Read the global PMO Teams observation surface
+
+Usage:
+  agentmux pmo snapshot [--project <id>] [--agent <session-id>] [--demand <id>] [--limit <n>]
+  agentmux pmo projects|workspaces|topics|agents|sessions|demands|activity [filters]
+  agentmux pmo inspect [--project <id>|--agent <session-id>|--demand <id>]
+
+The response is bounded, versioned JSON. Projects, active Agents, Sessions, and Demands
+come from their existing owners and retain unknown/error facts instead of guessing. Topic
+discovery stays filesystem-scoped; an unavailable scope is returned as a typed observation,
+not an empty claim that no Topics exist (\`TOPIC_FILESYSTEM_SCOPE_REQUIRED\`).`],
   ['open', `Open typed content at one exact destination
 
 Usage:
@@ -362,10 +377,14 @@ Cross-workspace delivery is refused. Remote targets are not supported yet.`],
   ['demand', `Manage a Board Demand
 
 Usage:
-  agentmux demand list
+  agentmux demand list [--status <status>] [--project <project-id>] [--executor <executor-id>] [--session <session-id>] [--limit <n>]
   agentmux demand show --demand <demand-id>
   agentmux demand create --title <title> [--project <project-id>] [--status <status>] [--priority <priority>]
   agentmux demand update --demand <demand-id> [--title <title>] [--status <status>] [--priority <priority>]
+  agentmux demand assign --demand <demand-id> [--project <project-id>] [--executor <executor-id>] [--start]
+  agentmux demand start --demand <demand-id> [--session <session-id>]
+  agentmux demand handoff --demand <demand-id> [--executor <executor-id>] [--session <session-id>]
+  agentmux demand delete --demand <demand-id> --confirm delete
   agentmux demand link-session --demand <demand-id> --session <session-id>
   agentmux demand link-project --demand <demand-id> --project <project-id>
   agentmux demand decision-log --demand <demand-id>

@@ -563,7 +563,7 @@ describe('Scratch Topic workbench binding', () => {
     expect(nextState.tabs[nextTopic.id]?.topicId).toBe(nextTopic.id)
   })
 
-  it('opens a filesystem Topic by focusing its bound View or recreating a Launcher View', async () => {
+  it('opens a filesystem Topic by focusing its bound View or starting a Terminal in a new View', async () => {
     const workspace = prepareScratch()
     const firstTopic = await useAppStore.getState().createScratchTopic()
     const secondTopic = await useAppStore.getState().createScratchTopic()
@@ -592,7 +592,11 @@ describe('Scratch Topic workbench binding', () => {
     activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
     expect(activeTabId).not.toBe(secondTopic.id)
     expect(state.tabs[activeTabId]?.topicId).toBe(secondTopic.id)
-    expect(titleWorkbenchSurface(state.tabs[activeTabId]!).kind).toBe('launcher')
+    expect(titleWorkbenchSurface(state.tabs[activeTabId]!).kind).toBe('terminal')
+    expect(titleWorkbenchSurface(state.tabs[activeTabId]!)).toMatchObject({
+      workspaceId: workspace.id,
+      phase: 'attached'
+    })
     expect(state.tabs[terminalTab.id]?.topicId).toBeUndefined()
     expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toContain(terminalTab.id)
   })

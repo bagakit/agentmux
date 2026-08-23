@@ -16,6 +16,7 @@ import type {
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
+import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
@@ -274,6 +275,7 @@ const sessionListeners = new Set<(event: RuntimeEvent) => void>()
 const browserListeners = new Set<(event: BrowserEvent) => void>()
 const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
 const mockBrowsers = new Map<string, BrowserSnapshot>()
+const mockDemands = new Map<string, Demand>()
 const mockDefaultBrowserProfile: BrowserProfileSummary = {
   id: '11111111-1111-4111-8111-111111111111',
   label: 'Default',
@@ -307,6 +309,29 @@ const mockApi: AgentMuxDesktopApi = {
   hosts: { check: async (host) => host.kind === 'ssh'
     ? { ok: false, detail: 'Remote Runs are not yet supported.' }
     : { ok: true, detail: 'CtxMux 0.1.0 · protocol 17' } },
+  demands: {
+    list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
+    create: async (input) => {
+      const now = Date.now()
+      const demand: Demand = { id: input.id ?? crypto.randomUUID(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: input.executorId ?? null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...(input.sessionIds ?? [])], activities: [], decisions: [], createdAt: now, updatedAt: now }
+      mockDemands.set(demand.id, demand)
+      return { schema: 'agentmux.demand-receipt.v1', operation: 'create', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) }
+    },
+    update: async (id, patch) => {
+      const now = Date.now()
+      const previous = mockDemands.get(id)
+      const demand: Demand = { id, title: patch.title ?? previous?.title ?? 'Demand', description: patch.description ?? previous?.description ?? '', status: patch.status ?? previous?.status ?? 'backlog', priority: patch.priority ?? previous?.priority ?? 'normal', projectId: patch.projectId === undefined ? previous?.projectId ?? null : patch.projectId, projectName: patch.projectName === undefined ? previous?.projectName ?? null : patch.projectName, executorId: patch.executorId === undefined ? previous?.executorId ?? null : patch.executorId, tags: patch.tags === undefined ? [...(previous?.tags ?? [])] : [...patch.tags], plannedStartAt: patch.plannedStartAt === undefined ? previous?.plannedStartAt ?? null : patch.plannedStartAt, targetAt: patch.targetAt === undefined ? previous?.targetAt ?? null : patch.targetAt, parentDemandId: patch.parentDemandId === undefined ? previous?.parentDemandId ?? null : patch.parentDemandId, phaseIndex: patch.phaseIndex === undefined ? previous?.phaseIndex ?? null : patch.phaseIndex, sessionIds: [...(previous?.sessionIds ?? [])], activities: [...(previous?.activities ?? [])], decisions: [...(previous?.decisions ?? [])], createdAt: previous?.createdAt ?? now, updatedAt: now }
+      mockDemands.set(id, demand)
+      return { schema: 'agentmux.demand-receipt.v1', operation: 'update', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) }
+    },
+    delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
+    linkSession: async (id, sessionId) => mockApi.demands.update(id, { description: `${id}:${sessionId}` }),
+    unlinkSession: async (id) => mockApi.demands.update(id, {}),
+    linkProject: async (id, projectId, projectName) => mockApi.demands.update(id, { projectId, ...(projectName === undefined ? {} : { projectName }) }),
+    unlinkProject: async (id) => mockApi.demands.update(id, { projectId: null, projectName: null }),
+    activity: async (id, input: Omit<DemandActivity, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.message }),
+    decision: async (id, input: Omit<DemandDecision, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.decision })
+  },
   workspaces: {
     appearance: async () => ({ kind: 'directory', icon: null }),
     chooseLocalFolder: async () => null,

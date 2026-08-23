@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
+import { TopicPresence } from '../src/renderer/src/components/TopicPresence'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
@@ -113,6 +114,37 @@ describe('Topic 行的视觉收敛', () => {
 
   it('用共享状态点语汇，不发明第三套', () => {
     expect(avatarSource).toContain('status status--')
+  })
+
+  it('Topic presence exposes Tab structure, Region executor and recent activity', () => {
+    const html = renderToStaticMarkup(createElement(TopicPresence, {
+      agents: [],
+      tabs: [{
+        tabId: 'tab:review',
+        title: 'Review runtime',
+        active: true,
+        regions: [{
+          regionId: 'region:agent',
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          surfaceKind: 'agent',
+          executorLabel: 'Codex',
+          activity: 'Editing store.ts'
+        }, {
+          regionId: 'region:file',
+          bounds: { x: 0.5, y: 0, width: 0.5, height: 1 },
+          surfaceKind: 'file',
+          executorLabel: 'File',
+          activity: 'No recent activity'
+        }]
+      }]
+    }))
+    expect(html).toContain('topic-work-surface-summary__popover')
+    expect(html).toContain('Review runtime')
+    expect(html).toContain('Codex')
+    expect(html).toContain('Editing store.ts')
+    expect(html).toContain('No recent activity')
+    expect(html).toContain('aria-describedby=')
+    expect(html).toContain('topic-work-surface-summary__activity-item')
   })
 })
 

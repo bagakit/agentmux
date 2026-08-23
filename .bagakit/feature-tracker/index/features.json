@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 261
+    "next_cursor": 264
   },
   "features": [
     {
@@ -2100,10 +2100,13 @@
     {
       "feat_id": "f-29z8fg88s",
       "title": "Filesystem Demand package and Leader Topic CLI",
-      "status": "in_progress",
-      "workspace_mode": "current_tree",
-      "branch": "",
-      "worktree_name": "",
+      "status": "transferred",
+      "workspace_mode": "worktree",
+      "branch": "demand-legacyf-29z8fg88s",
+      "worktree_name": "wt-f-29z8fg88s",
+      "transferred_to": {
+        "feature_id": "f-2ag8fy3y3"
+      },
       "runtime_role": "standalone",
       "runtime_relations": []
     },
@@ -2230,7 +2233,52 @@
     {
       "feat_id": "f-2ae8fknbw",
       "title": "Global work-surface hierarchy",
-      "status": "ready",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2af8fsxut",
+      "title": "Multica-inspired Demand board management",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ag8fy3y3",
+      "title": "Demand board and PMO Teams product closure",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "transferred_from": [
+        {
+          "feature_id": "f-29z8fg88s"
+        }
+      ],
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ah8fnchg",
+      "title": "Demand board extended future",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-scratch-topic-terminal-settings",
+      "title": "Scratch Topic Terminal and settings surface",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

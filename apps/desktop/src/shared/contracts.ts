@@ -1300,6 +1300,18 @@ export type AgentMuxDesktopApi = {
     setWikiEnabled(workspaceId: string, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot>
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
   }
+  demands: {
+    list(): Promise<import('@agentmux/demand').Demand[]>
+    create(input: import('@agentmux/demand').CreateDemandInput): Promise<import('@agentmux/demand').DemandReceipt>
+    update(id: string, patch: import('@agentmux/demand').UpdateDemandInput): Promise<import('@agentmux/demand').DemandReceipt>
+    delete(id: string): Promise<import('@agentmux/demand').DemandReceipt>
+    linkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
+    unlinkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
+    linkProject(id: string, projectId: string, projectName?: string | null): Promise<import('@agentmux/demand').DemandReceipt>
+    unlinkProject(id: string): Promise<import('@agentmux/demand').DemandReceipt>
+    activity(id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
+    decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
+  }
   ui: {
     rendererUpdateReady(token: string): Promise<void>
     captureScreenshot(): Promise<string | null>

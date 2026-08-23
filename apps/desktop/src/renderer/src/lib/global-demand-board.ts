@@ -1,5 +1,6 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
+import type { DemandActivity, DemandDecision } from '@agentmux/demand'
 
 export const DEMAND_STATUS_IDS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as const
 export type DemandStatus = (typeof DEMAND_STATUS_IDS)[number]
@@ -17,12 +18,19 @@ export type DemandRecord = {
   projectId: string | null
   projectName: string | null
   assigneeExecutorId?: string | null
+  tags?: string[]
+  plannedStartAt?: number | null
+  targetAt?: number | null
+  parentDemandId?: string | null
+  phaseIndex?: number | null
   activityLog?: string[]
   sessionIds: string[]
   createdAt: number
   updatedAt: number
   source: 'default-topic' | 'session'
   decisionLog?: AgentMuxDemandDecision[]
+  activities?: DemandActivity[]
+  decisions?: DemandDecision[]
 }
 
 export type DemandProjection = DemandRecord & {

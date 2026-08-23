@@ -1,0 +1,102 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "feat_id": null,
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/demand-board-extended-future-2026-09-23.json"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/reviews/demand-board-extended-future-2026-09-23.json",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "[P2] Demand 的多视图投影",
+      "objective": "在同一 Demand 集合之上提供列表、表格、泳道和时间窗口投影。",
+      "outcome": "用户可以切换阅读方式而不复制数据或改变 Demand 生命周期。",
+      "acceptance": [
+        "所有视图消费同一 Demand projection 和同一筛选状态，不能各自维护卡片事实。",
+        "视图切换、空态、键盘路径和窄窗都保留当前 Demand 与详情上下文。",
+        "视图投影只读，不创建第二套 Session/Run 状态。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-views.test.tsx --maxWorkers=1","proves":"All future views share one Demand projection and preserve selection."}
+      ],
+      "source_refs":["docs/design/agentmux-desktop-interaction.md"],
+      "estimate_hours":5,
+      "supersedes":[]
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "[P2] Demand 自定义属性与保存视图",
+      "objective": "让团队保存常用筛选、分组和非核心业务属性。",
+      "outcome": "自定义属性和保存视图有版本化 schema、权限和删除语义。",
+      "acceptance": [
+        "自定义属性不覆盖核心 Demand 字段，保存视图可导出并由 CUI 重放。",
+        "非法 schema、未知字段和权限失败返回稳定错误，现有 Demand 事实保留。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"pnpm --filter @agentmux/demand exec vitest run test/demand-custom-fields.test.ts --maxWorkers=1","proves":"Custom fields and saved views are versioned and fail closed."}
+      ],
+      "source_refs":["docs/design/agentmux-desktop-interaction.md"],
+      "estimate_hours":4,
+      "supersedes":[]
+    },
+    {
+      "id": "T-003",
+      "depends_on": ["T-001"],
+      "title": "[P2] 跨客户端增量同步",
+      "objective": "让多个 AgentMux Client 观察同一 Demand 文件事实时获得可解释的增量更新。",
+      "outcome": "增量、冲突、丢失和恢复均有稳定 revision 与服务窗提示。",
+      "acceptance": [
+        "增量基于 Demand store revision，不复制 Core/ctxmux 事件事实。",
+        "冲突或监听失败不会清空当前工作面，恢复动作可重放。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"pnpm --filter @agentmux/demand exec vitest run test/demand-sync.test.ts --maxWorkers=1","proves":"Cross-client revision and recovery semantics."}
+      ],
+      "source_refs":["packages/demand/src/demand-store.ts"],
+      "estimate_hours":5,
+      "supersedes":[]
+    },
+    {
+      "id": "T-004",
+      "depends_on": [],
+      "title": "[P3] PMO 插件安装与能力管理表面",
+      "objective": "为已通过证据门禁的 PMO capability 提供发现、安装、停用和回滚界面。",
+      "outcome": "插件 manifest、版本、权限、状态、诊断和回滚目标均可检查。",
+      "acceptance": [
+        "UI 只调用 Host 的插件控制 API，不直接安装包或触碰 Demand/ctxmux。",
+        "失败保留 manifest 与诊断，停止和回滚可验证且可逆。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"CI=true pnpm --filter @agentmux/desktop exec vitest run test/pmo-plugin-management.test.tsx --maxWorkers=1","proves":"Plugin management surface uses host-owned lifecycle and diagnostics."}
+      ],
+      "source_refs":["packages/core/src/agent-plugin.ts"],
+      "estimate_hours":5,
+      "supersedes":[]
+    },
+    {
+      "id": "T-005",
+      "depends_on": ["T-004"],
+      "title": "[P3] RSI 候选实验与回放工作流",
+      "objective": "让 PMO 对候选能力运行边界明确的 replay、评估、比较和回滚流程。",
+      "outcome": "候选版本与基线、输入摘要、评估结果和激活决定可追踪。",
+      "acceptance": [
+        "实验不修改正在运行的生产能力；只有明确阈值通过后才可激活。",
+        "回放输入有界、结果可复现、失败可停止且不影响健康 Agent。"
+      ],
+      "verification": [
+        {"kind":"command","ref":"CI=true pnpm --filter @agentmux/core exec vitest run test/pmo-rsi-replay.test.ts --maxWorkers=1","proves":"Candidate replay, evaluation gates and rollback evidence."}
+      ],
+      "source_refs":["packages/core/src/agent-plugin.ts"],
+      "estimate_hours":6,
+      "supersedes":[]
+    }
+  ]
+}

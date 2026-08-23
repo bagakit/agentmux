@@ -57,6 +57,12 @@ function sessionWorkspaceId(config: ReturnType<typeof useAppStore.getState>['con
   return workspaceForSession(config, session)?.id ?? SCRATCH_WORKSPACE_ID
 }
 
+function formatDemandDate(value: number | null | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+}
+
 function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; onSelect: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
   const status = STATUS_META[demand.status]
   const Icon = status.icon
@@ -82,6 +88,15 @@ function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { de
         <span>{demand.projectName ?? 'Unassigned project'}</span>
         <span>{demand.sessions.length} Session{demand.sessions.length === 1 ? '' : 's'}</span>
       </span>
+      {demand.tags?.length || demand.plannedStartAt || demand.targetAt || demand.phaseIndex !== null && demand.phaseIndex !== undefined ? (
+        <span className="global-demand-card__metadata" aria-label="Demand metadata">
+          {demand.tags?.slice(0, 3).map((tag) => <span className="global-demand-card__tag" key={tag}>{tag}</span>)}
+          {formatDemandDate(demand.plannedStartAt) ? <span>Start {formatDemandDate(demand.plannedStartAt)}</span> : null}
+          {formatDemandDate(demand.targetAt) ? <span>Target {formatDemandDate(demand.targetAt)}</span> : null}
+          {demand.phaseIndex !== null && demand.phaseIndex !== undefined ? <span>Batch {demand.phaseIndex + 1}</span> : null}
+        </span>
+      ) : null}
+      {demand.activities?.length || demand.decisions?.length ? <span className="global-demand-card__activity-count">{(demand.activities?.length ?? 0) + (demand.decisions?.length ?? 0)} updates</span> : null}
       {demand.sessionIds.length > 0 ? <AgentTopologySummary sessionIds={demand.sessionIds} sessions={sessions} tabs={tabs} config={config} /> : null}
     </div>
   )
@@ -92,7 +107,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
   arrangement: DemandArrangement
   onArrangement: (value: DemandArrangement) => void
   onClose: () => void
-  onUpdate: (patch: Partial<Pick<DemandProjection, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'activityLog' | 'sessionIds'>>) => void
+  onUpdate: (patch: Partial<Pick<DemandProjection, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>>) => void
   onDelete: () => void
   executors: Record<string, { label: string }>
   allSessions: readonly SessionSnapshot[]
@@ -104,7 +119,8 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
   const [title, setTitle] = useState(demand.title)
   const [description, setDescription] = useState(demand.description)
   const [sessionToAdd, setSessionToAdd] = useState('')
-  useEffect(() => { setTitle(demand.title); setDescription(demand.description); setSessionToAdd('') }, [demand.id, demand.title, demand.description])
+  const [tags, setTags] = useState((demand.tags ?? []).join(', '))
+  useEffect(() => { setTitle(demand.title); setDescription(demand.description); setTags((demand.tags ?? []).join(', ')); setSessionToAdd('') }, [demand.id, demand.title, demand.description, demand.tags])
   const arrangementClass = arrangement === 'grid' ? 'global-demand-workspace__regions--grid' : arrangement === 'balanced' ? 'global-demand-workspace__regions--balanced' : 'global-demand-workspace__regions--columns'
   return (
     <aside className="global-demand-workspace" aria-label={`Demand workspace for ${demand.title}`}>
@@ -119,11 +135,17 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
       <div className="global-demand-workspace__editor">
         <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => onUpdate({ title })} /></label>
         <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => onUpdate({ description })} rows={3} /></label>
+        <label>Tags<input value={tags} onChange={(event) => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="design, customer, release" /></label>
         <div className="global-demand-workspace__toolbar">
           <label className="global-board-select">Status<select aria-label="Demand status" value={demand.status} onChange={(event) => onUpdate({ status: event.target.value as DemandStatus })}>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select></label>
           <label className="global-board-select">Priority<select aria-label="Demand priority" value={demand.priority} onChange={(event) => onUpdate({ priority: event.target.value as DemandPriority })}>{Object.entries(PRIORITY_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
           <label className="global-board-select">Project<select aria-label="Demand project" value={demand.projectId ?? ''} onChange={(event) => { const project = config?.workspaces.find((workspace) => workspace.id === event.target.value); onUpdate({ projectId: project?.id ?? null, projectName: project?.name ?? null }) }}><option value="">Unassigned</option>{config?.workspaces.filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
           <label className="global-board-select">Assignee<select aria-label="Demand assignee" value={demand.assigneeExecutorId ?? ''} onChange={(event) => onUpdate({ assigneeExecutorId: event.target.value || null })}><option value="">Unassigned</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
+        </div>
+        <div className="global-demand-workspace__dates">
+          <label>Planned start<input type="date" value={demand.plannedStartAt ? new Date(demand.plannedStartAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T00:00:00`) : null })} /></label>
+          <label>Target date<input type="date" value={demand.targetAt ? new Date(demand.targetAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T00:00:00`) : null })} /></label>
+          <label>Progress batch<input type="number" min={1} value={demand.phaseIndex === null || demand.phaseIndex === undefined ? '' : demand.phaseIndex + 1} onChange={(event) => onUpdate({ phaseIndex: event.target.value ? Math.max(0, Number(event.target.value) - 1) : null })} /></label>
         </div>
         <div className="global-demand-workspace__assignment"><strong>Linked Sessions</strong><div className="global-demand-workspace__assignment-add"><select aria-label="Add Session to demand" value={sessionToAdd} onChange={(event) => setSessionToAdd(event.target.value)}><option value="">Choose a Session</option>{allSessions.filter((session) => !demand.sessionIds.includes(session.id)).map((session) => <option key={session.id} value={session.id}>{session.label} · {session.id.slice(0, 8)}</option>)}</select><button type="button" className="small-button" disabled={!sessionToAdd} onClick={() => { onUpdate({ sessionIds: [...demand.sessionIds, sessionToAdd] }); setSessionToAdd('') }}>Add</button></div>{demand.sessions.map((session) => <div className="global-demand-workspace__assignment-row" key={session.id}><span>{session.label}</span><button type="button" className="small-button" onClick={() => onUpdate({ sessionIds: demand.sessionIds.filter((id) => id !== session.id) })}>Remove</button></div>)}</div>
         <AgentTopologySummary sessionIds={demand.sessionIds} sessions={allSessions} tabs={tabs} config={config} />
@@ -135,6 +157,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
           <button type="button" className={arrangement === 'balanced' ? 'is-active' : ''} onClick={() => onArrangement('balanced')} title="Balanced"><SlidersHorizontal size={13} /></button>
         </div>
       </div>
+      {(demand.activities?.length || demand.decisions?.length) ? <section className="global-demand-workspace__timeline" aria-label="Demand activity timeline"><strong>Activity</strong>{[...(demand.activities ?? []).map((activity) => ({ id: activity.id, at: activity.createdAt, label: activity.kind, text: activity.message })), ...(demand.decisions ?? []).map((decision) => ({ id: decision.id, at: decision.createdAt, label: 'decision', text: decision.decision }))].sort((left, right) => right.at - left.at).slice(0, 12).map((entry) => <div className="global-demand-workspace__timeline-row" key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{formatDemandDate(entry.at)}</time><span><b>{entry.label}</b> {entry.text}</span></div>)}</section> : null}
       {sessions.length === 0 ? (
         <div className="global-demand-workspace__empty">
           <NotebookPen size={18} />
@@ -191,15 +214,18 @@ export function GlobalBoardSurface() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
+  const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
+  const [executorFilter, setExecutorFilter] = useState('all')
   const projectedDemands = useMemo(() => projectDemands(config, sessions, demands), [demands, config, sessions])
   const filteredDemands = useMemo(() => projectedDemands.filter((demand) => {
     const normalized = query.trim().toLocaleLowerCase()
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
-    return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter)
-  }), [projectFilter, query, statusFilter, projectedDemands])
+    const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeExecutorId : Boolean(demand.projectId && demand.assigneeExecutorId))
+    return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (executorFilter === 'all' || demand.assigneeExecutorId === executorFilter)
+  }), [executorFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
-  const projects = useMemo(() => [...new Map(projectedDemands.filter((demand) => demand.projectId && demand.projectName).map((demand) => [demand.projectId!, demand.projectName!])).entries()], [projectedDemands])
+  const projects = useMemo(() => (config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => [workspace.id, workspace.name] as [string, string]), [config?.workspaces])
 
   useEffect(() => {
     if (selectedDemandId && !selectedDemand) setSelectedDemand(null)
@@ -210,7 +236,7 @@ export function GlobalBoardSurface() {
     const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
     requestPmoTeamsTopicFloatingOpen({
       anchor: 'floating',
-      prompt: `你现在从 AgentMux Board 的 New Demand 入口接到一条新需求。请先和用户对话澄清，不要先创建空 Demand。${projectContext}\n请确认需求标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力写入并返回 receipt。`
+      prompt: `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到一条新需求。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请先和用户对话澄清，不要先创建空 Demand。${projectContext}\n请确认需求标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力写入并返回 receipt。`
     })
   }
 
@@ -223,6 +249,8 @@ export function GlobalBoardSurface() {
             <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search demands" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
             <label className="global-board-select"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as DemandStatus | 'all')}><option value="all">All</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select><ChevronDown size={12} /></label>
             <label className="global-board-select"><span>Project</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All</option>{projects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><ChevronDown size={12} /></label>
+            <label className="global-board-select"><span>Routing</span><select aria-label="Demand routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select><ChevronDown size={12} /></label>
+            <label className="global-board-select"><span>Executor</span><select aria-label="Demand executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">All</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select><ChevronDown size={12} /></label>
             <button type="button" className="global-board-action" onClick={createDemandCard}><CirclePlus size={14} /> Demand</button>
             <button type="button" className="global-board-icon-action" title="Board filters" aria-label="Board filters"><MoreHorizontal size={15} /></button>
           </div>
