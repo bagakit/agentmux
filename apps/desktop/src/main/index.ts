@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { RendererUpdates } from './renderer-updates.js'
-import { rename, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
@@ -30,6 +30,7 @@ import { windowOpenOutcome, windowSecurityWebPreferences } from './window-securi
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
+import { summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const startupAttemptId = randomUUID()
@@ -284,6 +285,44 @@ function startPrimaryInstance(): void {
       window.once('closed', () => rendererUpdates?.dispose())
     }
     const rendererLoadedAtMs = Date.now()
+    if (process.env.AGENTMUX_DESKTOP_RECOVERY_REPORT) {
+      // This is a read-only report over the same Renderer localStorage and Core Session store used by
+      // normal startup. The first isolated launch may seed a fixture after normal hydration, then exits
+      // without letting the unload writer replace it; no probe-only layout or Session owner is introduced.
+      const recoverySeed = process.env.AGENTMUX_DESKTOP_RECOVERY_SEED
+      if (recoverySeed) {
+        await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          const deadline = Date.now() + 20_000
+          const check = () => {
+            if (!document.querySelector('.boot')) { resolve(true); return }
+            if (Date.now() >= deadline) { reject(new Error('Recovery probe initial renderer readiness timed out.')); return }
+            setTimeout(check, 50)
+          }
+          check()
+        })`)
+        await window.webContents.executeJavaScript(
+          `localStorage.setItem('agentmux-workbench-v1', ${JSON.stringify(recoverySeed)});`
+        )
+        await window.webContents.session.flushStorageData()
+      }
+      const storage = await window.webContents.executeJavaScript(
+        "localStorage.getItem('agentmux-workbench-v1')"
+      ) as string | null
+      const sessionStore = await readFile(desktopAgentSessionStorePath(), 'utf8').catch(() => null)
+      const report = {
+        schema: 'agentmux.desktop-restart-recovery.v1',
+        pid: process.pid,
+        userData: app.getPath('userData'),
+        runtimeDirectory: process.env.AGENTMUX_RUNTIME_DIRECTORY ?? '',
+        rendererLoadedAtMs,
+        workbench: summarizeRecoveryStorage(storage),
+        sessions: summarizeRecoverySessionStore(sessionStore)
+      }
+      const reportPath = process.env.AGENTMUX_DESKTOP_RECOVERY_REPORT
+      const temporaryReportPath = `${reportPath}.tmp-${process.pid}`
+      await writeFile(temporaryReportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 })
+      await rename(temporaryReportPath, reportPath)
+    }
     if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
       const readyPath = process.env.AGENTMUX_DESKTOP_READY_FILE
       const temporaryReadyPath = `${readyPath}.tmp-${process.pid}`
@@ -295,7 +334,10 @@ function startPrimaryInstance(): void {
       })}\n`, { mode: 0o600 })
       await rename(temporaryReadyPath, readyPath)
       if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
-        app.quit()
+        // `app.quit()` lets the Renderer unload handler flush its in-memory default over the probe seed.
+        // The isolated seed is already flushed above, so exit immediately for this probe-only launch.
+        if (process.env.AGENTMUX_DESKTOP_RECOVERY_SEED) app.exit(0)
+        else app.quit()
         return
       }
     }
