@@ -55,10 +55,13 @@
   页面名称。组件自己的几何规则留在所属 surface 文件，不能把业务状态写进主题 token。
 - `data-appearance="dark|light"` 是浏览器运行时的主题切换入口。React 状态、持久化配置和系统偏好只
   负责决定这个属性的值，不再并行维护一套组件级 ThemeProvider 真值。
+- 外观选择项（dark、light、system）必须从共享的 `APP_APPEARANCE_IDS` 元组派生；设置页、配置校验和
+  类型不能各自再写一份列表。新增一个外观时，单点改动应能让三者一起变宽。
 - 如果未来引入 Tailwind 或其他 utility 层，只能通过 `@theme inline` 或等价的适配表把 utility 名称
   映射到现有 CSS token；适配层不得写颜色、字号或间距的第二份值，也不能让 utility 绕过语义 token。
-- Terminal/Editor 的原生调色板属于独立渲染器契约，和 App chrome 主题分开保存；二者可以在设置界面并列，
-  不能互相读取或覆盖对方的 token。
+- Terminal 的原生调色板属于独立渲染器契约，和 App chrome 主题分开保存；Monaco 编辑器的明暗主题跟随
+  resolved App appearance，避免设置页切换后编辑表面仍停在另一套明度。Terminal 与 App chrome 可以在设置
+  界面并列，不能互相读取或覆盖对方的 token。
 - 新增主题 token 必须同时满足三个条件：有真实调用者、有明确语义、能被契约测试从来源反推出；没有调用者
   的“以后可能用到” token 应删除。
 
