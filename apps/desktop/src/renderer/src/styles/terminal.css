@@ -1,5 +1,5 @@
 /**
- * 终端表面：xterm 容器、恢复态横幅、搜索、链接预览、主题选择。
+ * 终端表面：xterm 容器、局部启动提示、搜索、链接预览、主题选择。
  *
  * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
@@ -55,96 +55,6 @@
   color: var(--text-3);
   font: 10px/1.2 var(--font-mono);
   white-space: nowrap;
-}
-/* 恢复态：整格覆盖层，所以用品牌语言，不用十六处共用的行内 .spin
-   （见 agentmux-surface-density.md《动效》）。与兄弟态 .terminal-agent-startup 同族——同一种居中
-   卡片、同一套 Surface 与阴影——差异只在动效与色相：绿色扫描线说"在恢复画面"，兄弟态的中性
-   spinner 说"在等第一段输出"。 */
-.terminal-hydration {
-  isolation: isolate;
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--text-2);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--line-soft) 46%, transparent) 1px, transparent 1px),
-    linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 34%, transparent) 1px, transparent 1px),
-    var(--bg);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(135deg, var(--mask-opaque) 0%, transparent 86%);
-  pointer-events: none;
-}
-.terminal-hydration::after {
-  content: '';
-  position: absolute;
-  inset: var(--sp-5);
-  z-index: -1;
-  border-left: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  border-bottom: 1px solid var(--line-soft);
-  clip-path: polygon(0 0, 72% 0, 100% 32%, 100% 100%, 30% 100%, 0 70%);
-  opacity: .72;
-}
-.terminal-hydration__content {
-  position: relative;
-  width: min(420px, calc(100% - (var(--sp-8) * 2)));
-  box-sizing: border-box;
-  display: grid;
-  justify-items: start;
-  gap:var(--sp-3);
-  overflow: hidden;
-  padding:var(--sp-4) var(--sp-5);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  background:
-    radial-gradient(120% 90% at 100% 0, var(--overlay-line) 0, transparent 52%),
-    var(--surface-1);
-  box-shadow: var(--elev-1);
-}
-/* 扫描线：一道品牌绿掠过卡片顶边。静止的首帧本身就在可见位置（不是 0 宽、不是透明），
-   因为 prefers-reduced-motion 会把 keyframe 冻在首帧——动效不得是唯一的信息载体。 */
-.terminal-hydration__content::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 38%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--green), var(--green-2), transparent);
-  animation: terminal-scanline var(--dur-sweep) var(--ease-enter) infinite;
-}
-.terminal-hydration__content::after {
-  content: '';
-  position: absolute;
-  right: var(--sp-4);
-  bottom: var(--sp-4);
-  width: 28px;
-  height: 18px;
-  border-right: 1px solid var(--green);
-  border-bottom: 1px solid var(--green);
-  opacity: .42;
-}
-@keyframes terminal-scanline {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(340%); }
-}
-.terminal-hydration__line { display: flex; align-items: center; gap:var(--sp-3); }
-/* 方块光标：终端自己的语言。不倒角——一个终端光标就是个方块，倒角反而不像。
-   呼吸用与状态点同一档节奏（--dur-breath），冻住时停在 opacity 1，仍读得出"这是一个终端在恢复"。 */
-.terminal-hydration__cursor {
-  width: 6px;
-  height: 12px;
-  background: var(--green);
-  box-shadow: 0 0 6px var(--overlay-line);
-  animation: terminal-cursor-breath var(--dur-breath) ease-in-out infinite;
-}
-@keyframes terminal-cursor-breath {
-  50% { opacity: .35; }
-}
-.terminal-hydration__label { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
-.terminal-hydration__hint { color: var(--text-3); font-size: var(--fs-micro); }
-@media (prefers-reduced-motion: reduce) {
-  .terminal-hydration__content::before, .terminal-hydration__cursor { animation: none; }
 }
 .terminal-agent-startup {
   position: absolute;

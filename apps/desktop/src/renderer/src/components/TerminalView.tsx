@@ -88,6 +88,7 @@ import {
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
 import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
@@ -1217,15 +1218,13 @@ export function TerminalView({
             </div>
           ) : null}
           {startupPhase === 'restoring' ? (
-            <div className="terminal-hydration" role="status" aria-live="polite">
-              <div className="terminal-hydration__content">
-                <div className="terminal-hydration__line">
-                  <span className="terminal-hydration__cursor" aria-hidden="true" />
-                  <strong className="terminal-hydration__label">Restoring terminal…</strong>
-                </div>
-                <span className="terminal-hydration__hint">Replaying retained output.</span>
-              </div>
-            </div>
+            <FullPageLoadingSurface
+              scope="region"
+              phase="recovering"
+              eyebrow="Terminal recovery"
+              title="Restoring terminal"
+              detail="Replaying retained output and confirming the viewport before live bytes return."
+            />
           ) : null}
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
             <div className="terminal-agent-startup" role="status" aria-live="polite">
