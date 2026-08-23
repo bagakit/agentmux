@@ -22,7 +22,7 @@ it('keeps Leader Topic on one fixed floating/compact launcher and one canonical 
   expect(entry).toContain('leaderTopicAvatar')
   expect(entry).toContain('launcherPlacement')
   expect(styles).toContain('.leader-topic-floating-launcher__button')
-  expect(styles).toContain('border-radius: 12px')
+  expect(styles).toContain('border-radius: var(--radius-lg)')
   expect(styles).toContain('object-fit: contain')
   expect(panel).toContain('api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID)')
   expect(panel).toContain('api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, LEADER_TOPIC_ID, LEADER_TOPIC_TITLE)')
