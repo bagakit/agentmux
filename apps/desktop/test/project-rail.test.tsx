@@ -174,7 +174,8 @@ describe('Project Rail selection and running signals', () => {
     const runningRows = markup.match(/data-running="true"/g) ?? []
     expect(runningRows).toHaveLength(2)
     expect(markup).toContain('project-rail-row--active')
-    expect(markup).toContain('class="project-activity__pulse"')
+    expect(markup).toContain('class="project-activity__metric project-activity__metric--working"')
+    expect(markup).toContain('class="project-activity__metric project-activity__metric--idle"')
     expect(markup).toContain('Alpha · 1 Agent is working')
     expect(markup).toContain('Beta · 1 idle')
     expect(markup).not.toContain('Beta · 1 Agent is working')
@@ -223,12 +224,7 @@ describe('Project Rail selection and running signals', () => {
     expect(markup).not.toContain('1 Running')
   })
 
-  it('prints the number once: the hover label carries the word only', () => {
-    // 用户原话：「running 等标记本身已经带有数字了，hover 展开是不是不用带数字了」。
-    //
-    // 判据必须取**那个可见元素的文本本身**，不能用 `toContain('1 Working')`——展开后画成
-    // 「1 1 Working」时那条断言照旧成立（实测：把数字塞回 label 的变异体让 33 条断言全绿通过）。
-    // 所以这里抠出 `__label` 的内容，断言它**一个数字都没有**：这才是「印一遍」这个性质本身。
+  it('uses the same icon plus number structure for working and idle', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [
       session('a1', '/alpha', 'working'),
@@ -236,12 +232,10 @@ describe('Project Rail selection and running signals', () => {
       session('a3', '/alpha', 'running')
     ]
     const markup = renderRail()
-    const labels = [...markup.matchAll(/class="project-activity__label">([^<]*)</g)].map((m) => m[1]!)
-    expect(labels).toEqual(['Working'])
-    expect(labels[0]).not.toMatch(/\d/)
-    // 数字仍然在场，只是只在计数那一处（三个 Agent 里两个 working、一个 running，全在 working 列 = 3）。
-    const counts = [...markup.matchAll(/class="project-activity__count"[^>]*>([^<]*)</g)].map((m) => m[1]!)
-    expect(counts).toEqual(['2'])
+    const working = markup.match(/project-activity__metric--working[\s\S]*?<strong>([^<]*)<\/strong>/)?.[1]
+    const idle = markup.match(/project-activity__metric--idle[\s\S]*?<strong>([^<]*)<\/strong>/)?.[1]
+    expect(working).toBe('2')
+    expect(idle).toBe('1')
   })
 
   it('removes the repeated project icon while retaining Scratch identity', () => {
@@ -371,7 +365,8 @@ describe('Project Rail style contract', () => {
   it('does not brighten a project icon in the selected rule and has a separate running slot', () => {
     expect(source).not.toContain('.project-rail-row--active .project-rail-row__icon')
     expect(source).toContain('.project-activity')
-    expect(source).toContain('.project-activity__pulse')
+    expect(source).toContain('.project-activity__metrics')
+    expect(source).toContain('.project-activity__metric')
   })
 
   it('gives pinned children smaller underline-only hover and a quiet dashed relation connector', () => {

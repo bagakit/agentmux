@@ -36,7 +36,7 @@ it('hover explains which Agent needs a reply, selection navigates exactly there,
   try {
     await act(async () => root.render(<ProjectActivity sessions={[session]} />))
     const button = container.querySelector('button')!
-    expect(button.textContent).toContain('Needs you')
+    expect(button.getAttribute('aria-label')).toContain('Needs you')
     await act(async () => button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
     expect(document.querySelector('[role="menu"]')?.textContent).toContain('Unassigned')
     await act(async () => (document.querySelector('[aria-label^="Show Agents"]') as HTMLElement).click())

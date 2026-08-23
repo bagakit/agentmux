@@ -580,8 +580,8 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
   // 一个 working 字面量都不剩，所以条目删掉——留着就是守着空地的豁免（本文件对 ProjectActivity
   // 与 fanout-group 做过同样的清理，理由见上面那两段注释）。
   '/components/ProjectActivity.tsx': {
-    count: 1,
-    why: 'switch 的 "working" case（"Working · no recent summary"）：问"这一个 Session 在 working 吗"。逐行 "active now" 那处已搬到 project-activity-row.ts，计数走同文件已 import 的 workingAgentCount。菜单行的字形此前在这里又抄了一份 `state === working ? working : state === running ? running : neutral`（其余七支全塌成中性灰），2026-09-19 收敛为 attention-event.ts 的 activityGlyphFor——它是 statusDotTier 的投影，不是第二份状态判定'
+    count: 3,
+    why: 'switch 的 "working" case（"Working · no recent summary"）以及统一 Project tree 状态槽的 key/label；计数仍走 project-board 的 producingAgentCount，菜单行字形走 attention-event.ts 的 activityGlyphFor，不在这里重判'
   },
   '/lib/project-activity-row.ts': {
     count: 1,

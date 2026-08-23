@@ -1,4 +1,4 @@
-import { ChevronRight, MessageCircle, TriangleAlert } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { sessionRecentActivity } from '../lib/session-recency'
@@ -6,7 +6,8 @@ import { activityGlyphFor } from '../lib/attention-event'
 import { turnWorking } from '../lib/activity-working-state'
 import { projectActivityRow } from '../lib/project-activity-row'
 import { rowAttention } from '../lib/row-attention'
-import { workingAgentCount } from '../lib/project-board'
+import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
+import { categoryFor } from '../lib/attention-event'
 import { workspaceForSession, workspaceRootForPath } from '../lib/workbench-tabs'
 import { buildAgentRoster } from '../lib/agent-roster'
 import {
@@ -96,34 +97,34 @@ export function ProjectActivity({
   const agentNames = useAppStore((state) => state.agentNames)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
-  const running = workingAgentCount(sessions.filter((session) => turnWorking(session.status.state)))
-  if (!attention.category && !running) return null
+  const working = producingAgentCount(sessions)
+  const idle = idleAgentCount(sessions)
+  const error = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'error').length
+  const needsYou = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'needs-you').length
+  const metrics = [
+    { key: 'needs-you', count: needsYou, icon: 'message-queue' as const, label: 'Needs you' },
+    { key: 'error', count: error, icon: 'failed' as const, label: 'Error' },
+    { key: 'working', count: working, icon: 'working' as const, label: 'Working' },
+    { key: 'idle', count: idle, icon: 'running' as const, label: 'Idle' }
+  ].filter((metric) => metric.count > 0)
+  if (metrics.length === 0) return null
   // 一次渲染取一次时钟，供各行算 elapsed——与旧 quietDuration 在渲染时读 Date.now() 同口径。
   const now = Date.now()
-  // hover 展开的那个词**不带数字**：数字就在它左边 2px 处的 `__count` 里，一直可见（CSS 只折叠
-  // `__label` 的宽度，不折叠计数）。原先写 `${running} running`，于是展开后读作「3 3 running」——
-  // 同一个数字在同一枚控件上印两遍。留词、去数。
-  //
-  // 但 `__count` 是 `aria-hidden`（它是给眼睛看的字形），所以数字**只**活在视觉层。把它从 `label`
-  // 里摘掉的同时必须显式拼回 `aria-label`，否则读屏听到的是「Working」——数量凭空消失，而这枚控件
-  // 的全部信息就是「几个」。视觉去重不许把无障碍那一份也一起去掉。
-  const label = attention.category === 'needs-you'
-    ? 'Needs you'
-    : attention.category === 'error'
-      ? 'Error'
-      : 'Working'
-  const notificationCount = attention.category === 'error'
-    ? sessions.filter((session) => session.status.state === 'error').length
-    : attention.category === 'needs-you'
-      ? sessions.filter((session) => session.kind === 'agent' && Boolean(session.pendingInteraction)).length
-      : running
+  // 视觉槽只保留语义图标和数字，完整状态名称与数量由外层 aria-label/title 提供；这样四种状态
+  // 共享同一列宽和基线，又不会让窄栏被长文案撑开。
   const groups = buildActivityGroups(sessions, contexts)
   const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
+  const metricLabel = metrics.map((metric) => `${metric.count} ${metric.label}`).join(' · ')
   return <DropdownMenu.Root>
-    <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={details} aria-label={`${notificationCount} ${label}. ${details}`}>
-      {attention.category === 'needs-you' ? <MessageCircle size={13} /> : attention.category === 'error' ? <TriangleAlert size={13} /> : <span className="project-activity__pulse" aria-hidden="true"><i /><i /><i /></span>}
-      <strong className="project-activity__count" aria-hidden="true">{notificationCount}</strong>
-      <span className="project-activity__label">{label}</span>
+    <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={`${metricLabel} · ${details}`} aria-label={`${metricLabel}. ${details}`}>
+      <span className="project-activity__metrics" aria-hidden="true">
+        {metrics.map((metric) => (
+          <span key={metric.key} className={`project-activity__metric project-activity__metric--${metric.key}`}>
+            <SemanticIcon name={metric.icon} size={12} />
+            <strong>{metric.count}</strong>
+          </span>
+        ))}
+      </span>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu project-activity-menu" side="right" align="start" sideOffset={4}>
       <DropdownMenu.Label className="composer-menu__hint">Activity by work line · select a row to open</DropdownMenu.Label>
