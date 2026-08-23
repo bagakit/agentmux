@@ -25,6 +25,8 @@ describe('样式表的组织', () => {
       'terminal.css',
       'surfaces.css',
       'board.css',
+      'global-board.css',
+      'leader-topic.css',
       'browser.css',
       'agent.css',
       'session-connecting.css',
@@ -36,7 +38,8 @@ describe('样式表的组织', () => {
       'conversation-axis.css',
       'overlays.css',
       'agent-panels.css',
-      'agent-avatar.css'
+      'agent-avatar.css',
+      'full-page-loading.css'
     ])
   })
 

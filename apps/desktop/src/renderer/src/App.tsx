@@ -1,9 +1,5 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
-import {
-  AlertTriangle,
-  LoaderCircle
-} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
@@ -26,7 +22,8 @@ import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
-import { DefaultSessionFloatingPanel } from './components/DefaultSessionFloatingPanel'
+import { LeaderTopicFloatingPanel } from './components/LeaderTopicFloatingPanel'
+import { LeaderTopicEntry } from './components/LeaderTopicEntry'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
@@ -45,6 +42,7 @@ import {
   useSurfaceMemoryBudget
 } from './lib/surface-memory-budget-coordinator'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
+import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 
 export function App() {
   const workflowComponentGallery = typeof window !== 'undefined' &&
@@ -206,25 +204,11 @@ function DesktopApp() {
   }, [])
 
   if (loading) {
-    return (
-      <div className="boot" role="status" aria-live="polite">
-        <span className="brand-mark"><BrandIcon size={18} /></span>
-        <strong>Starting AgentMux</strong>
-        <span className="boot__progress"><LoaderCircle className="spin" size={13} /> Starting the local Runtime…</span>
-        <small>This is a normal startup state.</small>
-      </div>
-    )
+    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux boot sequence" title="Starting AgentMux" detail="Starting the local Runtime. Your saved workspace will return when it is ready." />
   }
 
   if (!config && error) {
-    return (
-      <div className="boot boot--error" role="alert">
-        <AlertTriangle size={22} />
-        <strong>Runtime connection failed</strong>
-        <span>{error}</span>
-        <button className="small-button" onClick={() => window.location.reload()}>Retry startup</button>
-      </div>
-    )
+    return <FullPageLoadingSurface scope="app" phase="failed" eyebrow="AgentMux startup" title="Runtime connection failed" detail={error} actions={<button className="small-button" onClick={() => window.location.reload()}>Retry startup</button>} />
   }
 
   return (
@@ -321,7 +305,7 @@ function DesktopApp() {
                   })}
                 </div>
               ) : null}
-              <DefaultSessionFloatingPanel />
+              <LeaderTopicFloatingPanel />
             </section>
           </div>
         )}
@@ -337,7 +321,7 @@ function DesktopApp() {
       </main>
       <footer className="window-status-bar">
         <AgentStatusBar />
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch /><LeaderTopicEntry placement="compact" /></div>
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

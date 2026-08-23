@@ -3,9 +3,9 @@
 Status: approved
 
 The current launcher still exposes a Default Session name, reuses the
-`launcher:default` topic, and can project the currently selected Scratch topic
+`launcher:leader` topic, and can project the currently selected Scratch topic
 when the main workbench is visible. This closure replaces that product model
-with a fixed product-owned `leader:topic` Topic and calls the surface **Leader
+with a fixed product-owned `launcher:leader` Topic and calls the surface **Leader
 Topic** everywhere users can see it.
 
 The approved behavior is:
@@ -32,7 +32,7 @@ Evidence reviewed before approval:
 
 - `docs/design/agentmux-desktop-interaction.md`
 - `docs/design/agentmux-surface-density.md`
-- `apps/desktop/src/renderer/src/components/DefaultSessionFloatingPanel.tsx`
+- `apps/desktop/src/renderer/src/components/LeaderTopicFloatingPanel.tsx`
 - `apps/desktop/src/renderer/src/components/TopRowChrome.tsx`
 - `apps/desktop/src/renderer/src/store.ts`
 - `apps/desktop/src/shared/scratch-topics.ts`

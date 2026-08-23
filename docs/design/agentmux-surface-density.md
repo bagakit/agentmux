@@ -332,6 +332,8 @@ styles/
   session-connecting.css  Connecting 与 Session 恢复的 Region 状态舞台
   surfaces.css    Settings、New Tab、Launch、Welcome
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
+  global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
+  leader-topic.css  Leader Topic 的悬浮窗口、标题栏和 compact 入口
   browser.css     Browser 工具与地址栏
   agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
   composer.css    Composer——Agent 那格底部的输入条
@@ -343,6 +345,7 @@ styles/
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
   agent-panels.css  Agent 的 Portal 面板（花名册、计数树、资源用量）——紧跟 overlays
   agent-avatar.css  执行器头像的 Provider 轮廓、角标、状态、计数与设置预览
+  full-page-loading.css  启动与全页 loading/recovering/failed 大屏的网格、切片、品牌层和动效
 ```
 
 这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`
@@ -719,7 +722,7 @@ Task 卡默认是无边框的面，选中只增加一处统一焦点信号；Tas
 
 ### 默认 Session 入口的原生复用（2026-09-22）
 
-Leader Topic 入口只承担打开既有 `leader:topic` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。浮动位置显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示；拖动坐标和 floating/compact 形态持久化。收起后与底部三项切换器同组，不再占用顶栏空位。Session chrome 不再额外画一套重复的内联入口。入口操作菜单只提供位置切换和 Topic 文件入口，不展开第二套聊天控件。
+Leader Topic 入口只承担打开既有 `launcher:leader` Topic 的动作，使用现有 tab／region／composer 的密度和身份表达。浮动位置显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示；拖动坐标和 floating/compact 形态持久化。收起后与底部三项切换器同组，不再占用顶栏空位。Session chrome 不再额外画一套重复的内联入口。入口操作菜单只提供位置切换和 Topic 文件入口，不展开第二套聊天控件。
 
 ### 启动错误与 Executor 命名的表面（2026-09-22）
 
@@ -778,7 +781,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 
 ### Leader Topic 的 a mature workbench 风格浮窗（2026-09-22）
 
-Leader Topic 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放固定 `leader:topic` 的原生 Topic Tab/Region，底部保留现有 composer。浮动位置同时显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
+Leader Topic 浮窗采用 a mature workbench floating workspace 的密度：外层是轻阴影和 hairline，顶部是可拖动的短标题栏与最小化/关闭控件，中间直接放固定 `launcher:leader` 的原生 Topic Tab/Region，底部保留现有 composer。浮动位置同时显示一个 36px 级别的紧凑助手按钮，按钮使用项目专属 low-poly 头像、可键盘聚焦并沿用同一份注意力提示。浮窗不使用客服式消息卡、独立头像墙或重复的聊天 header。
 
 浮窗关闭后只变为不可见并交还焦点，不能卸载或清空其 Topic/Region；再次打开应保留原 Tab、输出和滚动位置。入口可切换为与底部三项同组的 compact 形态；Board footer、Session chrome 和 Agents surface 不再各画一套内联菜单。
 

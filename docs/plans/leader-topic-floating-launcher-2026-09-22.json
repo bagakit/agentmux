@@ -1,5 +1,6 @@
 {
   "schema": "bagakit.feature-task-plan.v1",
+  "feat_id": "f-29y8fmh9y",
   "review": {
     "status": "approved",
     "evidence_ref": "docs/reviews/leader-topic-floating-launcher-2026-09-22.md"
@@ -14,7 +15,7 @@
       "id": "T-001",
       "task_key": "fixed-leader-topic",
       "title": "把入口改成固定的 Leader Topic",
-      "objective": "让入口始终投影产品固定的 leader:topic，不跟随用户当前 Scratch Topic，并统一用户可见与代码命名。",
+      "objective": "让入口始终投影产品固定的 launcher:leader，不跟随用户当前 Scratch Topic，并统一用户可见与代码命名。",
       "outcome": "浮窗与 Scratch 用户 Topic 隔离，产品拥有的 Topic 不出现在用户 Topic 列表，入口和标题均显示 Leader Topic。",
       "acceptance": [
         "生产代码只通过 LEADER_TOPIC_ID 绑定固定 Topic，并在首次打开前确保该 Topic 存在。",
@@ -24,7 +25,7 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-fixed.test.ts test/leader-topic-contract.test.ts --maxWorkers=1",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-floating-contract.test.ts test/leader-topic-board.test.tsx test/leader-topic-layout.test.ts --maxWorkers=1",
           "proves": "固定身份、隔离投影与用户可见命名。"
         },
         {
@@ -37,7 +38,7 @@
       ,"source_refs": [
         "docs/design/agentmux-desktop-interaction.md",
         "apps/desktop/src/shared/scratch-topics.ts",
-        "apps/desktop/src/renderer/src/components/DefaultSessionFloatingPanel.tsx"
+        "apps/desktop/src/renderer/src/components/LeaderTopicFloatingPanel.tsx"
       ]
     },
     {
@@ -67,7 +68,7 @@
       ,"source_refs": [
         "docs/design/agentmux-desktop-interaction.md",
         "apps/desktop/src/renderer/src/components/TopRowChrome.tsx",
-        "apps/desktop/src/renderer/src/lib/default-session-floating.ts"
+        "apps/desktop/src/renderer/src/lib/leader-topic-floating.ts"
       ]
     },
     {
@@ -83,7 +84,7 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-avatar.test.ts test/leader-topic-contract.test.ts --maxWorkers=1",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/leader-topic-launcher.test.tsx test/leader-topic-floating-contract.test.ts --maxWorkers=1",
           "proves": "资源存在且被入口生产代码引用。"
         },
         {
@@ -95,7 +96,7 @@
       "depends_on": ["T-001"]
       ,"source_refs": [
         "docs/design/agentmux-surface-density.md",
-        "apps/desktop/src/renderer/src/components/DefaultSessionEntry.tsx"
+        "apps/desktop/src/renderer/src/components/LeaderTopicEntry.tsx"
       ]
     },
     {

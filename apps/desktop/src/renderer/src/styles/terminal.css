@@ -70,7 +70,7 @@
     linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 34%, transparent) 1px, transparent 1px),
     var(--bg);
   background-size: 72px 72px;
-  mask-image: linear-gradient(135deg, #000 0%, transparent 86%);
+  mask-image: linear-gradient(135deg, var(--mask-opaque) 0%, transparent 86%);
   pointer-events: none;
 }
 .terminal-hydration::after {
@@ -155,7 +155,7 @@
     linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 24%, transparent) 1px, transparent 1px),
     var(--bg);
   background-size: 72px 72px;
-  mask-image: linear-gradient(45deg, #000 0%, transparent 88%);
+  mask-image: linear-gradient(45deg, var(--mask-opaque) 0%, transparent 88%);
   pointer-events: none;
 }
 .terminal-agent-startup__content {

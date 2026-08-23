@@ -1,24 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
 
-const STORAGE_KEY = 'agentmux.default-session-floating.v2'
-const EVENT_NAME = 'agentmux:default-session-floating'
+const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
+const EVENT_NAME = 'agentmux:leader-topic-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }
+const LAUNCHER_SIZE = 36
+
+export type LeaderTopicLauncherPlacement = 'floating' | 'compact'
 
 type FloatingState = {
   open: boolean
   maximized: boolean
   position: { left: number; top: number }
   size: { width: number; height: number }
+  launcherPlacement: LeaderTopicLauncherPlacement
+  launcherPosition: { left: number; top: number }
 }
 
-export type DefaultSessionFloatingState = FloatingState
+export type LeaderTopicFloatingState = FloatingState
+
+function defaultLauncherPosition(): { left: number; top: number } {
+  if (typeof window === 'undefined') return { left: 24, top: 24 }
+  return {
+    left: Math.max(16, window.innerWidth - 72),
+    top: Math.max(16, window.innerHeight - 104)
+  }
+}
 
 const defaultState = (): FloatingState => ({
   open: false,
   maximized: false,
   position: { ...DEFAULT_POSITION },
-  size: { ...DEFAULT_SIZE }
+  size: { ...DEFAULT_SIZE },
+  launcherPlacement: 'floating',
+  launcherPosition: defaultLauncherPosition()
 })
 
 function readState(): FloatingState {
@@ -35,7 +50,11 @@ function readState(): FloatingState {
         : { ...DEFAULT_POSITION },
       size: value.size && Number.isFinite(value.size.width) && Number.isFinite(value.size.height)
         ? { width: value.size.width, height: value.size.height }
-        : { ...DEFAULT_SIZE }
+        : { ...DEFAULT_SIZE },
+      launcherPlacement: value.launcherPlacement === 'compact' ? 'compact' : 'floating',
+      launcherPosition: value.launcherPosition && Number.isFinite(value.launcherPosition.left) && Number.isFinite(value.launcherPosition.top)
+        ? { left: value.launcherPosition.left, top: value.launcherPosition.top }
+        : defaultLauncherPosition()
     }
   } catch {
     return defaultState()
@@ -46,38 +65,39 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestDefaultSessionFloatingOpen(): void {
+export function requestLeaderTopicFloatingOpen(): void {
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: true } }))
 }
 
-export function requestDefaultSessionFloatingClose(): void {
+export function requestLeaderTopicFloatingClose(): void {
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: false } }))
 }
 
-export function useDefaultSessionFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
+export function useLeaderTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
   const [state, setState] = useState<FloatingState>(() => readState())
   const stateRef = useRef(state)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => {
     const onEvent = (event: Event): void => {
-      const nextOpen = (event as CustomEvent<{ open?: boolean }>).detail?.open
-      if (typeof nextOpen !== 'boolean') return
+      const detail = (event as CustomEvent<Partial<FloatingState>>).detail ?? {}
+      const nextOpen = detail.open
+      if (typeof nextOpen !== 'boolean' && detail.launcherPlacement === undefined && detail.launcherPosition === undefined) return
       const current = stateRef.current
-      if (nextOpen && !current.open) {
+      if (nextOpen === true && !current.open) {
         const active = document.activeElement
-        if (active instanceof HTMLElement && !active.closest('[data-default-session-floating]')) {
+        if (active instanceof HTMLElement && !active.closest('[data-leader-topic-floating]')) {
           returnFocusRef.current = active
         }
       }
-      if (nextOpen && current.open) {
-        document.querySelector<HTMLElement>('[data-default-session-floating]')?.focus({ preventScroll: true })
+      if (nextOpen === true && current.open) {
+        document.querySelector<HTMLElement>('[data-leader-topic-floating]')?.focus({ preventScroll: true })
       }
-      const next = { ...current, open: nextOpen }
+      const next = { ...current, ...detail }
       stateRef.current = next
       setState(next)
       writeState(next)
-      if (!nextOpen) {
+      if (nextOpen === false) {
         const target = returnFocusRef.current
         returnFocusRef.current = null
         if (target && document.contains(target)) {
@@ -93,12 +113,14 @@ export function useDefaultSessionFloatingState(): [FloatingState, (next: Partial
     stateRef.current = resolved
     setState(resolved)
     writeState(resolved)
+    window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: next }))
   }
   return [state, update]
 }
 
-export function clampDefaultSessionFloatingState(state: FloatingState): FloatingState {
+export function clampLeaderTopicFloatingState(state: FloatingState): FloatingState {
   if (typeof window === 'undefined') return state
+  const launcherPosition = state.launcherPosition ?? defaultLauncherPosition()
   const width = Math.max(420, Math.min(state.size.width, Math.max(420, window.innerWidth - 32)))
   const height = Math.max(280, Math.min(state.size.height, Math.max(280, window.innerHeight - 48)))
   return {
@@ -107,6 +129,10 @@ export function clampDefaultSessionFloatingState(state: FloatingState): Floating
     position: {
       left: Math.max(16, Math.min(state.position.left, Math.max(16, window.innerWidth - width - 16))),
       top: Math.max(16, Math.min(state.position.top, Math.max(16, window.innerHeight - height - 16)))
+    },
+    launcherPosition: {
+      left: Math.max(16, Math.min(launcherPosition.left, Math.max(16, window.innerWidth - LAUNCHER_SIZE - 16))),
+      top: Math.max(16, Math.min(launcherPosition.top, Math.max(16, window.innerHeight - LAUNCHER_SIZE - 16)))
     }
   }
 }

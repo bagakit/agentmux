@@ -1145,13 +1145,13 @@ Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口�
 
 入口是全局 Chrome，不依赖当前是否正在浏览 Board；切换到 Workbench、Settings 或窄窗口后仍保留一个可见且可键盘聚焦的停靠入口。浮动入口被遮挡、拖动越界或窗口尺寸变化时自动夹回可用区域；停靠入口空间不足时保留图标和提示，不把 Board 挤出视口。通知栏、Agents roster 和入口不得各自复制一份未读计数，统一消费同一份注意力投影。
 
-浮动位置必须有一个看得见的紧凑助手按钮作为唯一打开入口：它固定在当前窗口工作面边缘，带有注意力提示，点击打开或聚焦同一个 `leader:topic` 浮窗；它不能因为 Session 分屏、切换到 Settings 或当前没有活动 Tab 而消失。用户收起后，入口移动到底部三项切换器旁；不能只留下不可发现的顶栏动作。按钮必须支持拖动改变悬浮位置，并在窗口尺寸变化时夹回可用区域。
+浮动位置必须有一个看得见的紧凑助手按钮作为唯一打开入口：它固定在当前窗口工作面边缘，带有注意力提示，点击打开或聚焦同一个 `launcher:leader` 浮窗；它不能因为 Session 分屏、切换到 Settings 或当前没有活动 Tab 而消失。用户收起后，入口移动到底部三项切换器旁；不能只留下不可发现的顶栏动作。按钮必须支持拖动改变悬浮位置，并在窗口尺寸变化时夹回可用区域。
 
 默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
 
 ### Leader Topic 与任务写入确认（2026-09-22）
 
-项目调度 Agent 适合作为一个固定的 Leader Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，但使用产品固定的 `leader:topic` 身份，不进入用户 Scratch Topic 的选择投影，也不随着用户当前 Scratch Topic 改变。
+项目调度 Agent 适合作为一个固定的 Leader Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，但使用产品固定的 `launcher:leader` 身份，不进入用户 Scratch Topic 的选择投影，也不随着用户当前 Scratch Topic 改变。
 
 Task 写入策略必须是用户可配置的开关，默认值为“按风险确认”。明确且低风险的单项目请求可以直接创建，并在对话和 Board 中产生可追踪的 Task receipt；涉及跨项目路由、目标不明确、不可逆或高影响动作时，先展示来源与依据、候选 Project、风险和待确认项，不能静默写入。用户也可以切换为“全部确认”或“默认直接创建”，设置的改变必须持久化并在入口可见。
 
@@ -1294,7 +1294,7 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 
 Default Session 的打开动作呈现为当前工作面上的浮窗，交互参考成熟工作台的 floating workspace：有独立标题栏、拖动定位、最小化/关闭和明确焦点环。浮窗打开时保留用户正在看的 Agents、Session 或 Board 工作面，关闭后焦点回到打开前的控件；不能通过切换到 Scratch 主路由来冒充浮窗。
 
-浮窗内容就是唯一 `launcher:default` Topic 的原生 Tab、Region、Agent 身份、输出和 composer。它不创建第二个 Session、PTY 或聊天产品；浮窗只是同一 Topic 工作面的附着投影。Board、Agents 和 Session 中的入口都打开/聚焦同一个浮窗，不能各自维护一份默认会话。
+浮窗内容就是唯一 `launcher:leader` Topic 的原生 Tab、Region、Agent 身份、输出和 composer。它不创建第二个 Session、PTY 或聊天产品；浮窗只是同一 Topic 工作面的附着投影。Board、Agents 和 Session 中的入口都打开/聚焦同一个浮窗，不能各自维护一份 Leader Topic。
 
 浮窗的打开状态、位置和引用的 Topic 工作面属于持久 UI 状态。重启后先恢复浮窗和原有 Tab/Region，再尝试 reattach/resume；恢复握手、探测或浮窗渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。
 
