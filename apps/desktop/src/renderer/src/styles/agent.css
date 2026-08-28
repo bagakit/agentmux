@@ -75,7 +75,8 @@
   font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
 }
-.window-status-bar__surface-switch { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; }
+.window-status-bar__surface-switch { position: absolute; right: calc(50% + 26px); display: flex; align-items: center; }
+.window-status-bar__pmo-entry { position: absolute; left: 50%; display: flex; align-items: center; transform: translateX(-50%); }
 .agent-status-bar { display: flex; align-items: center; gap: var(--sp-5); flex: 1; min-width: 0; overflow: hidden; }
 .agent-status-bar__segment {
   display: inline-flex;
