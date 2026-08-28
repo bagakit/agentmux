@@ -241,6 +241,13 @@ describe('Topic 行的视觉收敛', () => {
     expect(topologySource).toContain('region.agent?.sessionId ?? region.agentSessionId')
     expect(topologySource).toContain('<TopicRegionMark region={region} />')
   })
+
+  it('uses the shared avatar-stack overlap while keeping each Tab above its neighbor on focus', () => {
+    expect(topologySource).toContain('style={{ zIndex: index + 1 }}')
+    expect(dockStyles).toContain('.topic-workbench-topology__tab-chip + .topic-workbench-topology__tab-chip')
+    expect(dockStyles).toContain('margin-left: calc(-1 * var(--sp-3))')
+    expect(dockStyles).toContain('z-index: 20 !important')
+  })
 })
 
 /**

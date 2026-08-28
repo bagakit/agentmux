@@ -177,7 +177,7 @@
   min-width: 0;
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -185,6 +185,7 @@
 .topic-workbench-topology__tab-rail::-webkit-scrollbar { display: none; }
 .topic-workbench-topology__tab-chip {
   flex: 0 0 auto;
+  position: relative;
   width: 24px;
   height: 24px;
   min-width: 0;
@@ -199,6 +200,9 @@
   font: 8px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   cursor: default;
+}
+.topic-workbench-topology__tab-chip + .topic-workbench-topology__tab-chip {
+  margin-left: calc(-1 * var(--sp-3));
 }
 .topic-workbench-topology__tab-glyph {
   position: relative;
@@ -243,6 +247,7 @@
 .topic-workbench-topology__tab-chip.inspected,
 .topic-workbench-topology__tab-chip:hover,
 .topic-workbench-topology__tab-chip:focus-visible {
+  z-index: 20 !important;
   border-color: var(--focus-line);
   color: var(--text);
   background: var(--surface-3);
