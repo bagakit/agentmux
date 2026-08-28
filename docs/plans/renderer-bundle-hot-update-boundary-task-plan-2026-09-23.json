@@ -1,0 +1,48 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/renderer-bundle-hot-update-boundary-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/renderer-bundle-hot-update-boundary-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "让安装后的 Renderer 优先使用同版本内置页面",
+      "objective": "防止旧 hot update 覆盖新安装包的 Renderer，同时保留同一内置版本内的热更新恢复。",
+      "outcome": "RendererUpdates 持久化 bundled release id；内置 id 变化或首次无 marker 时只清空 active 指针并加载 bundled index，布局和 Session durable 状态不受影响。",
+      "acceptance": [
+        "同一 bundled release 重启时，active hot update 仍被加载；bundled release id 变化时，旧 active 指针被清空并加载 bundled index.html。",
+        "Renderer 版本边界只影响 renderer-updates 指针，不删除或重建布局、Tab、Region、Session 或其它 durable 工作面状态。",
+        "启动选择、回退、active pointer 和 bundled marker 的任一关键接线被删改时，focused renderer-update test 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/renderer-update.test.ts --maxWorkers=1",
+          "proves": "Renderer update selection preserves same-bundle updates and invalidates stale active pointers."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Renderer update boundary compiles cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'new RendererUpdates|renderer-updates' apps/desktop/src/main/index.ts apps/desktop/src/main/renderer-updates.ts",
+          "proves": "The boundary is connected to production startup."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/main/renderer-updates.ts",
+        "apps/desktop/src/main/renderer-release.ts",
+        "apps/desktop/test/renderer-update.test.ts"
+      ],
+      "depends_on": []
+    }
+  ]
+}

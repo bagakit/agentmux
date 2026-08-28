@@ -6,6 +6,7 @@ import { validateRendererRelease, type RendererRelease } from './renderer-releas
 
 export type RendererPointer = { current: string | null; previous: string | null }
 function releaseId(value: unknown): value is string | null { return value === null || typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) }
+function bundledReleaseId(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) }
 
 /** Versioned presentation only. The host, IPC owners and Run clients never unload here. */
 export class RendererUpdates {
@@ -22,19 +23,29 @@ export class RendererUpdates {
   }) {}
 
   async initialize(): Promise<void> {
-    this.identity = (JSON.parse(await readFile(join(this.options.bundled, 'release.json'), 'utf8')) as RendererRelease).identity
+    const bundledRelease = JSON.parse(await readFile(join(this.options.bundled, 'release.json'), 'utf8')) as RendererRelease
+    if (!bundledReleaseId(bundledRelease.id)) throw new Error('Bundled Renderer release identity is invalid')
+    this.identity = bundledRelease.identity
     await mkdir(this.options.directory, { recursive: true })
     let pointer: RendererPointer = { current: null, previous: null }
+    const marker = await this.bundledMarker()
+    const bundledChanged = marker !== bundledRelease.id
     try {
       try { pointer = await this.pointer() }
       catch (error) {
         await this.options.load(await this.resolve(null))
         await this.publish(pointer)
+        await this.writeBundledMarker(bundledRelease.id)
         this.options.report(error)
         return
       }
+      if (bundledChanged) {
+        pointer = { current: null, previous: null }
+        await this.publish(pointer)
+      }
       await this.options.load(await this.resolve(pointer.current))
       this.current = pointer.current
+      await this.writeBundledMarker(bundledRelease.id)
       await this.recordOutcome(pointer.current).catch(this.options.report)
     } catch (error) {
       // A staged page can fail on cold start too. Recover before announcing readiness.
@@ -46,6 +57,7 @@ export class RendererUpdates {
       await this.options.load(file)
       this.current = restored
       await this.publish({ current: restored, previous: pointer.current })
+      await this.writeBundledMarker(bundledRelease.id)
       this.options.report(error)
     }
   }
@@ -69,6 +81,19 @@ export class RendererUpdates {
     })
     if (!releaseId(value.current) || !releaseId(value.previous)) throw new Error('Invalid renderer version pointer')
     return value
+  }
+  private async bundledMarker(): Promise<string | null> {
+    try {
+      const value = JSON.parse(await readFile(join(this.options.directory, 'bundled.json'), 'utf8'))
+      return bundledReleaseId(value?.id) ? value.id : null
+    } catch {
+      return null
+    }
+  }
+  private async writeBundledMarker(id: string): Promise<void> {
+    const temporary = join(this.options.directory, `.bundled-${randomUUID()}.json`)
+    await writeFile(temporary, JSON.stringify({ schema: 1, id }), { mode: 0o600 })
+    await rename(temporary, join(this.options.directory, 'bundled.json'))
   }
   private async resolve(id: string | null): Promise<string> {
     if (id === null) return join(this.options.bundled, 'index.html')

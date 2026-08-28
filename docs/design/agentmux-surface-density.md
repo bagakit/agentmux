@@ -927,3 +927,7 @@ Topic 行的 topology 收起态使用一个带 Tab rail、Region 分区和短文
 ### Topic topology Tab 缩略图的空间密度（2026-09-23）
 
 收起态的每枚 Tab 只占一个小方形缩略图槽位：单 Region 填满一个方格，多 Region 复用真实 bounds 形成紧凑网格；不在槽位中写 `Tn`、`nR` 或其它实现计数。缩略图之间用边界和细微的 surface 对比建立可读性，文字信息留给 hover/focus inspector。Inspector 采用较窄的内容宽度，标题和活动文本超长省略但保留完整 tooltip/无障碍名称，避免一个 Tab 的详情横向挤压 Topic 列表。
+
+### 安装后 Renderer 版本边界（2026-09-23）
+
+安装包启动时只能显示当前内置 Renderer 或同一内置版本下的有效热更新；上一安装包留下的热更新页面不能混入新包。版本边界失败时显示内置页面并保留工作面事实，不用空白或旧版 UI 占据首屏。

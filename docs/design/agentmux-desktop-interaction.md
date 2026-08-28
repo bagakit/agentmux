@@ -1461,3 +1461,7 @@ Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 
 ### Topic topology 的 Tab 缩略图语言（2026-09-23）
 
 Topic 行的 Tab 收起态使用真实布局缩略图表达工作面：只有一个 Region 时只画一个完整方格；有多个 Region 时按各自 bounds 画小型分栏网格。收起态不显示 `Tn`、`nR` 等内部计数标记，也不要求用户先理解实现编号；Tab 标题、Region 数量、Executor、surface 类型和最近活动在 hover 或键盘 focus 后的同一个 inspector 中可见。缩略图必须保持可点击/可聚焦，悬停详情不能被 Topic 列表或滚动容器裁切。
+
+### 安装后的 Renderer 选择（2026-09-23）
+
+安装新 App 或重启到新的内置 Renderer 后，启动必须先确认当前用户目录里的 hot update 是否属于同一份内置 Renderer。旧版本的 `active` 指针不能覆盖新安装包的界面；发现内置 Renderer 已变化时清空旧指针并使用新内置页面，同时保留布局、Tab、Region、Session 和其它 durable 工作面事实。热更新本身仍可在同一内置版本内恢复，失败时回退到该版本的内置页面并留下可诊断记录。
