@@ -1,8 +1,11 @@
 import type { TopicRegionCell } from '../lib/scratch-topic-layout'
-import { useId } from 'react'
-import { Layers3, PanelTop, SplitSquareVertical } from 'lucide-react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { PanelTop, SplitSquareVertical } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export type TopicRegionDetail = TopicRegionCell & {
   executorLabel: string
@@ -79,72 +82,130 @@ function RegionLayout({
 }
 
 /**
- * A compact workbench preview is the first visual answer to "what is open in this Topic?".
- * The same anchor owns the hover/focus inspector, so Tab/Region/Executor facts never become
- * three unrelated icon clusters in a selector row.
+ * A horizontal Tab strip is the first visual answer to "what is open in this Topic?".
+ * Each Tab owns the hover/focus inspector for its own Region layout and recent activity.
  */
 export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail[] }) {
   const popoverId = useId()
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const inspectorRef = useRef<HTMLSpanElement>(null)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [inspectorPosition, setInspectorPosition] = useState<{ left: number; top: number } | null>(null)
   const active = tabs.find((tab) => tab.active) ?? tabs[0]
-  const regionCount = tabs.reduce((total, tab) => total + tab.regions.length, 0)
-  const tabLabel = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}`
-  const regionLabel = `${regionCount} ${regionCount === 1 ? 'Region' : 'Regions'}`
-  const label = `${tabLabel}, ${regionLabel}. Hover or focus to inspect the Topic workbench.`
+  const [inspectedTabId, setInspectedTabId] = useState(active?.tabId ?? '')
+  const inspected = tabs.find((tab) => tab.tabId === inspectedTabId) ?? active
+  const inspectedIndex = inspected ? tabs.findIndex((tab) => tab.tabId === inspected.tabId) : -1
+  const label = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}. Hover or focus a Tab to inspect its Regions and recent activity.`
+  const portalHost = typeof document === 'undefined' ? null : document.body
+  const inspectorInPortal = inspectorOpen && portalHost !== null
+
+  const inspectTab = (tabId: string) => {
+    setInspectedTabId(tabId)
+    setInspectorOpen(true)
+  }
+
+  useIsomorphicLayoutEffect(() => {
+    if (!inspectorInPortal) {
+      setInspectorPosition(null)
+      return
+    }
+    const anchor = anchorRef.current
+    const inspector = inspectorRef.current
+    if (!anchor || !inspector) return
+    const viewportGap = 8
+    const updatePosition = () => {
+      const anchorBounds = anchor.getBoundingClientRect()
+      const inspectorBounds = inspector.getBoundingClientRect()
+      const maxLeft = Math.max(viewportGap, window.innerWidth - inspectorBounds.width - viewportGap)
+      const left = Math.min(Math.max(viewportGap, anchorBounds.right - inspectorBounds.width), maxLeft)
+      const aboveTop = anchorBounds.top - inspectorBounds.height - viewportGap
+      const belowTop = anchorBounds.bottom + viewportGap
+      const fitsAbove = aboveTop >= viewportGap
+      const fitsBelow = belowTop + inspectorBounds.height <= window.innerHeight - viewportGap
+      const top = fitsAbove
+        ? aboveTop
+        : fitsBelow
+          ? belowTop
+          : Math.max(viewportGap, Math.min(belowTop, window.innerHeight - inspectorBounds.height - viewportGap))
+      setInspectorPosition({ left, top })
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [inspectedTabId, inspectorInPortal])
+
+  const inspectorClassName = `topic-workbench-topology__inspector${inspectorInPortal ? ' topic-workbench-topology__inspector--portal' : ''}`
+  const inspector = (
+    <span
+      ref={inspectorRef}
+      id={popoverId}
+      className={inspectorClassName}
+      role="tooltip"
+      style={inspectorInPortal
+        ? {
+            left: inspectorPosition?.left ?? 0,
+            top: inspectorPosition?.top ?? 0,
+            visibility: inspectorPosition ? 'visible' : 'hidden'
+          }
+        : undefined}
+    >
+      <span className="topic-workbench-topology__inspector-head">
+        <span><PanelTop size={13} /><strong>{inspected?.title ?? 'Topic workbench'}</strong></span>
+        {inspected ? <em>T{inspectedIndex + 1} · {inspected.regions.length} {inspected.regions.length === 1 ? 'Region' : 'Regions'}</em> : null}
+      </span>
+      {inspected ? <>
+        <RegionLayout regions={inspected.regions} className="topic-workbench-topology__inspector-regions" />
+        <span className="topic-workbench-topology__activity">
+          {inspected.regions.map((region) => (
+            <span className="topic-workbench-topology__activity-item" key={`${inspected.tabId}:${region.regionId}`}>
+              <span><SplitSquareVertical size={10} /><strong>{region.executorLabel}</strong></span>
+              <small>{region.activity}</small>
+            </span>
+          ))}
+        </span>
+      </> : null}
+    </span>
+  )
+
   return (
     <span
+      ref={anchorRef}
       className="topic-workbench-topology"
       tabIndex={0}
       role="group"
       aria-label={label}
       aria-describedby={popoverId}
       title={label}
+      onMouseEnter={() => setInspectorOpen(true)}
+      onMouseLeave={() => setInspectorOpen(false)}
+      onFocus={() => setInspectorOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInspectorOpen(false)
+      }}
     >
-      <span className="topic-workbench-topology__preview" aria-hidden="true">
-        <span className="topic-workbench-topology__tab-rail">
-          {tabs.slice(0, 3).map((tab, index) => (
-            <span className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}`} key={tab.tabId}>
-              <PanelTop size={9} />
-              <b>T{index + 1}</b>
-            </span>
-          ))}
-          {tabs.length > 3 ? <span className="topic-workbench-topology__tab-more">+{tabs.length - 3}</span> : null}
-        </span>
-        {active ? <RegionLayout regions={active.regions} className="topic-workbench-topology__regions" /> : null}
+      <span className="topic-workbench-topology__tab-rail" role="list" aria-label="Topic Tabs">
+        {tabs.map((tab, index) => (
+          <span
+            className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}${tab.tabId === inspected?.tabId ? ' inspected' : ''}`}
+            key={tab.tabId}
+            role="listitem"
+            tabIndex={0}
+            aria-label={`T${index + 1}: ${tab.title}, ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
+            title={`${tab.title} · ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
+            onMouseEnter={() => inspectTab(tab.tabId)}
+            onFocus={() => inspectTab(tab.tabId)}
+          >
+            <PanelTop size={9} />
+            <b>T{index + 1}</b>
+            <small>{tab.regions.length}R</small>
+          </span>
+        ))}
       </span>
-      <span className="topic-workbench-topology__counts">
-        <Layers3 size={11} aria-hidden="true" />
-        <strong>{tabs.length}</strong><span>tabs</span>
-        <i aria-hidden="true">·</i>
-        <strong>{regionCount}</strong><span>regions</span>
-      </span>
-      <span id={popoverId} className="topic-workbench-topology__inspector" role="tooltip">
-        <span className="topic-workbench-topology__inspector-head">
-          <span><Layers3 size={13} /><strong>Topic workbench</strong></span>
-          <em>{tabLabel} · {regionLabel}</em>
-        </span>
-        <span className="topic-workbench-topology__tabs">
-          {tabs.map((tab, index) => (
-            <span className={`topic-workbench-topology__tab${tab.active ? ' active' : ''}`} key={tab.tabId}>
-              <span className="topic-workbench-topology__tab-head">
-                <span className="topic-workbench-topology__tab-index">T{index + 1}</span>
-                <PanelTop size={11} />
-                <strong title={tab.title}>{tab.title}</strong>
-                {tab.active ? <em>Active</em> : null}
-                <small>{tab.regions.length} {tab.regions.length === 1 ? 'Region' : 'Regions'}</small>
-              </span>
-              <RegionLayout regions={tab.regions} className="topic-workbench-topology__inspector-regions" />
-              <span className="topic-workbench-topology__activity">
-                {tab.regions.map((region) => (
-                  <span className="topic-workbench-topology__activity-item" key={`${tab.tabId}:${region.regionId}`}>
-                    <span><SplitSquareVertical size={10} /><strong>{region.executorLabel}</strong></span>
-                    <small>{region.activity}</small>
-                  </span>
-                ))}
-              </span>
-            </span>
-          ))}
-        </span>
-      </span>
+      {inspectorInPortal ? createPortal(inspector, portalHost) : inspector}
     </span>
   )
 }
