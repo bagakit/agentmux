@@ -1457,3 +1457,7 @@ Topic 行默认横向列出所有 Tab，每个 Tab 使用短标签和 Region 数
 ### Topic Workbench topology 的可读层级（2026-09-23）
 
 Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 Tab 的 Region 布局、Region 内的 Executor 与最近活动。收起态使用一个带 Tab rail 和 Region 分区的 mini workbench preview，让用户第一眼看到真实工作面；Tab 数字和短标签负责解释图形，不用没有标签的分屏小方块和头像簇让用户猜层级。hover 或键盘 focus 后展开同一个 topology inspector，按 Tab 分组展示所有真实 Region 几何、Executor、surface 类型和最近活动；当前 Tab 展开更详细，其他 Tab 保留紧凑布局预览。未挂载的后台 Agent 可以保留独立身份入口，但不能与 Tab/Region 摘要混成一串图标。
+
+### Topic topology 的 Tab 缩略图语言（2026-09-23）
+
+Topic 行的 Tab 收起态使用真实布局缩略图表达工作面：只有一个 Region 时只画一个完整方格；有多个 Region 时按各自 bounds 画小型分栏网格。收起态不显示 `Tn`、`nR` 等内部计数标记，也不要求用户先理解实现编号；Tab 标题、Region 数量、Executor、surface 类型和最近活动在 hover 或键盘 focus 后的同一个 inspector 中可见。缩略图必须保持可点击/可聚焦，悬停详情不能被 Topic 列表或滚动容器裁切。

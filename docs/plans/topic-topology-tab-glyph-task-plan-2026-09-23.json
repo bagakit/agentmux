@@ -1,0 +1,50 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-topology-tab-glyph-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-topology-tab-glyph-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "用真实布局缩略图替换 Tab 文字计数并收窄 inspector",
+      "objective": "让 Topic 收起态直接表达单 Region 与多 Region 的真实布局，并把详细事实留在可见、可操作的 hover/focus inspector。",
+      "outcome": "每枚 Tab chip 使用可复用的方形缩略图；单 Region 为一个完整方格，多 Region 按 bounds 组成小网格；collapsed chip 不再显示 Tn/nR；inspector 变窄且保留完整详情。",
+      "acceptance": [
+        "TopicPresence 的收起态不渲染 Tn、nR 等实现计数文字，每枚 Tab 都渲染一个可访问的视觉缩略图；单 Region 只有一个完整 cell，多 Region 的 cell 使用真实归一化 bounds。",
+        "hover 和键盘 focus 仍能打开对应 Tab 的 inspector，inspector 继续通过 viewport portal 定位并展示标题、真实 Region 几何、Executor 和最近活动，宽度收敛到窄内容表面。",
+        "Topic 行点击、openTopicWorkSurfaces 数据来源、Tab 顺序、active 状态和后台 Agent SelectorPresence 不变。",
+        "删除缩略图组件接线、真实 bounds 样式、collapsed label 移除或 inspector 收窄中的任一项时，focused component test 或 source contract 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/topic-region-mosaic.test.tsx test/selector-presence-shape.test.ts --maxWorkers=1",
+          "proves": "Tab thumbnail rendering, portal inspector content and shared Agent presence."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Topology component and styles compile and have no whitespace errors."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence|TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "The reusable topology component remains connected from the Topic product surface."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css",
+        "apps/desktop/test/topic-agent-status.test.ts"
+      ],
+      "depends_on": []
+    }
+  ]
+}

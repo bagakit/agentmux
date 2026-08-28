@@ -48,6 +48,38 @@ function surfaceLabel(kind: TopicRegionDetail['surfaceKind']): string {
   }
 }
 
+/**
+ * A Tab's collapsed preview is a miniature of its actual workbench. One
+ * Region gets a single quiet tile; split Tabs retain each Region's bounds so
+ * the shape can be read before opening the inspector.
+ */
+function TopicTabGlyph({ tab }: { tab: TopicTabDetail }) {
+  const singleRegion = tab.regions.length === 1
+  return (
+    <span
+      className={`topic-workbench-topology__tab-glyph${singleRegion ? ' topic-workbench-topology__tab-glyph--single' : ''}`}
+      data-region-count={tab.regions.length}
+      aria-hidden="true"
+    >
+      {tab.regions.map((region) => (
+        <span
+          className="topic-workbench-topology__tab-glyph__cell"
+          data-region-kind={region.surfaceKind}
+          key={region.regionId}
+          style={singleRegion
+            ? { left: '0%', top: '0%', width: '100%', height: '100%' }
+            : {
+                left: `${region.bounds.x * 100}%`,
+                top: `${region.bounds.y * 100}%`,
+                width: `${region.bounds.width * 100}%`,
+                height: `${region.bounds.height * 100}%`
+              }}
+        />
+      ))}
+    </span>
+  )
+}
+
 function RegionLayout({
   regions,
   className
@@ -199,9 +231,7 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
             onMouseEnter={() => inspectTab(tab.tabId)}
             onFocus={() => inspectTab(tab.tabId)}
           >
-            <PanelTop size={9} />
-            <b>T{index + 1}</b>
-            <small>{tab.regions.length}R</small>
+            <TopicTabGlyph tab={tab} />
           </span>
         ))}
       </span>

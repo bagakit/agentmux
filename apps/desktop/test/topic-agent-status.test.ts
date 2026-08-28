@@ -93,6 +93,10 @@ describe('Topic 行的视觉收敛', () => {
     new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
     'utf8'
   )
+  const dockStyles = readFileSync(
+    new URL('../src/renderer/src/styles/dock.css', import.meta.url),
+    'utf8'
+  )
   it('不再同时给出计数和逐个全名——两者说的是同一件事', () => {
     // `2 agents` 与其下一排「图标＋全名」胶囊重复，且把一行撑成四层。
     expect(source).not.toContain("'agent' : 'agents'")
@@ -155,10 +159,11 @@ describe('Topic 行的视觉收敛', () => {
     }))
     expect(html).toContain('class="topic-workbench-topology__inspector"')
     expect(html).toContain('aria-label="2 Tabs. Hover or focus a Tab')
-    expect(html).toContain('T1')
-    expect(html).toContain('T2')
-    expect(html).toContain('<small>2R</small>')
-    expect(html).toContain('<small>1R</small>')
+    expect(html).toContain('topic-workbench-topology__tab-glyph')
+    expect(html).toContain('data-region-count="2"')
+    expect(html).toContain('data-region-count="1"')
+    expect(html).not.toContain('<b>T1</b>')
+    expect(html).not.toContain('<small>2R</small>')
     expect(html).toContain('Review runtime')
     expect(html).toContain('Codex')
     expect(html).toContain('Editing store.ts')
@@ -184,6 +189,15 @@ describe('Topic 行的视觉收敛', () => {
     expect(topologySource).toContain('onMouseEnter={() => inspectTab(tab.tabId)}')
     expect(topologySource).toContain('inspectTab(tab.tabId)')
     expect(topologySource).toContain('inspected.regions.map')
+  })
+
+  it('收起态用可复用的真实 bounds 缩略图，详情浮层保持窄宽度', () => {
+    expect(topologySource).toContain('function TopicTabGlyph')
+    expect(topologySource).toContain('data-region-count={tab.regions.length}')
+    expect(topologySource).toContain('region.bounds.x * 100')
+    expect(topologySource).toContain('<TopicTabGlyph tab={tab} />')
+    expect(dockStyles).toContain('.topic-workbench-topology__tab-glyph')
+    expect(dockStyles).toContain('width: 280px;')
   })
 })
 

@@ -923,3 +923,7 @@ Topic 行的 topology 收起态使用一个带 Tab rail、Region 分区和短文
 ### Topic topology 计数与浮层的空间密度（2026-09-23）
 
 收起态使用横向 Tab strip 列出全部 Tab；每枚 Tab 只显示短标签和紧凑 Region 数，当前项用边界和字形建立层级，不再重复放总计数。Tab strip 在窄宽度下水平滚动但不隐藏 Tab 事实。Inspector 使用顶层 viewport 浮层的密度和边界，展示当前 hover/focus Tab 的完整 Region 几何、Executor 和最近活动；它可以在锚点上方或下方翻转，不能被列表滚动区域裁切，也不能因为靠近面板顶部而只露出一条残片。
+
+### Topic topology Tab 缩略图的空间密度（2026-09-23）
+
+收起态的每枚 Tab 只占一个小方形缩略图槽位：单 Region 填满一个方格，多 Region 复用真实 bounds 形成紧凑网格；不在槽位中写 `Tn`、`nR` 或其它实现计数。缩略图之间用边界和细微的 surface 对比建立可读性，文字信息留给 hover/focus inspector。Inspector 采用较窄的内容宽度，标题和活动文本超长省略但保留完整 tooltip/无障碍名称，避免一个 Tab 的详情横向挤压 Topic 列表。
