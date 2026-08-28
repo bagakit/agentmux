@@ -17,10 +17,21 @@
 .pmo-teams-topic-compact-launcher__button:hover { background: var(--surface-2); }
 .pmo-teams-topic-compact-launcher__button:focus-visible { outline: 2px solid var(--green-2); outline-offset: 2px; }
 .pmo-teams-topic-compact-launcher__button img { position: relative; z-index: 1; width: 30px; height: 28px; border-radius: 5px; object-fit: contain; }
-.pmo-teams-topic-compact-launcher__button[aria-expanded='true']::before { content: ''; position: absolute; z-index: 2; top: 7px; left: 4px; width: 26px; height: 14px; pointer-events: none; background: radial-gradient(circle at 28% 56%, color-mix(in srgb, white 86%, var(--green)) 0 1px, transparent 2px), radial-gradient(circle at 72% 56%, color-mix(in srgb, white 86%, var(--green)) 0 1px, transparent 2px), radial-gradient(circle at 18% 20%, var(--green) 0 1px, transparent 2px), radial-gradient(circle at 82% 82%, var(--green) 0 1px, transparent 2px); opacity: .9; animation: pmo-teams-topic-eye-particles 1.8s ease-in-out infinite; }
-.pmo-teams-topic-compact-launcher__button[aria-expanded='true']::after { content: ''; position: absolute; z-index: 2; top: 12px; left: 6px; width: 22px; height: 1px; pointer-events: none; background: color-mix(in srgb, var(--green) 76%, transparent); opacity: .55; animation: pmo-teams-topic-eye-scan 1.2s ease-in-out infinite; }
+.pmo-teams-topic-compact-launcher__fireworks { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.pmo-teams-topic-compact-launcher__firework { position: absolute; top: 14px; width: 2px; height: 2px; }
+.pmo-teams-topic-compact-launcher__firework--left { left: 10px; }
+.pmo-teams-topic-compact-launcher__firework--right { right: 10px; }
+.pmo-teams-topic-compact-launcher__firework i { position: absolute; display: block; width: 2px; height: 2px; border-radius: 50%; background: color-mix(in srgb, white 86%, var(--green)); box-shadow: 0 0 4px color-mix(in srgb, var(--green) 80%, transparent); opacity: 0; animation-duration: 2.8s; animation-timing-function: cubic-bezier(.16, .8, .32, 1); animation-iteration-count: infinite; }
+.pmo-teams-topic-compact-launcher__firework--left i { animation-name: pmo-teams-topic-firework-left; }
+.pmo-teams-topic-compact-launcher__firework--right i { animation-name: pmo-teams-topic-firework-right; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(1) { --dx: -5px; --dy: -5px; animation-delay: 0ms; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(2) { --dx: -2px; --dy: -7px; animation-delay: 28ms; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(3) { --dx: 3px; --dy: -6px; animation-delay: 48ms; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(4) { --dx: 6px; --dy: -1px; animation-delay: 72ms; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(5) { --dx: 4px; --dy: 4px; animation-delay: 94ms; }
+.pmo-teams-topic-compact-launcher__firework i:nth-child(6) { --dx: -2px; --dy: 5px; animation-delay: 116ms; }
 .pmo-teams-topic-compact-launcher__attention { position: absolute; z-index: 3; top: 1px; right: 1px; width: 5px; height: 5px; border: 1px solid var(--surface-2); border-radius: 50%; background: var(--green); }
 @keyframes pmo-teams-topic-signal { 0% { opacity: 0; background-position: 0 -24px; } 35% { opacity: .8; } 100% { opacity: 0; background-position: 0 24px; } }
-@keyframes pmo-teams-topic-eye-particles { 0%, 100% { opacity: .45; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } }
-@keyframes pmo-teams-topic-eye-scan { 0%, 100% { transform: scaleX(.55); opacity: .25; } 50% { transform: scaleX(1); opacity: .75; } }
-@media (prefers-reduced-motion: reduce) { .pmo-teams-topic-floating--opening::after, .pmo-teams-topic-compact-launcher__button[aria-expanded='true']::before, .pmo-teams-topic-compact-launcher__button[aria-expanded='true']::after { animation: none; } }
+@keyframes pmo-teams-topic-firework-left { 0%, 8% { opacity: 0; transform: translate(0, 0) scale(.35); } 18% { opacity: .95; transform: translate(0, 0) scale(1.1); } 65% { opacity: .55; transform: translate(var(--dx), var(--dy)) scale(.9); } 100% { opacity: 0; transform: translate(calc(var(--dx) * 1.35), calc(var(--dy) * 1.35)) scale(.35); } }
+@keyframes pmo-teams-topic-firework-right { 0%, 14% { opacity: 0; transform: translate(0, 0) scale(.35); } 24% { opacity: .95; transform: translate(0, 0) scale(1.1); } 71% { opacity: .55; transform: translate(calc(var(--dx) * -1), var(--dy)) scale(.9); } 100% { opacity: 0; transform: translate(calc(var(--dx) * -1.35), calc(var(--dy) * 1.35)) scale(.35); } }
+@media (prefers-reduced-motion: reduce) { .pmo-teams-topic-floating--opening::after, .pmo-teams-topic-compact-launcher__firework i { animation: none; opacity: 0; } }
