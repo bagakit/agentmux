@@ -63,16 +63,17 @@ function formatDemandDate(value: number | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
 }
 
-function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; onSelect: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
+function DemandCard({ demand, selected, sessionContext, onSelect, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; sessionContext?: string; onSelect: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
   const status = STATUS_META[demand.status]
   const Icon = status.icon
   return (
     <div
       role="button"
       tabIndex={0}
-      className={`global-demand-card ${selected ? 'global-demand-card--selected' : ''}`}
+      className={`global-demand-card ${selected ? 'global-demand-card--selected' : ''}${sessionContext ? ' global-demand-card--session-context' : ''}`}
       data-demand-id={demand.id}
       data-demand-status={demand.status}
+      {...(sessionContext ? { 'data-session-context': sessionContext } : {})}
       aria-pressed={selected}
       onClick={onSelect}
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
@@ -88,6 +89,7 @@ function DemandCard({ demand, selected, onSelect, sessions, tabs, config }: { de
         <span>{demand.projectName ?? 'Unassigned project'}</span>
         <span>{demand.sessions.length} Session{demand.sessions.length === 1 ? '' : 's'}</span>
       </span>
+      {sessionContext ? <span className="global-demand-card__session-context">Current Session · {sessionContext.slice(0, 8)}</span> : null}
       {demand.tags?.length || demand.plannedStartAt || demand.targetAt || demand.phaseIndex !== null && demand.phaseIndex !== undefined ? (
         <span className="global-demand-card__metadata" aria-label="Demand metadata">
           {demand.tags?.slice(0, 3).map((tag) => <span className="global-demand-card__tag" key={tag}>{tag}</span>)}
@@ -204,6 +206,7 @@ export function GlobalBoardSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
+  const selectedSessionId = useAppStore((state) => state.selectedAgentSessionId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const createDemand = useAppStore((state) => state.createDemand)
   const demandArrangement = useAppStore((state) => state.demandArrangement)
@@ -226,6 +229,9 @@ export function GlobalBoardSurface() {
   }), [executorFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
+  const selectedSessionDemand = selectedSessionId
+    ? projectedDemands.find((demand) => demand.sessionIds.includes(selectedSessionId)) ?? null
+    : null
   const projects = useMemo(() => (config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => [workspace.id, workspace.name] as [string, string]), [config?.workspaces])
 
   useEffect(() => {
@@ -271,7 +277,7 @@ export function GlobalBoardSurface() {
               <section className="global-board-column" key={status} data-status={status}>
                 <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} demand`} aria-label={`Add ${meta.label} demand`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
                 <div className="global-board-column__cards">
-                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} onSelect={() => setSelectedDemand(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
+                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} {...(demand.id === selectedSessionDemand?.id && selectedSessionId ? { sessionContext: selectedSessionId } : {})} onSelect={() => setSelectedDemand(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
                   {columns[status].length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}
                 </div>
               </section>

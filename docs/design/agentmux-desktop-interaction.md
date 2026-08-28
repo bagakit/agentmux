@@ -1477,3 +1477,13 @@ Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Regio
 ### 安装后的 Renderer 选择（2026-09-23）
 
 安装新 App 或重启到新的内置 Renderer 后，启动必须先确认当前用户目录里的 hot update 是否属于同一份内置 Renderer。旧版本的 `active` 指针不能覆盖新安装包的界面；发现内置 Renderer 已变化时清空旧指针并使用新内置页面，同时保留布局、Tab、Region、Session 和其它 durable 工作面事实。热更新本身仍可在同一内置版本内恢复，失败时回退到该版本的内置页面并留下可诊断记录。
+
+### 跨主视图的 Session 上下文连续性（2026-09-24）
+
+用户打开或选中的 Session 是 Agents、Workspaces、Board 之间共享的导航上下文。切换到 Workspaces 时，必须显示这个 Session 已有的 Workspace、Tab 和 Region；切换到 Agents 时，继续选中同一个 Session 的观察工作区；切换到 Board 时，保留同一 Session 对应的执行行或卡片选中与可见定位。切换只改变主视图投影，不创建第二个 Session、Run 或 Region，也不改变 Agent 的工作目录。
+
+如果 Session 已经结束、恢复中或暂时不可定位，切换不能清空当前工作面，也不能猜测一个新 Session；沿用现有服务窗和恢复事实说明当前状态。重新打开或从任意表面点击同一 Session，必须回到同一身份上下文。
+
+### Agent Input 的可用宽度（2026-09-24）
+
+Agent Input 的编辑区是这一行的主要内容，单行姿态下应优先获得剩余宽度。左右工具和发送、邮箱、身份控件保留稳定命中区，但不能用固定宽度把中间文字压成窄列；长文本在编辑区自然换行。Agent 名称、Executor 和 Session 信息留在上方身份 rail，不能为了给编辑区让路而重复塞进正文行.

@@ -939,3 +939,9 @@ Topic 行的 topology 收起态是一排紧凑 Tab 图标位；每枚只表达�
 ### 安装后 Renderer 版本边界（2026-09-23）
 
 安装包启动时只能显示当前内置 Renderer 或同一内置版本下的有效热更新；上一安装包留下的热更新页面不能混入新包。版本边界失败时显示内置页面并保留工作面事实，不用空白或旧版 UI 占据首屏。
+
+### 跨视图 Session 定位与 Agent Input 宽度（2026-09-24）
+
+Agents、Workspaces、Board 共用一个选中 Session 上下文。切换器只换主表面投影；Workspaces 展开已有 Region，Agents 保留右侧观察面，Board 高亮对应执行事实。不要为跨视图连续性新增重复卡片、隐藏 Session 或第二套选中状态。
+
+Agent Input 的 collapsed composer 采用“左右有界控件 + 中间弹性编辑区”的密度：编辑区占据全部剩余宽度，工具和会话动作只占自身命中区。长消息可以换行，身份 rail 单独承担 Agent 名称、Executor 和 Session 摘要；不能用固定中间列、居中窄框或重复身份文字降低可输入面积.

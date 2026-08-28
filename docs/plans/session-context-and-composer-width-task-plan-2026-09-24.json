@@ -1,0 +1,84 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/session-context-and-composer-width-2026-09-24.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/session-context-and-composer-width-2026-09-24.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Preserve selected Session across Agents, Workspaces, and Board",
+      "objective": "Keep one selected Session as the navigation context when the user changes the main surface.",
+      "outcome": "Agents selection, Workspaces projection, and Board execution row stay aligned to the same Session.",
+      "acceptance": [
+        "Selecting or opening a Session records the selected Session identity without changing its Runtime or creating duplicate Regions.",
+        "Switching to Workspaces reveals the selected Session's existing workbench location; switching to Agents preserves its selected detail; switching to Board marks and reveals the corresponding execution row when present.",
+        "Unknown or retired Session identities do not clear the current surface and continue using the existing recoverable notice path.",
+        "Removing the cross-surface navigation contract makes the focused tests red, and production callers remain present."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-context-navigation.test.ts test/global-agents-surface.test.ts --maxWorkers=1",
+          "proves": "Session selection and cross-surface navigation behavior."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Store and surface changes compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'setMainSurface|selectedAgentSessionId' apps/desktop/src/renderer/src/store.ts | head -1)\"",
+          "proves": "The navigation context remains connected to the product store."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/components/TopRowChrome.tsx",
+        "apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx",
+        "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "Give Agent Input text the available composer width",
+      "objective": "Make the one-line Agent Input editor use the available middle space instead of being squeezed by controls.",
+      "outcome": "Long input wraps across the composer width while tool and session controls retain stable hit targets.",
+      "acceptance": [
+        "Collapsed composer layout uses a flexible editor track with bounded control tracks; no fixed narrow middle column is introduced.",
+        "Long drafts wrap in the editor and the existing rail identity, send, mailbox, and view controls remain accessible.",
+        "Removing the flexible-width contract makes the focused style test red."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-composer.test.tsx --maxWorkers=1",
+          "proves": "Agent Input markup and style contract."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Composer changes compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n 'composer__editor' apps/desktop/src/renderer/src/components/InlineComposer.tsx | head -1)\"",
+          "proves": "The reusable editor remains connected to Agent Input."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/styles/composer.css",
+        "apps/desktop/src/renderer/src/components/AgentComposer.tsx",
+        "apps/desktop/src/renderer/src/components/InlineComposer.tsx"
+      ],
+      "depends_on": []
+    }
+  ]
+}

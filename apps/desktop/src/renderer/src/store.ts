@@ -3085,6 +3085,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
+      selectedAgentSessionId: id,
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
@@ -3530,6 +3531,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
+    const selectedSessionId = get().selectedAgentSessionId
+    const selectedSession = selectedSessionId
+      ? get().sessions.find((session) => session.id === selectedSessionId)
+      : undefined
+    if (mainSurface === 'workbench' && selectedSession) {
+      // The selected Session is the cross-surface navigation context. Reuse the existing
+      // selectSession path so Workspaces activates its durable Tab/Region instead of creating
+      // a second projection or losing the user's place.
+      set({ mainSurface })
+      get().selectSession(selectedSession.id)
+      return
+    }
+    if (mainSurface === 'board' && selectedSessionId) {
+      const linkedDemand = Object.values(get().demands).find((demand) => demand.sessionIds.includes(selectedSessionId))
+      set({ mainSurface, selectedDemandId: linkedDemand?.id ?? null })
+      return
+    }
     set({ mainSurface })
   },
   setSelectedAgentSession(id) {
