@@ -57,6 +57,16 @@ export function PmoTeamsTopicEntry({
         aria-controls="pmo-teams-topic-floating-panel"
       >
         <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" draggable={false} />
+        {floating.open ? (
+          <span className="pmo-teams-topic-compact-launcher__fireworks" aria-hidden="true">
+            <span className="pmo-teams-topic-compact-launcher__firework pmo-teams-topic-compact-launcher__firework--left">
+              {Array.from({ length: 6 }, (_, index) => <i key={index} data-particle={index} />)}
+            </span>
+            <span className="pmo-teams-topic-compact-launcher__firework pmo-teams-topic-compact-launcher__firework--right">
+              {Array.from({ length: 6 }, (_, index) => <i key={index} data-particle={index} />)}
+            </span>
+          </span>
+        ) : null}
         {needsAttention ? <span className={`${className}__attention`} aria-hidden="true" /> : null}
       </button>
     </div>
