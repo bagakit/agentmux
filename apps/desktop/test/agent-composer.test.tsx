@@ -365,13 +365,20 @@ describe('AgentComposer reusable surface', () => {
   })
 
   it('uses a transparent surface without a black drop shadow', () => {
-    const baseRule = styles.match(/\.composer \{([^}]*)\}/)?.[1]
+    const baseRule = styles.match(/(?:^|\n)\.composer \{([^}]*)\}/)?.[1]
     const focusRule = styles.match(/\.composer:focus-within \{([^}]*)\}/)?.[1]
 
     expect(baseRule).toContain('background: var(--surface-1)')
     expect(baseRule).toContain('box-shadow: none')
     expect(focusRule).toContain('box-shadow: var(--focus-ring)')
     expect(focusRule).not.toMatch(/#[0-9a-f]+/i)
+  })
+
+  it('gives the collapsed Agent Input editor the flexible middle track', () => {
+    const collapsedRule = allStyleRules().match(/\.composer:has\(\.composer-tools\[data-mode='collapsed'\]\) \{([^}]*)\}/)?.[1]
+    expect(collapsedRule, 'collapsed composer rule is missing').toBeDefined()
+    expect(collapsedRule).toContain('grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content')
+    expect(collapsedRule).not.toContain('grid-template-columns: auto minmax(0, 1fr) auto')
   })
 
   // -------------------------------------------------------------------------
