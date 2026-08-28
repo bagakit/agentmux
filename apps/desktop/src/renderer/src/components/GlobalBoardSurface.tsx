@@ -244,7 +244,6 @@ export function GlobalBoardSurface() {
     })
     const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
     requestPmoTeamsTopicFloatingOpen({
-      anchor: 'floating',
       prompt: `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
     })
   }

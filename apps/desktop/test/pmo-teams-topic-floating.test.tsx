@@ -14,7 +14,7 @@ function Harness() {
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
     createElement('div', { id: 'floating-panel', 'data-pmo-teams-topic-floating': true, tabIndex: -1 }),
-    createElement('output', { 'data-open': String(state.open), 'data-placement': state.launcherPlacement, 'data-anchor': state.openAnchor ?? '' })
+    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top) })
   )
 }
 
@@ -43,13 +43,10 @@ describe('PMO teams topic floating workspace state', () => {
       open: true,
       maximized: false,
       position: { left: 880, top: 680 },
-      size: { width: 900, height: 700 },
-      launcherPlacement: 'floating',
-      launcherPosition: { left: 880, top: 680 }
+      size: { width: 900, height: 700 }
     })
     expect(next.size).toEqual({ width: 868, height: 652 })
     expect(next.position).toEqual({ left: 16, top: 32 })
-    expect(next.launcherPosition).toEqual({ left: 848, top: 648 })
   })
 
   it('persists placement and open state, and returns focus to the launcher after close', async () => {
@@ -59,8 +56,6 @@ describe('PMO teams topic floating workspace state', () => {
     await act(async () => requestPmoTeamsTopicFloatingOpen())
     expect(container.querySelector('output')?.dataset.open).toBe('true')
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":true')
-    await act(async () => window.dispatchEvent(new CustomEvent('agentmux:pmo-teams-topic-floating', { detail: { launcherPlacement: 'compact' } })))
-    expect(container.querySelector('output')?.dataset.placement).toBe('compact')
     trigger.focus()
     await act(async () => requestPmoTeamsTopicFloatingOpen())
     expect(document.activeElement).toBe(container.querySelector('#floating-panel'))
@@ -71,10 +66,11 @@ describe('PMO teams topic floating workspace state', () => {
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
   })
 
-  it('carries the compact launcher anchor with the open request', async () => {
+  it('opens at the persisted position instead of recalculating from the bottom entry', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, position: { left: 212, top: 148 }, size: { width: 720, height: 520 } }))
     await act(async () => root.render(createElement(Harness)))
-    await act(async () => requestPmoTeamsTopicFloatingOpen({ anchor: 'compact' }))
-    expect(container.querySelector('output')?.dataset.anchor).toBe('compact')
-    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"openAnchor":"compact"')
+    await act(async () => requestPmoTeamsTopicFloatingOpen())
+    expect(container.querySelector('output')?.dataset.left).toBe('212')
+    expect(container.querySelector('output')?.dataset.top).toBe('148')
   })
 })

@@ -10,10 +10,7 @@ import {
 import { topicIdForSession } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
-import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
-
 const DRAG_THRESHOLD = 3
-const ATTACHED_LAUNCHER_OFFSET = { left: 12, top: 4 }
 
 export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
@@ -26,12 +23,9 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const reportError = useAppStore((state) => state.reportError)
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const [dragging, setDragging] = useState(false)
-  const [launcherDragging, setLauncherDragging] = useState(false)
   const [opening, setOpening] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const panelDragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
-  const launcherDragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
-  const suppressLauncherClickRef = useRef(false)
   const deliveredPromptRef = useRef<string | null>(null)
   const conversationInitializedRef = useRef<string | null>(null)
   const wasOpenRef = useRef(false)
@@ -59,19 +53,6 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       setViewMode(pmoTeamsSession.id, 'activity')
     }
   }, [config, floating.open, sessions, setViewMode])
-
-  useEffect(() => {
-    if (!floating.open || floating.openAnchor !== 'compact' || typeof window === 'undefined') return
-    const width = Math.max(420, Math.min(floating.size.width, Math.max(420, window.innerWidth - 32)))
-    const height = Math.max(280, Math.min(floating.size.height, Math.max(280, window.innerHeight - 48)))
-    const compactLeft = Math.max(16, Math.min(window.innerWidth - width - 16, window.innerWidth - width - 32))
-    const compactTop = Math.max(16, window.innerHeight - height - 64)
-    setFloating(clampPmoTeamsTopicFloatingState({
-      ...floating,
-      position: { left: compactLeft, top: compactTop },
-      openAnchor: undefined
-    }))
-  }, [floating, setFloating])
 
   useEffect(() => {
     if (!floating.open || !scratch) return
@@ -143,9 +124,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     return () => observer.disconnect()
   }, [floating.open, floating.size.height, floating.size.width, setFloating])
 
-  if (!scratch) {
-    return <PmoTeamsTopicEntry placement="floating" />
-  }
+  if (!scratch) return null
 
   const geometry = { left: floating.position.left, top: floating.position.top, width: floating.size.width, height: floating.size.height }
 
@@ -166,9 +145,6 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     setFloating(clampPmoTeamsTopicFloatingState({
       ...floating,
       position,
-      launcherPosition: floating.open
-        ? { left: position.left + ATTACHED_LAUNCHER_OFFSET.left, top: position.top + ATTACHED_LAUNCHER_OFFSET.top }
-        : floating.launcherPosition
     }))
   }
   const onPanelPointerEnd = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -178,74 +154,8 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     setDragging(false)
   }
 
-  const onLauncherPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0) return
-    const origin = floating.open
-      ? { left: floating.position.left, top: floating.position.top }
-      : floating.launcherPosition
-    launcherDragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: origin.left, top: origin.top, moved: false }
-    suppressLauncherClickRef.current = false
-    setLauncherDragging(true)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-  const onLauncherPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
-    const drag = launcherDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    const dx = event.clientX - drag.x
-    const dy = event.clientY - drag.y
-    if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
-    drag.moved = true
-    suppressLauncherClickRef.current = true
-    const position = { left: drag.left + dx, top: drag.top + dy }
-    setFloating(clampPmoTeamsTopicFloatingState({
-      ...floating,
-      ...(floating.open ? {
-        position,
-        launcherPosition: { left: position.left + ATTACHED_LAUNCHER_OFFSET.left, top: position.top + ATTACHED_LAUNCHER_OFFSET.top }
-      } : { launcherPosition: position })
-    }))
-  }
-  const onLauncherPointerEnd = (event: React.PointerEvent<HTMLDivElement>): void => {
-    const drag = launcherDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    launcherDragRef.current = null
-    setLauncherDragging(false)
-  }
-  const onLauncherOpen = (): void => {
-    if (suppressLauncherClickRef.current) {
-      suppressLauncherClickRef.current = false
-      return
-    }
-    if (floating.open) {
-      requestPmoTeamsTopicFloatingClose()
-      return
-    }
-    const position = typeof window === 'undefined'
-      ? floating.position
-      : {
-          left: floating.launcherPosition.left - ATTACHED_LAUNCHER_OFFSET.left,
-          top: floating.launcherPosition.top > window.innerHeight / 2
-            ? floating.launcherPosition.top - floating.size.height - 8
-            : floating.launcherPosition.top + 42 + 8
-        }
-    setFloating(clampPmoTeamsTopicFloatingState({ ...floating, open: true, position }))
-  }
-
   return (
     <>
-      <PmoTeamsTopicEntry
-        placement="floating"
-        style={floating.open
-          ? { left: geometry.left + ATTACHED_LAUNCHER_OFFSET.left, top: geometry.top + ATTACHED_LAUNCHER_OFFSET.top }
-          : { left: floating.launcherPosition.left, top: floating.launcherPosition.top }}
-        attached={floating.open}
-        dragging={launcherDragging}
-        onPointerDown={onLauncherPointerDown}
-        onPointerMove={onLauncherPointerMove}
-        onPointerUp={onLauncherPointerEnd}
-        onPointerCancel={onLauncherPointerEnd}
-        onOpen={onLauncherOpen}
-      />
       <div
         ref={panelRef}
         className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}`}
