@@ -149,7 +149,7 @@ describe('Topic 行的视觉收敛', () => {
         }]
       }]
     }))
-    expect(html).toContain('topic-workbench-topology__inspector')
+    expect(html).toContain('class="topic-workbench-topology__inspector"')
     expect(html).toContain('aria-label="2 Tabs, 3 Regions.')
     expect(html).toContain('<strong>2</strong><span>tabs</span>')
     expect(html).toContain('<strong>3</strong><span>regions</span>')
