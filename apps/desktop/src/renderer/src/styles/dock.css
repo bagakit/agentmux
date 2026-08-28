@@ -156,32 +156,28 @@
   position: relative;
   flex: 0 0 auto;
   min-width: 0;
-  min-height: 32px;
+  min-height: 24px;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 2px var(--sp-2);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   color: var(--text-3);
-  background: var(--surface-2);
   cursor: default;
   outline: none;
 }
 .topic-workbench-topology:hover,
 .topic-workbench-topology:focus-visible,
 .topic-workbench-topology:focus-within {
-  border-color: var(--focus-line);
   color: var(--text);
-  background: var(--surface-3);
-  box-shadow: var(--focus-ring);
 }
 .topic-workbench-topology__tab-rail {
-  max-width: min(232px, 52vw);
+  max-width: min(196px, 52vw);
   min-width: 0;
   display: flex;
   align-items: stretch;
-  gap: 3px;
+  gap: 4px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -189,17 +185,17 @@
 .topic-workbench-topology__tab-rail::-webkit-scrollbar { display: none; }
 .topic-workbench-topology__tab-chip {
   flex: 0 0 auto;
-  width: 30px;
+  width: 24px;
   height: 24px;
   min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
-  border: 1px solid var(--line-soft);
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-3);
-  background: var(--surface-1);
+  background: transparent;
   font: 8px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   cursor: default;
@@ -207,8 +203,8 @@
 .topic-workbench-topology__tab-glyph {
   position: relative;
   display: block;
-  width: 22px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 2px;
@@ -227,6 +223,18 @@
   border-color: var(--line-soft);
   background: var(--surface-2);
 }
+.topic-workbench-topology__tab-glyph--single {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+}
+.topic-workbench-topology__tab-glyph--single > .agent-avatar {
+  transform: scale(.86);
+  transform-origin: center;
+}
+.topic-workbench-topology__tab-glyph--single > svg { color: var(--text-2); }
 .topic-workbench-topology__tab-chip.active {
   border-color: var(--green-line);
   color: var(--green);
@@ -276,6 +284,11 @@
   align-items: center;
   gap: 1px;
   overflow: hidden;
+}
+.topic-workbench-topology__inspector-regions__region-label > .agent-avatar {
+  flex: 0 0 auto;
+  transform: scale(.82);
+  transform-origin: center;
 }
 .topic-workbench-topology__inspector-regions__region-label strong,
 .topic-workbench-topology__inspector-regions__region-label small {

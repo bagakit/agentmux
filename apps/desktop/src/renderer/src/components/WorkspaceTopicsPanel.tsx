@@ -169,7 +169,21 @@ export function WorkspaceTopicsPanel({
               : 'No recent activity')
             : surface?.kind === 'terminal' ? 'Terminal session'
               : 'No recent activity'
-          return { ...cell, executorLabel, activity }
+          const agent = surface?.kind === 'agent' && session?.kind === 'agent'
+            ? {
+                providerId: session.providerId,
+                executorId: session.executorId,
+                sessionId: session.id,
+                appearance: session.executorId ? config?.executors[session.executorId]?.avatar : undefined,
+                state: session.status.state,
+                label: resolveAgentName({
+                  userName: agentNames[session.id],
+                  firstPrompt: firstPromptFromTimeline(timelines[session.id]),
+                  fallback: session.label
+                }).name
+              }
+            : undefined
+          return { ...cell, executorLabel, activity, ...(agent ? { agent } : {}) }
         })
       } satisfies TopicTabDetail]
     })
