@@ -130,7 +130,7 @@
 
 /* One-line mode keeps the tool trigger, editor and primary action in separate columns.
    display:contents on the toolbar exposes its two groups to this grid without cloning controls. */
-.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
+.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content; align-items: center; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__suggestions { grid-column: 1 / -1; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 2; grid-row: 1; min-width: 0; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: contents; }
