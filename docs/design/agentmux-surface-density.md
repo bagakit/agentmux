@@ -919,3 +919,7 @@ Board 左侧清单的视觉单位是 Demand 卡片。零 Demand 只显示一条�
 ### Topic topology 的摘要与展开密度（2026-09-23）
 
 Topic 行的 topology 收起态使用一个带 Tab rail、Region 分区和短文字的 mini workbench preview；`2 tabs · 3 regions` 是辅助说明，不替代工作面本身。不再同时占用一组无标签 Region 缩略图和独立 Tabs 胶囊。展开面板保持单一连续 surface：Tab 标题在上、Region 几何在中、Executor 与最近活动在 Region 内或紧邻其下；状态色只做辅助，文字负责解释含义。当前 Tab 可以使用更亮的边界和活动字形，不能靠纯颜色区分。
+
+### Topic topology 计数与浮层的空间密度（2026-09-23）
+
+收起态使用横向 Tab strip 列出全部 Tab；每枚 Tab 只显示短标签和紧凑 Region 数，当前项用边界和字形建立层级，不再重复放总计数。Tab strip 在窄宽度下水平滚动但不隐藏 Tab 事实。Inspector 使用顶层 viewport 浮层的密度和边界，展示当前 hover/focus Tab 的完整 Region 几何、Executor 和最近活动；它可以在锚点上方或下方翻转，不能被列表滚动区域裁切，也不能因为靠近面板顶部而只露出一条残片。

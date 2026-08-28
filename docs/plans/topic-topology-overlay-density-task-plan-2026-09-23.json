@@ -1,0 +1,85 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-topology-overlay-density-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-topology-overlay-density-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "压缩 topology 计数并修复 inspector 裁切",
+      "objective": "让 Topic 行的计数只承担辅助索引，并确保 hover/focus inspector 在列表边缘仍完整可见。",
+      "outcome": "收起态使用 N T · M R 紧凑计数；inspector 通过顶层 portal 按锚点在 viewport 内翻转定位。",
+      "acceptance": [
+        "TopicPresence 收起态保留 Tab rail、当前 Region 几何和 Executor 标签，计数显示为紧凑 N T · M R，不再显示完整 tabs/regions 词组。",
+        "hover 和键盘 focus 都能打开同一个 inspector；inspector 不再依赖滚动面板内的 absolute 定位，靠近顶部时能在锚点下方显示。",
+        "Topic 行的打开点击、openTopicWorkSurfaces 数据来源和后台 Agent 的 SelectorPresence 不变。",
+        "删除紧凑计数、portal 定位或 hover/focus 接线中的任一项时，focused component test 或 source contract 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/topic-region-mosaic.test.tsx test/selector-presence-shape.test.ts --maxWorkers=1",
+          "proves": "Compact topology counts, inspector content and shared Agent presence."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Portal topology component and overlay styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence|TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "The reusable topology component remains connected from the Topic product surface."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "改为横向完整 Tab strip 和单 Tab inspector",
+      "objective": "让 Topic 行直接横向表达全部 Tab，并确保 hover/focus inspector 在列表边缘仍完整可见。",
+      "outcome": "收起态是完整 Tab strip，每枚 Tab 显示短标签和 Region 数；inspector 通过顶层 portal 按锚点在 viewport 内翻转定位。",
+      "acceptance": [
+        "TopicPresence 收起态横向列出全部 Tab，每枚 Tab 有短标签和 Region 数，当前 Tab 有明确选中态，不再显示总 tabs/regions 摘要块。",
+        "hover 和键盘 focus 某个 Tab 都能打开该 Tab 的 inspector；inspector 不再依赖滚动面板内的 absolute 定位，靠近顶部时能在锚点下方显示。",
+        "Topic 行的打开点击、openTopicWorkSurfaces 数据来源和后台 Agent 的 SelectorPresence 不变。",
+        "删除完整 Tab strip、per-Tab Region 数、portal 定位或 hover/focus 接线中的任一项时，focused component test 或 source contract 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/topic-region-mosaic.test.tsx test/selector-presence-shape.test.ts --maxWorkers=1",
+          "proves": "All Tab chips, per-Tab Region counts, inspector content and shared Agent presence."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Portal topology component and overlay styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence|TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "The reusable topology component remains connected from the Topic product surface."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css"
+      ],
+      "depends_on": [],
+      "supersedes": ["T-001"]
+    }
+  ]
+}

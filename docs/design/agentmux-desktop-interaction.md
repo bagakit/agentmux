@@ -1438,6 +1438,10 @@ Board 必须有一个可恢复的路由队列入口，用于查看无 Project、
 Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态、优先级、Project/负责人、标签、日期、子 Demand 进度和关联 Session/Agent 摘要。完整描述、活动、决策、评论、执行日志、重试/停止和删除确认在固定详情工作区中完成；删除是明确的危险动作，取消优先于删除以保留历史。AgentMux 的 Demand 文件系统包、Core Runtime 和 ctxmux 事实边界保持不变。
 > 命名更新（2026-09-23）：此前文档中的 “Leader Topic” 统一以代码和产品现名 **PMO Teams Topic** 为准；其固定身份、浮窗和职责约束继续有效。
 
+### Topic topology 的计数与浮层边界（2026-09-23）
+
+Topic 行默认横向列出所有 Tab，每个 Tab 使用短标签和 Region 数快速扫读，当前 Tab 有明确的选中边界；总的 Tab/Region 计数不再单独占一个摘要块。用户 hover 或键盘 focus 某个 Tab 时，展开同一个顶层 topology inspector，只展示该 Tab 的真实 Region 几何、Executor、surface 类型和最近活动，并保留 Tab 标题与上下文。Inspector 不能被 Topic 列表、滚动面板或工作区工具容器的 overflow 裁掉；靠近边缘时在锚点上方或下方选择可见位置。Topic 行原有的点击打开动作保持不变。
+
 ### PMO 浮窗标题与 Board 左侧清单（2026-09-23）
 
 - PMO Teams Topic 展开后是一块连续的紧凑工作面。标题只作为身份提示和拖动把手，不得另造高大的标题区域；头像、标题、关闭动作与对话内容属于同一块表面。视觉标题可以使用紧凑的 `PMO teams`，完整的 `PMO teams topic` 仍保留在可访问名称和工具提示中。
