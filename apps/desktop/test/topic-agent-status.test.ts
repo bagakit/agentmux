@@ -136,15 +136,32 @@ describe('Topic 行的视觉收敛', () => {
           executorLabel: 'File',
           activity: 'No recent activity'
         }]
+      }, {
+        tabId: 'tab:notes',
+        title: 'Notes',
+        active: false,
+        regions: [{
+          regionId: 'region:notes',
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          surfaceKind: 'terminal',
+          executorLabel: 'Terminal',
+          activity: 'Waiting for input'
+        }]
       }]
     }))
-    expect(html).toContain('topic-work-surface-summary__popover')
+    expect(html).toContain('topic-workbench-topology__inspector')
+    expect(html).toContain('aria-label="2 Tabs, 3 Regions.')
+    expect(html).toContain('<strong>2</strong><span>tabs</span>')
+    expect(html).toContain('<strong>3</strong><span>regions</span>')
+    expect(html).toContain('T1')
     expect(html).toContain('Review runtime')
     expect(html).toContain('Codex')
     expect(html).toContain('Editing store.ts')
     expect(html).toContain('No recent activity')
     expect(html).toContain('aria-describedby=')
-    expect(html).toContain('topic-work-surface-summary__activity-item')
+    expect(html).toContain('topic-workbench-topology__activity-item')
+    expect(html).toContain('data-region-kind="agent"')
+    expect(html).toContain('data-region-kind="file"')
   })
 })
 

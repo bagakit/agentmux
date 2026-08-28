@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 269
+    "next_cursor": 270
   },
   "features": [
     {
@@ -1920,7 +1920,7 @@
     {
       "feat_id": "f-29e8fufey",
       "title": "Agents Session Board 三工作面导航",
-      "status": "in_progress",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2319,6 +2319,16 @@
       "feat_id": "f-2ap8fyvjp",
       "title": "Scratch Topic 工作面可见性",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2aq8fu2ab",
+      "title": "Topic Workbench topology 可读摘要",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

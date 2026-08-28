@@ -1,0 +1,49 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-workbench-topology-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-workbench-topology-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "重做 Topic Workbench topology 摘要",
+      "objective": "让 Topic 行清楚表达 Tab、Region、Executor 和最近活动的层级。",
+      "outcome": "收起态是带 Tab rail 和 Region 分区的 mini workbench preview，hover/focus 面板按 Tab 展示真实 Region 布局与活动。",
+      "acceptance": [
+        "TopicPresence 收起态显示带短 Tab 标签的 mini workbench preview，当前 Tab 的真实 Region 分区可辨识，并有明确的 tabs 与 regions 数字。",
+        "展开 topology 面板按 Tab 分组，保留 active 标记、每个 Tab 的真实 Region 几何、Executor、surface 类型和最近活动。",
+        "后台未挂载 Agent 仍通过共享 SelectorPresence 展示；openTopicWorkSurfaces 仍是 Tab/Region 数据唯一来源。",
+        "删除摘要文字、Tab 分组、Region 标签或 Activity 接线中的任一项时，focused component test 变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/topic-region-mosaic.test.tsx test/selector-presence-shape.test.ts --maxWorkers=1",
+          "proves": "Topology summary, Tab/Region hierarchy, activity and shared Agent presence."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Reusable topology component and styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence|TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "The reusable topology component remains connected from the Topic product surface."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css"
+      ],
+      "depends_on": []
+    }
+  ]
+}
