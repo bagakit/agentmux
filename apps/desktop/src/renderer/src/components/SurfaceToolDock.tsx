@@ -43,7 +43,6 @@ import {
   type WorkspaceAgentGroupId,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { useBoardRows } from '../hooks/useBoardRows'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
 import { formatRelativeAge } from '../lib/relative-age'
@@ -464,8 +463,7 @@ export function WorkspaceAgentsTool({
  * 同源（`useBoardRows`），因此不会出现面板列了一条 Board 上没有的行。图例式静态说明降级为
  * 空态——没有任何行时它才有话说。
  */
-export function BoardToolList({ hostId }: { hostId: string }) {
-  const boardRows = useBoardRows()
+export function BoardToolList({ hostId: _hostId }: { hostId: string }) {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const demandRecords = useAppStore((state) => state.demands)
@@ -473,14 +471,10 @@ export function BoardToolList({ hostId }: { hostId: string }) {
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const demands = projectDemands(config, sessions, demandRecords)
   const columns = demandColumns(demands)
-  if (demands.length === 0 && boardRows.error && boardRows.rows.length === 0) {
-    return <div className="surface-tool-error" role="alert">{boardRows.error}</div>
-  }
   return (
     <section className="board-tool-list" aria-label="Global demand index">
-      <div className="board-tool-context"><span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span><em>{demands.length} demand{demands.length === 1 ? '' : 's'}</em></div>
-      {demands.length === 0 && boardRows.rows.length > 0 ? boardRows.rows.slice(0, 5).map((row) => <div className="board-tool-row__empty" key={row.id}>{row.name}</div>) : null}
-      {demands.length === 0 && boardRows.rows.length === 0 ? <div className="board-tool-row__empty">No demands yet. Use PMO Teams Topic to create one.</div> : null}
+      <div className="board-tool-context"><span><Columns3 size={12} /> Demands</span><em>{demands.length} demand{demands.length === 1 ? '' : 's'}</em></div>
+      {demands.length === 0 ? <div className="board-tool-row__empty">No demands yet. Use PMO Teams Topic to create one.</div> : null}
       {(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[]).flatMap((status) => columns[status].slice(0, 5).map((demand) => (
         <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
           <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
