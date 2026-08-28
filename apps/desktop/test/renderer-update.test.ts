@@ -28,7 +28,7 @@ async function fixture() {
   expect(load).toHaveBeenLastCalledWith(join(bundled, 'index.html'))
   load.mockClear()
   const pointer = (current: string | null, previous: string | null = null) => writeFile(join(directory, 'active.json'), JSON.stringify({ current, previous }))
-  return { directory, bundled, identity, id, prepare, load, owner, pointer }
+  return { directory, bundled, identity, id, prepare, load, owner, pointer, release }
 }
 it('checkpoints before hot reload, keeps host owners alive and returns to the bundled frontend on rollback', async () => {
   const f = await fixture()
@@ -47,6 +47,28 @@ it('a frontend that fails readiness rolls back without accepting its version', a
   await expect(f.owner.apply()).rejects.toThrow('restored the previous interface')
   expect(f.load).toHaveBeenLastCalledWith(join(f.bundled, 'index.html'))
   expect(JSON.parse(await readFile(join(f.directory, 'active.json'), 'utf8')).current).toBeNull()
+})
+it('invalidates an active hot update when the bundled Renderer release changes', async () => {
+  const f = await fixture()
+  await f.pointer(f.id)
+  await f.release(f.bundled, '<div>Bundled replacement</div>')
+  const load = vi.fn(async (_path: string) => {})
+  const owner = new RendererUpdates({ bundled: f.bundled, directory: f.directory, load, prepare: f.prepare, report: vi.fn() })
+  await owner.initialize()
+  expect(load).toHaveBeenLastCalledWith(join(f.bundled, 'index.html'))
+  expect(JSON.parse(await readFile(join(f.directory, 'active.json'), 'utf8'))).toEqual({ current: null, previous: null })
+  expect(JSON.parse(await readFile(join(f.directory, 'bundled.json'), 'utf8')).id).not.toBe(f.id)
+})
+it('keeps an active hot update across restart when the bundled release is unchanged', async () => {
+  const f = await fixture()
+  await f.pointer(f.id)
+  const load = vi.fn(async (_path: string) => {})
+  const owner = new RendererUpdates({ bundled: f.bundled, directory: f.directory, load, prepare: f.prepare, report: vi.fn() })
+  await owner.initialize()
+  load.mockClear()
+  const restarted = new RendererUpdates({ bundled: f.bundled, directory: f.directory, load, prepare: f.prepare, report: vi.fn() })
+  await restarted.initialize()
+  expect(load).toHaveBeenLastCalledWith(join(f.directory, f.id, 'index.html'))
 })
 it('integrity, incompatible shell and symlinks are rejected before current UI is touched', async () => {
   const f = await fixture(); await f.pointer(f.id)
