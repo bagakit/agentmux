@@ -44,6 +44,8 @@ describe('PMO teams topic launcher', () => {
     const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button img') as HTMLImageElement
     expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')
     expect(container.querySelector('button[aria-expanded="true"]')).toBeTruthy()
+    expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework')).toHaveLength(2)
+    expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework i')).toHaveLength(12)
   })
 
   it('uses the avatar as the close toggle when the panel is already open', async () => {
