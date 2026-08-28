@@ -1,7 +1,7 @@
 import type { TopicRegionCell } from '../lib/scratch-topic-layout'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { PanelTop, SplitSquareVertical } from 'lucide-react'
+import { Bot, FileCode2, Globe2, PanelTop, Sparkles, SplitSquareVertical, SquareTerminal } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 
@@ -10,6 +10,7 @@ const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : us
 export type TopicRegionDetail = TopicRegionCell & {
   executorLabel: string
   activity: string
+  agent?: Omit<SelectorPresenceAgent, 'key' | 'count' | 'onOpen'>
 }
 
 export type TopicTabDetail = {
@@ -25,7 +26,16 @@ export function TopicPresence({ cells, agents, tabs = [] }: {
   agents: readonly SelectorPresenceAgent[]
   tabs?: readonly TopicTabDetail[]
 }) {
-  const mounted = new Set(cells?.map((cell) => cell.agentSessionId))
+  // A Session already represented by any Tab has an identity slot in that Tab. Keep the
+  // separate roster for healthy background Agents that have no open Region only.
+  const mounted = new Set(
+    tabs.length > 0
+      ? tabs.flatMap((tab) => tab.regions.flatMap((region) => {
+        const sessionId = region.agent?.sessionId ?? region.agentSessionId
+        return sessionId ? [sessionId] : []
+      }))
+      : (cells ?? []).flatMap((cell) => cell.agentSessionId ? [cell.agentSessionId] : [])
+  )
   return <span className="topic-presence">
     {tabs.length > 0 ? <TopicWorkbenchTopology tabs={tabs} /> : cells ? <RegionMosaic cells={cells} agents={agents} /> : null}
     <SelectorPresence agents={agents.filter((agent) => !mounted.has(agent.key))} />
@@ -55,6 +65,12 @@ function surfaceLabel(kind: TopicRegionDetail['surfaceKind']): string {
  */
 function TopicTabGlyph({ tab }: { tab: TopicTabDetail }) {
   const singleRegion = tab.regions.length === 1
+  const region = tab.regions[0]
+  if (singleRegion && region) {
+    return <span className="topic-workbench-topology__tab-glyph topic-workbench-topology__tab-glyph--single" data-region-count="1" data-region-kind={region.surfaceKind}>
+      <TopicRegionMark region={region} />
+    </span>
+  }
   return (
     <span
       className={`topic-workbench-topology__tab-glyph${singleRegion ? ' topic-workbench-topology__tab-glyph--single' : ''}`}
@@ -78,6 +94,28 @@ function TopicTabGlyph({ tab }: { tab: TopicTabDetail }) {
       ))}
     </span>
   )
+}
+
+function TopicRegionMark({ region }: { region: TopicRegionDetail }) {
+  if (region.agent) {
+    return <AgentAvatar
+      label={region.agent.label}
+      providerId={region.agent.providerId}
+      executorId={region.agent.executorId}
+      sessionId={region.agent.sessionId}
+      appearance={region.agent.appearance}
+      state={region.agent.state}
+      size={16}
+    />
+  }
+  switch (region.surfaceKind) {
+    case 'terminal': return <SquareTerminal size={14} aria-hidden="true" />
+    case 'browser': return <Globe2 size={14} aria-hidden="true" />
+    case 'file': return <FileCode2 size={14} aria-hidden="true" />
+    case 'launcher': return <Sparkles size={14} aria-hidden="true" />
+    case 'agent': return <Bot size={14} aria-hidden="true" />
+    default: return <PanelTop size={14} aria-hidden="true" />
+  }
 }
 
 function RegionLayout({
@@ -104,6 +142,7 @@ function RegionLayout({
           title={`${region.executorLabel}: ${region.activity}`}
         >
           <span className={`${className}__region-label`}>
+            {region.agent ? <TopicRegionMark region={region} /> : null}
             <strong>{compactExecutorLabel(region.executorLabel)}</strong>
             <small>{surfaceLabel(region.surfaceKind)}</small>
           </span>

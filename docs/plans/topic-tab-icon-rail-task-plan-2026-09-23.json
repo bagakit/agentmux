@@ -1,0 +1,50 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-tab-icon-rail-2026-09-23.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-tab-icon-rail-2026-09-23.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Topic Tab icon rail and Agent identity inspector",
+      "objective": "Condense Topic topology while keeping each Tab and Agent understandable.",
+      "outcome": "Single-Region Tabs use the Region icon, split Tabs use a square layout glyph, mounted Agent duplicates disappear, and the inspector shows Agent avatars beside activity.",
+      "acceptance": [
+        "Each one-Region Tab renders one actual Agent avatar or one matching surface icon without an empty inset tile; each split Tab renders its true Region bounds in a square glyph.",
+        "The Topic row does not render a separate Agent avatar for a Session represented in any of its Tabs, including inactive Tabs; live Agents with no Tab remain reachable.",
+        "Hover/focus inspector shows the configured Agent avatar with its name, surface type and recent activity; Tab order, active state, Topic opening and viewport portal remain intact.",
+        "Focused behavior tests turn red when the identity or de-duplication path is broken; production caller is present outside the component definition."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/topic-region-mosaic.test.tsx test/selector-presence-shape.test.ts --maxWorkers=1",
+          "proves": "Topic Tab icon and inspector rendering plus Agent roster behavior."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Changed component and styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "TopicPresence is connected to the product Topic row outside its definition."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css",
+        "apps/desktop/test/topic-agent-status.test.ts"
+      ],
+      "depends_on": []
+    }
+  ]
+}

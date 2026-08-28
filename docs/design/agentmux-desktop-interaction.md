@@ -1440,7 +1440,7 @@ Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态�
 
 ### Topic topology 的计数与浮层边界（2026-09-23）
 
-Topic 行默认横向列出所有 Tab，每个 Tab 使用短标签和 Region 数快速扫读，当前 Tab 有明确的选中边界；总的 Tab/Region 计数不再单独占一个摘要块。用户 hover 或键盘 focus 某个 Tab 时，展开同一个顶层 topology inspector，只展示该 Tab 的真实 Region 几何、Executor、surface 类型和最近活动，并保留 Tab 标题与上下文。Inspector 不能被 Topic 列表、滚动面板或工作区工具容器的 overflow 裁掉；靠近边缘时在锚点上方或下方选择可见位置。Topic 行原有的点击打开动作保持不变。
+Topic 行默认横向列出所有 Tab，每个 Tab 以一个紧凑图标位快速扫读，当前 Tab 有明确的选中边界；总的 Tab/Region 计数不再单独占一个摘要块。用户 hover 或键盘 focus 某个 Tab 时，展开同一个顶层 topology inspector，只展示该 Tab 的真实 Region 几何、Executor、surface 类型和最近活动，并保留 Tab 标题与上下文。Inspector 不能被 Topic 列表、滚动面板或工作区工具容器的 overflow 裁掉；靠近边缘时在锚点上方或下方选择可见位置。Topic 行原有的点击打开动作保持不变。
 
 ### PMO 浮窗标题与 Board 左侧清单（2026-09-23）
 
@@ -1456,11 +1456,11 @@ Topic 行默认横向列出所有 Tab，每个 Tab 使用短标签和 Region 数
 
 ### Topic Workbench topology 的可读层级（2026-09-23）
 
-Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 Tab 的 Region 布局、Region 内的 Executor 与最近活动。收起态使用一个带 Tab rail 和 Region 分区的 mini workbench preview，让用户第一眼看到真实工作面；Tab 数字和短标签负责解释图形，不用没有标签的分屏小方块和头像簇让用户猜层级。hover 或键盘 focus 后展开同一个 topology inspector，按 Tab 分组展示所有真实 Region 几何、Executor、surface 类型和最近活动；当前 Tab 展开更详细，其他 Tab 保留紧凑布局预览。未挂载的后台 Agent 可以保留独立身份入口，但不能与 Tab/Region 摘要混成一串图标。
+Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 Tab 的 Region 布局、Region 内的 Executor 与最近活动。收起态横向列出所有 Tab，让用户第一眼看到工作面；单 Region 用该 Region 的身份图标，多 Region 用真实分栏网格。hover 或键盘 focus 后展开同一个 topology inspector，按选中的 Tab 展示真实 Region 几何、Executor、surface 类型和最近活动。已有 Tab 内的 Agent 不在右侧再列一份头像；没有挂载到任一 Tab、仍可工作的后台 Agent 保留独立身份入口，避免静默消失。
 
 ### Topic topology 的 Tab 缩略图语言（2026-09-23）
 
-Topic 行的 Tab 收起态使用真实布局缩略图表达工作面：只有一个 Region 时只画一个完整方格；有多个 Region 时按各自 bounds 画小型分栏网格。收起态不显示 `Tn`、`nR` 等内部计数标记，也不要求用户先理解实现编号；Tab 标题、Region 数量、Executor、surface 类型和最近活动在 hover 或键盘 focus 后的同一个 inspector 中可见。缩略图必须保持可点击/可聚焦，悬停详情不能被 Topic 列表或滚动容器裁切。
+Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Region，直接显示这个 Region 的图标；Agent Region 显示其真实 Agent 头像，Terminal、Browser、File、Launcher 显示相应类型图标。如果有分栏，显示一个按真实 bounds 构成的方形宫格。收起态不显示 `Tn`、`nR` 等内部计数标记。悬浮详情中 Agent 以同一头像自然呈现，名称与最近活动作为辅助文字；不能只写 Agent 名字而把身份图标藏起来。Tab 标题、Region 数量、Executor、surface 类型和最近活动在 hover 或键盘 focus 后的同一个 inspector 中可见；详情不能被列表或滚动容器裁切。视觉密度见 surface-density 的「Topic topology Tab 缩略图的空间密度」。
 
 ### 安装后的 Renderer 选择（2026-09-23）
 
