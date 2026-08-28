@@ -1,0 +1,49 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-tab-icon-overlap-2026-09-24.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-tab-icon-overlap-2026-09-24.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Use avatar-stack spacing for Topic Tab icons",
+      "objective": "Make the Topic Tab icon rail read as one dense work-surface group while preserving individual Tab interaction.",
+      "outcome": "Adjacent Tab chips overlap by the shared avatar-stack rhythm, and hovered/focused chips rise above neighbors without changing Tab order.",
+      "acceptance": [
+        "The Tab rail uses the shared small overlap rhythm instead of a positive gap, reducing the total footprint while retaining every Tab slot.",
+        "Each Tab chip has an explicit stacking order from its Tab index; hover/focus raises the targeted chip so its icon and selected state remain readable.",
+        "Keyboard focus order, hover inspector selection, active Tab state and Topic opening behavior remain unchanged.",
+        "Removing the overlap or stacking contract makes the focused test/source guard red, and the TopicPresence production caller remains present."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts --maxWorkers=1",
+          "proves": "Topic Tab topology and overlap contract."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Changed renderer code and styles compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "test -n \"$(rg -n '<TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx | head -1)\"",
+          "proves": "The reusable topology remains connected from the Topic product surface."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css",
+        "apps/desktop/test/topic-agent-status.test.ts"
+      ],
+      "depends_on": []
+    }
+  ]
+}

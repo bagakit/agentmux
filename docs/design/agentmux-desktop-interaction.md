@@ -1470,6 +1470,10 @@ Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 
 
 Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Region，直接显示这个 Region 的图标；Agent Region 显示其真实 Agent 头像，Terminal、Browser、File、Launcher 显示相应类型图标。如果有分栏，显示一个按真实 bounds 构成的方形宫格。收起态不显示 `Tn`、`nR` 等内部计数标记。悬浮详情中 Agent 以同一头像自然呈现，名称与最近活动作为辅助文字；不能只写 Agent 名字而把身份图标藏起来。Tab 标题、Region 数量、Executor、surface 类型和最近活动在 hover 或键盘 focus 后的同一个 inspector 中可见；详情不能被列表或滚动容器裁切。视觉密度见 surface-density 的「Topic topology Tab 缩略图的空间密度」。
 
+### Topic Tab 图标簇的交互（2026-09-24）
+
+多个 Tab 的收起态图标沿用 Agent 头像簇的轻微叠压关系，表达“这是同一 Topic 下的一组工作面”，不把每个 Tab 拉成一排彼此孤立的按钮。每个 Tab 仍是独立的 hover/focus 目标；被指向或聚焦的 Tab 必须浮到最上层并完整可读，点击和键盘顺序保持按 Tab 顺序。
+
 ### 安装后的 Renderer 选择（2026-09-23）
 
 安装新 App 或重启到新的内置 Renderer 后，启动必须先确认当前用户目录里的 hot update 是否属于同一份内置 Renderer。旧版本的 `active` 指针不能覆盖新安装包的界面；发现内置 Renderer 已变化时清空旧指针并使用新内置页面，同时保留布局、Tab、Region、Session 和其它 durable 工作面事实。热更新本身仍可在同一内置版本内恢复，失败时回退到该版本的内置页面并留下可诊断记录。

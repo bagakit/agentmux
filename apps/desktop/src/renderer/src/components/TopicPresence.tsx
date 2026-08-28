@@ -263,6 +263,7 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
           <span
             className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}${tab.tabId === inspected?.tabId ? ' inspected' : ''}`}
             key={tab.tabId}
+            style={{ zIndex: index + 1 }}
             role="listitem"
             tabIndex={0}
             aria-label={`T${index + 1}: ${tab.title}, ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
