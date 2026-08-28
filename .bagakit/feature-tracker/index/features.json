@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 278
+    "next_cursor": 279
   },
   "features": [
     {
@@ -2388,6 +2388,16 @@
     {
       "feat_id": "f-2ay8fevsy",
       "title": "PMO Teams eye firework signal",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2az8f3ka2",
+      "title": "Topic Tab icon overlap",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
