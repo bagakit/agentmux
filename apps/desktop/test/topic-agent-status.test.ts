@@ -181,6 +181,7 @@ describe('Topic 行的视觉收敛', () => {
   it('横向列出全部 Tab，细节按单个 Tab 展开', () => {
     expect(topologySource).toContain('tabs.map((tab, index)')
     expect(topologySource).not.toContain('tabs.slice(0, 3)')
+    expect(topologySource).toContain('onMouseEnter={() => inspectTab(tab.tabId)}')
     expect(topologySource).toContain('inspectTab(tab.tabId)')
     expect(topologySource).toContain('inspected.regions.map')
   })
