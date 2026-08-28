@@ -89,6 +89,10 @@ describe('Topic 行的视觉收敛', () => {
     new URL('../src/renderer/src/components/AgentAvatar.tsx', import.meta.url),
     'utf8'
   )
+  const topologySource = readFileSync(
+    new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
+    'utf8'
+  )
   it('不再同时给出计数和逐个全名——两者说的是同一件事', () => {
     // `2 agents` 与其下一排「图标＋全名」胶囊重复，且把一行撑成四层。
     expect(source).not.toContain("'agent' : 'agents'")
@@ -150,10 +154,11 @@ describe('Topic 行的视觉收敛', () => {
       }]
     }))
     expect(html).toContain('class="topic-workbench-topology__inspector"')
-    expect(html).toContain('aria-label="2 Tabs, 3 Regions.')
-    expect(html).toContain('<strong>2</strong><span>tabs</span>')
-    expect(html).toContain('<strong>3</strong><span>regions</span>')
+    expect(html).toContain('aria-label="2 Tabs. Hover or focus a Tab')
     expect(html).toContain('T1')
+    expect(html).toContain('T2')
+    expect(html).toContain('<small>2R</small>')
+    expect(html).toContain('<small>1R</small>')
     expect(html).toContain('Review runtime')
     expect(html).toContain('Codex')
     expect(html).toContain('Editing store.ts')
@@ -162,6 +167,22 @@ describe('Topic 行的视觉收敛', () => {
     expect(html).toContain('topic-workbench-topology__activity-item')
     expect(html).toContain('data-region-kind="agent"')
     expect(html).toContain('data-region-kind="file"')
+  })
+
+  it('把 inspector 提升到 viewport overlay，避免被 Topic 滚动面板裁切', () => {
+    expect(topologySource).toContain('createPortal(inspector, portalHost)')
+    expect(topologySource).toContain('getBoundingClientRect()')
+    expect(topologySource).toContain('onMouseEnter={() => setInspectorOpen(true)}')
+    expect(topologySource).toContain('onFocus={() => setInspectorOpen(true)}')
+    expect(topologySource).toContain('topic-workbench-topology__inspector--portal')
+    expect(topologySource).toContain('window.addEventListener(\'scroll\', updatePosition, true)')
+  })
+
+  it('横向列出全部 Tab，细节按单个 Tab 展开', () => {
+    expect(topologySource).toContain('tabs.map((tab, index)')
+    expect(topologySource).not.toContain('tabs.slice(0, 3)')
+    expect(topologySource).toContain('inspectTab(tab.tabId)')
+    expect(topologySource).toContain('inspected.regions.map')
   })
 })
 

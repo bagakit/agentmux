@@ -176,45 +176,57 @@
   background: var(--surface-3);
   box-shadow: var(--focus-ring);
 }
-.topic-workbench-topology__preview {
-  width: 64px;
-  height: 27px;
-  min-width: 0;
-  display: grid;
-  grid-template-rows: 9px minmax(0, 1fr);
-  gap: 2px;
-}
 .topic-workbench-topology__tab-rail {
+  max-width: min(232px, 52vw);
   min-width: 0;
   display: flex;
   align-items: stretch;
-  gap: 2px;
-  overflow: hidden;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
-.topic-workbench-topology__tab-chip,
-.topic-workbench-topology__tab-more {
+.topic-workbench-topology__tab-rail::-webkit-scrollbar { display: none; }
+.topic-workbench-topology__tab-chip {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 24px;
   min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 0 3px;
+  padding: 0 4px;
   border: 1px solid var(--line-soft);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   background: var(--surface-1);
   font: 8px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  cursor: default;
 }
-.topic-workbench-topology__tab-chip { flex: 1 1 0; }
 .topic-workbench-topology__tab-chip.active {
   border-color: var(--green-line);
   color: var(--green);
   background: var(--green-bg);
 }
+.topic-workbench-topology__tab-chip.inspected,
+.topic-workbench-topology__tab-chip:hover,
+.topic-workbench-topology__tab-chip:focus-visible {
+  border-color: var(--focus-line);
+  color: var(--text);
+  background: var(--surface-3);
+  outline: none;
+}
+.topic-workbench-topology__tab-chip.active.inspected,
+.topic-workbench-topology__tab-chip.active:hover,
+.topic-workbench-topology__tab-chip.active:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-bg-hover);
+}
 .topic-workbench-topology__tab-chip b { font-weight: 650; }
-.topic-workbench-topology__tab-more { flex: 0 0 auto; padding-inline: 2px; }
-.topic-workbench-topology__regions,
+.topic-workbench-topology__tab-chip small { color: var(--text-3); font: 9px/1 var(--font-mono); font-weight: 650; }
 .topic-workbench-topology__inspector-regions {
   position: relative;
   display: block;
@@ -223,8 +235,6 @@
   border-radius: 2px;
   background: var(--surface-0);
 }
-.topic-workbench-topology__regions { min-height: 0; }
-.topic-workbench-topology__regions__region,
 .topic-workbench-topology__inspector-regions__region {
   position: absolute;
   display: flex;
@@ -239,7 +249,6 @@
   background: var(--surface-3);
   text-align: center;
 }
-.topic-workbench-topology__regions__region-label,
 .topic-workbench-topology__inspector-regions__region-label {
   min-width: 0;
   display: flex;
@@ -248,30 +257,16 @@
   gap: 1px;
   overflow: hidden;
 }
-.topic-workbench-topology__regions__region-label strong,
-.topic-workbench-topology__regions__region-label small {
+.topic-workbench-topology__inspector-regions__region-label strong,
+.topic-workbench-topology__inspector-regions__region-label small {
   overflow: hidden;
   max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.topic-workbench-topology__regions__region-label strong { font: 8px/1 var(--font-mono); font-weight: 600; }
-.topic-workbench-topology__regions__region-label small { display: none; }
-.topic-workbench-topology__inspector-regions { height: 38px; }
-.topic-workbench-topology__inspector-regions__region-label strong { font-size: var(--fs-micro); }
+.topic-workbench-topology__inspector-regions__region-label strong { font: var(--fs-micro)/1 var(--font-mono); font-weight: 600; }
 .topic-workbench-topology__inspector-regions__region-label small { display: block; color: var(--text-3); font-size: 9px; }
-.topic-workbench-topology__counts {
-  min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  color: var(--text-3);
-  font-size: var(--fs-micro);
-  white-space: nowrap;
-}
-.topic-workbench-topology__counts > svg { flex: 0 0 auto; color: var(--green-2); align-self: center; }
-.topic-workbench-topology__counts strong { color: var(--text-2); font: var(--fs-micro)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-.topic-workbench-topology__counts i { color: var(--text-3); font-style: normal; }
+.topic-workbench-topology__inspector-regions { height: 38px; }
 .topic-workbench-topology__inspector {
   position: absolute;
   z-index: 30;
@@ -290,6 +285,14 @@
   box-shadow: var(--elev-3), var(--hl);
   pointer-events: none;
 }
+.topic-workbench-topology__inspector--portal {
+  position: fixed;
+  z-index: 10000;
+  right: auto;
+  bottom: auto;
+  display: grid;
+  gap: var(--sp-3);
+}
 .topic-workbench-topology:hover .topic-workbench-topology__inspector,
 .topic-workbench-topology:focus-visible .topic-workbench-topology__inspector,
 .topic-workbench-topology:focus-within .topic-workbench-topology__inspector { display: grid; gap: var(--sp-3); }
@@ -306,15 +309,6 @@
 .topic-workbench-topology__inspector-head strong { color: var(--text); font-size: var(--fs-meta); }
 .topic-workbench-topology__inspector-head svg { flex: 0 0 auto; color: var(--green-2); }
 .topic-workbench-topology__inspector-head em { flex: 0 0 auto; color: var(--text-3); font-size: var(--fs-micro); font-style: normal; }
-.topic-workbench-topology__tabs { min-width: 0; display: grid; gap: var(--sp-3); }
-.topic-workbench-topology__tab { min-width: 0; display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--overlay-line); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
-.topic-workbench-topology__tab.active { border-color: var(--green-line); background: color-mix(in srgb, var(--green-bg) 42%, var(--surface-2)); }
-.topic-workbench-topology__tab-head { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
-.topic-workbench-topology__tab-index { flex: 0 0 auto; color: var(--text-3); font: var(--fs-micro)/1 var(--font-mono); font-weight: 600; }
-.topic-workbench-topology__tab-head > svg { flex: 0 0 auto; color: var(--text-3); }
-.topic-workbench-topology__tab-head > strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
-.topic-workbench-topology__tab-head > em { flex: 0 0 auto; margin-left: auto; color: var(--green); font-size: var(--fs-micro); font-style: normal; }
-.topic-workbench-topology__tab-head > small { flex: 0 0 auto; color: var(--text-3); font-size: var(--fs-micro); }
 .topic-workbench-topology__activity { min-width: 0; display: grid; gap: var(--sp-1); overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.35; }
 .topic-workbench-topology__activity-item { min-width: 0; display: grid; gap: 1px; overflow: hidden; }
 .topic-workbench-topology__activity-item > span { min-width: 0; display: flex; align-items: center; gap: var(--sp-1); overflow: hidden; }
