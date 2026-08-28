@@ -323,7 +323,8 @@ function DesktopApp() {
       </main>
       <footer className="window-status-bar">
         <AgentStatusBar />
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch /><PmoTeamsTopicEntry placement="compact" footer /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch /></div>
+        <div className="window-status-bar__pmo-entry"><PmoTeamsTopicEntry placement="compact" /></div>
         <GlobalSystemNotices />
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

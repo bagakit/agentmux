@@ -3,11 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = {
-  config: null,
-  sessions: [],
-}
-
+const state = { config: null, sessions: [] }
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state })
 }))
@@ -32,70 +28,35 @@ afterEach(async () => {
 })
 
 describe('PMO teams topic launcher', () => {
-  it('stays visible, opens the fixed Topic, and can move to compact placement', async () => {
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
+  it('renders one bottom entry and opens the fixed Topic', async () => {
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
     const button = container.querySelector('button[aria-label="Open PMO teams topic"]') as HTMLButtonElement
     expect(button).toBeTruthy()
-    let requested = false
-    window.addEventListener('agentmux:pmo-teams-topic-floating', () => { requested = true }, { once: true })
+    expect(container.querySelector('.pmo-teams-topic-floating-launcher')).toBeNull()
     await act(async () => button.click())
-    expect(requested).toBe(true)
-
-    const footer = document.createElement('div')
-    document.body.append(footer)
-    const footerRoot = createRoot(footer)
-    await act(async () => footerRoot.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
-    const collapse = footer.querySelector('button[aria-label="Collapse PMO teams topic to bottom switcher"]') as HTMLButtonElement
-    expect(collapse).toBeTruthy()
-    await act(async () => collapse.click())
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
-    expect(container.querySelector('.pmo-teams-topic-compact-launcher')).toBeTruthy()
-    expect(container.querySelector('button[aria-label="Open PMO teams topic"]')).toBeTruthy()
-    await act(async () => footerRoot.unmount())
-    footer.remove()
-  })
-
-  it('renders the project avatar and keeps the old hidden preference from removing the entry', async () => {
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
-    const avatar = container.querySelector('.pmo-teams-topic-floating-launcher__button img') as HTMLImageElement
-    expect(avatar).toBeTruthy()
-    expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')
-  })
-
-  it('uses the avatar as the close toggle when the floating state is already open', async () => {
-    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
-    const button = container.querySelector('button[aria-label="Close PMO teams topic"]') as HTMLButtonElement
-    expect(button).toBeTruthy()
-    let closed = false
-    window.addEventListener('agentmux:pmo-teams-topic-floating', (event) => {
-      closed = (event as CustomEvent).detail?.open === false
-    }, { once: true })
-    await act(async () => button.click())
-    expect(closed).toBe(true)
-  })
-
-  it('opens when pointer capture retargets the click to the launcher wrapper', async () => {
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'floating' })))
-    const launcher = container.querySelector('[data-pmo-teams-topic-launcher]') as HTMLDivElement
-    expect(launcher).toBeTruthy()
-    await act(async () => launcher.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":true')
+    expect(button.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('moves the control to the footer and exposes a collapse action while floating', async () => {
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
-    const collapse = container.querySelector('button[aria-label="Collapse PMO teams topic to bottom switcher"]') as HTMLButtonElement
-    expect(collapse).toBeTruthy()
-    await act(async () => collapse.click())
-    expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"launcherPlacement":"compact"')
+  it('uses the dragon asset and the open state for the eye signal', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true, position: { left: 80, top: 72 }, size: { width: 720, height: 520 } }))
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
+    const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button img') as HTMLImageElement
+    expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')
+    expect(container.querySelector('button[aria-expanded="true"]')).toBeTruthy()
+  })
+
+  it('uses the avatar as the close toggle when the panel is already open', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
+    const button = container.querySelector('button[aria-label="Close PMO teams topic"]') as HTMLButtonElement
+    await act(async () => button.click())
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
   })
 
-  it('keeps the form switch beside the compact footer avatar without a floating three-dot control', async () => {
-    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, launcherPlacement: 'compact' }))
-    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact', footer: true })))
-    expect(container.querySelector('.pmo-teams-topic-floating-launcher__mode-button')).toBeNull()
-    expect(container.querySelector('.pmo-teams-topic-compact-launcher__mode-button')).toBeTruthy()
+  it('does not expose a floating mode switch or three-dot control', async () => {
+    await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
+    expect(container.querySelector('[data-pmo-teams-topic-mode]')).toBeNull()
+    expect(container.querySelector('button[aria-label*="floating"]')).toBeNull()
   })
 })

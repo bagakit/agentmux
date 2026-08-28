@@ -5,10 +5,6 @@ const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
 const EVENT_NAME = 'agentmux:pmo-teams-topic-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }
-const LAUNCHER_SIZE = 36
-
-export type PmoTeamsTopicLauncherPlacement = 'floating' | 'compact'
-export type PmoTeamsTopicOpenAnchor = PmoTeamsTopicLauncherPlacement
 export type PmoTeamsTopicPrompt = { id: string; text: string }
 
 type FloatingState = {
@@ -16,29 +12,16 @@ type FloatingState = {
   maximized: boolean
   position: { left: number; top: number }
   size: { width: number; height: number }
-  launcherPlacement: PmoTeamsTopicLauncherPlacement
-  launcherPosition: { left: number; top: number }
-  openAnchor?: PmoTeamsTopicOpenAnchor | undefined
   pendingPrompt?: PmoTeamsTopicPrompt | undefined
 }
 
 export type PmoTeamsTopicFloatingState = FloatingState
 
-function defaultLauncherPosition(): { left: number; top: number } {
-  if (typeof window === 'undefined') return { left: 24, top: 24 }
-  return {
-    left: Math.max(16, window.innerWidth - 72),
-    top: Math.max(16, window.innerHeight - 104)
-  }
-}
-
 const defaultState = (): FloatingState => ({
   open: false,
   maximized: false,
   position: { ...DEFAULT_POSITION },
-  size: { ...DEFAULT_SIZE },
-  launcherPlacement: 'floating',
-  launcherPosition: defaultLauncherPosition()
+  size: { ...DEFAULT_SIZE }
 })
 
 function readState(): FloatingState {
@@ -56,10 +39,6 @@ function readState(): FloatingState {
       size: value.size && Number.isFinite(value.size.width) && Number.isFinite(value.size.height)
         ? { width: value.size.width, height: value.size.height }
         : { ...DEFAULT_SIZE },
-      launcherPlacement: value.launcherPlacement === 'compact' ? 'compact' : 'floating',
-      launcherPosition: value.launcherPosition && Number.isFinite(value.launcherPosition.left) && Number.isFinite(value.launcherPosition.top)
-        ? { left: value.launcherPosition.left, top: value.launcherPosition.top }
-        : defaultLauncherPosition()
     }
   } catch {
     return defaultState()
@@ -70,12 +49,11 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestPmoTeamsTopicFloatingOpen(options?: { anchor?: PmoTeamsTopicOpenAnchor; prompt?: string }): void {
+export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string }): void {
   const prompt = options?.prompt?.trim()
   window.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       open: true,
-      ...(options?.anchor ? { openAnchor: options.anchor } : {}),
       ...(prompt ? { pendingPrompt: { id: crypto.randomUUID(), text: prompt } } : {})
     }
   }))
@@ -94,7 +72,7 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
     const onEvent = (event: Event): void => {
       const detail = (event as CustomEvent<Partial<FloatingState>>).detail ?? {}
       const nextOpen = detail.open
-      if (typeof nextOpen !== 'boolean' && detail.launcherPlacement === undefined && detail.launcherPosition === undefined) return
+      if (typeof nextOpen !== 'boolean' && detail.pendingPrompt === undefined) return
       const current = stateRef.current
       if (nextOpen === true && !current.open) {
         const active = document.activeElement
@@ -132,7 +110,6 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
 
 export function clampPmoTeamsTopicFloatingState(state: FloatingState): FloatingState {
   if (typeof window === 'undefined') return state
-  const launcherPosition = state.launcherPosition ?? defaultLauncherPosition()
   const width = Math.max(420, Math.min(state.size.width, Math.max(420, window.innerWidth - 32)))
   const height = Math.max(280, Math.min(state.size.height, Math.max(280, window.innerHeight - 48)))
   return {
@@ -141,10 +118,6 @@ export function clampPmoTeamsTopicFloatingState(state: FloatingState): FloatingS
     position: {
       left: Math.max(16, Math.min(state.position.left, Math.max(16, window.innerWidth - width - 16))),
       top: Math.max(16, Math.min(state.position.top, Math.max(16, window.innerHeight - height - 16)))
-    },
-    launcherPosition: {
-      left: Math.max(16, Math.min(launcherPosition.left, Math.max(16, window.innerWidth - LAUNCHER_SIZE - 16))),
-      top: Math.max(16, Math.min(launcherPosition.top, Math.max(16, window.innerHeight - LAUNCHER_SIZE - 16)))
     }
   }
 }
