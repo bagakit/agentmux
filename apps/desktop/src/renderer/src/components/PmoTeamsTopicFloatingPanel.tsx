@@ -267,7 +267,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
               onPointerUp={onPanelPointerEnd}
               onPointerCancel={onPanelPointerEnd}
             >
-              <strong>{PMO_TEAMS_TOPIC_TITLE}</strong>
+              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong>
               <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={requestPmoTeamsTopicFloatingClose}><X size={13} /></button>
               </div>

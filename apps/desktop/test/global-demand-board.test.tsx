@@ -7,4 +7,16 @@ describe('global Demand Board production surface', () => {
     const source = await readFile(fileURLToPath(new URL('../src/renderer/src/components/GlobalBoardSurface.tsx', import.meta.url)), 'utf8')
     for (const anchor of ['DemandCard', 'DemandWorkspace', 'routingFilter', 'plannedStartAt', 'AgentTopologySummary', 'requestPmoTeamsTopicFloatingOpen']) expect(source).toContain(anchor)
   })
+
+  it('persists an explicit New Demand before opening PMO with that Demand identity', async () => {
+    const source = await readFile(fileURLToPath(new URL('../src/renderer/src/components/GlobalBoardSurface.tsx', import.meta.url)), 'utf8')
+    const create = source.indexOf('const demandId = createDemand(')
+    const open = source.indexOf('requestPmoTeamsTopicFloatingOpen({', create)
+    expect(create).toBeGreaterThan(-1)
+    expect(open).toBeGreaterThan(create)
+    expect(source.slice(create, open)).toContain("status: 'backlog'")
+    expect(source.slice(open, open + 900)).toContain('Demand ${demandId}')
+    // Direct Topic chat owns the clarification decision; the Board button is the only path that pre-creates.
+    expect(source).toContain('从 Board 的 New Demand 入口接到已创建的 Demand')
+  })
 })
