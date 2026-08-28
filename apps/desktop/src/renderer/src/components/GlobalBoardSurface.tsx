@@ -205,6 +205,7 @@ export function GlobalBoardSurface() {
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
+  const createDemand = useAppStore((state) => state.createDemand)
   const demandArrangement = useAppStore((state) => state.demandArrangement)
   const setDemandArrangement = useAppStore((state) => state.setDemandArrangement)
   const updateDemand = useAppStore((state) => state.updateDemand)
@@ -233,10 +234,18 @@ export function GlobalBoardSurface() {
 
   function createDemandCard(): void {
     const project = projectFilter !== 'all' ? projects.find(([id]) => id === projectFilter) : undefined
+    const demandId = createDemand({
+      title: 'New demand — needs clarification',
+      description: 'Created from the Board New Demand action; PMO Teams will clarify the request before execution.',
+      projectId: project?.[0] ?? null,
+      projectName: project?.[1] ?? null,
+      status: 'backlog',
+      source: 'default-topic'
+    })
     const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
     requestPmoTeamsTopicFloatingOpen({
       anchor: 'floating',
-      prompt: `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到一条新需求。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请先和用户对话澄清，不要先创建空 Demand。${projectContext}\n请确认需求标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力写入并返回 receipt。`
+      prompt: `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
     })
   }
 

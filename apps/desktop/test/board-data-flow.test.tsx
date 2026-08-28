@@ -55,14 +55,14 @@ describe('Board request ownership', () => {
     await renderBoard()
     expect(api.workspaces.listBranches).toHaveBeenCalledTimes(1)
     expect(container.querySelector('.board--matrix')!.textContent).toContain('before-refresh')
-    expect(container.querySelector('.board-tool-list')!.textContent).toContain('before-refresh')
+    expect(container.querySelector('.board-tool-list')!.textContent).toContain('No demands yet')
     vi.mocked(api.workspaces.listBranches).mockResolvedValue(branches('after-refresh'))
     const refresh = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Refresh')!
     expect(refresh).toBeDefined()
     await act(async () => refresh.click())
     expect(api.workspaces.listBranches).toHaveBeenCalledTimes(2)
     expect(container.querySelector('.board--matrix')!.textContent).toContain('after-refresh')
-    expect(container.querySelector('.board-tool-list')!.textContent).toContain('after-refresh')
+    expect(container.querySelector('.board-tool-list')!.textContent).toContain('No demands yet')
     expect(container.textContent).not.toContain('before-refresh')
   })
   it('shows read failure in both surfaces instead of an empty Board or endless loading', async () => {

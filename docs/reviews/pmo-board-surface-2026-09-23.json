@@ -1,0 +1,15 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "PMO and Board surface clarity",
+  "decision": "approved",
+  "acceptance": [
+    "PMO Teams Topic opens as one compact, legible surface with a small identity header and no oversized title band.",
+    "Board's left tool panel renders Demand summaries and an explicit empty state; it never renders Branch names as Demand rows.",
+    "Board's explicit New Demand action persists a Demand before opening the canonical PMO Teams Topic with that Demand context; direct PMO chat keeps creation under PMO clarification and confirmation.",
+    "Board tool chrome has one non-overlapping grid and remains readable when Project Rail is hidden."
+  ],
+  "sources": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ]
+}

@@ -13,7 +13,7 @@ import { boardListSegments, BOARD_LIST_VISIBLE_ROWS } from '../src/renderer/src/
 import { browserOpenError } from '../src/renderer/src/lib/browser-open-feedback.js'
 
 /**
- * Board 工具的次级面板是**工作清单**，不是说明页。
+ * Board 工具的次级面板是**Demand 工作清单**，不是 Branch 说明页。
  *
  * 用户打开它是来找一条具体的工作线。所以这里断言的是"清单确实列出了 Board 的行和行内的
  * Agent，点一个 Agent 会定位到它"，以及一条同样重要的反面："行不是面板自己查来的"——
@@ -24,7 +24,8 @@ const fixture = vi.hoisted(() => ({
   rows: [] as BoardRow[],
   kind: 'branch' as BoardRow['kind'],
   loading: false,
-  selectSession: vi.fn()
+  selectSession: vi.fn(),
+  setSelectedDemand: vi.fn()
 }))
 
 vi.mock('../src/renderer/src/hooks/useBoardRows.js', () => ({
@@ -32,8 +33,8 @@ vi.mock('../src/renderer/src/hooks/useBoardRows.js', () => ({
 }))
 
 vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: (selector: (state: { selectSession: typeof fixture.selectSession }) => unknown) =>
-    selector({ selectSession: fixture.selectSession })
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({ selectSession: fixture.selectSession, setSelectedDemand: fixture.setSelectedDemand, config: null, sessions: [], demands: {}, selectedDemandId: null })
 }))
 
 const dockSource = readFileSync(
@@ -106,18 +107,13 @@ describe('Browser Tools launch feedback', () => {
 })
 
 describe('Board 工具面板是工作清单', () => {
-  it('行与 Board 主视图同源——面板不自己查一遍 topics/branches', () => {
-    // 这是本 task 最容易悄悄退化的一条：面板自己 useScratchTopics/useWorkspaceBranches，
-    // 两处就会在筛选、排序、加载时序上各自漂移，而漂移时谁都不会响。
-    expect(dockSource).toContain('const { rows, kind, loading, error } = useBoardRows()')
+  it('Demand 面板不自己查 Branch/Topic，也不把 Branch 作为空态行', () => {
+    // Board 的主实体是持久化 Demand。Branch 读取即使存在，也不能填充 Demand 面板。
+    expect(dockSource).not.toContain('useBoardRows()')
     expect(dockSource).not.toContain('useScratchTopics(')
     expect(dockSource).not.toContain('useWorkspaceBranches(')
     expect(dockSource).not.toContain('buildTopicBoardRows(')
     expect(dockSource).not.toContain('buildProjectBranchLanes(')
-  })
-
-  it('点 Agent 走既有的 selectSession，不新增第二条导航路径', () => {
-    expect(dockSource).toContain('onClick={() => selectSession(session.id)}')
   })
 
   it('状态点复用共享 StatusDot，不发明第二套颜色或形状', () => {
@@ -128,45 +124,35 @@ describe('Board 工具面板是工作清单', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const list = dockSource.slice(start, end)
-    expect(list).toContain('<StatusDot status={session.status} />')
+    expect(list).toContain('<StatusDot status={demand.sessions[0]?.status')
     // 自己按状态挑颜色就是第二套语汇。
     expect(list).not.toContain('status--')
   })
 
-  it('静态说明只在零行时作为空态出现，不再是默认视图', () => {
+  it('零 Demand 时显示明确空态，不显示 Branch 名', () => {
     const start = dockSource.indexOf('function BoardToolList')
     const end = dockSource.indexOf('function SurfaceToolDock')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const list = dockSource.slice(start, end)
-    // 图例在 rows.length === 0 的分支里，且那个分支先于清单返回。
-    const emptyBranch = list.indexOf('if (rows.length === 0)')
-    const legend = list.indexOf('board-tool-legend')
-    const listMarkup = list.indexOf('className="board-tool-list"')
-    expect(emptyBranch).toBeGreaterThan(-1)
-    expect(legend).toBeGreaterThan(emptyBranch)
-    expect(listMarkup).toBeGreaterThan(legend)
+    expect(list).toContain('No demands yet. Use PMO Teams Topic to create one.')
+    expect(list).not.toContain('boardRows.rows.slice')
+    expect(list).not.toContain('row.name')
   })
 
-  it('Scratch 也有这个面板——Topic 行同样是工作线', () => {
-    // 旧摘要挂在 `isBoard && project` 上，Scratch 没有 project，于是永远看不到它。
+  it('全局 Board 直接挂载 Demand 面板', () => {
     expect(dockSource).toContain('{isBoard ? <BoardToolList')
-    expect(dockSource).not.toContain('{isBoard && project ?')
   })
 })
 
 describe('BoardToolList 渲染', () => {
-  it('列出行名与行内 Agent 数，展开前不渲染 Agent', async () => {
-    fixture.rows = [row('alpha', [agentSession('s1'), agentSession('s2')])]
-    fixture.kind = 'branch'
+  it('零 Demand 时不渲染 Branch 行', async () => {
+    fixture.rows = [row('main')]
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
-    expect(markup).toContain('row-alpha')
     expect(markup).toContain('board-tool-row')
-    // 计数在行上；Agent 名字要展开才出现，折叠态一行只占一行。
-    expect(markup).toContain('>2</em>')
-    expect(markup).not.toContain('Agent s1')
-    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).toContain('No demands yet')
+    expect(markup).not.toContain('main')
   })
 
   it('零行时显示空态说明，而不是一张空清单', async () => {
@@ -174,7 +160,7 @@ describe('BoardToolList 渲染', () => {
     fixture.loading = false
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
-    expect(markup).toContain('board-tool-legend')
-    expect(markup).not.toContain('board-tool-list')
+    expect(markup).toContain('board-tool-list')
+    expect(markup).toContain('No demands yet')
   })
 })

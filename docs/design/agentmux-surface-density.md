@@ -909,3 +909,13 @@ Demand 详情是连续的右侧 surface：标题和状态在短 header 中，属
 ### Scratch Topic 工作面可见性（2026-09-23）
 
 Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两块表面。打开 Topic 后，右侧必须保留普通 Workbench 的 Tab bar、Region 和 Terminal/Agent 内容；不得把 Scratch 从 Workbench registry 排除而只留下全幅空底。
+
+### PMO 浮窗与 Board 工具栏的紧凑度（2026-09-23）
+
+PMO 展开面使用一体式短标题行：标题字号服从正文元信息档，头像与标题行接合，边框和阴影清楚但不靠高大的留白制造层级。标题行高度不应成为对话首屏的主要占用；完整名称放在 tooltip/无障碍名称中。Board 工具栏采用单行、单网格负责人布局；Project Rail 被遮挡时不保留 180px 的空 chrome，也不让侧栏按钮与 Board 图标落在同一格互相覆盖。
+
+Board 左侧清单的视觉单位是 Demand 卡片。零 Demand 只显示一条可操作的空态和创建提示，不能显示 Branch 名、`main` 或其它技术上下文作为占位行。创建按钮保持和工具带同一低高度，创建后再展开 PMO 对话，避免先弹出一个空的大面板。
+
+### Topic topology 的摘要与展开密度（2026-09-23）
+
+Topic 行的 topology 收起态使用一个带 Tab rail、Region 分区和短文字的 mini workbench preview；`2 tabs · 3 regions` 是辅助说明，不替代工作面本身。不再同时占用一组无标签 Region 缩略图和独立 Tabs 胶囊。展开面板保持单一连续 surface：Tab 标题在上、Region 几何在中、Executor 与最近活动在 Region 内或紧邻其下；状态色只做辅助，文字负责解释含义。当前 Tab 可以使用更亮的边界和活动字形，不能靠纯颜色区分。

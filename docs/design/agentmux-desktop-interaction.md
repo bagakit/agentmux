@@ -1438,6 +1438,18 @@ Board 必须有一个可恢复的路由队列入口，用于查看无 Project、
 Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态、优先级、Project/负责人、标签、日期、子 Demand 进度和关联 Session/Agent 摘要。完整描述、活动、决策、评论、执行日志、重试/停止和删除确认在固定详情工作区中完成；删除是明确的危险动作，取消优先于删除以保留历史。AgentMux 的 Demand 文件系统包、Core Runtime 和 ctxmux 事实边界保持不变。
 > 命名更新（2026-09-23）：此前文档中的 “Leader Topic” 统一以代码和产品现名 **PMO Teams Topic** 为准；其固定身份、浮窗和职责约束继续有效。
 
+### PMO 浮窗标题与 Board 左侧清单（2026-09-23）
+
+- PMO Teams Topic 展开后是一块连续的紧凑工作面。标题只作为身份提示和拖动把手，不得另造高大的标题区域；头像、标题、关闭动作与对话内容属于同一块表面。视觉标题可以使用紧凑的 `PMO teams`，完整的 `PMO teams topic` 仍保留在可访问名称和工具提示中。
+- PMO 浮窗的边界、焦点和拖动反馈必须清楚，但标题栏不能挤压对话首屏。展开、收起和窗口重启继续复用同一份浮窗状态，不能生成第二个 Topic 或 Session。
+- Board 左侧工具面板只展示持久化 Demand 的摘要、数量和明确空态。Demand 为零时不得把 `main` 或任意 Branch 名称当成需求行；Branch/Project 上下文只在真正需要展示归属时出现，不能冒充 Board 主实体。
+- Board 工具顶栏只保留一组不重叠的工作面控制和 Board 身份。Project Rail 被 Board 遮挡时，不得用固定宽度的侧栏 chrome 挤压或覆盖 Board 图标；控件必须在窄宽度下仍保持可见、可点击和可读。
+- Demand 有两条创建入口：用户直接在 PMO Teams Topic 对话时，PMO 先澄清需求并在确认后决定是否公开创建；用户点击 Board 的“新建”按钮时，界面先创建一条可见 Demand，再以该 Demand 的上下文打开同一个 PMO Teams Topic 浮窗。两条入口都不能创建第二个 Topic 或把 Demand 偷换成 Session。
+
 ### Scratch Topic 打开后的工作面渲染（2026-09-23）
 
 点击 Scratch Topic 后，Scratch workspace 的 Workbench 必须和普通 workspace 一样进入窗口级 registry 并显示对应 Tab/Region；Topic 只改变导航和绑定，不得因为 Scratch 是 wiki 工作区而留下空白右侧工作面。未准备完成时显示共享的 loading/失败服务窗，工作面本身不能被错误地过滤掉。
+
+### Topic Workbench topology 的可读层级（2026-09-23）
+
+Topic 行的工作面摘要必须明确区分三层事实：Tab 数量、每个 Tab 的 Region 布局、Region 内的 Executor 与最近活动。收起态使用一个带 Tab rail 和 Region 分区的 mini workbench preview，让用户第一眼看到真实工作面；Tab 数字和短标签负责解释图形，不用没有标签的分屏小方块和头像簇让用户猜层级。hover 或键盘 focus 后展开同一个 topology inspector，按 Tab 分组展示所有真实 Region 几何、Executor、surface 类型和最近活动；当前 Tab 展开更详细，其他 Tab 保留紧凑布局预览。未挂载的后台 Agent 可以保留独立身份入口，但不能与 Tab/Region 摘要混成一串图标。
