@@ -52,8 +52,9 @@ function RegionLayout({
   regions: readonly TopicRegionDetail[]
   className: string
 }) {
+  const regionLabel = `${regions.length} ${regions.length === 1 ? 'Region' : 'Regions'}`
   return (
-    <span className={className} aria-label={`${regions.length} Regions`}>
+    <span className={className} aria-label={regionLabel}>
       {regions.map((region) => (
         <span
           className={`${className}__region`}
