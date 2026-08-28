@@ -174,6 +174,42 @@ describe('Topic 行的视觉收敛', () => {
     expect(html).toContain('data-region-kind="file"')
   })
 
+  it('uses the Agent avatar for a single Region and removes that Agent from the duplicate roster', () => {
+    const html = renderToStaticMarkup(createElement(TopicPresence, {
+      agents: [{
+        key: 'session:codex',
+        providerId: 'codex',
+        executorId: 'codex',
+        sessionId: 'session:codex',
+        label: 'Codex',
+        state: 'working'
+      }],
+      tabs: [{
+        tabId: 'tab:agent',
+        title: 'Agent tab',
+        active: true,
+        regions: [{
+          regionId: 'region:agent',
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          surfaceKind: 'agent',
+          executorLabel: 'Codex',
+          activity: 'Editing TopicPresence.tsx',
+          agent: {
+            providerId: 'codex',
+            executorId: 'codex',
+            sessionId: 'session:codex',
+            label: 'Codex',
+            state: 'working'
+          }
+        }]
+      }]
+    }))
+    expect(html).toContain('topic-workbench-topology__tab-glyph--single')
+    expect(html).toContain('class="agent-avatar status status--working"')
+    expect(html).not.toContain('class="selector-presence"')
+    expect(html).toContain('Editing TopicPresence.tsx')
+  })
+
   it('把 inspector 提升到 viewport overlay，避免被 Topic 滚动面板裁切', () => {
     expect(topologySource).toContain('createPortal(inspector, portalHost)')
     expect(topologySource).toContain('getBoundingClientRect()')
@@ -198,6 +234,12 @@ describe('Topic 行的视觉收敛', () => {
     expect(topologySource).toContain('<TopicTabGlyph tab={tab} />')
     expect(dockStyles).toContain('.topic-workbench-topology__tab-glyph')
     expect(dockStyles).toContain('width: 280px;')
+  })
+
+  it('does not restore a duplicate Agent roster when a Session is mounted in any Tab', () => {
+    expect(topologySource).toContain('tabs.flatMap((tab) => tab.regions.flatMap')
+    expect(topologySource).toContain('region.agent?.sessionId ?? region.agentSessionId')
+    expect(topologySource).toContain('<TopicRegionMark region={region} />')
   })
 })
 
