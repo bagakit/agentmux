@@ -2,11 +2,11 @@
   "schema": "bagakit.review.v1",
   "title": "Browser overlay and resize continuity",
   "status": "approved",
-  "scope": "Keep Agent identity popovers above neighboring native Browser surfaces and preserve the last valid Browser frame through transient resize geometry.",
+  "scope": "Keep Agent identity popovers above overlapping native Browser surfaces and preserve the last valid Browser frame through transient resize geometry, including split-handle resizing.",
   "acceptance": [
-    "An Agent avatar hover/focus popover can be read without a neighboring Browser WebContentsView covering it.",
+    "An Agent avatar hover/focus popover can be read without an overlapping Browser WebContentsView covering it; a non-overlapping Browser remains visible.",
     "Every popover close, blur, Escape, unmount, and error path releases the native-surface occlusion lease.",
-    "A transient zero-size layout during window or pane resize does not send a null Browser bounds update.",
+    "A transient zero-size layout during window or pane resize or split-handle drag does not send a null Browser bounds update.",
     "Real visibility changes, parking, errors, screenshot and selection overlays retain their existing hide behavior."
   ],
   "sources": [

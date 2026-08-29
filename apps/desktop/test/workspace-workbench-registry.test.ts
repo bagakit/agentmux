@@ -46,6 +46,10 @@ describe('window-owned Workspace Workbench registry', () => {
     expect(app).toContain('visible={visible}')
   })
 
+  it('keeps native Browser surfaces mounted while a split handle is dragged', () => {
+    expect(workbench).not.toContain('nativeSurfacesVisible={nativeSurfacesVisible && !dragging}')
+  })
+
   it('does not prewarm a hidden launcher for every parked Workspace', () => {
     expect(workbench).toContain('visible={nativeSurfacesVisible}')
     expect(newTab).toContain('visible = true')
