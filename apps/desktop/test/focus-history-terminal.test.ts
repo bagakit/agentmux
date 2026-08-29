@@ -23,7 +23,6 @@ function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal
     id,
     kind: 'terminal',
     providerId: null,
-    executorId: null,
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: 'Terminal',
@@ -32,7 +31,7 @@ function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal
     processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
-    control: { kind: 'terminal', hostId: 'local', terminalSessionId: id }
+    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
 }
 

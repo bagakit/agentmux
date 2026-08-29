@@ -60,6 +60,24 @@ function nestedWorktreeGlobs(): string[] {
 }
 
 export default defineConfig({
+  /**
+   * `__AGENTMUX_WEB_PREVIEW__` 是 vite 的构建期常量（`apps/desktop/electron.vite.config.ts:22`
+   * 注入 `'false'`），`lib/api.ts` 在**模块作用域**读它来决定走 mock 还是 desktop 桥。plain
+   * vitest 不跑那份 vite 配置，于是任何 import 链摸到 `lib/api` 的测试文件在**加载期**就
+   * `ReferenceError`，整份文件一个测试都不跑。
+   *
+   * 此前每个测试文件各自 `vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)` 来躲它——125 个文件
+   * 抄同一行，122 个抄对了，三个漏了（activity-view、activity-view-wiring、
+   * conversation-axis-readout）。漏的后果不是「某条断言红」，而是那三份文件**整份不跑**：
+   * vitest 报 `no tests`，退出码却只在其他文件也红时才非零。一份不跑的测试文件不会保护任何东西。
+   *
+   * 所以把这个常量定义在它真正属于的那一层——构建配置，与 vite 一侧对称——而不是让每个新文件
+   * 记得抄那一行。测试侧取 `true`（走 mockApi）：那是 122 个文件已经在用的取值，也是唯一能在
+   * node 里加载的那个分支；`requireDesktop` 那条要 Electron 的 preload 桥。
+   *
+   * 文件里已有的 `vi.stubGlobal` 保持有效（stub 优先于 define，且值相同），不必逐个删。
+   */
+  define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   test: {
     exclude: [...defaultExclude, ...nestedWorktreeGlobs()],
     // 见 vitest.dist-freshness.ts：desktop 经 dist 消费 @agentmux/core，dist 陈旧时整个 desktop
