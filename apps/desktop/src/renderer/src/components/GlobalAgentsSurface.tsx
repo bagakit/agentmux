@@ -12,6 +12,7 @@ import { AgentTopologySummary } from './AgentTopologySummary'
 import { AgentFocusHistory } from './AgentFocusHistory'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { topicIdForSession } from '../lib/workbench-tabs'
+import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
 const BUCKET_META = {
@@ -33,8 +34,8 @@ export function GlobalAgentsSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const names = useAppStore((state) => state.agentNames)
-  const selectedId = useAppStore((state) => state.agentFocus.execution.sessionId)
-  const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
+  const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
+  const executionHistory = useAppStore((state) => executionFocusHistory(state.agentFocus))
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')

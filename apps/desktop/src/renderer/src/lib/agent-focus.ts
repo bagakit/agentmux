@@ -24,6 +24,18 @@ export const EMPTY_AGENT_FOCUS: AgentFocusContext = {
   pmo: { sessionId: null }
 }
 
+export function executionFocusSessionId(context: AgentFocusContext): string | null {
+  return context.execution.sessionId
+}
+
+export function executionFocusHistory(context: AgentFocusContext): readonly AgentFocusHistoryEntry[] {
+  return context.execution.history
+}
+
+export function pmoFocusSessionId(context: AgentFocusContext): string | null {
+  return context.pmo.sessionId
+}
+
 export function focusLaneForSession(
   topicId: string | null,
   pmoTopicId: string
