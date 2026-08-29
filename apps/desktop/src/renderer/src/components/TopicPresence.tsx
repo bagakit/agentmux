@@ -255,6 +255,7 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
             onMouseEnter={() => inspectTab(tab.tabId)}
             onFocus={() => inspectTab(tab.tabId)}
             onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation()
               setInspectorOpen(false)
