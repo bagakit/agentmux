@@ -739,7 +739,7 @@ export function BrowserPane({
         onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
         onOpenTimeline={openOperationTimeline}
       />
-      <div className="browser-stage" ref={stageRef}>
+      <div className="browser-stage" data-native-browser-stage ref={stageRef}>
         {screenshot ? (
           <ScreenshotEditor
             image={screenshot.image}

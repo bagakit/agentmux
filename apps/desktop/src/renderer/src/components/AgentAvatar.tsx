@@ -52,7 +52,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const trigger = useRef<HTMLButtonElement & HTMLSpanElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const panelOpenRef = useRef(false)
+  const nativeOverlayLeaseHeld = useRef(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const attention = displayState ? attentionAccentFor(displayState) : null
   const Element = onOpen ? 'button' : 'span'
@@ -62,8 +62,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   function keepOpen() { clearTimeout(closeTimer.current) }
   function closeNow() {
     keepOpen()
-    if (panelOpenRef.current) {
-      panelOpenRef.current = false
+    if (nativeOverlayLeaseHeld.current) {
+      nativeOverlayLeaseHeld.current = false
       notifyPanelVisibilityChange?.(false)
     }
     setPosition(null)
@@ -72,10 +72,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     keepOpen()
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
-      if (!panelOpenRef.current) {
-        panelOpenRef.current = true
-        notifyPanelVisibilityChange?.(true)
-      }
       setPosition({
         left: Math.min(Math.max(8, bounds.left), Math.max(8, window.innerWidth - 256)),
         top: bounds.bottom + 6
@@ -88,8 +84,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
-    if (panelOpenRef.current) {
-      panelOpenRef.current = false
+    if (nativeOverlayLeaseHeld.current) {
+      nativeOverlayLeaseHeld.current = false
       notifyPanelVisibilityChange?.(false)
     }
   }, [notifyPanelVisibilityChange])
@@ -115,8 +111,11 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     if (!position || !panel.current) return
     const bounds = panel.current.getBoundingClientRect()
     const triggerBounds = trigger.current?.getBoundingClientRect()
-    const maxLeft = Math.max(8, window.innerWidth - bounds.width - 8)
-    const left = Math.min(Math.max(8, position.left), maxLeft)
+    const region = trigger.current?.closest('.workbench-region')?.getBoundingClientRect()
+    const regionCanContainPanel = region && region.width >= bounds.width + 16
+    const minLeft = regionCanContainPanel ? region.left + 8 : 8
+    const maxLeft = regionCanContainPanel ? region.right - bounds.width - 8 : Math.max(8, window.innerWidth - bounds.width - 8)
+    const left = Math.min(Math.max(minLeft, position.left), maxLeft)
     let top = Math.min(Math.max(8, position.top), Math.max(8, window.innerHeight - bounds.height - 8))
     if (bounds.bottom > window.innerHeight - 8 && triggerBounds) {
       top = Math.max(8, triggerBounds.top - bounds.height - 6)
@@ -124,7 +123,22 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     if (top + bounds.height > window.innerHeight - 8) {
       top = Math.max(8, window.innerHeight - bounds.height - 8)
     }
-    if (left !== position.left || top !== position.top) setPosition({ left, top })
+    if (left !== position.left || top !== position.top) {
+      setPosition({ left, top })
+      return
+    }
+    const overlapsBrowser = [...document.querySelectorAll<HTMLElement>('[data-native-browser-stage]')]
+      .some((stage) => {
+        if (stage.closest('[inert]') || getComputedStyle(stage).visibility !== 'visible') return false
+        const browser = stage.getBoundingClientRect()
+        return browser.width > 0 && browser.height > 0 &&
+          left < browser.right && left + bounds.width > browser.left &&
+          top < browser.bottom && top + bounds.height > browser.top
+      })
+    if (overlapsBrowser !== nativeOverlayLeaseHeld.current) {
+      nativeOverlayLeaseHeld.current = overlapsBrowser
+      notifyPanelVisibilityChange?.(overlapsBrowser)
+    }
   }, [position])
 
   const mark = <><AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />
