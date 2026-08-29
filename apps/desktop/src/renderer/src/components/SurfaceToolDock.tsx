@@ -36,6 +36,7 @@ import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import type { MainSurface } from '../store'
 import {
+  boardListSegments,
   contentSlotPresentation,
   resolveExplorerCollapsed,
   resolveWorkspaceTools,
@@ -469,18 +470,29 @@ export function BoardToolList({ hostId: _hostId }: { hostId: string }) {
   const demandRecords = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
+  const [showAll, setShowAll] = useState(false)
   const demands = projectDemands(config, sessions, demandRecords)
   const columns = demandColumns(demands)
+  // 一条清单，按状态排序后整体截断——不是每列各截 5 条。按列截断会把"其余还有多少"
+  // 分散成七个各自无声的缺口，而用户读到的是一条连续的清单。
+  const ordered = (['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[])
+    .flatMap((status) => columns[status].map((demand) => ({ demand, status })))
+  const { shown, hidden } = boardListSegments(ordered, showAll)
   return (
     <section className="board-tool-list" aria-label="Global demand index">
       <div className="board-tool-context"><span><Columns3 size={12} /> Requests &amp; ideas</span><em>{demands.length} request{demands.length === 1 ? '' : 's'}</em></div>
       {demands.length === 0 ? <div className="board-tool-row__empty">No requests or ideas yet. Use PMO Teams Topic to create one.</div> : null}
-      {(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[]).flatMap((status) => columns[status].slice(0, 5).map((demand) => (
+      {shown.map(({ demand, status }) => (
         <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
           <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
           <span><strong>{demand.title}</strong><small>{demand.projectName ?? 'Global'} · {status}</small></span>
         </button>
-      )))}
+      ))}
+      {hidden > 0 ? (
+        <button className="board-tool-more" type="button" onClick={() => setShowAll(true)}>
+          其余 {hidden} 条
+        </button>
+      ) : null}
     </section>
   )
 }
