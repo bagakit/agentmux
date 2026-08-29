@@ -8,7 +8,7 @@ import {
   usePmoTeamsTopicFloatingState
 } from '../lib/pmo-teams-topic-floating'
 import { topicIdForSession } from '../lib/workbench-tabs'
-import { executionFocusContextText } from '../lib/agent-focus'
+import { executionFocusContextText, pmoFocusSessionId } from '../lib/agent-focus'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 const DRAG_THRESHOLD = 3
@@ -23,6 +23,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const setViewMode = useAppStore((state) => state.setViewMode)
   const focusPmoSession = useAppStore((state) => state.focusPmoSession)
   const agentFocus = useAppStore((state) => state.agentFocus)
+  const pmoSessionId = useAppStore((state) => pmoFocusSessionId(state.agentFocus))
   const agentNames = useAppStore((state) => state.agentNames)
   const reportError = useAppStore((state) => state.reportError)
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
@@ -52,12 +53,12 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       return
     }
     const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
-    if (pmoTeamsSession && conversationInitializedRef.current !== pmoTeamsSession.id) {
+    if (pmoTeamsSession && (conversationInitializedRef.current !== pmoTeamsSession.id || pmoSessionId !== pmoTeamsSession.id)) {
       conversationInitializedRef.current = pmoTeamsSession.id
       focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
     }
-  }, [config, floating.open, focusPmoSession, sessions, setViewMode])
+  }, [config, floating.open, focusPmoSession, pmoSessionId, sessions, setViewMode])
 
   useEffect(() => {
     if (!floating.open || !scratch) return

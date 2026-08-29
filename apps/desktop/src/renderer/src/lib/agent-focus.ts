@@ -81,27 +81,6 @@ export function focusPmo(
   return { ...context, pmo: { sessionId } }
 }
 
-export function pruneFocusHistory(
-  context: AgentFocusContext,
-  sessions: readonly SessionSnapshot[]
-): AgentFocusContext {
-  const known = new Set(sessions.map((session) => session.id))
-  const history = context.execution.history.filter((entry) => known.has(entry.sessionId))
-  const executionSessionId = context.execution.sessionId && known.has(context.execution.sessionId)
-    ? context.execution.sessionId
-    : null
-  const pmoSessionId = context.pmo.sessionId && known.has(context.pmo.sessionId)
-    ? context.pmo.sessionId
-    : null
-  return {
-    execution: {
-      sessionId: executionSessionId,
-      history
-    },
-    pmo: { sessionId: pmoSessionId }
-  }
-}
-
 export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return EMPTY_AGENT_FOCUS
   const value = candidate as Record<string, unknown>
