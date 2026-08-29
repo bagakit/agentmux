@@ -351,6 +351,35 @@ function attentionEmissions(source: string): Array<{ attention: string; classNam
   // 这里不引入哨兵字符——一个"类名里不可能出现的字符"是又一个要维护的假设，而本仓
   // reference-name-containment.test.ts 已经记过它最坏的形态：往源文件里塞 NUL 会让整个文件对
   // `git grep` 永久失明。
+  //
+  // 但"紧贴插值"只在**插值真的可能续写这个词**时才成立。`agent-avatar${s ? ` status…` : ''}` 的
+  // 插值每一个取值位都以空格开头或是空串，`agent-avatar` 因此是完整的——把它判成半截，守卫就会
+  // 对一个规则齐备的元素报红（实测：AgentAvatar 的 `.agent-avatar:is(…, [data-attention])` 明明在
+  // agent-avatar.css:12）。判"续得上吗"要看取值位，和本仓 git-diff-coordinate-wiring 的
+  // resultExpressions 同一个道理：条件位不算数，三元取两支、`??`/`||` 取两侧、`&&` 取右。
+  // 只有**每一个**取值位都以空白开头（或为空串），这一端才判完整；有一个说不准就按半截处理。
+  const valuePositions = (node: ts.Expression): ts.Expression[] => {
+    if (ts.isParenthesizedExpression(node)) return valuePositions(node.expression)
+    if (ts.isConditionalExpression(node)) {
+      return [...valuePositions(node.whenTrue), ...valuePositions(node.whenFalse)]
+    }
+    if (ts.isBinaryExpression(node)) {
+      const kind = node.operatorToken.kind
+      if (kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken) {
+        return [...valuePositions(node.left), ...valuePositions(node.right)]
+      }
+      if (kind === ts.SyntaxKind.AmpersandAmpersandToken) return valuePositions(node.right)
+    }
+    return [node]
+  }
+  const startsDetached = (node: ts.Expression): boolean =>
+    valuePositions(node).every((value) => {
+      if (ts.isStringLiteralLike(value)) return value.text === '' || /^\s/u.test(value.text)
+      if (ts.isTemplateExpression(value)) {
+        return value.head.text === '' ? false : /^\s/u.test(value.head.text)
+      }
+      return false
+    })
   const completeWords = (text: string, cutLeft: boolean, cutRight: boolean): string[] => {
     // split 在字符串两端的空白处留下空串——那正好证明"这一端与插值之间有空白"，即该端的词完整。
     const words = text.split(/\s+/u)
@@ -370,10 +399,12 @@ function attentionEmissions(source: string): Array<{ attention: string; classNam
       }
       if (ts.isTemplateExpression(expression)) {
         const last = expression.templateSpans.length - 1
+        // 每一段的右端被它后面那个插值切，左端被它前面那个插值切——除非该插值证明自己接不上。
+        const cutBy = expression.templateSpans.map((span) => !startsDetached(span.expression))
         return [
-          ...completeWords(expression.head.text, false, true),
+          ...completeWords(expression.head.text, false, cutBy[0] ?? true),
           ...expression.templateSpans.flatMap((span, index) =>
-            completeWords(span.literal.text, true, index < last)
+            completeWords(span.literal.text, cutBy[index] ?? true, index < last ? cutBy[index + 1] ?? true : false)
           )
         ]
       }
@@ -603,6 +634,26 @@ describe('each attention call site is wired to the shared vocabulary', () => {
     expect(
       attentionEmissions('const a = <b className={`a${x}b c ${y}d`} data-attention={g(s)} />')
     ).toEqual([{ attention: 'g(s)', classNames: ['c'] }])
+    // 但"紧贴插值"不等于"半截"：插值的每一个取值位都以空白开头（或是空串）时，前面那个词续不上，
+    // 它就是完整的。这是本仓 AgentAvatar 的真实写法，判成半截会对一个规则齐备的元素报红。
+    // 插值**内部**的类名照旧不算（这里只读外层模板自己的字面量段），所以 `status` 不在结果里。
+    expect(
+      attentionEmissions('const a = <b className={`avatar${s ? ` status status--${s}` : \'\'}`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: ['avatar'] }])
+    // 放宽必配一个"洗白"变异体：只要有**一个**取值位接得上，这一端就仍按半截处理。下面两个三元
+    // 分别在 whenTrue / whenFalse 上续写 `avatar`，两次都必须把它排除掉——否则一个谁也不上色的
+    // `.avatar-busy` 就能借 `.avatar[data-attention]` 的规则过关。（插值内部的 `idle` 本来就不读，
+    // 所以两次的正确结果都是空。）
+    expect(
+      attentionEmissions('const a = <b className={`avatar${s ? \'-busy\' : \' idle\'}`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: [] }])
+    expect(
+      attentionEmissions('const a = <b className={`avatar${s ? \' idle\' : \'-busy\'}`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: [] }])
+    // 说不准的取值位（一个裸标识符、一次调用）一律按接得上处理——不知道就不放行。
+    expect(
+      attentionEmissions('const a = <b className={`avatar${cls}`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: [] }])
     // A neighbouring element's class must not leak in.
     expect(
       attentionEmissions('const a = <b className="outer"><i className="inner" data-attention={h(s)} /></b>')
