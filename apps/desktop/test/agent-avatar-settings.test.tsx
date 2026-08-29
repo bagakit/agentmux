@@ -127,6 +127,31 @@ it('shows details on hover and focus, then routes the settings action to the mat
   expect(document.querySelector('.agent-identity-popover')).toBeNull()
 })
 
+it('holds one native-surface lease per visible avatar panel and releases it on close and unmount', async () => {
+  useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
+  const onPanelVisibilityChange = (visible: boolean) => {
+    if (visible) useAppStore.getState().acquireNativeSurfaceOverlay()
+    else useAppStore.getState().releaseNativeSurfaceOverlay()
+  }
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config: null, sessions: [], onPanelVisibilityChange }}>
+    <AgentAvatar label="Left Agent" providerId="codex" />
+    <AgentAvatar label="Second Agent" providerId="claude" />
+  </ExecutorIdentityContext.Provider>)
+  const avatars = [...dom.container.querySelectorAll<HTMLElement>('.agent-avatar')]
+  expect(avatars).toHaveLength(2)
+  await act(async () => {
+    avatars[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+    avatars[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+  })
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  await act(async () => avatars[1]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(2)
+  await act(async () => avatars[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  await dom.render(null)
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+})
+
 it('passes appearance and stack count through both shared presence paths', async () => {
   const agent = { key: 'a', providerId: 'codex', state: 'running' as const, label: 'Review', appearance: appearances.review, count: 3 }
   await dom.render(<><SelectorPresence agents={[agent]} /><RegionMosaic cells={[{ regionId: 'r', agentSessionId: 'a', bounds: { x: 0, y: 0, width: 1, height: 1 } }]} agents={[agent]} /></>)
