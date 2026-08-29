@@ -58,7 +58,7 @@
 .global-demand-card__metadata { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .global-demand-card__tag { max-width: 100%; overflow: hidden; padding: 1px var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
 .global-demand-card__activity-count { color: var(--text-3); font-size: var(--fs-micro); }
-.global-demand-card__session-context { color: var(--blue-text); font-size: var(--fs-micro); }
+.global-demand-card__session-context { color: var(--blue); font-size: var(--fs-micro); }
 .global-demand-card__pmo, .global-demand-workspace__pmo { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .global-demand-card__pmo { align-self: flex-start; padding: 0; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .global-demand-card__pmo:hover, .global-demand-workspace__pmo:hover { color: var(--green); }
