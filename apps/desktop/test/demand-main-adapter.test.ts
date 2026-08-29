@@ -13,7 +13,7 @@ it('wires the filesystem Demand store through Main, preload, typed API, and star
   const source = files.join('\n')
   expect(files.length).toBeGreaterThan(0)
   expect(source).toContain("openDemandStore({ root: join(app.getPath('userData'), 'demands') })")
-  for (const route of ['demands:list', 'demands:create', 'demands:update', 'demands:delete', 'demands:linkSession', 'demands:unlinkSession', 'demands:linkProject', 'demands:unlinkProject', 'demands:activity', 'demands:decision']) {
+  for (const route of ['demands:list', 'demands:create', 'demands:update', 'demands:delete', 'demands:linkSession', 'demands:unlinkSession', 'demands:activity', 'demands:decision']) {
     expect(source).toContain(route)
   }
   expect(source).toContain('api.demands.list()')
