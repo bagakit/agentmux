@@ -28,6 +28,23 @@ function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: nu
   } as SessionSnapshot
 }
 
+function terminal(id: string): SessionSnapshot {
+  return {
+    id,
+    kind: 'terminal',
+    providerId: null,
+    executorId: null,
+    hostId: 'local',
+    workspacePath: '/repo/terminal',
+    label: 'Terminal',
+    createdAt: 1,
+    updatedAt: 1,
+    processState: 'running',
+    latestOutputBytes: 0,
+    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    control: { kind: 'terminal', hostId: 'local', terminalSessionId: id }
+  } as SessionSnapshot
+}
 describe('Global Agents card board', () => {
   const baseline = useAppStore.getState()
   let root: Root
@@ -91,5 +108,21 @@ describe('Global Agents card board', () => {
     expect(container.querySelector('[data-focus-history-id="second"]')).toBeTruthy()
     await act(async () => (container.querySelector('[data-focus-history-id="second"]') as HTMLButtonElement).click())
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('second')
+  })
+
+  it('renders a Terminal Session in the left Focus history without an avatar slot', async () => {
+    useAppStore.setState({
+      sessions: [terminal('terminal-1')],
+      providerCatalog: [],
+      agentFocus: {
+        execution: { sessionId: 'terminal-1', history: [{ sessionId: 'terminal-1', focusedAt: 1 }] },
+        pmo: { sessionId: null }
+      }
+    })
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    expect(container.querySelector('.focus-history')).toBeTruthy()
+    expect(container.querySelector('[data-focus-history-id="terminal-1"]')).toBeTruthy()
+    expect(container.querySelector('.focus-history__terminal-icon')).toBeTruthy()
+    expect(container.querySelector('.focus-history__entry .agent-avatar')).toBeNull()
   })
 })
