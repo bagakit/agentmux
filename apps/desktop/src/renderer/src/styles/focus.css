@@ -1,0 +1,55 @@
+/* Focus is a three-part working surface: history, status, and the selected Session. */
+.global-focus-layout { min-width: 0; min-height: 0; flex: 1 1 auto; display: grid; grid-template-columns: clamp(205px, 18vw, 252px) minmax(0, 1fr); overflow: hidden; }
+.global-focus-surface.global-board-surface--session-open .global-focus-layout { flex: 0 1 53%; }
+.global-focus-main { min-width: 0; border-right: 1px solid var(--line-soft); }
+.global-focus-main .global-board-columns { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+.global-focus-main .global-board-toolbar { min-height: 52px; }
+.global-focus-main .global-board-toolbar__scope svg { color: var(--green); }
+.global-focus-main .global-board-toolbar__crumb { overflow: hidden; text-overflow: ellipsis; }
+.global-focus-main .global-board-footer { background: var(--surface-0); }
+.global-session-card__terminal-icon { display: inline-flex; color: var(--text-2); }
+
+.focus-history { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface-1) 62%, var(--surface-0)); }
+.focus-history__header { flex: none; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 0 var(--sp-4); border-bottom: 1px solid var(--line-soft); color: var(--text-2); }
+.focus-history__title { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.focus-history__title svg { color: var(--green); }
+.focus-history__title strong { color: var(--text); font-size: var(--fs-meta); font-weight: 650; }
+.focus-history__hint { color: var(--text-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .06em; }
+.focus-history__list { min-height: 0; display: grid; align-content: start; gap: 1px; margin: 0; padding: var(--sp-3) var(--sp-2); overflow: auto; list-style: none; }
+.focus-history__item { position: relative; min-width: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr); }
+.focus-history__lane { position: relative; display: flex; justify-content: center; }
+.focus-history__lane::before { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); content: ''; }
+.focus-history__item:first-child .focus-history__lane::before { top: 50%; }
+.focus-history__item:last-child .focus-history__lane::before { bottom: 50%; }
+.focus-history__dot { z-index: 1; width: 7px; height: 7px; margin-top: 19px; border: 1px solid var(--text-3); border-radius: 50%; background: var(--surface-1); }
+.focus-history__item.is-current .focus-history__dot { border-color: var(--green); background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent); }
+.focus-history__entry { min-width: 0; min-height: 44px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.focus-history__item.is-current .focus-history__entry { border-color: color-mix(in srgb, var(--green) 30%, var(--line)); background: color-mix(in srgb, var(--green) 8%, var(--surface-2)); }
+.focus-history__entry:hover, .focus-history__entry:focus-visible { border-color: var(--line); background: var(--surface-2); outline: none; }
+.focus-history__entry:focus-visible { box-shadow: inset 0 0 0 1px var(--green); }
+.focus-history__terminal-icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.focus-history__identity { min-width: 0; display: grid; gap: 1px; }
+.focus-history__identity strong, .focus-history__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-history__identity strong { color: var(--text); font-size: var(--fs-meta); font-weight: 630; }
+.focus-history__identity small { color: var(--text-3); font-size: var(--fs-micro); }
+.focus-history__meta { display: grid; justify-items: end; gap: 1px; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.focus-history__meta b { color: var(--text-2); font-size: 10px; font-weight: 650; letter-spacing: .03em; }
+.focus-history__item.is-current .focus-history__meta b { color: var(--green); }
+.focus-history__empty { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.focus-history__empty svg { flex: none; margin-top: 2px; }
+
+@media (max-width: 1100px) {
+  .global-focus-surface.global-board-surface--session-open .global-focus-layout { flex-basis: 56%; grid-template-columns: 200px minmax(0, 1fr); }
+  .global-focus-main .global-board-toolbar { align-items: flex-start; flex-direction: column; padding: var(--sp-3); }
+  .global-focus-main .global-board-toolbar__controls { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 880px) {
+  .global-focus-surface.global-board-surface--session-open .global-focus-layout { flex: 0 0 200px; display: block; }
+  .global-focus-surface.global-board-surface--session-open .global-focus-main { display: none; }
+  .global-focus-surface.global-board-surface--session-open .focus-history { height: 100%; }
+}
+@media (max-width: 600px) {
+  .global-focus-layout { grid-template-columns: 185px minmax(0, 1fr); }
+  .global-focus-surface.global-board-surface--session-open .global-focus-layout { flex-basis: 185px; }
+  .focus-history__hint, .focus-history__meta time { display: none; }
+}
