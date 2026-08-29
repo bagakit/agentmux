@@ -197,6 +197,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .status--waiting .status__dot::after, .status--blocked .status__dot::after { content: "?"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--amber-bg); font-size: 7px; font-weight: 800; line-height: 1; }
 .status--error .status__dot { width: 9px; height: 9px; }
 .status--error .status__dot::after { content: "!"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--surface-1); font-size: 7px; font-weight: 800; line-height: 1; }
+/* Tab-corner and rail-row marks shrink the dot to 5px (dock.css `.workspace-agent-row__mark`,
+   workbench.css `.workbench-tab__agent-mark`); a 7px glyph inside a 5px pip is illegible, and the
+   corner position already differentiates. So the pip lifts only on full-size surfaces.
+   This is keyed on the MARK, not on a list of glyph states — "?" and "!" are both 7px and both
+   unreadable there, and the next glyph would be too. Dropped by bcd94ac3 and restored here: for a
+   month both marks were rendering a smudge where the plain pip belongs. */
+.workspace-agent-row__mark .status__dot::after,
+.workbench-tab__agent-mark .status__dot::after { display: none; }
 /* Disconnected is a dropped link, not an attention request — split off amber (which now means "needs
    you") onto a neutral hollow dot so a lost connection can never be mistaken for one. Ring, not fill:
    a distinct shape as well as a neutral colour. */
