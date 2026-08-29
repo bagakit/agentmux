@@ -1,11 +1,11 @@
 import { GitBranch, History } from 'lucide-react'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
+import type { FocusHistoryEntry } from '../lib/agent-focus'
 import { workspaceForSession } from '../lib/workbench-tabs'
 import { AgentAvatar } from './AgentAvatar'
 
-export type AgentFocusHistoryProps = {
-  entries: readonly AgentFocusHistoryEntry[]
+export type FocusHistoryProps = {
+  entries: readonly FocusHistoryEntry[]
   currentSessionId: string | null
   sessions: readonly SessionSnapshot[]
   config: Parameters<typeof workspaceForSession>[0]
@@ -17,7 +17,7 @@ function focusTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-export function AgentFocusHistory({ entries, currentSessionId, sessions, config, names, onSelect }: AgentFocusHistoryProps) {
+export function FocusHistory({ entries, currentSessionId, sessions, config, names, onSelect }: FocusHistoryProps) {
   const sessionById = new Map(sessions.map((session) => [session.id, session]))
   return <section className="agent-focus-history" aria-label="Recent execution Agent focus">
     <header className="agent-focus-history__header">
