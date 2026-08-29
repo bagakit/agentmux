@@ -14,14 +14,34 @@
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 0,
-    "round_count": 0
+    "no_progress_rounds": 1,
+    "round_count": 1
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/agent-focus-context.test.ts test/pmo-focus-isolation.test.ts test/focus-history-terminal.test.ts --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2b68fsjry/artifacts/gate-T-001-r1-0001.log",
+    "last_context": {
+      "candidate_sha": "e45f9d37a1371ff22d8c8b08b096cca429c960b2",
+      "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification_digest": "none",
+      "dedup_key": "559b455dcd51ef955fb096633c92fe0b3b33eba5c18cfe4f5c0c1eabe8511e1d",
+      "source_key": "3bc1d309280d47a082f5a6104546411b9459061bc5e0220d2e607d585d1c3d56",
+      "artifact_digests": {},
+      "plan_revision": 1
+    }
   },
   "history": [
     {
@@ -39,6 +59,10 @@
     {
       "action": "task_started",
       "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
     }
   ]
 }

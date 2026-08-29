@@ -61,9 +61,29 @@
       "estimate_hours": 0.8,
       "introduced_in_revision": 1,
       "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/agent-focus-context.test.ts test/pmo-focus-isolation.test.ts test/focus-history-terminal.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "e45f9d37a1371ff22d8c8b08b096cca429c960b2",
+        "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "verification_digest": "none",
+        "dedup_key": "559b455dcd51ef955fb096633c92fe0b3b33eba5c18cfe4f5c0c1eabe8511e1d",
+        "source_key": "3bc1d309280d47a082f5a6104546411b9459061bc5e0220d2e607d585d1c3d56",
+        "artifact_digests": {},
+        "plan_revision": 1
+      }
     },
     {
       "id": "T-002",
