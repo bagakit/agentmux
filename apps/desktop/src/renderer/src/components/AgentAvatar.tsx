@@ -52,6 +52,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const trigger = useRef<HTMLButtonElement & HTMLSpanElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const panelOpenRef = useRef(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const attention = displayState ? attentionAccentFor(displayState) : null
   const Element = onOpen ? 'button' : 'span'
@@ -61,16 +62,20 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   function keepOpen() { clearTimeout(closeTimer.current) }
   function closeNow() {
     keepOpen()
-    setPosition((current) => {
-      if (current) notifyPanelVisibilityChange?.(false)
-      return null
-    })
+    if (panelOpenRef.current) {
+      panelOpenRef.current = false
+      notifyPanelVisibilityChange?.(false)
+    }
+    setPosition(null)
   }
   function show() {
     keepOpen()
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
-      if (!position) notifyPanelVisibilityChange?.(true)
+      if (!panelOpenRef.current) {
+        panelOpenRef.current = true
+        notifyPanelVisibilityChange?.(true)
+      }
       setPosition({
         left: Math.min(Math.max(8, bounds.left), Math.max(8, window.innerWidth - 256)),
         top: bounds.bottom + 6
@@ -83,7 +88,10 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
-    notifyPanelVisibilityChange?.(false)
+    if (panelOpenRef.current) {
+      panelOpenRef.current = false
+      notifyPanelVisibilityChange?.(false)
+    }
   }, [notifyPanelVisibilityChange])
   useEffect(() => {
     if (!position) return
