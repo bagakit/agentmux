@@ -26,7 +26,7 @@ describe('Agent avatar native-surface occlusion lease', () => {
 
   it('notifies the shared identity context exactly on popover open and close', () => {
     expect(avatarSource).toContain('const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange')
-    expect(avatarSource).toContain('if (!position) notifyPanelVisibilityChange?.(true)')
+    expect(avatarSource).toContain('if (!panelOpenRef.current)')
     expect(avatarSource).toContain('notifyPanelVisibilityChange?.(false)')
   })
 })
