@@ -14,7 +14,9 @@ export type RecoveryWorkbenchSummary = {
   activeWorkspaceId: string | null
   draftSessionIds: string[]
   drafts: Record<string, string>
-  selectedAgentSessionId: string | null
+  executionFocusSessionId: string | null
+  executionFocusHistory: string[]
+  pmoFocusSessionId: string | null
 }
 
 export type RecoverySessionSummary = {
@@ -36,7 +38,9 @@ export type RecoveryIdentity = {
   activeWorkspaceId: string | null
   draftSessionIds: string[]
   drafts: Record<string, string>
-  selectedAgentSessionId: string | null
+  executionFocusSessionId: string | null
+  executionFocusHistory: string[]
+  pmoFocusSessionId: string | null
   sessionIds: string[]
   runIds: string[]
 }
@@ -65,7 +69,9 @@ export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchS
       activeWorkspaceId: null,
       draftSessionIds: [],
       drafts: {},
-      selectedAgentSessionId: null
+      executionFocusSessionId: null,
+      executionFocusHistory: [],
+      pmoFocusSessionId: null
     }
   }
   let parsed: unknown
@@ -80,7 +86,9 @@ export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchS
       activeWorkspaceId: null,
       draftSessionIds: [],
       drafts: {},
-      selectedAgentSessionId: null
+      executionFocusSessionId: null,
+      executionFocusHistory: [],
+      pmoFocusSessionId: null
     }
   }
   const state = objectRecord(objectRecord(parsed).state)
@@ -96,6 +104,15 @@ export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchS
   const drafts = Object.fromEntries(Object.entries(rawDrafts).flatMap(([sessionId, draft]) => (
     typeof draft === 'string' ? [[sessionId, draft] as const] : []
   )))
+  const agentFocus = objectRecord(state.agentFocus)
+  const execution = objectRecord(agentFocus.execution)
+  const history = Array.isArray(execution.history)
+    ? execution.history.flatMap((entry) => {
+        const value = objectRecord(entry)
+        return stringValue(value.sessionId) ? [stringValue(value.sessionId)!] : []
+      })
+    : []
+  const pmo = objectRecord(agentFocus.pmo)
   return {
     storagePresent: true,
     tabIds,
@@ -104,7 +121,9 @@ export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchS
     activeWorkspaceId: stringValue(state.activeWorkspaceId),
     draftSessionIds: sortedStrings(Object.keys(drafts)),
     drafts,
-    selectedAgentSessionId: stringValue(state.selectedAgentSessionId)
+    executionFocusSessionId: stringValue(execution.sessionId),
+    executionFocusHistory: history,
+    pmoFocusSessionId: stringValue(pmo.sessionId)
   }
 }
 
@@ -151,7 +170,9 @@ export function recoveryIdentityFromReport(report: {
     activeWorkspaceId: report.workbench.activeWorkspaceId,
     draftSessionIds: report.workbench.draftSessionIds,
     drafts: report.workbench.drafts,
-    selectedAgentSessionId: report.workbench.selectedAgentSessionId,
+    executionFocusSessionId: report.workbench.executionFocusSessionId,
+    executionFocusHistory: report.workbench.executionFocusHistory,
+    pmoFocusSessionId: report.workbench.pmoFocusSessionId,
     sessionIds: report.sessions.sessions.map((session) => session.agentSessionId),
     runIds: report.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : [])
   }
