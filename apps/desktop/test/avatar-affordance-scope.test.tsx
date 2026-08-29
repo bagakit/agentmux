@@ -34,6 +34,18 @@ import { allStyleRules } from './helpers/styles.js'
  */
 
 const INTERACTIVE_PSEUDO = /:(?:focus-within|focus-visible|hover|active|focus)/gu
+/**
+ * 焦点伪类要单独拿出来，因为它回答的**不是**同一个问题。
+ *
+ * `:hover` / `:active` 与 `cursor: pointer` 画的是「点我会发生事」——静态头像点不动，画上去就是
+ * 说谎。`:focus-visible` 画的是「键盘现在停在我这里」，而静态头像**确实**能被键盘停住：
+ * `bcd94ac3` 给它加了无条件的 `tabIndex={0}`，`onFocus` 打开身份面板，于是它是一个真的键盘可达
+ * 控件。这时候没有焦点环才是缺陷——密度合同要求「每个图标按钮必须有 tooltip、`aria-label` 和
+ * 可见键盘 focus」。
+ *
+ * 所以焦点环不进"承诺可点"那一族。它另有守卫：下面那条「键盘可达就必须画得出焦点」。
+ */
+const FOCUS_PSEUDO = /:(?:focus-within|focus-visible|focus)(?![\w-])/u
 
 /** 一条 CSS 规则：选择器与规则体，都压成单行便于报错时读。 */
 interface Rule {
@@ -60,11 +72,14 @@ function avatarRules(): Rule[] {
  * 这条规则画的是不是「可以点我」。
  *
  * 两个来源，缺一不可：**指针形状**（`cursor: pointer` 直接就是那句承诺，它写在无伪类的基础规则上）
- * 与**交互伪类**（`:hover`/`:active`/`:focus*` 的整条规则按定义只在指针/焦点落上来时才生效，画的就是
+ * 与**指针伪类**（`:hover`/`:active` 的整条规则按定义只在指针落上来时才生效，画的就是
  * 「你碰到我了」的反馈）。只取其一都会漏：只看 cursor 会放过 hover 换底色，只看伪类会放过基础规则里
  * 那句 `cursor: pointer`——而后者正是这次的缺陷本体。
+ *
+ * 焦点伪类**不在**这一族，理由见 `FOCUS_PSEUDO`：它说的是键盘停在哪，不是点了会怎样。
  */
 function promisesInteraction(rule: Rule): boolean {
+  if (FOCUS_PSEUDO.test(rule.selector)) return false
   INTERACTIVE_PSEUDO.lastIndex = 0
   return INTERACTIVE_PSEUDO.test(rule.selector) || /cursor:\s*pointer/u.test(rule.body)
 }
@@ -190,6 +205,38 @@ describe('点不动的头像不许宣传自己可点', () => {
       '这些规则把「可以点我」画到了 role="img" 的静态头像上——它点不动，指针形状/悬停反馈在说谎'
     ).toEqual([])
     expect(reachesInteractive, '没有任何交互规则选中可点头像——手型和悬停反馈被整段删掉了').toBe(true)
+  })
+
+  it('键盘停得下来的头像都画得出焦点环', async () => {
+    // 上一条把焦点伪类从"承诺可点"里摘了出去。摘出去不能等于不守——否则收窄判据就成了删覆盖：
+    // 把 `.agent-avatar:focus-visible` 整条删掉，上一条会更绿，而键盘用户从此看不见自己在哪。
+    //
+    // 判据从**元素自己**来，不从形状来：凡是键盘停得下来的（`tabIndex >= 0`，今天静态与可点两支
+    // 都是），就必须有一条焦点规则选得中它。静态头像可聚焦是 `bcd94ac3` 的决定——它的 `onFocus`
+    // 打开身份面板，不给焦点环就等于有一个看不见的落脚点。
+    const { quiet, interactive } = await renderBothShapes()
+    const focusRules = avatarRules().filter((rule) => FOCUS_PSEUDO.test(rule.selector))
+    // 自检：一条焦点规则都没提取到时，下面的循环会对着空集合恒真。
+    expect(focusRules.length, '一条 agent-avatar 的焦点规则都没提取到——提取器坏了或规则被删光').toBeGreaterThan(0)
+
+    const focusable = [...quiet, ...interactive].filter((element) => {
+      const index = element.getAttribute('tabindex')
+      return element.tagName === 'BUTTON' ? index !== '-1' : index !== null && Number(index) >= 0
+    })
+    // 自检：可聚焦的一枚都没有＝下面恒真。两支形状各九个状态，一个都不该漏。
+    expect(focusable.length, '没有任何可聚焦头像——下面的全称判断恒真').toBe(quiet.length + interactive.length)
+
+    const unringed = focusable.filter((element) => !focusRules.some((rule) =>
+      rule.selector.split(',').some((member) => {
+        if (!member.includes('agent-avatar')) return false
+        FOCUS_PSEUDO.lastIndex = 0
+        return element.matches(member.replace(INTERACTIVE_PSEUDO, '').trim())
+      })
+    )).map((element) => `${element.tagName}[role=${element.getAttribute('role')}]`)
+    expect(
+      [...new Set(unringed)],
+      '这些头像键盘停得下来却没有任何焦点规则选中它——键盘用户看不见自己在哪'
+    ).toEqual([])
   })
 
   it('计算值层：静态头像没有 pointer 光标，可点头像有', async () => {
