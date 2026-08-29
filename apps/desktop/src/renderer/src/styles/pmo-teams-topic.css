@@ -1,10 +1,15 @@
 .pmo-teams-topic-floating { position: fixed; z-index: 45; min-width: 420px; min-height: 280px; overflow: hidden; resize: both; border-radius: var(--radius); background: transparent; box-shadow: 0 4px 12px var(--scrim-1), 0 24px 64px var(--scrim-2); }
+.pmo-teams-topic-floating.is-dragging { will-change: transform; }
 .pmo-teams-topic-floating--opening::after { content: ''; position: absolute; z-index: 3; inset: 0; pointer-events: none; border: 1px solid color-mix(in srgb, var(--green) 48%, transparent); border-radius: inherit; background: repeating-linear-gradient(180deg, transparent 0 9px, color-mix(in srgb, var(--green) 10%, transparent) 10px, transparent 11px); opacity: 0; animation: pmo-teams-topic-signal 220ms var(--ease-enter, ease-out) both; }
 .pmo-teams-topic-floating--hidden { visibility: hidden; pointer-events: none; }
 .pmo-teams-topic-floating__shell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: var(--radius); background: var(--surface-1); }
-.pmo-teams-topic-floating__titlebar { display: flex; align-items: center; gap: var(--sp-3); min-height: 34px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: grab; user-select: none; }
-.pmo-teams-topic-floating__titlebar--attached { min-height: 38px; padding-left: 58px; }
-.pmo-teams-topic-floating__title { min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 620; letter-spacing: .01em; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.pmo-teams-topic-floating__titlebar { display: flex; align-items: center; gap: var(--sp-3); min-height: 42px; padding: 0 var(--sp-4); border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent); background: color-mix(in srgb, var(--surface-2) 92%, transparent); color: var(--text); cursor: grab; user-select: none; }
+.pmo-teams-topic-floating__titlebar--attached { min-height: 42px; padding-left: var(--sp-4); }
+.pmo-teams-topic-floating__identity { display: inline-flex; min-width: 0; align-items: center; gap: var(--sp-2); }
+.pmo-teams-topic-floating__identity img { width: 24px; height: 24px; border-radius: 7px; object-fit: contain; background: var(--surface-3); }
+.pmo-teams-topic-floating__identity > span { display: inline-flex; min-width: 0; flex-direction: column; gap: 2px; }
+.pmo-teams-topic-floating__identity small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1; }
+.pmo-teams-topic-floating__title { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); font-weight: 650; letter-spacing: .01em; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
 .pmo-teams-topic-floating__titlebar:active, .pmo-teams-topic-floating__shell.is-dragging .pmo-teams-topic-floating__titlebar { cursor: grabbing; }
 .pmo-teams-topic-floating__topic { min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .pmo-teams-topic-floating__actions { display: inline-flex; gap: var(--sp-1); margin-left: auto; }

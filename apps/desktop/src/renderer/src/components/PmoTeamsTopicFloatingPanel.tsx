@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import {
@@ -12,6 +13,18 @@ import { executionFocusContextText, pmoFocusSessionId } from '../lib/agent-focus
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 const DRAG_THRESHOLD = 3
+
+type PanelDrag = {
+  pointerId: number
+  startX: number
+  startY: number
+  latestX: number
+  latestY: number
+  left: number
+  top: number
+  moved: boolean
+  frameId: number | null
+}
 
 export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
@@ -30,7 +43,9 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const [dragging, setDragging] = useState(false)
   const [opening, setOpening] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const panelDragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
+  const panelDragRef = useRef<PanelDrag | null>(null)
+  const floatingRef = useRef(floating)
+  floatingRef.current = floating
   const deliveredPromptRef = useRef<string | null>(null)
   const conversationInitializedRef = useRef<string | null>(null)
   const wasOpenRef = useRef(false)
@@ -150,41 +165,119 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     return () => observer.disconnect()
   }, [floating.open, floating.size.height, floating.size.width, setFloating])
 
-  if (!scratch) return null
-
   const geometry = { left: floating.position.left, top: floating.position.top, width: floating.size.width, height: floating.size.height }
+
+  const clearDragFrame = (): void => {
+    const drag = panelDragRef.current
+    if (drag?.frameId !== null && drag?.frameId !== undefined) {
+      window.cancelAnimationFrame(drag.frameId)
+      drag.frameId = null
+    }
+  }
+
+  const clearDragVisual = (): void => {
+    clearDragFrame()
+    if (panelRef.current) panelRef.current.style.transform = ''
+  }
+
+  const renderDragFrame = (): void => {
+    const drag = panelDragRef.current
+    if (!drag) return
+    drag.frameId = null
+    if (!drag.moved || !panelRef.current) return
+    const current = floatingRef.current
+    const next = clampPmoTeamsTopicFloatingState({
+      ...current,
+      position: {
+        left: drag.left + drag.latestX - drag.startX,
+        top: drag.top + drag.latestY - drag.startY
+      }
+    })
+    panelRef.current.style.transform = `translate3d(${next.position.left - drag.left}px, ${next.position.top - drag.top}px, 0)`
+  }
+
+  const scheduleDragFrame = (): void => {
+    const drag = panelDragRef.current
+    if (!drag || drag.frameId !== null) return
+    drag.frameId = window.requestAnimationFrame(renderDragFrame)
+  }
+
+  const finishPanelDrag = (commit: boolean, pointerId?: number): void => {
+    const drag = panelDragRef.current
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return
+    clearDragVisual()
+    if (commit && drag.moved) {
+      const current = floatingRef.current
+      const next = clampPmoTeamsTopicFloatingState({
+        ...current,
+        position: {
+          left: drag.left + drag.latestX - drag.startX,
+          top: drag.top + drag.latestY - drag.startY
+        }
+      })
+      setFloating({ position: next.position })
+    }
+    const target = panelRef.current
+    if (target && target.hasPointerCapture?.(drag.pointerId)) {
+      try { target.releasePointerCapture(drag.pointerId) } catch { /* pointer already cancelled */ }
+    }
+    panelDragRef.current = null
+    setDragging(false)
+  }
+
+  useEffect(() => {
+    const cancel = (): void => finishPanelDrag(false)
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') cancel()
+    }
+    window.addEventListener('blur', cancel)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('blur', cancel)
+      window.removeEventListener('keydown', onKeyDown)
+      finishPanelDrag(false)
+    }
+  }, [])
+
+  if (!scratch) return null
 
   const onPanelPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return
-    panelDragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: floating.position.left, top: floating.position.top, moved: false }
+    panelDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      latestX: event.clientX,
+      latestY: event.clientY,
+      left: floating.position.left,
+      top: floating.position.top,
+      moved: false,
+      frameId: null
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
     setDragging(true)
   }
   const onPanelPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     const drag = panelDragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
-    const dx = event.clientX - drag.x
-    const dy = event.clientY - drag.y
+    drag.latestX = event.clientX
+    drag.latestY = event.clientY
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
     drag.moved = true
-    const position = { left: drag.left + dx, top: drag.top + dy }
-    setFloating(clampPmoTeamsTopicFloatingState({
-      ...floating,
-      position,
-    }))
+    event.preventDefault()
+    scheduleDragFrame()
   }
   const onPanelPointerEnd = (event: React.PointerEvent<HTMLDivElement>): void => {
-    const drag = panelDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    panelDragRef.current = null
-    setDragging(false)
+    finishPanelDrag(true, event.pointerId)
   }
 
   return (
     <>
       <div
         ref={panelRef}
-        className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}`}
+        className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}${dragging ? ' is-dragging' : ''}`}
         id="pmo-teams-topic-floating-panel"
         role="dialog"
         aria-modal="false"
@@ -203,7 +296,10 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
               onPointerUp={onPanelPointerEnd}
               onPointerCancel={onPanelPointerEnd}
             >
-              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong>
+              <span className="pmo-teams-topic-floating__identity">
+                <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" />
+                <span><strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong><small>Request routing</small></span>
+              </span>
               <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={requestPmoTeamsTopicFloatingClose}><X size={13} /></button>
               </div>
