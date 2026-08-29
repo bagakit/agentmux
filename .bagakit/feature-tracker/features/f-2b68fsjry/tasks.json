@@ -1,0 +1,144 @@
+{
+  "version": 2,
+  "feat_id": "f-2b68fsjry",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/focus-surface-history-2026-09-24.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/focus-surface-history-2026-09-24.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/focus-surface-history-2026-09-24.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/focus-surface-history-2026-09-24.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Record every execution Session focus, including Terminal",
+      "objective": "Make real Region and Tab focus update the existing execution focus lane while preserving PMO isolation.",
+      "outcome": "Clicking or keyboard-focusing an Agent or Terminal Region makes that Session the current execution focus and adds it to the bounded MRU history; PMO focus never writes execution history.",
+      "acceptance": [
+        "focusRegion and the direct Session selection paths record Agent and Terminal Sessions through one typed execution focus path.",
+        "PMO Session focus continues to update only the PMO lane.",
+        "A focused Store test proves a Terminal Session enters history and a mutation that removes the record call turns the test red.",
+        "Zero-caller grep shows the focus recording path is used outside its defining module."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-focus-context.test.ts test/pmo-focus-isolation.test.ts test/focus-history-terminal.test.ts --maxWorkers=1",
+          "proves": "execution and PMO focus behavior"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "typed Store integration"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/focus-surface-history-2026-09-24.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.8,
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "Rename Agents surface to Focus and expose a left history list",
+      "objective": "Productize execution focus as a first-class Focus surface with a reusable history list that includes Agent and Terminal Sessions.",
+      "outcome": "The surface switch, breadcrumb, accessible names, and main panel say Focus; the left history list is clickable and selects the matching Session without duplicating PMO context.",
+      "acceptance": [
+        "Focus history is a left-side list, not a top summary rail, and each Agent or Terminal entry has a clear selected state.",
+        "Terminal entries use a terminal identity icon and do not render an empty Agent avatar slot.",
+        "Clicking a history entry selects the same execution Session used by Workspaces and Board.",
+        "Component tests assert the left history structure and terminal entry; removing the click handler makes the test red."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/global-focus-surface.test.tsx test/global-agents-board.test.tsx --maxWorkers=1",
+          "proves": "Focus surface and history interaction"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "surface rename and component integration"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/focus-surface-history-2026-09-24.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.2,
+      "heavy": true,
+      "heavy_reason": "The surface name, reusable list component, terminal identity projection, and existing observation panel must remain one coherent navigation surface.",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "Apply modern Focus layout and prove durable continuity",
+      "objective": "Tune the three-column Focus layout and keep cross-surface/restart projections on the durable focus context.",
+      "outcome": "Focus reads as a modern workspace, remains usable at narrow widths, and the current Session/history survive the existing persistence and recovery probes.",
+      "acceptance": [
+        "Left history, status groups, and observation surface use the documented density language without adding a second card or history store.",
+        "Cross-surface navigation and recovery tests continue to resolve the same execution Session.",
+        "The source and installed candidate are clean and the focused regression suite passes."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-context-navigation.test.ts test/recovery-probe.test.ts test/agent-focus-context.test.ts --maxWorkers=1",
+          "proves": "cross-surface and recovery continuity"
+        },
+        {
+          "kind": "command",
+          "ref": "git diff --check && pnpm --filter @agentmux/desktop typecheck",
+          "proves": "candidate hygiene and type safety"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/focus-surface-history-2026-09-24.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.8,
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

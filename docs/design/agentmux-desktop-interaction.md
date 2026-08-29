@@ -1464,6 +1464,7 @@ Topic 行默认横向列出所有 Tab，每个 Tab 以一个紧凑图标位快�
 - Demand 与专属 PMO Tab 的绑定是可恢复的编辑器投影。Demand 文件仍只保存 Demand 领域事实；绑定关系和 Tab/Region 继续由编辑器工作面状态持久化，重启后先恢复原 Tab，再尝试恢复其中的 Session。
 - Demand 详情必须提供明确的“打开 PMO”动作。点击后打开 PMO Teams 浮窗并聚焦该 Demand 的专属 Tab；如果原 Tab 已被关闭或不可恢复，动作先为该 Demand 建立新的专属 PMO Tab，再打开它，不能悄悄切到另一个 Demand 的上下文。
 - New Demand 的初始提示词必须带上稳定 Demand ID、标题、描述和当前路由事实，并明确 PMO 只负责澄清、分配和跟进，不直接冒充执行 Agent。PMO 对话创建 Demand 的路径仍由 PMO 自己决定是否写入，不因为专属 Tab 规则自动新建空 Demand。
+- New Demand 打开的浮窗如果带有明确目标 Tab，浮窗只能等待并展示这张 Tab 的 Agent；目标 Agent 尚未挂上时不能先展示旧 PMO Session，也不能在目标标记清除后回退到其他 Demand 的 PMO。
 
 ### Scratch Topic 打开后的工作面渲染（2026-09-23）
 
@@ -1512,3 +1513,13 @@ Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体�
 执行 Agent 焦点由一个明确的全局导航上下文承载：当前 Session 和有界的最近焦点历史按最近使用顺序保存，同一个 Session 只出现一次。任何执行 Agent 的打开、选中或跨表面跳转都通过这一上下文记录；切换主表面只读取它，不另猜一个“最近变化的 Session”。历史可以被 Agents 界面作为可操作的最近上下文入口，也作为只读上下文提供给 PMO Teams；PMO 只能观察这份执行上下文，不能把自己的交互写回去。
 
 PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic 导航使用。PMO 打开、恢复、提交消息和切换 PMO Tab 都更新 PMO 焦点；关闭 PMO 后回到之前的执行 Agent 上下文。执行 Agent 历史和 PMO 历史不合并，两个身份在 UI、持久化和提供给 Agent 的上下文中都必须可区分。
+
+### Focus 主表面与执行上下文历史（2026-09-24）
+
+顶部或底部的 Agents 产品入口统一命名为 **Focus**。Focus 代表“当前正在观察和工作的执行上下文”，不只代表 Agent 类型；Agent Session 和 Terminal Session 都可以成为当前执行上下文。PMO Teams 保持独立，不出现在 Focus 历史里。
+
+用户在 Workspaces 中点击、键盘切换或进入某个 Agent/Terminal Region 时，必须立即把该 Session 写入同一份 execution focus history；从 Focus、Board、Quick Switcher 或 Topic 进入同一 Session 也复用同一个写入入口。同一个 Session 只保留一个最近位置，最近一次聚焦提升到当前项。切换 Activity/Terminal 视图不创建新的 Session，也不产生第二份历史。
+
+Focus 表面左侧提供一个独立的“最近上下文”列表，作为可点击的导航入口。列表每项表达 Session 身份、Agent 或 Terminal 类型、工作区和最近聚焦时间；当前项有明确的选中状态。主区展示按状态分组的可观察执行 Session，右侧保留当前 Session 的观察工作面。历史为空时显示短空态，不用空白面板或伪造 Agent。
+
+Focus 是主表面命名和导航语义，不改变底层 `agentFocus.execution` 与 `agentFocus.pmo` 的持久化分层。跨表面切换只投影同一 execution Session，不创建第二个工作面、Run 或 Region；重启恢复时先恢复历史和当前 Session，再尝试恢复其原有 Tab/Region。
