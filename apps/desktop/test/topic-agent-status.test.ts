@@ -169,7 +169,7 @@ describe('Topic 行的视觉收敛', () => {
     expect(html).toContain('Editing store.ts')
     expect(html).toContain('No recent activity')
     expect(html).toContain('aria-describedby=')
-    expect(html).toContain('topic-workbench-topology__activity-item')
+    expect(html).not.toContain('topic-workbench-topology__activity-item')
     expect(html).toContain('data-region-kind="agent"')
     expect(html).toContain('data-region-kind="file"')
   })
@@ -224,7 +224,7 @@ describe('Topic 行的视觉收敛', () => {
     expect(topologySource).not.toContain('tabs.slice(0, 3)')
     expect(topologySource).toContain('onMouseEnter={() => inspectTab(tab.tabId)}')
     expect(topologySource).toContain('inspectTab(tab.tabId)')
-    expect(topologySource).toContain('inspected.regions.map')
+    expect(topologySource).toContain('regions.map((region)')
   })
 
   it('收起态用可复用的真实 bounds 缩略图，详情浮层保持窄宽度', () => {
@@ -234,6 +234,7 @@ describe('Topic 行的视觉收敛', () => {
     expect(topologySource).toContain('<TopicTabGlyph tab={tab} />')
     expect(dockStyles).toContain('.topic-workbench-topology__tab-glyph')
     expect(dockStyles).toContain('width: 280px;')
+    expect(dockStyles).toContain('width: 100%;')
   })
 
   it('does not restore a duplicate Agent roster when a Session is mounted in any Tab', () => {
@@ -245,7 +246,7 @@ describe('Topic 行的视觉收敛', () => {
   it('uses the shared avatar-stack overlap while keeping each Tab above its neighbor on focus', () => {
     expect(topologySource).toContain('style={{ zIndex: index + 1 }}')
     expect(dockStyles).toContain('.topic-workbench-topology__tab-chip + .topic-workbench-topology__tab-chip')
-    expect(dockStyles).toContain('margin-left: calc(-1 * var(--sp-3))')
+    expect(dockStyles).toContain('margin-left: calc(-1 * var(--sp-4))')
     expect(dockStyles).toContain('z-index: 20 !important')
   })
 })

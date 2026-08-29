@@ -45,6 +45,8 @@ import type {
 } from '../../shared/git-contracts'
 import {
   isScratchTopicId,
+  PMO_TEAMS_TOPIC_ID,
+  PMO_TEAMS_TOPIC_ROLE,
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
@@ -246,6 +248,8 @@ export type MainSurface = 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
+  /** When supplied, focus this exact bound Tab instead of selecting the first Tab for the Topic. */
+  tabId?: string
 }
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
@@ -368,12 +372,15 @@ type AppState = {
   mainSurface: MainSurface
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
+  /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
+  demandPmoTabIds: Record<string, string>
   selectedAgentSessionId: string | null
   setSelectedAgentSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
+  openDemandPmo(demandId: string, prompt?: string): Promise<string>
   createDemand(input: {
     title: string
     description?: string
@@ -1512,6 +1519,7 @@ type PersistedAppState = {
   selectedAgentSessionId?: string | null
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
+  demandPmoTabIds?: Record<string, string>
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
@@ -1767,6 +1775,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentNames: {},
   mainSurface: 'workbench',
   demands: {},
+  demandPmoTabIds: {},
   selectedAgentSessionId: null,
   selectedDemandId: null,
   demandArrangement: 'columns',
@@ -3559,6 +3568,70 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setDemandArrangement(arrangement) {
     set({ demandArrangement: arrangement })
   },
+  async openDemandPmo(demandId, prompt) {
+    const state = get()
+    const demand = state.demands[demandId]
+    if (!demand) throw new Error(`Demand ${demandId} is unavailable`)
+    const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
+    if (!workspace) throw new Error('Scratch workspace is unavailable')
+    const executorId = Object.keys(state.config?.executors ?? {})[0]
+    if (!executorId) throw new Error('No PMO executor is configured')
+
+    const mappedTabId = state.demandPmoTabIds[demandId]
+    const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
+    const layout = state.layouts[workspace.id]
+    const mappedRegion = mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
+    const mappedTabIsUsable = Boolean(
+      mappedTab &&
+      mappedTab.workspaceId === workspace.id &&
+      mappedTab.topicId === PMO_TEAMS_TOPIC_ID &&
+      layout &&
+      tabGroupForTab(layout, mappedTab.id) !== null &&
+      (mappedRegion?.kind === 'agent' || mappedRegion?.kind === 'launcher')
+    )
+    if (mappedTabIsUsable && mappedTab) {
+      await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
+      if (mappedRegion?.kind === 'launcher') {
+        const liveLayout = get().layouts[workspace.id]
+        const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
+        if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
+        const contextPrompt = prompt?.trim() || [
+          PMO_TEAMS_TOPIC_ROLE,
+          `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
+          `Title: ${demand.title}`,
+          `Description: ${demand.description || '(empty)'}`
+        ].join('\n\n')
+        await get().launchAgent(executorId, contextPrompt, groupId, {
+          tabId: mappedTab.id,
+          regionId: mappedTab.layout.activeRegionId
+        }, undefined, { tabName: `PMO · ${demand.title}` })
+      }
+      return mappedTab.id
+    }
+
+    await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
+    const current = get()
+    const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+    const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
+    const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
+    if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
+    set((next) => ({
+      tabs: { ...next.tabs, [tab.id]: tab },
+      layouts: { ...next.layouts, [workspace.id]: nextLayout },
+      demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id }
+    }))
+    const contextPrompt = prompt?.trim() || [
+      PMO_TEAMS_TOPIC_ROLE,
+      `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
+      `Title: ${demand.title}`,
+      `Description: ${demand.description || '(empty)'}`
+    ].join('\n\n')
+    await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
+      tabId: tab.id,
+      regionId: tab.layout.activeRegionId
+    }, undefined, { tabName: `PMO · ${demand.title}` })
+    return tab.id
+  },
   createDemand(input) {
     const id = `demand:${crypto.randomUUID()}`
     const now = Date.now()
@@ -3657,6 +3730,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { [id]: _removed, ...demands } = state.demands
       return {
         demands,
+        demandPmoTabIds: Object.fromEntries(Object.entries(state.demandPmoTabIds).filter(([demandId]) => demandId !== id)),
         ...(state.selectedDemandId === id ? { selectedDemandId: null } : {})
       }
     })
@@ -4018,11 +4092,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let placementFailed = false
     set((current) => {
       const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
-      const boundTab = Object.values(current.tabs).find((tab) =>
-        tab.workspaceId === workspace.id &&
-        tab.topicId === topicId &&
-        tabGroupForTab(layout, tab.id) !== null
-      )
+      const requestedTab = options?.tabId ? current.tabs[options.tabId] : undefined
+      const boundTab = options?.tabId
+        ? requestedTab?.workspaceId === workspace.id && requestedTab.topicId === topicId && tabGroupForTab(layout, requestedTab.id) !== null
+          ? requestedTab
+          : undefined
+        : Object.values(current.tabs).find((tab) =>
+          tab.workspaceId === workspace.id &&
+          tab.topicId === topicId &&
+          tabGroupForTab(layout, tab.id) !== null
+        )
+      if (options?.tabId && !boundTab) {
+        placementFailed = true
+        return current
+      }
       if (boundTab) {
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
@@ -5492,6 +5575,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     selectedAgentSessionId: state.selectedAgentSessionId,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
+    demandPmoTabIds: state.demandPmoTabIds,
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。

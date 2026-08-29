@@ -13,6 +13,7 @@ type FloatingState = {
   position: { left: number; top: number }
   size: { width: number; height: number }
   pendingPrompt?: PmoTeamsTopicPrompt | undefined
+  targetTabId?: string | undefined
 }
 
 export type PmoTeamsTopicFloatingState = FloatingState
@@ -49,11 +50,13 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string }): void {
+export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; targetTabId?: string }): void {
   const prompt = options?.prompt?.trim()
+  const targetTabId = options?.targetTabId?.trim()
   window.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       open: true,
+      ...(targetTabId ? { targetTabId } : {}),
       ...(prompt ? { pendingPrompt: { id: crypto.randomUUID(), text: prompt } } : {})
     }
   }))

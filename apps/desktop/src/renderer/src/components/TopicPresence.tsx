@@ -1,7 +1,7 @@
 import type { TopicRegionCell } from '../lib/scratch-topic-layout'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, FileCode2, Globe2, PanelTop, Sparkles, SplitSquareVertical, SquareTerminal } from 'lucide-react'
+import { Bot, FileCode2, Globe2, PanelTop, Sparkles, SquareTerminal } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 
@@ -21,10 +21,11 @@ export type TopicTabDetail = {
 }
 
 /** Agent identity belongs inside its Region; unmounted background Agents retain their own entry. */
-export function TopicPresence({ cells, agents, tabs = [] }: {
+export function TopicPresence({ cells, agents, tabs = [], onSelectTab }: {
   cells?: readonly TopicRegionCell[] | undefined
   agents: readonly SelectorPresenceAgent[]
   tabs?: readonly TopicTabDetail[]
+  onSelectTab?: (tabId: string) => void
 }) {
   // A Session already represented by any Tab has an identity slot in that Tab. Keep the
   // separate roster for healthy background Agents that have no open Region only.
@@ -37,25 +38,9 @@ export function TopicPresence({ cells, agents, tabs = [] }: {
       : (cells ?? []).flatMap((cell) => cell.agentSessionId ? [cell.agentSessionId] : [])
   )
   return <span className="topic-presence">
-    {tabs.length > 0 ? <TopicWorkbenchTopology tabs={tabs} /> : cells ? <RegionMosaic cells={cells} agents={agents} /> : null}
+    {tabs.length > 0 ? <TopicWorkbenchTopology tabs={tabs} onSelectTab={onSelectTab} /> : cells ? <RegionMosaic cells={cells} agents={agents} /> : null}
     <SelectorPresence agents={agents.filter((agent) => !mounted.has(agent.key))} />
   </span>
-}
-
-function compactExecutorLabel(label: string): string {
-  const firstWord = label.split(/[·/]/u)[0]?.trim() ?? label
-  return firstWord.length > 7 ? `${firstWord.slice(0, 6)}…` : firstWord
-}
-
-function surfaceLabel(kind: TopicRegionDetail['surfaceKind']): string {
-  switch (kind) {
-    case 'agent': return 'Agent'
-    case 'terminal': return 'Terminal'
-    case 'browser': return 'Browser'
-    case 'file': return 'File'
-    case 'launcher': return 'Launcher'
-    default: return 'Region'
-  }
 }
 
 /**
@@ -120,14 +105,16 @@ function TopicRegionMark({ region }: { region: TopicRegionDetail }) {
 
 function RegionLayout({
   regions,
-  className
+  className,
+  aspectRatio
 }: {
   regions: readonly TopicRegionDetail[]
   className: string
+  aspectRatio: number
 }) {
   const regionLabel = `${regions.length} ${regions.length === 1 ? 'Region' : 'Regions'}`
   return (
-    <span className={className} aria-label={regionLabel}>
+    <span className={className} aria-label={regionLabel} style={{ aspectRatio }}>
       {regions.map((region) => (
         <span
           className={`${className}__region`}
@@ -142,9 +129,9 @@ function RegionLayout({
           title={`${region.executorLabel}: ${region.activity}`}
         >
           <span className={`${className}__region-label`}>
-            {region.agent ? <TopicRegionMark region={region} /> : null}
-            <strong>{compactExecutorLabel(region.executorLabel)}</strong>
-            <small>{surfaceLabel(region.surfaceKind)}</small>
+            <TopicRegionMark region={region} />
+            <strong>{region.agent?.label ?? region.executorLabel}</strong>
+            <small>{region.activity}</small>
           </span>
         </span>
       ))}
@@ -156,7 +143,7 @@ function RegionLayout({
  * A horizontal Tab strip is the first visual answer to "what is open in this Topic?".
  * Each Tab owns the hover/focus inspector for its own Region layout and recent activity.
  */
-export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail[] }) {
+export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly TopicTabDetail[]; onSelectTab?: ((tabId: string) => void) | undefined }) {
   const popoverId = useId()
   const anchorRef = useRef<HTMLSpanElement>(null)
   const inspectorRef = useRef<HTMLSpanElement>(null)
@@ -165,7 +152,7 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
   const active = tabs.find((tab) => tab.active) ?? tabs[0]
   const [inspectedTabId, setInspectedTabId] = useState(active?.tabId ?? '')
   const inspected = tabs.find((tab) => tab.tabId === inspectedTabId) ?? active
-  const inspectedIndex = inspected ? tabs.findIndex((tab) => tab.tabId === inspected.tabId) : -1
+  const [aspectRatio, setAspectRatio] = useState(16 / 10)
   const label = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}. Hover or focus a Tab to inspect its Regions and recent activity.`
   const portalHost = typeof document === 'undefined' ? null : document.body
   const inspectorInPortal = inspectorOpen && portalHost !== null
@@ -185,6 +172,13 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
     if (!anchor || !inspector) return
     const viewportGap = 8
     const updatePosition = () => {
+      // Hidden Tabs stay mounted with their geometry. Read the actual Tab body, not
+      // the individual Region's aspect ratio (which already lives in its bounds).
+      const regionIds = new Set(inspected?.regions.map((region) => region.regionId))
+      const regionElement = Array.from(document.querySelectorAll<HTMLElement>('[data-workbench-region-id]'))
+        .find((element) => regionIds.has(element.dataset.workbenchRegionId!))
+      const body = regionElement?.closest('.pane-body__region')?.getBoundingClientRect()
+      if (body && body.width > 0 && body.height > 0) setAspectRatio(body.width / body.height)
       const anchorBounds = anchor.getBoundingClientRect()
       const inspectorBounds = inspector.getBoundingClientRect()
       const maxLeft = Math.max(viewportGap, window.innerWidth - inspectorBounds.width - viewportGap)
@@ -207,7 +201,7 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
       window.removeEventListener('resize', updatePosition)
       window.removeEventListener('scroll', updatePosition, true)
     }
-  }, [inspectedTabId, inspectorInPortal])
+  }, [inspected, inspectorInPortal, aspectRatio])
 
   const inspectorClassName = `topic-workbench-topology__inspector${inspectorInPortal ? ' topic-workbench-topology__inspector--portal' : ''}`
   const inspector = (
@@ -226,19 +220,8 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
     >
       <span className="topic-workbench-topology__inspector-head">
         <span><PanelTop size={13} /><strong>{inspected?.title ?? 'Topic workbench'}</strong></span>
-        {inspected ? <em>T{inspectedIndex + 1} · {inspected.regions.length} {inspected.regions.length === 1 ? 'Region' : 'Regions'}</em> : null}
       </span>
-      {inspected ? <>
-        <RegionLayout regions={inspected.regions} className="topic-workbench-topology__inspector-regions" />
-        <span className="topic-workbench-topology__activity">
-          {inspected.regions.map((region) => (
-            <span className="topic-workbench-topology__activity-item" key={`${inspected.tabId}:${region.regionId}`}>
-              <span><SplitSquareVertical size={10} /><strong>{region.executorLabel}</strong></span>
-              <small>{region.activity}</small>
-            </span>
-          ))}
-        </span>
-      </> : null}
+      {inspected ? <RegionLayout regions={inspected.regions} aspectRatio={aspectRatio} className="topic-workbench-topology__inspector-regions" /> : null}
     </span>
   )
 
@@ -258,21 +241,28 @@ export function TopicWorkbenchTopology({ tabs }: { tabs: readonly TopicTabDetail
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInspectorOpen(false)
       }}
     >
-      <span className="topic-workbench-topology__tab-rail" role="list" aria-label="Topic Tabs">
+      <span className="topic-workbench-topology__tab-rail" role="group" aria-label="Topic Tabs">
         {tabs.map((tab, index) => (
-          <span
-            className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}${tab.tabId === inspected?.tabId ? ' inspected' : ''}`}
+          <button
+            type="button"
+            className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}${inspectorOpen && tab.tabId === inspected?.tabId ? ' inspected' : ''}`}
             key={tab.tabId}
             style={{ zIndex: index + 1 }}
-            role="listitem"
-            tabIndex={0}
+            data-topic-tab-id={tab.tabId}
+            aria-pressed={tab.active}
             aria-label={`T${index + 1}: ${tab.title}, ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
             title={`${tab.title} · ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
             onMouseEnter={() => inspectTab(tab.tabId)}
             onFocus={() => inspectTab(tab.tabId)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              setInspectorOpen(false)
+              onSelectTab?.(tab.tabId)
+            }}
           >
             <TopicTabGlyph tab={tab} />
-          </span>
+          </button>
         ))}
       </span>
       {inspectorInPortal ? createPortal(inspector, portalHost) : inspector}

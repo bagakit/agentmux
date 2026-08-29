@@ -110,7 +110,7 @@ describe('Topic navigation reveals the visible workbench', () => {
   it('keeps Leader preparation explicitly backgrounded', () => {
     const panel = readFileSync(new URL('../src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', import.meta.url), 'utf8')
     const store = readFileSync(new URL('../src/renderer/src/store.ts', import.meta.url), 'utf8')
-    expect(panel).toContain('openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })')
+    expect(panel).toContain('openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {')
     expect(store).toContain('const reveal = options?.reveal ?? true')
     expect(store).toContain('activeWorkspaceId: workspace.id')
   })

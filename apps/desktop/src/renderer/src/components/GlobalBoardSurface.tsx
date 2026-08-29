@@ -63,7 +63,7 @@ function formatDemandDate(value: number | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
 }
 
-function DemandCard({ demand, selected, sessionContext, onSelect, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; sessionContext?: string; onSelect: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
+function DemandCard({ demand, selected, sessionContext, onSelect, onOpenPmo, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; sessionContext?: string; onSelect: () => void; onOpenPmo: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
   const status = STATUS_META[demand.status]
   const Icon = status.icon
   return (
@@ -76,7 +76,7 @@ function DemandCard({ demand, selected, sessionContext, onSelect, sessions, tabs
       {...(sessionContext ? { 'data-session-context': sessionContext } : {})}
       aria-pressed={selected}
       onClick={onSelect}
-      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
+      onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
     >
       <span className="global-demand-card__topline">
         <span className="global-demand-card__id">{demand.id.startsWith('session:') ? 'SESSION' : demand.id.slice(0, 12).toUpperCase()}</span>
@@ -89,6 +89,7 @@ function DemandCard({ demand, selected, sessionContext, onSelect, sessions, tabs
         <span>{demand.projectName ?? 'Unassigned project'}</span>
         <span>{demand.sessions.length} Session{demand.sessions.length === 1 ? '' : 's'}</span>
       </span>
+      <button type="button" className="global-demand-card__pmo" aria-label={`Open PMO for ${demand.title}`} onClick={(event) => { event.stopPropagation(); onOpenPmo() }}><ArrowUpRight size={12} /> PMO</button>
       {sessionContext ? <span className="global-demand-card__session-context">Current Session · {sessionContext.slice(0, 8)}</span> : null}
       {demand.tags?.length || demand.plannedStartAt || demand.targetAt || demand.phaseIndex !== null && demand.phaseIndex !== undefined ? (
         <span className="global-demand-card__metadata" aria-label="Demand metadata">
@@ -104,11 +105,12 @@ function DemandCard({ demand, selected, sessionContext, onSelect, sessions, tabs
   )
 }
 
-function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate, onDelete, executors, allSessions, tabs }: {
+function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onOpenPmo, onUpdate, onDelete, executors, allSessions, tabs }: {
   demand: DemandProjection
   arrangement: DemandArrangement
   onArrangement: (value: DemandArrangement) => void
   onClose: () => void
+  onOpenPmo: () => void
   onUpdate: (patch: Partial<Pick<DemandProjection, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>>) => void
   onDelete: () => void
   executors: Record<string, { label: string }>
@@ -132,7 +134,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onUpdate
           <strong>{demand.title}</strong>
           <small>{demand.projectName ?? 'Global demand'} · {demand.sessionIds.length} linked Session{demand.sessionIds.length === 1 ? '' : 's'}</small>
         </div>
-        <div className="global-demand-workspace__header-actions"><button type="button" className="icon-button" title="Delete demand" aria-label="Delete demand" onClick={() => { if (window.confirm(`Delete demand “${demand.title}”?`)) onDelete() }}><Trash2 size={14} /></button><button type="button" className="icon-button" title="Close demand workspace" aria-label="Close demand workspace" onClick={onClose}><PanelRightClose size={15} /></button></div>
+        <div className="global-demand-workspace__header-actions"><button type="button" className="small-button global-demand-workspace__pmo" title="Open dedicated PMO Tab" aria-label={`Open PMO for ${demand.title}`} onClick={onOpenPmo}><ArrowUpRight size={13} /> Open PMO</button><button type="button" className="icon-button" title="Delete demand" aria-label="Delete demand" onClick={() => { if (window.confirm(`Delete demand “${demand.title}”?`)) onDelete() }}><Trash2 size={14} /></button><button type="button" className="icon-button" title="Close demand workspace" aria-label="Close demand workspace" onClick={onClose}><PanelRightClose size={15} /></button></div>
       </header>
       <div className="global-demand-workspace__editor">
         <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => onUpdate({ title })} /></label>
@@ -209,10 +211,12 @@ export function GlobalBoardSurface() {
   const selectedSessionId = useAppStore((state) => state.selectedAgentSessionId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const createDemand = useAppStore((state) => state.createDemand)
+  const openDemandPmo = useAppStore((state) => state.openDemandPmo)
   const demandArrangement = useAppStore((state) => state.demandArrangement)
   const setDemandArrangement = useAppStore((state) => state.setDemandArrangement)
   const updateDemand = useAppStore((state) => state.updateDemand)
   const deleteDemand = useAppStore((state) => state.deleteDemand)
+  const reportError = useAppStore((state) => state.reportError)
   const executorCatalog = useAppStore((state) => state.config?.executors)
   const executors = executorCatalog ?? EMPTY_EXECUTORS
   const [query, setQuery] = useState('')
@@ -249,9 +253,16 @@ export function GlobalBoardSurface() {
       source: 'default-topic'
     })
     const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
-    requestPmoTeamsTopicFloatingOpen({
-      prompt: `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
-    })
+    const prompt = `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
+    void openDemandPmo(demandId, prompt)
+      .then((tabId) => requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId }))
+      .catch(reportError)
+  }
+
+  function openDemandPmoSurface(demandId: string): void {
+    void openDemandPmo(demandId)
+      .then((tabId) => requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId }))
+      .catch(reportError)
   }
 
   return (
@@ -277,7 +288,7 @@ export function GlobalBoardSurface() {
               <section className="global-board-column" key={status} data-status={status}>
                 <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} demand`} aria-label={`Add ${meta.label} demand`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
                 <div className="global-board-column__cards">
-                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} {...(demand.id === selectedSessionDemand?.id && selectedSessionId ? { sessionContext: selectedSessionId } : {})} onSelect={() => setSelectedDemand(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
+                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} {...(demand.id === selectedSessionDemand?.id && selectedSessionId ? { sessionContext: selectedSessionId } : {})} onSelect={() => setSelectedDemand(demand.id)} onOpenPmo={() => openDemandPmoSurface(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
                   {columns[status].length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}
                 </div>
               </section>
@@ -286,7 +297,7 @@ export function GlobalBoardSurface() {
         </div>
         <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} demands</span><span className="global-board-footer__hint">Select a demand to keep its context beside the board</span></footer>
       </div>
-      {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} onDelete={() => { deleteDemand(selectedDemand.id); setSelectedDemand(null) }} executors={executors} allSessions={sessions} tabs={tabs} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
+      {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} onOpenPmo={() => openDemandPmoSurface(selectedDemand.id)} onDelete={() => { deleteDemand(selectedDemand.id); setSelectedDemand(null) }} executors={executors} allSessions={sessions} tabs={tabs} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
     </section>
   )
 }
