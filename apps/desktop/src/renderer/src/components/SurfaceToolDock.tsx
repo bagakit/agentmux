@@ -473,8 +473,8 @@ export function BoardToolList({ hostId: _hostId }: { hostId: string }) {
   const columns = demandColumns(demands)
   return (
     <section className="board-tool-list" aria-label="Global demand index">
-      <div className="board-tool-context"><span><Columns3 size={12} /> Demands</span><em>{demands.length} demand{demands.length === 1 ? '' : 's'}</em></div>
-      {demands.length === 0 ? <div className="board-tool-row__empty">No demands yet. Use PMO Teams Topic to create one.</div> : null}
+      <div className="board-tool-context"><span><Columns3 size={12} /> Requests &amp; ideas</span><em>{demands.length} request{demands.length === 1 ? '' : 's'}</em></div>
+      {demands.length === 0 ? <div className="board-tool-row__empty">No requests or ideas yet. Use PMO Teams Topic to create one.</div> : null}
       {(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[]).flatMap((status) => columns[status].slice(0, 5).map((demand) => (
         <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
           <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
@@ -585,10 +585,10 @@ export function SurfaceToolDock({
   }
 
   return (
-    <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Tasks' : 'Workspace'} tools`}>
+    <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Work' : 'Workspace'} tools`}>
       <header className={`surface-tool-activitybar ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
-        <nav aria-label={`${isBoard ? 'Tasks' : 'Workspace'} tool selection`}>
+        <nav aria-label={`${isBoard ? 'Work' : 'Workspace'} tool selection`}>
           {tools.map((tool) => {
             const Icon = tool.icon
             return (
