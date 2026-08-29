@@ -76,7 +76,7 @@ export function ToolsToggle() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const toolsAvailable =
     mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId)))
-  const scope = mainSurface === 'board' ? 'board' : mainSurface === 'agents' ? 'agents' : 'workspace'
+  const scope = mainSurface === 'board' ? 'board' : mainSurface === 'agents' ? 'Focus' : 'workspace'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
