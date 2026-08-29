@@ -859,6 +859,12 @@ Demand 卡片的执行 rail 使用统一的“Agent 工作拓扑摘要”组件�
 
 Leader Topic 浮窗承担“提出需求”和“分配上下文”的对话入口，Board 承担扫描、编辑和审计；两者共享同一 Demand 事实。一个流程从浮窗开始时，Board 不提前画空卡；确认写入后卡片立即显示描述、Project、状态和 Session 数量。CUI 查询与 UI 详情使用相同字段顺序和稳定 ID，Agent 可以完成与人相同的提出、分配、推进和删除流程。
 
+### Demand 专属 PMO Tab 的表面（2026-09-24）
+
+每个由 Board `New Demand` 创建的 Demand 都有一枚专属 PMO Tab。Demand 卡片和详情只显示一个紧凑的 PMO 入口，入口文字使用 `Open PMO` 或同义短文案；不在卡片上重复渲染整段对话。打开后浮窗直接切到对应 Tab，Tab 标题可用 Demand 标题辅助识别，内容区保持普通 PMO 对话密度。新 Demand 的 Tab 与其它 Demand 的 Tab 在 Tab 条上可并列扫读，但不得合并成一个共享的 Session。
+
+绑定关系属于工作面恢复事实：Demand 的文件投影不增加编辑器字段，编辑器状态单独保存 Demand 到 PMO Tab 的映射。映射失效时，入口显示一次明确的恢复动作并创建新的专属 Tab；不能把用户送到另一个 Demand 的 PMO 对话，也不能因为映射暂时不可用把 Demand 详情清空。
+
 ### 真实重启恢复的表面密度（2026-09-22）
 
 真实重启后的第一帧先显示原有 Tab、Region 和焦点所属工作面；Runtime/Provider 恢复中的服务窗贴在受影响 Region 的边缘，不用全屏 loading 覆盖工作面。服务窗短标题说明失败阶段，正文说明当前保留的事实和恢复动作；恢复成功后收敛为轻量状态，不制造第二套恢复面板。验收证据必须来自不同的真实 Electron 进程和同一持久化根目录，不能用组件重挂载或静态启动标记代替。
@@ -944,4 +950,12 @@ Topic 行的 topology 收起态是一排紧凑 Tab 图标位；每枚只表达�
 
 Agents、Workspaces、Board 共用一个选中 Session 上下文。切换器只换主表面投影；Workspaces 展开已有 Region，Agents 保留右侧观察面，Board 高亮对应执行事实。不要为跨视图连续性新增重复卡片、隐藏 Session 或第二套选中状态。
 
-Agent Input 的 collapsed composer 采用“左右有界控件 + 中间弹性编辑区”的密度：编辑区占据全部剩余宽度，工具和会话动作只占自身命中区。长消息可以换行，身份 rail 单独承担 Agent 名称、Executor 和 Session 摘要；不能用固定中间列、居中窄框或重复身份文字降低可输入面积.
+Agent Input 的 collapsed composer 采用“左右有界控件 + 中间弹性编辑区”的密度：编辑区占据全部剩余宽度，工具和会话动作只占自身命中区。长消息可以换行，身份 rail 单独承担 Agent 名称、Executor 和 Session 摘要；不能用固定中间列、居中窄框或重复身份文字降低可输入面积。
+
+### Topic Tab Rail 与 Region 地图密度（2026-09-24）
+
+Topic rail 以紧凑的 Tab 图标簇表达打开面，不再用宽大的 chip 或重复计数抢占 Topic 标题空间。点击目标 Tab 直接切换工作面；hover 只负责预览，不承担导航的唯一入口。预览浮层使用一个按实际分栏比例绘制的 Region map，去掉地图下方重复的 Region 列表，地图内只保留必要的身份图标和截断标签。
+
+### 用户消息气泡的内文密度（2026-09-24）
+
+用户气泡可以停靠在右侧，但正文阅读线保持左对齐，和 Agent 回复共享同一套 Markdown 阅读基线。右侧停靠表达说话者，不改变段落、列表、表格和代码的阅读起点。

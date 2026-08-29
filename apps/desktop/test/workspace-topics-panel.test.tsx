@@ -216,16 +216,14 @@ describe('Topic live Agent presence', () => {
     fixture.state.layouts = { [workspace.id]: createWorkspaceLayout('main', ['split']) }
     await mount()
     const row = rowByTitle('Shared Topic')
-    const cells = [...row.querySelectorAll<HTMLElement>('.topic-region-mosaic__cell')]
-    expect(cells.map((cell) => [cell.dataset.regionId, cell.querySelector('.agent-avatar')?.getAttribute('aria-label')]))
-      .toEqual([['left-cell', 'left · working'], ['right-cell', 'right · working']])
+    const cells = [...row.querySelectorAll<HTMLElement>('.topic-workbench-topology__tab-glyph__cell')]
+    expect(cells).toHaveLength(2)
+    expect(cells.map((cell) => cell.dataset.regionKind)).toEqual(['agent', 'agent'])
     const avatars = [...row.querySelectorAll<HTMLButtonElement>('.agent-avatar')]
     expect(avatars.map((avatar) => avatar.getAttribute('aria-label')))
-      .toEqual(['left · working', 'right · working', 'background · working', 'unknown · disconnected'])
-    await act(async () => cells[1]!.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-    expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
-    await act(async () => (cells[1]!.querySelector('button') as HTMLButtonElement).click())
-    expect(fixture.state.selectSession).toHaveBeenCalledWith('right')
+      .toEqual(['background · working', 'unknown · disconnected'])
+    const tabButton = row.querySelector<HTMLButtonElement>('[data-topic-tab-id="split"]')!
+    await act(async () => tabButton.click())
     expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
     // Serializing and reloading the durable layout retains the same geometry/identity projection.
     fixture.state.tabs = JSON.parse(JSON.stringify(fixture.state.tabs))

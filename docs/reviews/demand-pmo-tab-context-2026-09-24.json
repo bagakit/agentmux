@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Demand dedicated PMO Tab context",
+  "status": "approved",
+  "decision": "Every Board New Demand receives its own PMO Teams Tab and fresh PMO Agent context. Demand details can always reopen that same Tab, recreating only when the bound work surface is gone.",
+  "constraints": [
+    "Demand remains the filesystem package's domain fact; the editor stores the Demand-to-Tab projection separately.",
+    "A dedicated PMO Tab must be bound to the product-owned PMO Teams Topic and must not reuse another Demand's Session.",
+    "The binding survives restart with the existing Workbench projection and does not silently retarget another Demand when recovery is incomplete.",
+    "Direct PMO conversation creation policy remains unchanged: PMO clarifies and decides whether to write a Demand."
+  ],
+  "acceptance": [
+    "Each Board New Demand allocates a unique PMO Tab, launches a fresh PMO Agent context with the Demand identity, and opens it in the PMO surface.",
+    "Demand cards/details expose one action that opens the bound PMO Tab; missing bindings create a replacement dedicated Tab rather than opening another Demand's context.",
+    "The binding is persisted beside the Workbench projection and removed when the Demand is deleted without removing an otherwise healthy PMO Tab.",
+    "Focused tests, typecheck, mutation evidence, and a production caller check cover the complete path."
+  ],
+  "sources": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/store.ts",
+    "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx",
+    "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx",
+    "apps/desktop/src/shared/scratch-topics.ts"
+  ]
+}

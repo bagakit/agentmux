@@ -1,0 +1,107 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/topic-topology-and-conversation-alignment-2026-09-24.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/topic-topology-and-conversation-alignment-2026-09-24.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make Topic Tab glyphs compact and directly navigable",
+      "objective": "Turn each Topic Tab glyph into a direct activation affordance for its existing Workbench location.",
+      "outcome": "The rail is tighter, and clicking or keyboard-confirming a glyph activates that Tab without creating duplicate surfaces.",
+      "acceptance": [
+        "Each rendered Tab glyph has a button-like activation path and invokes the existing workspace Tab/Region selection callback.",
+        "The rail uses compact chip and glyph dimensions while preserving a readable single-Region icon and multi-Region map.",
+        "Removing the activation callback or compact style contract makes the focused topology tests red, and the production panel remains connected."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts test/workspace-topics-panel.test.tsx --maxWorkers=1",
+          "proves": "Topic glyph markup, activation callback, and compact rail contract."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Navigation and styling changes compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n 'onSelectTab=' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+          "proves": "The reusable topology is connected to a production activation path."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "Use one clean Region-map hover inspector",
+      "objective": "Show the selected Tab's actual Region distribution without repeating the same Regions as a second list.",
+      "outcome": "The hover/focus surface is a concise map with real aspect ratios, icons, and minimal inline activity labels.",
+      "acceptance": [
+        "The inspector map preserves each Region's x/y/width/height proportions from the Workbench layout.",
+        "The redundant activity list below the map is removed; each Region may carry only a compact in-map label or tooltip.",
+        "The inspector remains viewport-safe and keyboard discoverable."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/topic-agent-status.test.ts --maxWorkers=1",
+          "proves": "Region-map geometry and non-redundant inspector markup."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n '<TopicPresence' apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx",
+          "proves": "The Region map remains connected to the reusable topology."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/TopicPresence.tsx",
+        "apps/desktop/src/renderer/src/styles/dock.css",
+        "apps/desktop/test/topic-agent-status.test.ts"
+      ],
+      "depends_on": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Left-align content inside right-docked human messages",
+      "objective": "Keep user bubbles on the right while making their Markdown content read from the left edge.",
+      "outcome": "Human message body content is left aligned without moving the bubble or changing Agent message layout.",
+      "acceptance": [
+        "The human message body uses text-align: left while the human turn remains right docked.",
+        "The rule covers the shared Markdown body, including paragraphs, lists, tables, and code blocks through inheritance.",
+        "Removing the body alignment rule makes the focused conversation style test red."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-message.test.tsx --maxWorkers=1",
+          "proves": "Human message layout and Markdown alignment contract."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n '<ConversationMessage' apps/desktop/src/renderer/src/components/ActivityView.tsx",
+          "proves": "The shared human body style remains connected to ConversationMessage."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/ConversationMessage.tsx",
+        "apps/desktop/src/renderer/src/styles/activity-conversation.css"
+      ],
+      "depends_on": []
+    }
+  ]
+}

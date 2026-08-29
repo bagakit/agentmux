@@ -1458,6 +1458,13 @@ Topic 行默认横向列出所有 Tab，每个 Tab 以一个紧凑图标位快�
 - Board 工具顶栏只保留一组不重叠的工作面控制和 Board 身份。Project Rail 被 Board 遮挡时，不得用固定宽度的侧栏 chrome 挤压或覆盖 Board 图标；控件必须在窄宽度下仍保持可见、可点击和可读。
 - Demand 有两条创建入口：用户直接在 PMO Teams Topic 对话时，PMO 先澄清需求并在确认后决定是否公开创建；用户点击 Board 的“新建”按钮时，界面先创建一条可见 Demand，再以该 Demand 的上下文打开同一个 PMO Teams Topic 浮窗。两条入口都不能创建第二个 Topic 或把 Demand 偷换成 Session。
 
+### Demand 的专属 PMO Tab（2026-09-24）
+
+- Board 的 `New Demand` 每次都创建一个新的 PMO Teams Tab，并为该 Tab 启动一个全新的 PMO Agent 上下文。不同 Demand 不能共享同一个 PMO 对话来澄清、分配或跟进，避免上下文串线。
+- Demand 与专属 PMO Tab 的绑定是可恢复的编辑器投影。Demand 文件仍只保存 Demand 领域事实；绑定关系和 Tab/Region 继续由编辑器工作面状态持久化，重启后先恢复原 Tab，再尝试恢复其中的 Session。
+- Demand 详情必须提供明确的“打开 PMO”动作。点击后打开 PMO Teams 浮窗并聚焦该 Demand 的专属 Tab；如果原 Tab 已被关闭或不可恢复，动作先为该 Demand 建立新的专属 PMO Tab，再打开它，不能悄悄切到另一个 Demand 的上下文。
+- New Demand 的初始提示词必须带上稳定 Demand ID、标题、描述和当前路由事实，并明确 PMO 只负责澄清、分配和跟进，不直接冒充执行 Agent。PMO 对话创建 Demand 的路径仍由 PMO 自己决定是否写入，不因为专属 Tab 规则自动新建空 Demand。
+
 ### Scratch Topic 打开后的工作面渲染（2026-09-23）
 
 点击 Scratch Topic 后，Scratch workspace 的 Workbench 必须和普通 workspace 一样进入窗口级 registry 并显示对应 Tab/Region；Topic 只改变导航和绑定，不得因为 Scratch 是 wiki 工作区而留下空白右侧工作面。未准备完成时显示共享的 loading/失败服务窗，工作面本身不能被错误地过滤掉。
@@ -1486,4 +1493,14 @@ Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Regio
 
 ### Agent Input 的可用宽度（2026-09-24）
 
-Agent Input 的编辑区是这一行的主要内容，单行姿态下应优先获得剩余宽度。左右工具和发送、邮箱、身份控件保留稳定命中区，但不能用固定宽度把中间文字压成窄列；长文本在编辑区自然换行。Agent 名称、Executor 和 Session 信息留在上方身份 rail，不能为了给编辑区让路而重复塞进正文行.
+Agent Input 的编辑区是这一行的主要内容，单行姿态下应优先获得剩余宽度。左右工具和发送、邮箱、身份控件保留稳定命中区，但不能用固定宽度把中间文字压成窄列；长文本在编辑区自然换行。Agent 名称、Executor 和 Session 信息留在上方身份 rail，不能为了给编辑区让路而重复塞进正文行。
+
+### Topic Tab 缩略图导航与 hover 结构（2026-09-24）
+
+Topic 行上的每个 Tab 缩略图是可操作的导航入口：点击或键盘确认后，必须直接激活该 Tab 所在的 Workspace、Tab 和 Region；只改变 hover 检视而不改变工作面的交互不成立。缩略图保持紧凑的横向 rail，单 Region 只显示该 Region 的身份图标，多 Region 显示与真实 bounds 同比例的分栏轮廓。
+
+Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体是按真实 Region bounds 绘制的工作面小地图，Region 内用图标识别 Agent、Terminal、Browser 或 File。最近活动作为 Region 的轻量辅助信息贴在对应格内或作为单行摘要，不再在地图下方重复列出同一批 Region。
+
+### 对话中用户消息的阅读方向（2026-09-24）
+
+用户消息气泡整体靠右，用来表达对话轴上的发言归属；气泡内部正文、Markdown、列表和代码块统一居左对齐，长内容从左侧开始阅读。用户头像、时间和操作元数据可以继续沿右侧排列，但不能让正文跟着气泡方向右对齐。

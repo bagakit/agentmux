@@ -61,27 +61,37 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
         if (snapshot.title !== PMO_TEAMS_TOPIC_TITLE) {
           await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE)
         }
-        await openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })
+        await openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
+          reveal: false,
+          ...(floating.targetTabId ? { tabId: floating.targetTabId } : {})
+        })
+        if (!floating.pendingPrompt && floating.targetTabId) setFloating({ targetTabId: undefined })
       })
       .catch(reportError)
-  }, [floating.open, openScratchTopic, reportError, scratch])
+  }, [floating.open, floating.pendingPrompt, floating.targetTabId, openScratchTopic, reportError, scratch, setFloating])
 
   useEffect(() => {
     const pending = floating.open ? floating.pendingPrompt : undefined
     if (!pending || deliveredPromptRef.current === pending.id || !scratch) return
-    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    const targetTab = floating.targetTabId ? tabs[floating.targetTabId] : undefined
+    const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
+    const targetSessionId = targetSurface?.kind === 'agent' ? targetSurface.sessionId : undefined
+    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSessionId)
+      ?? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession) {
       deliveredPromptRef.current = pending.id
       setViewMode(pmoTeamsSession.id, 'activity')
       void api.sessions.submitPrompt(pmoTeamsSession.control, pending.text, pending.id)
-        .then(() => setFloating({ pendingPrompt: undefined }))
+        .then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined }))
         .catch((error) => {
           deliveredPromptRef.current = null
           reportError(error)
         })
       return
     }
-    const pmoTeamsTab = Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
+    const pmoTeamsTab = targetTab?.workspaceId === SCRATCH_WORKSPACE_ID && targetTab.topicId === PMO_TEAMS_TOPIC_ID
+      ? targetTab
+      : Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
     const layout = layouts[SCRATCH_WORKSPACE_ID]
     const group = pmoTeamsTab && layout?.groups.find((entry) => entry.tabOrder.includes(pmoTeamsTab.id))
     const regionId = pmoTeamsTab?.layout.activeRegionId
@@ -91,11 +101,11 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     void launchAgent(executorId, pending.text, group.id, {
       tabId: pmoTeamsTab.id,
       regionId
-    }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
+    }).then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined })).catch((error) => {
       deliveredPromptRef.current = null
       reportError(error)
     })
-  }, [config, floating.open, floating.pendingPrompt, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
+  }, [config, floating.open, floating.pendingPrompt, floating.targetTabId, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
 
   useEffect(() => {
     const onResize = (): void => setFloating(clampPmoTeamsTopicFloatingState(floating))

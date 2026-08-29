@@ -236,6 +236,18 @@ export function WorkspaceTopicsPanel({
     }
   }
 
+  async function selectTopicTab(tabId: string): Promise<void> {
+    try {
+      await useAppStore.getState().selectWorkspace(workspace.id)
+      const state = useAppStore.getState()
+      const group = state.layouts[workspace.id]?.groups.find((group) => group.tabOrder.includes(tabId))
+      if (!group || !state.tabs[tabId]) throw new Error('This Tab is no longer available.')
+      state.activateTab(workspace.id, group.id, tabId)
+    } catch (cause) {
+      setError(presentError(cause))
+    }
+  }
+
   function beginRename(topic: ScratchTopicSnapshot): void {
     if (pending) return
     setError(null)
@@ -422,6 +434,7 @@ export function WorkspaceTopicsPanel({
                         <TopicPresence
                           cells={openMosaics.get(topic.id)}
                           tabs={topicTabDetails.get(topic.id) ?? []}
+                          onSelectTab={(tabId) => { void selectTopicTab(tabId) }}
                           agents={topic.agents
                             .filter((agent) => agent.live !== null && agent.live.processState === 'running')
                             .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))
