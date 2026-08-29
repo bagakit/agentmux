@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 282
+    "next_cursor": 283
   },
   "features": [
     {
@@ -2429,6 +2429,16 @@
       "feat_id": "f-2b48f3whe",
       "title": "Topic Tab navigation and compact Region preview",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2b58fmyvc",
+      "title": "Execution Agent focus history and PMO isolation",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

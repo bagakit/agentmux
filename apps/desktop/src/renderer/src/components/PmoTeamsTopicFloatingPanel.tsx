@@ -8,6 +8,7 @@ import {
   usePmoTeamsTopicFloatingState
 } from '../lib/pmo-teams-topic-floating'
 import { topicIdForSession } from '../lib/workbench-tabs'
+import { executionFocusContextText } from '../lib/agent-focus'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 const DRAG_THRESHOLD = 3
@@ -20,6 +21,9 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore((state) => state.layouts)
   const setViewMode = useAppStore((state) => state.setViewMode)
+  const focusPmoSession = useAppStore((state) => state.focusPmoSession)
+  const agentFocus = useAppStore((state) => state.agentFocus)
+  const agentNames = useAppStore((state) => state.agentNames)
   const reportError = useAppStore((state) => state.reportError)
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const [dragging, setDragging] = useState(false)
@@ -50,9 +54,10 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession && conversationInitializedRef.current !== pmoTeamsSession.id) {
       conversationInitializedRef.current = pmoTeamsSession.id
+      focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
     }
-  }, [config, floating.open, sessions, setViewMode])
+  }, [config, floating.open, focusPmoSession, sessions, setViewMode])
 
   useEffect(() => {
     if (!floating.open || !scratch) return
@@ -80,6 +85,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       ?? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession) {
       deliveredPromptRef.current = pending.id
+      focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
       void api.sessions.submitPrompt(pmoTeamsSession.control, pending.text, pending.id)
         .then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined }))
@@ -98,14 +104,15 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     const executorId = Object.keys(config?.executors ?? {})[0]
     if (!pmoTeamsTab || !group || !regionId || !executorId) return
     deliveredPromptRef.current = pending.id
-    void launchAgent(executorId, pending.text, group.id, {
+    const executionContext = executionFocusContextText(agentFocus, sessions, (session) => agentNames[session.id] ?? session.label)
+    void launchAgent(executorId, [pending.text, executionContext].join('\n\n'), group.id, {
       tabId: pmoTeamsTab.id,
       regionId
     }).then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined })).catch((error) => {
       deliveredPromptRef.current = null
       reportError(error)
     })
-  }, [config, floating.open, floating.pendingPrompt, floating.targetTabId, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
+  }, [agentFocus, agentNames, config, floating.open, floating.pendingPrompt, floating.targetTabId, focusPmoSession, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
 
   useEffect(() => {
     const onResize = (): void => setFloating(clampPmoTeamsTopicFloatingState(floating))

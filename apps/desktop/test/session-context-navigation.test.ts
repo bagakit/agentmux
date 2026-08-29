@@ -56,7 +56,7 @@ function prepare(): void {
     tabs: {},
     layouts: { [workspace.id]: createWorkspaceLayout('context-pane') },
     demands: {},
-    selectedAgentSessionId: null,
+    agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } },
     selectedDemandId: null,
     mainSurface: 'agents',
     error: null
@@ -73,19 +73,19 @@ describe('selected Session context across main surfaces', () => {
 
     useAppStore.getState().selectSession(session.id, 'context-pane')
     const opened = useAppStore.getState()
-    expect(opened.selectedAgentSessionId).toBe(session.id)
+    expect(opened.agentFocus.execution.sessionId).toBe(session.id)
     expect(opened.mainSurface).toBe('workbench')
     expect(Object.values(opened.tabs).some((tab) => Object.values(tab.regions).some((surface) => surface.kind === 'agent' && surface.sessionId === session.id))).toBe(true)
 
     useAppStore.getState().setMainSurface('agents')
     useAppStore.getState().setMainSurface('workbench')
-    expect(useAppStore.getState().selectedAgentSessionId).toBe(session.id)
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
     expect(useAppStore.getState().mainSurface).toBe('workbench')
   })
 
   it('selects the linked Demand when the same Session context enters Board', () => {
     prepare()
-    useAppStore.setState({ selectedAgentSessionId: session.id, demands: { [demand().id]: demand() } })
+    useAppStore.setState({ agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } }, demands: { [demand().id]: demand() } })
 
     useAppStore.getState().setMainSurface('board')
 

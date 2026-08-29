@@ -1504,3 +1504,11 @@ Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体�
 ### 对话中用户消息的阅读方向（2026-09-24）
 
 用户消息气泡整体靠右，用来表达对话轴上的发言归属；气泡内部正文、Markdown、列表和代码块统一居左对齐，长内容从左侧开始阅读。用户头像、时间和操作元数据可以继续沿右侧排列，但不能让正文跟着气泡方向右对齐。
+
+### 执行 Agent 焦点历史与 PMO 上下文隔离（2026-09-24）
+
+执行 Agent 与 PMO Teams Agent 属于两套不同的上下文。用户在 Workspaces、Agents、Board 之间切换时，只沿用当前执行 Agent 的身份、Workspace、Tab、Region 和焦点；打开或切换 PMO Teams 不得改写执行 Agent，也不得把 PMO Session 放进执行 Agent 的历史。
+
+执行 Agent 焦点由一个明确的全局导航上下文承载：当前 Session 和有界的最近焦点历史按最近使用顺序保存，同一个 Session 只出现一次。任何执行 Agent 的打开、选中或跨表面跳转都通过这一上下文记录；切换主表面只读取它，不另猜一个“最近变化的 Session”。历史可以被 Agents 界面作为可操作的最近上下文入口，也作为只读上下文提供给 PMO Teams；PMO 只能观察这份执行上下文，不能把自己的交互写回去。
+
+PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic 导航使用。PMO 打开、恢复、提交消息和切换 PMO Tab 都更新 PMO 焦点；关闭 PMO 后回到之前的执行 Agent 上下文。执行 Agent 历史和 PMO 历史不合并，两个身份在 UI、持久化和提供给 Agent 的上下文中都必须可区分。

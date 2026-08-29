@@ -1,0 +1,109 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agent-focus-history-and-pmo-isolation-2026-09-24.md"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/agent-focus-history-and-pmo-isolation-2026-09-24.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add explicit execution and PMO focus lanes",
+      "objective": "Replace the single mutable Session selection with a typed focus context that classifies and records execution and PMO Sessions independently.",
+      "outcome": "Cross-surface navigation uses execution focus and PMO opens without changing it.",
+      "acceptance": [
+        "Execution focus stores a unique bounded MRU history and current Session.",
+        "PMO focus has a separate current Session and is never added to execution history.",
+        "A focused store test fails when PMO selection writes execution focus."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-focus-context.test.ts --maxWorkers=1",
+          "proves": "Focus classification, MRU ordering, and PMO isolation."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && git diff --check",
+          "proves": "Store and focus abstraction compile cleanly."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"executionFocusSessionId|pmoFocusSessionId|executionFocusHistory\" apps/desktop/src/renderer/src/store.ts apps/desktop/src/renderer/src/lib/agent-focus.ts",
+          "proves": "The abstraction is defined and consumed by the product store."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/agent-focus.ts",
+        "apps/desktop/src/renderer/src/store.ts"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T-002",
+      "title": "Expose execution focus history in Agents and PMO context",
+      "objective": "Make the execution focus history useful without mixing it into PMO identity.",
+      "outcome": "Agents can return to recent execution Sessions and PMO prompts receive a read-only execution-context summary.",
+      "acceptance": [
+        "Agents surface renders a compact recent execution rail and clicking an item restores the execution focus.",
+        "PMO prompt context contains execution history only and does not include the PMO Session.",
+        "A focused UI test and source contract verify both production callers."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/global-agents-board.test.tsx test/agent-focus-context.test.ts --maxWorkers=1",
+          "proves": "Agents rail and PMO context are connected."
+        },
+        {
+          "kind": "command",
+          "ref": "rg -n \"executionFocusHistory|focusExecutionAgent|execution context\" apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx apps/desktop/src/renderer/src/store.ts",
+          "proves": "The feature has non-test callers."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/components/GlobalAgentsSurface.tsx",
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/src/renderer/src/styles/dock.css"
+      ],
+      "depends_on": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Preserve focus lanes across surface switches and restart",
+      "objective": "Ensure Workspaces, Agents and Board resolve the execution focus while PMO stays isolated and durable.",
+      "outcome": "Returning to Workspaces reopens the original execution Tab/Region after Agents or PMO interactions, including after hydration.",
+      "acceptance": [
+        "Main-surface navigation uses execution focus only.",
+        "PMO open/focus leaves execution Session, history and Board linkage unchanged.",
+        "Persisted focus fields are restored independently."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-context-navigation.test.ts test/pmo-focus-isolation.test.ts --maxWorkers=1",
+          "proves": "Cross-surface and PMO isolation behavior."
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/recovery-probe.test.ts --maxWorkers=1",
+          "proves": "Durable focus facts survive recovery probe."
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/store.ts",
+        "apps/desktop/test/session-context-navigation.test.ts",
+        "apps/desktop/test/pmo-focus-isolation.test.ts"
+      ],
+      "depends_on": [
+        "T-001"
+      ]
+    }
+  ]
+}

@@ -225,6 +225,16 @@ import {
 } from './lib/pr-eligibility'
 import { decayStaleAgentStatuses as computeDecayedAgentStatuses } from './lib/agent-status-decay'
 import {
+  EMPTY_AGENT_FOCUS,
+  executionFocusContextText,
+  focusExecution,
+  focusLaneForSession,
+  focusPmo,
+  restoreAgentFocus,
+  sanitizeAgentFocus,
+  type AgentFocusContext
+} from './lib/agent-focus'
+import {
   createDebouncedPersistentStorage,
   createWriteFencedStorage,
   registerUnloadFlush
@@ -374,8 +384,10 @@ type AppState = {
   demands: Record<string, DemandRecord>
   /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
   demandPmoTabIds: Record<string, string>
-  selectedAgentSessionId: string | null
-  setSelectedAgentSession(id: string | null): void
+  /** Global navigation context. Execution and PMO focus are separate lanes and never overwrite one another. */
+  agentFocus: AgentFocusContext
+  focusExecutionSession(id: string | null): void
+  focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
@@ -1516,7 +1528,7 @@ type PersistedAppState = {
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  selectedAgentSessionId?: string | null
+  agentFocus?: AgentFocusContext
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
   demandPmoTabIds?: Record<string, string>
@@ -1776,7 +1788,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   mainSurface: 'workbench',
   demands: {},
   demandPmoTabIds: {},
-  selectedAgentSessionId: null,
+  agentFocus: EMPTY_AGENT_FOCUS,
   selectedDemandId: null,
   demandArrangement: 'columns',
   projectRailOpen: true,
@@ -2021,6 +2033,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...recoveryFailures
       ]
       const persistedState = get()
+      const restoredAgentFocus = sanitizeAgentFocus(
+        restoreAgentFocus(persistedState.agentFocus),
+        visibleSessions,
+        (session) => focusLaneForSession(topicIdForSession(config, session), PMO_TEAMS_TOPIC_ID)
+      )
       const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,
@@ -2049,6 +2066,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
         environmentWarning: snapshotVerified ? snapshot.environmentWarning ?? null : get().environmentWarning,
         pendingAgentLaunches: {},
+        agentFocus: restoredAgentFocus,
         ...restoredUi,
         tabs: workbench.tabs,
         layouts: workbench.layouts,
@@ -3078,6 +3096,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? replaceWorkbenchRegion(existing.tab, regionId, surface)
       : createWorkbenchTab(tabId, surface)
     const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+    const focusLane = focusLaneForSession(sessionTopicId, PMO_TEAMS_TOPIC_ID)
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
     // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
     // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
@@ -3094,7 +3113,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
-      selectedAgentSessionId: id,
+      agentFocus: focusLane === 'pmo'
+        ? focusPmo(state.agentFocus, id)
+        : focusExecution(state.agentFocus, id),
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
@@ -3540,7 +3561,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
-    const selectedSessionId = get().selectedAgentSessionId
+    const selectedSessionId = get().agentFocus.execution.sessionId
     const selectedSession = selectedSessionId
       ? get().sessions.find((session) => session.id === selectedSessionId)
       : undefined
@@ -3559,8 +3580,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     set({ mainSurface })
   },
-  setSelectedAgentSession(id) {
-    set({ selectedAgentSessionId: id })
+  focusExecutionSession(id) {
+    set((state) => {
+      const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
+      if (session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
+        return { agentFocus: focusPmo(state.agentFocus, id) }
+      }
+      return { agentFocus: focusExecution(state.agentFocus, id) }
+    })
+  },
+  focusPmoSession(id) {
+    set((state) => {
+      const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
+      if (session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) !== 'pmo') {
+        return { agentFocus: focusExecution(state.agentFocus, id) }
+      }
+      return { agentFocus: focusPmo(state.agentFocus, id) }
+    })
   },
   setSelectedDemand(id) {
     set({ selectedDemandId: id })
@@ -3576,6 +3612,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Scratch workspace is unavailable')
     const executorId = Object.keys(state.config?.executors ?? {})[0]
     if (!executorId) throw new Error('No PMO executor is configured')
+    const buildPmoPrompt = (): string => {
+      const current = get()
+      const executionContext = executionFocusContextText(
+        current.agentFocus,
+        current.sessions,
+        (session) => current.agentNames[session.id] ?? session.label
+      )
+      return [
+        prompt?.trim() || PMO_TEAMS_TOPIC_ROLE,
+        executionContext
+      ].join('\n\n')
+    }
+    const focusPmoTabSession = (tabId: string): void => {
+      const tab = get().tabs[tabId]
+      const surface = tab?.regions[tab.layout.activeRegionId]
+      if (surface?.kind !== 'agent') return
+      const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
+      if (session && focusLaneForSession(topicIdForSession(get().config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
+        get().focusPmoSession(session.id)
+      }
+    }
 
     const mappedTabId = state.demandPmoTabIds[demandId]
     const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
@@ -3595,8 +3652,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const liveLayout = get().layouts[workspace.id]
         const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
         if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
-        const contextPrompt = prompt?.trim() || [
-          PMO_TEAMS_TOPIC_ROLE,
+        const contextPrompt = [
+          buildPmoPrompt(),
           `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
           `Title: ${demand.title}`,
           `Description: ${demand.description || '(empty)'}`
@@ -3606,6 +3663,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           regionId: mappedTab.layout.activeRegionId
         }, undefined, { tabName: `PMO · ${demand.title}` })
       }
+      focusPmoTabSession(mappedTab.id)
       return mappedTab.id
     }
 
@@ -3620,8 +3678,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       layouts: { ...next.layouts, [workspace.id]: nextLayout },
       demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id }
     }))
-    const contextPrompt = prompt?.trim() || [
-      PMO_TEAMS_TOPIC_ROLE,
+    const contextPrompt = [
+      buildPmoPrompt(),
       `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
       `Title: ${demand.title}`,
       `Description: ${demand.description || '(empty)'}`
@@ -3630,6 +3688,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       tabId: tab.id,
       regionId: tab.layout.activeRegionId
     }, undefined, { tabName: `PMO · ${demand.title}` })
+    focusPmoTabSession(tab.id)
     return tab.id
   },
   createDemand(input) {
@@ -5572,7 +5631,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
-    selectedAgentSessionId: state.selectedAgentSessionId,
+    agentFocus: state.agentFocus,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
     demandPmoTabIds: state.demandPmoTabIds,

@@ -208,7 +208,7 @@ export function GlobalBoardSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
-  const selectedSessionId = useAppStore((state) => state.selectedAgentSessionId)
+  const selectedSessionId = useAppStore((state) => state.agentFocus.execution.sessionId)
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const createDemand = useAppStore((state) => state.createDemand)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
