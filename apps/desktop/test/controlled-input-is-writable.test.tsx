@@ -141,6 +141,18 @@ const PURE_SINKS = new Set([
   'alert', 'String', 'Number', 'Boolean', 'parseInt', 'parseFloat', 'JSON.stringify'
 ])
 
+/**
+ * 只读不写的遍历方法：谓词里读到了取值，但整个调用的结果被丢掉。
+ *
+ * 与 `PURE_SINKS` 的区别是这里**就地判死**，不再往外问：`filter`/`some` 的返回值就算被人接走，
+ * 接走的也不是用户敲进来的那个值。`find` 故意不在这张表里——它选出来的那一项往往正是要写回去的
+ * 记录（Project 下拉就是），它按普通调用继续往外问。
+ */
+const PURE_TRAVERSALS = new Set(['filter', 'some', 'every', 'includes', 'indexOf', 'findIndex'])
+
+/** 控制流关键字的括号不是实参位：它读值决定分支，没有把值交给谁。 */
+const CONTROL_KEYWORDS = new Set(['if', 'while', 'switch', 'for', 'catch', 'return'])
+
 /** 从 `index` 往左找包住它的那个未闭合开括号；找不到（已在最外层）回 null。 */
 function openerBefore(body: string, index: number): number | null {
   let depth = 0
@@ -169,8 +181,16 @@ function consumedByWrite(body: string, valueStart: number): boolean {
     if (last === ':') return true
     if (last === '=') {
       const prev = before[before.length - 2]
-      // `=>`/`==`/`!=`/`<=`/`>=` 不是赋值，它们正是「读完即弃」那一族。
-      if (prev === '=' || prev === '!' || prev === '<' || prev === '>') return false
+      // `=>`/`==`/`!=`/`<=`/`>=` 不是赋值。但比较式**本身**是个值，所以不能就地判死：
+      // `ws.find((w) => w.id === e.target.value)` 里，取值经由谓词选出了那条要写回去的记录
+      // （GlobalBoardSurface 的 Project 下拉就是这个形状）。跳到包住这个比较式的那个开括号，
+      // 按普通「这次调用给了谁」再问一轮——`.find(` 算写回，`.filter(`/`if (` 不算。
+      if (prev === '=' || prev === '!' || prev === '<' || prev === '>') {
+        const enclosing = openerBefore(body, index)
+        if (enclosing === null) return false
+        index = enclosing + 1
+        continue
+      }
       // `const x = e.target.value` 只有在 `x` 后面真的被用到时才是写回；否则是个死绑定。
       const declaration = /(?:const|let|var)\s+([\w$]+)\s*$/.exec(before.slice(0, -1))
       if (declaration) return body.split(new RegExp(`\\b${declaration[1]!}\\b`)).length - 1 > 1
@@ -187,6 +207,13 @@ function consumedByWrite(body: string, valueStart: number): boolean {
     }
     const callee = /([\w$]+(?:\.[\w$]+)*)\s*$/.exec(body.slice(0, opener))?.[1]
     if (!callee) return false
+    // `if (…)` / `while (…)` / `switch (…)` 的括号不是实参位，是控制流条件——它读了这个值来决定
+    // 走哪条分支，没有把它写到任何地方。不排掉的话 `if` 会被上面那条 callee 正则当成函数名，
+    // 于是 `if (e.target.value === x) return` 判成写回。
+    if (CONTROL_KEYWORDS.has(callee)) return false
+    // 只读不写的遍历：谓词的返回值被丢掉，整个调用没有把任何东西写出去。`.find()` 不在此列——
+    // 它选出来的那一项通常正是要写回的值，所以它按普通调用继续往外问。
+    if (PURE_TRAVERSALS.has(callee.split('.').pop()!)) return false
     if (!PURE_SINKS.has(callee)) return true
     index = opener - callee.length
   }
@@ -326,6 +353,28 @@ describe('受控表单控件必须有写回口', () => {
     expect(writesEventValue('(e) => { const next = Number(e.target.value); setFontSize(next) }')).toBe(true)
     // 裸赋值。
     expect(writesEventValue('(e) => { x = e.target.value }')).toBe(true)
+    // 取值当**查表谓词**，选出来的那一项才被写回（GlobalBoardSurface 的 Project 下拉）。比较式不是
+    // 终点：`===` 的结果交给了 `.find(`，那才是这一跳真正的去处。判死在 `===` 上会把这个能用的
+    // 控件报成"永久不可写"，而守卫误伤合法代码比没有守卫更糟——它会被删掉。
+    expect(writesEventValue(
+      "(event) => { const project = ws.find((w) => w.id === event.target.value); onUpdate({ projectId: project?.id ?? null }) }"
+    )).toBe(true)
+  })
+
+  /**
+   * 比较式那一跳的对偶：比较**没有**交给任何人时，仍然是读完即弃。
+   *
+   * 上一版在 `===` 上就地 `return false`，于是这一族判对了、但查表谓词被误伤；改成"跳到比较式左端
+   * 接着问"之后，这一族必须靠"问出去没人接"来判死，而不是靠那条 return。两侧要同时钉住，否则
+   * 把那个 `continue` 改回 `return false`（或改成 `return true`）各有一侧不会红。
+   */
+  it('自检：没有人接收的比较式仍然是读完即弃', () => {
+    // 比较式在语句位置被丢掉。
+    expect(writesEventValue('(e) => e.target.value === x')).toBe(false)
+    expect(writesEventValue('(e) => { if (e.target.value === x) return }')).toBe(false)
+    // 只读不写的遍历：谓词读到了值，但 `filter` 的结果没写回任何地方。
+    expect(writesEventValue('(e) => { ws.filter((w) => w.id === e.target.value) }')).toBe(false)
+    expect(writesEventValue('(e) => { if (ws.some((w) => w.id === e.target.value)) return }')).toBe(false)
   })
 
   it('自检：处理器体里的对象字面量不会把提取截断', () => {
