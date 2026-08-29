@@ -7,6 +7,7 @@ import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ComposerTextarea } from './ComposerTextarea'
 import { SemanticIcon } from './semantic-icons'
 
 export type ConversationMessageProps = {
@@ -107,7 +108,7 @@ export function ConversationMessage({
       ) : null}
       {selection && onAnnotate ? <div className="log-turn__annotation" role="dialog" aria-label="Annotate selected text">
         <div className="log-turn__annotation-quote">“{selection.quote}”</div>
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Leave a note for this Agent…" autoFocus />
+        <ComposerTextarea value={note} onValueChange={setNote} placeholder="Leave a note for this Agent…" autoFocus />
         <div className="log-turn__annotation-actions"><button type="button" className="small-button" onClick={() => setSelection(null)}>Cancel</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={submitAnnotation}>Add note to reply</button></div>
       </div> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
