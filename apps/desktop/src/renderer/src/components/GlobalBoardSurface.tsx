@@ -247,7 +247,7 @@ export function GlobalBoardSurface() {
     const project = projectFilter !== 'all' ? projects.find(([id]) => id === projectFilter) : undefined
     const demandId = createDemand({
       title: 'New demand — needs clarification',
-      description: 'Created from the Board New Demand action; PMO Teams will clarify the request before execution.',
+      description: 'Created from the Tasks New Demand action; PMO Teams will clarify the request before execution.',
       projectId: project?.[0] ?? null,
       projectName: project?.[1] ?? null,
       status: 'backlog',
@@ -270,7 +270,7 @@ export function GlobalBoardSurface() {
     <section className={`global-board-surface ${selectedDemand ? 'global-board-surface--demand-open' : ''}`}>
       <div className="global-board-main">
         <header className="global-board-toolbar">
-          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Board</strong><span className="global-board-toolbar__crumb">Demands · Global</span></div>
+          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Tasks</strong><span className="global-board-toolbar__crumb">Demands · Global</span></div>
           <div className="global-board-toolbar__controls">
             <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search demands" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
             <label className="global-board-select"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as DemandStatus | 'all')}><option value="all">All</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select><ChevronDown size={12} /></label>
@@ -278,10 +278,10 @@ export function GlobalBoardSurface() {
             <label className="global-board-select"><span>Routing</span><select aria-label="Demand routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select><ChevronDown size={12} /></label>
             <label className="global-board-select"><span>Executor</span><select aria-label="Demand executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">All</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select><ChevronDown size={12} /></label>
             <button type="button" className="global-board-action" onClick={createDemandCard}><CirclePlus size={14} /> Demand</button>
-            <button type="button" className="global-board-icon-action" title="Board filters" aria-label="Board filters"><MoreHorizontal size={15} /></button>
+            <button type="button" className="global-board-icon-action" title="Tasks filters" aria-label="Tasks filters"><MoreHorizontal size={15} /></button>
           </div>
         </header>
-        <div className="global-board-columns" role="region" aria-label="Global demand board">
+        <div className="global-board-columns" role="region" aria-label="Global Tasks demand board">
           {DEMAND_STATUS_IDS.map((status) => {
             const meta = STATUS_META[status]
             const Icon = meta.icon

@@ -9,7 +9,7 @@ import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('Agents / Workspaces / Board navigation', () => {
+describe('Focus / Workspaces / Tasks navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -26,11 +26,11 @@ describe('Agents / Workspaces / Board navigation', () => {
     useAppStore.setState(baseline, true)
   })
 
-  it('renders one three-item switch with Workspaces as the workbench label', async () => {
+  it('renders one three-item switch with Focus, Workspaces, and Tasks labels', async () => {
     useAppStore.setState({ mainSurface: 'agents' })
     await act(async () => root.render(createElement(SurfaceSwitch)))
     const buttons = [...container.querySelectorAll('button')]
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Agents', 'Workspaces', 'Board'])
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Focus', 'Workspaces', 'Tasks'])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
     expect(buttons[0]?.classList.contains('selected')).toBe(true)
   })
@@ -46,7 +46,7 @@ describe('Agents / Workspaces / Board navigation', () => {
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
     expect(container.querySelector('.global-demand-workspace')).toBeNull()
-    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Board')
-    expect(container.querySelector('.global-board-toolbar')?.textContent).not.toContain('Agents')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Tasks')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).not.toContain('Focus')
   })
 })

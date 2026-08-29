@@ -31,9 +31,10 @@ export function TopRowLeadingChrome() {
     && toolsOpen
     && (mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace)))
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
+  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board') && chromeOwnedOutsideMain
   return (
     <div
-      className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}`}
+      className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}${globalSurfaceNeedsTrafficLightInset ? ' top-row-leading-chrome--global-inset' : ''}`}
     >
       {chromeOwnedOutsideMain ? null : <SidebarToggleChrome />}
       <TopBreadcrumb />
@@ -76,7 +77,7 @@ export function ToolsToggle() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const toolsAvailable =
     mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId)))
-  const scope = mainSurface === 'board' ? 'board' : mainSurface === 'agents' ? 'Focus' : 'workspace'
+  const scope = mainSurface === 'board' ? 'Tasks' : mainSurface === 'agents' ? 'Focus' : 'workspace'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
@@ -105,7 +106,7 @@ export function TopBreadcrumb() {
   if (mainSurface === 'board') {
     return (
       <div className="breadcrumbs">
-        <strong>Board</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Demands</span>
+        <strong>Tasks</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Demands</span>
         {project ? (
           <>
             <span className="breadcrumbs__sep" aria-hidden>/</span>
@@ -159,11 +160,11 @@ export function SurfaceSwitch() {
       </button>
       <button
         className={mainSurface === 'board' ? 'selected' : ''}
-        aria-label="Board: show Demands"
-        title="Board — show Demands"
+        aria-label="Tasks: show Demands"
+        title="Tasks — show Demands"
         onClick={() => setMainSurface('board')}
       >
-        <LayoutDashboard size={13} /> Board
+        <LayoutDashboard size={13} /> Tasks
       </button>
     </div>
   )
