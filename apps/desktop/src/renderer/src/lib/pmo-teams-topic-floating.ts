@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // Stable UI state key: renaming the code surface must not lose a user's saved position/size.
 const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
@@ -101,13 +101,13 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
     window.addEventListener(EVENT_NAME, onEvent)
     return () => window.removeEventListener(EVENT_NAME, onEvent)
   }, [])
-  const update = (next: Partial<FloatingState>): void => {
+  const update = useCallback((next: Partial<FloatingState>): void => {
     const resolved = { ...stateRef.current, ...next }
     stateRef.current = resolved
     setState(resolved)
     writeState(resolved)
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: next }))
-  }
+  }, [])
   return [state, update]
 }
 
