@@ -205,9 +205,27 @@ function attentionOrdinalTables(source: string, label: string): string[] {
   const keyOf = (name: ts.PropertyName): string | null =>
     ts.isStringLiteralLike(name) || ts.isIdentifier(name) ? name.text : null
 
-  const mentionsClass = (node: ts.Node): boolean => {
-    if (ts.isStringLiteralLike(node) && SORT_CLASSES.includes(node.text)) return true
-    return ts.forEachChild(node, mentionsClass) ?? false
+  /**
+   * How many DISTINCT sort classes a condition names.
+   *
+   * 数「几个」而不是「有没有」，因为这些名字不归注意力排序独占：`'working'`、`'done'`、
+   * `'needs-you'` 同时也是 Board 的列名（`PROJECT_BOARD_COLUMNS`）。只问「提到没提到」，
+   * 一句 `sessionBoardColumn(session) === 'working' ? 1 : 0` 就被判成一张序表——它是在问
+   * 「这一行在哪一列」，跟谁排在谁前面毫无关系。`producingAgentCount` 正是这么被报上来的。
+   *
+   * 序表的定义性质是**给多个类排出先后**，一个类排不出先后。所以门槛定在 2，这也正是上面
+   * 对象字面量那一支早就在用的门槛（`properties.length >= 2`）——两支此前不一致，宽的那支
+   * 就是误报的来源。代价写明：`s === 'needs-you' ? 0 : 1` 这种把其余类折进 else 的两档表
+   * 从此看不见；那是同音词换来的，比反过来把正确代码判红好。
+   */
+  const distinctClasses = (node: ts.Node): Set<string> => {
+    const names = new Set<string>()
+    const walk = (current: ts.Node): void => {
+      if (ts.isStringLiteralLike(current) && SORT_CLASSES.includes(current.text)) names.add(current.text)
+      ts.forEachChild(current, walk)
+    }
+    walk(node)
+    return names
   }
 
   // A ladder's branches are numbers, possibly through further ternaries: `a ? 0 : b ? 1 : 2`.
@@ -232,12 +250,14 @@ function attentionOrdinalTables(source: string, label: string): string[] {
         found.push(node.getText())
       }
     }
-    // Spelling 2: `state === 'needs-you' ? 0 : 1` — a ternary over class names yielding only numbers.
+    // Spelling 2: `state === 'needs-you' ? 0 : state === 'error' ? 1 : 3` — a ternary LADDER ranking two
+    // or more classes, yielding only numbers. Counted over the whole ladder, so a nested tail's classes
+    // count toward the two; a single class in a condition is a lookup, not an ordering.
     if (
       ts.isConditionalExpression(node) &&
-      mentionsClass(node.condition) &&
       yieldsOnlyNumbers(node.whenTrue) &&
-      yieldsOnlyNumbers(node.whenFalse)
+      yieldsOnlyNumbers(node.whenFalse) &&
+      distinctClasses(node).size >= 2
     ) {
       found.push(node.getText())
       // Report the OUTERMOST ladder only: `a ? 0 : b ? 1 : 2` is one table, and descending would count
@@ -263,6 +283,11 @@ describe('the attention ordinals live in exactly one file', () => {
     expect(attentionOrdinalTables("const counts = { 'needs-you': n, error: e }", 'x.ts')).toEqual([])
     expect(attentionOrdinalTables("const label = s === 'needs-you' ? 'Waiting' : 'Idle'", 'x.ts')).toEqual([])
     expect(attentionOrdinalTables('const sizes = { small: 0, large: 1 }', 'x.ts')).toEqual([])
+    // 同音词：这三个名字（也是 Board 的列名）出现一次不构成序表。`producingAgentCount` 问的是
+    // 「这一行落在 working 列吗」，被这道守卫报成了「又一份排名表」——一个类排不出先后，这条钉住
+    // 那个判据。它是**收窄**，所以紧跟着下一条钉住收窄后仍必须抓到的那个形状。
+    expect(attentionOrdinalTables("const n = boardColumn(s) === 'working' ? 1 : 0", 'x.ts')).toEqual([])
+    expect(attentionOrdinalTables("const n = s === 'working' && s !== 'done' ? 1 : 0", 'x.ts')).toHaveLength(1)
   })
 
   it('finds the mapping in the SSOT and nowhere else', () => {
