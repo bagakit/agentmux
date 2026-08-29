@@ -80,6 +80,13 @@ const PERSISTED_PREFERENCES = {
   unclaimedTerminalSessionIds: ['orphan-terminal-1', 'orphan-terminal-2'],
   activeWorkspaceId: 'workspace-alpha',
   mainSurface: 'board',
+  agentFocus: {
+    execution: { sessionId: 'sess-1', history: [{ sessionId: 'sess-1', focusedAt: 1 }] },
+    pmo: { sessionId: null }
+  },
+  selectedDemandId: 'demand:kept',
+  demandArrangement: 'grid',
+  demandPmoTabIds: { 'demand:kept': 'pmo-tab-kept' },
   workspaceTool: 'agents',
   // 第二组：表面偏好。
   toolDockWidth: 421,
@@ -182,6 +189,10 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.projectRailOpen, '项目栏开合被重置了').toBe(PERSISTED_PREFERENCES.projectRailOpen)
     expect(state.projectRailWidth, '项目栏宽度被重置了').toBe(PERSISTED_PREFERENCES.projectRailWidth)
     expect(state.toolsOpen, '工具面板开合被重置了').toBe(PERSISTED_PREFERENCES.toolsOpen)
+    expect(state.agentFocus, 'Agent focus context was reset').toEqual(PERSISTED_PREFERENCES.agentFocus)
+    expect(state.selectedDemandId).toBe(PERSISTED_PREFERENCES.selectedDemandId)
+    expect(state.demandArrangement).toBe(PERSISTED_PREFERENCES.demandArrangement)
+    expect(state.demandPmoTabIds).toEqual(PERSISTED_PREFERENCES.demandPmoTabIds)
     expect(state.agentNames, '用户自己起的 Agent 名字丢了').toEqual(PERSISTED_PREFERENCES.agentNames)
     expect(state.noticeReadReceipts).toEqual(PERSISTED_PREFERENCES.noticeReadReceipts)
     expect(state.displacedAgentSessionIds).toEqual(PERSISTED_PREFERENCES.displacedAgentSessionIds)
