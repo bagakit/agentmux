@@ -11,7 +11,10 @@ function storage(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     state: {
       activeWorkspaceId: 'workspace-probe',
-      selectedAgentSessionId: 'session-probe',
+      agentFocus: {
+        execution: { sessionId: 'session-probe', history: [{ sessionId: 'session-probe', focusedAt: 1 }] },
+        pmo: { sessionId: null }
+      },
       agentComposerDrafts: { 'session-probe': 'draft survives restart' },
       restoredWorkbench: {
         tabs: {
@@ -37,7 +40,9 @@ describe('real Electron recovery receipt projections', () => {
       activeWorkspaceId: 'workspace-probe',
       draftSessionIds: ['session-probe'],
       drafts: { 'session-probe': 'draft survives restart' },
-      selectedAgentSessionId: 'session-probe'
+      executionFocusSessionId: 'session-probe',
+      executionFocusHistory: ['session-probe'],
+      pmoFocusSessionId: null
     })
   })
 
@@ -82,7 +87,9 @@ describe('real Electron recovery receipt projections', () => {
       activeWorkspaceId: common.workbench.activeWorkspaceId,
       draftSessionIds: common.workbench.draftSessionIds,
       drafts: common.workbench.drafts,
-      selectedAgentSessionId: common.workbench.selectedAgentSessionId,
+      executionFocusSessionId: common.workbench.executionFocusSessionId,
+      executionFocusHistory: common.workbench.executionFocusHistory,
+      pmoFocusSessionId: common.workbench.pmoFocusSessionId,
       sessionIds: common.sessions.sessions.map((session) => session.agentSessionId),
       runIds: common.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : [])
     }

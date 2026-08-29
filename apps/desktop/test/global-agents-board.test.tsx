@@ -38,7 +38,7 @@ describe('Global Agents card board', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    useAppStore.setState({ selectedAgentSessionId: null, mainSurface: 'agents' })
+    useAppStore.setState({ agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, mainSurface: 'agents' })
   })
 
   afterEach(async () => {
@@ -62,7 +62,7 @@ describe('Global Agents card board', () => {
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
     await act(async () => (container.querySelector('[data-session-id="needs-you"]') as HTMLButtonElement).click())
     expect(selectSession).not.toHaveBeenCalled()
-    expect(useAppStore.getState().selectedAgentSessionId).toBe('needs-you')
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('needs-you')
     expect(useAppStore.getState().mainSurface).toBe('agents')
     expect(container.querySelector('[data-observing="needs-you"]')).toBeTruthy()
   })
@@ -72,5 +72,24 @@ describe('Global Agents card board', () => {
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
     expect(container.querySelector('.global-agents-empty')).toBeTruthy()
     expect(container.querySelector('.global-agents-group')).toBeNull()
+  })
+
+  it('renders a git-like focus history and returns to a recent execution Agent', async () => {
+    useAppStore.setState({
+      sessions: [agent('first', 'working', 1), agent('second', 'waiting', 2)],
+      providerCatalog: [],
+      agentFocus: {
+        execution: {
+          sessionId: 'first',
+          history: [{ sessionId: 'first', focusedAt: 1 }, { sessionId: 'second', focusedAt: 2 }]
+        },
+        pmo: { sessionId: null }
+      }
+    })
+    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    expect(container.querySelector('.agent-focus-history')).toBeTruthy()
+    expect(container.querySelector('[data-focus-history-id="second"]')).toBeTruthy()
+    await act(async () => (container.querySelector('[data-focus-history-id="second"]') as HTMLButtonElement).click())
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('second')
   })
 })

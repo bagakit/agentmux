@@ -38,7 +38,7 @@ describe('Global Agents attention inbox', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    useAppStore.setState({ selectedAgentSessionId: null, mainSurface: 'agents' })
+    useAppStore.setState({ agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, mainSurface: 'agents' })
   })
 
   afterEach(async () => {
@@ -62,7 +62,7 @@ describe('Global Agents attention inbox', () => {
     await act(async () => root.render(createElement(GlobalAgentsSurface)))
     await act(async () => (container.querySelector('[data-session-id="needs-you"]') as HTMLButtonElement).click())
     expect(selectSession).not.toHaveBeenCalled()
-    expect(useAppStore.getState().selectedAgentSessionId).toBe('needs-you')
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('needs-you')
     expect(useAppStore.getState().mainSurface).toBe('agents')
     expect(container.querySelector('[data-observing="needs-you"]')).toBeTruthy()
   })

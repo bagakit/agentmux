@@ -9,6 +9,9 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
+import { AgentFocusHistory } from './AgentFocusHistory'
+import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { topicIdForSession } from '../lib/workbench-tabs'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
 const BUCKET_META = {
@@ -30,13 +33,18 @@ export function GlobalAgentsSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const names = useAppStore((state) => state.agentNames)
-  const selectedId = useAppStore((state) => state.selectedAgentSessionId)
-  const setSelected = useAppStore((state) => state.setSelectedAgentSession)
+  const selectedId = useAppStore((state) => state.agentFocus.execution.sessionId)
+  const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
+  const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
   const [requestId, setRequestId] = useState<string | null>(null)
   const rows = useMemo(() => buildAgentRoster({ sessions, providerCatalog }), [sessions, providerCatalog])
-  const filtered = rows.filter((row) => {
+  const executionRows = rows.filter((row) => {
+    const session = sessions.find((entry) => entry.id === row.sessionId)
+    return session && topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID
+  })
+  const filtered = executionRows.filter((row) => {
     const session = sessions.find((entry) => entry.id === row.sessionId)!
     return (project === 'all' || workspaceForSession(config, session)?.id === project)
       && `${names[row.sessionId] ?? row.label} ${row.workspacePath} ${row.providerId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
@@ -51,14 +59,15 @@ export function GlobalAgentsSurface() {
           <label className="global-board-select">Project<select aria-label="Agent project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
       </header>
-      {rows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global agent board">
+      <AgentFocusHistory entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
+      {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global agent board">
         {(Object.keys(BUCKET_META) as AgentBucket[]).map((bucket) => {
           const meta = BUCKET_META[bucket]
           const Icon = meta.icon
           const grouped = filtered.filter((row) => bucketFor(row) === bucket)
           return <section className="global-board-column global-agents-group" data-bucket={bucket} key={bucket}>
             <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{grouped.length}</em></span></header>
-            <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-session-card ${selectedId === row.sessionId ? 'global-session-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => setSelected(row.sessionId)}>
+            <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-session-card ${selectedId === row.sessionId ? 'global-session-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => focusExecutionSession(row.sessionId)}>
               <span className="global-session-card__topline"><AgentAvatar sessionId={row.sessionId} label={row.label} state={row.state} providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
               <strong className="global-session-card__title">{names[row.sessionId] ?? row.label}</strong>
               <span className="global-session-card__description">{row.workspacePath}</span>
@@ -67,14 +76,14 @@ export function GlobalAgentsSurface() {
           </section>
         })}
       </div>}
-      <footer className="global-board-footer"><span>{filtered.length} of {rows.length} Agents</span></footer>
+      <footer className="global-board-footer"><span>{filtered.length} of {executionRows.length} Agents</span><span>PMO context is isolated</span></footer>
     </div>
     {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
-      <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => setSelected(null)}><PanelRightClose size={15} /></button></header>
+      <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => focusExecutionSession(null)}><PanelRightClose size={15} /></button></header>
       {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
       <AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} />
       <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />
     </aside> : null}
-    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={setSelected} /> : null}
+    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={focusExecutionSession} /> : null}
   </section>
 }
