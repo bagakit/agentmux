@@ -56,14 +56,14 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; ta
   window.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       open: true,
-      ...(targetTabId ? { targetTabId } : {}),
-      ...(prompt ? { pendingPrompt: { id: crypto.randomUUID(), text: prompt } } : {})
+      targetTabId,
+      pendingPrompt: prompt ? { id: crypto.randomUUID(), text: prompt } : undefined
     }
   }))
 }
 
 export function requestPmoTeamsTopicFloatingClose(): void {
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: false } }))
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: false, targetTabId: undefined, pendingPrompt: undefined } }))
 }
 
 export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {

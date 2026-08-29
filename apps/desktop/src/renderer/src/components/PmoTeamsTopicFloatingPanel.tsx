@@ -52,13 +52,20 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       conversationInitializedRef.current = null
       return
     }
-    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    const targetTab = floating.targetTabId ? tabs[floating.targetTabId] : undefined
+    const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
+    const targetSession = targetSurface?.kind === 'agent'
+      ? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSurface.sessionId)
+      : undefined
+    const pmoTeamsSession = floating.targetTabId
+      ? targetSession
+      : sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession && (conversationInitializedRef.current !== pmoTeamsSession.id || pmoSessionId !== pmoTeamsSession.id)) {
       conversationInitializedRef.current = pmoTeamsSession.id
       focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
     }
-  }, [config, floating.open, focusPmoSession, pmoSessionId, sessions, setViewMode])
+  }, [config, floating.open, floating.targetTabId, focusPmoSession, pmoSessionId, sessions, setViewMode, tabs])
 
   useEffect(() => {
     if (!floating.open || !scratch) return
@@ -71,7 +78,6 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
           reveal: false,
           ...(floating.targetTabId ? { tabId: floating.targetTabId } : {})
         })
-        if (!floating.pendingPrompt && floating.targetTabId) setFloating({ targetTabId: undefined })
       })
       .catch(reportError)
   }, [floating.open, floating.pendingPrompt, floating.targetTabId, openScratchTopic, reportError, scratch, setFloating])
@@ -79,11 +85,13 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   useEffect(() => {
     const pending = floating.open ? floating.pendingPrompt : undefined
     if (!pending || deliveredPromptRef.current === pending.id || !scratch) return
-    const targetTab = floating.targetTabId ? tabs[floating.targetTabId] : undefined
+    const targetTabId = floating.targetTabId
+    const targetTab = targetTabId ? tabs[targetTabId] : undefined
     const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
     const targetSessionId = targetSurface?.kind === 'agent' ? targetSurface.sessionId : undefined
-    const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSessionId)
-      ?? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
+    const pmoTeamsSession = targetTabId
+      ? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSessionId)
+      : sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession) {
       deliveredPromptRef.current = pending.id
       focusPmoSession(pmoTeamsSession.id)

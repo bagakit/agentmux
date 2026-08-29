@@ -9,7 +9,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
-import { AgentFocusHistory } from './AgentFocusHistory'
+import { FocusHistory } from './FocusHistory'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { topicIdForSession } from '../lib/workbench-tabs'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
@@ -28,7 +28,7 @@ function bucketFor(row: RosterRow): AgentBucket {
   return 'working'
 }
 
-export function GlobalAgentsSurface() {
+export function GlobalFocusSurface() {
   const sessions = useAppStore((state) => state.sessions)
   const config = useAppStore((state) => state.config)
   const tabs = useAppStore((state) => state.tabs)
@@ -60,7 +60,7 @@ export function GlobalAgentsSurface() {
           <label className="global-board-select">Project<select aria-label="Agent project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
       </header>
-      <AgentFocusHistory entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
+      <FocusHistory entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global agent board">
         {(Object.keys(BUCKET_META) as AgentBucket[]).map((bucket) => {
           const meta = BUCKET_META[bucket]

@@ -554,7 +554,7 @@ const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: strin
     why: 'AttentionSortClass union 的成员名 + statusDotTier 的 working 档（返回类型与判定各一次）+ attentionSortClass 的 case 与返回值 + categoryFor 的 case：这个文件是"一个状态归哪一档"的裁决点，画点、排序、注意力三问各一份，都不数总量。名册行、fan-out lane、快速切换、活动列表此前各手抄一份，画点那批把 running 塌成 null（计数说 working、点画静止灰），排序那批把第十个状态默默塌成 idle。categoryFor 那一处是把 if 链改成穷举 switch 时新增的：它此前以 return null 收尾，是四个状态映射里唯一对第十个状态静默的一个。2026-09-19 新增 3 处，全属 activityGlyphFor（返回类型联合、tier 比较、返回值）：它把 ProjectActivity 菜单行就地手抄的那份字形判定收成 statusDotTier 的投影——判据仍只有 statusDotTier 一处，这三个字面量是投影的出口拼写，不是第二次裁决'
   },
   '/components/AgentAvatar.tsx': { count: 2, why: '工作中头像的活动字形及对应语义图标名；不计数' },
-  '/components/GlobalAgentsSurface.tsx': { count: 2, why: 'Agents 看板列类型与派生列名，计数不在这里重复判定' },
+  '/components/GlobalFocusSurface.tsx': { count: 2, why: 'Agents 看板列类型与派生列名，计数不在这里重复判定' },
   '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
   '/lib/api.ts': { count: 1, why: 'browser preview 的 mock 数据，不是生产状态写入路径' },
   '/components/semantic-icons/index.tsx': {

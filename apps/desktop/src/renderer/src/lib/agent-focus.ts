@@ -2,7 +2,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 
 export const MAX_EXECUTION_FOCUS_HISTORY = 12
 
-export type AgentFocusHistoryEntry = {
+export type FocusHistoryEntry = {
   sessionId: string
   focusedAt: number
 }
@@ -10,7 +10,7 @@ export type AgentFocusHistoryEntry = {
 export type AgentFocusContext = {
   execution: {
     sessionId: string | null
-    history: AgentFocusHistoryEntry[]
+    history: FocusHistoryEntry[]
   }
   pmo: {
     sessionId: string | null
@@ -28,7 +28,7 @@ export function executionFocusSessionId(context: AgentFocusContext): string | nu
   return context.execution.sessionId
 }
 
-export function executionFocusHistory(context: AgentFocusContext): readonly AgentFocusHistoryEntry[] {
+export function executionFocusHistory(context: AgentFocusContext): readonly FocusHistoryEntry[] {
   return context.execution.history
 }
 
@@ -44,11 +44,11 @@ export function focusLaneForSession(
 }
 
 export function recordExecutionFocus(
-  history: readonly AgentFocusHistoryEntry[],
+  history: readonly FocusHistoryEntry[],
   sessionId: string,
   focusedAt = Date.now(),
   limit = MAX_EXECUTION_FOCUS_HISTORY
-): AgentFocusHistoryEntry[] {
+): FocusHistoryEntry[] {
   if (!sessionId || limit < 1) return []
   return [
     { sessionId, focusedAt },
