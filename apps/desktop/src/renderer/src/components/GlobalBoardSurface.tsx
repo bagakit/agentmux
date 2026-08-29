@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
+import { executionFocusSessionId } from '../lib/agent-focus'
 import {
   DEMAND_STATUS_IDS,
   demandColumns,
@@ -208,7 +209,7 @@ export function GlobalBoardSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
-  const selectedSessionId = useAppStore((state) => state.agentFocus.execution.sessionId)
+  const selectedSessionId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const createDemand = useAppStore((state) => state.createDemand)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)

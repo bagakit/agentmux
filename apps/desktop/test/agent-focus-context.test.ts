@@ -48,7 +48,10 @@ describe('Agent focus context', () => {
     const text = executionFocusContextText({
       execution: { sessionId: 'exec-1', history: [entry('exec-1', 1)] },
       pmo: { sessionId: 'pmo-1' }
-    }, [{ id: 'exec-1', label: 'Build Agent' } as never, { id: 'pmo-1', label: 'PMO' } as never])
+    }, [
+      { id: 'exec-1', label: 'Build Agent', workspacePath: '/project', status: { state: 'working' } } as never,
+      { id: 'pmo-1', label: 'PMO', workspacePath: '/scratch', status: { state: 'working' } } as never
+    ])
     expect(text).toContain('Build Agent (exec-1)')
     expect(text).not.toContain('pmo-1')
   })
