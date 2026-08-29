@@ -234,7 +234,11 @@ it('does not switch folders or consume new incoming messages while reading the O
   await act(async () => useAppStore.setState({ timelines: { 'agent-1': {
     agentSessionId: 'agent-1', revision: 2, items: [delivered('sent'), delivered('new', 'other')] } } }))
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
-  expect(unread()).toBe('true')
+  // 未读要等指纹算完：`useMessageFingerprints` 走的是异步的 `crypto.subtle.digest`，
+  // `setState` 返回时 `receipts.unread` 还是空的。并行跑时这个微任务会输掉竞争，于是这一行
+  // 在满载下 2/3 的概率读到 'false'，单跑必绿——看着像 flake，其实是漏了一次等待。
+  // 兄弟文件 session-mailbox-receipts.test.tsx 全程用的就是 `vi.waitFor`。
+  await vi.waitFor(() => expect(unread()).toBe('true'))
   await toggle('closed')
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox (1)')
