@@ -10,6 +10,8 @@ it('keeps an explicit PMO target authoritative while the target Agent attaches',
   expect(panel).toContain('const pmoTeamsSession = floating.targetTabId')
   expect(panel).toContain('const pmoTeamsSession = targetTabId')
   expect(panel).not.toContain('const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: \'agent\' }> => session.kind === \'agent\' && session.id === targetSessionId)\n      ?? sessions.find')
+  expect(panel).toContain('const pmoTeamsTab = targetTabId')
+  expect(panel).not.toContain('pendingPrompt: undefined, targetTabId: undefined')
   const ensureStart = panel.indexOf('api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)')
   const ensureEnd = panel.indexOf('}, [floating.open, floating.pendingPrompt, floating.targetTabId', ensureStart)
   expect(ensureStart).toBeGreaterThan(-1)
