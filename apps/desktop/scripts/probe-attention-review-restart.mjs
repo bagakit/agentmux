@@ -38,7 +38,10 @@ const fixtureSession = {
 }
 const workbenchSeed = {
   state: {
-    activeWorkspaceId: 'workspace-restart-probe', mainSurface: 'workbench', selectedAgentSessionId: sessionId,
+    activeWorkspaceId: 'workspace-restart-probe', mainSurface: 'workbench', agentFocus: {
+      execution: { sessionId, history: [{ sessionId, focusedAt: 1 }] },
+      pmo: { sessionId: null }
+    },
     agentComposerDrafts: { [sessionId]: draft },
     restoredWorkbench: {
       tabs: { [tabId]: {
@@ -71,7 +74,9 @@ function identity(report) {
     tabIds: report.workbench.tabIds, regionIds: report.workbench.regionIds,
     activeRegionIds: report.workbench.activeRegionIds, activeWorkspaceId: report.workbench.activeWorkspaceId,
     draftSessionIds: report.workbench.draftSessionIds, drafts: report.workbench.drafts,
-    selectedAgentSessionId: report.workbench.selectedAgentSessionId,
+    executionFocusSessionId: report.workbench.executionFocusSessionId,
+    executionFocusHistory: report.workbench.executionFocusHistory,
+    pmoFocusSessionId: report.workbench.pmoFocusSessionId,
     sessionIds: report.sessions.sessions.map((session) => session.agentSessionId),
     runIds: report.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : [])
   }
@@ -87,7 +92,8 @@ function assertReport(report, label) {
   if (JSON.stringify(report.workbench.activeRegionIds) !== JSON.stringify([regionId])) throw new Error(`${label}: active Region focus was not recovered.`)
   if (report.workbench.activeWorkspaceId !== 'workspace-restart-probe') throw new Error(`${label}: active Workspace was not recovered.`)
   if (report.workbench.drafts[sessionId] !== draft) throw new Error(`${label}: composer draft was not recovered.`)
-  if (report.workbench.selectedAgentSessionId !== sessionId) throw new Error(`${label}: selected Session identity was not recovered.`)
+  if (report.workbench.executionFocusSessionId !== sessionId) throw new Error(`${label}: execution focus Session identity was not recovered.`)
+  if (JSON.stringify(report.workbench.executionFocusHistory) !== JSON.stringify([sessionId])) throw new Error(`${label}: execution focus history was not recovered.`)
   const session = report.sessions.sessions.find((candidate) => candidate.agentSessionId === sessionId)
   if (!session || session.runId !== runId || session.nativeSessionId !== 'native-restart-probe') throw new Error(`${label}: Core Session identity was not recovered.`)
 }
