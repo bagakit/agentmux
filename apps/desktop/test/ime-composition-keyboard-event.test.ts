@@ -534,7 +534,7 @@ function discoverCommitOnEnterHandlers(): DiscoveryResult {
 // 这个数字应当收到 **2**，不是 0 也不是 1。（69d2ed0 的 message 在这里写了「改到 1」，那是错的：
 // 它把 requestClose 也算成了欠账。分类由下面每条的 **kind 字段**声明、并被交叉核对，见该表下方的 kind/tag 断言；
 // reason 只是给人看的解释，不再是分类的依据。）
-const EXPECTED_EXCEPTION_COUNT = 4
+const EXPECTED_EXCEPTION_COUNT = 6
 // `kind` 是**机器可判**的分类声明，不从 reason 散文里解析（本仓规则：分类必须是声明字段，绝不 parse 散文）。
 //   · 'fact' —— 事实豁免：这个 handler 落在非文本可编辑元素上（按钮 / 树导航），永远不承载 IME 组字确认。
 //   · 'debt' —— peer 欠账：它落在 input/textarea 这类文本编辑元素上、在 Enter 上提交草稿，文件落地后欠一个组字守卫。
@@ -569,6 +569,23 @@ const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; kind: 'fact' | 'debt'; r
       '事实豁免：role=button 的 span 按 Enter/Space 激活以关闭 Tab，不承载文本草稿，' +
       '所以它永远不该带组字守卫——这一条不随 WorkspaceWorkbench.tsx 落地而消失。' +
       '（该文件同时为 peer 持有、本轮只读，但那与本条是不是欠账无关。）'
+  },
+  {
+    anchor: 'components/GlobalBoardSurface.tsx::div:onSelect',
+    kind: 'fact',
+    reason:
+      '事实豁免：Demand 卡片是 role=button 的 div，按 Enter/Space 选中这张卡（onSelect → setSelectedDemand），' +
+      '卡片内没有任何 input/textarea/contentEditable，不承载文本草稿。它还先判 ' +
+      'event.target !== event.currentTarget 就退出，连子元素冒泡上来的按键都不接。' +
+      '与 span:requestClose 同一类——按钮语义的激活键，不是提交草稿。'
+  },
+  {
+    anchor: 'components/WorkspaceBoard.tsx::span:openRow',
+    kind: 'fact',
+    reason:
+      '事实豁免：Board 行首是 role=button 的 span，按 Enter/Space 打开这一行（openRow → 打开 Topic/' +
+      'workspace/worktree），行首里只有 strong/small 文本，没有任何可编辑元素，不承载文本草稿。' +
+      '与 span:requestClose / div:onSelect 同一类。'
   }
 ]
 

@@ -19,7 +19,7 @@ function makeSession(id = 'session-1'): SessionSnapshot {
   return {
     id, hostId: 'local', workspacePath: '/repo', label: 'Build auth flow', createdAt: 1, updatedAt: 2,
     processState: 'running', latestOutputBytes: 0, status: { state: 'working', source: 'run-process', observedAt: 2 },
-    kind: 'terminal', providerId: null, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id, generation: 1 } }
+    kind: 'terminal', providerId: null, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
 }
 

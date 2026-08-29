@@ -42,7 +42,7 @@ function terminal(id: string): SessionSnapshot {
     processState: 'running',
     latestOutputBytes: 0,
     status: { state: 'running', source: 'run-process', observedAt: 1 },
-    control: { kind: 'terminal', hostId: 'local', terminalSessionId: id }
+    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   } as SessionSnapshot
 }
 describe('Global Agents card board', () => {

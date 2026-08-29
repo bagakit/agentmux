@@ -63,7 +63,7 @@ function warmShellSession(): SessionSnapshot {
     processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
-    control: { kind: 'terminal', hostId: 'local', terminalSessionId: 'warm-shell' }
+    control: { kind: 'terminal', hostId: 'local', runId: 'warm-shell', run: { runId: 'warm-shell' } }
   } as SessionSnapshot
 }
 
@@ -464,7 +464,7 @@ describe('launcher Workspace 判定只有一处', () => {
     // 判「至少覆盖这五个」而不是「恰好是这五个」：后者会把第七个动作先撞在这条白名单上，红出来
     // 的原因就变成「清单该更新了」，而真正的原因是「你收了 launcher 却没调那个实现」。判据的红
     // 必须指向缺陷本身，所以在场性归这一条，是否调用全部交给下面的循环。
-    const names = declarations.map(({ line }) => line.trim().match(/async (\w+)/)![1])
+    const names = declarations.map(({ line }) => line.trim().match(/async (\w+)/)![1]!)
     expect(
       names.filter((name) => [
         'createBrowser', 'createNote', 'launchAgent', 'launchTerminal', 'promoteWarmTerminal'
@@ -477,7 +477,7 @@ describe('launcher Workspace 判定只有一处', () => {
       // 函数体到下一个同缩进的 `},` 为止。store 的 action 全是两空格缩进的对象方法。
       let end = lines.length
       for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-        if (/^ {2}\},?$/.test(lines[cursor])) { end = cursor; break }
+        if (/^ {2}\},?$/.test(lines[cursor]!)) { end = cursor; break }
       }
       const body = lines.slice(index, end).join('\n')
       expect(
@@ -520,16 +520,37 @@ describe('launcher Workspace 判定只有一处', () => {
     }
   })
 
-  it('前提自检：上一条那个例外指的确实是 openFile 的显式 workspace 形参', () => {
+  it('前提自检：那个例外名字处处都是声明出来的形参，不是随手取的变量', () => {
     // 没有这一条，`requestedWorkspaceId ??` 就是一句可以被任何人借用的免检咒语。
     const source = readSource('store.ts')
-    // 那个名字只在 openFile 的实现里出现，且是它的第四个形参。
-    //
-    // 判据钉到「第四个形参」为止，**不钉签名到此结束**：T-004 在后面追加了 `openAsText`，
-    // 而追加一个形参并不动摇这条自检要证的性质（那个名字是声明出来的形参，不是随手取的变量）。
-    // 原来那版把右括号也钉死了，于是加参数就红——红的是判据的写法，不是被判的性质。
-    expect(source).toMatch(/async openFile\(path, tabGroupId, location, requestedWorkspaceId[,)]/)
-    expect(source.match(/requestedWorkspaceId/g) ?? []).toHaveLength(2)
+    const lines = source.split('\n')
+
+    // 原来这条钉的是「`requestedWorkspaceId` 在全文出现恰好 2 次」，前提是只有 openFile 一个动作
+    // 收这个形参。后来 openFileDiff 与 openScratchTopic 也收了同一个上游解析结果，次数变成 6，
+    // 于是它红了——红的是「计数假设只有一个」，不是被判的性质。按性质重写：**每一处读取都必须
+    // 待在一个把它声明为形参的 action 里**。这样第七个动作把局部变量命名成 requestedWorkspaceId
+    // 来蹭上面那条例外时，这里当场红，而合法地多一个收参的 action 不会。
+    const declaresParam = (line: string): boolean => /^ {2}async \w+\([^)]*\brequestedWorkspaceId\b/.test(line)
+
+    const reads = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /\brequestedWorkspaceId\s*\?\?/.test(line))
+    // 自检：真的扫到了读取点。一个都没有时下面的循环是空转，`for` of 空集合什么都不证明。
+    expect(reads.length, '一处 `requestedWorkspaceId ??` 都没扫到——这条自检在空转').toBeGreaterThan(0)
+
+    for (const { line, index } of reads) {
+      // 往回找最近的一个 action 签名。不用 `findLast`——本仓的 `lib` 低于 es2023，它在 tsc 下不存在。
+      const owner = lines.slice(0, index).reverse().find((candidate) => /^ {2}async \w+\(/.test(candidate))
+      expect(
+        owner !== undefined && declaresParam(owner),
+        `这一行借用了 requestedWorkspaceId 这个例外，但它所在的 action 并没有把它声明为形参：\n${line.trim()}\n所属签名：${owner?.trim() ?? '（找不到）'}`
+      ).toBe(true)
+    }
+
+    // 反面：这个名字不许被任何人**造**出来。上面按「所属 action 的签名」判归属，而
+    // `const requestedWorkspaceId = …` 会让一个自造的值住进一个恰好收了同名形参的 action 里，
+    // 从签名那侧看不出来。
+    expect(source).not.toMatch(/\b(?:const|let|var)\s+requestedWorkspaceId\b/)
   })
 
 

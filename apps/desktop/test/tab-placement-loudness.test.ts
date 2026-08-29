@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import ts from 'typescript'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -84,7 +85,6 @@ function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal
     id,
     kind: 'terminal',
     providerId: null,
-    executorId: null,
     hostId: 'local',
     workspacePath: '/repo',
     label: 'Terminal',
@@ -93,7 +93,7 @@ function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal
     processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
-    control: { kind: 'terminal', hostId: 'local', terminalSessionId: id }
+    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
 }
 
@@ -153,7 +153,7 @@ describe('启动落点不在场时响亮失败，不留孤儿 Tab', () => {
     // 泊车的那个 shell 已经起好了。promoteWarmTerminal 会先把它从全局单槽里取出（消费掉），
     // 所以落点不在场时它没有别的归宿——必须停掉，否则那个进程泄漏且用户永远看不到它。
     useAppStore.setState({
-      warmTerminal: { key: warmTerminalKey('local', '/repo'), ready: Promise.resolve(session), session },
+      warmTerminal: { key: warmTerminalKey('local', '/repo'), ownerLauncherId: 'group:group', ready: Promise.resolve(session), session },
       unclaimedTerminalSessionIds: [session.id],
       sessions: [session]
     })
@@ -260,7 +260,6 @@ describe('结构层：写 state.layouts 的地方不许用裸 addTab', () => {
       new URL('../src/renderer/src/store.ts', import.meta.url),
       'utf8'
     )
-    const ts = (await import('typescript')).default
     const ast = ts.createSourceFile('store.ts', source, ts.ScriptTarget.Latest, true)
 
     const calls: { name: string; line: number }[] = []

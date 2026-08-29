@@ -20,6 +20,7 @@ const config: AppConfig = {
 function session(id: string, workspacePath: string): SessionSnapshot {
   return {
     id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath,
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     label: id, createdAt: 1, updatedAt: 2, processState: 'running',
     status: { state: 'working', source: 'run-process', observedAt: 2 }, latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }

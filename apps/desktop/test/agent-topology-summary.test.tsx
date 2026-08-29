@@ -30,12 +30,17 @@ describe('AgentTopologySummary projection', () => {
     }
     second.regions['region-b2'] = { regionId: 'region-b2', kind: 'terminal', phase: 'attached', workspaceId: 'project-a', sessionId: 'session-b' }
 
-    const [projection] = projectAgentTopology({
+    const projections = projectAgentTopology({
       sessionIds: ['session-a'],
       sessions: [session('session-a', 'Planner'), session('session-b', 'Builder')],
       tabs: { [first.id]: { ...first, topicId: 'view:shared' }, [second.id]: second },
       config: { workspaces: [{ id: 'project-a', name: 'Project A', branch: 'feature/demand', path: '/repo', hostId: 'local', kind: 'worktree' }] } as never
     })
+
+    // 先钉住「恰好一条」，再看它的内容。上一版直接解构第一项，于是投影成了两条（同一件事被拆成
+    // 两个 topology）时，这里仍只读第一条，断言照样全绿。
+    expect(projections).toHaveLength(1)
+    const projection = projections[0]!
 
     expect(projection.topicId).toBe('view:shared')
     expect(projection.branch).toBe('feature/demand')
