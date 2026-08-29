@@ -56,8 +56,9 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.tabOrder).toContain(secondTabId)
     expect(state.demandPmoTabIds[demand.id]).toBe(tabId)
     expect(state.demandPmoTabIds[secondDemand.id]).toBe(secondTabId)
-    expect(launchAgent).toHaveBeenCalledWith('codex', 'fresh demand prompt', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' })
-    expect(launchAgent).toHaveBeenCalledWith('codex', 'second fresh prompt', 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' })
+    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('fresh demand prompt'), 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' })
+    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('second fresh prompt'), 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' })
+    expect(launchAgent.mock.calls[0]?.[1]).toContain('Read-only execution Agent context')
   })
 
   it('reopens only the mapped PMO Tab and does not create another context', async () => {
