@@ -15,8 +15,10 @@ it('groups real Session controls and interrupts only the current reply', async (
   const groups = dom.container.querySelectorAll('[role="group"][aria-label="Session controls"]')
   expect(groups).toHaveLength(1)
   const group = groups[0]!
+  // 身份不再是这一组里的第 4 个 `<button>`：`bcd94ac3` 把 composer 自己那个带 popover 的按钮
+  // 并进了 AgentAvatar 的 disclosure，于是它是个包着头像的 `<span>`。剩下三个才是真正的按钮。
   expect([...group.querySelectorAll(':scope > button')].map(button => button.getAttribute('aria-label'))).toEqual([
-    expect.stringContaining('Context usage'), 'Interrupt the current turn', expect.stringContaining('Mailbox:'), 'codex · Agent details'
+    expect.stringContaining('Context usage'), 'Interrupt the current turn', expect.stringContaining('Mailbox:')
   ])
   expect(group.querySelector('.composer-agent-identity .agent-avatar')).not.toBeNull()
   expect(dom.container.querySelector('.composer__toolbar > div:last-child')?.contains(group)).toBe(true)
@@ -28,13 +30,19 @@ it('groups real Session controls and interrupts only the current reply', async (
   expect(identity.parentElement).toBe(group)
   expect(mailbox.parentElement).toBe(group)
   expect(identity.contains(mailbox)).toBe(false)
-  const identityTarget = identity.getAttribute('popovertarget')
+  // 两个 disclosure 依旧各自独立，只是机制不同了：身份走 AgentAvatar 的 hover/focus 门户
+  // （`aria-describedby` 指向它自己的面板），mailbox 仍走原生 popover。要守的是"互不相干"，
+  // 不是"都用 popovertarget"——旧断言钉的是后者，而那个机制已经不在身份这一侧了。
   const mailboxTarget = mailbox.getAttribute('popovertarget')
-  expect(identityTarget).toBeTruthy()
   expect(mailboxTarget).toBeTruthy()
-  expect(identityTarget).not.toBe(mailboxTarget)
-  expect(document.getElementById(identityTarget!)?.classList.contains('agent-identity-popover')).toBe(true)
-  await dom.click('.composer-agent-identity')
+  expect(identity.getAttribute('popovertarget')).toBeNull()
+  const avatar = identity.querySelector('.agent-avatar')!
+  expect(avatar.getAttribute('aria-describedby')).toBeNull()
+  await dom.hover('.composer-agent-identity .agent-avatar')
+  const describedBy = avatar.getAttribute('aria-describedby')
+  expect(describedBy).toBeTruthy()
+  expect(describedBy).not.toBe(mailboxTarget)
+  expect(document.getElementById(describedBy!)?.classList.contains('agent-identity-popover')).toBe(true)
   expect(interrupt).not.toHaveBeenCalled()
   await dom.click('.composer__mailbox')
   expect(interrupt).not.toHaveBeenCalled()
@@ -62,5 +70,11 @@ it('uses one continuous surface and a Provider contour instead of a rectangular 
   expect(body('.agent-avatar')).not.toMatch(/(?:^|;)\s*outline:/u)
   expect(body('.agent-avatar__contour')).toContain('filter: none')
   expect(body('.agent-avatar__contour')).not.toContain('drop-shadow(')
-  expect(body('.composer-session-controls .composer-agent-identity')).toContain('background: transparent')
+  // 这里曾经断言 `.composer-session-controls .composer-agent-identity { background: transparent }`。
+  // 那条覆盖存在只是因为身份当年是个 `<button>`，UA 会给按钮一层灰底。`bcd94ac3` 把它并进
+  // AgentAvatar 的 disclosure 之后它是个 `<span>`，本来就没有底——覆盖是过时的，不是丢了。
+  // 还需要成立的是「一整片连续表面」：身份自己不得再画第二块底或第二道边。
+  const identityRule = body('.composer-agent-identity')
+  expect(identityRule).not.toMatch(/(?:^|;)\s*background:/u)
+  expect(identityRule).not.toMatch(/(?:^|;)\s*border:/u)
 })
