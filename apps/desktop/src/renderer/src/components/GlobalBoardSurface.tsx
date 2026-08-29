@@ -35,6 +35,7 @@ import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
 import { AgentTopologySummary } from './AgentTopologySummary'
+import { ComposerTextarea } from './ComposerTextarea'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 
 const STATUS_META: Record<DemandStatus, { label: string; icon: typeof Inbox }> = {
@@ -139,7 +140,7 @@ function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onOpenPm
       </header>
       <div className="global-demand-workspace__editor">
         <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => onUpdate({ title })} /></label>
-        <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => onUpdate({ description })} rows={3} /></label>
+        <label>Description<ComposerTextarea value={description} onValueChange={setDescription} onBlur={() => onUpdate({ description })} rows={3} /></label>
         <label>Tags<input value={tags} onChange={(event) => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="design, customer, release" /></label>
         <div className="global-demand-workspace__toolbar">
           <label className="global-board-select">Status<select aria-label="Demand status" value={demand.status} onChange={(event) => onUpdate({ status: event.target.value as DemandStatus })}>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select></label>
