@@ -97,15 +97,15 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
       void api.sessions.submitPrompt(pmoTeamsSession.control, pending.text, pending.id)
-        .then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined }))
+        .then(() => setFloating({ pendingPrompt: undefined }))
         .catch((error) => {
           deliveredPromptRef.current = null
           reportError(error)
         })
       return
     }
-    const pmoTeamsTab = targetTab?.workspaceId === SCRATCH_WORKSPACE_ID && targetTab.topicId === PMO_TEAMS_TOPIC_ID
-      ? targetTab
+    const pmoTeamsTab = targetTabId
+      ? (targetTab?.workspaceId === SCRATCH_WORKSPACE_ID && targetTab.topicId === PMO_TEAMS_TOPIC_ID ? targetTab : undefined)
       : Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
     const layout = layouts[SCRATCH_WORKSPACE_ID]
     const group = pmoTeamsTab && layout?.groups.find((entry) => entry.tabOrder.includes(pmoTeamsTab.id))
@@ -117,7 +117,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     void launchAgent(executorId, [pending.text, executionContext].join('\n\n'), group.id, {
       tabId: pmoTeamsTab.id,
       regionId
-    }).then(() => setFloating({ pendingPrompt: undefined, targetTabId: undefined })).catch((error) => {
+    }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
       deliveredPromptRef.current = null
       reportError(error)
     })
