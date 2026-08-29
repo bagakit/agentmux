@@ -327,8 +327,6 @@ const mockApi: AgentMuxDesktopApi = {
     delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
     linkSession: async (id, sessionId) => mockApi.demands.update(id, { description: `${id}:${sessionId}` }),
     unlinkSession: async (id) => mockApi.demands.update(id, {}),
-    linkProject: async (id, projectId, projectName) => mockApi.demands.update(id, { projectId, ...(projectName === undefined ? {} : { projectName }) }),
-    unlinkProject: async (id) => mockApi.demands.update(id, { projectId: null, projectName: null }),
     activity: async (id, input: Omit<DemandActivity, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.message }),
     decision: async (id, input: Omit<DemandDecision, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.decision })
   },
