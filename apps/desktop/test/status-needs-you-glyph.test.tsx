@@ -8,9 +8,14 @@ const styles = allStyles()
 
 // Isolate one CSS rule body by its selector text so an assertion is about that rule, not an
 // accidental match elsewhere in the sheet.
+//
+// 找不到就**当场报红**，不返回空串。空串会让每一条 `toContain` 变成同一句「没找到」，而让每一条
+// `not.toContain` 恒真——本仓已经记过这个形状（indexOf 取锚点取空）。这次它真的咬了人：
+// `bcd94ac3` 删掉 5px 标记的抑制规则后，这里读到的是空串，报错写着「expected '' to contain
+// 'display: none'」，看上去像规则体不对，实际是规则整条不在了。
 function ruleBody(selector: string): string {
   const at = styles.indexOf(selector)
-  if (at === -1) return ''
+  expect(at, `样式表里找不到这条选择器，它被删掉或改名了：${selector}`).toBeGreaterThan(-1)
   const open = styles.indexOf('{', at)
   const close = styles.indexOf('}', open)
   return styles.slice(open + 1, close)
