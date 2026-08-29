@@ -6,7 +6,8 @@ import { api } from '../lib/api'
 import {
   clampPmoTeamsTopicFloatingState,
   requestPmoTeamsTopicFloatingClose,
-  usePmoTeamsTopicFloatingState
+  usePmoTeamsTopicFloatingState,
+  type PmoTeamsTopicFloatingState
 } from '../lib/pmo-teams-topic-floating'
 import { topicIdForSession } from '../lib/workbench-tabs'
 import { executionFocusContextText, pmoFocusSessionId } from '../lib/agent-focus'
@@ -160,10 +161,10 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
 }
 
 type PmoTeamsFloatingWindowProps = {
-  floating: ReturnType<typeof usePmoTeamsTopicFloatingState>[0]
+  floating: PmoTeamsTopicFloatingState
   opening: boolean
   visible: boolean
-  onUpdate: (next: Partial<ReturnType<typeof usePmoTeamsTopicFloatingState>[0]>) => void
+  onUpdate: (next: Partial<PmoTeamsTopicFloatingState>) => void
   onClose: () => void
   children: React.ReactNode
 }
