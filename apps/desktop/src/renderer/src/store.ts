@@ -458,6 +458,8 @@ type AppState = {
   togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
   tabMenuOpen: boolean
+  /** Transient leases held by Renderer overlays that must sit above window-level native surfaces. */
+  nativeSurfaceOverlayCount: number
   workspaceTool: WorkspaceTool
   projectRailWidth: number
   toolDockWidth: number
@@ -608,6 +610,8 @@ type AppState = {
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
   setTabMenuOpen(open: boolean): void
+  acquireNativeSurfaceOverlay(): void
+  releaseNativeSurfaceOverlay(): void
   setWorkspaceTool(tool: WorkspaceTool): void
   toggleTools(): void
   setProjectRailWidth(width: number): void
@@ -1813,6 +1817,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   pinnedItems: {},
   toolsOpen: true,
   tabMenuOpen: false,
+  nativeSurfaceOverlayCount: 0,
   workspaceTool: 'files-branches',
   projectRailWidth: PROJECT_RAIL_DEFAULT_WIDTH,
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
@@ -3852,6 +3857,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setTabMenuOpen(tabMenuOpen) {
     set({ tabMenuOpen })
+  },
+  acquireNativeSurfaceOverlay() {
+    set((state) => ({ nativeSurfaceOverlayCount: state.nativeSurfaceOverlayCount + 1 }))
+  },
+  releaseNativeSurfaceOverlay() {
+    set((state) => ({ nativeSurfaceOverlayCount: Math.max(0, state.nativeSurfaceOverlayCount - 1) }))
   },
   setWorkspaceTool(workspaceTool) {
     set({ workspaceTool, toolsOpen: true, mainSurface: 'workbench' })

@@ -48,6 +48,7 @@ import {
 import {
   LatestBrowserBoundsSynchronizer,
   focusRingYieldOf,
+  hasPositiveBrowserStageGeometry,
   nativeBoundsClearOfFocusRing,
   regionAncestorOf,
   rendererCssBoundsToWindowDip
@@ -268,6 +269,10 @@ export function BrowserPane({
           return
         }
         const rect = stage.getBoundingClientRect()
+        // During native window/pane resize the stage can briefly report zero geometry while still
+        // belonging to the visible Browser. Keep the last valid native frame until a usable rect arrives;
+        // explicit visibility/release branches above still hide it when the surface really goes away.
+        if (!hasPositiveBrowserStageGeometry(rect)) return
         // 让开 Region 的焦点框：原生视图是窗口级层，画在页面之上，焦点框盖不过它（详见
         // nativeBoundsClearOfFocusRing 的注释）。让位量走 focusRingYieldOf——**只有聚焦的那一格**
         // 取环宽，其余格取 0。不能像从前那样只问「有没有 .workbench-region 祖先」：环宽声明在 :root，
