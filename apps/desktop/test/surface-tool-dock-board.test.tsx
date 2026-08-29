@@ -24,6 +24,7 @@ const fixture = vi.hoisted(() => ({
   rows: [] as BoardRow[],
   kind: 'branch' as BoardRow['kind'],
   loading: false,
+  demands: {} as Record<string, unknown>,
   selectSession: vi.fn(),
   setSelectedDemand: vi.fn()
 }))
@@ -34,7 +35,7 @@ vi.mock('../src/renderer/src/hooks/useBoardRows.js', () => ({
 
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ selectSession: fixture.selectSession, setSelectedDemand: fixture.setSelectedDemand, config: null, sessions: [], demands: {}, selectedDemandId: null })
+    selector({ selectSession: fixture.selectSession, setSelectedDemand: fixture.setSelectedDemand, config: null, sessions: [], demands: fixture.demands, selectedDemandId: null })
 }))
 
 const dockSource = readFileSync(
@@ -145,9 +146,26 @@ describe('Board 工具面板是工作清单', () => {
   })
 })
 
+function demand(id: string, status: string, updatedAt: number): Record<string, unknown> {
+  return {
+    id,
+    title: `demand-${id}`,
+    description: '',
+    status,
+    priority: 'normal',
+    projectId: null,
+    projectName: null,
+    sessionIds: [],
+    createdAt: updatedAt,
+    updatedAt,
+    source: 'session'
+  }
+}
+
 describe('BoardToolList 渲染', () => {
   it('零 Demand 时不渲染 Branch 行', async () => {
     fixture.rows = [row('main')]
+    fixture.demands = {}
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
     expect(markup).toContain('board-tool-row')
@@ -158,9 +176,36 @@ describe('BoardToolList 渲染', () => {
   it('零行时显示空态说明，而不是一张空清单', async () => {
     fixture.rows = []
     fixture.loading = false
+    fixture.demands = {}
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
     expect(markup).toContain('board-tool-list')
     expect(markup).toContain('No requests or ideas yet')
+  })
+
+  /**
+   * 清单是**一条**清单，所以超额那部分折叠成**一条**"其余 N 条"，而不是每个状态各自
+   * 无声地截断。这里刻意让每个状态列都装不满（3 列 × 3 条，列内都不超 5 条）：
+   * 按列截断会把 9 条全列出来且不给任何"还有更多"的提示，只有整体截断才会红。
+   */
+  it('超出可见条数时折叠成一条可展开的"其余 N 条"，而不是按列各自截断', async () => {
+    fixture.rows = []
+    const statuses = ['todo', 'in_progress', 'done']
+    const demands: Record<string, unknown> = {}
+    let clock = 1000
+    for (const status of statuses) {
+      for (let index = 0; index < 3; index += 1) {
+        const id = `${status}-${index}`
+        demands[id] = demand(id, status, clock--)
+      }
+    }
+    fixture.demands = demands
+    const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
+    const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
+    const rendered = markup.split('board-tool-demand').length - 1
+    expect(rendered).toBe(BOARD_LIST_VISIBLE_ROWS)
+    expect(markup).toContain(`其余 ${9 - BOARD_LIST_VISIBLE_ROWS} 条`)
+    // 计数栏说的是总数，不是显示出来的条数——否则"还有 3 条"就没有出处。
+    expect(markup).toContain('9 requests')
   })
 })
