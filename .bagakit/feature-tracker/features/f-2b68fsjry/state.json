@@ -15,14 +15,14 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 1,
-    "round_count": 1
+    "round_count": 3
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-001",
+    "last_task_id": "T-002",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop exec vitest run test/agent-focus-context.test.ts test/pmo-focus-isolation.test.ts test/focus-history-terminal.test.ts --maxWorkers=1",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/global-focus-surface.test.tsx test/global-agents-board.test.tsx --maxWorkers=1",
         "exit_code": 0,
         "status": "pass"
       },
@@ -32,13 +32,13 @@
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2b68fsjry/artifacts/gate-T-001-r1-0001.log",
+    "last_log_path": ".bagakit/feature-tracker/features/f-2b68fsjry/artifacts/gate-T-002-r3-0001.log",
     "last_context": {
-      "candidate_sha": "e45f9d37a1371ff22d8c8b08b096cca429c960b2",
-      "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidate_sha": "6572423c3b5c8763792d0b6b8c31b595616b5024",
+      "worktree_digest": "09eb3763fc8849dd393f039d1e131bb310799f260d189e9150a26f5974de58cb",
       "verification_digest": "none",
-      "dedup_key": "559b455dcd51ef955fb096633c92fe0b3b33eba5c18cfe4f5c0c1eabe8511e1d",
-      "source_key": "3bc1d309280d47a082f5a6104546411b9459061bc5e0220d2e607d585d1c3d56",
+      "dedup_key": "2a175b801a193aece64d49a2ff8018d2661bd6df290196e82168821cfd029ac2",
+      "source_key": "2db5e5622c3f6f5b46a056db2253db0150b8fb29124808be3b946cd8555375d6",
       "artifact_digests": {},
       "plan_revision": 1
     }
@@ -63,6 +63,22 @@
     {
       "action": "task_gate",
       "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
     }
   ]
 }

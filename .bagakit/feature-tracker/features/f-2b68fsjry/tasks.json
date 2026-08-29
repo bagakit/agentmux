@@ -60,7 +60,7 @@
       "supersedes": [],
       "estimate_hours": 0.8,
       "introduced_in_revision": 1,
-      "status": "in_progress",
+      "status": "done",
       "gate_result": "pass",
       "last_gate_commands": [
         {
@@ -76,11 +76,11 @@
       ],
       "notes": [],
       "last_gate_context": {
-        "candidate_sha": "e45f9d37a1371ff22d8c8b08b096cca429c960b2",
+        "candidate_sha": "6572423c3b5c8763792d0b6b8c31b595616b5024",
         "worktree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "verification_digest": "none",
-        "dedup_key": "559b455dcd51ef955fb096633c92fe0b3b33eba5c18cfe4f5c0c1eabe8511e1d",
-        "source_key": "3bc1d309280d47a082f5a6104546411b9459061bc5e0220d2e607d585d1c3d56",
+        "dedup_key": "a5b9932360c32a9e1d8163278fcee6a85df0c8a4d62f7da8af61bde1131e6a87",
+        "source_key": "d2d4f11694f72b2b75f937c437db6b298b1d44946c0bd04b252f213ce7b1f7f9",
         "artifact_digests": {},
         "plan_revision": 1
       }
@@ -119,10 +119,30 @@
       "heavy": true,
       "heavy_reason": "The surface name, reusable list component, terminal identity projection, and existing observation panel must remain one coherent navigation surface.",
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/global-focus-surface.test.tsx test/global-agents-board.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "last_gate_context": {
+        "candidate_sha": "6572423c3b5c8763792d0b6b8c31b595616b5024",
+        "worktree_digest": "09eb3763fc8849dd393f039d1e131bb310799f260d189e9150a26f5974de58cb",
+        "verification_digest": "none",
+        "dedup_key": "2a175b801a193aece64d49a2ff8018d2661bd6df290196e82168821cfd029ac2",
+        "source_key": "2db5e5622c3f6f5b46a056db2253db0150b8fb29124808be3b946cd8555375d6",
+        "artifact_digests": {},
+        "plan_revision": 1
+      }
     },
     {
       "id": "T-003",
