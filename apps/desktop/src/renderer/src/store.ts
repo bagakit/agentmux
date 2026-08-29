@@ -227,6 +227,7 @@ import { decayStaleAgentStatuses as computeDecayedAgentStatuses } from './lib/ag
 import {
   EMPTY_AGENT_FOCUS,
   executionFocusContextText,
+  executionFocusSessionId,
   focusExecution,
   focusLaneForSession,
   focusPmo,
@@ -3561,7 +3562,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
-    const selectedSessionId = get().agentFocus.execution.sessionId
+    const selectedSessionId = executionFocusSessionId(get().agentFocus)
     const selectedSession = selectedSessionId
       ? get().sessions.find((session) => session.id === selectedSessionId)
       : undefined
