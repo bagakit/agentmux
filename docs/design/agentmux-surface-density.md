@@ -381,6 +381,7 @@ styles/
   surfaces.css    Settings、New Tab、Launch、Welcome
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
+  focus.css       Focus 三段工作面：历史、状态、选中的 Session
   pmo-teams-topic.css  PMO Teams Topic 的悬浮窗口、标题栏和 compact 入口
   browser.css     Browser 工具与地址栏
   agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点

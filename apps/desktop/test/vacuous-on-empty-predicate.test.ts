@@ -1,7 +1,10 @@
 import ts from 'typescript'
-import { readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
+import {
+  packageRootsWithTestsOnDisk,
+  workspaceTestFiles
+} from './helpers/workspace-test-files.js'
 
 /**
  * `expect(xs.every(p)).toBe(true)` 必须证明 `xs` 非空。
@@ -38,8 +41,7 @@ import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
  * 宁可漏报不误伤：一条被误判的判据会让人给守卫加豁免，而豁免会把守卫吃掉。
  */
 describe('空集合上恒真的谓词断言都带着非空证明', () => {
-  const TEST_DIR = new URL('../test/', import.meta.url)
-  const testFiles = readdirSync(TEST_DIR).filter((name) => /\.tsx?$/.test(name))
+  const testFiles = workspaceTestFiles()
 
   /** `expect(<pop>.every(...)).toBe(true)` 或 `expect(<pop>.some(...)).toBe(false)` 的 population 文本。 */
   function vacuousPopulation(node: ts.Node): string | undefined {
@@ -267,12 +269,21 @@ describe('空集合上恒真的谓词断言都带着非空证明', () => {
     return false
   }
 
-  it('扫描面自检：test 目录读得到，且这两种形状真的存在', () => {
+  it('扫描面自检：全部 workspace test 树读得到，且这两种形状真的存在', () => {
     // 守卫自己也是扫描式的，所以它自己也得证明扫到了东西——否则它正是它要防的那种东西。
-    expect(testFiles.length, 'test 目录扫出来是空的').toBeGreaterThan(100)
+    expect(testFiles.length, 'workspace test 树扫出来是空的').toBeGreaterThan(700)
+
+    // 只数文件总数挡不住**丢掉一整个包**：apps/desktop 一家就有近 600 个文件，把 packages/* 从
+    // workspace 声明里删掉，总数仍然过任何合理阈值。所以再拿一个独立来源（磁盘上直接找带 test 树
+    // 的包目录）对一次——两个来源只在缺陷处分岔。
+    const declaredRoots = [...new Set(testFiles.map((file) => file.relPath.slice(0, file.relPath.indexOf('/test/'))))]
+    expect(declaredRoots.sort(), 'workspace 声明派生出的包与磁盘上带 test 树的包对不上').toEqual(
+      packageRootsWithTestsOnDisk()
+    )
+
     let found = 0
-    for (const name of testFiles) {
-      const { sourceFile } = readAndParse(new URL(name, TEST_DIR).pathname)
+    for (const file of testFiles) {
+      const { sourceFile } = readAndParse(file.absPath)
       const visit = (node: ts.Node): void => {
         if (vacuousPopulation(node) !== undefined) found += 1
         ts.forEachChild(node, visit)
@@ -281,8 +292,8 @@ describe('空集合上恒真的谓词断言都带着非空证明', () => {
     }
     expect(
       found,
-      '一处 `expect(xs.every(…)).toBe(true)` / `expect(xs.some(…)).toBe(false)` 都没扫到——' +
-        '形状匹配的那段不认当前写法了，这条判据什么都没检查'
+      '`expect(xs.every(…)).toBe(true)` / `expect(xs.some(…)).toBe(false)` 扫得太少——' +
+        '形状匹配的那段不认当前写法了，这条判据基本没在检查'
     ).toBeGreaterThan(20)
   })
 
@@ -310,9 +321,8 @@ describe('空集合上恒真的谓词断言都带着非空证明', () => {
   it('每一处都在同一个 it() 里证明了集合非空', () => {
     const offenders: string[] = []
     let checked = 0
-    for (const name of testFiles) {
-      const path = new URL(name, TEST_DIR).pathname
-      const { sourceFile } = readAndParse(path)
+    for (const file of testFiles) {
+      const { sourceFile } = readAndParse(file.absPath)
       const visit = (node: ts.Node): void => {
         const population = vacuousPopulation(node)
         if (population !== undefined) {
@@ -322,7 +332,7 @@ describe('空集合上恒真的谓词断言都带着非空证明', () => {
             checked += 1
             if (!hasNonEmptyProof(scope, population) && !hasExemptionComment(sourceFile, node)) {
               const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1
-              offenders.push(`${name}:${line} — \`${population}\` 空了这条照样绿`)
+              offenders.push(`${file.relPath}:${line} — \`${population}\` 空了这条照样绿`)
             }
           }
         }
@@ -331,7 +341,8 @@ describe('空集合上恒真的谓词断言都带着非空证明', () => {
       visit(sourceFile)
     }
 
-    expect(checked, '一处都没核到——形状匹配失效了，这条判据什么都没检查').toBeGreaterThan(20)
+    // 阈值按放大后的扫描面重设：写 > 0 的话，扫描面从一个包扩到全仓后几乎不可能红，等于没守。
+    expect(checked, '核到的太少——形状匹配失效了，这条判据基本没在检查').toBeGreaterThan(40)
     expect(
       offenders,
       '这些断言在集合为空时恒成立，而集合为空本身是个更严重的缺陷，却被它们盖住了。\n' +

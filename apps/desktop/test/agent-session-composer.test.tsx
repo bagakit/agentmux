@@ -16,6 +16,10 @@ const fixture = vi.hoisted(() => ({
       composerShortcuts: [] as ComposerShortcut[]
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
+    // 手搭的 store 替身缺一个 slice 就抛 TypeError，而栈顶指向生产文件，看起来像组件回归。
+    // `AgentSessionComposer` 读 `state.viewModes[sessionId]` 且**没有** `?.`（其余 slice 都有），
+    // 所以这个 key 缺席时整组测试在渲染期就炸。
+    viewModes: {} as Record<string, 'terminal' | 'timeline'>,
     agentComposerDrafts: {} as Record<string, string>,
     noticeReadReceipts: {},
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'deferred' | 'failed'; error?: string }>>,

@@ -93,10 +93,9 @@ describe('Topic 行的视觉收敛', () => {
     new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
     'utf8'
   )
-  const dockStyles = readFileSync(
-    new URL('../src/renderer/src/styles/dock.css', import.meta.url),
-    'utf8'
-  )
+  // 整张表而不是 dock.css 一个文件：这几条规则按表面再拆一刀就会搬走，而硬编码单文件时
+  // 扫描面变空、`toContain` 一条都不红（stylesheet-organisation 那道守卫守的正是这个）。
+  const dockStyles = allStyles()
   it('不再同时给出计数和逐个全名——两者说的是同一件事', () => {
     // `2 agents` 与其下一排「图标＋全名」胶囊重复，且把一行撑成四层。
     expect(source).not.toContain("'agent' : 'agents'")

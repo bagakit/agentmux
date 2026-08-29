@@ -10,6 +10,9 @@ const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[], providerCatalog: [],
     agentComposerDrafts: {} as Record<string, string>, agentSteerQueues: {}, agentSteerInFlight: {}, noticeReadReceipts: {},
+    // 手搭的 store 替身缺一个 slice 就抛 TypeError，而栈顶指向生产文件，看起来像组件回归。
+    // `AgentSessionComposer` 读 `state.viewModes[sessionId]` 且**没有** `?.`（其余 slice 都有）。
+    viewModes: {} as Record<string, 'terminal' | 'timeline'>,
     setAgentComposerDraft: vi.fn(), clearAgentComposerDraftIfUnchanged: vi.fn(),
     enqueueAgentSteer: vi.fn(() => true), flushAgentSteerQueue: vi.fn(async () => {}),
     send: vi.fn(() => true), interrupt: vi.fn(), setPosture: vi.fn(), reportError: vi.fn()

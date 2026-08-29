@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EMPTY_AGENT_FOCUS, type AgentFocusContext } from '../src/renderer/src/lib/agent-focus'
 
 const observed = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -32,10 +33,19 @@ const observed = vi.hoisted(() => {
       // this test does not care about, which reads as a source regression rather than a gap here.
       tabs: {},
       displacedAgentSessionIds: [],
-      noticeReadReceipts: {}
+      noticeReadReceipts: {},
+      // 同上：`PmoTeamsTopicFloatingPanel` 也是 App 的 chrome 子组件，它读 `state.agentFocus`
+      // 并交给 `pmoFocusSessionId()`，后者直接取 `context.pmo.sessionId`——缺席时抛在生产文件里。
+      // 真值在下面用 store 自己的 EMPTY_AGENT_FOCUS 填（vi.hoisted 跑在 import 之前，拿不到它），
+      // 复用常量而不是手写一份形状：手写的那份会和 AgentFocusContext 一起漂移。
+      agentFocus: null as unknown as AgentFocusContext,
+      agentNames: {},
+      layouts: {}
     }
   }
 })
+
+observed.state.agentFocus = EMPTY_AGENT_FOCUS
 
 vi.mock('../src/renderer/src/store', () => ({
   useAppStore: (selector: (state: typeof observed.state) => unknown) => selector(observed.state)

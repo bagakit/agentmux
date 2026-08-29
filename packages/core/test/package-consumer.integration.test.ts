@@ -805,7 +805,12 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         const receiptlessDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
         await stopDaemon(receiptlessDaemon)
         await waitForNoDaemon(daemonPath, runtimeDirectory)
-        expect((await readdir(runtimeDirectory)).some((entry) => entry.startsWith('.owner-'))).toBe(false)
+        // 目录整个空了的话，下面那条 `some(...)===false` 照样绿——而 runtime 目录被清空
+        // 比「留下一个 .owner- 临时文件」严重得多。`owner.json` 在上面第 792 行刚被 mkdir 成一个
+        // 目录、其后没有任何一处删过它，所以它必然在这份清单里：拿它当非空证明，不需要知道别的条目。
+        const runtimeEntries = await readdir(runtimeDirectory)
+        expect(runtimeEntries, 'runtime 目录被清空了').toContain('owner.json')
+        expect(runtimeEntries.some((entry) => entry.startsWith('.owner-'))).toBe(false)
         await rm(ownerReceiptPath, { recursive: true, force: true })
 
         const replacementStateDirectory = join(runtimeDirectory, 'replacement-state')
