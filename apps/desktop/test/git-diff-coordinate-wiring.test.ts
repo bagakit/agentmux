@@ -75,21 +75,78 @@ function callsTo(source: ts.SourceFile, name: string): ts.CallExpression[] {
  * conditional forms a caller reaches for when null is a real answer (`x ? f(...) : null`, `f(...) ?? y`).
  * A guard that only accepted the bare `const p = f(...)` shape would go blind the moment the caller has
  * to handle the "names nothing in this tree" answer, which is exactly what #761's caller does.
+ *
+ * 传递闭包，不是一跳。取值经过一次中转再递出去是本仓真实在用的形状：`SessionResultReview` 先把
+ * 转换结果绑成 `timelineDiffPath`，再由 `uniqueTimelineDiffPath` 做一次去重后才递给 `openFileDiff`。
+ * 只认一跳会把这个**已经转换过**的调用点报成违例——而守卫误伤合法代码比没有守卫更糟：下一个人
+ * 会照着报错把 `uniqueTimelineDiffPath` 改成直接递 porcelain 路径，那才真的把 #761 装回去。
+ *
+ * 局部函数同样算数：把转换包进 `function f(...) { … return workspaceRelativeGitPath(…) }` 再调用，
+ * 取值依然来自转换。`timelinePathForWorkspace` 正是这个形状（它的另一条臂走 Workspace 约束规则，
+ * 两条臂产出的都是编辑器坐标）。
+ *
+ * 只看初始化式的**取值位**，不看整段文本。`cond ? A : B` 真正被绑定的是 A 或 B，条件里提到什么
+ * 都不算数——否则 `timelineDiffPath ? change.path : null` 会因为"提到了一个转换过的名字"被放行，
+ * 而它递出去的正是 porcelain 路径。放宽传递闭包时最容易开的就是这个洞。
  */
+function resultExpressions(node: ts.Expression): ts.Expression[] {
+  if (ts.isParenthesizedExpression(node)) return resultExpressions(node.expression)
+  if (ts.isConditionalExpression(node)) {
+    return [...resultExpressions(node.whenTrue), ...resultExpressions(node.whenFalse)]
+  }
+  if (ts.isBinaryExpression(node)) {
+    const kind = node.operatorToken.kind
+    if (kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken) {
+      return [...resultExpressions(node.left), ...resultExpressions(node.right)]
+    }
+    // `a && b` 取值是 b（a 为假时是 a 本身，那一侧只会是 null/undefined/false 这类空值）。
+    if (kind === ts.SyntaxKind.AmpersandAmpersandToken) return resultExpressions(node.right)
+  }
+  return [node]
+}
+
+/** 空值取值位不需要来自转换：`: null` 表达的是"没有可打开的路径"。 */
+function isEmptyResult(node: ts.Expression): boolean {
+  return node.kind === ts.SyntaxKind.NullKeyword
+    || node.kind === ts.SyntaxKind.FalseKeyword
+    || (ts.isIdentifier(node) && node.text === 'undefined')
+}
+
 function namesBoundToConversion(source: ts.SourceFile): Set<string> {
   const names = new Set<string>()
-  const containsConversion = (node: ts.Node): boolean => {
+  // 先收本文件里"返回值来自转换"的局部函数名，它们与 CONVERSION 同样算作转换的来源。
+  const converters = new Set<string>([CONVERSION])
+  const containsCallTo = (node: ts.Node, callees: ReadonlySet<string>): boolean => {
     let hit = false
     walk(node, (inner) => {
-      if (ts.isCallExpression(inner) && calleeName(inner) === CONVERSION) hit = true
+      if (ts.isCallExpression(inner)) {
+        const name = calleeName(inner)
+        if (name !== null && callees.has(name)) hit = true
+      }
     })
     return hit
   }
   walk(source, (node) => {
-    if (!ts.isVariableDeclaration(node)) return
-    if (!ts.isIdentifier(node.name) || !node.initializer) return
-    if (containsConversion(node.initializer)) names.add(node.name.text)
+    if (!ts.isFunctionDeclaration(node) || !node.name || !node.body) return
+    if (containsCallTo(node.body, converters)) converters.add(node.name.text)
   })
+  // 再求名字绑定的传递闭包：一轮只能看见直接绑定，中转量要多走几轮才连得上。
+  // 判据是**每一个**非空取值位都来自转换——有一个取值位递的是别的东西，这个名字就不算转换过。
+  for (let round = 0; round < 8; round += 1) {
+    const before = names.size
+    walk(source, (node) => {
+      if (!ts.isVariableDeclaration(node)) return
+      if (!ts.isIdentifier(node.name) || !node.initializer) return
+      if (names.has(node.name.text)) return
+      const results = resultExpressions(node.initializer).filter((result) => !isEmptyResult(result))
+      if (results.length === 0) return
+      const everyResultConverted = results.every((result) =>
+        containsCallTo(result, converters) || (ts.isIdentifier(result) && names.has(result.text))
+      )
+      if (everyResultConverted) names.add(node.name.text)
+    })
+    if (names.size === before) break
+  }
   return names
 }
 
