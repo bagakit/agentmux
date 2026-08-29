@@ -34,6 +34,8 @@ const fixture = vi.hoisted(() => ({
     renameScratchTopic: vi.fn(),
     setScratchTopicOrder: vi.fn(),
     selectSession: vi.fn(),
+    selectWorkspace: vi.fn(async () => {}),
+    activateTab: vi.fn(),
     reportError: vi.fn(),
     togglePinnedItem: vi.fn()
   }
@@ -133,6 +135,8 @@ afterEach(async () => {
   fixture.state.agentNames = {}
   fixture.state.timelines = {}
   fixture.state.selectSession.mockReset()
+  fixture.state.selectWorkspace.mockReset()
+  fixture.state.activateTab.mockReset()
   fixture.state.openScratchTopic.mockReset()
   fixture.state.togglePinnedItem.mockReset()
 })
@@ -225,6 +229,8 @@ describe('Topic live Agent presence', () => {
     const tabButton = row.querySelector<HTMLButtonElement>('[data-topic-tab-id="split"]')!
     await act(async () => tabButton.click())
     expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
+    expect(fixture.state.selectWorkspace).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID)
+    expect(fixture.state.activateTab).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, 'main', 'split')
     // Serializing and reloading the durable layout retains the same geometry/identity projection.
     fixture.state.tabs = JSON.parse(JSON.stringify(fixture.state.tabs))
     fixture.state.layouts = JSON.parse(JSON.stringify(fixture.state.layouts))
