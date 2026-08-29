@@ -17,8 +17,30 @@ beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipt
 const trigger = () => dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
 const mailbox = () => dom.container.querySelector<HTMLDivElement>('.composer-mailbox')!
 const unread = () => trigger().getAttribute('data-unread')
+/**
+ * 打开之前先把指纹等出来。
+ *
+ * `useMessageFingerprints` 走异步的 `crypto.subtle.digest`，而**打开时落在哪个文件夹**正是由它
+ * 决定的：`openFolder()` 读 `receipts.unread.length`，指纹没算完时它是空的，于是本该停在 Inbox 的
+ * 一次打开落到了 System。并行满载下这个微任务经常输、单跑则赢——看着像 flake，其实每一次
+ * `toggle('open')` 都在赌同一场竞争。
+ *
+ * 上一轮我只给其中一条断言补了 `vi.waitFor`，那是打地鼠：这个文件有 15 处 `toggle('open')`。
+ * 等待放进 toggle 自己，一次覆盖全部。等的是 digest 自己那些 promise（兄弟文件
+ * `session-mailbox-receipts.test.tsx` 用的也是这个），不是数几个微任务——数微任务是赌实现细节。
+ *
+ * 装在 `beforeEach` 而不是模块顶层：`composerDOM()` 的 `afterEach` 会 `vi.restoreAllMocks()`，
+ * 顶层那一枚从第二条用例起就被卸掉了。实测过——16 个打开点上 `digest.mock.calls.length` 全是 0，
+ * 于是 `Promise.all([])` 立刻 resolve，这个等待**看着在等，其实一步没等**。
+ */
+let digest: { mock: { results: { value: unknown }[] } }
+beforeEach(() => { digest = vi.spyOn(crypto.subtle, 'digest') })
+async function settleFingerprints() {
+  await act(async () => { await Promise.all(digest.mock.results.map((result) => result.value)) })
+}
 // happy-dom has no native popover toggle. Dispatch the browser's state event, not React internals.
 async function toggle(state: 'open' | 'closed') {
+  if (state === 'open') await settleFingerprints()
   const event = new Event('toggle')
   Object.defineProperty(event, 'newState', { value: state })
   await act(async () => mailbox().dispatchEvent(event))
