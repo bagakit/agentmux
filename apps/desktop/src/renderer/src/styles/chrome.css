@@ -51,6 +51,9 @@
   padding:0;
   border-right: 0;
 }
+/* Global surfaces hide the Project Rail, so the topbar no longer gets its traffic-light inset from
+   the rail's toggle chrome. Keep the native macOS controls and the title in separate hit areas. */
+.top-row-leading-chrome--global-inset { padding-left: 80px; }
 .sidebar-toggle-chrome {
   width: 180px;
   height: 100%;
