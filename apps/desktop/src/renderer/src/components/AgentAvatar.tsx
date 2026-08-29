@@ -14,6 +14,7 @@ import { SemanticIcon } from './semantic-icons'
 export const ExecutorIdentityContext = createContext<{
   config: AppConfig | null
   sessions: readonly SessionSnapshot[]
+  onPanelVisibilityChange?: (visible: boolean) => void
 }>({ config: null, sessions: [] })
 
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */
@@ -68,7 +69,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     keepOpen()
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
-      onPanelVisibilityChange?.(true)
+      if (!position) (onPanelVisibilityChange ?? identity.onPanelVisibilityChange)?.(true)
       setPosition({
         left: Math.min(Math.max(8, bounds.left), Math.max(8, window.innerWidth - 256)),
         top: bounds.bottom + 6
@@ -81,8 +82,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
-    onPanelVisibilityChange?.(false)
-  }, [onPanelVisibilityChange])
+    ;(onPanelVisibilityChange ?? identity.onPanelVisibilityChange)?.(false)
+  }, [identity.onPanelVisibilityChange, onPanelVisibilityChange])
   useEffect(() => {
     if (!position) return
     // A fixed portal becomes stale when the dock or page scrolls. Dismiss it so the

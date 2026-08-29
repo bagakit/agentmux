@@ -32,6 +32,11 @@ export function rendererCssBoundsToWindowDip(
   }
 }
 
+/** A ResizeObserver may report a transient zero rectangle while a visible stage is relaid out. */
+export function hasPositiveBrowserStageGeometry(bounds: Pick<DOMRect, 'width' | 'height'>): boolean {
+  return Number.isFinite(bounds.width) && Number.isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0
+}
+
 /**
  * 原生 Browser 视图必须让开 Region 的焦点框。
  *
