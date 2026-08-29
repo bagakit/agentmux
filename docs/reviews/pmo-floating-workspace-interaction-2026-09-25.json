@@ -1,0 +1,21 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "PMO floating workspace interaction",
+  "status": "approved",
+  "scope": "Make PMO Teams floating-panel dragging frame-synchronous and keep the panel surface visually distinct from the embedded Workbench chrome.",
+  "acceptance": [
+    "Dragging the PMO title bar updates a temporary visual position at most once per animation frame and does not write localStorage or broadcast the floating state on every pointer move.",
+    "Pointer capture, pointer cancel, window blur, Escape and unmount clear the drag session; pointer up commits one clamped position and preserves the existing Session/Tab context.",
+    "The PMO shell has one clear title/action rail and one bounded content surface; it does not duplicate a second floating launcher or hide the embedded Workbench controls needed to operate the Session.",
+    "The existing PMO open, close, focus isolation and resize behavior remains intact."
+  ],
+  "sources": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx",
+    "apps/desktop/src/renderer/src/lib/pmo-teams-topic-floating.ts",
+    "~/proj/github/a mature workbench/src/renderer/src/components/floating-terminal/floating-terminal-panel-drag-actions.ts",
+    "~/proj/github/a mature workbench/src/renderer/src/components/floating-terminal/use-floating-terminal-panel-geometry.ts"
+  ]
+}
