@@ -99,7 +99,7 @@ export function GlobalFocusSurface() {
       <footer className="global-board-footer"><span>{filtered.length} of {executionRows.length} contexts</span><span>PMO context is isolated</span></footer>
       </div>
     </div>
-    {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
+    {selectedId ? <aside className="global-session-workspace" aria-label="Focus workspace">
       <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? (selected.kind === 'agent' ? agentProviderLabel(selected.providerId) : 'Terminal') : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close Focus workspace" onClick={() => focusExecutionSession(null)}><PanelRightClose size={15} /></button></header>
       {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
       <AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} />
