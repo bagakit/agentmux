@@ -2,9 +2,11 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { CONFIG_VERSION } from '../src/shared/contracts.js'
+import { declarationOf, parseModule, propertyInitializer } from './helpers/ts-binding.js'
 
 /**
  * 守住 scripts/*.mjs 里手抄的配置版本号。
@@ -19,6 +21,12 @@ import { CONFIG_VERSION } from '../src/shared/contracts.js'
  *
  * 判据故意不是"检查那两个已知文件"，而是**谁往 agentmux.config.json 写配置**。规则因此不随脚本
  * 数量变：新增第四个写配置的脚本会自动落进扫描范围，而不是悄悄绕过这道门。
+ *
+ * 版本号取自**写进那个文件的那个对象**，而不是全文里每一处 `version:`。这个区别不是洁癖：
+ * probe-attention-review-restart.mjs 一个文件里同时播种三份存储——config 是 9、
+ * `agentmux-workbench-v1`（store.ts 的 persist version）是 1、agent-sessions 是 5。
+ * 按全文扫，后两个会被当成"配置版本漂了"报上来，而它们各自都是对的；照着报错去改，反倒会把
+ * 两份正确的种子改坏。谁的版本号，就按谁的写入点判。
  */
 
 const desktopRoot = fileURLToPath(new URL('../', import.meta.url))
@@ -39,22 +47,76 @@ type ConfigWritingScript = {
   declaredVersions: number[]
 }
 
+/** The object literal an expression denotes, following one level of `const x = {…}` binding. */
+function objectLiteralOf(
+  module: ReturnType<typeof parseModule>,
+  node: ts.Expression
+): ts.ObjectLiteralExpression | null {
+  if (ts.isObjectLiteralExpression(node)) return node
+  if (!ts.isIdentifier(node)) return null
+  const declaration = declarationOf(module, node)
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return null
+  const initializer = declaration.initializer
+  return initializer && ts.isObjectLiteralExpression(initializer) ? initializer : null
+}
+
+/**
+ * Every `version:` on an object that is stringified into a path ending in agentmux.config.json.
+ *
+ * Shape matched: `writeFile(join(dir, 'agentmux.config.json'), `${JSON.stringify(<obj>)}\n`, …)`,
+ * where `<obj>` is an inline literal or a `const` bound to one — both spellings are in the tree today.
+ */
+function configVersionsIn(source: string, label: string): number[] {
+  const module = parseModule(source, label)
+  const versions: number[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText().endsWith('JSON.stringify')) {
+      const argument = node.arguments[0]
+      // Walk out to the writeFile() call and ask which file this stringify feeds.
+      let ancestor: ts.Node | undefined = node.parent
+      while (ancestor && !ts.isCallExpression(ancestor)) ancestor = ancestor.parent
+      if (argument && ancestor && ts.isCallExpression(ancestor)) {
+        const target = ancestor.arguments[0]
+        if (target && target.getText().includes(CONFIG_FILE_NAME)) {
+          const object = objectLiteralOf(module, argument)
+          const version = object && propertyInitializer(object, 'version')
+          if (version && ts.isNumericLiteral(version)) versions.push(Number(version.text))
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(module.sourceFile)
+  return versions
+}
+
 function configWritingScripts(): ConfigWritingScript[] {
   const found: ConfigWritingScript[] = []
   for (const path of trackedScripts()) {
     const text = readFileSync(join(desktopRoot, path), 'utf8')
     if (!text.includes(CONFIG_FILE_NAME)) continue
-    // 只认 `version: <整数>` 这一种写法——那正是这两份 fixture 的形状（JSON.stringify 的对象字面量）。
-    // 写成别的形状（拼字符串、从别处取）就不该由这道门负责，那时它会因为"一个都没抓到"而变红，
-    // 而红比静默放过好：它会把人带到这里，要么补形状，要么说明为什么不需要守。
-    const declaredVersions = [...text.matchAll(/\bversion:\s*(\d+)/gu)]
-      .map((match) => Number(match[1]))
-    found.push({ path, declaredVersions })
+    // 标签必须以 .ts 结尾：`parseModule` 固定按 ScriptKind.TS 建单文件 program，而 host 只在文件名
+    // 完全相同时才交出源码。用真实的 .mjs 名字时 program 里一个文件都没有，checker 于是对每个
+    // 标识符都返回"无声明"——`JSON.stringify(fixtureConfig)` 这种写法会被静默当成"没有版本号"。
+    // 这不是洁癖：实测 .mjs 名下 5 个标识符实参 0 个解析得到，换成 .ts 名 5 个全部解析得到。
+    found.push({ path, declaredVersions: configVersionsIn(text, `${join(desktopRoot, path)}.ts`) })
   }
   return found
 }
 
 describe('scripts fixture config version', () => {
+  it('reads the version off the object that is written, not every version in the file', () => {
+    // 自证：这条判据必须能把同一个文件里的三份存储分开。全文扫的写法会把 1 和 5 也算进来。
+    const sample = `
+      const fixtureConfig = { version: 9, hosts: [] }
+      const workbenchSeed = { state: {}, version: 1 }
+      await writeFile(join(userData, 'agentmux.config.json'), \`\${JSON.stringify(fixtureConfig)}\\n\`)
+      await writeFile(join(userData, 'agent-sessions.json'), \`\${JSON.stringify({ version: 5 })}\\n\`)
+      localStorage.setItem('agentmux-workbench-v1', JSON.stringify(workbenchSeed))
+    `
+    expect(configVersionsIn(sample, '/synthetic/three-stores.ts')).toEqual([9])
+  })
+
   it('scans real tracked scripts instead of passing on an empty result', () => {
     const scripts = trackedScripts()
     // 扫描根写错时这里立刻红，而不是让下面每条断言在空集合上恒真通过。
@@ -64,7 +126,11 @@ describe('scripts fixture config version', () => {
     expect(
       writers.map((script) => basename(script.path)).sort(),
       `没有任何脚本被识别为 ${CONFIG_FILE_NAME} 的写方：要么判据失效了，要么脚本改了写法`
-    ).toEqual(['file-editing-fixture.mjs', 'measure-desktop-resources.mjs'])
+    ).toEqual([
+      'file-editing-fixture.mjs',
+      'measure-desktop-resources.mjs',
+      'probe-attention-review-restart.mjs'
+    ])
   })
 
   it('keeps every scripted fixture config at the current CONFIG_VERSION', () => {
