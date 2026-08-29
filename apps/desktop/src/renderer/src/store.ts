@@ -782,6 +782,21 @@ type AppState = {
   reopenError(): void
 }
 
+/**
+ * Record the Session represented by a focused Workbench surface in the correct global lane.
+ * Region focus is the common seam for pointer clicks, keyboard navigation and cross-surface
+ * reveals, so Agent and Terminal Sessions share one execution MRU while PMO stays isolated.
+ */
+function focusSessionContext(
+  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config'>,
+  sessionId: string
+): AgentFocusContext {
+  const session = state.sessions.find((candidate) => candidate.id === sessionId)
+  return session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo'
+    ? focusPmo(state.agentFocus, sessionId)
+    : focusExecution(state.agentFocus, sessionId)
+}
+
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
   return {
     sessions: [],
@@ -2336,11 +2351,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!layout) return
     const tab = get().tabs[tabId]
     const surface = tab ? titleWorkbenchSurface(tab) : null
+    const activeRegion = tab?.regions[tab.layout.activeRegionId]
+    const focusedSessionId = activeRegion && isSessionSurface(activeRegion) ? activeRegion.sessionId : null
     set((state) => ({
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
       },
+      ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {}),
       ...(surface?.kind === 'file'
         ? { lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: surface.path } }
         : {})
@@ -3299,6 +3317,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const layout = get().layouts[workspaceId]
     const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
     if (!tab || tab.workspaceId !== workspaceId || !tabGroupId || !tab.regions[regionId]) return
+    const surface = tab.regions[regionId]
+    const focusedSessionId = isSessionSurface(surface) ? surface.sessionId : null
     set((state) => ({
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
@@ -3311,7 +3331,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // nonce 递增让「连按方向键停在同一格」也能各触发一次，且 selector 不因对象相等忽略它。
       ...(regionFocusClaimsCaret(cause)
         ? { regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce } }
-        : { regionCaretFocus: null })
+        : { regionCaretFocus: null }),
+      ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {})
     }))
   },
   clearRegionCaretFocus(nonce) {
@@ -3514,7 +3535,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   setViewMode(sessionId, mode) {
-    set((state) => ({ viewModes: { ...state.viewModes, [sessionId]: mode } }))
+    set((state) => ({
+      viewModes: { ...state.viewModes, [sessionId]: mode },
+      agentFocus: focusSessionContext(state, sessionId)
+    }))
   },
   toggleEditorWordWrap() {
     set((state) => ({ editorWordWrap: !state.editorWordWrap }))

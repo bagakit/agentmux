@@ -21,7 +21,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
-import { GlobalAgentsSurface } from './components/GlobalAgentsSurface'
+import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { PmoTeamsTopicEntry } from './components/PmoTeamsTopicEntry'
 import { ProjectRail } from './components/ProjectRail'
@@ -278,7 +278,7 @@ function DesktopApp() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
-              {mainSurface === 'agents' ? <GlobalAgentsSurface /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {workspace ? (
                 <div
