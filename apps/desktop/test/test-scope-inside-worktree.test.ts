@@ -69,6 +69,16 @@ afterAll(() => {
   rmSync(join(NESTED_WORKTREES, '__scope_probe__'), { recursive: true, force: true })
 })
 
+/**
+ * 下面三条各自要起一到两个 `vitest list` 子进程，每个都得把整棵树收集一遍。单跑时约 1s 一次，
+ * 而它们跑在**整个 desktop 套件之中**——585 个文件在并发抢 CPU，同一次收集实测到过 6.8s，撞穿
+ * vitest 默认的 5s。红出来的样子是 `STACK_TRACE_ERROR`，既不指向 worktree 也不指向 exclude，
+ * 于是看起来像「范围守卫发现了什么」，其实只是预算不够。
+ *
+ * 给一个明确的预算而不是调高全局默认：真的卡死时仍要红，只是不该被同机负载判死。
+ */
+const SUBPROCESS_BUDGET = 60_000
+
 describe('test scope stays inside this worktree', () => {
   it('collects nothing from .claude/worktrees, including a freshly planted copy', () => {
     mkdirSync(PROBE_DIRECTORY, { recursive: true })
@@ -88,7 +98,7 @@ describe('test scope stays inside this worktree', () => {
     } finally {
       rmSync(insideTest, { force: true })
     }
-  })
+  }, SUBPROCESS_BUDGET)
 
   it('still excludes them when a script passes its own --exclude', () => {
     // `test:fast` 的形状。CLI exclude 若是替换而非追加，配置里那条会在这条路上失效。
@@ -98,7 +108,7 @@ describe('test scope stays inside this worktree', () => {
     expect(collected.filter((file) => file.includes('.claude/worktrees'))).toEqual([])
     expect(collected).not.toContain('packages/core/test/package-consumer.integration.test.ts')
     expect(collected.length).toBeGreaterThan(200)
-  })
+  }, SUBPROCESS_BUDGET)
 
   it('keeps vitest own defaults in the exclude list, instead of a hand-copied subset', () => {
     // 加一条自定义 exclude 时最容易顺手把整个数组写成字面量，于是默认那几条被悄悄丢掉。实测丢掉
@@ -109,7 +119,7 @@ describe('test scope stays inside this worktree', () => {
     // 只钉 node_modules 一条：默认清单里其余几项（dist / cypress / .git 等）实测去掉后收集量
     // 恒为 268，本仓根本没有落在那些位置的 `*.test.ts`，钉上去只会是一条永远不红的死断言。
     expect(collectedFiles().filter((file) => file.includes('node_modules'))).toEqual([])
-  })
+  }, SUBPROCESS_BUDGET)
 
   it('keeps the nested-worktree location a real one, so this guard cannot go vacuously green', () => {
     // 若 `EnterWorktree` 换了落点，上面几条会变成排除一个不存在的目录——绿得毫无意义。

@@ -229,13 +229,30 @@ describe('组件把这些值渲染出去', () => {
 
   it('每一行读的都是它自己那个 action 的键位', () => {
     const discovered = menuRows()
-    // Identity actions are a real ninth JSX path, generated from the shared action model. They have
-    // no registered shortcuts; check their actual label/handler source rather than ignoring unknown rows.
+    // 动态行：由 `xxxActions.map` 生成，没有注册快捷键，所以没有 kbd。它们承重的性质是**每一行的
+    // label 与 handler 都取自它自己那次迭代的 action**——而不是从外层闭包捞一个固定值（那样整列
+    // 会渲染成同一条）。
+    //
+    // 上一版把整张动态行表钉成一个单元素数组，前提是「只有 identityActions 这一条动态路径」。
+    // 后来 pathActions 也接了进来（终端里点到文件路径时那一簇），于是这条红了——红的是「只有一条」
+    // 这个过期前提，不是被判的性质。按性质重写：逐行判，路径清单只钉**集合**，多一条合法路径要
+    // 显式登记（仍然响亮），但不必再改断言的形状。
     const dynamic = discovered.filter((row) => row.labelExpression !== null)
-    expect(dynamic).toEqual([{
-      label: null, labelExpression: 'action.label', chord: undefined, dynamic: true,
-      source: 'identityActions.map', handler: '() => void action.onSelect()'
-    }])
+    // 自检：真的扫到了动态行。一个都没有时下面的 for 是空转，`every` 在空集合上恒真
+    //（记忆 vacuous-predicate-on-empty-collection）。
+    expect(dynamic.length, '一条动态菜单行都没扫到——AST 遍历坏了，下面逐行的判据已经恒真').toBeGreaterThan(0)
+    expect(dynamic.map((row) => row.source).sort()).toEqual(['identityActions.map', 'pathActions.map'])
+    for (const row of dynamic) {
+      // label 必须来自本次迭代的 action，不能是外层的固定文本。
+      expect(row.labelExpression, `${row.source} 的 label 不是取自本行的 action`).toBe('action.label')
+      expect(row.label, `${row.source} 渲染了一个静态 label，那一列会整列相同`).toBeNull()
+      // handler 同样只认本行的 action.onSelect（允许包一层 `() => void …`）。
+      expect(row.handler, `${row.source} 的 handler 不是本行 action 的 onSelect`).toMatch(
+        /^(?:\(\) => void )?action\.onSelect(?:\(\))?$/
+      )
+      expect(row.chord, `${row.source} 不该有 kbd：动态行没有注册快捷键`).toBeUndefined()
+      expect(row.dynamic).toBe(true)
+    }
     const rows = discovered.filter((row) => row.labelExpression === null)
     // 在场自检：遍历坏掉（改 tag 名判据、走错文件）时整条断言会静默恒真
     // （记忆 false-green-gate-patterns「扫描根写错静默变绿」）。
