@@ -16,6 +16,7 @@
 @import './surfaces.css';
 @import './board.css';
 @import './global-board.css';
+@import './focus.css';
 @import './pmo-teams-topic.css';
 @import './browser.css';
 @import './agent.css';
