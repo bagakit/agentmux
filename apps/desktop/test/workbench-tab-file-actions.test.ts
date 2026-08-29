@@ -22,17 +22,34 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({ api: { ui: clipboard } }))
 
 import { createWorkbenchTabCopyModel } from '../src/renderer/src/components/WorkbenchTabContextMenu.js'
 import { formatPathsForCopy } from '../src/renderer/src/lib/clipboard-copy.js'
+import { applyCopyPathStyle } from '../src/renderer/src/lib/copy-path-display.js'
 
 // 文件 Tab 与 Agent Tab 共用一份 items 定义，按类型切。这组测试守两侧：
 //   - 文件 Tab 才有路径复制 / 相对路径 / 「在文件管理器中显示」；agent Tab、无 file 时这三项必须缺席；
 //   - 每一项点下去真的做对应的事（复制走共用出口、reveal 调传进来的回调），不是画个壳。
 // 「该出现时出现」不够，还要守「不该出现时不出现」——本仓有过菜单项静默失效（不渲染而全绿）的先例。
 
+/**
+ * 这份夹具此前缺 `home` 与 `copyPathsAsAbsolute` 两个字段，于是**整个家目录缩写档在这里从未被跑过**。
+ *
+ * 它不是「少写两个字段」那么无害：`WorkbenchTabFileActions` 在 d382e520 长出这两个字段后，Copy Path
+ * 就会走 `applyCopyPathStyle`，而缺字段时 `home` 是 `undefined`、`abbreviateHomePath` 第一句
+ * `if (!home) return path` 直接原样返回——**测试断言的正是那个未缩写的值，所以它因为字段缺失而绿**。
+ * tsc 一直在报 TS2739 点名这两个字段，但 desktop 的 `tsc -p tsconfig.json` 只含 `src/**`，
+ * 测试树的类型错误靠 type-tree-typecheck 的棘轮兜着，而它当时正红着。
+ *
+ * `workspaceRoot` 放进 home 之下，是为了让缩写档真的有东西可缩——两条判据（缩写生效、选了绝对路径
+ * 时不缩写）在下面各有一个 `it`。
+ */
+const HOME = '/w'
+
 const FILE = {
   path: 'src/app/main.ts',
   workspaceRoot: '/w/repo',
   revealLabel: 'Reveal in Finder',
-  onReveal: async () => {}
+  onReveal: async () => {},
+  home: HOME,
+  copyPathsAsAbsolute: undefined
 }
 
 function fileEntries(agentSessionId: string | null = null) {
@@ -77,7 +94,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
     expect(model.reveal).toBeUndefined()
   })
 
-  it('复制绝对路径：把 path 接到 workspaceRoot 上，走共用出口', async () => {
+  it('复制绝对路径：把 path 接到 workspaceRoot 上，再按默认档缩写家目录', async () => {
     const writeClipboardText = vi.fn(async (_text: string) => {})
     const model = createWorkbenchTabCopyModel({
       tabId: 'view:x',
@@ -86,12 +103,29 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
       writeClipboardText
     })
     await model.copyPath?.onSelect()
-    // 期望值锚成写死字面量，不由被测函数自己算。
-    expect(writeClipboardText).toHaveBeenCalledWith('/w/repo/src/app/main.ts')
-    // 且与共用格式化出口逐字一致（改出口格式两处一起红）。
+    // 期望值锚成写死字面量，不由被测函数自己算。`~/repo/...` 而不是 `/w/repo/...`：默认档
+    // （`copyPathsAsAbsolute` 未选）要把本机 home 缩成 `~`。此前夹具缺 `home`，这一步被跳过，
+    // 断言写的是未缩写的值——测试因为字段缺失而绿，缩写这一整档从来没被跑到过。
+    expect(writeClipboardText).toHaveBeenCalledWith('~/repo/src/app/main.ts')
+    // 且与两个共用出口逐字一致（改格式化或改缩写规则，两处一起红）。
     expect(writeClipboardText).toHaveBeenCalledWith(
-      formatPathsForCopy(['src/app/main.ts'], 'absolute', '/w/repo')
+      applyCopyPathStyle(formatPathsForCopy(['src/app/main.ts'], 'absolute', '/w/repo'), {
+        home: HOME,
+        copyPathsAsAbsolute: undefined
+      })
     )
+  })
+
+  it('用户选了绝对路径时不缩写——这一档与上一条互为对照', async () => {
+    const writeClipboardText = vi.fn(async (_text: string) => {})
+    const model = createWorkbenchTabCopyModel({
+      tabId: 'view:x',
+      agentSessionId: null,
+      file: { ...FILE, copyPathsAsAbsolute: true },
+      writeClipboardText
+    })
+    await model.copyPath?.onSelect()
+    expect(writeClipboardText).toHaveBeenCalledWith('/w/repo/src/app/main.ts')
   })
 
   it('复制相对路径：原样，绝不误用绝对分支', async () => {
@@ -162,7 +196,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
     })
     const expectedCopy = new Map<string, string>([
       ['Copy View Address', 'AgentMux View view:x'],
-      ['Copy Path', '/w/repo/src/app/main.ts'],
+      ['Copy Path', '~/repo/src/app/main.ts'],
       ['Copy Relative Path', 'src/app/main.ts']
     ])
     let clicked = 0

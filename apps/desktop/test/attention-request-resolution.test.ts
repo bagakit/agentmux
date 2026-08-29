@@ -68,7 +68,7 @@ describe('attention request resolution boundaries', () => {
     resolveResponse()
     await act(async () => response)
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose one')
-    expect(container.querySelector('.agent-interaction button')?.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.agent-interaction button')?.disabled).toBe(true)
 
     await act(async () => useAppStore.setState({ sessions: [session('a'), session('b', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')

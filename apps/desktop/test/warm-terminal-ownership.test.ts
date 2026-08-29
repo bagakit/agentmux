@@ -42,7 +42,6 @@ function terminalSession(id: string): SessionSnapshot {
     id,
     kind: 'terminal',
     providerId: null,
-    executorId: null,
     hostId: 'local',
     workspacePath: '/repo',
     label: 'Terminal',
@@ -51,7 +50,7 @@ function terminalSession(id: string): SessionSnapshot {
     processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
-    control: { kind: 'terminal', hostId: 'local', terminalSessionId: id }
+    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
 }
 

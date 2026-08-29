@@ -20,6 +20,7 @@ const session: SessionSnapshot = {
   kind: 'agent',
   providerId: 'codex',
   executorId: 'codex',
+  capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   hostId: 'local',
   workspacePath: workspace.path,
   label: 'Context session',

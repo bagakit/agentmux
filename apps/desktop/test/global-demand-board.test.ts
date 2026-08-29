@@ -19,7 +19,7 @@ function session(id: string, state: SessionSnapshot['status']['state'], processS
     status: { state, source: 'run-process', observedAt: 10 },
     kind: 'terminal',
     providerId: null,
-    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id, generation: 1 } }
+    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
 }
 

@@ -25,6 +25,53 @@ import { fileURLToPath } from 'node:url'
 
 const DESKTOP = new URL('../', import.meta.url)
 
+/**
+ * 排障存档：`docs/reviews/` 下的复盘与证据。
+ *
+ * 这些文件里出现 bundle id，是因为它们**抄录了机器上的真实事实**——`sample` 命令输出的
+ * `Identifier:` 那一行、崩溃日志所在的 `~/Library/Application Support/<那个串>/` 路径。
+ * 它们不是第四个写入点：没有任何代码读它们，改掉一个字也不会让任何一份用户数据换位置。
+ *
+ * （这段注释本身不能抄那个串：抄了本文件就成为一处命中，上面那条「未登记的位置」会把它报出来
+ * ——实测发生过一次，正是本轮。守卫不抄它所守的值，这条纪律对守卫的注释一样生效。）
+ *
+ * 为什么按**目录**豁免而不是逐个文件登记：这个目录的性质就是「每查一次问题就多几份存档」，
+ * 逐条登记等于要求每一次排障都回来改这个测试，而那条规则没人会记得——它会以「守卫又红了、
+ * 补一行名字」的形式被例行绕过，直到没人再读这张表。本仓已记过这个形状（手抄清单会与来源
+ * 一起漂移）。按目录判，边界就成了「这份产物是存档还是构建输入」，那才是真正承重的区分。
+ *
+ * 口子有多大：只对 `docs/reviews/` 生效。任何 `src/`、`scripts/`、`apps/` 下的新手抄点照旧
+ * 当场变红——下面那条「构建树里不许出现未登记的 bundle id」把这个边界钉住。
+ */
+function isCapturedEvidence(path: string): boolean {
+  return path.startsWith('docs/reviews/')
+}
+
+/**
+ * 全仓出现 bundle id 的文件清单，仓根相对路径。
+ *
+ * `--untracked` 不是可选的：默认的 `git grep` 只搜**已跟踪**文件，于是新写一个脚本、在
+ * `git add` 之前跑这道门，第四个手抄点会被静默放过——实测过一次（新建一个 .mjs 抄一份 id，
+ * 4 条全绿）。而那恰好是最可能发生的时序：作者写完新脚本、跑测试、然后才提交。
+ *
+ * 抽成函数是为了让豁免边界那条判据**执行这一份**扫描来取正向样本，而不是手抄两个路径字面量：
+ * 手抄要么与来源漂移，要么（如果连 id 一起抄）让本文件自己变成第四个手抄点——后者实测发生过，
+ * 上面那条「未登记的位置」当场把本文件报了出来。
+ */
+function bundleIdHits(): string[] {
+  const literal = packagedBundleId()
+  expect(literal, '没有 SSOT 可扫').not.toBeNull()
+  const grep = spawnSync(
+    'git',
+    ['grep', '-l', '--untracked', '--fixed-strings', literal!, '--', ':!*pnpm-lock*', ':!*/dist/*'],
+    { cwd: fileURLToPath(new URL('../../', DESKTOP)), encoding: 'utf8' }
+  )
+  // 自检：grep 必须真的跑起来。它静默失败（git 不在、cwd 不对、pathspec 写错）时返回空清单，
+  // 下游的「全部已知」就会退化成恒真。
+  expect(grep.error, `git grep 没跑起来：${grep.error?.message}`).toBeUndefined()
+  return grep.stdout.split('\n').filter((line) => line.length > 0)
+}
+
 function read(relative: string): string {
   return readFileSync(new URL(relative, DESKTOP), 'utf8')
 }
@@ -32,7 +79,7 @@ function read(relative: string): string {
 /** 打包脚本写进 Info.plist 的那个值。取常量声明本身，不取它的使用点。 */
 function packagedBundleId(): string | null {
   const match = /^const BUNDLE_ID = '([^']+)'/m.exec(read('scripts/package-macos.mjs'))
-  return match ? match[1] : null
+  return match?.[1] ?? null
 }
 
 /** dev 分支脚本用 plutil 写进 CFBundleIdentifier 的那个字面量。 */
@@ -40,13 +87,13 @@ function devBundleId(): string | null {
   const match = /'-replace',\s*'CFBundleIdentifier',\s*'-string',\s*'([^']+)'/.exec(
     read('scripts/dev-desktop.mjs')
   )
-  return match ? match[1] : null
+  return match?.[1] ?? null
 }
 
 /** 主进程用来拼 userData 路径的那个目录名。 */
 function userDataDirectoryName(): string | null {
   const match = /getPath\('appData'\),\s*'([^']+)'\)/.exec(read('src/main/index.ts'))
-  return match ? match[1] : null
+  return match?.[1] ?? null
 }
 
 describe('bundle id 与 userData 目录名是同一个串', () => {
@@ -80,22 +127,8 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
     const literal = packagedBundleId()
     expect(literal, '没有 SSOT 可扫').not.toBeNull()
 
-    // `--untracked` 不是可选的：默认的 `git grep` 只搜**已跟踪**文件，于是新写一个脚本、在
-    // `git add` 之前跑这道门，第四个手抄点会被静默放过——实测过一次（新建一个 .mjs 抄一份 id，
-    // 4 条全绿）。而那恰好是最可能发生的时序：作者写完新脚本、跑测试、然后才提交。
-    //
-    const grep = spawnSync(
-      'git',
-      [
-        'grep', '-l', '--untracked', '--fixed-strings', literal!,
-        '--', ':!*pnpm-lock*', ':!*/dist/*'
-      ],
-      { cwd: fileURLToPath(new URL('../../', DESKTOP)), encoding: 'utf8' }
-    )
-    // 自检：grep 必须真的跑起来并至少找到那三个写入点。它静默失败（git 不在、cwd 不对、
-    // pathspec 写错）时返回空清单，下面的「全部已知」就会退化成恒真。
-    expect(grep.error, `git grep 没跑起来：${grep.error?.message}`).toBeUndefined()
-    const hits = grep.stdout.split('\n').filter((line) => line.length > 0)
+    const hits = bundleIdHits()
+    // 自检：至少得找到那三个写入点，否则下面的「全部已知」在空清单上恒真。
     expect(hits.length, 'git grep 一个位置都没找到——扫描范围写错了').toBeGreaterThanOrEqual(3)
 
     // 例外项各自带着它为什么无害的理由，而不是一个笼统的白名单。
@@ -114,7 +147,7 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
       ['apps/desktop/test/config-store.test.ts', '注释：同上，回归用例的出处说明']
     ])
 
-    const unexpected = hits.filter((path) => !known.has(path))
+    const unexpected = hits.filter((path) => !known.has(path) && !isCapturedEvidence(path))
     expect(
       unexpected,
       `bundle id 出现在未登记的位置：${unexpected.join(', ')}——它是不是也该参与上面的相等判定？`
@@ -126,6 +159,32 @@ describe('bundle id 与 userData 目录名是同一个串', () => {
       expect(hits, `${path} 不再含有 bundle id（例外理由已过时：${why}）`).toContain(path)
     }
 
+  })
+
+  it('存档豁免只对 docs/reviews/ 生效——构建树里的手抄点照旧当场红', () => {
+    // 上一条给 `docs/reviews/` 开了一道按目录的豁免。豁免一旦存在就要问它有多大：这条钉住边界。
+    //
+    // 判的是**谓词本身**，不是「今天树里恰好没有构建树手抄点」——后者会随着代码变化静默松开。
+    // 每一条都给出一个具体路径，要求豁免对它说「不」。
+    for (const outside of [
+      'apps/desktop/scripts/some-new-script.mjs',
+      'apps/desktop/src/main/index.ts',
+      'packages/core/src/anything.ts',
+      'docs/plans/agentmux-desktop-package.md',
+      // 形近但不同的目录：豁免按前缀判，别把整个 docs/ 或一个同前缀的兄弟目录一起放进去。
+      'docs/reviews-archive/old.md',
+      'docs/design/agentmux-desktop-interaction.md'
+    ]) {
+      expect(isCapturedEvidence(outside), `${outside} 不该被存档豁免放行`).toBe(false)
+    }
+    // 正向：真正的存档确实被放行，否则上面那些 false 可能只是因为谓词恒假。
+    // 路径从**实际扫描命中**里取，不手写——本文件刻意不抄那个串（抄了就失去判定能力，
+    // 上一条「未登记位置」会把本文件自己报出来，实测过）。
+    const evidence = bundleIdHits().filter((path) => path.startsWith('docs/reviews/'))
+    expect(evidence.length, 'docs/reviews/ 下一个命中都没有，正向那半在空转').toBeGreaterThan(0)
+    for (const inside of evidence) {
+      expect(isCapturedEvidence(inside), `${inside} 是存档，应被放行`).toBe(true)
+    }
   })
 
   it('扫描确实覆盖未跟踪文件——删掉 --untracked 会让上一条重新失明', () => {
