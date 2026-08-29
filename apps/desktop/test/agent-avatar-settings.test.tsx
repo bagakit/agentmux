@@ -129,6 +129,14 @@ it('shows details on hover and focus, then routes the settings action to the mat
 
 it('holds one native-surface lease per visible avatar panel and releases it on close and unmount', async () => {
   useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
+  const browserStage = document.createElement('div')
+  browserStage.dataset.nativeBrowserStage = ''
+  browserStage.style.visibility = 'visible'
+  browserStage.getBoundingClientRect = () => ({
+    x: 0, y: 0, left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800,
+    toJSON: () => ({})
+  })
+  document.body.append(browserStage)
   const onPanelVisibilityChange = (visible: boolean) => {
     if (visible) useAppStore.getState().acquireNativeSurfaceOverlay()
     else useAppStore.getState().releaseNativeSurfaceOverlay()
@@ -150,6 +158,7 @@ it('holds one native-surface lease per visible avatar panel and releases it on c
   expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
   await dom.render(null)
   expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  browserStage.remove()
 })
 
 it('passes appearance and stack count through both shared presence paths', async () => {
