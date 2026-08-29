@@ -100,7 +100,7 @@ export function TopBreadcrumb() {
   const { mainSurface, workspace, project } = useSurfaceIdentity()
   const hostId = mainSurface === 'board' ? project?.hostId : workspace?.hostId
   if (mainSurface === 'agents') {
-    return <div className="breadcrumbs"><strong>Agents</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Needs you and active Agents</span></div>
+    return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
   }
   if (mainSurface === 'board') {
     return (
@@ -143,11 +143,11 @@ export function SurfaceSwitch() {
     <div className="surface-switch" role="group" aria-label="Main view">
       <button
         className={mainSurface === 'agents' ? 'selected' : ''}
-        aria-label="Agents: show all Agent attention"
-        title="Agents — show all Agent attention"
+        aria-label="Focus: show execution contexts"
+        title="Focus — show execution contexts"
         onClick={() => setMainSurface('agents')}
       >
-        <Users size={13} /> Agents
+        <Users size={13} /> Focus
       </button>
       <button
         className={mainSurface === 'workbench' ? 'selected' : ''}

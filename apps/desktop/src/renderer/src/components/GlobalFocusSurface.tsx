@@ -1,5 +1,5 @@
 import { AgentAvatar } from './AgentAvatar'
-import { AlertCircle, CheckCircle2, Inbox, PanelRightClose, PlayCircle, Search, Users } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Inbox, PanelRightClose, PlayCircle, Search, SquareTerminal, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, type RosterRow } from '../lib/agent-roster'
@@ -15,13 +15,16 @@ import { topicIdForSession } from '../lib/workbench-tabs'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 type AgentBucket = 'needs-you' | 'working' | 'done' | 'error'
+type FocusRow = Pick<RosterRow, 'sessionId' | 'label' | 'providerId' | 'workspacePath' | 'state' | 'attention' | 'awaitingReply'> & {
+  kind: 'agent' | 'terminal'
+}
 const BUCKET_META = {
   'needs-you': { label: 'Needs you', icon: Inbox },
   working: { label: 'Working', icon: PlayCircle },
   done: { label: 'Results', icon: CheckCircle2 },
   error: { label: 'Error', icon: AlertCircle }
 }
-function bucketFor(row: RosterRow): AgentBucket {
+function bucketFor(row: Pick<FocusRow, 'state'>): AgentBucket {
   if (isNeedsYouState(row.state)) return 'needs-you'
   if (row.state === 'error') return 'error'
   if (row.state === 'done') return 'done'
@@ -40,28 +43,44 @@ export function GlobalFocusSurface() {
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
   const [requestId, setRequestId] = useState<string | null>(null)
-  const rows = useMemo(() => buildAgentRoster({ sessions, providerCatalog }), [sessions, providerCatalog])
-  const executionRows = rows.filter((row) => {
-    const session = sessions.find((entry) => entry.id === row.sessionId)
-    return session && topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID
-  })
+  const executionRows = useMemo<FocusRow[]>(() => {
+    const agentRows: FocusRow[] = buildAgentRoster({ sessions, providerCatalog })
+      .map((row) => ({ ...row, kind: 'agent' as const }))
+    const terminalRows: FocusRow[] = sessions
+      .filter((session) => session.kind === 'terminal' && topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)
+      .map((session) => ({
+        sessionId: session.id,
+        label: session.label,
+        providerId: '',
+        workspacePath: session.workspacePath,
+        state: session.status.state,
+        attention: null,
+        awaitingReply: false,
+        kind: 'terminal' as const
+      }))
+    return [...agentRows, ...terminalRows].filter((row) => {
+      const session = sessions.find((entry) => entry.id === row.sessionId)
+      return session && topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID
+    })
+  }, [config, providerCatalog, sessions])
   const filtered = executionRows.filter((row) => {
     const session = sessions.find((entry) => entry.id === row.sessionId)!
     return (project === 'all' || workspaceForSession(config, session)?.id === project)
       && `${names[row.sessionId] ?? row.label} ${row.workspacePath} ${row.providerId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
   })
-  const selected = rows.find((row) => row.sessionId === selectedId)
-  return <section className={`global-board-surface global-agents-board ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Agents">
-    <div className="global-board-main">
+  const selected = executionRows.find((row) => row.sessionId === selectedId)
+  return <section className={`global-board-surface global-focus-surface ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Focus">
+    <div className="global-focus-layout">
+      <FocusHistory entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
+      <div className="global-board-main global-focus-main">
       <header className="global-board-toolbar">
-        <div className="global-board-toolbar__scope"><Users size={14} /><strong>Agents</strong><span className="global-board-toolbar__crumb">Sessions · Global</span></div>
+        <div className="global-board-toolbar__scope"><Users size={14} /><strong>Focus</strong><span className="global-board-toolbar__crumb">Execution contexts · Global</span></div>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><Search size={13} /><input aria-label="Search agents" placeholder="Search agents" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <label className="global-board-select">Project<select aria-label="Agent project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label className="global-board-search"><Search size={13} /><input aria-label="Search contexts" placeholder="Search contexts" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-select">Project<select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
       </header>
-      <FocusHistory entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
-      {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No Agent Sessions yet</strong><span>Start a Session from a Project to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global agent board">
+      {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         {(Object.keys(BUCKET_META) as AgentBucket[]).map((bucket) => {
           const meta = BUCKET_META[bucket]
           const Icon = meta.icon
@@ -69,7 +88,7 @@ export function GlobalFocusSurface() {
           return <section className="global-board-column global-agents-group" data-bucket={bucket} key={bucket}>
             <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{grouped.length}</em></span></header>
             <div className="global-board-column__cards">{grouped.map((row) => <button type="button" className={`global-session-card ${selectedId === row.sessionId ? 'global-session-card--selected' : ''}`} data-session-id={row.sessionId} data-attention={row.attention ?? undefined} aria-pressed={selectedId === row.sessionId} key={row.sessionId} onClick={() => focusExecutionSession(row.sessionId)}>
-              <span className="global-session-card__topline"><AgentAvatar sessionId={row.sessionId} label={row.label} state={row.state} providerId={row.providerId} size={16} /><span>{agentProviderLabel(row.providerId)}</span><span>{row.state}</span></span>
+              <span className="global-session-card__topline">{row.kind === 'agent' ? <AgentAvatar sessionId={row.sessionId} label={row.label} state={row.state} providerId={row.providerId} size={16} /> : <span className="global-session-card__terminal-icon"><SquareTerminal size={15} /></span>}<span>{row.kind === 'agent' ? agentProviderLabel(row.providerId) : 'Terminal'}</span><span>{row.state}</span></span>
               <strong className="global-session-card__title">{names[row.sessionId] ?? row.label}</strong>
               <span className="global-session-card__description">{row.workspacePath}</span>
               {row.awaitingReply ? <span className="global-session-card__meta">Awaiting your reply</span> : null}
@@ -77,10 +96,11 @@ export function GlobalFocusSurface() {
           </section>
         })}
       </div>}
-      <footer className="global-board-footer"><span>{filtered.length} of {executionRows.length} Agents</span><span>PMO context is isolated</span></footer>
+      <footer className="global-board-footer"><span>{filtered.length} of {executionRows.length} contexts</span><span>PMO context is isolated</span></footer>
+      </div>
     </div>
     {selectedId ? <aside className="global-session-workspace" aria-label="Agent workspace">
-      <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? agentProviderLabel(selected.providerId) : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close agent workspace" onClick={() => focusExecutionSession(null)}><PanelRightClose size={15} /></button></header>
+      <header className="global-session-workspace__header"><div className="global-session-workspace__identity"><strong>{names[selectedId] ?? selected?.label ?? 'Session awaiting recovery'}</strong><small>{selected ? (selected.kind === 'agent' ? agentProviderLabel(selected.providerId) : 'Terminal') : selectedId}</small></div><button type="button" className="icon-button" aria-label="Close Focus workspace" onClick={() => focusExecutionSession(null)}><PanelRightClose size={15} /></button></header>
       {selected && (selected.awaitingReply || selected.attention === 'needs-you') ? <div className="global-session-workspace__toolbar"><button type="button" className="global-board-action" onClick={() => setRequestId(selectedId)}>Review here</button></div> : null}
       <AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} />
       <SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} />

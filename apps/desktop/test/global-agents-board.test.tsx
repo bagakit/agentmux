@@ -87,7 +87,7 @@ describe('Global Agents card board', () => {
       }
     })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
-    expect(container.querySelector('.agent-focus-history')).toBeTruthy()
+    expect(container.querySelector('.focus-history')).toBeTruthy()
     expect(container.querySelector('[data-focus-history-id="second"]')).toBeTruthy()
     await act(async () => (container.querySelector('[data-focus-history-id="second"]') as HTMLButtonElement).click())
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('second')
