@@ -59,6 +59,9 @@ const SPACING_EXCEPTIONS = new Set([1, 104])
  */
 const LAYOUT_GEOMETRY = new Map<string, string>([
   ['.sidebar-toggle-chrome', '左侧 80px 给 macOS 红绿灯让位'],
+  // Global surface 隐藏 Project Rail，于是顶栏拿不到 rail 那边的红绿灯让位，只能自己让一次。
+  // 与上一条是同一个 80px，同一个理由——不是节奏，是原生窗口控件的物理占位。
+  ['.top-row-leading-chrome--global-inset', '左侧 80px 给 macOS 红绿灯让位（Global surface 无 Project Rail）'],
   ['.settings-content', '34px 顶栏偏移，与 .settings-sidebar 对齐'],
   ['.settings-sidebar', '34px 顶栏偏移，与 .settings-content 对齐'],
   ['.settings-content > header', '25px 光学垂直居中；clamp 上界 74px 是大屏阅读宽度'],

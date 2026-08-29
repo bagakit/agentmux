@@ -305,7 +305,7 @@
   white-space: nowrap;
 }
 .topic-workbench-topology__inspector-regions__region-label strong { font: var(--fs-micro)/1 var(--font-mono); font-weight: 600; }
-.topic-workbench-topology__inspector-regions__region-label small { display: block; color: var(--text-3); font-size: 9px; }
+.topic-workbench-topology__inspector-regions__region-label small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
 .topic-workbench-topology__inspector-regions { width: 100%; }
 .topic-workbench-topology__inspector {
   position: absolute;
