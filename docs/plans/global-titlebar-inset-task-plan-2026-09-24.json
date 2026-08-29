@@ -1,0 +1,26 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": { "status": "approved", "evidence_ref": "docs/reviews/global-titlebar-inset-2026-09-24.md" },
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/global-titlebar-inset-2026-09-24.md"],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Keep global surface titles clear of native window controls",
+      "depends_on": [],
+      "objective": "Give Focus and Tasks titlebars the same native control inset used by the existing window chrome.",
+      "outcome": "With the Project Rail absent, the top-left title begins after the macOS traffic lights and stays readable across surface switching.",
+      "estimate_hours": 0.7,
+      "acceptance": [
+        "Focus and Tasks global titlebars reserve the native-control area while Workspaces keeps its current rail and dock behavior.",
+        "The inset is declared in the shared chrome and is not duplicated inside either global content panel.",
+        "A focused titlebar test turns red when the global inset or its production class wiring is removed; the installed UI shows no overlap."
+      ],
+      "verification": [
+        { "kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/traffic-light-inset.test.ts test/global-titlebar-inset.test.tsx --maxWorkers=1", "proves": "titlebar inset and production wiring" },
+        { "kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "typed top-row integration" }
+      ],
+      "source_refs": ["docs/reviews/global-titlebar-inset-2026-09-24.md"],
+      "supersedes": []
+    }
+  ]
+}

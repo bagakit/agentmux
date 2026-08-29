@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 285
+    "next_cursor": 286
   },
   "features": [
     {
@@ -746,8 +746,8 @@
     {
       "feat_id": "f-24c8fqsgc",
       "title": "窗口外壳：自有标题栏与系统按钮",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "archived",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -2458,6 +2458,16 @@
     {
       "feat_id": "f-2b78fhqhw",
       "title": "PMO floating target isolation",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2b88fwbah",
+      "title": "Tasks global surface name",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

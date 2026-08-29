@@ -1,0 +1,26 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": { "status": "approved", "evidence_ref": "docs/reviews/tasks-surface-name-2026-09-24.md" },
+  "source_refs": ["docs/design/agentmux-desktop-interaction.md", "docs/design/agentmux-surface-density.md", "docs/reviews/tasks-surface-name-2026-09-24.md"],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Name the global demand surface Tasks",
+      "depends_on": [],
+      "objective": "Replace the visible Board surface name with Tasks at every primary navigation and title entry.",
+      "outcome": "The global switch, breadcrumb, and demand workspace toolbar consistently say Tasks, while persisted Demand selection remains unchanged.",
+      "estimate_hours": 0.5,
+      "acceptance": [
+        "The three-item main switch reads Focus, Workspaces, Tasks and preserves the existing board route identity.",
+        "The global demand surface breadcrumb and toolbar read Tasks; no product-visible primary Board title remains.",
+        "Clicking Tasks still opens the existing Demand work area and retains the selected Demand across cross-surface navigation."
+      ],
+      "verification": [
+        { "kind": "command", "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agents-session-board-navigation.test.tsx test/global-board-demand-workspace.test.tsx --maxWorkers=1", "proves": "visible navigation name and preserved demand workspace" },
+        { "kind": "command", "ref": "pnpm --filter @agentmux/desktop typecheck", "proves": "typed navigation integration" }
+      ],
+      "source_refs": ["docs/reviews/tasks-surface-name-2026-09-24.md"],
+      "supersedes": []
+    }
+  ]
+}

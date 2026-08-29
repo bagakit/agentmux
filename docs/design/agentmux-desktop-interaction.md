@@ -1523,3 +1523,9 @@ PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic
 Focus 表面左侧提供一个独立的“最近上下文”列表，作为可点击的导航入口。列表每项表达 Session 身份、Agent 或 Terminal 类型、工作区和最近聚焦时间；当前项有明确的选中状态。主区展示按状态分组的可观察执行 Session，右侧保留当前 Session 的观察工作面。历史为空时显示短空态，不用空白面板或伪造 Agent。
 
 Focus 是主表面命名和导航语义，不改变底层 `agentFocus.execution` 与 `agentFocus.pmo` 的持久化分层。跨表面切换只投影同一 execution Session，不创建第二个工作面、Run 或 Region；重启恢复时先恢复历史和当前 Session，再尝试恢复其原有 Tab/Region。
+
+### 全局工作面顶栏与 Tasks 命名（2026-09-24）
+
+Focus 和需求工作面的左上角标题必须避开 macOS 原生窗口按钮。Project Rail 在全局工作面隐藏时，不能仍按它可见来决定标题起点；切换 Focus、Workspaces 和需求工作面、开合工具坞或重启恢复后，系统按钮与标题都必须保持可见、可操作。
+
+全局需求工作面的用户可见主名称为 **Tasks**，因为用户在这里寻找、创建和推进一件工作；`Board` 只描述一种视图排版。底部主切换、顶栏面包屑和工作面主标题使用同一名称。Demand 仍是该工作面的持久化实体与控制协议身份；改主表面名称不得重建 Demand、Session 或用户已选中的工作面。
