@@ -1,3 +1,4 @@
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import {
   EMPTY_AGENT_FOCUS,
@@ -48,7 +49,10 @@ describe('Agent focus context', () => {
     const text = executionFocusContextText({
       execution: { sessionId: 'exec-1', history: [entry('exec-1', 1)] },
       pmo: { sessionId: 'pmo-1' }
-    }, [{ id: 'exec-1', label: 'Build Agent' } as never, { id: 'pmo-1', label: 'PMO' } as never])
+    }, [
+      { id: 'exec-1', label: 'Build Agent', workspacePath: _hygiene_fixturePath("project"), status: { state: 'working' } } as never,
+      { id: 'pmo-1', label: 'PMO', workspacePath: _hygiene_fixturePath("scratch"), status: { state: 'working' } } as never
+    ])
     expect(text).toContain('Build Agent (exec-1)')
     expect(text).not.toContain('pmo-1')
   })
