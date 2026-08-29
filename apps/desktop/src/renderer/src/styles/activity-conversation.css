@@ -299,7 +299,7 @@
 }
 .log-turn[data-speaker-role='human'] .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
 .log-turn[data-speaker-role='human'] .log-turn__head { grid-row: 1; }
-.log-turn[data-speaker-role='human'] .log-turn__body { grid-row: 2; }
+.log-turn[data-speaker-role='human'] .log-turn__body { grid-row: 2; text-align: left; }
 .log-turn[data-speaker-role='human'] .log-turn__annotation { grid-column: 1; justify-self: end; }
 
 @media (max-width: 620px) {
