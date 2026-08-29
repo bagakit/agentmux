@@ -1,0 +1,26 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "PMO floating target isolation",
+  "status": "approved",
+  "decision": "When a Demand opens PMO with an explicit Tab target, the floating surface keeps that target through Agent attachment and never focuses an older PMO Session while the target is pending.",
+  "constraints": [
+    "The existing PMO Topic and Workbench remain the single surface implementation.",
+    "An explicit target is authoritative for the whole open transition; absence of the target Agent is a waiting state, not permission to choose another Session.",
+    "Direct PMO opening without an explicit Demand target retains the existing first available PMO behavior.",
+    "The fix must preserve the Demand-to-Tab mapping and not add a second Session registry."
+  ],
+  "acceptance": [
+    "Opening a newly created Demand cannot display an older PMO Session before the target Agent attaches.",
+    "After the target Agent attaches, the floating panel focuses the target Tab and its conversation.",
+    "A direct PMO open without a target still selects an available PMO Session.",
+    "Focused tests, typecheck, mutation evidence, and a production caller check cover the target isolation path."
+  ],
+  "sources": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx",
+    "apps/desktop/src/renderer/src/lib/pmo-teams-topic-floating.ts",
+    "apps/desktop/src/renderer/src/store.ts"
+  ]
+}

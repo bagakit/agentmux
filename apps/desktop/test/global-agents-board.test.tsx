@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 vi.mock('../src/renderer/src/components/SessionPane.js', () => ({ SessionPane: ({ sessionId }: { sessionId: string }) => createElement('div', { 'data-observing': sessionId }) }))
-import { GlobalAgentsSurface } from '../src/renderer/src/components/GlobalAgentsSurface.js'
+import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: number): SessionSnapshot {
@@ -50,7 +50,7 @@ describe('Global Agents card board', () => {
 
   it('orders Needs you before results and working rows', async () => {
     useAppStore.setState({ sessions: [agent('done', 'done', 3), agent('needs-you', 'waiting', 1), agent('working', 'working', 2)], providerCatalog: [] })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     const groups = [...container.querySelectorAll<HTMLElement>('.global-agents-group')]
     expect(groups.map((group) => group.dataset.bucket)).toEqual(['needs-you', 'working', 'done', 'error'])
     expect(container.querySelector('[data-session-id="needs-you"]')).toBeTruthy()
@@ -59,7 +59,7 @@ describe('Global Agents card board', () => {
   it('clicking a card opens an observation workspace without navigating', async () => {
     const selectSession = vi.fn()
     useAppStore.setState({ sessions: [agent('needs-you', 'waiting', 1)], providerCatalog: [], selectSession: selectSession as never })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="needs-you"]') as HTMLButtonElement).click())
     expect(selectSession).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('needs-you')
@@ -69,7 +69,7 @@ describe('Global Agents card board', () => {
 
   it('states the empty state instead of rendering a vacuous inbox', async () => {
     useAppStore.setState({ sessions: [], providerCatalog: [] })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     expect(container.querySelector('.global-agents-empty')).toBeTruthy()
     expect(container.querySelector('.global-agents-group')).toBeNull()
   })
@@ -86,7 +86,7 @@ describe('Global Agents card board', () => {
         pmo: { sessionId: null }
       }
     })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     expect(container.querySelector('.agent-focus-history')).toBeTruthy()
     expect(container.querySelector('[data-focus-history-id="second"]')).toBeTruthy()
     await act(async () => (container.querySelector('[data-focus-history-id="second"]') as HTMLButtonElement).click())

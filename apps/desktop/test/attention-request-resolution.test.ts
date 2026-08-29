@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { GlobalAgentsSurface } from '../src/renderer/src/components/GlobalAgentsSurface.js'
+import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
@@ -33,7 +33,7 @@ describe('attention request resolution boundaries', () => {
 
   it('does not invent answer controls when Core has no typed request', async () => {
     useAppStore.setState({ sessions: [session('a')], providerCatalog: [] })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
     await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
     expect(container.querySelector('[aria-label="Agent question"]')).toBeNull()
@@ -43,7 +43,7 @@ describe('attention request resolution boundaries', () => {
   it('keeps A and B request identities separate when the list changes', async () => {
     const selectSession = vi.fn()
     useAppStore.setState({ sessions: [session('a', request), session('b', request)], providerCatalog: [], selectSession: selectSession as never })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     const rows = [...container.querySelectorAll<HTMLElement>('.global-session-card')]
     await act(async () => rows[1]!.click())
     await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
@@ -53,7 +53,7 @@ describe('attention request resolution boundaries', () => {
 
 
   async function openReview(id: string): Promise<void> {
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector(`[data-session-id="${id}"]`) as HTMLElement).click())
     await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
   }
@@ -116,7 +116,7 @@ describe('attention request resolution boundaries', () => {
 
   it('returns focus to Review here when Escape closes the panel', async () => {
     useAppStore.setState({ sessions: [session('a', request)], providerCatalog: [] })
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
     const review = container.querySelector('.global-board-action') as HTMLButtonElement
     review.focus()

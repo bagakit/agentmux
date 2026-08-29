@@ -14,7 +14,7 @@ function Harness() {
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
     createElement('div', { id: 'floating-panel', 'data-pmo-teams-topic-floating': true, tabIndex: -1 }),
-    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top) })
+    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top), 'data-target': state.targetTabId ?? '', 'data-pending': state.pendingPrompt?.text ?? '' })
   )
 }
 
@@ -72,5 +72,19 @@ describe('PMO teams topic floating workspace state', () => {
     await act(async () => requestPmoTeamsTopicFloatingOpen())
     expect(container.querySelector('output')?.dataset.left).toBe('212')
     expect(container.querySelector('output')?.dataset.top).toBe('148')
+  })
+
+  it('keeps an explicit target until close and clears it for untargeted opens', async () => {
+    await act(async () => root.render(createElement(Harness)))
+    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-one', prompt: 'route this demand' }))
+    expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-one')
+    expect(container.querySelector('output')?.dataset.pending).toBe('route this demand')
+    await act(async () => requestPmoTeamsTopicFloatingOpen())
+    expect(container.querySelector('output')?.dataset.target).toBe('')
+    expect(container.querySelector('output')?.dataset.pending).toBe('')
+    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-two' }))
+    expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-two')
+    await act(async () => requestPmoTeamsTopicFloatingClose())
+    expect(container.querySelector('output')?.dataset.target).toBe('')
   })
 })

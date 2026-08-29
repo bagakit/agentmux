@@ -11,7 +11,7 @@ vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView:
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: () => null }))
 vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
 
-import { GlobalAgentsSurface } from '../src/renderer/src/components/GlobalAgentsSurface.js'
+import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { SessionPane } from '../src/renderer/src/components/SessionPane.js'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store.js'
 
@@ -56,7 +56,7 @@ describe('Agents attention and result review loop', () => {
 
   it('keeps the durable surface, opens Needs you in place, and routes a result back to its Session', async () => {
     expect(restorePersistedUiState(useAppStore.getState().config!, { mainSurface: 'agents' }).mainSurface).toBe('agents')
-    await act(async () => root.render(createElement(GlobalAgentsSurface)))
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="attention-loop"]') as HTMLElement).click())
     const review = container.querySelector('.global-board-action') as HTMLElement
     await act(async () => review.click())

@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 284
+    "next_cursor": 285
   },
   "features": [
     {
@@ -2448,7 +2448,17 @@
     {
       "feat_id": "f-2b68fsjry",
       "title": "Focus surface and execution context history",
-      "status": "ready",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2b78fhqhw",
+      "title": "PMO floating target isolation",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

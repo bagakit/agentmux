@@ -1,0 +1,37 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review_ref": "docs/reviews/pmo-floating-target-isolation-2026-09-24.json",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Keep the PMO floating panel on an explicit Demand target",
+      "objective": "Prevent the PMO floating surface from selecting an older PMO Session while a Demand-specific Agent is attaching.",
+      "outcome": "The panel treats an explicit target Tab as authoritative until its Agent is visible, while untargeted PMO opens retain their existing behavior.",
+      "acceptance": [
+        "Targeted PMO opening waits when the target Tab is still a launcher and never falls back to another PMO Session.",
+        "Targeted PMO opening focuses the target Agent once its Session is attached and only then clears the transient target.",
+        "Untargeted PMO opening continues to focus an available PMO Session.",
+        "The regression test fails when target preference or target waiting is removed."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "CI=true pnpm --filter @agentmux/desktop exec vitest run test/demand-pmo-tab-context.test.ts test/pmo-teams-topic-floating.test.tsx test/pmo-teams-topic-floating-contract.test.ts test/pmo-floating-target-isolation.test.ts --maxWorkers=1 && CI=true pnpm --filter @agentmux/desktop typecheck",
+          "proves": "Demand target routing, floating target waiting, direct PMO fallback, and renderer type safety"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/pmo-floating-target-isolation-2026-09-24.json"
+      ]
+    }
+  ],
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/pmo-floating-target-isolation-2026-09-24.json"
+  },
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/pmo-floating-target-isolation-2026-09-24.json"
+  ]
+}

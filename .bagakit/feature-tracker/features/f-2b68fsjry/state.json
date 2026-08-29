@@ -4,7 +4,7 @@
   "title": "Focus surface and execution context history",
   "slug": "focus-surface-history",
   "goal": "Rename Agents to Focus, record the current Agent or Terminal Session in one execution history, and present that history as a modern left-side navigation surface while keeping PMO isolated.",
-  "status": "ready",
+  "status": "in_progress",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -35,6 +35,10 @@
     {
       "action": "workspace_assigned",
       "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
     }
   ]
 }
