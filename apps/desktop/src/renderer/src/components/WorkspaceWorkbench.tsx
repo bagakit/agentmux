@@ -811,7 +811,7 @@ function WorkbenchRegionBranch({
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           tab={tab}
           groupId={groupId}
-          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
         />
       </Panel>
@@ -828,7 +828,7 @@ function WorkbenchRegionBranch({
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           tab={tab}
           groupId={groupId}
-          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
         />
       </Panel>
@@ -1126,7 +1126,7 @@ function SplitBranch({
           layout={layout}
           allLayout={allLayout}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
         />
@@ -1146,7 +1146,7 @@ function SplitBranch({
           layout={layout}
           allLayout={allLayout}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={false}
         />
