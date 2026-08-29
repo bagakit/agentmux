@@ -489,8 +489,6 @@ export async function registerIpc(args: {
   handle('demands:delete', async (id: string) => await demands.delete(id))
   handle('demands:linkSession', async (id: string, sessionId: string) => await demands.linkSession(id, sessionId))
   handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
-  handle('demands:linkProject', async (id: string, projectId: string, projectName?: string | null) => await demands.linkProject(id, projectId, projectName))
-  handle('demands:unlinkProject', async (id: string) => await demands.unlinkProject(id))
   handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>) => await demands.addActivity(id, input))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   /**
