@@ -1209,6 +1209,7 @@ export function WorkspaceWorkbench({
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const tabMenuOpen = useAppStore((state) => state.tabMenuOpen)
+  const nativeSurfaceOverlayCount = useAppStore((state) => state.nativeSurfaceOverlayCount)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
@@ -1286,7 +1287,7 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}
+            nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
