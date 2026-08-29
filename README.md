@@ -46,14 +46,15 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 
 当前 Local Run、Codex 代表纵切与 Desktop Control 纵切已经跑通：
 
-- 固定 CtxMux clean commit `aaadb6843ae2c8fa71565e2d72ddd4b4c6fede02`、protocol 16；
+- 固定 CtxMux clean commit `c168c0ab9cd849bfade68461b62684982c71f688`、protocol 17；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
 - Core typecheck 与构建直接消费固定 tarball 的官方 SDK 类型和实现，不保留手写 wire 声明；公开包仍不暴露 CtxMux 类型，也不读取相邻 checkout、全局安装或下载；
 - Local endpoint 由 exact artifact identity 隔离，调用方不能插入另一个同协议 daemon；
 - `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
 - Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
 - Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；
-- 旧自建 daemon、wire、journal、`node-pty` Owner、Remote artifact 和 package bin 已删除。
+- 旧自建 daemon、wire、journal、`node-pty` Owner 和 Remote artifact 已删除；包仍按 `packages/core/package.json` 的 `bin` 字段暴露 `agentmux`、`ctxmux`、`ctxmuxd` 三个可执行入口。
+- 平台边界是 **darwin-arm64 only**，且是 fail-closed 的硬边界而非软约定：`ctxmux-run-adapter.ts` 逐字段校验 vendor manifest，`support.platform` / `support.architecture` 与当前 `process.platform` / `process.arch` 对不上就抛 `CTXMUX_ARTIFACT_INVALID`，不降级、不回退到别的产物。
 - Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物化后的通用 `RunSpec` 和物理 Run 操作交给同一个 `CtxmuxRunAdapter`；ctxmux 不提供第二份 Agent-specific Provider；
 - Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
 - checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
