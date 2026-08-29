@@ -1,0 +1,20 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Browser overlay and resize continuity",
+  "status": "approved",
+  "scope": "Keep Agent identity popovers above neighboring native Browser surfaces and preserve the last valid Browser frame through transient resize geometry.",
+  "acceptance": [
+    "An Agent avatar hover/focus popover can be read without a neighboring Browser WebContentsView covering it.",
+    "Every popover close, blur, Escape, unmount, and error path releases the native-surface occlusion lease.",
+    "A transient zero-size layout during window or pane resize does not send a null Browser bounds update.",
+    "Real visibility changes, parking, errors, screenshot and selection overlays retain their existing hide behavior."
+  ],
+  "sources": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/AgentAvatar.tsx",
+    "apps/desktop/src/renderer/src/components/BrowserPane.tsx",
+    "apps/desktop/src/renderer/src/lib/browser-bounds-sync.ts"
+  ]
+}

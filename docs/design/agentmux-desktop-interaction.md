@@ -43,6 +43,14 @@
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
 
+### AgentMux 自操作与外部 Computer Use 边界（2026-09-24）
+
+- Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility、a mature workbench 或其他通用 Computer Use 旁路完成本产品已有的操作。
+- AgentMux 的产品运行、Session/Run 生命周期、Board/PMO 管理和发布验收不得把外部 Computer Use 工具作为前置条件。外部工具不可用、权限过期或观察失败时，保留产品自身的真实状态并给出诊断，不得阻断健康 Agent。
+- 内嵌 Browser 的网页操作继续使用已有 CDP/Browser Control；它是页面语义通道，不是 macOS 辅助功能，也不复制一套桌面自动化 Runtime。
+- Codex Computer Use、a mature workbench 或未来的其他桌面自动化实现只能作为开发验收或跨应用场景的可选外部适配器；它们不得进入 `packages/core`、不得成为 AgentMux 启动依赖，也不得写入产品状态真相。
+- 如果未来需要跨应用桌面自动化，应新增隔离的可选 adapter 包并通过能力声明接入；本 Feature 不扩展为通用桌面机器人，也不把 macOS Accessibility 权限引入 AgentMux 主流程。
+
 ### 打包、安装与启动事实
 
 - 候选包在签名、身份和安装前启动验证任一步失败时，保留旧的 canonical 安装并明确报告失败阶段，不能把旧包或半成品误报为最新版。
@@ -1529,3 +1537,9 @@ Focus 是主表面命名和导航语义，不改变底层 `agentFocus.execution`
 Focus 和 Work 工作面的左上角标题必须避开 macOS 原生窗口按钮。Project Rail 在全局工作面隐藏时，不能仍按它可见来决定标题起点；切换 Focus、Workspaces 和 Work、开合工具坞或重启恢复后，系统按钮与标题都必须保持可见、可操作。
 
 全局需求工作面的用户可见主名称为 **Work**，因为用户在这里承接、组织和推进自己的诉求或想法；副标题使用 **Requests & ideas**，而 `Board` 只描述一种视图排版。底部主切换、顶栏面包屑和工作面主标题使用同一主名称。单项 Work 的结果语义使用 **Goal**，但不把 Goal 当成全局工作面名称。Demand 仍是该工作面的持久化实体与控制协议身份；改主表面名称不得重建 Demand、Session 或用户已选中的工作面。
+
+### 原生 Browser 与 Agent 身份浮层（2026-09-24）
+
+Agent 头像的 hover/focus 详情属于最高层的非模态身份浮层。它可以跨 Region 阅读，不能被相邻 Region 的 Browser 原生视图盖住；`z-index` 只解决 Renderer 内部层级，不能代替对窗口级 Browser 的让位。浮层打开时沿用统一的原生表面遮挡租约，浮层关闭、失焦、Escape、组件卸载和异常路径都必须释放租约，不能留下永久空白 Browser。
+
+Browser 在窗口或分栏尺寸调整期间保持最近一次有效画面。Renderer 暂时得到零宽/零高或未完成布局时，属于几何过渡，不得把 Browser 当成关闭而调用隐藏；等下一次有效矩形到达后直接更新边界。真正的不可见、切换、停放、截图/选择操作和错误状态仍然可以主动隐藏 Browser。尺寸调整不能触发 Browser 销毁、重新导航或空白闪烁。

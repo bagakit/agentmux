@@ -42,7 +42,7 @@ describe('window-owned Workspace Workbench registry', () => {
 
   it('keeps only the active Workbench native surfaces live', () => {
     expect(workbench).toContain('visible?: boolean')
-    expect(workbench).toContain('nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}')
+    expect(workbench).toContain('nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0}')
     expect(app).toContain('visible={visible}')
   })
 

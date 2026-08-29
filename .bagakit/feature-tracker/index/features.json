@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 287
+    "next_cursor": 289
   },
   "features": [
     {
@@ -2479,6 +2479,26 @@
       "feat_id": "f-2b98fef7p",
       "title": "Work surface naming",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2ba8f6kju",
+      "title": "Browser overlay and resize continuity",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bb8f5yhh",
+      "title": "AgentMux 自操作不依赖 Computer Use",
+      "status": "in_progress",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
