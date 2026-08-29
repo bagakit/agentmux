@@ -9,7 +9,7 @@ import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('Focus / Workspaces / Tasks navigation', () => {
+describe('Focus / Workspaces / Work navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -26,11 +26,11 @@ describe('Focus / Workspaces / Tasks navigation', () => {
     useAppStore.setState(baseline, true)
   })
 
-  it('renders one three-item switch with Focus, Workspaces, and Tasks labels', async () => {
+  it('renders one three-item switch with Focus, Workspaces, and Work labels', async () => {
     useAppStore.setState({ mainSurface: 'agents' })
     await act(async () => root.render(createElement(SurfaceSwitch)))
     const buttons = [...container.querySelectorAll('button')]
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Focus', 'Workspaces', 'Tasks'])
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Focus', 'Workspaces', 'Work'])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
     expect(buttons[0]?.classList.contains('selected')).toBe(true)
   })
@@ -41,12 +41,13 @@ describe('Focus / Workspaces / Tasks navigation', () => {
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
 
-  it('does not create a DemandWorkspace when no Task is selected', async () => {
+  it('does not create a DemandWorkspace when no request is selected', async () => {
     useAppStore.setState({ sessions: [], demands: {}, selectedDemandId: null, mainSurface: 'board' })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
     expect(container.querySelector('.global-demand-workspace')).toBeNull()
-    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Tasks')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Work')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Requests & ideas')
     expect(container.querySelector('.global-board-toolbar')?.textContent).not.toContain('Focus')
   })
 })
