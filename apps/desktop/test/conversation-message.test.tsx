@@ -2,6 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage.js'
@@ -16,6 +17,12 @@ const base = {
 }
 
 describe('ConversationMessage', () => {
+  it('keeps a right-docked human bubble while left-aligning its readable body', () => {
+    const styles = readFileSync(new URL('../src/renderer/src/styles/activity-conversation.css', import.meta.url), 'utf8')
+    expect(styles).toMatch(/\.log-turn\[data-speaker-role='human'\] \.log-turn__body \{[^}]*text-align: left/)
+    expect(styles).toContain(".log-turn[data-speaker-role='human'] {")
+    expect(styles).toContain('justify-self: end')
+  })
   it('renders one shared message shape with identity, markdown and quiet time', () => {
     const markup = renderToStaticMarkup(createElement(ConversationMessage, {
       ...base,
