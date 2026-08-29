@@ -48,6 +48,15 @@ export function composerDOM() {
       if (!button) throw new Error(`Missing button: ${selector}`)
       await act(async () => button.click())
     },
+    /** AgentAvatar 的 disclosure 由指针进入打开（不是原生 popover），所以要能模拟这一下。
+     *  React 的 `onPointerEnter` 是从冒泡的 `pointerover` 合成的，直接发 `pointerenter` 到不了。 */
+    hover: async (selector: string) => {
+      const target = container.querySelector<HTMLElement>(selector)
+      if (!target) throw new Error(`Missing element: ${selector}`)
+      await act(async () => {
+        target.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+      })
+    },
     draft: (id = 'agent-1') => useAppStore.getState().agentComposerDrafts[id]
   }
 }
