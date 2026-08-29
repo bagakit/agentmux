@@ -24,10 +24,9 @@ describe('Agent avatar native-surface occlusion lease', () => {
     useAppStore.setState({ nativeSurfaceOverlayCount: initial })
   })
 
-  it('owns one idempotent lease for the AgentAvatar popover lifecycle', () => {
-    expect(avatarSource).toContain('const overlayLeaseHeld = useRef(false)')
-    expect(avatarSource).toContain('if (!overlayLeaseHeld.current)')
-    expect(avatarSource).toContain('acquireNativeSurfaceOverlay()')
-    expect(avatarSource).toContain('releaseNativeSurfaceOverlay()')
+  it('notifies the shared identity context exactly on popover open and close', () => {
+    expect(avatarSource).toContain('const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange')
+    expect(avatarSource).toContain('if (!position) notifyPanelVisibilityChange?.(true)')
+    expect(avatarSource).toContain('notifyPanelVisibilityChange?.(false)')
   })
 })

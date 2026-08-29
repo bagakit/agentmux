@@ -74,6 +74,12 @@ function DesktopApp() {
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+  const onAgentPanelVisibilityChange = useCallback((visible: boolean) => {
+    if (visible) acquireNativeSurfaceOverlay()
+    else releaseNativeSurfaceOverlay()
+  }, [acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
   useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
@@ -215,7 +221,7 @@ function DesktopApp() {
 
   return (
     <SettingsNavigation.Provider value={{ open: openSettings }}>
-    <ExecutorIdentityContext.Provider value={{ config, sessions }}>
+    <ExecutorIdentityContext.Provider value={{ config, sessions, onPanelVisibilityChange: onAgentPanelVisibilityChange }}>
       <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>

@@ -33,6 +33,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   onPanelVisibilityChange?: ((visible: boolean) => void) | undefined
 }) {
   const identity = useContext(ExecutorIdentityContext)
+  const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange
   const session = sessionId ? identity.sessions.find((entry) => entry.id === sessionId && entry.kind === 'agent') : undefined
   const resolvedExecutorId = executorId ?? (session?.kind === 'agent' ? session.executorId : undefined)
   const executor = resolvedExecutorId ? identity.config?.executors[resolvedExecutorId] : undefined
@@ -61,7 +62,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   function closeNow() {
     keepOpen()
     setPosition((current) => {
-      if (current) onPanelVisibilityChange?.(false)
+      if (current) notifyPanelVisibilityChange?.(false)
       return null
     })
   }
@@ -69,7 +70,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     keepOpen()
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
-      if (!position) (onPanelVisibilityChange ?? identity.onPanelVisibilityChange)?.(true)
+      if (!position) notifyPanelVisibilityChange?.(true)
       setPosition({
         left: Math.min(Math.max(8, bounds.left), Math.max(8, window.innerWidth - 256)),
         top: bounds.bottom + 6
@@ -82,8 +83,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
-    ;(onPanelVisibilityChange ?? identity.onPanelVisibilityChange)?.(false)
-  }, [identity.onPanelVisibilityChange, onPanelVisibilityChange])
+    notifyPanelVisibilityChange?.(false)
+  }, [notifyPanelVisibilityChange])
   useEffect(() => {
     if (!position) return
     // A fixed portal becomes stale when the dock or page scrolls. Dismiss it so the
