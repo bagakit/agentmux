@@ -1,0 +1,32 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Session placement and Message Tools composer review",
+  "scope": "Fork/Resume new-tab placement and adaptive Message Tools input",
+  "evidence": [
+    {
+      "source": "User reproduction",
+      "observation": "A forked Agent resumed in a new tab and the new surface appeared to the right of the pre-fork Agent.",
+      "risk": "Ambient focus or a stale Region is being used instead of the target Session's durable Tab/Region owner."
+    },
+    {
+      "source": "a mature workbench workspace tab model",
+      "observation": "A workspace tab belongs to a concrete worktree/session context; active focus does not redefine that ownership.",
+      "reference": "a mature workbench/src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx"
+    },
+    {
+      "source": "AgentMux surface-density contract",
+      "observation": "Message Tools should use a flexible central editor with stable side controls.",
+      "reference": "docs/design/agentmux-surface-density.md"
+    }
+  ],
+  "decision": {
+    "sessionPlacement": "Resolve all fork/resume/browser/new-tab destinations from the target Session's owning Workspace, Tab, Region and insertion policy; ambient focus is never a fallback placement.",
+    "composer": "Use an elastic left-aligned editor that grows from one line to a bounded multiline surface before scrolling."
+  },
+  "acceptance": [
+    "A forked Session resumed from its own context opens its new Tab in that Session's intended work surface, regardless of the currently focused Agent.",
+    "A target that cannot be resolved stays visible as a recoverable placement error instead of attaching to another Agent.",
+    "Message Tools input expands when content exceeds one line and preserves stable side controls and left-aligned reading."
+  ]
+}

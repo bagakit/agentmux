@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 291
+    "next_cursor": 292
   },
   "features": [
     {
@@ -2519,6 +2519,16 @@
       "feat_id": "f-2bd8febfa",
       "title": "PMO floating surface simplicity",
       "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2be8fv5jc",
+      "title": "Session placement and adaptive Message Tools composer",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
