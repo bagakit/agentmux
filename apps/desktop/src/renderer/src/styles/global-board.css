@@ -84,6 +84,17 @@
 .global-session-card:hover { background: var(--surface-2); border-color: var(--line); transform: translateY(-1px); }
 .global-session-card:focus-visible { outline: 2px solid var(--green-2); outline-offset: 1px; }
 .global-session-card--selected { border-color: color-mix(in srgb, var(--green) 65%, var(--line)); background: color-mix(in srgb, var(--green) 7%, var(--surface-1)); }
+/* 卡片发出 data-attention（取值走 attentionAccentFor，与头像、快速切换器、Board 卡问的是同一个
+   问题），所以恰好两个值。此前它只发不画：属性在 DOM 上，没有任何规则读它，于是"需要你"和"出错"
+   在这张卡上完全不可见——所在的列只说得出四个桶，而 working 那个桶里混着五个安静状态。
+   配方沿用 `.board-run-card[data-attention]` 那一对（边 40% / 底 13%，hover 各抬一档），只是这张卡
+   没有 `.status--<state>` 因而拿不到 `--status-ink`，只能直接点名色相。 */
+.global-session-card[data-attention='needs-you'] { border-color: color-mix(in srgb, var(--amber) 40%, var(--surface-1)); background: color-mix(in srgb, var(--amber) 13%, var(--surface-0)); }
+.global-session-card[data-attention='error'] { border-color: color-mix(in srgb, var(--red) 40%, var(--surface-1)); background: color-mix(in srgb, var(--red) 13%, var(--surface-0)); }
+/* 上面两条与 `:hover` 特异性同为 0,2,0 且排在后面，不抬一档的话一张需要你 / 出错的卡指上去毫无
+   回应，而它恰恰是最该被点开的那张。 */
+.global-session-card[data-attention='needs-you']:hover { border-color: color-mix(in srgb, var(--amber) 55%, var(--surface-1)); background: color-mix(in srgb, var(--amber) 20%, var(--surface-0)); }
+.global-session-card[data-attention='error']:hover { border-color: color-mix(in srgb, var(--red) 55%, var(--surface-1)); background: color-mix(in srgb, var(--red) 20%, var(--surface-0)); }
 .global-session-card__topline, .global-session-card__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .global-session-card__topline { color: var(--text-3); font-size: var(--fs-micro); }
 .global-session-card__title { display: -webkit-box; overflow: hidden; color: var(--text); font-size: var(--fs-body); font-weight: 620; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
