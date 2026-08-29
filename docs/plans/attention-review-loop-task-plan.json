@@ -14,11 +14,11 @@
     {
       "revision": 1,
       "supersedes_revision": null,
-      "review_ref": "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md",
+      "review_ref": "docs/reviews/attention-review-loop-2026-09-22.md",
       "source_refs": [
         "docs/design/agentmux-desktop-interaction.md",
         "docs/design/agentmux-surface-density.md",
-        "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+        "docs/reviews/attention-review-loop-2026-09-22.md"
       ],
       "task_ids": [
         "T-001",

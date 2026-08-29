@@ -10,9 +10,9 @@
       "risk": "Ambient focus or a stale Region is being used instead of the target Session's durable Tab/Region owner."
     },
     {
-      "source": "a mature workbench workspace tab model",
+      "source": "参考项目的 workspace tab model",
       "observation": "A workspace tab belongs to a concrete worktree/session context; active focus does not redefine that ownership.",
-      "reference": "a mature workbench/src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx"
+      "reference": "本地参考语料：floating-terminal 面板组件（路径见 ideas/index.md，不入库）"
     },
     {
       "source": "AgentMux surface-density contract",

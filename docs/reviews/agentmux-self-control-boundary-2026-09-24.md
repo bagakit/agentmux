@@ -4,14 +4,14 @@
 
 ## 用户目标
 
-AgentMux 内的 Agent 在操作 AgentMux 自己时，直接使用 AgentMux 提供的控制能力，不经过 a mature workbench、Codex Computer Use、截图坐标点击或 macOS Accessibility。外部 Computer Use 只属于可选的开发验收和跨应用工具，不成为产品运行条件。
+AgentMux 内的 Agent 在操作 AgentMux 自己时，直接使用 AgentMux 提供的控制能力，不经过外部 Computer Use 实现、截图坐标点击或 macOS Accessibility。外部 Computer Use 只属于可选的开发验收和跨应用工具，不成为产品运行条件。
 
 ## 当前证据
 
 - `packages/core` 已有 typed Control 协议与 CLI，覆盖 `inspect`、`list`、`open`、`send`、`focus`、`arrange`、Browser Control 以及 Demand/PMO 操作。
-- 打包验收使用 LaunchServices、应用内 ready/file-editing receipt 和 ctxmux owner receipt；没有调用 a mature workbench 或自动点击。
-- 当前会话通过 Codex 的 `cua_repl` 直接读取安装版 AgentMux，已经证明开发验收不需要 a mature workbench 作为唯一 Computer Use 实现。
-- 仓库中少量 a mature workbench 文字和 MIT 许可改编代码属于参考/来源记录，不是 a mature workbench 运行时依赖。改编代码在被自有实现替换前必须保留许可声明。
+- 打包验收使用 LaunchServices、应用内 ready/file-editing receipt 和 ctxmux owner receipt；没有调用外部自动化工具或自动点击。
+- 当前会话通过 Codex 的 `cua_repl` 直接读取安装版 AgentMux，已经证明开发验收不依赖任何单一的外部 Computer Use 实现。
+- 仓库中少量参考项目文字和 MIT 许可改编代码属于参考/来源记录（署名见 `THIRD_PARTY_NOTICES.md`），不是运行时依赖。改编代码在被自有实现替换前必须保留许可声明。
 
 ## 保护不变量
 
@@ -29,5 +29,5 @@ AgentMux 内的 Agent 在操作 AgentMux 自己时，直接使用 AgentMux 提�
 ## 非目标
 
 - 本次不实现通用 macOS Accessibility 驱动器。
-- 本次不把 Codex Computer Use 或 a mature workbench 打包进 AgentMux。
+- 本次不把任何外部 Computer Use 实现打包进 AgentMux。
 - 本次不删除仍在使用中的第三方 MIT 改编代码；替换它们需要独立的行为等价 Feature。

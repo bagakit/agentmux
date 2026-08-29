@@ -6,7 +6,7 @@
     {
       "id": "T-001",
       "depends_on": [],
-      "title": "建立 Default Session a mature workbench 风格浮窗",
+      "title": "建立 Default Session 浮动工作面",
       "objective": "把默认 Topic 从内联入口改成当前工作面上的可拖动浮窗，并复用 Scratch workspace 的原生 Workbench。",
       "outcome": "打开入口显示唯一 launcher:default Topic 的 Tab/Region/composer；关闭只隐藏浮窗并保留工作面状态。",
       "acceptance": [

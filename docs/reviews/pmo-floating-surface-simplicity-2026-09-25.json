@@ -5,8 +5,8 @@
   "scope": "PMO Teams floating workspace shell, title hierarchy, and drag isolation",
   "references": [
     {
-      "name": "a mature workbench FloatingTerminalPanelSurface",
-      "path": "a mature workbench/src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx",
+      "name": "参考项目的 floating terminal panel surface",
+      "path": "本地参考语料：floating-terminal 面板组件（路径见 ideas/index.md，不入库）",
       "evidence": ["36px utility tabbar", "Tabbar carries the workspace identity", "single inner surface and separate window controls"]
     },
     {

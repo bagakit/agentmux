@@ -17,10 +17,10 @@
       "id": "T-001",
       "depends_on": [],
       "title": "P0 固化 AgentMux 自操作 Control 边界",
-      "objective": "让 Agent 操作 AgentMux 自身时只经过 typed Control/semantic surface，不依赖 a mature workbench、Computer Use、截图坐标或 macOS Accessibility。",
+      "objective": "让 Agent 操作 AgentMux 自身时只经过 typed Control/semantic surface，不依赖外部 Computer Use、截图坐标或 macOS Accessibility。",
       "outcome": "现有 inspect/list/open/send/focus/arrange 与 Demand/PMO 操作形成一条可验证的自操作路径，外部桌面自动化不是启动、运行或发布前置条件。",
       "acceptance": [
-        "AgentMux 自操作的生产调用者全部进入 AgentMux Control owner；不能在 Core、Desktop 或 PMO 生产代码中导入 a mature workbench/Computer Use、调用系统窗口点击或读取 macOS Accessibility。",
+        "AgentMux 自操作的生产调用者全部进入 AgentMux Control owner；不能在 Core、Desktop 或 PMO 生产代码中导入外部 Computer Use 实现、调用系统窗口点击或读取 macOS Accessibility。",
         "AgentMux CLI 与 Control receipt 能覆盖 Agent 查询项目、活跃 Agent、Workspace、Topic、Demand，以及打开、聚焦、发送、排列和 Demand/PMO 更新所需的当前产品动作。",
         "外部 Computer Use 不可用或观察失败时，AgentMux 仍可启动、恢复 Session、操作 Board/PMO，并把失败作为独立诊断而不是流程阻断。",
         "对应行为测试在移除 Control owner 接线或错误降级边界时变红；实现文件之外存在至少一个真实 Desktop/Core 生产调用者。"
@@ -33,7 +33,7 @@
         },
         {
           "kind": "command",
-          "ref": "test -z \"$(rg -n -i --glob '!**/*.test.*' --glob '!**/docs/**' --glob '!**/THIRD_PARTY_NOTICES.md' '\\b(a mature workbench|computer[- ]use|AXUIElement|CGWindow|System Events)\\b' packages/core/src apps/desktop/src apps/desktop/scripts)\"",
+          "ref": "test -z \"$(rg -n -i --glob '!**/*.test.*' --glob '!**/docs/**' --glob '!**/THIRD_PARTY_NOTICES.md' '\\b(computer[- ]use|AXUIElement|CGWindow|System Events)\\b' packages/core/src apps/desktop/src apps/desktop/scripts)\"",
           "proves": "生产路径没有把外部 Computer Use 或 macOS Accessibility 当作 AgentMux 自操作依赖。"
         },
         {
@@ -53,11 +53,11 @@
       "depends_on": ["T-001"],
       "title": "P1 收口自操作语义面与外部适配器隔离",
       "objective": "补齐 AgentMux 自有 semantic surface 的实际调用者和可操作回执，并把未来跨应用 Computer Use 明确隔离为可选 adapter。",
-      "outcome": "PMO Teams、Board、Workspaces 和 Agent 查询均能通过机器可读 receipt 完成；产品代码不暴露 a mature workbench 专属入口，外部适配器边界有清晰的非阻断契约。",
+      "outcome": "PMO Teams、Board、Workspaces 和 Agent 查询均能通过机器可读 receipt 完成；产品代码不暴露任何外部自动化工具的专属入口，外部适配器边界有清晰的非阻断契约。",
       "acceptance": [
         "PMO Teams 可通过自有 CLI/Control receipt 查询并操作项目、活跃 Agent、Workspace、Topic 和 Demand，不需要读取 UI 截图或依赖当前焦点窗口。",
         "每个自操作命令都有明确的成功、未知和流程降级回执；观察失败不会伪装成业务状态，也不会删除 durable 工作面。",
-        "未来的 Codex Computer Use、a mature workbench 或其他跨应用实现只能位于可选 adapter 边界，Core 与 Desktop 的启动图和发布 Gate 不引用它们。",
+        "未来的 Codex Computer Use 或其他跨应用实现只能位于可选 adapter 边界，Core 与 Desktop 的启动图和发布 Gate 不引用它们。",
         "自操作的关键行为有变异测试和零调用者证据；安装版启动验收继续使用应用内 receipt。"
       ],
       "verification": [

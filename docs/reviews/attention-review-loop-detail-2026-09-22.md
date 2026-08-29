@@ -61,7 +61,7 @@ Review: approved（仅限本 Feature 已有目标内的计划细化，不代表�
 
 本次仍是同一 Goal、同一桌面环境、同一恢复与 Owner 约束，无新产品线。活动任务保持原样，剩余任务各有用户结果及可证伪 oracle；T-003 消费两个分支作最早联合验收。无新的 ceremony task，无自动化证明替代真实交互。工作量估计为 Agent 执行小时，不是交付时间承诺。
 
-tasks.json 是任务和状态唯一真相。docs/plans/moshi-inspired-attention-review-loop-task-plan.json 是本 revision 的导入证据；旧 moshi-inspired-attention-review-loop.json 仅保留 revision 1 来源，不作为第二份可编辑当前计划。
+tasks.json 是任务和状态唯一真相。docs/plans/attention-review-loop-task-plan.json 是本 revision 的导入证据；旧 attention-review-loop.json 仅保留 revision 1 来源，不作为第二份可编辑当前计划。
 
 
 ## Command preflight correction

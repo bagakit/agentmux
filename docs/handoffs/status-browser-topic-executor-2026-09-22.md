@@ -154,6 +154,6 @@ OOM 待证假设：新测试把含 review 的 config 传给 AgentSettingsPane，
 - region 缩放正确后顶部 redraw 提示同步。
 - terminal DMG/本地文件链接打开系统应用及 Finder/Explorer 菜单。
 - 状态只 working/需提醒画角标，idle 用树计数；停止不能红叹号。
-- 与需求池/Feature Tracker 的相关条目闭环；保持 Provider/插件化边界，可参考 deepseek-harness/a mature workbench。
+- 与需求池/Feature Tracker 的相关条目闭环；保持 Provider/插件化边界，可参考本地参考语料中的插件化 harness 实现。
 
 接手者应以 git history、当前 code、Tracker 和安装版实测判断哪些已完成、哪些要补，不把这份历史清单全部当本轮新实现。用户仍期待主干提交和最新安装包。

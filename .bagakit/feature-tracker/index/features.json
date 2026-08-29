@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 292
+    "next_cursor": 293
   },
   "features": [
     {
@@ -1929,7 +1929,7 @@
     },
     {
       "feat_id": "f-29f8f7krj",
-      "title": "Moshi 对照：Agent 注意力与结果审查闭环",
+      "title": "Agent 注意力与结果审查闭环（对照参考项目）",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
@@ -2029,7 +2029,7 @@
     },
     {
       "feat_id": "f-29s8fwf9m",
-      "title": "Default Session Orca 风格浮窗",
+      "title": "Default Session 浮动工作面",
       "status": "archived",
       "workspace_mode": "worktree",
       "branch": "feat/f-29s8fwf9m",
@@ -2529,6 +2529,16 @@
       "feat_id": "f-2be8fv5jc",
       "title": "Session placement and adaptive Message Tools composer",
       "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bf8fny4g",
+      "title": "两道元守卫只看得见一个包：把扫描根派生出来，并清掉暴露的存量",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",

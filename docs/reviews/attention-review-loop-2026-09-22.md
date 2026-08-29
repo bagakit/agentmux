@@ -1,4 +1,4 @@
-# Moshi 对照：Agent 注意力与结果审查闭环 review
+# Agent 注意力与结果审查闭环 review（对照参考项目）
 
 Review: approved — 用户要求在 Feature `f-29f8f7krj` 中完善细节。本次确认的产品闭环是：从全局 Needs you 发现待处理 Session，使用已有 typed interaction 完成决定，在同一 Session/工作区附近查看 Diff、已确认的开发预览或继续追问，并在切换、重绘、重连和重启后保留工作面与 Session 身份。
 
@@ -24,6 +24,6 @@ Review: approved — 用户要求在 Feature `f-29f8f7krj` 中完善细节。本
 
 ## 依据
 
-- `docs/design/agentmux-desktop-interaction.md` 的 Moshi 对照可借鉴闭环。
+- `docs/design/agentmux-desktop-interaction.md` 中记录的参考闭环。
 - `docs/design/agentmux-surface-density.md` 的注意力与审查密度约束。
 - 现有 `AgentInteractionCard`、`useAgentAttentionNotifications`、Context usage、Diff、Browser preview 和 Session recovery 测试。

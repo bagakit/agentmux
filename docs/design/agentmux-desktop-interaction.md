@@ -45,10 +45,10 @@
 
 ### AgentMux 自操作与外部 Computer Use 边界（2026-09-24）
 
-- Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility、a mature workbench 或其他通用 Computer Use 旁路完成本产品已有的操作。
+- Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
 - AgentMux 的产品运行、Session/Run 生命周期、Board/PMO 管理和发布验收不得把外部 Computer Use 工具作为前置条件。外部工具不可用、权限过期或观察失败时，保留产品自身的真实状态并给出诊断，不得阻断健康 Agent。
 - 内嵌 Browser 的网页操作继续使用已有 CDP/Browser Control；它是页面语义通道，不是 macOS 辅助功能，也不复制一套桌面自动化 Runtime。
-- Codex Computer Use、a mature workbench 或未来的其他桌面自动化实现只能作为开发验收或跨应用场景的可选外部适配器；它们不得进入 `packages/core`、不得成为 AgentMux 启动依赖，也不得写入产品状态真相。
+- Codex Computer Use 或未来的其他桌面自动化实现只能作为开发验收或跨应用场景的可选外部适配器；它们不得进入 `packages/core`、不得成为 AgentMux 启动依赖，也不得写入产品状态真相。
 - 如果未来需要跨应用桌面自动化，应新增隔离的可选 adapter 包并通过能力声明接入；本 Feature 不扩展为通用桌面机器人，也不把 macOS Accessibility 权限引入 AgentMux 主流程。
 
 ### 打包、安装与启动事实
@@ -1188,7 +1188,7 @@ Readiness 是 Provider 输入框的观测证据，不是健康 Run 的永久发�
 
 用户确认：Board 不作为 Agents 的默认主视图。Board 是全局任务面，跨 Project、Workspace、Branch、Topic 可见；它承载任务卡、任务状态、目标项目和与 Agent 执行的关联，不再以当前 Workspace 的 Branch/Topic × Agent 状态矩阵作为产品模型。任务状态与 Agent/Attempt/Session 状态是不同事实，不能用同一个列或状态字段互相替代。
 
-Agents 提供一个类似 a mature workbench 浮动入口的常驻助手入口。这个入口叫 **Leader Topic**，点击后展开或聚焦一个固定、产品拥有的 Topic；Topic 里的 Session 仍是正常的 AgentSession，必须通过 Core 的公开生命周期能力运行，不建立隐藏的第二套 Runtime。它可以读取全局项目目录与 Board，但不复用用户当前 Scratch Topic，也不跟随 Scratch 当前选中的 Topic。
+Agents 提供一个常驻的浮动助手入口。这个入口叫 **Leader Topic**，点击后展开或聚焦一个固定、产品拥有的 Topic；Topic 里的 Session 仍是正常的 AgentSession，必须通过 Core 的公开生命周期能力运行，不建立隐藏的第二套 Runtime。它可以读取全局项目目录与 Board，但不复用用户当前 Scratch Topic，也不跟随 Scratch 当前选中的 Topic。
 
 用户可以直接与默认 Session 讨论需求。Session 分析后可以在全局 Board 创建任务，并为任务标记应执行的 Project；创建结果、目标 Project、分析依据和关联 Session 必须在对话与任务卡上可追踪，不能把跨项目的创建变成不可见的副作用。无法确定目标 Project 时保留待确认状态，不猜测归属，也不阻断 Session 继续对话。
 
@@ -1376,9 +1376,9 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 - 状态语义只通过右上角的小型标记或活动字形表达；普通身份不使用外描边制造状态。
 - 活动菜单必须保留可读的原因、项目和 Provider 信息；长内容在有界菜单内换行或滚动，不能被固定宽度裁成看不懂的尾巴。
 
-### 默认 Session 的 a mature workbench 风格浮窗（2026-09-22）
+### 默认 Session 的浮动工作面（2026-09-22）
 
-Default Session 的打开动作呈现为当前工作面上的浮窗，交互参考成熟工作台的 floating workspace：有独立标题栏、拖动定位、最小化/关闭和明确焦点环。浮窗打开时保留用户正在看的 Agents、Session 或 Board 工作面，关闭后焦点回到打开前的控件；不能通过切换到 Scratch 主路由来冒充浮窗。
+Default Session 的打开动作呈现为当前工作面上的浮窗，交互沿用成熟桌面产品的 floating workspace 形态：有独立标题栏、拖动定位、最小化/关闭和明确焦点环。浮窗打开时保留用户正在看的 Agents、Session 或 Board 工作面，关闭后焦点回到打开前的控件；不能通过切换到 Scratch 主路由来冒充浮窗。
 
 浮窗内容就是唯一 `launcher:leader` Topic 的原生 Tab、Region、Agent 身份、输出和 composer。它不创建第二个 Session、PTY 或聊天产品；浮窗只是同一 Topic 工作面的附着投影。Board、Agents 和 Session 中的入口都打开/聚焦同一个浮窗，不能各自维护一份 Leader Topic。
 
@@ -1552,7 +1552,7 @@ PMO Teams 是固定产品工作面，不应只是完整 Workbench 的透明容�
 
 ### 产品表面设计审核与参考层级（2026-09-25）
 
-- 新的桌面工作面、浮层和工具栏在实现前必须先找同类成熟产品作为参考；参考必须匹配对象和交互，而不是只借颜色或圆角。浮动终端/工作面优先参考成熟工作台的 `FloatingTerminalPanelSurface`：36px 级别的工具栏直接承载 Tab、分屏和新建动作，工作面不再另造一条大标题。
+- 新的桌面工作面、浮层和工具栏在实现前必须先找同类成熟产品作为参考；参考必须匹配对象和交互，而不是只借颜色或圆角。浮动终端/工作面优先参考成熟桌面终端的浮动面板形态：36px 级别的工具栏直接承载 Tab、分屏和新建动作，工作面不再另造一条大标题。
 - 设计默认采用内容优先、工具条优先和单一 chrome。标题是身份元信息，不是首屏主视觉；如果去掉标题仍能从 Tab、头像、状态和工具提示识别工作面，就不要保留大字标题、副标题或欢迎式说明。
 - 一个表面只能有一套窗口边界、一套标题/Tab 层级和一套关闭语义。把完整 Workbench 放进弹窗时，必须复用 Workbench 的顶层 Tab/工具栏，不得再套一个同义标题栏、第二个空壳或重复的 PMO 入口。
 - 评审第一眼必须能回答三个问题：当前工作面是什么、第一交互是什么、内容从哪里开始。不能回答时先删减层级和装饰，再考虑增加说明。大标题、宽 padding、持续副标题、重复边框和无操作的品牌卡片属于默认拒绝项。

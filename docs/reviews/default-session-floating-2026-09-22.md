@@ -4,7 +4,7 @@
 
 ## Reviewed goal
 
-Default Session 必须像 a mature workbench 的 floating workspace 一样作为当前工作面的浮窗打开：入口只负责打开或聚焦唯一的 `launcher:default` Topic；浮窗有独立 chrome、可拖动标题栏、关闭/最小化和焦点返还；关闭后保留 Topic、Tab、Region、Session 与恢复事实，不创建第二个 Agent 或第二份终端。
+Default Session 必须像成熟桌面产品的 floating workspace 一样作为当前工作面的浮窗打开：入口只负责打开或聚焦唯一的 `launcher:default` Topic；浮窗有独立 chrome、可拖动标题栏、关闭/最小化和焦点返还；关闭后保留 Topic、Tab、Region、Session 与恢复事实，不创建第二个 Agent 或第二份终端。
 
 ## Protected invariants
 
@@ -15,7 +15,7 @@ Default Session 必须像 a mature workbench 的 floating workspace 一样作为
 
 ## Accepted scope
 
-1. 将 Default Session 入口改为 a mature workbench 风格的单一浮窗 launcher。
+1. 将 Default Session 入口改为单一浮窗 launcher。
 2. 浮窗复用 Scratch workspace 的 `WorkspaceWorkbench` 投影，显示既有 Topic Tab/Region/composer。
 3. 增加拖动、最小化、焦点返还、持久化打开状态与回归测试；入口仍可从 Board、Agents 与 Session 顶栏触发。
 

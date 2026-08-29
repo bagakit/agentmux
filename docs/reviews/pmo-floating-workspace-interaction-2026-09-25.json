@@ -15,7 +15,7 @@
     "docs/design/agentmux-surface-density.md",
     "apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx",
     "apps/desktop/src/renderer/src/lib/pmo-teams-topic-floating.ts",
-    "~/proj/github/a mature workbench/src/renderer/src/components/floating-terminal/floating-terminal-panel-drag-actions.ts",
-    "~/proj/github/a mature workbench/src/renderer/src/components/floating-terminal/use-floating-terminal-panel-geometry.ts"
+    "本地参考语料：floating-terminal 拖动动作模块（路径见 ideas/index.md，不入库）",
+    "本地参考语料：floating-terminal 几何 hook（路径见 ideas/index.md，不入库）"
   ]
 }

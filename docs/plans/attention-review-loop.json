@@ -2,12 +2,12 @@
   "schema": "bagakit.feature-task-plan.v1",
   "review": {
     "status": "approved",
-    "evidence_ref": "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+    "evidence_ref": "docs/reviews/attention-review-loop-2026-09-22.md"
   },
   "source_refs": [
     "docs/design/agentmux-desktop-interaction.md",
     "docs/design/agentmux-surface-density.md",
-    "docs/reviews/moshi-inspired-attention-review-loop-2026-09-22.md"
+    "docs/reviews/attention-review-loop-2026-09-22.md"
   ],
   "tasks": [
     {
