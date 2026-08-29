@@ -585,10 +585,10 @@ export function SurfaceToolDock({
   }
 
   return (
-    <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Board' : 'Workspace'} tools`}>
+    <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Tasks' : 'Workspace'} tools`}>
       <header className={`surface-tool-activitybar ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
-        <nav aria-label={`${isBoard ? 'Board' : 'Workspace'} tool selection`}>
+        <nav aria-label={`${isBoard ? 'Tasks' : 'Workspace'} tool selection`}>
           {tools.map((tool) => {
             const Icon = tool.icon
             return (
