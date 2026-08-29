@@ -246,15 +246,15 @@ export function GlobalBoardSurface() {
   function createDemandCard(): void {
     const project = projectFilter !== 'all' ? projects.find(([id]) => id === projectFilter) : undefined
     const demandId = createDemand({
-      title: 'New demand — needs clarification',
-      description: 'Created from the Tasks New Demand action; PMO Teams will clarify the request before execution.',
+      title: 'New request or idea — needs clarification',
+      description: 'Created from the Work request action; PMO Teams will clarify the request before execution.',
       projectId: project?.[0] ?? null,
       projectName: project?.[1] ?? null,
       status: 'backlog',
       source: 'default-topic'
     })
     const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
-    const prompt = `你现在是 AgentMux 的 PMO Teams Topic，从 Board 的 New Demand 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
+    const prompt = `你现在是 AgentMux 的 PMO Teams Topic，从 Work 的 New request 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
     void openDemandPmo(demandId, prompt)
       .then((tabId) => requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId }))
       .catch(reportError)
@@ -270,24 +270,24 @@ export function GlobalBoardSurface() {
     <section className={`global-board-surface ${selectedDemand ? 'global-board-surface--demand-open' : ''}`}>
       <div className="global-board-main">
         <header className="global-board-toolbar">
-          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Tasks</strong><span className="global-board-toolbar__crumb">Demands · Global</span></div>
+          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Work</strong><span className="global-board-toolbar__crumb">Requests &amp; ideas · Global</span></div>
           <div className="global-board-toolbar__controls">
-            <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search demands" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
+            <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search requests and ideas" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
             <label className="global-board-select"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as DemandStatus | 'all')}><option value="all">All</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select><ChevronDown size={12} /></label>
             <label className="global-board-select"><span>Project</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All</option>{projects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><ChevronDown size={12} /></label>
             <label className="global-board-select"><span>Routing</span><select aria-label="Demand routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select><ChevronDown size={12} /></label>
             <label className="global-board-select"><span>Executor</span><select aria-label="Demand executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">All</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select><ChevronDown size={12} /></label>
-            <button type="button" className="global-board-action" onClick={createDemandCard}><CirclePlus size={14} /> Demand</button>
-            <button type="button" className="global-board-icon-action" title="Tasks filters" aria-label="Tasks filters"><MoreHorizontal size={15} /></button>
+            <button type="button" className="global-board-action" onClick={createDemandCard}><CirclePlus size={14} /> New request</button>
+            <button type="button" className="global-board-icon-action" title="Work filters" aria-label="Work filters"><MoreHorizontal size={15} /></button>
           </div>
         </header>
-        <div className="global-board-columns" role="region" aria-label="Global Tasks demand board">
+        <div className="global-board-columns" role="region" aria-label="Global Work requests and ideas">
           {DEMAND_STATUS_IDS.map((status) => {
             const meta = STATUS_META[status]
             const Icon = meta.icon
             return (
               <section className="global-board-column" key={status} data-status={status}>
-                <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} demand`} aria-label={`Add ${meta.label} demand`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
+                <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} request`} aria-label={`Add ${meta.label} request`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
                 <div className="global-board-column__cards">
                   {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} {...(demand.id === selectedSessionDemand?.id && selectedSessionId ? { sessionContext: selectedSessionId } : {})} onSelect={() => setSelectedDemand(demand.id)} onOpenPmo={() => openDemandPmoSurface(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
                   {columns[status].length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}
@@ -296,7 +296,7 @@ export function GlobalBoardSurface() {
             )
           })}
         </div>
-        <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} demands</span><span className="global-board-footer__hint">Select a demand to keep its context beside the board</span></footer>
+        <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} requests</span><span className="global-board-footer__hint">Select a request to keep its context beside the work surface</span></footer>
       </div>
       {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} onOpenPmo={() => openDemandPmoSurface(selectedDemand.id)} onDelete={() => { deleteDemand(selectedDemand.id); setSelectedDemand(null) }} executors={executors} allSessions={sessions} tabs={tabs} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
     </section>

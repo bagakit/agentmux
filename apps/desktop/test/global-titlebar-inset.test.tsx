@@ -27,8 +27,8 @@ describe('global surface titlebar inset', () => {
     expect(declarationsFor('.top-row-leading-chrome--global-inset')).toMatch(/padding-left\s*:\s*80px/)
   })
 
-  it('uses Tasks as the visible demand surface name without changing the board route', () => {
-    expect(chromeSource).toContain('<strong>Tasks</strong>')
+  it('uses Work as the visible request surface name without changing the board route', () => {
+    expect(chromeSource).toContain('<strong>Work</strong>')
     expect(chromeSource).toContain("onClick={() => setMainSurface('board')}")
   })
 })

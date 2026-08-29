@@ -1,0 +1,19 @@
+{
+  "schema": "bagakit.review.v1",
+  "title": "Work surface naming",
+  "status": "approved",
+  "scope": "Rename the user-facing Tasks surface to Work and describe its contents as Requests & ideas without changing Demand persistence or routing.",
+  "acceptance": [
+    "Focus, Workspaces, and Work are the only primary surface labels.",
+    "Requests & ideas is the visible contextual subtitle for the Work surface.",
+    "Goal remains the outcome concept for an individual item; Demand remains the persisted protocol identity.",
+    "The mainSurface board route, selection, recovery, and Demand APIs remain unchanged."
+  ],
+  "sources": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/TopRowChrome.tsx",
+    "apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx"
+  ]
+}

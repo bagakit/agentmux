@@ -77,7 +77,7 @@ export function ToolsToggle() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const toolsAvailable =
     mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId)))
-  const scope = mainSurface === 'board' ? 'Tasks' : mainSurface === 'agents' ? 'Focus' : 'workspace'
+  const scope = mainSurface === 'board' ? 'Work' : mainSurface === 'agents' ? 'Focus' : 'workspace'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
@@ -106,7 +106,7 @@ export function TopBreadcrumb() {
   if (mainSurface === 'board') {
     return (
       <div className="breadcrumbs">
-        <strong>Tasks</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Demands</span>
+        <strong>Work</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Requests &amp; ideas</span>
         {project ? (
           <>
             <span className="breadcrumbs__sep" aria-hidden>/</span>
@@ -160,11 +160,11 @@ export function SurfaceSwitch() {
       </button>
       <button
         className={mainSurface === 'board' ? 'selected' : ''}
-        aria-label="Tasks: show Demands"
-        title="Tasks — show Demands"
+        aria-label="Work: show requests and ideas"
+        title="Work — show requests and ideas"
         onClick={() => setMainSurface('board')}
       >
-        <LayoutDashboard size={13} /> Tasks
+        <LayoutDashboard size={13} /> Work
       </button>
     </div>
   )
