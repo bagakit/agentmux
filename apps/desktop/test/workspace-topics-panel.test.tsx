@@ -221,7 +221,7 @@ describe('Topic live Agent presence', () => {
     expect(cells.map((cell) => cell.dataset.regionKind)).toEqual(['agent', 'agent'])
     const avatars = [...row.querySelectorAll<HTMLButtonElement>('.agent-avatar')]
     expect(avatars.map((avatar) => avatar.getAttribute('aria-label')))
-      .toEqual(['background · working', 'unknown · disconnected'])
+      .toEqual(['left · working', 'right · working', 'background · working', 'unknown · disconnected'])
     const tabButton = row.querySelector<HTMLButtonElement>('[data-topic-tab-id="split"]')!
     await act(async () => tabButton.click())
     expect(fixture.state.openScratchTopic).not.toHaveBeenCalled()
