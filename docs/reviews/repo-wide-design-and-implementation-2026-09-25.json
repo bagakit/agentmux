@@ -1,0 +1,103 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Repo-wide design philosophy and implementation review",
+  "scope": "AGENTS.md/RED-LINES.md philosophy conformance, packages/core boundary, ctxmux owner boundary, desktop main/renderer architecture, test-guard coverage, and doc/process entropy",
+  "references": [
+    {
+      "name": "Provider extension point",
+      "path": "packages/core/src/agent-provider.ts",
+      "evidence": [
+        "3 required fields (catalog/hook/agentId) + 7 optional at :72-86",
+        "14 providers implemented in 21-292 lines each",
+        "provider id literals outside providers/ : 1 hit"
+      ]
+    },
+    {
+      "name": "Host-neutral core",
+      "path": "packages/core/src",
+      "evidence": [
+        "zero electron/react imports",
+        "runtime deps are only @xterm/headless and yaml",
+        "agent-terminal-screen.ts reads agent state via a headless emulator instead of a provider API"
+      ]
+    },
+    {
+      "name": "Authoritative-cursor discipline",
+      "path": "apps/desktop/src/main/runtime-controller.ts",
+      "evidence": [
+        ":1185-1202 seeds the input cursor from ctxmux, updates only from its receipt, and deletes on any error",
+        "CtxmuxRunAdapter.projectRun passes ctxmux fields through without a second state machine"
+      ]
+    },
+    {
+      "name": "Design token SSOT",
+      "path": "apps/desktop/src/renderer/src/styles/tokens.css",
+      "evidence": [
+        "only 2 literal colors outside tokens.css, both #ffffff inside color-mix",
+        "--sp-* scale used 895 times",
+        "banned odd-px (5/7/9) went from the doc's stated 300+ down to 47"
+      ]
+    },
+    {
+      "name": "Self-defending guards",
+      "path": "apps/desktop/test/vacuous-on-empty-predicate.test.ts",
+      "evidence": [
+        "asserts its own scan is non-empty via expect(checked).toBeGreaterThan(20)",
+        "surface-scale-contract.test.ts:169 asserts rules().length > 100"
+      ]
+    },
+    {
+      "name": "Pending admission decision already recorded",
+      "path": ".bagakit/feature-tracker/features/f-25z8fff73",
+      "evidence": [
+        "records the review's objection to f-25q8fccdm T-002 with three independently re-verified facts",
+        "names the discriminator: agent-session-continuity.test.ts must stay 20 passed",
+        "explicitly declines to change another owner's in_progress reviewed task plan"
+      ]
+    }
+  ],
+  "decision": {
+    "title": "Core and the design system are healthy; the durable defects are guard scope, one god-object, and doc/README drift — not the P0, which is correctly blocked on a recorded decision",
+    "rules": [
+      "The two meta-guards must scan every workspace test root, not just apps/desktop/test one level deep.",
+      "A scan-surface guard must derive its roots rather than hardcode one directory, so a new package or nested dir cannot silently escape it.",
+      "README's 当前实现状态 must state facts derivable from the shipped artifact, not a hand-copied snapshot.",
+      "store.ts must not keep accreting unrelated concerns; splitting follows the clusters already visible in AppState.",
+      "The design SSOT records constraints; a dated section that supersedes an earlier one must edit the earlier one, not only append.",
+      "Do not re-litigate the readiness P0 here: f-25z8fff73 owns the decision and f-25q8fccdm owns the execution."
+    ]
+  },
+  "acceptance": [
+    "Both meta-guards fail when a vacuous/sliced-scan offender is introduced anywhere under packages/*/test or apps/*/test, proven by adding one offender per guard and observing red.",
+    "Each guard still asserts its own scan is non-empty, and the non-empty threshold reflects the widened surface.",
+    "packages/core/test/doctor.test.ts:183 and the other vacuous assertions found in core either carry a non-empty proof or a vacuous-ok comment.",
+    "README states the ctxmux commit and protocol actually present in packages/core/vendor/ctxmux/darwin-arm64/manifest.json, and a check fails when they diverge.",
+    "README no longer claims package bin was deleted while packages/core/bin exists and package.json declares three bins.",
+    "README states the darwin-arm64-only support boundary that ctxmux-run-adapter.ts:396-397 enforces.",
+    "store.ts is split so that no single module owns both Runtime/Session state and unrelated UI preference state; behavior is unchanged and the persisted slice keeps its current narrow shape.",
+    "Every split step keeps pnpm typecheck green and leaves the 411 existing useAppStore call sites working without a compatibility shim."
+  ],
+  "findings_not_actioned": [
+    {
+      "finding": "RED-LINES.md commit-message gate has 0/80 compliance; the one commit adding 14 AgentMuxError throws (80826a2f) carries a single-line message",
+      "why_not_actioned": "This is a process decision for the repo owner: either enforce the gate mechanically or delete it per principle 1. Not a code task; needs the owner to pick."
+    },
+    {
+      "finding": "docs/reviews holds 190 files / 7401 lines with only 6 referenced from code, tests, or the design SSOT",
+      "why_not_actioned": "Write-only layer. Deleting or indexing it is an owner call about process, not an implementation defect."
+    },
+    {
+      "finding": "docs/design/agentmux-desktop-interaction.md is 93% append (added 1682 / deleted 117 lifetime), 79 of 138 H3 sections dated",
+      "why_not_actioned": "Consolidating a 1559-line SSOT is high-conflict work while peers edit it concurrently; needs a quiet window and owner agreement on what supersedes what."
+    },
+    {
+      "finding": "browser-view-manager.ts:308 hardcodes a Google search URL and browser-profile-import-source.ts:557 special-cases google.com cookies, against principle 13",
+      "why_not_actioned": "Both are defensible (search-engine default, Chromium cookie reality) and tiny; recorded for the owner rather than churned."
+    },
+    {
+      "finding": "Test code is 170k lines vs 103k production; apps/desktop/src/main is ~14.6% self-verification machinery (resource-probe 1095, file-editing-probe 967, recovery-probe, crash-capture*)",
+      "why_not_actioned": "Ratio observation, not a defect. No evidence any single probe is unearned; cutting would need per-probe justification."
+    }
+  ]
+}

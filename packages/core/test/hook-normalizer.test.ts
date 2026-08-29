@@ -142,6 +142,11 @@ describe('native hook normalization', () => {
       payload: { prompt: 'Do not duplicate this Prompt.' }
     })
 
+    // `event.timeline` 空了的话，下面那条 `some(...)===false` 照样绿——而 normalizeHook
+    // 对 UserPromptSubmit 什么都不产出，比「多产出了一条 user_message」更值得红：这条测试名说的是
+    // 「Prompt 的归属留给 Core」，不是「这个事件不进 timeline」。所以先把产出钉死：一条 lifecycle。
+    expect(event.timeline, 'normalizeHook 对 UserPromptSubmit 的产出变了').toHaveLength(1)
+    expect(event.timeline[0]).toMatchObject({ type: 'append', item: { kind: 'lifecycle' } })
     expect(event.timeline.some(
       (mutation) => mutation.type === 'append' && mutation.item.kind === 'user_message'
     )).toBe(false)

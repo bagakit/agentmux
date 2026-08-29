@@ -1,5 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import {
+  packageRootsWithTestsOnDisk,
+  workspaceTestFiles
+} from './helpers/workspace-test-files.js'
 
 /**
  * `indexOf` 取出来的扫描面不许是空的。
@@ -35,17 +39,20 @@ import { describe, expect, it } from 'vitest'
  * 不误伤：误伤会让人给判据加豁免，而豁免会把这条守卫吃掉。
  */
 describe('切出来的扫描面不是空的', () => {
-  const TEST_DIR = new URL('../test/', import.meta.url)
-
   /**
-   * `const <name> = readFileSync(\n? new URL('../src/<path>'` —— 允许换行与空白。
+   * `const <name> = readFileSync(\n? new URL('<../>+<path>'` —— 允许换行与空白。
    *
    * 覆盖 `src/` **整棵树**而不只是 `renderer/src/`：`main/` 那一侧才是 `ipc.ts`、
    * `browser-view-manager.ts` 这些靠切片判据守着的文件所在的地方，把它排除在外等于在守卫自己身上
    * 留一块盲区（实测：全仓 104 处绑定里 14 处在 renderer 之外，12 处在 `main/`）。
+   *
+   * 上溯层数是 `(\.\.\/)+` 而不是写死一层的 `\.\.\/src\/`：扫描面递归之后，
+   * `packages/core/test/providers/kimi.test.ts` 这类子目录里的文件读源码写的是 `'../../src/…'`，
+   * 钉死一层会把它们整批漏掉——而漏掉时没有任何东西会红。目标目录名也不再钉 `src/`：
+   * `stylesheet-organisation.test.ts` 读的是 `'../../../docs/design/…'`，那同样是一份「锚点落空就
+   * 静默恒真」的扫描面，没有理由不守。
    */
-  const SOURCE_BINDING_RE =
-    /const\s+(\w+)\s*=\s*readFileSync\(\s*new URL\(\s*'(\.\.\/src\/[^']+)'/g
+  const SOURCE_BINDING_RE = /const\s+(\w+)\s*=\s*readFileSync\(\s*new URL\(\s*'((?:\.\.\/)+[^']+)'/g
   /** `<var>.indexOf('<literal>'` —— 只认单引号字面量。 */
   const INDEX_OF_RE = /(\w+)\.indexOf\(\s*'((?:[^'\\]|\\.)*)'/g
 
@@ -56,43 +63,53 @@ describe('切出来的扫描面不是空的', () => {
     )
   }
 
-  const testFiles = readdirSync(TEST_DIR).filter((name) => /\.tsx?$/.test(name))
+  const testFiles = workspaceTestFiles()
 
-  it('扫描面自检：test 目录读得到，且里面真有这种取锚点的写法', () => {
+  it('扫描面自检：全部 workspace test 树读得到，且里面真有这种取锚点的写法', () => {
     // 这条判据自己也是扫描式的，所以它自己也得证明扫到了东西——否则它正是它要防的那种东西。
-    expect(testFiles.length, 'test 目录扫出来是空的').toBeGreaterThan(100)
-    const withAnchors = testFiles.filter((name) => {
-      const text = readFileSync(new URL(name, TEST_DIR), 'utf8')
+    expect(testFiles.length, 'workspace test 树扫出来是空的').toBeGreaterThan(700)
+
+    // 只数文件总数挡不住**丢掉一整个包**：apps/desktop 一家就有近 600 个文件，把 packages/* 从
+    // workspace 声明里删掉，总数仍然过任何合理阈值。所以再拿一个独立来源（磁盘上直接找带 test 树
+    // 的包目录）对一次——两个来源只在缺陷处分岔。
+    const declaredRoots = [...new Set(testFiles.map((file) => file.relPath.slice(0, file.relPath.indexOf('/test/'))))]
+    expect(declaredRoots.sort(), 'workspace 声明派生出的包与磁盘上带 test 树的包对不上').toEqual(
+      packageRootsWithTestsOnDisk()
+    )
+
+    const withAnchors = testFiles.filter((file) => {
+      const text = readFileSync(file.absPath, 'utf8')
       SOURCE_BINDING_RE.lastIndex = 0
       INDEX_OF_RE.lastIndex = 0
       return SOURCE_BINDING_RE.test(text) && INDEX_OF_RE.test(text)
     })
     expect(
       withAnchors.length,
-      '一个「从源码读字符串再 indexOf 取锚点」的文件都没扫到——两条正则里至少有一条不认当前写法了'
-    ).toBeGreaterThan(3)
+      '「从源码读字符串再 indexOf 取锚点」的文件扫得太少——两条正则里至少有一条不认当前写法了'
+    ).toBeGreaterThan(25)
   })
 
   it('每个 indexOf 锚点都真的出现在它所读的那个源文件里', () => {
     const sourceCache = new Map<string, string | null>()
-    const readSource = (relative: string): string | null => {
-      if (!sourceCache.has(relative)) {
+    const readSource = (dirUrl: URL, relative: string): string | null => {
+      const key = new URL(relative, dirUrl).pathname
+      if (!sourceCache.has(key)) {
         try {
-          // 捕获到的是 `../src/…`（相对 test 目录），所以基址就是 TEST_DIR——与测试文件里那句
-          // `new URL('../src/…', import.meta.url)` 解析成同一个绝对路径。
-          sourceCache.set(relative, readFileSync(new URL(relative, TEST_DIR), 'utf8'))
+          // 捕获到的是 `../…`，相对的是**那个测试文件自己所在的目录**——扫描面递归之后，
+          // test/ 与 test/providers/ 下的文件上溯层数不同，拿单一基址去解析会整批错位。
+          sourceCache.set(key, readFileSync(key, 'utf8'))
         } catch {
           // 源文件本身没了是另一条判据的事（那种情况 readFileSync 会在真测试里直接抛），这里跳过。
-          sourceCache.set(relative, null)
+          sourceCache.set(key, null)
         }
       }
-      return sourceCache.get(relative) ?? null
+      return sourceCache.get(key) ?? null
     }
 
     const offenders: string[] = []
     let checked = 0
-    for (const name of testFiles) {
-      const text = readFileSync(new URL(name, TEST_DIR), 'utf8')
+    for (const file of testFiles) {
+      const text = readFileSync(file.absPath, 'utf8')
 
       // 先把「哪个变量读的哪个文件」收齐，再逐个 indexOf 去对。
       const boundTo = new Map<string, string>()
@@ -106,19 +123,21 @@ describe('切出来的扫描面不是空的', () => {
       for (let m = INDEX_OF_RE.exec(text); m; m = INDEX_OF_RE.exec(text)) {
         const relative = boundTo.get(m[1]!)
         if (relative === undefined) continue
-        const source = readSource(relative)
+        const source = readSource(file.dirUrl, relative)
         if (source === null) continue
         checked += 1
         const anchor = unescape(m[2]!)
         if (!source.includes(anchor)) {
           const line = text.slice(0, m.index).split('\n').length
-          offenders.push(`${name}:${line} 在 ${relative} 里找不到锚点 ${JSON.stringify(anchor)}`)
+          offenders.push(`${file.relPath}:${line} 在 ${relative} 里找不到锚点 ${JSON.stringify(anchor)}`)
         }
       }
     }
 
     // 判据非空自检：一对锚点都没核到的话，上面那个 `offenders` 空得毫无意义。
-    expect(checked, '一个锚点都没核到——绑定与 indexOf 没配上，这条判据什么都没检查').toBeGreaterThan(20)
+    // 阈值按放大后的扫描面重设（实测 91）：写 > 0 的话，扫描面从一个包扩到全仓后几乎不可能红，
+    // 等于没守。
+    expect(checked, '核到的锚点太少——绑定与 indexOf 没配上，这条判据基本没在检查').toBeGreaterThan(70)
     expect(
       offenders,
       '这些锚点在源文件里不存在，`indexOf` 返回 -1，切出来的是空串，之后的 `not.toContain` 恒真：\n' +

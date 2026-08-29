@@ -26,6 +26,7 @@ describe('样式表的组织', () => {
       'surfaces.css',
       'board.css',
       'global-board.css',
+      'focus.css',
       'pmo-teams-topic.css',
       'browser.css',
       'agent.css',

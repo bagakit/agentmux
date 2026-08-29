@@ -180,6 +180,13 @@ describe('AgentMux doctor', () => {
         }
       }
     })
+    // `report.agents` 空了的话，下面那条 `every` 照样绿——而「doctor 一个 agent 都没报」
+    // 比「某个 agent 没被标 blocked」严重得多。拿 catalog 的规模钉一次长度：doctor 在 host
+    // 不可达时是 `catalog.map(blockedAgent)`，少一个、或者整个空掉，这里当场红。不写死 13：
+    // 那会让每次新增 Provider 都打红这条，而它并不关心 Provider 有几个，只关心一个都没漏。
+    expect(report.agents, 'doctor 漏报了 catalog 里的 agent').toHaveLength(
+      new AgentProviderRegistry().catalog().length
+    )
     expect(report.agents.every((agent) => agent.probe === 'blocked')).toBe(true)
   })
 })

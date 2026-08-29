@@ -36,7 +36,13 @@ describe('Focus / Workspaces / Work navigation', () => {
   })
 
   it('keeps the Project Rail out of the global Agents surface', async () => {
-    const source = readFileSync(join(process.cwd(), 'src/renderer/src/App.tsx'), 'utf8')
+    // 基址取本文件的位置而不是 `process.cwd()`：cwd 取决于谁在哪一层发起 vitest，从仓根跑
+    // （`pnpm test:fast` 就是）解析成 `<repo>/src/…` 直接 ENOENT，从 apps/desktop 跑才对。
+    // 同一条判据在两个目录下一红一绿，那不是判据，是掷硬币。
+    // 用 `import.meta.dirname` 而非 `new URL(…, import.meta.url)`：happy-dom 环境下
+    // `import.meta.url` 是 http scheme，`readFileSync` 会抛 "The URL must be of scheme file"。
+    // 本仓其它 happy-dom 测试（session-connecting-surface、message-tools-three-state）也都这么写。
+    const source = readFileSync(join(import.meta.dirname, '../src/renderer/src/App.tsx'), 'utf8')
     expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents'")
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
