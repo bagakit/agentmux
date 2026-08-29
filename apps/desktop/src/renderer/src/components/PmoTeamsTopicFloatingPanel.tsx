@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -40,12 +40,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const agentNames = useAppStore((state) => state.agentNames)
   const reportError = useAppStore((state) => state.reportError)
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
-  const [dragging, setDragging] = useState(false)
   const [opening, setOpening] = useState(false)
-  const panelRef = useRef<HTMLDivElement | null>(null)
-  const panelDragRef = useRef<PanelDrag | null>(null)
-  const floatingRef = useRef(floating)
-  floatingRef.current = floating
   const deliveredPromptRef = useRef<string | null>(null)
   const conversationInitializedRef = useRef<string | null>(null)
   const wasOpenRef = useRef(false)
@@ -144,6 +139,49 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     return () => window.removeEventListener('resize', onResize)
   }, [floating, setFloating])
 
+  const workbench = useMemo(
+    () => <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" visible={visible} interactiveResize={false} />,
+    [visible]
+  )
+
+  if (!scratch) return null
+
+  return (
+    <PmoTeamsFloatingWindow
+      floating={floating}
+      opening={opening}
+      visible={visible}
+      onUpdate={setFloating}
+      onClose={requestPmoTeamsTopicFloatingClose}
+    >
+      {workbench}
+    </PmoTeamsFloatingWindow>
+  )
+}
+
+type PmoTeamsFloatingWindowProps = {
+  floating: ReturnType<typeof usePmoTeamsTopicFloatingState>[0]
+  opening: boolean
+  visible: boolean
+  onUpdate: (next: Partial<ReturnType<typeof usePmoTeamsTopicFloatingState>[0]>) => void
+  onClose: () => void
+  children: React.ReactNode
+}
+
+const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
+  floating,
+  opening,
+  visible,
+  onUpdate,
+  onClose,
+  children
+}: PmoTeamsFloatingWindowProps): React.JSX.Element {
+  const [dragging, setDragging] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const panelDragRef = useRef<PanelDrag | null>(null)
+  const floatingRef = useRef(floating)
+  floatingRef.current = floating
+
   useEffect(() => {
     if (!floating.open || !panelRef.current) return
     panelRef.current.focus({ preventScroll: true })
@@ -158,14 +196,12 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       const width = Math.round(rect.width)
       const height = Math.round(rect.height)
       if (width !== Math.round(floating.size.width) || height !== Math.round(floating.size.height)) {
-        setFloating({ size: { width, height } })
+        onUpdate({ size: { width, height } })
       }
     })
     observer.observe(element)
     return () => observer.disconnect()
-  }, [floating.open, floating.size.height, floating.size.width, setFloating])
-
-  const geometry = { left: floating.position.left, top: floating.position.top, width: floating.size.width, height: floating.size.height }
+  }, [floating.open, floating.size.height, floating.size.width, onUpdate])
 
   const clearDragFrame = (): void => {
     const drag = panelDragRef.current
@@ -215,7 +251,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
           top: drag.top + drag.latestY - drag.startY
         }
       })
-      setFloating({ position: next.position })
+      onUpdate({ position: next.position })
     }
     const target = panelRef.current
     if (target && target.hasPointerCapture?.(drag.pointerId)) {
@@ -238,8 +274,6 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       finishPanelDrag(false)
     }
   }, [])
-
-  if (!scratch) return null
 
   const onPanelPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return
@@ -273,43 +307,40 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
     finishPanelDrag(true, event.pointerId)
   }
 
+  const geometry = { left: floating.position.left, top: floating.position.top, width: floating.size.width, height: floating.size.height }
   return (
-    <>
-      <div
-        ref={panelRef}
-        className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}${dragging ? ' is-dragging' : ''}`}
-        id="pmo-teams-topic-floating-panel"
-        role="dialog"
-        aria-modal="false"
-        aria-hidden={!visible}
-        aria-label={PMO_TEAMS_TOPIC_TITLE}
-        data-pmo-teams-topic-floating
-        tabIndex={-1}
-        style={floating.open ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
-      >
-        <div className={`pmo-teams-topic-floating__shell${dragging ? ' is-dragging' : ''}`}>
-          {floating.open ? (
-            <div
-              className="pmo-teams-topic-floating__titlebar pmo-teams-topic-floating__titlebar--attached"
-              onPointerDown={onPanelPointerDown}
-              onPointerMove={onPanelPointerMove}
-              onPointerUp={onPanelPointerEnd}
-              onPointerCancel={onPanelPointerEnd}
-            >
-              <span className="pmo-teams-topic-floating__identity">
-                <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" />
-                <span><strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong><small>Request routing</small></span>
-              </span>
-              <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
-                <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={requestPmoTeamsTopicFloatingClose}><X size={13} /></button>
-              </div>
+    <div
+      ref={panelRef}
+      className={`pmo-teams-topic-floating${floating.open ? '' : ' pmo-teams-topic-floating--hidden'}${opening ? ' pmo-teams-topic-floating--opening' : ''}${dragging ? ' is-dragging' : ''}`}
+      id="pmo-teams-topic-floating-panel"
+      role="dialog"
+      aria-modal="false"
+      aria-hidden={!visible}
+      aria-label={PMO_TEAMS_TOPIC_TITLE}
+      data-pmo-teams-topic-floating
+      tabIndex={-1}
+      style={floating.open ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
+    >
+      <div className={`pmo-teams-topic-floating__shell${dragging ? ' is-dragging' : ''}`}>
+        {floating.open ? (
+          <div
+            className="pmo-teams-topic-floating__titlebar pmo-teams-topic-floating__titlebar--attached"
+            onPointerDown={onPanelPointerDown}
+            onPointerMove={onPanelPointerMove}
+            onPointerUp={onPanelPointerEnd}
+            onPointerCancel={onPanelPointerEnd}
+          >
+            <span className="pmo-teams-topic-floating__identity">
+              <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" />
+              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong>
+            </span>
+            <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
+              <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={onClose}><X size={13} /></button>
             </div>
-          ) : null}
-          <div className="pmo-teams-topic-floating__body">
-            <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" visible={visible} interactiveResize={false} />
           </div>
-        </div>
+        ) : null}
+        <div className="pmo-teams-topic-floating__body">{children}</div>
       </div>
-    </>
+    </div>
   )
-}
+})

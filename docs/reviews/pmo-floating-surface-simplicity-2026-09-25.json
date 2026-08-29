@@ -1,0 +1,33 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "PMO floating surface simplicity and reference review",
+  "scope": "PMO Teams floating workspace shell, title hierarchy, and drag isolation",
+  "references": [
+    {
+      "name": "a mature workbench FloatingTerminalPanelSurface",
+      "path": "a mature workbench/src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx",
+      "evidence": ["36px utility tabbar", "Tabbar carries the workspace identity", "single inner surface and separate window controls"]
+    },
+    {
+      "name": "AgentMux workbench tabbar",
+      "path": "apps/desktop/src/renderer/src/styles/workbench.css",
+      "evidence": ["root pane tabbar is 36px", "tabbar is the chrome owner", "actions share the same top row"]
+    }
+  ],
+  "decision": {
+    "title": "Use one compact utility rail and let the embedded Workbench own the Tab/Region chrome",
+    "rules": [
+      "No large PMO title or permanent subtitle.",
+      "No duplicate titlebar above the Workbench root tabbar.",
+      "Keep the drag owner isolated from high-churn Workbench renders.",
+      "Keep pointer preview compositor-only and persist only at pointer end."
+    ]
+  },
+  "acceptance": [
+    "The first visible PMO rail is 32-36px and uses metadata-sized identity text.",
+    "Removing the permanent subtitle does not remove accessible PMO identity.",
+    "Pointer movement does not trigger setState, localStorage, or a full Workbench render.",
+    "The embedded Tab/Region tools remain directly operable and no content is clipped."
+  ]
+}
