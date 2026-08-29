@@ -33,7 +33,6 @@ const COMPACT_CONTROLS = [
   '.workbench-tab-strip__nav',
   '.workbench-tab__close',
   '.pane-action',
-  '.pane-view-toggle button',
   '.workbench-region__close',
   '.pane-drop-overlay span',
   '.terminal-replay-gap > button'
@@ -50,7 +49,16 @@ const MICRO_MARKS = [
   '.terminal-theme-preview__composer',
   // 10px 高的进度轨（workflow.css:73）。--radius-sm 的 6px 在这个高度上把两端啃成半圆，读起来是
   // 一颗胶囊而不是一条轨。与上面 activity-ruler 那三条同类：量级只有几像素的装饰性刻度。
-  '.wf-rail'
+  '.wf-rail',
+  // 18px 见方的 Region 拓扑缩略图（dock.css）。它画的是"这个 Tab 里分了几格"的示意图形，
+  // 不是面性容器；6px 在 18px 上啃掉三分之一，格子就读不出是格子了。inspector 里那张是同一张图
+  // 的放大版，同一个理由。
+  '.topic-workbench-topology__tab-glyph',
+  '.topic-workbench-topology__inspector-regions',
+  // 图标裁角，与上面 .agent-provider-icon > img 的 3px 同类：18px/30px 的 Provider 图标只是把
+  // 方形图片的四角收一下，不是给它做一个圆角容器。
+  '.pmo-teams-topic-floating__identity img',
+  '.pmo-teams-topic-compact-launcher__button img'
 ]
 
 const DECLARED_EXCEPTIONS = new Set([...COMPACT_CONTROLS, ...MICRO_MARKS])
