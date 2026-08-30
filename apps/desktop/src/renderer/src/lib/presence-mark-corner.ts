@@ -13,11 +13,8 @@
  * 排它的位置，而不是找一个看起来还空着的角。
  */
 
-/** 叠压簇中这一角是否可见。`left-*` 在上，`right-*` 被右邻座盖住。 */
+/** 叠压簇中的四个角。`left-*` 在上，`right-*` 被右邻座盖住。 */
 export type PresenceMarkCorner = 'top-left' | 'bottom-left' | 'top-right' | 'bottom-right'
-
-/** 头像四角里，不被右邻座叠压的那两个。 */
-export const VISIBLE_PRESENCE_CORNERS: readonly PresenceMarkCorner[] = ['top-left', 'bottom-left']
 
 /**
  * 记号 → 落角。键是它在样式表里的类名后缀，使测试能从这里反推该去核哪条规则。
@@ -35,10 +32,3 @@ export const PRESENCE_MARK_CORNERS = {
   /** 显示名字母牌——登记占位。它最需要被看见时（簇里有多枚）恰好被盖住，所以角标位交付不了它。 */
   monogram: 'bottom-right'
 } as const satisfies Record<string, PresenceMarkCorner>
-
-export type PresenceMark = keyof typeof PRESENCE_MARK_CORNERS
-
-/** 这枚记号在叠压簇里看得见吗。 */
-export function presenceMarkIsVisible(mark: PresenceMark): boolean {
-  return VISIBLE_PRESENCE_CORNERS.includes(PRESENCE_MARK_CORNERS[mark])
-}

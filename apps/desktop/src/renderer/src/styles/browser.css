@@ -246,9 +246,6 @@
 .browser-rsi-replay__outcome--script-failed { color: var(--red-text); background: var(--red-bg); }
 .browser-rsi-replay__outcome--indeterminate { color: var(--amber-text); background: var(--amber-bg); }
 .browser-rsi-replay__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-soft); }
-.browser-rsi-spin { animation: browser-rsi-spin .9s linear infinite; }
-@keyframes browser-rsi-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .browser-rsi-spin { animation: none; } }
 @media (max-width: 700px) {
   .browser-rsi-rail { flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
   .browser-rsi-rail__identity { flex-basis: 140px; }
