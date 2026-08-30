@@ -207,7 +207,13 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     // 转发不会留下一个点不动的按钮，而是整段静默换成另一句话，人只会以为这些字本来就没救了。
     // 而这些字是人亲手打的、发不出去了，复制是把它们捞回来的唯一手段。
     ['components/AgentSessionComposer.tsx', ['AgentSessionComposer > jsx:onCopyQueued']],
-    ['components/SessionConnectingSurface.tsx', ['SessionConnectingSurface > copyPrompt']]
+    ['components/SessionConnectingSurface.tsx', ['SessionConnectingSurface > copyPrompt']],
+    // 每条对话消息上那个 Copy 按钮（`f-2ac8fhvwu` 的一部分）。它落地时没进这张表，于是全树自检
+    // 当场把它报成「在转发却无人守」——这正是自检那一条存在的理由：漏登记的不会自己喊。
+    // 它守的东西与别处不同：别处复制的是路径、地址、身份这些**还能再找回来**的短文本，这里复制的
+    // 是一整条 Agent 回合的正文。删掉它，那段字仍在屏幕上，但取出来的唯一一键没了——
+    // 而 `copyState` 三档（idle/copied/failed）还会照常渲染，按钮看着是好的。
+    ['components/ConversationMessage.tsx', ['ConversationMessage > copyMessage']]
   ]
 
   it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {
