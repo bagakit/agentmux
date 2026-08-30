@@ -46,11 +46,19 @@
  *     一次无条件的整串写回就把追加的内容抹掉了（`store.appendAgentComposerDraft` 是
  *     `current + '\n\n' + text` 的读-改-写，被覆盖的正是它刚写进去的那一段）。
  *
- *     今天唯一的外部写入者是 dock 上那个按钮（`SurfaceToolDock` 的浏览器标注动作），点它要先移
- *     焦点、组字因此先结束，所以这条今天不产生可见行为。但它是**取舍**不是巧合，而且这条注释
+ *     外部写入者今天有两个，都走 `appendAgentComposerDraft`：dock 上那个按钮（`SurfaceToolDock`
+ *     的浏览器标注动作），以及对话消息上的选区注解（`SessionPane.annotateMessage`）。两个都要先
+ *     把焦点移出 Composer——dock 按钮是点它就移焦；注解那条更远，弹层自带一个 autoFocus 的
+ *     `ComposerTextarea`，用户是在**那一格**里打字，Composer 根本没有焦点——所以组字都已先结束，
+ *     这条今天不产生可见行为。但它是**取舍**不是巧合，而且这条注释
  *     此前把它写成「压到 compositionend 之后由 store 自己决定要不要还在」——那是假的，读起来像
  *     追加还活着。真要修，`compositionEnd` 不能整串写回，得让它只提交「这次组字新增的那一段」，
  *     那是另一件事（本仓记过「今天没人需要」是会过期的理由）。
+ *
+ *     「只有一条追加路径」不是自然而然的：`annotateMessage` 曾手写过一份读-改-写
+ *     （`getState()` + `setAgentComposerDraft`），于是这条注释说的「唯一」当时是假的，而且两份实现
+ *     在尾部空白上给不同结果。收敛到 `appendAgentComposerDraft` 之后这句话才成立——
+ *     再有人手写第三份，这段描述会重新变成谎。
  *   - 它**没有**测到那次真实的 IME 破坏：desktop 包没有 DOM/IME 测试环境（无 jsdom / happy-dom /
  *     @testing-library，渲染只有 `renderToStaticMarkup`，它不跑 effect 也不派发事件）。所以这一族的
  *     判据分三层：**取值与状态机**在这里，可以直接调用并断言；**壳（`ComposerTextarea`）有没有把
