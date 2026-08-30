@@ -28,6 +28,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
@@ -524,7 +525,7 @@ function SurfaceContent({
   }
   if (surface.kind === 'file') {
     return (
-      <Suspense fallback={<section className="pane-state"><strong>Loading editor…</strong></section>}>
+      <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Editor" title="Loading editor" detail="Bringing up the code editor for this file." />}>
         <EditorPane tabId={tabId} surface={surface} released={monacoReleased} visible={nativeSurfacesVisible} />
       </Suspense>
     )
