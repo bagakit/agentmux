@@ -86,7 +86,7 @@ export function SessionPane({
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const timelineSnapshot = useAppStore((state) => state.timelines[sessionId])
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
-  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
+  const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
@@ -125,9 +125,12 @@ export function SessionPane({
   const recoverSession = useAppStore((state) => state.recoverSession)
   const respondInteraction = useAppStore((state) => state.respondInteraction)
   const annotateMessage = (annotation: ConversationAnnotation): void => {
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    const reference = `Regarding this message:\n> ${annotation.quote.replace(/\n/g, '\n> ')}\n\nNote: ${annotation.note}`
-    setAgentComposerDraft(sessionId, current.trim() ? `${current.trim()}\n\n${reference}` : reference)
+    // 「把一段引文送进当前草稿」这个决定归 store 的 `appendAgentComposerDraft` 所有——
+    // 浏览器标注那条 dock 动作走的就是它。这里此前手写了一份读-改-写（`getState()` +
+    // `setAgentComposerDraft`），两份实现在尾部空白上**不一致**（实测：草稿是 `'Existing\n'` 时
+    // 手写那份给出 `Existing\n\nREF`、store 给出 `Existing\n\n\nREF`）。同一个产品动作在两个
+    // 表面上给两种结果，而只有其中一份有判据。
+    appendAgentComposerDraft(sessionId, `Regarding this message:\n> ${annotation.quote.replace(/\n/gu, '\n> ')}\n\nNote: ${annotation.note}`)
   }
   // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
   // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
