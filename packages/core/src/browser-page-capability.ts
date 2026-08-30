@@ -79,6 +79,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'snapshotText', effect: 'observe', summary: 'read the page as text' },
   { name: 'pageInfo', effect: 'observe', summary: 'read the current url and title' },
   { name: 'captureScreenshot', effect: 'observe', summary: 'capture what the page looks like' },
+  { name: 'elementContext', effect: 'observe', summary: 'read one element in full: selector, role, accessible name, attributes, sanitized html' },
   { name: 'click', effect: 'act', summary: 'click the element a ref points at' },
   { name: 'fillInput', effect: 'act', summary: 'replace an input value' },
   { name: 'typeText', effect: 'act', summary: 'type into the focused element' },

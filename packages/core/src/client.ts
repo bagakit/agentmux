@@ -92,7 +92,12 @@ import {
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller } from './managed-hook-installer.js'
 import { defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
-import { projectAgentMuxRuntimeSubjects, type AgentMuxRuntimeProjection } from './runtime.js'
+import {
+  projectAgentMuxRuntimeSubjects,
+  type AgentMuxRuntimeProjection,
+  type AgentMuxRuntimeSubject,
+  type AgentMuxRuntimeSubjectTarget
+} from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import type {
   AgentCapabilitySnapshot,
@@ -358,7 +363,7 @@ export function terminalEnvironment(
   agentSessionStorePath?: string
 ): Record<string, string> {
   const inheritedPath = environment.PATH ?? process.env.PATH ?? ''
-  return {
+  const resolved: Record<string, string> = {
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     TERM_PROGRAM: 'AgentMux',
@@ -376,6 +381,16 @@ export function terminalEnvironment(
     // reach. The path's authority is whoever constructed the store (the desktop points it at userData).
     ...(agentSessionStorePath ? { AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath } : {})
   }
+  // `environment` is the last merge before the PTY boundary. A desktop process can carry
+  // NO_COLOR/CLICOLOR=0 from the shell that launched it, and passing those values through here makes
+  // Provider behavior diverge: Claude follows them and turns its TUI monochrome while Codex may keep
+  // emitting ANSI. The Runtime baseline removes the same signals for daemon startup; repeat that
+  // invariant at the final Agent/Terminal launch boundary so a stale daemon or executor snapshot cannot
+  // reintroduce them.
+  delete resolved.NO_COLOR
+  if (resolved.FORCE_COLOR === '0') delete resolved.FORCE_COLOR
+  if (resolved.CLICOLOR === '0') delete resolved.CLICOLOR
+  return resolved
 }
 
 /**
@@ -1291,6 +1306,48 @@ export class AgentMuxClient {
       hostId: 'local',
       subjects: projectAgentMuxRuntimeSubjects('local', runs, this.registry.list().map(cloneSession))
     }
+  }
+
+  /**
+   * Project one Runtime Subject from an exact target.
+   *
+   * A caller that already owns an Attachment should pass the Run returned by that Attachment. The
+   * Run is then projected without another status round trip. Callers that only have a stable target
+   * identity pay for one status request for that Run; neither path enumerates the retained Run set.
+   */
+  async runtimeSubject(
+    target: AgentMuxRuntimeSubjectTarget,
+    knownRun?: AgentMuxRun
+  ): Promise<AgentMuxRuntimeSubject> {
+    this.requireConnected()
+    let agentSession: AgentMuxStoredAgentSession | undefined
+    let runId: string
+    if (target.kind === 'agent-session') {
+      agentSession = this.requireAgentSession(target.agentSessionId)
+      runId = agentSession.run.runId
+    } else {
+      runId = target.runId
+    }
+    const run = knownRun ?? this.projectRun(
+      await this.kernel.status(runId),
+      agentSession
+    )
+    const subjectId = target.kind === 'agent-session'
+      ? `agent:local:${target.agentSessionId}`
+      : `terminal:local:${target.runId}`
+    const [subject] = projectAgentMuxRuntimeSubjects(
+      'local',
+      [run],
+      agentSession ? [cloneSession(agentSession)] : [],
+      [{
+        subjectId,
+        target: target.kind === 'agent-session'
+          ? { kind: 'agent-session', agentSessionId: target.agentSessionId }
+          : { kind: 'terminal-run', run: { runId: target.runId } }
+      }]
+    )
+    if (!subject) throw new AgentMuxError(`Runtime subject is not available: ${subjectId}`, 'UNKNOWN_RUNTIME_SUBJECT_TARGET')
+    return subject
   }
 
   async statusAgent(agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus> {

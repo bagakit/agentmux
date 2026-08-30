@@ -6,7 +6,13 @@ import { CLAUDE_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import {
+  buildPromptInputPayload,
+  catalog,
+  managedHookCommand,
+  hookCommandTimeout,
+  sanitizeBracketedPasteText
+} from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -113,6 +119,17 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    // Claude's composer is a real TUI input line. Send the payload first, verify that the \`❯\` line
+    // contains the exact text, then send Enter as a separate CtxMux operation. A single write can
+    // visibly populate the line while the TUI is still in a redraw/steer transition, leaving the
+    // user with text that was never submitted.
+    terminalPromptRender: { frameStart: '\u001b[?2026h', activeComposer: '❯', frameEnd: '\u001b[?2026l' },
+    planPromptInput: (prompt) => ({
+      kind: 'render-then-submit',
+      payload: buildPromptInputPayload(prompt),
+      renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
+      submit: '\r'
+    }),
     interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PermissionRequest', 'PreToolUse'],
       questionTools: ['askuserquestion'],

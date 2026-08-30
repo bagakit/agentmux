@@ -859,7 +859,13 @@ export function ActivityView({
       </div>
       {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
-        <button type="button" className="activity-feed__jump" onClick={jumpToLatest}>
+        <button
+          type="button"
+          className="activity-feed__jump"
+          data-message-tool-control="jump-to-latest"
+          aria-label="Jump to latest message"
+          onClick={jumpToLatest}
+        >
           Jump to latest
         </button>
       ) : null}

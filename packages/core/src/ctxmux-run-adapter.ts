@@ -62,6 +62,7 @@ const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
 const DAEMON_SHUTDOWN_TIMEOUT_MS = 2_000
+const RUN_STATUS_CONCURRENCY = 8
 const execFileAsync = promisify(execFile)
 
 type ArtifactDescriptor = {
@@ -202,6 +203,24 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  map: (value: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = nextIndex++
+      if (index >= values.length) return
+      results[index] = await map(values[index]!, index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker))
+  return results
+}
+
 function localProcessEnvironment(): Record<string, string> {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
@@ -216,6 +235,14 @@ function localProcessEnvironment(): Record<string, string> {
   delete environment.NO_COLOR
   if (environment.FORCE_COLOR === '0') delete environment.FORCE_COLOR
   if (environment.CLICOLOR === '0') delete environment.CLICOLOR
+  // AgentMux can itself be started from an Agent/CI shell. Those markers describe the
+  // desktop host, not a newly launched Agent, and Claude treats them as a child/CI session
+  // (which disables transcript/UI behavior). Explicit Run env overrides are merged after this
+  // baseline, so a caller can still opt into one deliberately.
+  delete environment.CI
+  delete environment.CODEX_CI
+  delete environment.CLAUDECODE
+  delete environment.CLAUDE_CODE_CHILD_SESSION
   return Object.fromEntries(Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined))
 }
 
@@ -851,11 +878,9 @@ export class CtxmuxRunAdapter {
    * `projectRunWith` publishes it. The SDK's own answer is to read the full `RunInfo` with `status`,
    * so that is what this does.
    *
-   * ponytail: N summaries ⇒ N `status` round trips, issued concurrently. Ceiling: a fleet with hundreds
-   * of retained Runs pays hundreds of requests on every list. Upgrade path if that shows up in a trace:
-   * hand the two consumers a summary-shaped type and let each fetch the one Run it actually inspects —
-   * `assertAgentRun` only ever looks at Runs that have a Session, which is a small subset. Not built now;
-   * the call sites are cold-start and reconnect, not a hot loop.
+   * `list()` still needs one full RunInfo per summary because the two projection consumers need fields that
+   * protocol 16 removed from RunSummary. Hydration is deliberately bounded: cold-start and reconnect are
+   * allowed to make progress without turning the retained Run count into the number of simultaneous Unix RPCs.
    *
    * A Run that ends between the list and its `status` is dropped rather than failed: `list` is already a
    * best-effort snapshot (the SDK pages it non-atomically), so a Run disappearing mid-walk is a normal
@@ -864,14 +889,14 @@ export class CtxmuxRunAdapter {
   async list(): Promise<CtxmuxAdapterRun[]> {
     try {
       const summaries = await this.requireClient().list()
-      const runs = await Promise.all(summaries.map(async (summary) => {
+      const runs = await mapWithConcurrency(summaries, RUN_STATUS_CONCURRENCY, async (summary) => {
         try {
           return await this.requireClient().status(summary.id)
         } catch (error) {
           if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null
           throw error
         }
-      }))
+      })
       return runs.flatMap((run) => (run === null ? [] : [this.projectRun(run)]))
     } catch (error) {
       throw translateCtxmuxError(error)
