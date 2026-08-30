@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import {
   EDITOR_COPY_ACTIONS,
@@ -92,9 +93,13 @@ function EditorDiffCanvas({
 }) {
   if (!diff || (diff.loading && !diff.diff)) {
     return (
-      <section className="pane-state">
-        <span>Loading diff…</span>
-      </section>
+      <FullPageLoadingSurface
+        scope="region"
+        phase="loading"
+        eyebrow="File diff"
+        title="Loading diff"
+        detail="Reading the HEAD blob and the worktree file."
+      />
     )
   }
   if (diff.error && !diff.diff) {
