@@ -88,6 +88,6 @@ export function SemanticIcon({ name, size = 14, className, ...props }: { name: S
 
 export function WorkflowSemanticIcon({ status, size = 12, className }: { status: WorkflowAgentStatus; size?: number; className?: string }) {
   const name: SemanticIconName = status === 'running' ? 'workflow' : status
-  const resolvedClassName = [className, status === 'running' ? 'wf-spin' : null].filter(Boolean).join(' ')
+  const resolvedClassName = [className, status === 'running' ? 'spin' : null].filter(Boolean).join(' ')
   return <SemanticIcon name={name} size={size} {...(resolvedClassName ? { className: resolvedClassName } : {})} />
 }

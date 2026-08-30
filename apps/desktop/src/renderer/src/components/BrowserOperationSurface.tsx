@@ -242,7 +242,7 @@ export function BrowserReplayPreview({
       </ol>
       {outcome && outcome.kind !== 'completed' ? <p className={`browser-rsi-replay__outcome browser-rsi-replay__outcome--${outcome.kind}`} role="status"><CircleAlert size={12} aria-hidden="true" /><strong>{replayOutcomeLabel(outcome.kind)}</strong><span>{outcome.message}</span></p> : null}
       <footer className="browser-rsi-replay__actions">
-        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><LoaderCircle className={busy ? 'browser-rsi-spin' : undefined} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
+        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><LoaderCircle className={busy ? 'spin' : undefined} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
         {onRun ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={busy || blockedCount > 0} title={blockedCount > 0 ? 'Resolve blocked steps before running' : 'Run replay'} onClick={onRun}><Play size={12} aria-hidden="true" />Run replay</button> : null}
       </footer>
     </section>
@@ -289,7 +289,7 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
 
 function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
   if (phase === 'running') return <SemanticIcon name="working" size={13} />
-  if (phase === 'preparing') return <LoaderCircle className="browser-rsi-spin" size={13} aria-hidden="true" />
+  if (phase === 'preparing') return <LoaderCircle className="spin" size={13} aria-hidden="true" />
   if (phase === 'waiting') return <Pause size={13} aria-hidden="true" />
   if (phase === 'human') return <UserRound size={13} aria-hidden="true" />
   if (phase === 'completed') return <CheckCircle2 size={13} aria-hidden="true" />
@@ -298,7 +298,7 @@ function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
 }
 
 function StepGlyph({ status }: { status: BrowserOperationStep['status'] }) {
-  if (status === 'running') return <LoaderCircle className="browser-rsi-spin" size={11} aria-hidden="true" />
+  if (status === 'running') return <LoaderCircle className="spin" size={11} aria-hidden="true" />
   if (status === 'completed') return <CheckCircle2 size={11} aria-hidden="true" />
   if (status === 'failed') return <CircleX size={11} aria-hidden="true" />
   return <Hand size={11} aria-hidden="true" />

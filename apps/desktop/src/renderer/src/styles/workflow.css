@@ -78,8 +78,6 @@
 .wf-ico--failed { color: var(--red); }
 .wf-ico--paused { color: var(--amber); }
 .wf-ico--killed { color: var(--text-3); }
-.wf-spin { transform-origin: 50% 50%; animation: wf-spin 1s linear infinite; }
-@keyframes wf-spin { to { transform: rotate(360deg); } }
 .wf-chev { flex: 0 0 auto; transition: transform var(--dur-fast) ease; }
 [aria-expanded='true'] > .wf-chev { transform: rotate(90deg); }
 .wf-flat-note, .wf-tool-row { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; color: var(--text-3); font-size: var(--fs-meta); }
@@ -125,7 +123,6 @@
   .wf-head, .wf-phase__head, .wf-agent__button, .wf-more button, .wf-dock__close, .wf-gallery__theme button { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .wf-spin { animation: none; }
   .wf-chev, .wf-rail__fill { transition: none; }
 }
 
