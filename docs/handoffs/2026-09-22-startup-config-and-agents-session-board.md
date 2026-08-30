@@ -46,7 +46,7 @@
    - `docs/design/agentmux-surface-density.md`
    - `docs/plans/startup-config-diagnostics.json`
    - `docs/reviews/startup-config-diagnostics-plan.md`
-   - `.bagakit` 中 Feature `f-29d8fk466`：`启动配置修复与持久诊断`，T-001 已 start，尚未跑 gate/finish。
+   - Feature `f-29d8fk466`：`启动配置修复与持久诊断`，T-001 已 start，尚未跑 gate/finish。
 3. 另一条并行工作树留下的 Project Rail 改动，不要回滚：
    - `apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx`
    - `apps/desktop/src/renderer/src/styles/chrome.css`
@@ -60,7 +60,7 @@
    - `docs/reviews/agents-session-board-navigation-2026-09-22.md`
    - Feature `f-29e8fufey`：`Agents Session Board 三工作面导航`，T-001 尚未 start。
 
-注意：`.bagakit/feature-tracker` 大多被全局 ignore，不能再次 `git add -f` 整个目录。提交 tracker 时只 stage 这两个 Feature 所需的精确 state/index 路径，沿用仓库已有做法。
+注意：feature-tracker 是本地工作状态，已被 ignore，不要 `git add -f` 整个目录。
 
 ## 启动诊断改动的当前状态
 
@@ -146,6 +146,6 @@
 2. 实现并验证 Agents/Session/Board 三工作面与底部中央切换。
 3. 保留 Project Rail 并行改动，解决冲突后做统一 typecheck/test。
 4. 逐个更新/完成两个 Feature Tracker Task，保留 gate receipt。
-5. 提交一版 clean commit（不要强制添加整个 `.bagakit`）。
+5. 提交一版 clean commit（不要把本地 feature-tracker 加进仓库）。
 6. clean tree 上重新跑 `CI=true pnpm --filter @agentmux/desktop package:mac`，再跑 `package:mac:install`，确认 `report:package` 中 `canonicalMatchesCandidate=true`、`canonicalMatchesCheckout=true`、`runningCanonical=true`、`mismatchCount=0`。
 7. 最后在真实安装包中验证配置已启动、窗口持续存活、Board/Agents/Session 三项可切换；再向用户报告包的 source commit/tree 和未覆盖风险。

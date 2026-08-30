@@ -7,7 +7,7 @@ Implement Feature `f-2be8fv5jc` (`session-placement-adaptive-composer`). The rev
 - `T-001` — bind fork/resume-created tabs to the target Session surface.
 - `T-002` — make the Message Tools input expand with its content.
 
-The canonical task plan is in `.bagakit/feature-tracker/features/f-2be8fv5jc/tasks.json`.
+The canonical task plan is local feature-tracker feature `f-2be8fv5jc` (not repository content).
 
 ## Context
 

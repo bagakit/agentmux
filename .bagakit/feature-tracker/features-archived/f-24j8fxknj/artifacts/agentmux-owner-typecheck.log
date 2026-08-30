@@ -1,7 +1,0 @@
-$ pnpm --filter @agentmux/core build && pnpm -r typecheck
-$ node scripts/build.mjs
-Scope: 2 of 3 workspace projects
-packages/core typecheck$ tsc --noEmit -p tsconfig.json
-packages/core typecheck: Done
-apps/desktop typecheck$ tsc --noEmit -p tsconfig.json
-apps/desktop typecheck: Done

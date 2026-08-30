@@ -1,8 +1,0 @@
-project_type=ui
-execution_root=.
-workspace_mode=current_tree
-execution_detail=current_tree uses the tracker root
-result=pass
-commands:
-- pnpm --filter @agentmux/core exec vitest run test/agent-role-directory.test.ts test/agent-handoff-cli.test.ts --maxWorkers=1 => pass (0)
-- pnpm --filter @agentmux/core typecheck => pass (0)

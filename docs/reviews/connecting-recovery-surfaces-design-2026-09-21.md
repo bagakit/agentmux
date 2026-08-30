@@ -2,7 +2,7 @@
 
 日期：2026-09-21
 范围：`f-27x8fkd5k` 的 Connecting、Terminal 恢复和恢复边界
-设计 packet：`.bagakit/design/connecting-recovery-surfaces/design-packet.toml`
+设计 packet：本地 design packet `connecting-recovery-surfaces`（非仓库内容）。
 
 ## 结论
 

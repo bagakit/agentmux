@@ -43,7 +43,7 @@
 
 ## 恢复入口
 
-先读 `.bagakit/feature-tracker/features/f-24n8fj87m/goal.md`，再核对同目录
+先读 Feature `f-24n8fj87m` 的本地 tracker goal，再核对同目录
 `owner-receipt.json`、`state.json`、`tasks.json`；实际工作树从 state 解析。
 其余 Feature 是独立需求所有者，依据固定 ID 查询其当前或归档记录。
 当前提交、失败日志、下一步和机器路径属于执行证据，不写入稳定 Goal。

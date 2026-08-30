@@ -38,7 +38,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/feature-tracker/features/f-29u8f9ntc/artifacts/T-001-mutation.md",
+          "ref": "feature-tracker/features/f-29u8f9ntc/artifacts/T-001-mutation.md",
           "proves": "删除固定详情 Review here 挂载、跳过 Core 确认或置空请求集合时的变异红绿证据"
         }
       ],
@@ -76,7 +76,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/feature-tracker/features/f-29u8f9ntc/artifacts/T-002-mutation.md",
+          "ref": "feature-tracker/features/f-29u8f9ntc/artifacts/T-002-mutation.md",
           "proves": "未知 Workspace fallback 和嵌套 repo path 变异红绿证据"
         }
       ],

@@ -1,6 +1,6 @@
 # 全局 Board 继续实现交接
 
-当前 Feature 是 `f-27y8fzdf5`（全局 Agents 任务看板重构）。本轮已经把 T-001（全局 Board + Task 右侧工作区 MVP）完成并通过 gate，Feature 仍有 T-002～T-005 四个待办；当前版本可以继续开发，但还不是 Feature 完成态。目标与约束以 `.bagakit/feature-tracker/features/f-27y8fzdf5/goal.md`、`docs/design/agentmux-desktop-interaction.md`、`docs/design/agentmux-surface-density.md` 为准。
+当前 Feature 是 `f-27y8fzdf5`（全局 Agents 任务看板重构）。本轮已经把 T-001（全局 Board + Task 右侧工作区 MVP）完成并通过 gate，Feature 仍有 T-002～T-005 四个待办；当前版本可以继续开发，但还不是 Feature 完成态。目标与约束以 Feature `f-27y8fzdf5` 的本地 tracker goal、`docs/design/agentmux-desktop-interaction.md`、`docs/design/agentmux-surface-density.md` 为准。
 
 已经落地的部分：
 

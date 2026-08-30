@@ -169,7 +169,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-002-mutation.md",
+          "ref": "feature-tracker/features/f-29f8f7krj/artifacts/T-002-mutation.md",
           "proves": "执行时产出候选绑定的变异红绿记录：删除结果组件挂载、将所属工作区换成 active、把无效 URL 放行；逐项红后恢复。"
         }
       ],
@@ -226,7 +226,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-004-mutation.md",
+          "ref": "feature-tracker/features/f-29f8f7krj/artifacts/T-004-mutation.md",
           "proves": "执行时产出删除聚合入口挂载、交换 A/B 目标、确认前跳下一项、整块待处理集合置空四类变异红绿证据。"
         }
       ],
@@ -287,7 +287,7 @@
         },
         {
           "kind": "artifact",
-          "ref": ".bagakit/feature-tracker/features/f-29f8f7krj/artifacts/T-003-candidate-proof.md",
+          "ref": "feature-tracker/features/f-29f8f7krj/artifacts/T-003-candidate-proof.md",
           "proves": "记录真实 UI 操作、重启前后身份/焦点、探针日志、包报告、候选/input digest、消费的变异与调用者证据及清理状态。没有实测不得 finish done。"
         }
       ],

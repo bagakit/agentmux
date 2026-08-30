@@ -1,7 +1,0 @@
-project_type=ui
-execution_root=/private/tmp/agentmux-release.hmfsNQ
-workspace_mode=worktree
-execution_detail=worktree uses state.worktree_path=../../../../../../private/tmp/agentmux-release.hmfsNQ
-result=pass
-commands:
-- pnpm exec vitest run apps/desktop/test/layered-updates.test.ts apps/desktop/test/renderer-update.test.ts apps/desktop/test/terminal-ime.test.ts apps/desktop/test/terminal-redraw-feedback.test.tsx => pass (0)

@@ -49,7 +49,7 @@
     },
     {
       "name": "Pending admission decision already recorded",
-      "path": ".bagakit/feature-tracker/features/f-25z8fff73",
+      "path": "feature-tracker feature f-25z8fff73",
       "evidence": [
         "records the review's objection to f-25q8fccdm T-002 with three independently re-verified facts",
         "names the discriminator: agent-session-continuity.test.ts must stay 20 passed",

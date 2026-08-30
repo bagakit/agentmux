@@ -184,8 +184,7 @@ AgentMux 需要在两条形态完全不同的通路里选一条，而这个选�
 **待决策的内容**：选 JS 插件（要把 AgentMux 的 hook 模型扩出一条「同进程回调」形态）还是选 SSE
 （要给 Core 加一条长连接事件通路）。**决策人是用户**——这是产品/架构取舍，不是取证工作能替代的。
 出处：feature-tracker 的 T-009，`status: blocked`，blocked 原因逐字记录了上述两条通路与
-「选 JS 插件还是 SSE 属架构决策，待用户定夺」（`.bagakit/feature-tracker/features/f-23z8fgsw3/tasks.json`
-的 T-009 blocked.reason，非 git 跟踪）。
+「选 JS 插件还是 SSE 属架构决策，待用户定夺」（Feature `f-23z8fgsw3` T-009 blocked.reason，本地 tracker，非 git 跟踪）。
 
 因此它的正确落点是**待决策（decision-pending）**：证据已备齐、实现被一个明确的、指名到人的决策
 挡住。把它写成「证据不足」会误导下一个读者去补证据——而证据不缺；缺的是一次拍板。
