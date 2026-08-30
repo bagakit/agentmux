@@ -1668,7 +1668,7 @@
     {
       "feat_id": "f-27b8fbsvp",
       "title": "叠压头像簇里注意力角标被右邻座盖住：把状态标记落到可见的一侧",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
