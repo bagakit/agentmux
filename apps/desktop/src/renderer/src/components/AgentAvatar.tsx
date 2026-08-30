@@ -4,6 +4,7 @@ import { Settings2 } from 'lucide-react'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentAvatarAppearance, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { attentionAccentFor } from '../lib/attention-event'
+import { PRESENCE_MARK_CORNERS } from '../lib/presence-mark-corner'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
 import { AgentEnamelFilter } from './AgentEnamelFilter'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -142,7 +143,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }, [position])
 
   const mark = <><AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />
-    {avatar?.badge ? <span className="agent-avatar__badge" data-avatar-badge={avatar.badge}>
+    {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
       <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
     </span> : null}</>
   return <>
@@ -169,9 +170,9 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
           : <span className="agent-avatar__mark">{mark}</span>}
       </span>
       {displayState === 'working'
-        ? <span className="agent-avatar__status agent-avatar__status--working" aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
-        : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" aria-hidden="true" /> : null}
-      {count && count > 1 ? <span className="agent-avatar__count" aria-hidden="true">{count}</span> : null}
+        ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
+        : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
+      {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
     </Element>
     {position ? createPortal(<div ref={panel} id={panelId} className="agent-identity-popover" role="dialog" aria-label="Executor details"
       style={position} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}

@@ -1,4 +1,13 @@
-/* The Provider alpha owns the contour; status, custom badge and count each have one corner. */
+/* The Provider alpha owns the contour; status, custom badge and count each have one corner.
+   落角**不在这份样式表里**：四种记号由 lib/presence-mark-corner.ts 统一分配，组件把结果写成
+   `data-corner`，下面四条规则只负责把某个角翻译成 top/left/right/bottom。叠压簇是右压左
+   （selector.css 的负 margin + z-index 递增），只有左侧两角看得见——理由见密度合同
+   「叠压头像簇的角位分配」。在这里改方位是改不动的：它读的是那份分配。 */
+.agent-avatar [data-corner] { position: absolute; }
+.agent-avatar [data-corner='top-left'] { top: var(--mark-inset); left: var(--mark-inset); }
+.agent-avatar [data-corner='top-right'] { top: var(--mark-inset); right: var(--mark-inset); }
+.agent-avatar [data-corner='bottom-left'] { bottom: var(--mark-inset); left: var(--mark-inset); }
+.agent-avatar [data-corner='bottom-right'] { bottom: var(--mark-inset); right: var(--mark-inset); }
 .agent-avatar {
   width: var(--agent-avatar-size); height: var(--agent-avatar-size); padding: 0; gap: 0; position: relative;
   display: inline-flex; align-items: center; justify-content: center;
@@ -10,18 +19,19 @@
 .agent-avatar__mark { position: relative; align-items: center; justify-content: center; width: var(--agent-avatar-size); height: var(--agent-avatar-size); }
 .agent-avatar__contour { filter: none; }
 .agent-avatar:is(.status--working, [data-attention]) .agent-avatar__contour { filter: none; }
-.agent-avatar .agent-avatar__status { position: absolute; top: -2px; right: -2px; margin: 0; outline: 1px solid var(--surface-1); }
+/* 每枚记号只声明自己的外伸量与外观，方位由上面的 [data-corner] 规则给。 */
+.agent-avatar .agent-avatar__status { --mark-inset: -2px; margin: 0; outline: 1px solid var(--surface-1); }
 .agent-avatar .agent-avatar__status--working {
   width: 11px; height: 11px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; color: var(--status-ink); background: var(--surface-1); box-shadow: none;
 }
 .agent-avatar__badge, .agent-avatar__count {
-  position: absolute; display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);
   font-size: var(--fs-micro); font-weight: 600; line-height: 1; white-space: nowrap; text-transform: none;
 }
-.agent-avatar__badge { top: 1px; left: 1px; width: 8px; height: 8px; border: 1px solid var(--surface-0); border-radius: 50%; }
-.agent-avatar__count { bottom: -4px; right: -4px; padding: 1px; }
+.agent-avatar__badge { --mark-inset: 1px; width: 8px; height: 8px; border: 1px solid var(--surface-0); border-radius: 50%; }
+.agent-avatar__count { --mark-inset: -4px; padding: 1px; }
 button.agent-avatar { cursor: pointer; }
 button.agent-avatar:hover { background: var(--surface-3); }
 button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
