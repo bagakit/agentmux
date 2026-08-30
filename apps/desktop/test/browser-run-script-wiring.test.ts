@@ -369,6 +369,7 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       snapshotText: 'snapshotText()',
       pageInfo: 'pageInfo()',
       captureScreenshot: 'captureScreenshot()',
+      elementContext: 'elementContext("@e1")',
       click: 'click("@e1")',
       fillInput: 'fillInput("@e1", "x")',
       typeText: 'typeText("x")',

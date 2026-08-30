@@ -142,13 +142,21 @@
 .agent-input-stack__identity strong { min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; letter-spacing: 0; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .agent-input-stack__meta { min-width: 0; overflow: hidden; color: var(--neutral-1); letter-spacing: .02em; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .agent-input-stack[data-input-surface='terminal'] .composer { margin: 0; border-color: var(--line-soft); background: var(--surface-0); }
-.session-result-review { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--hl); }
+.session-result-review { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--hl); }
 .session-result-review__identity { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--green); }
-.session-result-review__identity span { display: grid; gap: var(--sp-1); }
+.session-result-review__identity span { display: grid; min-width: 0; gap: var(--sp-1); }
 .session-result-review__identity strong { color: var(--text); font-size: var(--fs-meta); }
 .session-result-review__identity small, .session-result-review__waiting, .session-result-review__hint { color: var(--text-3); font-size: var(--fs-micro); }
-.session-result-review__actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; }
-.session-result-review__hint { margin-left: auto; }
+.session-result-review__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-result-review__actions, .session-result-review__details-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; }
+.session-result-review__details { grid-column: 1 / -1; min-width: 0; max-height: min(30vh, 240px); overflow: auto; padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); }
+.session-result-review__details-actions { justify-content: flex-start; }
+.session-result-review__details-actions .small-button span { min-width: 0; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-result-review__hint { display: block; margin-top: var(--sp-2); }
+@media (max-width: 520px) {
+  .session-result-review { grid-template-columns: minmax(0, 1fr); }
+  .session-result-review__actions { justify-content: flex-start; }
+}
 /* The request is an interruption, so it earns weight from surface fill + elevation and an amber STATUS
    icon — not from a permanent coloured rail (accent expresses state, not decoration) and not from an
    outline (a stroke here would compete with the composer directly beneath it). */
@@ -307,4 +315,3 @@
 .continuous-progress-panel__actions { display: flex; gap:var(--sp-1); }
 .continuous-progress-panel__actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
 .continuous-progress-panel__actions button:hover { color: var(--text); background: var(--surface-3); }
-

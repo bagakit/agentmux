@@ -12,6 +12,88 @@ const ANNOTATION_HOST_ATTRIBUTE = 'data-agentmux-browser-annotation-overlay'
 const DRIVE_STATE_KEY = '__agentMuxBrowserDriveBadge'
 export const BROWSER_DRIVE_BADGE_ATTRIBUTE = 'data-agentmux-browser-drive-badge'
 
+/**
+ * 元素结构化提取的**唯一一份**页面侧实现，注入给两条路共用。
+ *
+ * 两条路是：人点选（{@link buildBrowserElementSelectionScript}，只认 `event.isTrusted` 的真实事件）
+ * 与 Agent 按 ref 取（{@link buildBrowserElementContextScript}，不经指针事件）。它们的**信任边界
+ * 完全不同**，但「一个元素读出来长什么样」必须是同一个答案——否则 Agent 读到的字段与人选出来的
+ * 字段会各自漂移，而脱敏层 `sanitizeBrowserElementSelection` 按一组固定键校验，漂移的那一侧会
+ * 在运行时才炸，且炸的地方离改动很远。
+ *
+ * 写成一个字符串常量而不是两份拷贝：拷贝今天相等，下一次给 `extract` 加字段时只会加到一处。
+ */
+const ELEMENT_EXTRACT_SOURCE = `
+  const bounded = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+  const stableSelector = (element) => {
+    const parts = [];
+    let current = element;
+    while (current && current instanceof Element && current !== document.documentElement && parts.length < 8) {
+      let part = current.tagName.toLowerCase();
+      if (current.id) {
+        part += '#' + CSS.escape(current.id);
+        parts.unshift(part);
+        break;
+      }
+      const parent = current.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
+        if (sameTag.length > 1) part += ':nth-of-type(' + (sameTag.indexOf(current) + 1) + ')';
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return bounded(parts.join(' > '), 1200);
+  };
+  const fixed = (element) => {
+    let current = element;
+    while (current && current instanceof Element) {
+      const position = getComputedStyle(current).position;
+      if (position === 'fixed' || position === 'sticky') return true;
+      current = current.parentElement;
+    }
+    return false;
+  };
+  const extract = (element) => {
+    const rect = element.getBoundingClientRect();
+    const attributes = {};
+    for (const attribute of Array.from(element.attributes).slice(0, 64)) {
+      attributes[bounded(attribute.name, 100)] = bounded(attribute.value, 2000);
+    }
+    const nearbyText = [];
+    const siblings = [element.previousElementSibling, element.nextElementSibling];
+    for (const sibling of siblings) {
+      if (!sibling || nearbyText.length >= 6) continue;
+      const value = bounded(sibling.innerText || sibling.textContent || '', 500);
+      if (value.trim()) nearbyText.push(value);
+    }
+    const text = bounded(element.innerText || element.textContent || '', 4000);
+    return {
+      pageTitle: bounded(document.title, 1000),
+      pageUrl: bounded(location.href, 4000),
+      tagName: bounded(element.tagName.toLowerCase(), 100),
+      role: bounded(element.getAttribute('role') || element.tagName.toLowerCase(), 200),
+      accessibleName: bounded(
+        element.getAttribute('aria-label') || element.getAttribute('alt') || element.getAttribute('title') || text,
+        1000
+      ),
+      selector: stableSelector(element),
+      text,
+      nearbyText,
+      attributes,
+      html: bounded(element.outerHTML, 16384),
+      rectViewport: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      rectPage: {
+        x: rect.x + (Number.isFinite(window.scrollX) ? window.scrollX : 0),
+        y: rect.y + (Number.isFinite(window.scrollY) ? window.scrollY : 0),
+        width: rect.width,
+        height: rect.height
+      },
+      isFixed: fixed(element)
+    };
+  };
+`
+
 export function buildBrowserElementSelectionScript(revision: number): string {
   return `(() => {
   'use strict';
@@ -42,79 +124,12 @@ export function buildBrowserElementSelectionScript(revision: number): string {
 
     let target = null;
     let settled = false;
-    const bounded = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+    ${ELEMENT_EXTRACT_SOURCE}
     const elementFromEvent = (event) => {
       for (const item of event.composedPath()) {
         if (item instanceof Element && item !== host && !host.contains(item)) return item;
       }
       return event.target instanceof Element && event.target !== host ? event.target : null;
-    };
-    const stableSelector = (element) => {
-      const parts = [];
-      let current = element;
-      while (current && current instanceof Element && current !== document.documentElement && parts.length < 8) {
-        let part = current.tagName.toLowerCase();
-        if (current.id) {
-          part += '#' + CSS.escape(current.id);
-          parts.unshift(part);
-          break;
-        }
-        const parent = current.parentElement;
-        if (parent) {
-          const sameTag = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
-          if (sameTag.length > 1) part += ':nth-of-type(' + (sameTag.indexOf(current) + 1) + ')';
-        }
-        parts.unshift(part);
-        current = parent;
-      }
-      return bounded(parts.join(' > '), 1200);
-    };
-    const fixed = (element) => {
-      let current = element;
-      while (current && current instanceof Element) {
-        const position = getComputedStyle(current).position;
-        if (position === 'fixed' || position === 'sticky') return true;
-        current = current.parentElement;
-      }
-      return false;
-    };
-    const extract = (element) => {
-      const rect = element.getBoundingClientRect();
-      const attributes = {};
-      for (const attribute of Array.from(element.attributes).slice(0, 64)) {
-        attributes[bounded(attribute.name, 100)] = bounded(attribute.value, 2000);
-      }
-      const nearbyText = [];
-      const siblings = [element.previousElementSibling, element.nextElementSibling];
-      for (const sibling of siblings) {
-        if (!sibling || nearbyText.length >= 6) continue;
-        const value = bounded(sibling.innerText || sibling.textContent || '', 500);
-        if (value.trim()) nearbyText.push(value);
-      }
-      const text = bounded(element.innerText || element.textContent || '', 4000);
-      return {
-        pageTitle: bounded(document.title, 1000),
-        pageUrl: bounded(location.href, 4000),
-        tagName: bounded(element.tagName.toLowerCase(), 100),
-        role: bounded(element.getAttribute('role') || element.tagName.toLowerCase(), 200),
-        accessibleName: bounded(
-          element.getAttribute('aria-label') || element.getAttribute('alt') || element.getAttribute('title') || text,
-          1000
-        ),
-        selector: stableSelector(element),
-        text,
-        nearbyText,
-        attributes,
-        html: bounded(element.outerHTML, 16384),
-        rectViewport: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-        rectPage: {
-          x: rect.x + (Number.isFinite(window.scrollX) ? window.scrollX : 0),
-          y: rect.y + (Number.isFinite(window.scrollY) ? window.scrollY : 0),
-          width: rect.width,
-          height: rect.height
-        },
-        isFixed: fixed(element)
-      };
     };
     const cleanup = () => {
       document.removeEventListener('pointermove', onPointerMove, true);
@@ -320,4 +335,41 @@ export function buildCancelBrowserDriveBadgeScript(): string {
   if (state && typeof state.cleanup === 'function') state.cleanup();
   return true;
 })()`
+}
+
+/**
+ * Agent 发起的元素上下文：**不经指针事件**，直接对一个已经解出来的元素跑 `extract`。
+ *
+ * ## 为什么这是一条独立的入口，而不是"让 Agent 调人工选择"
+ *
+ * 人工选择那条路上的三个 `event.isTrusted` 门禁是**真实的信任边界**：没有它，页面里的脚本
+ * 自己 `dispatchEvent(new MouseEvent('click'))` 就能让我们把一个它挑好的元素当成"人选的"
+ * 交出去。所以这条新入口的第一条规矩是**不碰那些门禁**——它们继续只认真实事件，Agent 走
+ * 另一条完全不同的路：由主进程用一个 CDP 句柄（`Runtime.callFunctionOn` 的 `objectId`）
+ * 指定元素，页面脚本从来没有机会选目标。
+ *
+ * 换句话说两条路的授权判据不同：人那条是"这个事件是不是真的人干的"，Agent 这条是
+ * "这次调用是不是从一个正在跑的 Browser 操作里来的"。后者由派发层保证——这段代码只可能
+ * 被 `createBrowserPageDispatch` 的 `elementContext` 分支调用，而那个分支只在
+ * `runBrowserScript` 的子进程往回喊 `page-call` 时才到得了。
+ *
+ * ## 为什么它是 `observe`
+ *
+ * 它只读元素，不点、不填、不滚（连 `scrollIntoView` 都不做——那会改变页面的滚动位置，
+ * 而人此刻可能正在看别处）。所以人工接管之后它照常放行：程序被打断时最该做的就是先看一眼
+ * 现在是什么样。
+ *
+ * ## 返回值与人工选择**逐字段相同**
+ *
+ * 共用 {@link ELEMENT_EXTRACT_SOURCE}，所以脱敏层 `sanitizeBrowserElementSelection`
+ * （它按一组固定键 `assertExactKeys`）对两条路都成立。这不是巧合而是要求：两份拷贝今天相等，
+ * 下一次加字段时只会加到一处，而漂移的那一侧会在运行时才炸。
+ */
+export function buildBrowserElementContextDeclaration(): string {
+  return `function () {
+  'use strict';
+  ${ELEMENT_EXTRACT_SOURCE}
+  if (!(this instanceof Element)) return null;
+  return extract(this);
+}`
 }

@@ -12,8 +12,10 @@ import {
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
   type AgentMuxAgentSessionStore,
+  type AgentMuxRun,
   type AgentMuxRunInputData,
   type AgentMuxRuntimeSubject,
+  type AgentMuxRuntimeSubjectTarget,
   type ExecutionHost
 } from '@agentmux/core'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
@@ -595,7 +597,11 @@ export class RuntimeController {
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
         try {
-          const session = await this.sessionById(client, agentSession.agentSessionId, config)
+          const session = await this.sessionByTarget(
+            client,
+            { kind: 'agent-session', agentSessionId: agentSession.agentSessionId },
+            config
+          )
           if (session.kind !== 'agent') {
             throw new Error(`Agent launch projected a non-Agent Session: ${agentSession.agentSessionId}`)
           }
@@ -685,7 +691,12 @@ export class RuntimeController {
         terminalInputKey(request.hostId, run.runId),
         run.acceptedInputBytes
       )
-      return await this.sessionById(client, run.runId, config)
+      return await this.sessionByTarget(
+        client,
+        { kind: 'terminal-run', runId: run.runId },
+        config,
+        run
+      )
     })
   }
 
@@ -715,10 +726,13 @@ export class RuntimeController {
         if (attached.run.runId !== control.run.runId) {
           throw new Error('The Session control changed before its exact Run Attachment was established.')
         }
-        const session = await this.sessionById(
+        const session = await this.sessionByTarget(
           client,
-          control.kind === 'agent' ? control.agentSessionId : control.runId,
-          config
+          control.kind === 'agent'
+            ? { kind: 'agent-session', agentSessionId: control.agentSessionId }
+            : { kind: 'terminal-run', runId: control.runId },
+          config,
+          attached.run
         )
         if ((this.rendererGenerations.get(webContentsId) ?? 0) !== rendererGeneration) {
           throw new Error('The Desktop Renderer changed before its Session Attachment was delivered.')
@@ -948,7 +962,11 @@ export class RuntimeController {
       if (resumed.agentSessionId !== control.agentSessionId) {
         throw new AgentMuxError('Agent resume returned another Session identity.', 'LAUNCH_RESULT_MISMATCH')
       }
-      return await this.sessionById(client, control.agentSessionId, config)
+      return await this.sessionByTarget(
+        client,
+        { kind: 'agent-session', agentSessionId: control.agentSessionId },
+        config
+      )
     })
   }
 
@@ -965,9 +983,11 @@ export class RuntimeController {
   }
 
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
-    return await this.sessionById(
+    return await this.sessionByTarget(
       await this.connectedClient(control.hostId),
-      control.kind === 'agent' ? control.agentSessionId : control.runId,
+      control.kind === 'agent'
+        ? { kind: 'agent-session', agentSessionId: control.agentSessionId }
+        : { kind: 'terminal-run', runId: control.runId },
       config
     )
   }
@@ -997,7 +1017,11 @@ export class RuntimeController {
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'terminal') {
-      const cwd = workspacePath ?? (await this.sessionById(client, control.runId, config)).workspacePath
+      const cwd = workspacePath ?? (await this.sessionByTarget(
+        client,
+        { kind: 'terminal-run', runId: control.runId },
+        config
+      )).workspacePath
       const run = await client.createTerminal({
         createOperationId: randomUUID(),
         workspacePath: cwd
@@ -1008,7 +1032,12 @@ export class RuntimeController {
       )
       return {
         kind: 'terminal-restarted',
-        session: await this.sessionById(client, run.runId, config)
+        session: await this.sessionByTarget(
+          client,
+          { kind: 'terminal-run', runId: run.runId },
+          config,
+          run
+        )
       }
     }
     let stored
@@ -1046,7 +1075,11 @@ export class RuntimeController {
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
     return {
       kind: result.kind,
-      session: await this.sessionById(client, control.agentSessionId, config)
+      session: await this.sessionByTarget(
+        client,
+        { kind: 'agent-session', agentSessionId: control.agentSessionId },
+        config
+      )
     }
   }
 
@@ -1211,17 +1244,13 @@ export class RuntimeController {
     await operation
   }
 
-  private async sessionById(
+  private async sessionByTarget(
     client: AgentMuxClient,
-    subjectId: string,
-    config: AppConfig
+    target: AgentMuxRuntimeSubjectTarget,
+    config: AppConfig,
+    knownRun?: AgentMuxRun
   ): Promise<SessionSnapshot> {
-    const subject = (await client.runtimeProjection()).subjects.find((candidate) => (
-      candidate.kind === 'agent'
-        ? candidate.agentSession.agentSessionId === subjectId
-        : candidate.run.runId === subjectId
-    ))
-    if (!subject) throw new Error(`Runtime subject is not available: ${subjectId}`)
+    const subject = await client.runtimeSubject(target, knownRun)
     return projectSession(subject, config, providerCapabilitiesFrom(client))
   }
 

@@ -34,6 +34,10 @@ export type AgentMuxRuntimeProjection = {
   subjects: AgentMuxRuntimeSubject[]
 }
 
+export type AgentMuxRuntimeSubjectTarget =
+  | { kind: 'terminal-run'; runId: string }
+  | { kind: 'agent-session'; agentSessionId: string }
+
 export type AgentMuxRuntimeProjectionRequest = {
   subjectId: string
   target:
