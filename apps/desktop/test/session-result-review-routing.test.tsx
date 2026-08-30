@@ -34,6 +34,9 @@ describe('SessionResultReview production routing', () => {
   it('mounts the result review strip through SessionPane', async () => {
     await act(async () => root.render(createElement(SessionPane, { sessionId: 'mounted-result', surfaceKind: 'agent', interactiveResize: false, visible: true, linkOrigin: { workspaceId: 'repo', tabGroupId: 'group' } })))
     expect(container.querySelector('.session-result-review')).toBeTruthy()
-    expect(container.querySelector('.session-result-review button')?.textContent).toContain('Activity')
+    const review = container.querySelector('.session-result-review button') as HTMLButtonElement
+    expect(review.textContent).toContain('Review')
+    await act(async () => review.click())
+    expect([...container.querySelectorAll('.session-result-review button')].some((button) => button.textContent?.includes('Activity'))).toBe(true)
   })
 })

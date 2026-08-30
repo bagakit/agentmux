@@ -4,6 +4,8 @@ import type { BrowserCdpSession } from './browser-cdp-session.js'
 import { captureBrowserPageSnapshot } from './browser-page-snapshot.js'
 import { healRef, ledgerFromSnapshot, type BrowserRefLedger } from './browser-ref-ledger.js'
 import { resolveBrowserRef } from './browser-ref-resolve.js'
+import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
+import { sanitizeBrowserElementSelection } from './browser-selection.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -297,6 +299,25 @@ export function createBrowserPageDispatch(
         return context.pageInfo()
       case 'captureScreenshot':
         return await context.captureScreenshot()
+      case 'elementContext': {
+        // Agent 读一个元素的完整上下文。**不经指针事件**——目标由 `callOn` 解出来的 CDP 句柄指定，
+        // 页面脚本没有机会自己挑目标。人工选择那条路上的 `event.isTrusted` 门禁原样不动：
+        // 那是防网页脚本伪造"人选的"的真实边界，这条新入口不碰它（设计 SSOT 的约束）。
+        //
+        // 归 `observe`：只读，连 scrollIntoView 都不做（那会挪走人此刻正在看的位置）。所以人工
+        // 接管之后照常放行。
+        const ref = requireString(args[0], 'ref')
+        const raw = await callOn(ref, buildBrowserElementContextDeclaration())
+        // `this` 不是 Element 时页面侧返回 null。这一条要单独成话：它和"ref 解不开"是完全不同的
+        // 下一步——前者是 ref 指向了一个文本节点之类，后者是那个 ref 根本不在页面上（`handleFor`
+        // 已经各自成话了）。含混成一句会让 Agent 不知道该换 ref 还是该重新 snapshot。
+        if (raw === null) {
+          throw new Error(`${ref} does not point at an element, so it has no element context. Take a fresh snapshot() and use a ref from it.`)
+        }
+        // 与人工选择走同一道脱敏（同一组固定键 assertExactKeys）。脱敏抛出来的是"提取结果形状不对"
+        // ——那是我们自己的 bug 或者页面返回了意外的东西，不该被当成"元素不存在"。
+        return sanitizeBrowserElementSelection(raw)
+      }
 
       // ── 动作（全部按 ref） ─────────────────────────────────────────────
       case 'click':

@@ -4,7 +4,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { BrowserSnapshot } from '../src/shared/contracts.js'
+import type { BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -64,12 +64,65 @@ function setupOrigin(): OpenHttpLinkOrigin {
   return { workspaceId: 'workspace', tabGroupId: 'pane', tabId, regionId }
 }
 
+function terminalSession(): SessionSnapshot {
+  return {
+    id: 'terminal-session',
+    kind: 'terminal',
+    hostId: 'host-a',
+    workspacePath: '/workspace',
+    label: 'Terminal Session',
+    createdAt: 1,
+    updatedAt: 1,
+    processState: 'running',
+    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    latestOutputBytes: 0,
+    providerId: null,
+    control: {
+      kind: 'terminal',
+      hostId: 'host-a',
+      sessionId: 'terminal-session',
+      run: { runId: 'run-terminal-session' }
+    }
+  } as unknown as SessionSnapshot
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
 })
 
 describe('HTTP link routing ownership', () => {
+  it('resolves a Session origin from its durable owner even when another workspace is active', async () => {
+    const origin = setupOrigin()
+    useAppStore.setState({ activeWorkspaceId: 'unrelated-workspace', sessions: [terminalSession()] })
+    const create = vi.spyOn(api.browser, 'create').mockImplementation(async (regionId, url) => browserSnapshot(regionId, url))
+
+    await useAppStore.getState().openHttpLink(
+      { ...origin, sessionId: 'terminal-session' },
+      'https://example.com/session-owned',
+      'tab'
+    )
+
+    const created = Object.values(useAppStore.getState().tabs).find((tab) => tab.id !== origin.tabId)
+    expect(created).toMatchObject({ workspaceId: 'workspace' })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('reports a stale Session origin instead of attaching to another surface', async () => {
+    const origin = setupOrigin()
+    useAppStore.setState({ sessions: [terminalSession()] })
+    const create = vi.spyOn(api.browser, 'create')
+
+    await expect(useAppStore.getState().openHttpLink(
+      { ...origin, sessionId: 'terminal-session', tabId: 'closed-tab', regionId: 'closed-region' },
+      'https://example.com/stale',
+      'tab'
+    )).rejects.toThrow('target Session surface moved or was closed')
+
+    expect(create).not.toHaveBeenCalled()
+    expect(Object.keys(useAppStore.getState().tabs)).toEqual([origin.tabId])
+  })
+
   it('opens a canonical HTTP(S) URL through the system boundary without creating Browser state', async () => {
     const openExternal = vi.spyOn(api.ui, 'openExternal').mockResolvedValue()
     const create = vi.spyOn(api.browser, 'create')

@@ -7,6 +7,8 @@ export type OpenHttpLinkOrigin = {
   tabGroupId: string
   tabId?: string
   regionId?: string
+  /** The Session whose durable surface owns this origin, when opened from a Session view. */
+  sessionId?: string
 }
 
 export function openDestinationNeedsRegion(

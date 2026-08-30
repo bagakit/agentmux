@@ -147,7 +147,7 @@ Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出
 
 Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线，避免常驻 daemon 的旧环境覆盖应用重启后新读取的值。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除基线的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`；Run 显式配置仍可覆盖。配置修改对重启应用后创建的新进程生效，不能修改既有进程的环境。
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`；最终 Agent/Terminal 启动边界再次执行这条清理，避免 executor 快照或长寿命 Runtime 把禁色信号带回来。配置修改对重启应用后创建的新进程生效，不能修改既有进程的环境。
 
 ## 4. 完整 ANSI palette 与 Graphite 工作面
 

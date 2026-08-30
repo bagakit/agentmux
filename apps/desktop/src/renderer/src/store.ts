@@ -62,6 +62,7 @@ import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
+import { resolveSessionPlacement } from './lib/session-placement'
 import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focus'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
@@ -5031,42 +5032,55 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await api.ui.openExternal(url)
       return
     }
-    if (destination !== 'tab' && (!origin.tabId || !origin.regionId)) {
+    const targetPlacement = origin.sessionId
+      ? resolveSessionPlacement({
+          sessionId: origin.sessionId,
+          sessions: get().sessions,
+          tabs: get().tabs,
+          layouts: get().layouts,
+          origin
+        })
+      : null
+    if (targetPlacement && targetPlacement.kind === 'unresolved') {
+      throw new Error(targetPlacement.message)
+    }
+    const placementOrigin = targetPlacement ?? origin
+    if (destination !== 'tab' && (!placementOrigin.tabId || !placementOrigin.regionId)) {
       throw new Error('Directional link destinations require a Tab and Region origin')
     }
 
-    const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : origin.tabId!
+    const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : placementOrigin.tabId!
     const regionId = destination === 'tab' ? initialWorkbenchRegionId(tabId) : newRegionId()
     const pendingLauncher: LauncherWorkbenchSurface = {
       regionId,
       kind: 'launcher',
-      workspaceId: origin.workspaceId
+      workspaceId: placementOrigin.workspaceId
     }
     let planned = false
     let placementError: Error | null = null
     set((current) => {
-      const layout = current.layouts[origin.workspaceId]
+      const layout = current.layouts[placementOrigin.workspaceId]
       if (!layout) {
         placementError = new Error('Workspace layout is unavailable')
         return current
       }
-      if (!findGroup(layout, origin.tabGroupId)) {
+      if (!findGroup(layout, placementOrigin.tabGroupId)) {
         placementError = new Error('Link origin Tab Group is no longer available')
         return current
       }
       if (destination === 'tab') {
         const topicId = inheritedTopicIdForNewTab(
-          origin.workspaceId,
+          placementOrigin.workspaceId,
           layout,
           current.tabs,
-          origin.tabGroupId
+          placementOrigin.tabGroupId
         )
         const createdTab = createWorkbenchTab(tabId, pendingLauncher)
         const tab = topicId ? { ...createdTab, topicId } : createdTab
         // 落点判定收在 addTabPlacement 里（同一族缺陷的唯一判据）。原先这里写的是
         // `nextLayout === layout` 的身份比较——对这条路径恰好等价，但那个判据认不出
         // 「Tab 已在别处、activateTab 返回同一对象」，换到别的调用点就会把正常路径判成失败。
-        const nextLayout = addTabPlacement(layout, origin.tabGroupId, tabId)
+        const nextLayout = addTabPlacement(layout, placementOrigin.tabGroupId, tabId)
         if (!nextLayout) {
           placementError = new Error('Link destination Tab could not be created')
           return current
@@ -5074,16 +5088,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         planned = true
         return {
           tabs: { ...current.tabs, [tabId]: tab },
-          layouts: { ...current.layouts, [origin.workspaceId]: nextLayout }
+          layouts: { ...current.layouts, [placementOrigin.workspaceId]: nextLayout }
         }
       }
 
-      const originTab = current.tabs[origin.tabId!]
+      const originTab = current.tabs[placementOrigin.tabId!]
       if (
         !originTab ||
-        originTab.workspaceId !== origin.workspaceId ||
-        !originTab.regions[origin.regionId!] ||
-        tabGroupForTab(layout, originTab.id) !== origin.tabGroupId
+        originTab.workspaceId !== placementOrigin.workspaceId ||
+        !originTab.regions[placementOrigin.regionId!] ||
+        tabGroupForTab(layout, originTab.id) !== placementOrigin.tabGroupId
       ) {
         placementError = new Error('Link origin Region is no longer available')
         return current
@@ -5094,7 +5108,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const nextTab = addWorkbenchRegion(
         originTab,
-        origin.regionId!,
+        placementOrigin.regionId!,
         destination,
         pendingLauncher
       )
@@ -5108,7 +5122,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
     try {
-      await get().createBrowser(origin.tabGroupId, { tabId, regionId }, url)
+      await get().createBrowser(placementOrigin.tabGroupId, { tabId, regionId }, url)
     } catch (error) {
       set((current) => {
         const liveTab = current.tabs[tabId]
@@ -5119,7 +5133,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             ? { tabs: { ...current.tabs, [tabId]: nextTab } }
             : current
         }
-        const layout = current.layouts[origin.workspaceId]
+        const layout = current.layouts[placementOrigin.workspaceId]
         const currentTabGroupId = tabGroupForTab(layout, tabId)
         if (!layout || !currentTabGroupId) return current
         const tabs = { ...current.tabs }
@@ -5128,7 +5142,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           tabs,
           layouts: {
             ...current.layouts,
-            [origin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId)
+            [placementOrigin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId)
           }
         }
       })

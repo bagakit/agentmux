@@ -59,16 +59,21 @@ describe('Session result review strip', () => {
     useAppStore.setState(baseline, true)
   })
 
+  async function expandReview(): Promise<void> {
+    const review = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Review')) as HTMLButtonElement
+    expect(review).toBeTruthy()
+    await act(async () => review.click())
+  }
+
   it('does not offer a Diff action when the Session workspace is unknown', async () => {
     const openFileDiff = vi.fn(() => Promise.resolve())
     useAppStore.setState({ openFileDiff: openFileDiff as never })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review', 'Close'])
+    await expandReview()
     expect(container.textContent).toContain('workspace could not be located')
-    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
-      'Activity',
-      'Continue in Session'
-    ])
+    expect(container.textContent).toContain('Activity')
     expect(openFileDiff).not.toHaveBeenCalled()
   })
 
@@ -91,6 +96,7 @@ describe('Session result review strip', () => {
       error: null
     })
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
     const diff = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('src/app.ts')) as HTMLButtonElement
     expect(diff).toBeTruthy()
     expect(container.textContent).not.toContain('README.md')
@@ -108,6 +114,7 @@ describe('Session result review strip', () => {
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: 'packages/app/src/app.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
     const diff = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Review changes')) as HTMLButtonElement
     expect(diff).toBeTruthy()
     await act(async () => diff.click())
@@ -124,10 +131,7 @@ describe('Session result review strip', () => {
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: '../outside.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
-    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
-      'Activity',
-      'Continue in Session'
-    ])
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review', 'Close'])
     expect(openFileDiff).not.toHaveBeenCalled()
   })
 
@@ -137,6 +141,7 @@ describe('Session result review strip', () => {
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     useAppStore.setState({ sessions: [nestedSession] })
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
     expect(container.textContent).toContain('No Git changes were found')
     expect(container.textContent).not.toContain('not a Git repository')
 
@@ -152,7 +157,17 @@ describe('Session result review strip', () => {
 
   it('keeps an explicit unknown-workspace state when no result target is known', async () => {
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
     expect(container.textContent).toContain('workspace could not be located')
+  })
+
+  it('keeps the default surface compact and lets the user close it', async () => {
+    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    expect(container.querySelector('[data-result-review-expanded="false"]')).toBeTruthy()
+    const close = [...container.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Dismiss result review') as HTMLButtonElement
+    expect(close).toBeTruthy()
+    await act(async () => close.click())
+    expect(container.querySelector('.session-result-review')).toBeNull()
   })
 
   it('offers each explicitly mentioned HTTP or HTTPS preview and routes to the existing Browser owner', async () => {
@@ -160,6 +175,7 @@ describe('Session result review strip', () => {
     useAppStore.setState({ openHttpLink: openHttpLink as never, config: { workspaces: [{ id: 'repo', path: '/repo', name: 'Repo', hostId: 'local', kind: 'folder' }] } as never })
     const items = [{ id: 'assistant-1', kind: 'assistant_message', content: 'Preview http://127.0.0.1:4173 and https://preview.example.test', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
     await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
     const previews = [...container.querySelectorAll('button')].filter((button) => button.textContent?.includes('Preview'))
     expect(previews).toHaveLength(2)
     await act(async () => previews[0]!.click())

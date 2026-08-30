@@ -23,7 +23,28 @@ export type TerminalPalette = Readonly<{
   brightMagenta: string
   brightCyan: string
   brightWhite: string
+  /** The 240 indexed ANSI colors (16–255), supplied explicitly to xterm. */
+  // xterm's ITheme type is mutable, but the shared palette is frozen at construction.
+  extendedAnsi: string[]
 }>
+
+function xtermExtendedAnsiPalette(): string[] {
+  const colors: string[] = []
+  const levels = [0, 95, 135, 175, 215, 255]
+  for (const red of levels) {
+    for (const green of levels) {
+      for (const blue of levels) {
+        colors.push('#' + red.toString(16).padStart(2, '0') + green.toString(16).padStart(2, '0') + blue.toString(16).padStart(2, '0'))
+      }
+    }
+  }
+  for (let gray = 8; gray <= 238; gray += 10) {
+    colors.push('#' + gray.toString(16).padStart(2, '0').repeat(3))
+  }
+  return Object.freeze(colors) as unknown as string[]
+}
+
+const EXTENDED_ANSI = xtermExtendedAnsiPalette()
 
 // Keep a proven ANSI role palette, but use a true-black terminal work area
 // so Codex's own gray composer and message surfaces remain visibly distinct.
@@ -52,7 +73,8 @@ const TERMINAL_PALETTES: Readonly<Record<TerminalThemeId, TerminalPalette>> = Ob
     brightBlue: '#7aa6da',
     brightMagenta: '#c397d8',
     brightCyan: '#70c0b1',
-    brightWhite: '#eaeaea'
+    brightWhite: '#eaeaea',
+    extendedAnsi: EXTENDED_ANSI
   }),
   'catppuccin-mocha': Object.freeze({
     background: '#1e1e2e',
@@ -76,7 +98,8 @@ const TERMINAL_PALETTES: Readonly<Record<TerminalThemeId, TerminalPalette>> = Ob
     brightBlue: '#89b4fa',
     brightMagenta: '#f5c2e7',
     brightCyan: '#94e2d5',
-    brightWhite: '#a6adc8'
+    brightWhite: '#a6adc8',
+    extendedAnsi: EXTENDED_ANSI
   })
 })
 
