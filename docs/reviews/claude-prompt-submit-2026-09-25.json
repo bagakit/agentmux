@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Claude prompt submission review",
+  "scope": "Message Tool prompt delivery and submit key handling for Claude sessions",
+  "evidence": [
+    {
+      "source": "User report",
+      "observation": "Text reaches Claude's input box but is not submitted.",
+      "risk": "The UI reports or implies a sent prompt while Claude remains in its editor, causing silent lost work and duplicate sends."
+    },
+    {
+      "source": "Shared prompt path",
+      "observation": "Provider input is delivered through the common AgentMux send boundary, while terminal keyboard protocol state is learned from the live PTY.",
+      "risk": "A static Enter/CR assumption can write text successfully but miss the provider's active submit sequence."
+    }
+  ],
+  "decision": {
+    "submission": "Use the provider's declared prompt readiness and keyboard protocol state to send the actual submit sequence, then confirm delivery through the existing runtime/terminal observation path.",
+    "failure": "Keep the draft and expose a retryable inline state when submission is not confirmed."
+  },
+  "acceptance": [
+    "A Claude prompt test proves the text write and submit key are both sent in order.",
+    "The send path does not claim success while Claude remains in its input editor.",
+    "Readiness or submit failure keeps the user's text available and is visible without blocking a healthy Agent."
+  ]
+}

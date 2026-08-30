@@ -20,12 +20,18 @@ describe('local Run environment', () => {
     vi.stubEnv('AGENTMUX_TEST_ENV', 'before-daemon')
     vi.stubEnv('NO_COLOR', '1')
     vi.stubEnv('FORCE_COLOR', '0')
+    vi.stubEnv('CI', 'true')
+    vi.stubEnv('CODEX_CI', '1')
+    vi.stubEnv('CLAUDECODE', '1')
+    vi.stubEnv('CLAUDE_CODE_CHILD_SESSION', '1')
     // Only the wire is replaced. AgentMuxClient → adapter → SDK Run spec is the production path.
     const client = new AgentMuxClient()
     Object.assign(client, { kernel: adapter, connected: true })
     try {
       vi.stubEnv('AGENTMUX_TEST_ENV', 'after-daemon')
-      await expect(client.createTerminal({ workspacePath: '/tmp', command: '/bin/sh' }))
+      await expect(client.createTerminal({ workspacePath: '/tmp', command: '/bin/sh', env: {
+        NO_COLOR: '1', FORCE_COLOR: '0', CLICOLOR: '0'
+      } }))
         .rejects.toThrow('captured at SDK boundary')
       vi.stubEnv('AGENTMUX_TEST_ENV', 'changed-again')
       await expect(client.createTerminal({ workspacePath: '/tmp', command: '/bin/sh', env: { AGENTMUX_TEST_OVERRIDE: 'run', EMPTY: '' } }))
@@ -38,6 +44,11 @@ describe('local Run environment', () => {
       expect(captured[2]!.env.AGENTMUX_TEST_OVERRIDE).toBe('explicit')
       expect(captured[0]!.env.NO_COLOR).toBeUndefined()
       expect(captured[0]!.env.FORCE_COLOR).toBeUndefined()
+      expect(captured[0]!.env.CLICOLOR).toBeUndefined()
+      expect(captured[0]!.env.CI).toBeUndefined()
+      expect(captured[0]!.env.CODEX_CI).toBeUndefined()
+      expect(captured[0]!.env.CLAUDECODE).toBeUndefined()
+      expect(captured[0]!.env.CLAUDE_CODE_CHILD_SESSION).toBeUndefined()
       expect(captured[0]!.env.TERM_PROGRAM).toBe('AgentMux')
       const child = await exec(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.AGENTMUX_TEST_ENV, process.env.AGENTMUX_TEST_OVERRIDE, process.env.EMPTY]))'], { env: captured[1]!.env })
       expect(JSON.parse(child.stdout)).toEqual(['changed-again', 'run', ''])

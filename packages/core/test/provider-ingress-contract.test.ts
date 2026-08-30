@@ -15,7 +15,7 @@ import { ackDeliveryBatch, checkDeliveries, type DeliveryQueue } from '../src/ag
  * merging stay two facts.
  *
  * This file drives the REAL client (only ctxmux I/O faked) so the assertions are about behaviour, not a
- * source scan. The single-phase provider (claude) is enough for the ingress properties; the two-facts
+ * source scan. The single-phase provider (TraeX) is enough for the ingress properties; the two-facts
  * separation is proven directly against the two owning modules.
  *
  * Why this is the right shape (verbatim from the plan):
@@ -38,8 +38,8 @@ function storedSession(
   return {
     kind: 'agent',
     agentSessionId: AGENT_SESSION_ID,
-    providerId: 'claude',
-    executorId: 'claude',
+    providerId: 'traex',
+    executorId: 'traex',
     hostId: 'local',
     workspacePath: WORKSPACE,
     run: { runId: RUN_ID },
@@ -57,7 +57,7 @@ function runProjection(acceptedInputBytes: number) {
   return {
     runId: RUN_ID,
     lifecycleOperationId: null,
-    program: 'claude',
+    program: 'traex',
     args: [] as string[],
     workspacePath: WORKSPACE,
     pid: 321,

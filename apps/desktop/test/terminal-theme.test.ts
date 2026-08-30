@@ -50,7 +50,8 @@ describe('terminal appearance', () => {
       brightBlue: '#7aa6da',
       brightMagenta: '#c397d8',
       brightCyan: '#70c0b1',
-      brightWhite: '#eaeaea'
+      brightWhite: '#eaeaea',
+      extendedAnsi: expect.any(Array)
     })
   })
 
@@ -66,7 +67,10 @@ describe('terminal appearance', () => {
       'catppuccin-mocha'
     ])
     for (const { theme } of TERMINAL_THEME_CATALOG) {
-      expect(Object.keys(theme)).toHaveLength(22)
+      expect(Object.keys(theme)).toHaveLength(23)
+      expect(theme.extendedAnsi).toHaveLength(240)
+      expect(theme.extendedAnsi?.[208 - 16]).toBe('#ff8700')
+      expect(theme.extendedAnsi?.[148 - 16]).toBe('#afd700')
       expect(theme.black).not.toBe(theme.background)
     }
   })

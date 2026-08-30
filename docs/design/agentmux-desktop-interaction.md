@@ -1506,6 +1506,28 @@ Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Regio
 
 Agent Input 的编辑区是这一行的主要内容，单行姿态下应优先获得剩余宽度。左右工具和发送、邮箱、身份控件保留稳定命中区，但不能用固定宽度把中间文字压成窄列；长文本在编辑区自然换行。Agent 名称、Executor 和 Session 信息留在上方身份 rail，不能为了给编辑区让路而重复塞进正文行。
 
+### Message Tools 的底部回看入口（2026-09-25）
+
+当 Message Tools 的编辑区或消息内容已经离开底部时，在 composer 内提供一个紧凑的“滑动到底部”入口。入口只负责把同一个编辑区滚动容器带回最新内容，不创建第二个滚动面，也不改变草稿或工具状态。编辑区已经在底部时入口必须消失；用户继续向下滚动时它可以重新出现。入口要有键盘焦点和无障碍名称，并且不能挤压 Agent 身份、工具、邮箱或发送控件的稳定命中区。
+
+### Agent 终端颜色与 Provider 环境（2026-09-25）
+
+AgentMux 的 PTY 终端必须向所有 Provider 提供同一份可显示颜色的终端能力：`TERM=xterm-256color`、`COLORTERM=truecolor`，并清理宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 和 `CLICOLOR=0`。这条清理覆盖 Agent 启动、恢复和终端重连的完整路径；不能因为某个 Provider 更尊重这些变量而显示成单色，而另一个 Provider 仍有颜色。
+
+Provider 或用户明确传入的其它终端环境仍按显式配置处理，但上述三个禁色信号不能从桌面宿主环境意外渗入新的 Agent。颜色能力只影响显示，不得阻断健康 Agent；若颜色探测或清理流程失败，终端仍保持可输入并留下可诊断提示。
+
+### Agent 终端 256 色显示（2026-09-25）
+
+Claude 的终端输出会使用 ANSI 256 色（包含橙色等索引色），这些颜色字节到达桌面后必须在 xterm 的 DOM 与 WebGL 渲染路径中保持可见。终端主题只提供基础 16 色时，也不能把其余 ANSI 索引色折叠成前景色、背景色或灰度；Provider 名称、消息类型和是否为 diff 不得改变 256 色的解析结果。回退渲染路径与主渲染路径必须使用同一份颜色语义，颜色失败不能阻断健康 Agent 的输入和输出。
+
+### Result ready 在小 Region 中的可用性（2026-09-25）
+
+Agent 完成后的 Result ready 只占一行紧凑摘要，默认不展开文件和链接。用户可以明确展开、收起或关闭它；关闭后终端、Message Tool 和 Region 的主要操作必须立即恢复可用。展开的结果按文件和预览目标分组为可扫描列表，内容有独立滚动上限，不能靠把每个目标平铺成按钮而把小 Region 撑成十行左右。窄 Region 里所有可见控件必须可点、可键盘到达；面板不能盖住或挤走输入区。
+
+### Claude Prompt 提交（2026-09-25）
+
+从 Message Tool 发送给 Claude 的文字必须完成一次真实的 Prompt 提交：文字进入 Claude 输入区后，终端要收到该 Provider 当前输入模式对应的提交键，并能从后续终端字节或状态观察到已离开编辑态。不能把“文字已写入输入框”当成发送成功；发送失败或 readiness 尚未完成时要保留草稿并给出可诊断提示，不静默清空或假装执行。
+
 ### Topic Tab 缩略图导航与 hover 结构（2026-09-24）
 
 Topic 行上的每个 Tab 缩略图是可操作的导航入口：点击或键盘确认后，必须直接激活该 Tab 所在的 Workspace、Tab 和 Region；只改变 hover 检视而不改变工作面的交互不成立。缩略图保持紧凑的横向 rail，单 Region 只显示该 Region 的身份图标，多 Region 显示与真实 bounds 同比例的分栏轮廓。
@@ -1565,3 +1587,17 @@ PMO Teams 是固定产品工作面，不应只是完整 Workbench 的透明容�
 - Fork 出来的 Agent 仍属于它自己的 Session/Tab/Region 映射。之后从旧 Session resume、打开 Browser 或创建新 Tab 时，目标必须由被操作的 Session 上下文解析出所属 Workspace、Tab、Region 和插入位置；不能使用当前鼠标焦点、最近全局焦点或“旧 Agent 右侧”作为隐式落点。
 - 如果目标 Session 已不可定位，界面必须显示明确的恢复/选择目标动作；不能悄悄把内容挂到另一个 Agent 的 Region，也不能因为焦点切换而改变目标归属。创建后的新 Tab 必须能从 UI 直接确认它属于哪个 Session。
 - Message Tools 的编辑区在单行状态下输入增长时自动扩展为多行，保留左右工具、Agent 身份和发送动作的稳定命中区；中间编辑区占据剩余宽度并从左侧开始阅读，不得把长文本压成居中的窄列或只露一条细线。达到上限后才滚动，回删后可以恢复单行。
+
+### Session Attach 与 Runtime Projection 的边界（2026-09-25）
+
+打开、刷新或恢复一个 Session 时，操作先绑定目标 Session/Run，再消费目标 Attachment 或精确 Subject 返回的权威 Run 事实；一个单目标操作不能为了生成单个 Session 画面而枚举全部历史 Run。启动快照、Agents 聚合和跨 Host 查找等确实需要全量事实的入口可以读取完整 Runtime projection，但它们不能成为单目标操作的隐式前置步骤。
+
+ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux Core 负责把目标 Run 与 AgentSession 组合成 Runtime Subject；Desktop 负责工作面恢复和服务窗。Runtime 暂时不可用或流程握手失败时，保留原 Tab、Region 和 Session 引用，明确显示失败步骤与恢复动作；只有 Core 给出终局 retired/unknown 事实时才移除投影。
+
+### 联邦 Runtime 与远端恢复边界（2026-09-25）
+
+- AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
+- Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有 Core 明确给出终局 retired/unknown，才允许移除投影。
+- `ExecutionHost`（文件、shell、SSH 等执行能力）与 `AgentMux Runtime endpoint` 是两种不同的产品能力。即使它们落在同一台远端机器上，也不能因为能访问工作区就假定 Agent Runtime 可用；两者的身份、能力和恢复状态分别呈现。
+- 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
+- ctxmux 的持久化语义必须如实表达：客户端断开和 daemon 重启可以保留历史 Run、Replay 与恢复线索；宿主机重启后的原生 PTY/进程连续性不是 ctxmux 的保证。宿主重启后由 AgentMux 使用 durable Provider handle 语义恢复同一 Session、创建新的 Run 时，界面应显示“同一 Session 的新 Run”，不能声称原 PTY 仍在继续运行。

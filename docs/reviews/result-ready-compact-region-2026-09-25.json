@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Result ready compact Region review",
+  "scope": "Completed Agent result surface in narrow Regions",
+  "evidence": [
+    {
+      "source": "User report",
+      "observation": "Result ready sometimes grows to roughly ten rows in a small Region, cannot be closed, and its buttons can be unreachable, blocking normal work.",
+      "risk": "A completion summary becomes an unbounded obstruction instead of an optional review entry."
+    },
+    {
+      "source": "SessionResultReview",
+      "observation": "All changed files and preview URLs render as wrapping buttons in a permanently mounted flex strip with no dismiss or height bound.",
+      "reference": "apps/desktop/src/renderer/src/components/SessionResultReview.tsx; apps/desktop/src/renderer/src/styles/agent.css"
+    }
+  ],
+  "decision": {
+    "surface": "Use a single compact summary row by default with explicit expand, collapse and dismiss controls.",
+    "details": "Show files and previews in bounded, scrollable, grouped lists with reachable actions at narrow widths."
+  },
+  "acceptance": [
+    "The default Result ready surface occupies one compact row in a narrow Region.",
+    "Expand exposes every review target in a bounded list; collapse and dismiss restore the Region without blocking input.",
+    "The visible controls remain reachable by pointer and keyboard at narrow widths."
+  ]
+}

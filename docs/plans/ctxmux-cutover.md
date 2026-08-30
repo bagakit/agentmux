@@ -36,7 +36,7 @@ Adapter 先用 unfenced diagnostics client 读取一次原始 `runtimeInfo()` �
 `ctxmuxd/0.1.0`、`macos/aarch64`；缺一项即在业务帧发送前失败关闭，不做 runtimeInfo preflight、
 重试、错误重映射或 capability fallback。
 
-AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Provider/调用方仍可通过 Run env 显式覆盖终端设置。这样既保留 Codex ANSI/truecolor，也让 Core 能从同一条权威 raw PTY byte stream 重放当前 terminal screen。
+AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Core 在最终 Agent/Terminal 启动边界重复清理，防止长寿命 Runtime 或 executor 快照重新注入禁色信号。这样既保留 Codex ANSI/truecolor，也让 Core 能从同一条权威 raw PTY byte stream 重放当前 terminal screen。
 
 macOS LaunchServices 启动的 packaged Electron 不天然继承 Terminal 的登录环境。Desktop Main
 因此在创建任何 Local Runtime Host 之前，只执行一次用户的 profile-loading shell，并把其中的

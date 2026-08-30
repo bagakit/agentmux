@@ -1021,3 +1021,32 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 
 - Fork / Resume 的 Tab 入口沿用目标 Session 的工作面归属，不能从当前焦点 Region 借用位置。新 Tab 的插入点只由目标 Tab 的布局事实决定，不能用“当前 Agent 右侧”这种无法解释的空间捷径。
 - Message Tools 的 composer 采用“左右稳定、中间弹性”的布局：单行时使用一行高度，输入超过可读宽度时扩展为 2–4 行，工具与发送控件不被文字挤压；超出最大高度后才在编辑区内部滚动。文本始终左对齐，不能用固定窄宽度和居中布局牺牲输入面积。
+- Message Tools 的“滑动到底部”入口贴在编辑区内部的边缘，沿用 24px 级别的紧凑命中区和现有 focus ring；它只在滚动位置离开底部时出现，回到底部立即隐藏。入口不改变编辑区宽度、不新增外层滚动条、不改变左右控件的对齐。
+
+### Agent 终端颜色的能力一致性（2026-09-25）
+
+- Terminal surface 对每个 Provider 使用同一套 ANSI/truecolor 能力基线，颜色由 PTY 字节和 xterm palette 共同决定；Provider 名称不能成为颜色是否可见的隐式开关。
+- 启动和恢复时过滤宿主注入的禁色环境变量，避免 Claude 这类会严格遵循 `NO_COLOR`/`CLICOLOR=0` 的 CLI 变成单色。过滤只作用于宿主的意外继承，不改变用户为当前 Run 明确选择的其它环境语义。
+
+- 终端颜色密度由 ANSI 16 色和 256 色共同构成。Claude 的橙色、绿色和灰阶等索引色要在普通消息、提示、工具输出和 diff 之外都保持原有层次；不能只让代码 diff 看起来有颜色。WebGL 和 DOM 回退的颜色表必须一致，终端主题的基础色定义不能覆盖或禁用 xterm 的扩展索引色。
+
+### Result ready 的紧凑层级（2026-09-25）
+
+小 Region 的完成提示是低占用状态行：一枚完成标记、一句结果摘要、展开入口和关闭入口。展开内容使用有上限的列表或树状分组表达文件与预览链接，名称可截断、完整值在可访问名称中保留；不使用十行平铺按钮，不把解释性长句与每个目标并列占据首层。行为约束见 desktop-interaction 的“Result ready 在小 Region 中的可用性”。
+
+### Claude Prompt 的提交反馈（2026-09-25）
+
+发送动作保持与其它 Provider 同一枚主按钮和命中区；提交是否完成由运行事实或终端回显确认，不能只靠按钮瞬时禁用。Claude 仍在输入编辑态时，Message Tool 要保留文字并显示正在提交/需要重试的状态，避免用户误以为任务已开始而继续操作。
+
+### Session 恢复服务窗与单目标 attach（2026-09-25）
+
+恢复中的服务窗保持紧凑的一行提示，不覆盖终端和 Agent 输入，也不把健康 Session 画成全屏错误。提示应说明失败发生在连接、Replay、屏幕证据或 Provider 流程的哪一步，并保留可达的恢复动作。成功取得目标 Attachment 后，服务窗收敛，当前输出和输入区域继续使用原 Region 的边界。
+
+单目标 attach、刷新和恢复的视觉更新只依赖目标 Attachment 或精确 Subject 的 Run/尺寸/Gap 事实，不等待全局 Session 列表刷新；全量 Runtime projection 属于启动或管理表面，不得让一个 Region 的首次画面等待历史 Run 的批量状态查询。
+
+### 联邦 Runtime 的状态与身份密度（2026-09-25）
+
+- 本机与远端 Runtime 共享同一套状态语汇：`live`、`unverified`、`historical/interrupted` 和 `retired` 必须可区分，不能把远端不可达或探测超时压成绿色的运行中，也不能用空白工作面代替未知状态。
+- 远端 endpoint、Host 和可信身份属于低频元信息，放进既有 tooltip、context menu、服务窗或详情面，不新增一条常驻 Remote bar、第二套 Tab chrome 或重复的 Session/Run 标签。布局、Agent 名称和状态仍由原有工作面承担。
+- 远端 Runtime 使用现有紧凑服务窗表达连接、握手、能力探测和恢复阶段；告示说明失败步骤、当前保留的事实和可执行动作，不覆盖终端、输入区或焦点。恢复成功后收敛为轻量状态，不留下第二个恢复面板。
+- Linux headless Runtime 不引入桌面专属视觉组件。Desktop 只渲染统一的 Runtime/Session 投影，远端服务的 Provider、Hook、权限和 semantic resume 细节不在工作面复制一份。

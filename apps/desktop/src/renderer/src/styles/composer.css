@@ -100,8 +100,8 @@
    几何预算因此只有一个家——档位只改变量，落点始终是下面这一条。
    min-height 里的上下两档必须跟着同两个变量走：border-box 让地板含 padding，写死 --sp-4/--sp-1
    会在一行态把地板算高，于是空输入框仍按两行高画（正是这条地板当初要修的那个缺陷）。 */
-.composer { --composer-input-max: 132px; --composer-input-pad-top: var(--sp-4); --composer-input-pad-bottom: var(--sp-1); }
-.composer__editor .tiptap { position: relative; width: 100%; height: var(--composer-input-height, auto); min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer { --composer-input-max: calc(4lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); --composer-input-pad-top: var(--sp-4); --composer-input-pad-bottom: var(--sp-1); }
+.composer__editor .tiptap { position: relative; width: 100%; height: var(--composer-input-height, auto); min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__editor .tiptap p { margin: 0; }
 .composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; max-width: calc(100% - 2 * var(--sp-5)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer__editor[data-disabled='true'] { color: var(--text-3); }
@@ -201,8 +201,8 @@
    单位必须是 rem 不能是 em：这个变量在这里声明、却在 .tiptap 上消费，而 .tiptap 自己把字号压到
    --fs-meta(11px)，em 在**消费处**结算，6em 会变成 66px——比原来那个 96px 的框矮一截，等于顺手
    把启动页输入框改小了。rem 按根字号(16px)结算，与原尺寸一致。真机量过：rem→96px、em→66px。
-   96px > --composer-input-max(132px) 为假，不会被 max-height 裁掉。 */
-.launcher-composer { margin-inline: auto; --composer-input-height: 6rem; }
+   启动页的显式高度同时把上限提升到同一档，避免基础 composer 的四行预算裁掉启动入口。 */
+.launcher-composer { margin-inline: auto; --composer-input-height: 6rem; --composer-input-max: 6rem; }
 
 .composer-mailbox__heading, .composer-mailbox__messages header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .composer-mailbox__heading { margin-bottom: var(--sp-2); }

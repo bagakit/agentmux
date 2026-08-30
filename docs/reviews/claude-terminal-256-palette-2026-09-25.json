@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Claude terminal 256-color renderer consistency review",
+  "scope": "Shared xterm DOM/WebGL rendering of ANSI indexed colors emitted by Provider terminals",
+  "evidence": [
+    {
+      "source": "Captured Claude replay",
+      "observation": "The Claude replay contains ANSI 38;5; and 48;5; sequences, including index 208 (orange), while the desktop view exposes color mainly in code diffs.",
+      "risk": "The PTY bytes are intact but the renderer or custom palette is collapsing indexed colors in ordinary terminal output."
+    },
+    {
+      "source": "Shared TerminalView",
+      "observation": "TerminalView uses one custom theme with WebGL and a DOM fallback for every Provider; no Provider-specific renderer exists.",
+      "risk": "A renderer-level palette regression can affect Claude while simpler 16-color diff output appears healthy."
+    }
+  ],
+  "decision": {
+    "renderer": "Preserve xterm's complete ANSI indexed-color semantics when applying the shared theme, across WebGL and DOM fallback.",
+    "verification": "Add a focused regression that feeds representative 256-color SGR sequences and proves the terminal surface keeps distinct indexed foreground/background colors."
+  },
+  "acceptance": [
+    "Representative Claude-style 38;5; and 48;5; sequences remain distinct from the base foreground/background colors.",
+    "WebGL and DOM rendering use the same complete indexed-color palette and ordinary non-diff output retains color.",
+    "The fix remains Provider independent and does not strip or rewrite PTY bytes."
+  ]
+}

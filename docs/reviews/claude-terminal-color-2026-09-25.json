@@ -1,0 +1,27 @@
+{
+  "schema": "bagakit.design-review.v1",
+  "status": "approved",
+  "title": "Provider terminal color consistency review",
+  "scope": "Agent PTY environment and terminal color rendering across Providers",
+  "evidence": [
+    {
+      "source": "User report",
+      "observation": "Claude is displayed without colors while GPT/Codex still shows colors in the same desktop terminal surface.",
+      "risk": "A provider-sensitive terminal environment signal is disabling ANSI color before bytes reach the shared xterm renderer."
+    },
+    {
+      "source": "AgentMux terminal environment contract",
+      "observation": "The runtime establishes xterm-256color and truecolor, but the explicit Run environment is merged after the host cleanup step.",
+      "reference": "packages/core/src/client.ts; packages/core/src/ctxmux-run-adapter.ts"
+    }
+  ],
+  "decision": {
+    "terminalEnvironment": "Strip accidental host NO_COLOR, FORCE_COLOR=0 and CLICOLOR=0 signals at the final Agent launch boundary while preserving the shared ANSI/truecolor baseline.",
+    "renderer": "Keep one xterm palette and one PTY byte path for every Provider; do not add a Claude-only renderer branch."
+  },
+  "acceptance": [
+    "A Claude launch receives the same color-capable terminal baseline as Codex even when the desktop host exports NO_COLOR or CLICOLOR=0.",
+    "Explicit non-color signals are not allowed to re-enter through the final launch environment merge.",
+    "The existing xterm palette and PTY byte path remain shared across Providers."
+  ]
+}

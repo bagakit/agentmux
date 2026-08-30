@@ -201,6 +201,14 @@ const runtimeFixture = vi.hoisted(() => {
       })
     }
     readonly runtimeProjection = vi.fn(async (): Promise<AgentMuxRuntimeProjection> => ({ hostId: 'fixture', subjects: [] }))
+    readonly runtimeSubject = vi.fn(async (target: { kind: 'agent-session' | 'terminal-run'; agentSessionId?: string; runId?: string }) => {
+      const projection = await this.runtimeProjection()
+      const subject = projection.subjects.find((candidate) => target.kind === 'agent-session'
+        ? candidate.kind === 'agent' && candidate.agentSession.agentSessionId === target.agentSessionId
+        : candidate.kind === 'terminal' && candidate.run.runId === target.runId)
+      if (!subject) throw new Error('Runtime subject fixture is not available')
+      return subject
+    })
     readonly runtimeIdentity = vi.fn(() => ({
       protocolVersion: 5,
       buildIdentity: '0.1.0',
@@ -1982,6 +1990,53 @@ describe('RuntimeController configuration transaction', () => {
       50
     )).resolves.toBeNull()
     expect(client.resizeTerminal).toHaveBeenCalledOnce()
+    detachRenderer()
+  })
+
+  it('projects an attached terminal from its exact Run without a global Runtime projection', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture()
+    const detachRenderer = controller.attach(renderer)
+    const control: SessionControl = {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'run-1',
+      run: { runId: 'run-1' }
+    }
+    const run = {
+      runId: 'run-1',
+      kind: 'terminal' as const,
+      providerId: null,
+      executorId: null,
+      agentSessionId: null,
+      workspacePath: '/repo',
+      pid: 42,
+      state: 'running' as const,
+      cols: 80,
+      rows: 24,
+      observedAt: 1,
+      latestOutputBytes: 12,
+      acceptedInputBytes: 4
+    }
+    client.runtimeSubject.mockResolvedValueOnce({
+      subjectId: 'terminal:local:run-1',
+      kind: 'terminal',
+      hostId: 'local',
+      workspacePath: '/repo',
+      run
+    })
+    client.runtimeProjection.mockRejectedValueOnce(new Error('attach must not enumerate Runtime subjects'))
+
+    const attachment = await controller.attachSession(renderer.id, control, 0, localConfig)
+
+    expect(attachment.session).toMatchObject({ id: 'run-1', kind: 'terminal' })
+    expect(client.runtimeSubject).toHaveBeenCalledWith(
+      { kind: 'terminal-run', runId: 'run-1' },
+      expect.objectContaining({ runId: 'run-1' })
+    )
+    expect(client.runtimeProjection).not.toHaveBeenCalled()
+    await controller.detachSession(renderer.id, attachment.attachmentId)
     detachRenderer()
   })
 

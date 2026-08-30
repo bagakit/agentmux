@@ -101,6 +101,17 @@ describe('Message Tools three-state interaction', () => {
     expect(shared[0]!.selector).toContain('.composer__mailbox')
   })
 
+  it('keeps the adaptive editor left-aligned and bounded to a readable four-line budget', () => {
+    const root = ruleList.find(({ selector, body }) => selector === '.composer' && body.includes('--composer-input-max:'))
+    const editor = ruleList.filter(({ selector }) => selector === '.composer__editor .tiptap')
+    expect(root).toBeDefined()
+    expect(editor).toHaveLength(1)
+    expect(root!.body).toContain('--composer-input-max: calc(4lh +')
+    expect(editor[0]!.body).toContain('text-align: left')
+    expect(editor[0]!.body).toContain('max-height: var(--composer-input-max)')
+    expect(editor[0]!.body).toContain('overflow-y: auto')
+  })
+
   it('keeps identity in the control flow instead of overlaying the editor', () => {
     // 形状：`position: absolute` **且**钉了边距。钉边距才会脱离静态位置跑到盒子角上，而一行态里
     // 右上角与右下角都被控件占着，于是装饰直接压在按钮上（用户原话「叠在一起」）。
@@ -175,7 +186,7 @@ describe('Message Tools three-state interaction', () => {
     }
     const root = ruleList.find(({ selector }) => selector === COLLAPSED)
     expect(root).toBeDefined()
-    expect(root!.body).toContain('grid-template-columns: auto minmax(0, 1fr) auto')
+    expect(root!.body).toContain('grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content')
   })
 
   it('一行态里那一行文字垂直居中，而工具/主动作控件仍锚在底部', () => {

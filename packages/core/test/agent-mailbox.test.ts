@@ -17,8 +17,8 @@ function storedSession(
   return {
     kind: 'agent',
     agentSessionId: AGENT_SESSION_ID,
-    providerId: 'claude',
-    executorId: 'claude',
+    providerId: 'traex',
+    executorId: 'traex',
     hostId: 'local',
     workspacePath: WORKSPACE,
     run: { runId: RUN_ID },
@@ -36,7 +36,7 @@ function runProjection(acceptedInputBytes: number) {
   return {
     runId: RUN_ID,
     lifecycleOperationId: null,
-    program: 'claude',
+    program: 'traex',
     args: [] as string[],
     workspacePath: WORKSPACE,
     pid: 321,

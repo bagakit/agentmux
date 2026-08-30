@@ -342,7 +342,7 @@ describe('built-in agent providers', () => {
       renderedText: 'text with \u241b escape',
       submit: '\r'
     })
-    for (const id of ['claude', 'traex', 'hermes', 'pi'] as const) {
+    for (const id of ['traex', 'hermes', 'pi'] as const) {
       expect(providers.get(id).terminalHandshake).toBeUndefined()
       expect(providers.get(id).terminalPromptRender).toBeUndefined()
       expect(providers.get(id).planPromptInput('continue')).toEqual({

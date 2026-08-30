@@ -518,7 +518,8 @@ function SurfaceContent({
           workspaceId: surface.workspaceId,
           tabGroupId: groupId,
           tabId,
-          regionId: surface.regionId
+          regionId: surface.regionId,
+          sessionId: surface.sessionId
         }}
       />
     )

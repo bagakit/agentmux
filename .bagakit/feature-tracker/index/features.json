@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 293
+    "next_cursor": 299
   },
   "features": [
     {
@@ -1388,7 +1388,7 @@
     {
       "feat_id": "f-26e8f6h4z",
       "title": "书签文件：把当前页存成 .webloc，以及打开一个存着链接的文件",
-      "status": "ready",
+      "status": "in_progress",
       "workspace_mode": "worktree",
       "branch": "feat/f-26e8f6h4z",
       "worktree_name": "wt-f-26e8f6h4z",
@@ -2183,7 +2183,7 @@
     {
       "feat_id": "f-2a98fqxek",
       "title": "全局加载表面统一盘点",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2193,7 +2193,7 @@
     {
       "feat_id": "f-2aa8fqy9f",
       "title": "设置页现代化工作台",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2203,7 +2203,7 @@
     {
       "feat_id": "f-2ab8fr5m6",
       "title": "Message Tool 内 Agent 视图切换",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2213,7 +2213,7 @@
     {
       "feat_id": "f-2ac8fhvwu",
       "title": "对话消息阅读、复制与标注",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2528,7 +2528,7 @@
     {
       "feat_id": "f-2be8fv5jc",
       "title": "Session placement and adaptive Message Tools composer",
-      "status": "ready",
+      "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
@@ -2538,6 +2538,66 @@
     {
       "feat_id": "f-2bf8fny4g",
       "title": "两道元守卫只看得见一个包：把扫描根派生出来，并清掉暴露的存量",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bg8frpfy",
+      "title": "Attach recovery boundary and bounded runtime projection",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bh8fpunv",
+      "title": "Keep Claude terminal colors visible",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bj8f4y89",
+      "title": "Federated AgentMux Runtime 与 Headless Remote",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bk8feyhb",
+      "title": "Claude terminal indexed colors",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bm8ffymc",
+      "title": "Compact Result ready in Regions",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2bn8fu6vy",
+      "title": "Claude prompt submission",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",
