@@ -42,12 +42,17 @@ describe('settings workbench shell', () => {
   })
 
   /**
-   * 窄窗口下设置页真的改了布局，而不是"那几个类名在样式表里出现过"。
+   * 窄窗口下设置页真的**写了**收窄规则，而不是"那几个类名在样式表里出现过"。
+   *
+   * 这是静态判据：它读拼起来的样式表，问 560px 那一档**里面**有没有那几条收窄规则。它不在 560px
+   * 下渲染、不量真实盒子——所以它证的是"规则在"，不是"看起来收窄了"。这条边界写在这里而不是
+   * 假装覆盖全：一条读起来比实际强的断言，比一条明说自己边界的断言更危险。
    *
    * 病史（2026-09-25）：这条原先写成 `expect(styles).toContain('.settings-content__icon')` 一类的
-   * 全表子串判断。那几个类**都有自己的基础规则**（`surfaces.css:97/118/124`），于是子串在
-   * 「窄窗口规则还在」和「窄窗口规则被删光」两种世界里同样为真——断言什么都没记录
-   * （记忆 assertion-passing-under-both-behaviors-records-nothing）。
+   * 全表子串判断。那几个类**都有自己的基础规则**（`.settings-sidebar__context`、
+   * `.settings-content__icon`、`.settings-content__hint` 在 `surfaces.css` 顶层各有一条，都排在
+   * 560px 那一档之前），于是子串在「窄窗口规则还在」和「窄窗口规则被删光」两种世界里同样为真
+   * ——断言什么都没记录（记忆 assertion-passing-under-both-behaviors-records-nothing）。
    *
    * 实测：把 560px 块里四条规则删掉（侧栏上下文、搜索条高度、icon、hint 在手机宽度下不再收起），
    * 只留下测试恰好 grep 的那一句字面量——**两条全绿**。所以判据改成先把那个 media 块整段切出来，
@@ -57,11 +62,15 @@ describe('settings workbench shell', () => {
    * 取第一个 `}` 会切出只含一条规则的碎片，之后每条 `toContain` 都容易恒假（假红）或恒真（假绿）。
    *
    * 找块也不能只 `indexOf('@media (max-width: 560px)')`：这张拼起来的总表里 **560px 这一档不止一个**
-   * （实测 `surfaces.css:232` 与 `workflow.css:115` 各有一个）。今天 `indexOf` 拿到对的那个，靠的只是
+   * （`surfaces.css` 与 `workflow.css` 各有一个）。今天 `indexOf` 拿到对的那个，靠的只是
    * `index.css` 里 surfaces 排在 workflow 前面——改一次 @import 顺序，这份判据就会对着 workflow 的
    * 块提问，六条全红（假红）或更糟。所以要在候选块里按**内容**认领：哪个块真的在改设置页的规则。
+   *
+   * 注释里刻意**不写行号**：行号会随任何一次插入静默变假，而没有任何守卫会因此变红。
+   * 这条注释的上一版就踩了——它按 `97/118/124` 的顺序点名三个类，而那三行上的类其实是
+   * 另一个排列（97 是 `__context`，118 才是 `__icon`）。类名本身 grep 得到，行号 grep 不到。
    */
-  it('窄窗口那一档真的收窄了布局，不只是类名在表里出现过', () => {
+  it('窄窗口那一档写了收窄规则，不只是类名在表里出现过', () => {
     const rules = allStyleRules()
 
     /** 从 `@media` 开头切到它配对的那个 `}`。 */
