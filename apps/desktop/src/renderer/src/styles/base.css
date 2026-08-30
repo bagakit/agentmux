@@ -158,7 +158,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 @media (max-width: 900px) {
   .settings-page { grid-template-columns: 210px minmax(0, 1fr); }
-  .settings-content > header, .settings-content__scroll { padding-right:var(--sp-7); padding-left:var(--sp-7); }
+  .settings-content__header, .settings-content__scroll { padding-right:var(--sp-7); padding-left:var(--sp-7); }
   .host-settings-card > header { grid-template-columns: 32px minmax(0, 1fr) auto auto; }
   .host-settings-card > header > .check-pill { grid-column: 2 / -1; grid-row: 2; width: fit-content; }
   .host-edit-grid { grid-template-columns: 1fr 1fr; }
