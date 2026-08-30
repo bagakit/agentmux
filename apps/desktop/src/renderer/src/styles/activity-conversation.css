@@ -171,7 +171,7 @@
    to READ as a link, so it borrows the accent and underline and nothing else.
 
    TWO independent knobs decide how the line looks, and the file reference is the stress case: its content
-   is a pure-mono path like `.bagakit/…/features.json:987`, dense with slashes and g/j descenders.
+   is a pure-mono path like `docs/plans/tasks.json:987`, dense with slashes and g/j descenders.
    - WHERE it sits: `text-underline-offset: 3px` from the (mono) baseline. 2px sat inside the descender
      zone and read as cramped (tracker #794). 3px is a compromise, NOT full clearance — mono slashes and
      g/j still reach below it, so the line does pass through their lower ink.

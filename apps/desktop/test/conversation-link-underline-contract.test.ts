@@ -367,7 +367,7 @@ describe('conversation link underline contract (#794)', () => {
 
   it('keeps the underline continuous through the mono path descenders', () => {
     // FRAGMENTATION FIX (the actual #794 screenshot complaint). The file reference is a pure-mono path
-    // (`.bagakit/…/features.json:987`) whose slashes and g/j descenders reach below the 3px offset, so the
+    // (`docs/plans/tasks.json:987`) whose slashes and g/j descenders reach below the 3px offset, so the
     // engine default `text-decoration-skip-ink: auto` carves a gap at every one of them — the line comes
     // out ragged/dashed and reads as imprecise. `none` forces a single continuous stroke.
     //
