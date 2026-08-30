@@ -95,4 +95,32 @@ describe('等待态的两档语汇', () => {
     const callers = files.filter((file) => file !== definition && readFileSync(file, 'utf8').includes('FullPageLoadingSurface'))
     expect(callers.length, '品牌加载表面没有任何产品调用者——竖切未闭合').toBeGreaterThan(0)
   })
+
+  /**
+   * 「running 就转圈」这个决定只由一层做。
+   *
+   * 病史（2026-09-25）：`WorkflowStatusGlyph` 与它调用的 `WorkflowSemanticIcon` 各自判了一次
+   * `status === 'running'` 并各自挂一个 spin 类，渲染出来是 `class="… spin spin"`（实测）。
+   * 浏览器不在乎重复类名，所以它安静地活了很久——但那正是同一个决定写了两遍：两处将来会各自
+   * 漂移，而且上一次统一 spinner 的改动同时改了这两行，恰恰说明它们必须一起改才对。
+   *
+   * 判据落在**渲染出来的 class 列表**上，不落在源码：源码里两处 `'spin'` 分属两个文件，
+   * 读源码的扫描看不出它们会叠加。
+   */
+  it('转圈类只挂一次——重复即同一个决定做了两遍', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { WorkflowStatusGlyph } = await import('../src/renderer/src/components/workflow/WorkflowStatusGlyph.js')
+
+    const markup = renderToStaticMarkup(createElement(WorkflowStatusGlyph, { status: 'running' }))
+    const classes = /class="([^"]*)"/u.exec(markup)?.[1]?.split(/\s+/u) ?? []
+    // 非空见证：一个类都没读到时，下面的计数会是 0，"不重复"就成了恒真的白绿。
+    expect(classes.length, '渲染结果里一个 class 都没读到——这条判据在空转').toBeGreaterThan(0)
+    expect(classes, 'running 状态下没挂上通用转圈类').toContain('spin')
+    expect(
+      classes.filter((name) => name === 'spin').length,
+      `转圈类挂了不止一次（${classes.join(' ')}）：调用方和组件各判了一次 running，` +
+        '这个决定该只归组件所有'
+    ).toBe(1)
+  })
 })
