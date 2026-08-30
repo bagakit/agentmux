@@ -26,20 +26,25 @@ describe('Executor avatar badge icons', () => {
   })
 
   it('overlays a compact badge inside both provider marks', () => {
+    // 只判尺寸与外伸量——**落角不归这条规则管**。叠压簇里那枚徽标的方位由
+    // lib/presence-mark-corner.ts 分配、由 `[data-corner]` 规则翻译，守在
+    // selector-presence-mark-corners.test.tsx。在这里再钉一次方位，就是同一个事实两份真相，
+    // 改分配表时这里会打出一条与产品决定相反的假红。
     const sheets = [
-      ['agent-avatar.css', '.agent-avatar__badge', 8],
-      ['session-connecting.css', '.session-connecting__executor-badge', 9]
+      ['agent-avatar.css', '.agent-avatar__badge', 8, '--mark-inset'],
+      ['session-connecting.css', '.session-connecting__executor-badge', 9, 'top']
     ] as const
-    for (const [file, selector, size] of sheets) {
+    for (const [file, selector, size, inset] of sheets) {
       const css = readFileSync(new URL('../src/renderer/src/styles/' + file, import.meta.url), 'utf8')
-      const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+      // 先剥注释：规则头捕获的是上一个 `}` 之后的全部文本，注释留在里面会让 trim() 后的头对不上，
+      // 于是这条规则"没扫到"、body 为 undefined，后面每条 toContain 都在 undefined 上恒假。
+      const rules = [...css.replace(/\/\*[\s\S]*?\*\//gu, '').matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
       expect(rules.length).toBeGreaterThan(0)
       const body = rules.find(([, head]) => head!.trim() === selector)?.[2]
-      expect(body).toBeDefined()
+      expect(body, `${selector} 没扫到`).toBeDefined()
       expect(body).toContain('width: ' + size + 'px')
       expect(body).toContain('height: ' + size + 'px')
-      expect(body).toMatch(/top: [12]px/)
-      expect(body).toMatch(/left: [12]px/)
+      expect(body).toMatch(new RegExp(`${inset}:\\s*[12]px`, 'u'))
     }
   })
 
