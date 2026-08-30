@@ -352,3 +352,64 @@ describe('AgentComposer 接入 InlineComposer 的受控取值与草稿写回口'
     expect(attributes.get('onValueChange')).toBe('onChange')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 「谁能从外部写这张草稿」是 composer-composition.ts 顶部那段注释的事实基础：它据此断言组字期间
+// 那次覆盖今天不产生可见行为。事实变了而注释不变，就成了一段自信的谎（本仓记过 docs-manifests-rot）。
+// ---------------------------------------------------------------------------
+describe('外部追加草稿只有一条路径', () => {
+  /**
+   * 追加 = 读当前草稿、拼上新内容、写回去。这个决定归 store 的 `appendAgentComposerDraft` 所有。
+   *
+   * 病史（2026-09-25）：`SessionPane.annotateMessage` 手写过一份读-改-写
+   * （`getState().agentComposerDrafts[...]` + `setAgentComposerDraft`），与 store 那份在尾部空白上
+   * 给不同结果（草稿为 `'Existing\n'` 时一份给 `Existing\n\nREF`、另一份给 `Existing\n\n\nREF`），
+   * 而只有 store 那份有判据。同一个产品动作在两个表面上给两种结果。
+   *
+   * 判据放行两类已知的非追加用法：Composer 自己那一格（受控输入的普通写回，不读旧值拼接），
+   * 以及 `appendSemanticReference` 那条（空格分隔的引用插入，另有自己的纯函数与判据）。
+   * 破例按**文件**点名，不按值点名——放行一个字符串等于全树哪里都能写它。
+   */
+  it('没有第二处手写的「读草稿 → 拼接 → 写回」', () => {
+    const ALLOWED = new Set([
+      // 受控输入与命令前缀：这一格本来就是草稿的主人，它写的是整串而不是追加。
+      'components/AgentSessionComposer.tsx',
+      // 新建页共享同一张草稿表，走的是 writeShared 的整串写回。
+      'components/NewTabSurface.tsx'
+    ])
+    const offenders: string[] = []
+    let readers = 0
+    for (const file of sourceFiles(RENDERER_SRC)) {
+      const relative = file.slice(RENDERER_SRC.length + 1)
+      if (relative === 'store.ts') continue
+      const source = readFileSync(file, 'utf8')
+      // 读旧值是追加的必要动作：没读过旧值就不可能是读-改-写。
+      if (!source.includes('agentComposerDrafts[')) continue
+      readers += 1
+      if (ALLOWED.has(relative)) continue
+      offenders.push(relative)
+    }
+    // 非空见证：一处都没扫到时，下面那条 toEqual([]) 恒真——扫描根写错就是这个形状。
+    expect(readers, '一处读 agentComposerDrafts 的地方都没扫到——这份扫描在空转').toBeGreaterThan(0)
+    expect(
+      offenders,
+      '这些地方自己读草稿再拼回去，绕开了 store 的 appendAgentComposerDraft：' +
+        `两份实现会在空白处理上分岔，且只有 store 那份有判据。\n${offenders.join('\n')}`
+    ).toEqual([])
+  })
+
+  it('注释里那两个外部写入者与代码对得上', () => {
+    const callers = sourceFiles(RENDERER_SRC)
+      .filter((file) => file.slice(RENDERER_SRC.length + 1) !== 'store.ts')
+      .filter((file) => /\bappendAgentComposerDraft\(/u.test(readFileSync(file, 'utf8')))
+      .map((file) => file.slice(RENDERER_SRC.length + 1))
+      .sort()
+    // 钉死整个集合，不写 `every`/`some`：空集合上那两个谓词恒真/恒假，什么都不记
+    // （本仓记过 vacuous-on-empty-predicate）。多一个少一个都要有人来看一眼注释还准不准。
+    expect(
+      callers,
+      'appendAgentComposerDraft 的调用方变了。composer-composition.ts 顶部那段注释据此断言' +
+        '「两个外部写入者都先移焦、组字已结束」——新增一个就得先确认它也满足这个前提，再改注释。'
+    ).toEqual(['components/SessionPane.tsx', 'components/SurfaceToolDock.tsx'])
+  })
+})
