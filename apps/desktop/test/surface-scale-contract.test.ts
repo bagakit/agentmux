@@ -64,7 +64,7 @@ const LAYOUT_GEOMETRY = new Map<string, string>([
   ['.top-row-leading-chrome--global-inset', '左侧 80px 给 macOS 红绿灯让位（Global surface 无 Project Rail）'],
   ['.settings-content', '34px 顶栏偏移，与 .settings-sidebar 对齐'],
   ['.settings-sidebar', '34px 顶栏偏移，与 .settings-content 对齐'],
-  ['.settings-content > header', '25px 光学垂直居中；clamp 上界 74px 是大屏阅读宽度'],
+  ['.settings-content__header', '25px 光学垂直居中；clamp 上界 74px 是大屏阅读宽度'],
   ['.settings-content__scroll', 'clamp 上界 74px 与 header 同宽；底部 50px 是滚动尾部留白'],
   ['.settings-search input', '右 28px / 左 30px 给搜索与清除图标让位'],
   ['.board-search input', '右 28px 给清除按钮让位'],
