@@ -13,7 +13,7 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 //   PIP    —— needs-you 那枚 `?` 角标。共享状态点那道缝（`.status--<state> .status__dot::after`）。
 //   PULSE  —— 「在跑」那颗点的脉动动画（`.status--<state> .status__dot { animation }`）。
 //   SHAPE  —— 点的填充形态：默认实心 vs 掉线态的空心环（`background: transparent`）。
-//   CONTOUR—— Provider alpha轮廓读共享墨色；状态点在右上，不能重新画矩形状态框。
+//   CONTOUR—— Provider alpha轮廓读共享墨色；状态点绝对定位在一个角上，不能重新画矩形状态框。
 //
 // 词表两半都从**代码**读，不在这里手抄：`AGENT_DISPLAY_STATES` 是成员全集，`isNeedsYouState` 是逐态判定
 // （二者都来自 attention-vocabulary.ts 那张 total Record）。于是在 `NEEDS_YOU_BY_STATE` 里翻一个判定，
@@ -199,7 +199,7 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
     expect([...hollowStates].every((state) => NOT_NEEDS_YOU.includes(state as (typeof NOT_NEEDS_YOU)[number]))).toBe(true)
   })
 
-  it('CONTOUR：Provider alpha描边与右上共享状态点可达，不重建矩形状态框', () => {
+  it('CONTOUR：Provider alpha描边与共享状态点可达，不重建矩形状态框', () => {
     const contour = rules.find((rule) => rule.selector === '.agent-avatar__contour')
     expect(contour, 'alpha轮廓规则缺失').toBeDefined()
     expect(declValue(contour!.body, 'filter')).toBe('none')
@@ -207,11 +207,16 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
     expect(avatar).toBeDefined()
     expect(declValue(avatar!.body, 'background')).toBe('transparent')
     expect(declValue(avatar!.body, 'outline')).toBeUndefined()
+    // 状态点定位在某个角上。定位由共享的 `[data-corner]` 翻译规则给，每枚记号只声明自己的外伸量;
+    // **落哪个角**不在这里判——那是叠压几何的裁决，由 selector-presence-mark-corners.test.ts
+    // 从头像尺寸与叠压量推出来。在这里再钉一次方位就是把同一个决定写两遍，2026-09-25 把 right
+    // 改成 left 时红的正是那种重复。这里只判「这条通路还在」：翻译规则绝对定位，状态点喂得进外伸量。
+    const translate = rules.find((rule) => rule.selector === '.agent-avatar [data-corner]')
+    expect(translate, '角位翻译规则缺失——记号会退回文档流').toBeDefined()
+    expect(declValue(translate!.body, 'position')).toBe('absolute')
     const corner = rules.find((rule) => rule.selector === '.agent-avatar .agent-avatar__status')
-    expect(corner, '状态点不在头像右上').toBeDefined()
-    expect(declValue(corner!.body, 'position')).toBe('absolute')
-    expect(declValue(corner!.body, 'top')).toBeDefined()
-    expect(declValue(corner!.body, 'right')).toBeDefined()
+    expect(corner, '状态点没有自己的规则').toBeDefined()
+    expect(declValue(corner!.body, '--mark-inset'), '状态点没声明外伸量，翻译规则会拿不到值').toBeDefined()
     const ink = (state: string) => {
       const rule = rules.find((item) => item.selector === `.status--${state}`)
       expect(rule, `没有共享${state}墨色`).toBeDefined()

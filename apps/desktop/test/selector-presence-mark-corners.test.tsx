@@ -6,8 +6,6 @@ import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
 import { SelectorPresence } from '../src/renderer/src/components/SelectorList.js'
 import {
   PRESENCE_MARK_CORNERS,
-  VISIBLE_PRESENCE_CORNERS,
-  presenceMarkIsVisible,
   type PresenceMarkCorner
 } from '../src/renderer/src/lib/presence-mark-corner.js'
 
@@ -102,6 +100,9 @@ describe('叠压头像簇的角位分配', () => {
    * 四种记号两两不同角，且注意力与归并计数（两者可同时在场）都在可见带上。
    *
    * 只测注意力会放过「归并计数又被推回被盖的右缘」——A2 明确点了这个缺陷，所以这里判的是整份分配。
+   *
+   * 「可见」不引一份手写的可见角清单：那会变成第二份真相，而且它与几何漂开的那天自己不会响。
+   * 可见性从上一条已经证实过的几何直接推——右压左，所以落在 `-left` 的那两个角在上。
    */
   it('四种记号两两不落在同一角，通报类的两种都在可见带上', () => {
     const corners = Object.values(PRESENCE_MARK_CORNERS)
@@ -111,11 +112,10 @@ describe('叠压头像簇的角位分配', () => {
     // 通报类：看不见就等于没通报。整表钉死而不写 every——空集合上的 every 恒真。
     expect(PRESENCE_MARK_CORNERS.status).toBe('top-left')
     expect(PRESENCE_MARK_CORNERS.count).toBe('bottom-left')
-    expect(presenceMarkIsVisible('status')).toBe(true)
-    expect(presenceMarkIsVisible('count')).toBe(true)
 
-    // 可见角就这两个，且它们真的是"左"侧——右侧被叠压。
-    expect([...VISIBLE_PRESENCE_CORNERS]).toEqual(['top-left', 'bottom-left'])
+    // 叠压是右压左（上一条从样式表证过），于是可见带就是左侧两角。通报类两种都必须落在那里。
+    expect(PRESENCE_MARK_CORNERS.status).toMatch(/-left$/u)
+    expect(PRESENCE_MARK_CORNERS.count).toMatch(/-left$/u)
   })
 
   /**
