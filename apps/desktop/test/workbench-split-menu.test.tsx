@@ -2,13 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
-// createRegionCopyModel（下面 import）与 RegionContextMenu 同住一个模块，该组件为 #544 复用了 store 的
-// setTabMenuOpen，于是 import 会连带加载 store → api.ts，后者在模块加载期读构建期全局
-// __AGENTMUX_WEB_PREVIEW__。node 测试环境里它不存在，须先 stub（与 agent-address / tab-control-handoff
-// 同一处理）。
-vi.hoisted(() => {
-  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
-})
+// 此处曾要 stub 构建期全局 __AGENTMUX_WEB_PREVIEW__（RegionContextMenu 当时 import store 接让位
+// 开关，把 store → api.ts 拉进模块加载期）。让位改走 DOM 协议观察后那条 import 没了，stub 也不需要。
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
   workbenchRegionLayoutMenuEntries,

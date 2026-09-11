@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-// createRegionCopyModel 与 RegionContextMenu 同住一个模块，而该组件为 #544 复用了 store 的
-// setTabMenuOpen（原生视图让位的唯一 SSOT），于是 import 它会连带加载 store → api.ts，后者在模块加载期
-// 就读构建期全局 __AGENTMUX_WEB_PREVIEW__。node 测试环境里这个全局不存在，须先 stub（与 agent-address /
-// tab-control-handoff 这两个同样 import 本模块的测试同一处理）。
-vi.hoisted(() => {
-  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
-})
+// 此处曾要 stub 构建期全局 __AGENTMUX_WEB_PREVIEW__：RegionContextMenu 当时 import 了 store
+// 来接原生视图让位开关，于是连带把 store → api.ts 拉进模块加载期。让位改由 App 的
+// MutationObserver 按 Radix 的 DOM 协议统一观察之后，那条 import 没了，stub 也就不需要了。
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
   formatMessagingAddress,
