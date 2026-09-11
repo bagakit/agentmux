@@ -116,7 +116,65 @@ export function terminalViewportText(buffer: TerminalBufferSnapshot, rows: numbe
   )
 }
 
-/** 整个回滚缓冲的文本——「复制这个会话到目前为止的全部输出」。 */
+/**
+ * 整个回滚缓冲的文本——「复制这个会话到目前为止的全部输出」。
+ *
+ * 调用方必须喂 **normal buffer**，不是 `buffer.active`。这是 #638 那次修复漏掉的半条：全屏 TUI
+ * 会把终端切到 alternate buffer（DECSET ?1049），那块缓冲按定义只有一屏、没有回滚，而此刻
+ * `buffer.active` 正指着它。跟着 active 走，「全部输出」就在 TUI 开着时缩水成当前一屏，
+ * 想复制的内容一旦滚出去就直接取空——而且是静默取空。会话历史始终留在 normal buffer 里。
+ *
+ * 这一层不接收终端对象、也不自己挑缓冲区：挑哪一块是**调用点的判定**，在那里被
+ * terminal-buffer-copy-wiring 逐个调用点钉死取值身份。这里多一个「要不要 normal」的开关，
+ * 等于让同一个决定有两个说法。
+ */
 export function terminalScrollbackText(buffer: TerminalBufferSnapshot): string {
   return withoutTrailingBlankLines(joinBufferLines(sliceLines(buffer, 0, buffer.length)))
+}
+
+/**
+ * 两档复制范围。加一档会让下面那张表少一格而 tsc 变红，不会安静落进某个 default。
+ *
+ * **不导出**：调用点传的是字面量 'visible' / 'all'，没有人需要这个名字。导出一个零消费者的
+ * 类型只是把内部形状钉在公开面上，以后改它要先数谁在用。
+ */
+type TerminalCopyScope = 'visible' | 'all'
+
+/**
+ * 某一档复制取到空串时要说的那句话（原则 11 第 2 类）。
+ *
+ * 取空**不是错误**：Agent 好好的，字节也好好的，是我们这一步没取到东西。所以三件事都要说清——
+ * 哪一档空了、现在是什么状态、还能怎么办——并且**点名另一档**，因为两档的取值源本就不同
+ * （可见读 active、全部读 normal），一档空着另一档往往正好有内容，这是用户此刻唯一有用的动作。
+ *
+ * 判据只能是缓冲区模型，不能是「哪个 Agent 在跑」：这里不出现任何 Provider 名
+ * （守卫见 test/terminal-copy-provider-agnostic.test.ts）。
+ */
+const EMPTY_COPY_NOTICE: Record<TerminalCopyScope, string> = {
+  visible:
+    'Copy visible output found nothing on screen. Nothing was written to the clipboard — ' +
+    'your Agent is unaffected. Copy all output still has this session’s retained history.',
+  all:
+    'Copy all output found no retained history for this session. Nothing was written to the clipboard — ' +
+    'your Agent is unaffected. Copy visible output still copies what is on screen now.'
+}
+
+/**
+ * 一次复制的结局：要么有文本可写，要么该说一句话。
+ *
+ * 为什么是 union 而不是让组件自己写 `if (!text) return`：那个分支**守不住**。
+ * terminal-buffer-copy-wiring 已经如实记过这个缺口——唯一能对 in-component 分支写的判据是
+ * 「这个 if 在场」，而在场判据挡不住把条件取反（`if (text) return` 编译照过、计数不变、全绿，
+ * 而用户从此一次都复制不到）。换成纯函数之后，取反当场变红。
+ *
+ * 两条出路都不是「失败」：`empty` 这一支专门存在，是为了让「没取到」有个地方可说，而不是
+ * 静默 `return`——静默正是用户报上来的症状：点了菜单，什么都没发生，也没人说为什么。
+ */
+export type TerminalCopyOutcome =
+  | { kind: 'copy'; text: string }
+  | { kind: 'empty'; notice: string }
+
+export function terminalCopyOutcome(text: string, scope: TerminalCopyScope): TerminalCopyOutcome {
+  if (text === '') return { kind: 'empty', notice: EMPTY_COPY_NOTICE[scope] }
+  return { kind: 'copy', text }
 }
