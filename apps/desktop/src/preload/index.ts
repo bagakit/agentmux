@@ -11,6 +11,7 @@ import {
   WINDOW_RESIZE_EVENT_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
+import { withStopTimeout } from '../shared/session-stop-timeout.js'
 import type {
   AgentAttentionNotifyInput,
   AgentLaunchInput,
@@ -219,7 +220,9 @@ const api: AgentMuxPreloadApi = {
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
     recover: (session: SessionControl, workspacePath?: string) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath),
-    stop: (session: SessionControl) => ipcRenderer.invoke('sessions:stop', session),
+    // 唯一带超时的那条：等 Runtime 收尾必须有上限，否则一次没回执的握手会把关闭按钮永久锁死。
+    // 理由与取值见 shared/session-stop-timeout.ts。
+    stop: (session: SessionControl) => withStopTimeout(ipcRenderer.invoke('sessions:stop', session)),
     onEvent(listener: (event: RuntimeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
       ipcRenderer.on(SESSION_EVENT_CHANNEL, wrapped)
