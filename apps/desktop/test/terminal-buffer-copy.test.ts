@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   joinBufferLines,
+  terminalCopyOutcome,
   terminalScrollbackText,
   terminalViewportText,
   type TerminalBufferLine,
@@ -107,6 +108,93 @@ describe('terminalScrollbackText：整个回滚缓冲', () => {
 
   it('空缓冲区得到空串', () => {
     expect(terminalScrollbackText(buffer([]))).toBe('')
+  })
+})
+
+describe('alternate buffer：两档范围读的不是同一块缓冲区', () => {
+  /**
+   * 全屏 TUI 会把终端切到 alternate buffer（DECSET ?1049）。那块缓冲**按定义只有一屏、没有回滚**，
+   * 而 `terminal.buffer.active` 此刻正指着它；会话历史原封不动留在 normal buffer 里。
+   *
+   * 这是 #638 修复漏掉的半条：取值源从选区换到了缓冲区（对的），但「全部输出」跟着 active 走
+   * （错的）。于是同一个菜单项，在不占 alternate buffer 的 Agent 上工作、在全屏 TUI 上缩水成一屏
+   * 甚至直接取空——而且静默取空，用户只看见点了没反应。
+   *
+   * 判据是**缓冲区模型**，不是哪个 Agent：任何占用 alternate buffer 的程序都适用。
+   */
+  const history = [line('run 1 output'), line('run 2 output'), line('run 3 output')]
+  const oneScreen = [line('┌ full-screen TUI ┐'), line('└ one screen only ┘')]
+
+  it('active 指向 alternate 时，整段复制仍拿到 normal 的全部历史', () => {
+    // 这条就是用户报的那个缺陷的正面判据。把生产代码里 scrollback 的取值源改回 active，
+    // 它拿到的是 oneScreen 那两行，这条当场红。
+    const normal = buffer(history)
+    expect(terminalScrollbackText(normal)).toBe('run 1 output\nrun 2 output\nrun 3 output')
+  })
+
+  it('同一时刻，可见输出读 alternate，拿到的正是那一屏', () => {
+    // 反向的一半：两档**不能**都读 normal。都读 normal 的话，TUI 开着时「复制可见输出」会复制到
+    // 屏幕上根本没有的旧内容——同样静默、同样错，而上一条判据看不出来。
+    const alternate = buffer(oneScreen)
+    expect(terminalViewportText(alternate, 2)).toBe('┌ full-screen TUI ┐\n└ one screen only ┘')
+  })
+
+  it('两档在同一时刻得到的文本互不相同', () => {
+    // 前两条各自钉死一档的期望值；这一条钉死它们**不是同一段**。若哪天两个调用点被接成同一块
+    // 缓冲区，前两条里至少一条会红——但这条说得更直接，读失败信息的人一眼知道病在哪。
+    expect(terminalScrollbackText(buffer(history))).not.toBe(terminalViewportText(buffer(oneScreen), 2))
+  })
+
+  it('alternate 已被 TUI 清空时，整段复制仍拿得到历史', () => {
+    // 第二种触发形态（原则 13：不能过拟合到单一场景）。上面那组是「alternate 有内容」；
+    // 这里是「alternate 是空的」——TUI 刚清屏、或内容已滚出那一屏。跟着 active 走会取到空串，
+    // 于是静默 return，用户什么都拿不到，而历史其实好好地躺在 normal 里。
+    expect(terminalViewportText(buffer([]), 24)).toBe('')
+    expect(terminalScrollbackText(buffer(history))).toBe('run 1 output\nrun 2 output\nrun 3 output')
+  })
+})
+
+describe('terminalCopyOutcome：取到空不静默，说清哪一档空了', () => {
+  it('有文本时原样交出去写剪贴板', () => {
+    expect(terminalCopyOutcome('hello', 'visible')).toEqual({ kind: 'copy', text: 'hello' })
+  })
+
+  it('空串时不写剪贴板，改为给出一条提示', () => {
+    // 往剪贴板写空串会清掉用户原有的内容，所以 empty 支必须**没有** text 可写。
+    const outcome = terminalCopyOutcome('', 'all')
+    expect(outcome.kind).toBe('empty')
+    expect(outcome).not.toHaveProperty('text')
+  })
+
+  it('两档的提示各不相同，且都点名了另一档', () => {
+    // 提示的全部价值在于「现在该怎么办」。两档取值源不同（可见读 active、全部读 normal），
+    // 一档空着另一档往往正好有内容——所以必须点名另一档，而不是只说「没有内容」。
+    const visible = terminalCopyOutcome('', 'visible')
+    const all = terminalCopyOutcome('', 'all')
+    expect(visible.kind === 'empty' && visible.notice).toBeTruthy()
+    expect(all.kind === 'empty' && all.notice).toBeTruthy()
+    const visibleNotice = visible.kind === 'empty' ? visible.notice : ''
+    const allNotice = all.kind === 'empty' ? all.notice : ''
+    expect(visibleNotice, '两档提示相同——用户分不出是哪一档空了').not.toBe(allNotice)
+    expect(visibleNotice, '可见输出为空时没有指向「全部输出」这条出路').toContain('Copy all output')
+    expect(allNotice, '全部输出为空时没有指向「可见输出」这条出路').toContain('Copy visible output')
+  })
+
+  it('两档提示都说明 Agent 没受影响（原则 11 第 2 类）', () => {
+    // 取空是**我们这一步**没取到，不是 Agent 坏了。不说这句，用户会以为自己的 Agent 出了问题。
+    for (const scope of ['visible', 'all'] as const) {
+      const outcome = terminalCopyOutcome('', scope)
+      const notice = outcome.kind === 'empty' ? outcome.notice : ''
+      expect(notice, `${scope} 档的提示没说明 Agent 未受影响`).toContain('Agent is unaffected')
+      expect(notice, `${scope} 档的提示没说明剪贴板未被改动`).toContain('clipboard')
+    }
+  })
+
+  it('只有空串才走 empty；一个空格不是空', () => {
+    // 判据是「取到了没有」，不是「看起来像不像空」。若这里放宽成 trim 后为空，复制一行缩进
+    // （合法内容）就会被当成失败而不写剪贴板。
+    expect(terminalCopyOutcome(' ', 'visible').kind).toBe('copy')
+    expect(terminalCopyOutcome('\n', 'all').kind).toBe('copy')
   })
 })
 
