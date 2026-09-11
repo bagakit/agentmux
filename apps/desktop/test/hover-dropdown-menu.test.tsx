@@ -25,18 +25,20 @@ async function pointer(target: Element, type: string, pointerType = 'mouse', rel
 }
 async function pause() { await act(async () => { await new Promise((r) => setTimeout(r, 220)) }) }
 async function split(disabled = false) {
-  const action = vi.fn(), open = vi.fn()
-  await act(async () => root.render(<><input aria-label="editor" /><PaneSplitMenu disabled={disabled} regionCount={2} onSplit={action} onArrange={vi.fn()} onOpenChange={open} /></>))
-  return { trigger: container.querySelector<HTMLButtonElement>('.pane-action--split-menu')!, action, open }
+  // 没有 onOpenChange：原生视图让位已不再逐个菜单接线，改由 App 的那个 MutationObserver 按
+  // Radix 的 DOM 协议统一观察（lib/native-surface-overlay.ts）。适配器本身仍会通知它的 owner，
+  // 那条性质由下面直接用 Menu.Root 的那个用例守。
+  const action = vi.fn()
+  await act(async () => root.render(<><input aria-label="editor" /><PaneSplitMenu disabled={disabled} regionCount={2} onSplit={action} onArrange={vi.fn()} /></>))
+  return { trigger: container.querySelector<HTMLButtonElement>('.pane-action--split-menu')!, action }
 }
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
 it('production Split opens without a click, preserves the editor caret and executes once', async () => {
-  const { trigger, action, open } = await split()
+  const { trigger, action } = await split()
   const editor = container.querySelector('input')!
   editor.focus()
   await pointer(trigger, 'pointerover')
   expect(menu()).not.toBeNull()
-  expect(open).toHaveBeenLastCalledWith(true)
   expect(document.activeElement).toBe(editor)
   await pointer(trigger, 'pointerdown')
   expect(menu()).not.toBeNull()
@@ -44,11 +46,10 @@ it('production Split opens without a click, preserves the editor caret and execu
   expect(item).toBeDefined()
   await act(async () => item.click())
   expect(action).toHaveBeenCalledExactlyOnceWith('right')
-  expect(open).toHaveBeenLastCalledWith(false)
   expect(menu()).toBeNull()
 })
-it('crossing the trigger gap keeps the menu; leaving both closes and restores native-view yielding', async () => {
-  const { trigger, open } = await split()
+it('crossing the trigger gap keeps the menu; leaving both closes it', async () => {
+  const { trigger } = await split()
   await pointer(trigger, 'pointerover')
   const content = menu()!
   await pointer(trigger, 'pointerout')
@@ -58,7 +59,6 @@ it('crossing the trigger gap keeps the menu; leaving both closes and restores na
   await pointer(content, 'pointerout')
   await pause()
   expect(menu()).toBeNull()
-  expect(open).toHaveBeenLastCalledWith(false)
 })
 it('disabled and touch hover never disclose, but touch press still opens', async () => {
   let { trigger } = await split(true)
@@ -71,13 +71,12 @@ it('disabled and touch hover never disclose, but touch press still opens', async
   expect(menu()).not.toBeNull()
 })
 it('keyboard opens and Escape dismisses the real Radix menu', async () => {
-  const { trigger, open } = await split()
+  const { trigger } = await split()
   trigger.focus()
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
   expect(menu()).not.toBeNull()
   await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(menu()).toBeNull()
-  expect(open).toHaveBeenLastCalledWith(false)
 })
 it('switching hover menus closes the previous owner and unmount releases the active owner', async () => {
   const first = vi.fn(), second = vi.fn()

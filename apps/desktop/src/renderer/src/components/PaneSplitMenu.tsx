@@ -13,14 +13,12 @@ import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split
 export function PaneSplitMenu({
   disabled = false,
   regionCount,
-  onOpenChange,
   onSplit,
   onArrange
 }: {
   disabled?: boolean
   /** 当前 Tab 的格数。预设只增不减，所以它决定了哪几项列得出来——判定在 workbenchRegionPresetMenu。 */
   regionCount: number
-  onOpenChange(open: boolean): void
   onSplit(direction: SplitDirection): void
   /**
    * 重排。形参是引擎自己那个三档 union，不是裸的 preset——这一节里既有预设（补格子）也有均分／
@@ -30,7 +28,7 @@ export function PaneSplitMenu({
 }) {
   const entries = workbenchSplitMenuEntries({ regionCount, split: onSplit, arrange: onArrange })
   return (
-    <DropdownMenu.Root onOpenChange={onOpenChange}>
+    <DropdownMenu.Root>
       <div className="pane-action-group pane-action-group--split">
         <button
           type="button"

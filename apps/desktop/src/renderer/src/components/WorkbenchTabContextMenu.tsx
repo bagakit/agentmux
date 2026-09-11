@@ -221,7 +221,6 @@ export function WorkbenchTabContextMenu({
   canCloseLeft,
   canCloseRight,
   canMoveToNewGroup,
-  onOpenChange,
   tabId,
   copyableAgentSessionId,
   fileActions,
@@ -243,7 +242,6 @@ export function WorkbenchTabContextMenu({
   canCloseLeft: boolean
   canCloseRight: boolean
   canMoveToNewGroup: boolean
-  onOpenChange?: (open: boolean) => void
   tabId: string
   copyableAgentSessionId: string | null
   // 文件 Tab 才传；非文件 Tab 缺席，路径复制与「显示」整组不出现。
@@ -282,7 +280,7 @@ export function WorkbenchTabContextMenu({
   })
   const layoutEntries = workbenchRegionLayoutMenuEntries({ regionCount, arrange: onArrange })
   return (
-    <ContextMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
+    <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
