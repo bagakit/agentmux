@@ -194,6 +194,12 @@
 - 启动、恢复、全页导航和大块数据加载共用一个 `FullPageLoadingSurface` 组件；视觉语言统一为 Graphite 深底、低对比网格/切片、非对称注册标记和一处清晰阶段标题。调用方不重复实现全屏 spinner 或品牌 splash。
 - 大屏的前景层保持稳定可读，包含 AgentMux 品牌、阶段标题、短说明和当前可用动作；扫描线、错位框线和微动效只作用于中景，不闪烁整屏、不遮蔽错误文案。
 - loading、recovering、ready 和 blocked/failed 共享同一几何与密度预算，状态只改变语义色、图标和动作，不改变页面结构。真实工作面出现后加载层卸载，不留下空的 chrome 行。
+- 「不重复实现」是**屏幕上只有一份**，不是「调用方自觉不写第二份」。调用方把自己的内容交给
+  `FullPageLoadingSurface` 之后，就不再自带信号切片、品牌层或阶段标签——同一张面上出现两组
+  扫描切片、两行阶段文案即为违反。这条是  真实发生过的回归：Connecting 面搬进共享
+  组件时把自己那套舞台一起带了进去，而圈着旧舞台的 `:not(.full-page-loading)` 因为两个类落在
+  同一个元素上而全部失效，于是旧的那份既没被样式藏起来、也没被删掉，两份同时显形。约束按
+  「这张面上有几组」验收，不按「代码里写没写」验收。
 - `prefers-reduced-motion` 下停止扫描与位移，保留静态切片、边框和阶段状态；所有大屏必须提供可访问的 live 文本和不会因动画变化而重复播报的标签。
 
 ## Surface 层级
@@ -393,7 +399,7 @@ styles/
   source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
   workbench.css   Pane、Region、分屏、拖放
   terminal.css    终端表面与它的状态覆盖层
-  session-connecting.css  Connecting 与 Session 恢复的 Region 状态舞台
+  session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   surfaces.css    Settings、New Tab、Launch、Welcome
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
