@@ -459,7 +459,6 @@ type AppState = {
   /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
   togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
-  tabMenuOpen: boolean
   /** Transient leases held by Renderer overlays that must sit above window-level native surfaces. */
   nativeSurfaceOverlayCount: number
   /**
@@ -623,7 +622,6 @@ type AppState = {
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
-  setTabMenuOpen(open: boolean): void
   setPortalOverlayCount(count: number): void
   acquireNativeSurfaceOverlay(): void
   releaseNativeSurfaceOverlay(): void
@@ -1831,7 +1829,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   explorerCollapsed: {},
   pinnedItems: {},
   toolsOpen: true,
-  tabMenuOpen: false,
   nativeSurfaceOverlayCount: 0,
   portalOverlayCount: 0,
   workspaceTool: 'files-branches',
@@ -3873,9 +3870,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return { pinnedItems: { ...state.pinnedItems, [scope]: next } }
     })
-  },
-  setTabMenuOpen(tabMenuOpen) {
-    set({ tabMenuOpen })
   },
   setPortalOverlayCount(portalOverlayCount) {
     set({ portalOverlayCount })

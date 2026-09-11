@@ -185,7 +185,6 @@ function SortableWorkbenchTab({
   const renameAgent = useAppStore((state) => state.renameAgent)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
-  const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const config = useAppStore((state) => state.config)
   const localHome = useAppStore((state) => state.localHome)
   const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
@@ -366,7 +365,6 @@ function SortableWorkbenchTab({
         canCloseLeft={tabsToLeft.length > 0}
         canCloseRight={tabsToRight.length > 0}
         canMoveToNewGroup={group.tabOrder.length > 1}
-        onOpenChange={setTabMenuOpen}
         tabId={tab.id}
         copyableAgentSessionId={copyableAgentSessionId}
         {...(fileActions ? { fileActions } : {})}
@@ -867,7 +865,6 @@ function PaneGroup({
   const openLauncher = useAppStore((state) => state.openLauncher)
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
-  const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const stopSession = useAppStore((state) => state.stopSession)
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
@@ -951,8 +948,7 @@ function PaneGroup({
             </button>
           ) : null}
           <PaneSplitMenu
-            onOpenChange={setTabMenuOpen}
-            disabled={!activeTab || !activeSurface}
+                disabled={!activeTab || !activeSurface}
             regionCount={activeTab ? Object.keys(activeTab.regions).length : 0}
             onSplit={(direction) => {
               if (activeTab && activeSurface) {
@@ -1210,7 +1206,6 @@ export function WorkspaceWorkbench({
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
-  const tabMenuOpen = useAppStore((state) => state.tabMenuOpen)
   // 观察到的 portal 浮层数。与手工租约在下面合并一次——两者生命周期不同（整体写入 vs 增量
   // acquire/release），所以分开存、只在这一处相加，而不是让两边往同一个数上加减。
   const portalOverlayCount = useAppStore((state) => state.portalOverlayCount)
@@ -1292,7 +1287,7 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
-            nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+            nativeSurfacesVisible={visible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
