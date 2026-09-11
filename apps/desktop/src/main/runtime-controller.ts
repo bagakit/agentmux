@@ -1085,18 +1085,29 @@ export class RuntimeController {
 
   async stopSession(control: SessionControl): Promise<void> {
     const attachmentKey = sessionAttachmentKey(control)
-    await this.serializeSessionAttachment(attachmentKey, async () => {
-      const client = await this.connectedClient(control.hostId)
-      if (control.kind === 'agent') {
-        await client.stopAgent(control.agentSessionId, control.run)
-      } else {
-        await client.stopTerminal(control.run)
-        const inputKey = terminalInputKey(control.hostId, control.runId)
-        this.terminalInputCursors.delete(inputKey)
-        this.terminalInputTails.delete(inputKey)
-      }
-      this.forgetSessionAttachmentOwner(attachmentKey)
-    })
+    // 停止**不排队**，其余附着操作照旧排队。
+    //
+    // 理由是「关不掉」那条缺陷的下半场。一次没回执的停止会让它那格队列永远不前进；如果停止
+    // 自己也排在这条队上，用户按提示再关一次，第二次会卡在队尾——`client.stopTerminal` 一次都
+    // 不会被再调到。那正是「点了没反应」的实感，而我们给出的恢复动作（「再关一次」）在这种
+    // 状态下根本走不通：文案点名的动作必须从当前状态真能走通。
+    //
+    // 队列存在的理由是 resize / attach / detach 这些**改附着状态**的操作不能互相穿插。停止不属于
+    // 这一族：它是终局动作，重复发一次对 Runtime 是幂等的（同一个 run 停两次，第二次无事发生），
+    // 不存在需要被上一步保护的中间态。反过来它还必须能插队——正因为队首卡住的往往就是它自己。
+    // 附着在**决定停止的那一刻**就作废，而不是等 Runtime 回话之后。这一句同时管两件事：
+    // 排在后面的 resize 找不到 owner，直接 revoke（这条性质原先靠「停止占着队列」间接成立，
+    // 现在直接写出来）；而一次没回执的停止也不会让这一格永远顶着一个已经作废的附着。
+    this.forgetSessionAttachmentOwner(attachmentKey)
+    const client = await this.connectedClient(control.hostId)
+    if (control.kind === 'agent') {
+      await client.stopAgent(control.agentSessionId, control.run)
+    } else {
+      await client.stopTerminal(control.run)
+      const inputKey = terminalInputKey(control.hostId, control.runId)
+      this.terminalInputCursors.delete(inputKey)
+      this.terminalInputTails.delete(inputKey)
+    }
   }
 
   async dispose(): Promise<void> {
