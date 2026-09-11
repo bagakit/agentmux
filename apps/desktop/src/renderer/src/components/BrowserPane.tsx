@@ -739,6 +739,10 @@ export function BrowserPane({
         onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
         onOpenTimeline={openOperationTimeline}
       />
+      {/* 页面与轨迹是左右两块，不是上下两块。原生 WebContentsView 的矩形取自 `.browser-stage`
+          的 getBoundingClientRect（见上面那个 ResizeObserver），所以轨迹 rail 作为 flex 兄弟把
+          stage 挤窄时，原生视图会跟着收——轨迹不是盖在页面上，是页面真的让出了那条竖带。 */}
+      <div className="browser-body">
       <div className="browser-stage" data-native-browser-stage ref={stageRef}>
         {screenshot ? (
           <ScreenshotEditor
@@ -815,7 +819,7 @@ export function BrowserPane({
         ) : null}
       </div>
       {timelineOpen ? (
-        <>
+        <aside className="browser-trace-rail" aria-label="Browser activity trace">
           <BrowserOperationHistory
             operations={[
               ...(tab.activity?.operation && !operationHistory.some((operation) => operation.id === tab.activity?.operation?.id) ? [tab.activity.operation] : []),
@@ -861,8 +865,9 @@ export function BrowserPane({
               onRun={() => void runReplay()}
             />
           ) : null}
-        </>
+        </aside>
       ) : null}
+      </div>
     </section>
   )
 }
