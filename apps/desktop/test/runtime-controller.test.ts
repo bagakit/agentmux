@@ -2040,6 +2040,69 @@ describe('RuntimeController configuration transaction', () => {
     detachRenderer()
   })
 
+  /**
+   * 「经常出现 session 关不掉」的下半场。
+   *
+   * 上半场（session-stop-timeout.ts）给等待加了上限，到点如实失败，并告诉用户「再关一次」。
+   * 但那句话当时是走不通的：停止和 resize/attach/detach 一起排在同一条按 Session 串行的队上，
+   * 一次没回执的停止会让那一格队列永远不前进——用户照提示再点一次，第二次卡在队尾，
+   * `stopTerminal` 一次都不会被再调到。我们给出的恢复动作必须从当前状态真的走得通。
+   *
+   * 队列保护的是「改附着状态」的操作不能互相穿插。停止不属于这一族：它是终局动作，同一个 run
+   * 停两次对 Runtime 是幂等的，没有需要被上一步保护的中间态；反过来它必须能插队，因为卡住队首
+   * 的往往正是它自己。
+   */
+  it('lets a second Stop reach the Runtime while the first one is still unanswered', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture()
+    const detachRenderer = controller.attach(renderer)
+    const control: SessionControl = {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'run-1',
+      run: { runId: 'run-1' }
+    }
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
+        kind: 'terminal',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: {
+          runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
+          workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
+          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+        }
+      }]
+    })
+    await controller.attachSession(renderer.id, control, 0, localConfig)
+
+    // daemon 收下了停止帧却没回执——这个 await 永不结束。
+    const stopEntered = deferred<void>()
+    const wedged = deferred<void>()
+    client.stopTerminal.mockImplementationOnce(async () => {
+      stopEntered.resolve()
+      await wedged.promise
+    })
+    const first = controller.stopSession(control)
+    await stopEntered.promise
+    expect(client.stopTerminal).toHaveBeenCalledTimes(1)
+
+    // 用户等不到回音，按提示又点了一次关闭。
+    const second = controller.stopSession(control)
+    await second
+    expect(
+      client.stopTerminal,
+      '第二次关闭没到达 Runtime——它卡在队尾，而我们的文案正让用户去做这个动作'
+    ).toHaveBeenCalledTimes(2)
+
+    wedged.resolve()
+    await first
+    detachRenderer()
+  })
+
   it('revokes a late Attachment resize that queues behind an in-flight Stop', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
