@@ -44,15 +44,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     detail={detail}
   >
     <div className="session-connecting__body">
-      <div className="session-connecting__signal" aria-hidden="true">
-        <span className="session-connecting__slice" />
-        <span className="session-connecting__slice" />
-        <span className="session-connecting__slice" />
-        <span className="session-connecting__scan" />
-        <span className="session-connecting__registration">+</span>
-      </div>
       <header className="session-connecting__heading" role="status" aria-live="polite">
-        <span className="session-connecting__eyebrow">{phase === 'launch' ? 'Launch request' : 'Session connection'}</span>
         <h2>{title}<span className="session-connecting__cursor" aria-hidden="true">_</span></h2>
         <p>{detail}</p>
       </header>
