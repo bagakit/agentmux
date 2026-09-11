@@ -42,7 +42,10 @@ describe('window-owned Workspace Workbench registry', () => {
 
   it('keeps only the active Workbench native surfaces live', () => {
     expect(workbench).toContain('visible?: boolean')
-    expect(workbench).toContain('nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0}')
+    // 这里只守「泊车的 Workbench 不点亮原生视图」那一半——即 visible 确实在那条表达式里。
+    // 整条表达式的其余条件（浮层让位的两把租约）归 workbench-browser-visibility.test.tsx 守：
+    // 此前这里抄的是整行字面量，于是每加一个合法条件都要来改这一行，而它并不比那边的逐条判据更强。
+    expect(workbench).toContain('nativeSurfacesVisible={visible &&')
     expect(app).toContain('visible={visible}')
   })
 
