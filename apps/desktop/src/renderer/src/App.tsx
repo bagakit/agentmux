@@ -33,6 +33,7 @@ import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
 import { applyAppAppearance } from './lib/app-appearance'
+import { observeOverlays } from './lib/native-surface-overlay'
 import {
   TerminalParkingProvider,
   useTerminalColdParking
@@ -80,6 +81,15 @@ function DesktopApp() {
     if (visible) acquireNativeSurfaceOverlay()
     else releaseNativeSurfaceOverlay()
   }, [acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
+  // 浮层 vs 原生视图的那条**唯一**订阅点。窗口级原生视图合成在所有 renderer 像素之上，所以任何
+  // 画在 DOM 里的浮层都会被它盖住——与 z-index 无关。判据取 Radix 自己的 DOM 协议（portal 到
+  // React 根之外 + data-state=open），一次覆盖全仓 21 个 Root，新加的自动覆盖；判定在
+  // lib/native-surface-overlay.ts 里，这里只负责订阅与投递。
+  const setPortalOverlayCount = useAppStore((state) => state.setPortalOverlayCount)
+  useEffect(
+    () => observeOverlays(document.body, setPortalOverlayCount, MutationObserver),
+    [setPortalOverlayCount]
+  )
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
   useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)

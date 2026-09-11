@@ -1211,6 +1211,9 @@ export function WorkspaceWorkbench({
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const tabMenuOpen = useAppStore((state) => state.tabMenuOpen)
+  // 观察到的 portal 浮层数。与手工租约在下面合并一次——两者生命周期不同（整体写入 vs 增量
+  // acquire/release），所以分开存、只在这一处相加，而不是让两边往同一个数上加减。
+  const portalOverlayCount = useAppStore((state) => state.portalOverlayCount)
   const nativeSurfaceOverlayCount = useAppStore((state) => state.nativeSurfaceOverlayCount)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
@@ -1289,7 +1292,7 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
-            nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0}
+            nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
