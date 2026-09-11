@@ -807,6 +807,56 @@ describe('Session and Launcher lifecycle ownership', () => {
     expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
   })
 
+  it('a stop that never answers still frees the View so it can be closed again', async () => {
+    // 「经常出现 session 关不掉」的端到端判据。
+    //
+    // 缺陷不是"停止失败了"，是停止**永远不返回**：整条链路没有客户端超时，daemon 收下停止帧却不回执时
+    // 这个 await 永不结束。而重入租约在 `finally` 里释放——于是租约永久扣住，之后每一次点关闭都在入口被
+    // 静默挡掉。用户看到的是「点了没反应，而且这个 Tab 现在连反应都没有了」。
+    //
+    // 上限本身由 session-stop-timeout.test.ts 逐条守；这里守的是它接上之后**整条关闭路的结局**：
+    // 拒绝 → 保留投影 → 释放租约 → 还能再关一次。这三件事缺任何一件，用户仍然被卡住。
+    const session = terminalSession('wedged-run')
+    const tab = createWorkbenchTab('wedged-view', {
+      regionId: 'terminal-region',
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: session.id
+    })
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      sessions: [session],
+      tabs: { [tab.id]: tab },
+      layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
+      error: null
+    })
+    const stop = vi.spyOn(api.sessions, 'stop')
+      // 第一次：上限到点后拒绝（preload 的 withStopTimeout 的实际形状）。
+      .mockRejectedValueOnce(Object.assign(new Error('no response from the Runtime'), {
+        code: 'SESSION_STOP_TIMEOUT'
+      }))
+      // 第二次：用户再点一次，这回 Runtime 答了。
+      .mockResolvedValueOnce()
+
+    await expect(useAppStore.getState().closeTab('workspace', 'pane', tab.id)).resolves.toBe(false)
+    expect(
+      useAppStore.getState().tabs[tab.id],
+      '没等到回音就把 Tab 删了——那是在拿用户的 Agent 撒谎，Session 可能还活着'
+    ).toBeDefined()
+    expect(
+      useAppStore.getState().closingWorkbenchViews[tab.id],
+      '租约没释放——之后每一次点关闭都会被静默挡掉，这正是「连反应都没有了」'
+    ).toBeUndefined()
+    expect(useAppStore.getState().error, '超时没有告诉用户').not.toBeNull()
+
+    // 再关一次：这一次必须真的走到 stop，而不是被上一次的租约挡在门外。
+    await expect(useAppStore.getState().closeTab('workspace', 'pane', tab.id)).resolves.toBe(true)
+    expect(stop, '第二次点击没能走到 stop——租约仍扣着').toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
+  })
+
   it('retries only the failed owner after a partial close', async () => {
     const session = terminalSession('terminal-run')
     const tab = addWorkbenchRegion(createWorkbenchTab('closing-view', {
