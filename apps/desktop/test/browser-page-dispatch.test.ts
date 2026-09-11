@@ -286,3 +286,110 @@ describe('导航之后旧快照必须被丢掉', () => {
     ).rejects.toThrow()
   })
 })
+
+/**
+ * `elementContext` 派发路径：真的走 `callOn`、真的脱敏、真的把「不是元素」和「ref 解不开」分开。
+ *
+ * 为什么这条非有不可：`browser-element-context.test.ts` 直接调 builder 和 sanitizer，
+ * `browser-run-script-wiring.test.ts` 把整个派发层 mock 掉——两条都碰不到 dispatch 里
+ * 302-320 那段接线。于是把 `return sanitizeBrowserElementSelection(raw)` 改成 `return {}`、
+ * 或者把 `raw === null` 那句删掉，38 条测试**照样全绿**（实测过）。这条补的正是那个缺口：
+ * 它跑真派发器，用假 CDP 对端喂回 `Runtime.callFunctionOn` 的返回。
+ *
+ * 三件可证伪的事，与设计 SSOT 的约束一一对应：
+ *   1. 返回值经过脱敏——白名单外的 `data-*` 被丢掉、`style`/`onclick` 进不来；直接回 raw 会红。
+ *   2. `raw === null`（`this` 不是 Element）说的是「换个 ref」，与「ref 根本解不开」是两句话；
+ *      折并或漏掉 null 判都会红。
+ *   3. 只读：`callOn` 收到的声明里没有事件监听、没有 scrollIntoView。
+ */
+describe('elementContext 真的走派发层：脱敏、且「不是元素」自成一句', () => {
+  /** 一份形状合法、但夹带了该被脱敏丢掉的东西的 element-context 原始返回。 */
+  const rawWithForbiddenAttrs = {
+    pageTitle: 'Example',
+    pageUrl: 'https://example.invalid/',
+    tagName: 'button',
+    role: 'button',
+    accessibleName: 'Go now',
+    selector: 'button#go',
+    text: 'Go',
+    // `id`/`aria-label` 在白名单里留下；`data-k` 与 `onclick` 必须被丢掉——页面能借任意 data-*
+    // 和事件属性给 Agent 塞内容。
+    attributes: { id: 'go', 'aria-label': 'Go now', 'data-k': 'v', onclick: 'steal()' },
+    nearbyText: ['before', 'after'],
+    html: '<button id="go">Go</button>',
+    rectViewport: { x: 1, y: 2, width: 3, height: 4 },
+    rectPage: { x: 1, y: 2, width: 3, height: 4 },
+    isFixed: false
+  }
+
+  /** 记下 `Runtime.callFunctionOn` 收到的声明，并按需返回一份 raw 或 null。 */
+  function elementContextSession(callReturn: unknown): {
+    session: BrowserCdpSession
+    declarations: string[]
+  } {
+    const declarations: string[] = []
+    const session = {
+      sendCommand: async (method: string, params?: { functionDeclaration?: string }) => {
+        if (method === 'Accessibility.getFullAXTree') {
+          return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Go' }, childIds: [] }] }
+        }
+        if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-1' } }
+        if (method === 'Runtime.callFunctionOn') {
+          declarations.push(params?.functionDeclaration ?? '')
+          return { result: { value: callReturn } }
+        }
+        return {}
+      },
+      frames: new Map(),
+      endedReason: null,
+      frameDiscoveryFailure: null,
+      observe: () => () => {},
+      detach: () => {}
+    } as unknown as BrowserCdpSession
+    return { session, declarations }
+  }
+
+  it('返回值经过脱敏白名单，且用的是元素上下文那份声明（只读，不碰事件）', async () => {
+    const { session, declarations } = elementContextSession(rawWithForbiddenAttrs)
+    const dispatch = dispatchOn(session)
+    const snapshot = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
+    const ref = snapshot.nodes.find((node) => node.ref !== '')!.ref
+
+    const context = (await dispatch('elementContext', [ref])) as {
+      attributes: Record<string, string>
+      accessibleName: string
+    }
+
+    // 脱敏真的发生了：白名单里的留下，白名单外的丢掉。直接 `return raw` 会让 data-k / onclick 穿过去。
+    expect(context.accessibleName, '脱敏后没保住 accessibleName').toBe('Go now')
+    expect(context.attributes['aria-label'], '白名单里的属性被丢了').toBe('Go now')
+    expect(context.attributes['data-k'], '任意 data-* 穿过了脱敏白名单——页面可借它给 Agent 塞内容').toBeUndefined()
+    expect(context.attributes.onclick, '事件属性穿过了脱敏白名单').toBeUndefined()
+
+    // 用的是元素上下文那份声明：它由 `this` 取目标、且不碰事件这条路（观察类，只读）。
+    expect(declarations, '没有走 callFunctionOn——elementContext 没落到派发层').toHaveLength(1)
+    expect(declarations[0], '目标不是来自调用方的句柄').toContain('extract(this)')
+    for (const forbidden of ['addEventListener', 'dispatchEvent', 'isTrusted', 'scrollIntoView']) {
+      expect(declarations[0], `elementContext 声明里出现了 ${forbidden}：它不该碰事件、也不该改页面`).not.toContain(forbidden)
+    }
+  })
+
+  it('`this` 不是元素时（页面返回 null）说的是「换个 ref」，不是「ref 解不开」', async () => {
+    const { session } = elementContextSession(null)
+    const dispatch = dispatchOn(session)
+    const snapshot = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
+    const ref = snapshot.nodes.find((node) => node.ref !== '')!.ref
+
+    // ref 解得开（DOM.resolveNode 给了 objectId），但目标不是 Element。这句话必须点名「取一张新快照」
+    // 且说清是「没有元素上下文」，而不是复用「ref 不在快照里」那句——两者的下一步不同。
+    const message = await dispatch('elementContext', [ref]).catch((error: Error) => error.message)
+    expect(message, 'null（不是元素）被读成了成功').toEqual(expect.any(String))
+    expect(message, '没说清这个 ref 指的不是一个元素').toMatch(/element context|does not point at an element/i)
+
+    // 反面对照：一个**解不开**的 ref 给的是另一句话（不在快照里）。两句不能是同一句。
+    const unknown = await dispatch('elementContext', ['@e9999']).catch((error: Error) => error.message)
+    expect(unknown, '不认识的 ref 被放行了').toMatch(/snapshot/i)
+    expect(message, '「不是元素」与「ref 解不开」被折并成同一句话').not.toBe(unknown)
+  })
+})
