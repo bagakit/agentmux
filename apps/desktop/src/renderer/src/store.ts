@@ -1,4 +1,5 @@
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
+import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
@@ -2714,8 +2715,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'browser.run') {
       // 授权闸不在这层，在 Main 的 browser:runScript handler 里：那是所有调用方的必经之路，
       // 而这里只是今天唯一的一个调用方。放在这层的话，每多一个入口就要记得再写一遍同样的检查。
+      // 操作者身份从真实 Session 解析（browserOperatorForSession），不在这里拼名字：
+      // 原先写的是 `name: \`Agent ${agentSessionId}\``，于是轨迹上显示一串 UUID、头像退化成
+      // 通用图标——而"是哪个 Agent 在动我的浏览器"正是这条轨迹要回答的唯一问题。
       const report = await api.browser.runScript(request.browserId, request.code, request.caller
-        ? { id: request.caller.agentSessionId, name: `Agent ${request.caller.agentSessionId}` }
+        ? browserOperatorForSession(request.caller.agentSessionId, get().sessions)
         : undefined, request.operationId)
       requireActive()
       return {
