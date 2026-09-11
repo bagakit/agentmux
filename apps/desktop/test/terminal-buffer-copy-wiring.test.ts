@@ -145,9 +145,13 @@ describe('取值：两个 lib 函数被真的调用，且喂的是这个终端�
   // 逐个函数问同一串问题。两条路今天形状几乎一样，但**不共用**一条断言：措辞近似的两条判据
   // 若折成一条，把 scrollback 那条接成 viewport 的实现（或反之）就无人发现
   // （记忆 near-identical-copy-defeats-distinct-classes）。
+  // `buffer` 这一列是**承重的、两条各不相同**：可见输出读 active（问题是「屏幕上现在是什么」），
+  // 全部输出读 normal（问题是「这个会话到目前为止有什么」，而会话历史只留在 normal 里）。
+  // 曾经两条共用 `'buffer.active'` 一个期望值——那条判据把缺陷本身钉成了验收：全屏 TUI 占着
+  // alternate buffer 时，「全部输出」跟着 active 走就缩水成一屏甚至取空，而这里全绿。
   const CASES = [
-    { fn: 'terminalViewportText', holder: 'copyViewport', arity: 2 },
-    { fn: 'terminalScrollbackText', holder: 'copyScrollback', arity: 1 }
+    { fn: 'terminalViewportText', holder: 'copyViewport', arity: 2, buffer: 'buffer.active' },
+    { fn: 'terminalScrollbackText', holder: 'copyScrollback', arity: 1, buffer: 'buffer.normal' }
   ] as const
 
   it('两个取值函数都是从 terminal-buffer-copy 导入的，不是同名本地函数', () => {
@@ -207,7 +211,7 @@ describe('取值：两个 lib 函数被真的调用，且喂的是这个终端�
     ).toEqual([])
   })
 
-  for (const { fn, holder, arity } of CASES) {
+  for (const { fn, holder, arity, buffer } of CASES) {
     describe(`${fn} 的调用点`, () => {
       const calls = callsTo(view, fn)
 
@@ -230,18 +234,21 @@ describe('取值：两个 lib 函数被真的调用，且喂的是这个终端�
         )
       })
 
-      it(`第一个实参读的是 terminalRef.current 的 buffer.active`, () => {
-        // 本文件最承重的一条。换成一个假 buffer 字面量、换成 `buffer.normal`（另一块缓冲区，
-        // alt-screen 下内容完全不同）、或换成别处同名字段，调用点在场、计数不变、lib 侧 14 条全绿，
-        // 而用户复制到的是另一段东西。判**取值身份**，不判「有没有实参」。
+      it(`第一个实参读的是 terminalRef.current 的 ${buffer}`, () => {
+        // 本文件最承重的一条。换成一个假 buffer 字面量、换成**另一块缓冲区**、或换成别处同名字段，
+        // 调用点在场、计数不变、lib 侧全绿，而用户复制到的是另一段东西。判**取值身份**，
+        // 不判「有没有实参」。
+        //
+        // 两条路的期望值不同，且这个差别就是 #638 剩下那半条缺陷的判据（见 CASES 上的注释）：
+        // 把 scrollback 那条改回 `buffer.active`，这里必须红。
         expect(calls, '调用缺席，这条判据没有对象').toHaveLength(1)
         const resolved = resolvedArgument(calls[0]!, 0)
         expect(resolved, `${fn} 没有第一个实参`).not.toBe('')
         expect(
           resolved,
-          `${fn} 读的不是 xterm 的活动缓冲区（实测取值：${resolved}）——` +
-            'buffer.normal / 假 buffer 都会让复制到的内容与屏幕对不上'
-        ).toContain('buffer.active')
+          `${fn} 读的不是 ${buffer}（实测取值：${resolved}）——` +
+            '另一块缓冲区 / 假 buffer 都会让复制到的内容与这一档的语义对不上'
+        ).toContain(buffer)
         expect(
           resolved,
           `${fn} 读的 buffer 不来自 terminalRef.current（实测取值：${resolved}）——可能读到了别的终端实例`

@@ -31,7 +31,11 @@ import {
 } from '../lib/terminal-path-link'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
 import { installTerminalPasteSanitizer, pasteIntoTerminal } from '../lib/terminal-paste'
-import { terminalScrollbackText, terminalViewportText } from '../lib/terminal-buffer-copy'
+import {
+  terminalCopyOutcome,
+  terminalScrollbackText,
+  terminalViewportText
+} from '../lib/terminal-buffer-copy'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
@@ -1028,22 +1032,53 @@ export function TerminalView({
   }
 
   // #638 的出路：两条**不经过选区**的复制路。取值全在 lib（terminal-buffer-copy），这里只负责把
-  // 真的 buffer 与真的 rows 喂进去——`buffer.active` 是 xterm 的公开数据 API，不问选区服务死活，
+  // 真的 buffer 与真的 rows 喂进去——`buffer` 是 xterm 的公开数据 API，不问选区服务死活，
   // 所以 TUI 开着鼠标上报、上面那条 copySelection 恒空时，这两条照常拿得到文本。
+  //
+  // 两档范围喂的**不是同一个 buffer**，这是 #638 漏掉的那半条：全屏 TUI 会把终端切到 alternate
+  // buffer（DECSET ?1049），那里按定义只有一屏、没有回滚，而 `buffer.active` 此刻正指向它。
+  // 于是「全部输出」若跟着 active 走，就会在 TUI 开着时缩水成当前一屏，想复制的内容一旦滚出去
+  // 就直接取空——静默失败，用户只看见点了没反应。会话历史始终留在 `buffer.normal` 里，所以
+  // 「全部输出」固定读 normal，「可见输出」才读 active。
+  //
+  // 判据只能是缓冲区模型，不能是"哪个 Agent 在跑"：任何占用 alternate buffer 的程序都适用，
+  // 这里和 lib 里都不出现 Provider 名（守卫见 test/terminal-copy-provider-agnostic.test.ts）。
+  // 取到空串时**不静默 return**（原则 11 第 2 类：Agent 好好的，是我们这一步没取到东西）。
+  // 「写剪贴板还是说一句话」这个判定在 lib 的 terminalCopyOutcome 里，不在这儿写 `if (!text)`：
+  // 那种 in-component 分支唯一能写的判据是「这个 if 在场」，而在场判据挡不住把条件取反
+  // （terminal-buffer-copy-wiring 早把这个缺口如实记在案）。
+  //
+  // 提示走 reportError 那一个瞬时槽，而不是新起一个服务窗：服务窗承载「这个 Session 现在处于某个
+  // 降级状态」这类持续事实，会一直挂着；而「刚才那次点击没取到内容」是一次**事件**，说完就该让位。
+  // 两个面已经共用 serviceNoticeAriaLive 这一条严重度轴（见 TransientErrorNotice 文件头），
+  // 不带 kind 时落在 polite/status 档——看得见，不喊。
+  // 两条路各自 dispatch 一次，**不抽一个共用的 deliverCopy**：那样 copyTextToClipboard 就从两个
+  // handler 里搬走了，而 wiring 那道门正是按「这一处落在哪个绑定上」判投递的，抽走即失守。
+  // 这里的三行不是重复事实——判定只有 terminalCopyOutcome 一处，这三行只是把它的两支接出去。
+  //
+  // 分支取反（把 'empty' 写成非 'empty'）不需要额外守卫：union 收窄之后 `outcome.notice` 在 copy
+  // 支上不存在、`outcome.text` 在 empty 支上不存在，取反当场 tsc 红。这比它替下来的
+  // `if (!text) return` 强——那个分支能被取反且全绿（缺口原先如实记在 wiring 那个文件头里）。
   function copyViewport(): void {
     const terminal = terminalRef.current
     if (!terminal) return
-    const text = terminalViewportText(terminal.buffer.active, terminal.rows)
-    if (!text) return
-    void copyTextToClipboard(text, reportError)
+    const outcome = terminalCopyOutcome(terminalViewportText(terminal.buffer.active, terminal.rows), 'visible')
+    if (outcome.kind === 'empty') {
+      reportError(new Error(outcome.notice))
+      return
+    }
+    void copyTextToClipboard(outcome.text, reportError)
   }
 
   function copyScrollback(): void {
     const terminal = terminalRef.current
     if (!terminal) return
-    const text = terminalScrollbackText(terminal.buffer.active)
-    if (!text) return
-    void copyTextToClipboard(text, reportError)
+    const outcome = terminalCopyOutcome(terminalScrollbackText(terminal.buffer.normal), 'all')
+    if (outcome.kind === 'empty') {
+      reportError(new Error(outcome.notice))
+      return
+    }
+    void copyTextToClipboard(outcome.text, reportError)
   }
 
   function pasteClipboard(): void {
