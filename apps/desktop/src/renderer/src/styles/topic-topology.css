@@ -1,0 +1,230 @@
+/**
+ * Topic 行尾的工作台拓扑：Region 分屏缩略图、在场簇，以及悬停展开的 Tab/Region 检视面。
+ *
+ * 从 dock.css 拆出来（那个文件过了 400 行的上限）。拆分线选在「表面」而不是「组件」上：
+ * 这一族是长在 Topic 行**尾部**的一块独立观察面——它自带一个悬停浮层、一套 chip 轨道和
+ * 一张 Region 网格，与列表行本身（内外边距、背景、状态色，仍在 dock.css）是两件事。
+ *
+ * 必须紧跟 dock.css 被 @import（见 index.css）：层叠顺序即文件顺序。这一族的选择器都带
+ * `.workspace-topic-item` 或 `.topic-` 前缀，与 dock 里剩下的规则不重叠，但它们长在 dock 的
+ * Topic 行里——排在 dock 之后才能在需要时覆盖行本身的底色，反过来不行。
+ */
+/* 行尾那枚 Region 分屏缩略图（48×28px）。只在 Topic 开着一张 Tab 时出现，画的是那张 Tab 的
+   Region 分屏缩影。48×28 与 border-radius 都不在尺度合同扫描的属性里（surface-scale-contract 只扫
+   font-size / gap / padding / margin，surface-radius 只管 <6px 的圆角），故无需例外条目。 */
+.topic-region-mosaic {
+  flex: 0 0 auto;
+  position: relative;
+  width: 48px; height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  overflow: hidden;
+}
+.topic-presence { display: flex; align-items: center; gap: var(--sp-2); }
+.topic-workbench-topology {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-3);
+  cursor: default;
+  outline: none;
+}
+.topic-workbench-topology:hover,
+.topic-workbench-topology:focus-visible,
+.topic-workbench-topology:focus-within {
+  color: var(--text);
+}
+.topic-workbench-topology__tab-rail {
+  max-width: min(196px, 52vw);
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.topic-workbench-topology__tab-rail::-webkit-scrollbar { display: none; }
+.topic-workbench-topology__tab-chip {
+  flex: 0 0 auto;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  font: 8px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.topic-workbench-topology__tab-chip + .topic-workbench-topology__tab-chip {
+  margin-left: calc(-1 * var(--sp-4));
+}
+.topic-workbench-topology__tab-glyph {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--surface-0);
+}
+.topic-workbench-topology__tab-glyph__cell {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  min-width: 1px;
+  min-height: 1px;
+  border: 1px solid var(--surface-0);
+  background: var(--surface-3);
+}
+.topic-workbench-topology__tab-glyph--single .topic-workbench-topology__tab-glyph__cell {
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+}
+.topic-workbench-topology__tab-glyph--single {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+}
+.topic-workbench-topology__tab-glyph--single > .agent-avatar {
+  pointer-events: none;
+  transform: scale(.86);
+  transform-origin: center;
+}
+.topic-workbench-topology__tab-glyph--single > svg { color: var(--text-2); }
+.topic-workbench-topology__tab-chip.active {
+  border-color: var(--green-line);
+  color: var(--green);
+  background: var(--green-bg);
+}
+.topic-workbench-topology__tab-chip.inspected,
+.topic-workbench-topology__tab-chip:hover,
+.topic-workbench-topology__tab-chip:focus-visible {
+  z-index: 20 !important;
+  border-color: var(--focus-line);
+  color: var(--text);
+  background: var(--surface-3);
+  outline: none;
+}
+.topic-workbench-topology__tab-chip.active.inspected,
+.topic-workbench-topology__tab-chip.active:hover,
+.topic-workbench-topology__tab-chip.active:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-bg-hover);
+}
+.topic-workbench-topology__inspector-regions {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--surface-0);
+}
+.topic-workbench-topology__inspector-regions__region {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1px;
+  border: 1px solid var(--surface-0);
+  color: var(--text-2);
+  background: var(--surface-3);
+  text-align: center;
+}
+.topic-workbench-topology__inspector-regions__region-label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+.topic-workbench-topology__inspector-regions__region-label > .agent-avatar {
+  flex: 0 0 auto;
+  transform: scale(.82);
+  transform-origin: center;
+}
+.topic-workbench-topology__inspector-regions__region-label strong,
+.topic-workbench-topology__inspector-regions__region-label small {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topic-workbench-topology__inspector-regions__region-label strong { font: var(--fs-micro)/1 var(--font-mono); font-weight: 600; }
+.topic-workbench-topology__inspector-regions__region-label small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.topic-workbench-topology__inspector-regions { width: 100%; }
+.topic-workbench-topology__inspector {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + var(--sp-2));
+  display: none;
+  width: 280px;
+  max-width: min(280px, 80vw);
+  max-height: min(520px, 70vh);
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--overlay-line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface-1);
+  box-shadow: var(--elev-3), var(--hl);
+  pointer-events: none;
+}
+.topic-workbench-topology__inspector--portal {
+  position: fixed;
+  z-index: 10000;
+  right: auto;
+  bottom: auto;
+  display: grid;
+  gap: var(--sp-3);
+}
+.topic-workbench-topology:hover .topic-workbench-topology__inspector,
+.topic-workbench-topology:focus-visible .topic-workbench-topology__inspector,
+.topic-workbench-topology:focus-within .topic-workbench-topology__inspector { display: grid; gap: var(--sp-3); }
+.topic-workbench-topology__inspector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+
+}
+.topic-workbench-topology__inspector-head > span { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.topic-workbench-topology__inspector-head strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.topic-workbench-topology__inspector-head svg { flex: 0 0 auto; color: var(--green-2); }
+.topic-region-mosaic__cell {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--surface-0);
+  background: var(--surface-3);
+}
+.topic-region-mosaic__cell .agent-avatar { transform: scale(.6); transform-origin: center; }
+.workspace-topic-item.current .topic-region-mosaic__cell { background: var(--green-line); }
