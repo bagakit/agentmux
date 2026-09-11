@@ -152,7 +152,11 @@ it('keeps reduced motion and readable prompt constraints on the actual imported 
   const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/session-connecting.css'), 'utf8')
   const index = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/index.css'), 'utf8')
   expect(index).toContain("@import './session-connecting.css'")
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?animation:\s*none/)
+  // 这里曾经还有一条 `prefers-reduced-motion` 断言。它守的是这张面自己那套扫描切片，而那套
+  // 舞台已经整体归还给 `FullPageLoadingSurface`（见 session-connecting.css 头部）——动效不在
+  // 这个文件里了，判据也就不该钉在这个文件上。同一件事下面那个 it 已经在**动效真正所在的**
+  // full-page-loading.css 上守着（`__grid::before` 与 `__signal i` 两条），这里再写一遍只会
+  // 让规则搬家时红在错误的位置（记忆 test-pins-a-filename-the-rule-can-leave）。
   const start = styles.indexOf('.session-connecting__prompt pre {')
   const end = styles.indexOf('}', start)
   expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start)

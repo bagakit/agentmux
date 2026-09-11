@@ -69,7 +69,7 @@ function waitForSurface(view) {
 async function inspect(view) {
   await waitForSurface(view)
   return await view.webContents.executeJavaScript(
-    '(async () => { await document.fonts?.ready; const surface = document.querySelector(".session-connecting"); const body = document.querySelector(".session-connecting__body"); const heading = document.querySelector(".session-connecting__heading h2"); const prompt = document.querySelector(".session-connecting__prompt pre"); const slices = [...document.querySelectorAll(".session-connecting__slice, .session-connecting__scan")]; const css = getComputedStyle(surface); const bodyRect = body.getBoundingClientRect(); const headingRect = heading.getBoundingClientRect(); const promptRect = prompt.getBoundingClientRect(); return { innerWidth: innerWidth, innerHeight: innerHeight, surfaceRect: surface.getBoundingClientRect().toJSON(), bodyRect: bodyRect.toJSON(), headingRect: headingRect.toJSON(), promptRect: promptRect.toJSON(), surfaceClientWidth: surface.clientWidth, surfaceScrollWidth: surface.scrollWidth, bodyScrollWidth: body.scrollWidth, promptClientWidth: prompt.clientWidth, promptScrollWidth: prompt.scrollWidth, paddingInline: css.paddingInline, overflowX: css.overflowX, headingText: heading.textContent, promptText: prompt.textContent, sliceAnimationNames: slices.map((node) => getComputedStyle(node).animationName), reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, bodyVisible: bodyRect.width > 0 && bodyRect.height > 0, headingVisible: headingRect.width > 0 && headingRect.height > 0, promptVisible: promptRect.width > 0 && promptRect.height > 0 }; })()', true
+    '(async () => { await document.fonts?.ready; const surface = document.querySelector(".session-connecting"); const body = document.querySelector(".session-connecting__body"); const heading = document.querySelector(".session-connecting__heading h2"); const prompt = document.querySelector(".session-connecting__prompt pre"); const stage = document.querySelector(".full-page-loading__stage"); const slices = [...document.querySelectorAll(".full-page-loading__signal span, .full-page-loading__signal i")]; const css = getComputedStyle(surface); const bodyRect = body.getBoundingClientRect(); const headingRect = heading.getBoundingClientRect(); const promptRect = prompt.getBoundingClientRect(); return { innerWidth: innerWidth, innerHeight: innerHeight, surfaceRect: surface.getBoundingClientRect().toJSON(), bodyRect: bodyRect.toJSON(), headingRect: headingRect.toJSON(), promptRect: promptRect.toJSON(), surfaceClientWidth: surface.clientWidth, surfaceScrollWidth: surface.scrollWidth, bodyScrollWidth: body.scrollWidth, promptClientWidth: prompt.clientWidth, promptScrollWidth: prompt.scrollWidth, paddingInline: getComputedStyle(stage).paddingInline, signalCount: document.querySelectorAll(".full-page-loading__signal, .session-connecting__signal").length, eyebrowTexts: [...document.querySelectorAll(".full-page-loading__eyebrow, .session-connecting__eyebrow")].map((node) => node.textContent),  overflowX: css.overflowX, headingText: heading.textContent, promptText: prompt.textContent, sliceAnimationNames: slices.map((node) => getComputedStyle(node).animationName), reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, bodyVisible: bodyRect.width > 0 && bodyRect.height > 0, headingVisible: headingRect.width > 0 && headingRect.height > 0, promptVisible: promptRect.width > 0 && promptRect.height > 0 }; })()', true
   )
 }
 
@@ -135,6 +135,8 @@ type SurfaceCase = {
     promptClientWidth: number
     promptScrollWidth: number
     paddingInline: string
+    signalCount: number
+    eyebrowTexts: string[]
     overflowX: string
     headingText: string
     promptText: string
@@ -228,10 +230,13 @@ describe('SessionConnectingSurface in a real Electron WebContentsView', () => {
     expect(result.cases).toHaveLength(3)
   }, 180_000)
 
-  it.each([
-    [320, 16],
-    [420, 21]
-  ])('keeps the %dpx region readable without horizontal overflow', async (width, expectedPadding) => {
+  // 内边距量的是 `.full-page-loading__stage`——这张面被搬进 `FullPageLoadingSurface` 之后，
+  // 舞台的留白归它。两档宽度下都是 `var(--sp-6)` = 16px（`__stage` 的 `padding: var(--sp-8) var(--sp-6)`）。
+  //
+  // 这两条判据此前期望 16px / 21px，那是 `.session-connecting` 还自带 `clamp(…, 5vw, …)` 时的
+  // 值（5% × 320 = 16，5% × 420 = 21）。搬家之后那条规则连同它的整座舞台都失效了，两处都量到
+  // `0px`——**红得对**。修的是源头（删掉那套已经有人画的舞台），不是把期望值改成 0。
+  it.each([320, 420])('keeps the %dpx region readable without horizontal overflow', async (width) => {
     const result = await probe()
     const item = result.cases.find((candidate) => candidate.width === width && !candidate.reducedMotion)
     expect(item, `missing ${width}px case`).toBeDefined()
@@ -241,13 +246,29 @@ describe('SessionConnectingSurface in a real Electron WebContentsView', () => {
     expect(view.bodyVisible).toBe(true)
     expect(view.headingVisible).toBe(true)
     expect(view.promptVisible).toBe(true)
-    expect(view.paddingInline).toBe(`${expectedPadding}px`)
-    expect(view.overflowX).toBe('auto')
+    expect(view.paddingInline, '舞台没有横向留白——文字贴到了 Region 边缘').toBe('16px')
     expect(view.surfaceScrollWidth).toBe(view.surfaceClientWidth)
     expect(view.bodyScrollWidth).toBeLessThanOrEqual(view.surfaceClientWidth)
     expect(view.promptScrollWidth).toBe(view.promptClientWidth)
     expect(view.headingText).toContain('Restoring your session')
     expect(view.promptText).toBe(PROMPT)
+  }, 180_000)
+
+  // 设计 SSOT「全页加载大屏」：调用方不重复实现全屏 spinner 或品牌 splash。
+  // 这条守的是那句话被违反时**屏幕上**的样子：两组扫描切片、两行「Session connection」。
+  // 它曾经真的发生过——这张面搬进 `FullPageLoadingSurface` 时带着自己那份 signal 与 eyebrow
+  // 一起搬了进去，而圈着旧舞台的 `:not(.full-page-loading)` 从此一条都不命中，于是旧的那份
+  // 没有被样式藏起来，两份同时显形。类型检查、单测和 review 都看不见这件事。
+  it('不重复画大屏的 chrome——同一张面上只有一组信号和一行阶段标签', async () => {
+    const result = await probe()
+    expect(result.cases.length).toBeGreaterThan(0)
+    for (const item of result.cases) {
+      const view = item.result
+      expect(view.signalCount, `${item.width}px 上有 ${view.signalCount} 组扫描切片`).toBe(1)
+      // 钉死整张清单而不是数个数：`Executor` 与 `Initial prompt` 是这张面自己的小标签，
+      // 该在；重复的是阶段行。整份写出来，多一行少一行都当场看得见是哪一行。
+      expect(view.eyebrowTexts).toEqual(['Session connection', 'Executor', 'Initial prompt'])
+    }
   }, 180_000)
 
   it('keeps the connecting identity and prompt intact when reduced motion is requested', async () => {
@@ -258,6 +279,7 @@ describe('SessionConnectingSurface in a real Electron WebContentsView', () => {
     expect(view.reducedMotion).toBe(true)
     expect(view.headingText).toContain('Restoring your session')
     expect(view.promptText).toBe(PROMPT)
+    // 钉死整份清单：空集合上 `.every()` 恒真，而「一个都没扫到」正是这次缺陷的形态。
     expect(view.sliceAnimationNames).toEqual(['none', 'none', 'none', 'none'])
     expect(view.surfaceScrollWidth).toBe(view.surfaceClientWidth)
     expect(view.bodyVisible).toBe(true)

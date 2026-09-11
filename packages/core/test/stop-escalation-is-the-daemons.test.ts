@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
  * 「优雅 → 强制」那条阶梯是 **daemon 的**，不是我们的。本文件守这一条。
  *
  * 它守的是一个**差点被写下的**缺陷。2026-09-26 的关闭复盘里白纸黑字记着「没有强制路径」，
- * 并据此排了一条 P1：照 orca / deepseek / paseo 的样子，在 Core 里搭一条
+ * 并据此排了一条 P1：照几个参考项目的样子，在 Core 里搭一条
  * `TERM → 等 N 秒 → SIGKILL` 的阶梯。那条结论是读代码读出来的——只看了 `interrupt`
  * （回合级 Ctrl-C）和 `remove`（明确拒绝运行中的 run），漏掉了 `stop` 本身。
  *

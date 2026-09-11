@@ -1,52 +1,18 @@
-/* Motion belongs to the registration marks, never to the identity or submitted text. */
-.session-connecting:not(.full-page-loading) {
-  position: relative;
-  isolation: isolate;
+/* Connecting 是 `FullPageLoadingSurface` 的一个 Region 级用法，不是第二张加载大屏。
+   底、网格、错位框线、扫描切片和品牌/阶段行都由 full-page-loading.css 画（设计 SSOT
+   「全页加载大屏」：调用方不重复实现全屏 spinner 或品牌 splash）。本文件只画这张面**多出来的
+   那部分**——身份、Executor 与初始 Prompt。
+
+   这里曾经有一整套自己的舞台，用 `.session-connecting:not(.full-page-loading)` 圈着。
+   那个 `:not()` 写于这张面还是独立组件的年代；它被搬进 `FullPageLoadingSurface` 之后，
+   两个类落在**同一个元素**上，于是那六条规则一条都不再命中——padding 变成 0，而 body
+   上那份 signal/eyebrow 与大屏自己的那份同时渲染，屏幕上是两组扫描切片和两行
+   「Session connection」。删掉，不是补一条覆盖：那套舞台本来就已经有人画了。 */
+.session-connecting {
   box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 100%;
-  overflow: auto;
-  padding: clamp(var(--sp-5), 5vw, var(--sp-8));
-  display: flex;
   container-type: inline-size;
-  background: var(--surface-0);
-}
-/* Graphite grid is a quiet depth layer; it does not carry a state and never sits above text. */
-.session-connecting:not(.full-page-loading)::before {
-  content: '';
-  position: absolute;
-  z-index: -2;
-  inset: 0;
-  pointer-events: none;
-  opacity: .42;
-  background-image:
-    linear-gradient(90deg, color-mix(in srgb, var(--line-soft) 55%, transparent) 1px, transparent 1px),
-    linear-gradient(0deg, color-mix(in srgb, var(--line-soft) 40%, transparent) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(135deg, var(--mask-opaque) 0%, transparent 78%);
-}
-/* The offset frame gives the stage its asymmetric/deconstructed silhouette. */
-.session-connecting:not(.full-page-loading)::after {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: var(--sp-5);
-  pointer-events: none;
-  border-top: 1px solid var(--line-soft);
-  border-right: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  clip-path: polygon(0 0, 68% 0, 100% 34%, 100% 100%, 27% 100%, 0 64%);
-  opacity: .72;
 }
 .session-connecting__body { width: 100%; max-width: 520px; min-width: 0; margin: auto; }
-.session-connecting__signal { width: 112px; height: 64px; position: relative; margin-bottom: var(--sp-7); color: var(--text-3); }
-.session-connecting__slice { position: absolute; left: 0; width: 72px; height: 12px; border: 1px solid currentColor; border-left: 0; transform: skewX(-24deg); animation: session-connecting-slice var(--dur-sweep) var(--ease-enter) infinite; }
-.session-connecting__slice:nth-child(1) { top: 0; left: 12px; }
-.session-connecting__slice:nth-child(2) { top: 20px; left: 28px; animation-delay: -0.7s; color: var(--green); }
-.session-connecting__slice:nth-child(3) { top: 40px; left: 4px; animation-delay: -1.4s; }
-.session-connecting__scan { position: absolute; top: -4px; left: 36px; width: 1px; height: 64px; background: var(--green); opacity: 0.55; transform: rotate(24deg); animation: session-connecting-scan var(--dur-sweep) var(--ease-enter) infinite; }
-.session-connecting__registration { position: absolute; right: -12px; bottom: 0; font-size: var(--fs-meta); color: var(--text-3); }
 .session-connecting__eyebrow { color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
 .session-connecting__heading h2 { margin: var(--sp-3) 0 var(--sp-4); color: var(--text); font-size: var(--fs-display); font-weight: 550; line-height: 1.3; overflow-wrap: anywhere; }
 .session-connecting__cursor { color: var(--green); margin-left: var(--sp-1); }
@@ -69,20 +35,13 @@
 .session-connecting__empty { margin: var(--sp-4) 0 0; font-size: var(--fs-body); line-height: 1.6; color: var(--text-3); }
 .session-connecting__feedback { min-height: 20px; margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .session-connecting__feedback [role='alert'] { color: var(--red); }
-@keyframes session-connecting-slice { 0%, 100% { transform: skewX(-24deg) translateX(0); } 45% { transform: skewX(-24deg) translateX(16px); } 60% { transform: skewX(-24deg) translateX(12px); } }
-@keyframes session-connecting-scan { 0%, 100% { transform: rotate(24deg) translateX(0); opacity: 0.25; } 50% { transform: rotate(24deg) translateX(36px); opacity: 0.65; } }
+/* 窄幅只收紧这张面自己那几块。舞台的内边距归 full-page-loading.css 的 `__stage`——
+   它是同一个盒子的同一份留白，两边各写一份就会在下一次改动时分叉。 */
 @container (max-width: 420px) {
-  .session-connecting:not(.full-page-loading) { padding: var(--sp-5); }
-  .session-connecting__signal { margin-bottom: var(--sp-6); }
   .session-connecting__executor { margin: var(--sp-6) 0; }
   .session-connecting__heading h2 { font-size: var(--fs-title); }
 }
 @container (max-width: 320px) {
-  .session-connecting:not(.full-page-loading) { padding: var(--sp-4); }
-  .session-connecting:not(.full-page-loading)::after { inset: var(--sp-3); }
   .session-connecting__prompt-heading { align-items: flex-start; }
   .session-connecting__copy { min-width: 60px; padding-inline: var(--sp-3); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .session-connecting__slice, .session-connecting__scan { animation: none; }
 }
