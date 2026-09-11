@@ -388,6 +388,7 @@ styles/
   chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
   selector.css    同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
   dock.css        Tool Dock 这个容器本身及其 Topics / Agents 面板
+  topic-topology.css  Topic 行尾的工作台拓扑：Region 缩略图、在场簇、悬停展开的 Tab/Region 检视面
   file-explorer.css   被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
   source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
   workbench.css   Pane、Region、分屏、拖放
