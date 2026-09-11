@@ -70,6 +70,20 @@ describe('Agents attention and result review loop', () => {
       linkOrigin: { workspaceId: 'repo', tabGroupId: 'group' }
     })))
     expect(container.querySelector('.session-result-review')).toBeTruthy()
+    // 结果面默认是**收起**的（37e0282f「keep agent results compact」）：折叠态只留
+    // Result ready + Review/Close 两个按钮，逐项动作在展开后才在 DOM 里。
+    // 这条判据此前直接找「Continue in Session」，于是自那次改动起一直红——它描述的是
+    // 一个已经不存在的形态，而不是一个缺陷。这里按真实动线走：先展开，再继续。
+    const reviewToggle = [...container.querySelectorAll<HTMLButtonElement>('.session-result-review button')]
+      .find((button) => button.textContent?.includes('Review'))
+    expect(reviewToggle, '结果面上没有展开按钮').toBeTruthy()
+    expect(reviewToggle!.getAttribute('aria-expanded'), '结果面默认应当是收起的').toBe('false')
+    await act(async () => reviewToggle!.click())
+    expect(
+      container.querySelector('.session-result-review__details'),
+      '展开后没有出现逐项动作区'
+    ).toBeTruthy()
+
     const continueButton = [...container.querySelectorAll<HTMLButtonElement>('.session-result-review button')]
       .find((button) => button.textContent?.includes('Continue in Session'))
     expect(continueButton).toBeTruthy()
