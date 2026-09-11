@@ -100,6 +100,7 @@
 .browser-menu__item[data-highlighted] { color: var(--text); background: var(--surface-2); }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.browser-body { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .browser-stage { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--surface-0); }
 .browser-empty, .browser-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-3); padding: var(--sp-8); color: var(--text-3); text-align: center; }
 .browser-empty > svg, .browser-preview > svg { color: var(--green); }
@@ -246,6 +247,17 @@
 .browser-rsi-replay__outcome--script-failed { color: var(--red-text); background: var(--red-bg); }
 .browser-rsi-replay__outcome--indeterminate { color: var(--amber-text); background: var(--amber-bg); }
 .browser-rsi-replay__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-soft); }
+/* 轨迹占页面右侧一条竖带（见 surface-density「Browser RSI 操作表面」）。堆在页面下方时它与
+   页面抢同一条纵轴：页面被往上挤，轨迹自己只剩一条窄缝，读不成一条轨迹。这里让出的是横向
+   空间，而 `.browser-stage` 的矩形就是原生 WebContentsView 的矩形——rail 挤窄 stage，原生
+   视图跟着收，页面不是被盖住，是真的让出了这条带。 */
+.browser-trace-rail { flex: 0 0 clamp(248px, 26%, 340px); min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface-0); }
+/* rail 里这三块是同一条轨迹的三段，不是三张卡片：去掉各自的外框与圆角，只留一条分界发丝线，
+   竖读下来是一条连续的脊，而不是三个盒子摞在一起。 */
+.browser-trace-rail > * { flex: none; border: 0; border-radius: 0; background: transparent; }
+.browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
+.browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
+
 @media (max-width: 700px) {
   .browser-rsi-rail { flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
   .browser-rsi-rail__identity { flex-basis: 140px; }
