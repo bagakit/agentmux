@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
-import type { AgentProviderId, AgentMuxRuntimeDiagnostics } from '../src/types.js'
+import { HOOK_INSTALLATION_BY_PROVIDER } from '../src/providers/shared.js'
+import type { AgentProviderId, AgentMuxRuntimeDiagnostics, AgentHookStrategy } from '../src/types.js'
 
 const runtime: AgentMuxRuntimeDiagnostics = {
   nodeVersion: '24.0.0',
@@ -126,7 +127,6 @@ describe('AgentMux doctor', () => {
     })
     expect(report.integration).toEqual({
       hookIngress: 'authenticated-loopback',
-      hookInstallation: 'explicit-managed',
       permissionDefault: 'reject',
       semanticEvidence: 'native-hook-or-acp-only'
     })
@@ -136,6 +136,38 @@ describe('AgentMux doctor', () => {
       permission: 'respond',
       acp: { kind: 'none' }
     })
+  })
+
+  /**
+   * hook 安装归属是**逐 Provider 的事实**，doctor 报出来的必须逐家等于 SSOT，不能是一个全局常量。
+   *
+   * 这条守的是一个被删掉的缺陷：`integration` 块里曾写死 `hookInstallation: 'explicit-managed'`，
+   * 对 13 家一律这么说——而 kimi 真实是 `unmanaged`、traex 是 `none`（连 hook 都没有）。那个字段没有
+   * 任何生产消费者，是一份会说谎的重复事实，已删。逐家的真值改由 `agents[].hook`（该 catalog 的
+   * `hookStrategy`）承载，本条把「doctor 报的 == HOOK_INSTALLATION_BY_PROVIDER 那家的值」逐 id 钉死。
+   *
+   * 判据必须逐家遍历、且钉死**整张映射**（`toEqual`），不能抽查：只查 codex 会让 kimi/traex 两个例外
+   * 继续裸奔，而它们正是原缺陷报反的两家。把 doctor 里 `hook: { ...catalog.hookStrategy }` 变异成写死
+   * `{ kind: 'native', installation: 'explicit-managed' }`，本条会同时因 kimi 和 traex 变红。
+   *
+   * 这与 provider-conformance 里那条不同：那条钉的是「SSOT 表 == catalog」，本条钉的是「doctor 报出来的
+   * == SSOT 表」——两处投影各守一段，doctor 这一段此前无人守（旧断言抄的是被测对象唯一可能的字面量，恒真）。
+   */
+  it('reports each provider hook-installation as its own fact, matching the SSOT for all providers', async () => {
+    const report = await diagnoseAgentMux({ client: client() })
+    const classify = (hook: AgentHookStrategy) =>
+      hook.kind === 'none' ? 'none' : hook.installation
+    const reported = Object.fromEntries(
+      report.agents.map((agent) => [agent.id, classify(agent.hook)])
+    )
+    // 自检：doctor 真的报了全部 13 家，否则下面那条 toEqual 在比两张都缺 kimi/traex 的空表，恒真。
+    expect(Object.keys(reported).sort()).toEqual(
+      Object.keys(HOOK_INSTALLATION_BY_PROVIDER).sort()
+    )
+    expect(reported).toEqual({ ...HOOK_INSTALLATION_BY_PROVIDER })
+    // 点名两个例外：它们是原缺陷报反/报错字段的两家，必须真的以非 explicit-managed 出现在报告里。
+    expect(reported.kimi).toBe('unmanaged')
+    expect(reported.traex).toBe('none')
   })
 
   it('does not advertise unsupported platforms or Remote as usable', async () => {
