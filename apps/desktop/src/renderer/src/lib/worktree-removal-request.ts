@@ -92,12 +92,26 @@ export function worktreeRemovalPrompt(request: WorktreeRemovalRequest): Worktree
     //
     // 没拿到就不说：宁可少一句，也不能因为「还没问到」而默认说一句安心话。真正查不出来的那一档有它
     // 自己的措辞（`branchRetentionNote(branch, null)`），会作为一个正常的 note 送进来。
-    description:
+    description: appendNote(
       `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.`,
+      request.note
+    ),
     subject: request.path,
     confirmLabel: 'Remove',
     discardChanges: false
   }
+}
+
+/**
+ * 把「这条分支会留下什么」那句 note 接在正文后面。
+ *
+ * `null`/空是**还没问到**（见 {@link WorktreeRemovalRequest.note}），此时少说一句，绝不默认补一句安心话——
+ * 那正是这个字段存在的理由：查不出来时用户必须看到「查不出来」，而不是沉默。真正查出「独有提交」或
+ * 「查不出来」的措辞都由 main 侧 `branchRetentionNote` 给出，这里只负责把它接上，不自己造词。
+ */
+function appendNote(body: string, note: string | null | undefined): string {
+  const trimmed = note?.trim()
+  return trimmed ? `${body} ${trimmed}` : body
 }
 
 /**
