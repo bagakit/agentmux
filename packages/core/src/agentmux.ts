@@ -21,6 +21,7 @@ import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
+import { pmoSessionMatches } from './pmo-session-filter.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
@@ -306,7 +307,7 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
     const results = await Promise.allSettled(client.agentSessions().map(async (session) => await client.statusAgent(session.agentSessionId)))
     return results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   })
-  const filteredSessions = sessions.filter((session) => (!sessionId || session.session.agentSessionId === sessionId) && (!status || String((session.session as unknown as { processState?: string }).processState ?? '') === status) && (since === undefined || session.session.updatedAt >= since)).slice(0, limit)
+  const filteredSessions = sessions.filter((session) => pmoSessionMatches(session, { sessionId, status, since })).slice(0, limit)
   if (action === 'projects' || action === 'workspaces') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'agents') { printPmoSuccess('pmo.agents', { agents: filteredAgents, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'sessions') { printPmoSuccess('pmo.sessions', { sessions: filteredSessions, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
