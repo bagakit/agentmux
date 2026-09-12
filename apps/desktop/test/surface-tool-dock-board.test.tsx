@@ -108,13 +108,29 @@ describe('Browser Tools launch feedback', () => {
 })
 
 describe('Board 工具面板是工作清单', () => {
-  it('Demand 面板不自己查 Branch/Topic，也不把 Branch 作为空态行', () => {
-    // Board 的主实体是持久化 Demand。Branch 读取即使存在，也不能填充 Demand 面板。
-    expect(dockSource).not.toContain('useBoardRows()')
-    expect(dockSource).not.toContain('useScratchTopics(')
-    expect(dockSource).not.toContain('useWorkspaceBranches(')
-    expect(dockSource).not.toContain('buildTopicBoardRows(')
-    expect(dockSource).not.toContain('buildProjectBranchLanes(')
+  it('Demand 面板与主 Board 视图同源：都从共享的 projectDemands/demandColumns 派生，不自己查 Branch/Topic', () => {
+    // 真正要守的性质是「同源」——面板列出的行必须来自与主 Board 视图（GlobalBoardSurface）同一个
+    // Demand 投影，否则「这个 Board 有哪些行」就有了两份会漂的答案。所以判据是**正面**的：
+    // BoardToolList 的函数体里必须调用 projectDemands(...) 和 demandColumns(...)，这两个是
+    // global-demand-board.ts 里的共享 SSOT，GlobalBoardSurface 走的也是它们。
+    //
+    // 这取代了此前四条 not.toContain('useScratchTopics(' 之类的**恒真**守卫：那些低层构建函数
+    // （useScratchTopics/useWorkspaceBranches/buildTopicBoardRows/buildProjectBranchLanes）本就住在
+    // useBoardRows.ts 与 project-board.ts，从来不在本文件里，断言它们「不在」这个文件永远为真，判空气
+    // （本仓记过 substring-assertion-cannot-prove-absence）。把 BoardToolList 改成自己拼一份行、
+    // 或改读 useBoardRows() 的 branch 行，会让下面的正面断言变红。
+    const start = dockSource.indexOf('function BoardToolList')
+    const end = dockSource.indexOf('function SurfaceToolDock')
+    // 锚点必须真的找到，否则 slice 会静默扫错范围、把断言变成恒真（indexof-anchor-gone-slices-to-empty-string）。
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const list = dockSource.slice(start, end)
+    expect(list).toContain('projectDemands(')
+    expect(list).toContain('demandColumns(')
+    // 反面仍守一条**在这个作用域内可证伪**的：面板不得把 Branch 读取当成 Demand 的空态行来源。
+    // 这条不同于上面被删的四条——row.name/boardRows 这类恰恰是本文件曾经写过、且改坏时会真的出现的。
+    expect(list).not.toContain('useBoardRows(')
+    expect(list).not.toContain('boardRows.rows')
   })
 
   it('状态点复用共享 StatusDot，不发明第二套颜色或形状', () => {
