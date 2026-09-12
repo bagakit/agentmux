@@ -157,6 +157,42 @@ describe('worktree 移除的两次确认', () => {
       worktreeRemovalPrompt(request({ stage: blockedStage() })).subject
     ).toBe(path)
   })
+
+  /**
+   * 「这条分支会留下什么」那句 note 必须真的出现在确认屏的正文里。
+   *
+   * 这守的是一条**接到消费方为止的竖切**：note 由 main 侧 `branchRetentionNote` 算出、经 IPC 送来、
+   * 由面板转发进 `request.note`（那一段已有 AST 判据），但此前 `worktreeRemovalPrompt` 把它**丢了**——
+   * 字段有类型、有三处注释描述它「会接在正文后面」、有两个生产者算它，唯独消费点从不读它。那正是
+   * 本仓记过的 orphan-helper / promised-accessor 形态：能力声明了却在最后一跳静默不落地。判据落在
+   * **输出的 description 上**（生产可达），不是「字段被转发了」——后者上面那条 AST 判据已经守住，却证
+   * 不到这里。
+   */
+  it('把「分支会留下什么」那句 note 接进确认屏正文，没问到时不硬补一句', () => {
+    const note = 'Whether this branch holds work that exists nowhere else could not be checked.'
+    const withNote = worktreeRemovalPrompt(request({ note }))
+    const withoutNote = worktreeRemovalPrompt(request())
+
+    // 有 note：它必须原样出现在正文里，且是**接在**动作说明之后，不是替换掉它——两件事用户都要读到。
+    expect(withNote.description, 'note 没接进确认屏正文——竖切在消费点断了').toContain(note)
+    expect(
+      withNote.description,
+      'note 把前半句「签出会被删、分支不动」顶掉了：用户读不到这次动作做了什么'
+    ).toContain('untouched and stays available')
+
+    // 没问到（note 缺席）：正文就是干净的动作说明，不能出现悬空的分隔符或凭空补出的安心话。
+    expect(withoutNote.description).toBe(
+      `The checkout at this location goes away. Branch ${request().branch} itself is untouched and stays available.`
+    )
+
+    // note 只属于**确认屏**：`blocked` 那屏说的是「丢弃未提交产出」，绝不能把这句留存说明混进去
+    // （两屏刻意不共用实词）。带着同一个 note 走到 blocked，也不该出现在它的正文里。
+    const blockedWithNote = worktreeRemovalPrompt(request({ note, stage: blockedStage() }))
+    expect(
+      blockedWithNote.description,
+      'note 漏进了「丢弃产出？」那一屏：两屏的措辞开始互相污染'
+    ).not.toContain(note)
+  })
 })
 
 describe('一次移除尝试之后往哪走', () => {
