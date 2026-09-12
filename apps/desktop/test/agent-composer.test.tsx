@@ -374,11 +374,19 @@ describe('AgentComposer reusable surface', () => {
     expect(focusRule).not.toMatch(/#[0-9a-f]+/i)
   })
 
-  it('gives the collapsed Agent Input editor the flexible middle track', () => {
+  it('gives the collapsed Agent Input editor the flexible middle track, without a reserved-and-empty tool column', () => {
     const collapsedRule = allStyleRules().match(/\.composer:has\(\.composer-tools\[data-mode='collapsed'\]\) \{([^}]*)\}/)?.[1]
     expect(collapsedRule, 'collapsed composer rule is missing').toBeDefined()
-    expect(collapsedRule).toContain('grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content')
-    expect(collapsedRule).not.toContain('grid-template-columns: auto minmax(0, 1fr) auto')
+    // The tool column must size to its actual content, not draw a fixed 6rem regardless of what
+    // sits in it — collapsed mode has only the view-switch + mode-toggle icons (~56px), and a track
+    // that maxes at 6rem next to a `1fr` sibling grows toward that maximum, leaving a visible empty
+    // gap between the icons and the editor's first character. `fit-content(6rem)` sizes to
+    // max-content and only clamps to 6rem if a future toolset ever gets wider than that.
+    //
+    // 正面钉死这一整条声明，改成任何等价形状（`auto`/`min-content`/`minmax(0, 6rem)`…）都会红。
+    // 不再另写一条按 token 的禁令：那种「名词检查」挡不住换写法（本仓记过 banned-word-guard-misses
+    // -the-mirror），也是本轮用户明确说的过度校验；轨道的形状由这条正面断言唯一负责。
+    expect(collapsedRule).toContain('grid-template-columns: fit-content(6rem) minmax(0, 1fr) max-content')
   })
 
   // -------------------------------------------------------------------------

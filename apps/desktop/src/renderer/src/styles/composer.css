@@ -129,8 +129,17 @@
 .composer__editor-fallback { display: none; }
 
 /* One-line mode keeps the tool trigger, editor and primary action in separate columns.
-   display:contents on the toolbar exposes its two groups to this grid without cloning controls. */
-.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content; align-items: center; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
+   display:contents on the toolbar exposes its two groups to this grid without cloning controls.
+   First track uses fit-content(6rem) — NOT minmax(0, 6rem): with `minmax(0, 6rem)` the track has
+   a 6rem maximum and, next to a `1fr` sibling, sizes toward that maximum even when its content is
+   much narrower. Collapsed content is just two 24px icons (view-switch + mode toggle) plus 4px
+   padding on each side ≈ 56px, but the track was drawing at ~96px, leaving ~40px of dead space
+   between the icons and the editor's first character — the "left padding is huge" report.
+   `fit-content(6rem)` = min(max-content, max(min-content, 6rem)): the track sizes to the tools'
+   actual max-content width and caps at 6rem only if more tools ever join, so the editor starts
+   right after the icons while the 6rem ceiling still protects against a future tool set widening
+   the tool column past a Region-relative budget. */
+.composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: fit-content(6rem) minmax(0, 1fr) max-content; align-items: center; --composer-input-pad-top: var(--sp-2); --composer-input-pad-bottom: var(--sp-2); }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__suggestions { grid-column: 1 / -1; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 2; grid-row: 1; min-width: 0; }
 .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: contents; }
