@@ -42,9 +42,9 @@ describe('停止的强制阶梯归 daemon 所有', () => {
       join(here, '..', 'node_modules', '@ctxmux', 'sdk', 'dist', 'generated', 'StopDisposition.d.ts'),
       'utf8'
     )
-    const union = declaration.match(/export type StopDisposition\s*=\s*([^;]+);/)
-    expect(union, 'SDK 里找不到 StopDisposition——上游改了形状，这条推理要重做').not.toBeNull()
-    const members = [...union![1].matchAll(/"([^"]+)"/g)].map((match) => match[1])
+    const union = declaration.match(/export type StopDisposition\s*=\s*([^;]+);/)?.[1]
+    expect(union, 'SDK 里找不到 StopDisposition——上游改了形状，这条推理要重做').not.toBeUndefined()
+    const members = [...union!.matchAll(/"([^"]+)"/g)].map((match) => match[1])
     // 钉死整个集合，不写 `.includes('forced')`：多出一档（比如上游加了 "abandoned"）意味着
     // 结局多了一种，而那种新结局大概率正是我们该讲给用户听的那一种。
     expect(members).toEqual(['graceful', 'forced'])
@@ -106,11 +106,11 @@ describe('停止的强制阶梯归 daemon 所有', () => {
 
   it('signalTerminal 只放行 SIGINT——它是这条路上唯一的信号，且语义是回合级 Ctrl-C', () => {
     const text = readFileSync(join(coreSrc, 'client.ts'), 'utf8')
-    const body = text.match(/async signalTerminal\([^)]*\)[^{]*\{([\s\S]*?)\n  \}/)
-    expect(body, 'client.ts 里找不到 signalTerminal——这条判据在问空气').not.toBeNull()
+    const body = text.match(/async signalTerminal\([^)]*\)[^{]*\{([\s\S]*?)\n  \}/)?.[1]
+    expect(body, 'client.ts 里找不到 signalTerminal——这条判据在问空气').not.toBeUndefined()
     // `SIG[A-Z]+` 会顺手吃掉错误码 `SIGNAL_UNSUPPORTED`——那不是一个信号名。这里点名真实存在的
     // 信号，而不是「SIG 开头的任意大写串」。
-    const signals = [...body![1].matchAll(/\bSIG(?:INT|KILL|TERM|QUIT|HUP|USR[12]|STOP|CONT)\b/g)]
+    const signals = [...body!.matchAll(/\bSIG(?:INT|KILL|TERM|QUIT|HUP|USR[12]|STOP|CONT)\b/g)]
       .map((match) => match[0])
     // 钉死集合而不是 `.includes('SIGINT')`：放宽到第二个信号正是这条判据要拦的那件事。
     expect([...new Set(signals)]).toEqual(['SIGINT'])
