@@ -69,7 +69,12 @@ export type AgentMuxDoctorReport = {
   agents: AgentMuxDoctorAgent[]
   integration: {
     hookIngress: 'authenticated-loopback'
-    hookInstallation: 'explicit-managed'
+    // hook 安装归属**不在这里**：它不是全局事实，是每家 Provider 各自的（codex/claude…是
+    // explicit-managed，kimi 是 unmanaged，traex 根本没有 hook）。逐家的真值已经随 `agents[].hook`
+    // （即该 catalog 的 `hookStrategy`）发出去了，权威分类的 SSOT 是 providers/shared.ts 的
+    // HOOK_INSTALLATION_BY_PROVIDER。曾经这里写死一个全局 `hookInstallation: 'explicit-managed'`，
+    // 对 kimi 报反、对 traex 报了一个它没有的字段，且没有任何生产代码读它——一个会说谎的重复事实，
+    // 已删。要看安装归属看 `agents[]`，不要在这个全局块里重新长出第二份。
     permissionDefault: 'reject'
     semanticEvidence: 'native-hook-or-acp-only'
   }
@@ -185,7 +190,6 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       agents,
       integration: {
         hookIngress: 'authenticated-loopback',
-        hookInstallation: 'explicit-managed',
         permissionDefault: 'reject',
         semanticEvidence: 'native-hook-or-acp-only'
       }
@@ -223,7 +227,6 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       agents: catalog.map(blockedAgent),
       integration: {
         hookIngress: 'authenticated-loopback',
-        hookInstallation: 'explicit-managed',
         permissionDefault: 'reject',
         semanticEvidence: 'native-hook-or-acp-only'
       }
