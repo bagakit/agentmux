@@ -877,6 +877,8 @@ Leader Topic 的头像、三个点和展开面板使用一个连续的浮动面�
 
 Demand 由与 Core 平行的文件系统包提供，Board 和 Leader Topic 只消费同一份 Demand 投影。界面中的 Demand 卡第一层显示标题、状态和目标 Project，关联 Session / Attempt 作为第二层执行 rail；不在卡片内复制一套 Session 状态机或把 Agent 行伪装成 Demand。CLI/API 的失败沿用服务窗语言，保留已读到的 Demand，不用空列表覆盖工作面。
 
+`pmo` 查询的过滤维度（`--status`/`--session`/`--since` 等）必须读投影里**真实存在**的字段：会话的进程活性来自 `observation.process`（`running`/`exited`/`interrupted`），与 CLI/渲染层共用的同一条观察轴。过滤不得把某个不属于该类型的字段（例如控制协议会话上的 `processState`）经类型洗白读进来——那会让整条过滤恒不匹配、`--status <任意值>` 永远返回空，正是"不用空列表覆盖工作面"这条在查询侧的反例。
+
 ### Demand 管理与业务流程表面
 
 Demand 详情必须有可编辑的描述、优先级、状态、目标 Project、Executor 和关联 Session 列表；每个编辑动作沿用紧凑的行内控件与 receipt，不把详情做成空白表单或信息堆。关联 Session 使用稳定 ID 和 Agent/Project 摘要，提供添加、移除和进入原工作面的动作；删除 Demand 放在明确的危险动作菜单里，要求确认并保留审计信息。
