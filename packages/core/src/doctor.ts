@@ -67,16 +67,33 @@ export type AgentMuxDoctorReport = {
     }
   }
   agents: AgentMuxDoctorAgent[]
+  /**
+   * 全局层面上、**不随 provider 变化**的一组事实。只允许放真的全局事实，不放"每家各不相同的
+   * 字段的平均值/默认值/汇总"——那一族真值一定属于 `agents[]`。
+   *
+   * 这里曾经塞过四条字面量：`hookInstallation`、`hookIngress`、`permissionDefault`、
+   * `semanticEvidence`。其中三条实际是**逐-provider 事实**——每家 provider 各不相同：
+   *
+   * - `hookInstallation` 对 kimi 该是 `unmanaged`、traex 该是 `none`，全局字面量 `'explicit-managed'`
+   *   对 13 家一律这么说，报反了两家（已在 b2bc7f1e 删）；
+   * - `permissionDefault: 'reject'` 说的是"全局 permission 默认拒绝"，但今天**没有任何 provider
+   *   声明 permission=reject**。真值在 `catalog.capabilities.permission` 上——traex=none、
+   *   claude/codex=respond、pi=none、其余多数=observe。这个字面量是从没落地过的承诺；
+   * - `semanticEvidence: 'native-hook-or-acp-only'` 里的 `-or-acp` 部分从没接通：今天所有
+   *   provider 的 `acpStrategy` 都是 `{kind: 'none'}`，那条通路一端还没有。实际证据就是
+   *   `native-hook`，"or-acp" 部分是承诺不是事实。
+   *
+   * 这三条冒充逐-provider 事实的字面量已全部删除。逐家的真值权威由 `agents[]` 承载：hook 归属
+   * 看 `agents[].hook`（该 catalog 的 `hookStrategy`，SSOT 是 `providers/shared.ts` 的
+   * `HOOK_INSTALLATION_BY_PROVIDER`），permission 看 `agents[].permission`，acp 通路看
+   * `agents[].acp`。若哪天需要"聚合安装态"这种视图，另建 axis，别再往这个已经被弄脏的坑里
+   * 加第二份聚合。
+   *
+   * 剩下的 `hookIngress` 是真的全局事实——AgentMux 只接受 authenticated loopback 上的 hook
+   * 写入（见 `agent-hook-command.ts` 的 200-201 行与整个 hook 面的 owner-token 契约）。
+   */
   integration: {
     hookIngress: 'authenticated-loopback'
-    // hook 安装归属**不在这里**：它不是全局事实，是每家 Provider 各自的（codex/claude…是
-    // explicit-managed，kimi 是 unmanaged，traex 根本没有 hook）。逐家的真值已经随 `agents[].hook`
-    // （即该 catalog 的 `hookStrategy`）发出去了，权威分类的 SSOT 是 providers/shared.ts 的
-    // HOOK_INSTALLATION_BY_PROVIDER。曾经这里写死一个全局 `hookInstallation: 'explicit-managed'`，
-    // 对 kimi 报反、对 traex 报了一个它没有的字段，且没有任何生产代码读它——一个会说谎的重复事实，
-    // 已删。要看安装归属看 `agents[]`，不要在这个全局块里重新长出第二份。
-    permissionDefault: 'reject'
-    semanticEvidence: 'native-hook-or-acp-only'
   }
 }
 
@@ -189,9 +206,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       },
       agents,
       integration: {
-        hookIngress: 'authenticated-loopback',
-        permissionDefault: 'reject',
-        semanticEvidence: 'native-hook-or-acp-only'
+        hookIngress: 'authenticated-loopback'
       }
     }
   } catch (error) {
@@ -226,9 +241,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       },
       agents: catalog.map(blockedAgent),
       integration: {
-        hookIngress: 'authenticated-loopback',
-        permissionDefault: 'reject',
-        semanticEvidence: 'native-hook-or-acp-only'
+        hookIngress: 'authenticated-loopback'
       }
     }
   }

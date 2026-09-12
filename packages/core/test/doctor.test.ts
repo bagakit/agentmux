@@ -125,10 +125,11 @@ describe('AgentMux doctor', () => {
         action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
       }
     })
+    // integration 只允许放**真的全局事实**——不随 provider 变化的那一类。逐-provider 事实
+    // （hook 归属、permission 默认、semantic 证据来源）曾在这里以字面量冒充普适事实，全部已删。
+    // toEqual 精确匹配，任何字段被加回来都会当场红——比列一份名字禁令强，也不会随字面量拼法漂移。
     expect(report.integration).toEqual({
-      hookIngress: 'authenticated-loopback',
-      permissionDefault: 'reject',
-      semanticEvidence: 'native-hook-or-acp-only'
+      hookIngress: 'authenticated-loopback'
     })
     expect(report.agents.find((agent) => agent.id === 'codex')).toMatchObject({
       probe: 'found',
@@ -220,5 +221,11 @@ describe('AgentMux doctor', () => {
       new AgentProviderRegistry().catalog().length
     )
     expect(report.agents.every((agent) => agent.probe === 'blocked')).toBe(true)
+    // 失败路径的 integration 形状必须与成功路径一致——否则清理只在成功路径生效、失败路径继续说谎。
+    // 这一族缺陷的历史标记正是「成功路径与失败路径给出完全一样的字面量」；反过来清理也必须两处
+    // 同步。上面那条 `toMatchObject` 对多余字段宽容，不足以钉住这一点，专门用 `toEqual` 定死一次。
+    expect(report.integration).toEqual({
+      hookIngress: 'authenticated-loopback'
+    })
   })
 })
