@@ -355,6 +355,19 @@ function mergeRetiredAgentSessions(
   return [...merged.values()].slice(-MAX_RETIRED_AGENT_SESSIONS)
 }
 
+/**
+ * 退役 Run 环是容量，不是损坏。环满后丢掉最旧的 Run 时，只指向这些 Run 的退役
+ * Session 必须一起离开；否则下一次停止落账会被当成冲突，启动直接退出。
+ * 仍出现在当前 Session 列表里的退役身份不在这里消掉，后面的断言继续拒绝。
+ */
+function retiredAgentSessionsForRuns(
+  retiredSessions: readonly AgentMuxRetiredAgentSession[],
+  retiredRuns: readonly AgentMuxRunRef[]
+): AgentMuxRetiredAgentSession[] {
+  const retiredRunIds = new Set(retiredRuns.map((run) => run.runId))
+  return retiredSessions.filter((session) => retiredRunIds.has(session.run.runId))
+}
+
 function assertUnboundRetiredRuns(
   sessions: readonly AgentMuxStoredAgentSession[],
   retiredRuns: readonly AgentMuxRunRef[]
@@ -1419,25 +1432,29 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       throw new AgentMuxError('Lifecycle reservation belongs to another owner.', 'AGENT_SESSION_BUSY')
     }
     const merged = mergeRetiredRuns(this.retiredRuns, retiredRuns)
+    const retainedSessions = retiredAgentSessionsForRuns(this.retiredAgentSessions, merged)
     assertUnboundRetiredRuns([...this.sessions.values()], merged)
     assertRetiredAgentSessions(
       [...this.sessions.values()],
       merged,
-      this.retiredAgentSessions
+      retainedSessions
     )
     this.retiredRuns = merged
+    this.retiredAgentSessions = retainedSessions
     this.reservations.delete(reservation.agentSessionId)
   }
 
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
     const merged = mergeRetiredRuns(this.retiredRuns, runs)
+    const retainedSessions = retiredAgentSessionsForRuns(this.retiredAgentSessions, merged)
     assertUnboundRetiredRuns([...this.sessions.values()], merged)
     assertRetiredAgentSessions(
       [...this.sessions.values()],
       merged,
-      this.retiredAgentSessions
+      retainedSessions
     )
     this.retiredRuns = merged
+    this.retiredAgentSessions = retainedSessions
   }
 
   async commitLifecycle(
@@ -1465,15 +1482,18 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const retiredRuns = reservation.kind === 'stop' && previous
       ? mergeRetiredRuns(this.retiredRuns, [...previous.retiredRuns, previous.run])
       : this.retiredRuns
-    const retiredAgentSessions = reservation.kind === 'stop' && previous
-      ? mergeRetiredAgentSessions(this.retiredAgentSessions, [{
-          agentSessionId: previous.agentSessionId,
-          hostId: previous.hostId,
-          run: { ...previous.run },
-          source: 'user',
-          observedAt: Date.now()
-        }])
-      : this.retiredAgentSessions
+    const retiredAgentSessions = retiredAgentSessionsForRuns(
+      reservation.kind === 'stop' && previous
+        ? mergeRetiredAgentSessions(this.retiredAgentSessions, [{
+            agentSessionId: previous.agentSessionId,
+            hostId: previous.hostId,
+            run: { ...previous.run },
+            source: 'user',
+            observedAt: Date.now()
+          }])
+        : this.retiredAgentSessions,
+      retiredRuns
+    )
     assertUnboundRetiredRuns(sessions, retiredRuns)
     assertRetiredAgentSessions(sessions, retiredRuns, retiredAgentSessions)
     if (normalized) {
@@ -1778,15 +1798,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         throw new AgentMuxError('Lifecycle reservation belongs to another owner.', 'AGENT_SESSION_BUSY')
       }
       const mergedRetiredRuns = mergeRetiredRuns(document.retiredRuns, retiredRuns)
+      const retiredAgentSessions = retiredAgentSessionsForRuns(
+        document.retiredAgentSessions,
+        mergedRetiredRuns
+      )
       assertUnboundRetiredRuns(document.sessions, mergedRetiredRuns)
       assertRetiredAgentSessions(
         document.sessions,
         mergedRetiredRuns,
-        document.retiredAgentSessions
+        retiredAgentSessions
       )
       await this.write({
         ...document,
         retiredRuns: mergedRetiredRuns,
+        retiredAgentSessions,
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
         )
@@ -1798,15 +1823,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       const document = await this.read()
       const retiredRuns = mergeRetiredRuns(document.retiredRuns, runs)
+      const retiredAgentSessions = retiredAgentSessionsForRuns(
+        document.retiredAgentSessions,
+        retiredRuns
+      )
       assertUnboundRetiredRuns(document.sessions, retiredRuns)
       assertRetiredAgentSessions(
         document.sessions,
         retiredRuns,
-        document.retiredAgentSessions
+        retiredAgentSessions
       )
       await this.write({
         ...document,
-        retiredRuns
+        retiredRuns,
+        retiredAgentSessions
       })
     })
   }
@@ -1842,15 +1872,18 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const retiredRuns = reservation.kind === 'stop' && previous
         ? mergeRetiredRuns(document.retiredRuns, [...previous.retiredRuns, previous.run])
         : document.retiredRuns
-      const retiredAgentSessions = reservation.kind === 'stop' && previous
-        ? mergeRetiredAgentSessions(document.retiredAgentSessions, [{
-            agentSessionId: previous.agentSessionId,
-            hostId: previous.hostId,
-            run: { ...previous.run },
-            source: 'user',
-            observedAt: Date.now()
-          }])
-        : document.retiredAgentSessions
+      const retiredAgentSessions = retiredAgentSessionsForRuns(
+        reservation.kind === 'stop' && previous
+          ? mergeRetiredAgentSessions(document.retiredAgentSessions, [{
+              agentSessionId: previous.agentSessionId,
+              hostId: previous.hostId,
+              run: { ...previous.run },
+              source: 'user',
+              observedAt: Date.now()
+            }])
+          : document.retiredAgentSessions,
+        retiredRuns
+      )
       assertUnboundRetiredRuns(committedSessions, retiredRuns)
       assertRetiredAgentSessions(committedSessions, retiredRuns, retiredAgentSessions)
       if (reservation.kind === 'create') {

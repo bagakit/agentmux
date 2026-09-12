@@ -80,6 +80,99 @@ function storedSession() {
   }
 }
 
+function sessionNamed(agentSessionId: string, runId: string) {
+  const session = structuredClone(storedSession())
+  const rewritten = JSON.parse(
+    JSON.stringify(session)
+      .replaceAll('semantic-1', agentSessionId)
+      .replaceAll('daemon-1', runId)
+      .replaceAll('native-1', `native-${agentSessionId}`)
+  ) as ReturnType<typeof storedSession>
+  return rewritten
+}
+
+function stopReservation(session: ReturnType<typeof storedSession>, id: string) {
+  return {
+    reservationId: `stop-${id}`,
+    ownerId: 'ring-owner',
+    ownerPid: process.pid,
+    kind: 'stop' as const,
+    agentSessionId: session.agentSessionId,
+    operationId: `stop-op-${id}`,
+    expiresAt: Date.now() + 60_000,
+    expectedRun: { ...session.run },
+    stopOperation: {
+      daemonInstance: 'daemon-instance',
+      operationKey: `stop-op-${id}`,
+      runId: session.run.runId
+    }
+  }
+}
+
+async function stopSession(
+  store: AgentMuxAgentSessionStore,
+  session: ReturnType<typeof storedSession>,
+  id: string
+) {
+  await store.compareAndSwap(null, session)
+  const reservation = stopReservation(session, id)
+  await store.reserveLifecycle(reservation)
+  await store.commitLifecycle(reservation, null)
+}
+
+async function releaseRetiredRuns(store: AgentMuxAgentSessionStore, runIds: readonly string[]) {
+  const reservation = {
+    reservationId: `release-${runIds.join('-')}`,
+    ownerId: 'ring-owner',
+    ownerPid: process.pid,
+    kind: 'create' as const,
+    agentSessionId: `create-${runIds[0]}`,
+    operationId: `release-op-${runIds[0]}`,
+    expiresAt: Date.now() + 60_000
+  }
+  await store.reserveLifecycle(reservation)
+  await store.releaseLifecycle(reservation, runIds.map((runId) => ({ runId })))
+}
+
+async function withRetiredRing(
+  exercise: (store: AgentMuxAgentSessionStore) => Promise<{
+    retiredRuns: readonly { runId: string }[]
+    retiredSessions: readonly { agentSessionId: string, run: { runId: string }, source: string }[]
+  }>
+) {
+  const memory = new AgentMuxMemoryAgentSessionStore()
+  for (let index = 0; index < 256; index += 1) {
+    await stopSession(memory, sessionNamed(`session-${index}`, `run-${index}`), `fill-${index}`)
+  }
+  const fromMemory = await exercise(memory)
+
+  const root = await mkdtemp('/tmp/agentmux-retired-ring-')
+  try {
+    const path = join(root, 'agent-sessions.json')
+    await writeFile(path, `${JSON.stringify({
+      version: 5,
+      sessions: [],
+      reservations: [],
+      retiredRuns: Array.from({ length: 256 }, (_, index) => ({ runId: `run-${index}` })),
+      retiredAgentSessions: Array.from({ length: 256 }, (_, index) => ({
+        agentSessionId: `session-${index}`,
+        hostId: 'local',
+        run: { runId: `run-${index}` },
+        source: 'user',
+        observedAt: 1_000 + index
+      }))
+    })}\n`, { mode: 0o600 })
+    const file = new AgentMuxFileAgentSessionStore(path)
+    const fromFile = await exercise(file)
+    const reloaded = new AgentMuxFileAgentSessionStore(path)
+    expect(await reloaded.loadRetiredRuns()).toEqual(fromFile.retiredRuns)
+    expect(await reloaded.loadRetiredAgentSessions()).toEqual(fromFile.retiredSessions)
+    return [fromMemory, fromFile]
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
 describe('semantic session persistence boundary', () => {
   it('rejects retired File Store schemas without rewriting or migrating them', async () => {
     const root = await mkdtemp('/tmp/agentmux-retired-store-')
@@ -141,6 +234,47 @@ describe('semantic session persistence boundary', () => {
         source: 'user'
       })
     ])
+  })
+
+  it('a full retired-run ring still records the next Stop and forgets only sessions whose runs left', async () => {
+    // 一对一地再停一条，会话上限和 Run 环会一起丢掉最旧的那条，旧断言照样绿。
+    // 多带一条仍绑在 Session 上的旧 Run，环会多挤掉一条，而会话上限只丢掉一条——
+    // 被挤掉 Run、却还留在退役会话里的那条，就是启动时把整窗判死的形状。
+    const remembered = await withRetiredRing(async (store) => {
+      const session = {
+        ...storedSession(),
+        retiredRuns: [{ runId: 'bound-overflow' }]
+      }
+      await stopSession(store, session, 'overflow')
+      await releaseRetiredRuns(store, ['released-a', 'released-b'])
+      await store.retireRuns([{ runId: 'retired-extra-a' }, { runId: 'retired-extra-b' }])
+      return {
+        retiredRuns: await store.loadRetiredRuns(),
+        retiredSessions: await store.loadRetiredAgentSessions()
+      }
+    })
+    const expectedRuns = [
+      ...Array.from({ length: 250 }, (_, index) => ({ runId: `run-${index + 6}` })),
+      { runId: 'bound-overflow' },
+      { runId: 'daemon-1' },
+      { runId: 'released-a' },
+      { runId: 'released-b' },
+      { runId: 'retired-extra-a' },
+      { runId: 'retired-extra-b' }
+    ]
+    const expectedSessionIds = [
+      ...Array.from({ length: 250 }, (_, index) => `session-${index + 6}`),
+      'semantic-1'
+    ]
+    expect(remembered).toHaveLength(2)
+    for (const { retiredRuns, retiredSessions } of remembered) {
+      expect(retiredRuns).toEqual(expectedRuns)
+      expect(retiredSessions.map((session) => session.agentSessionId)).toEqual(expectedSessionIds)
+      expect(retiredSessions.map((session) => session.run.runId)).toEqual([
+        ...Array.from({ length: 250 }, (_, index) => `run-${index + 6}`),
+        'daemon-1'
+      ])
+    }
   })
 
   it('selects only semantic identity, run reference, native handle, receipt, and cursor fields', () => {
