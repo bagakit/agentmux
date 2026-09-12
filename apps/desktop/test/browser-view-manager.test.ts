@@ -135,6 +135,9 @@ const fakeElectron = vi.hoisted(() => {
     readonly webPreferences: Record<string, unknown> | undefined
     visible = true
     bounds = { x: 0, y: 0, width: 0, height: 0 }
+    // 重绘那次抖动会用**同一个值**再 setBounds 一遍（首帧后强制合成器重绘）——只记最后的值看不出它发生过，
+    // 所以把每次 setBounds 的值都追加进来，让"首帧后又设了一次 bounds"这件事可被断言。
+    boundsHistory: Array<{ x: number; y: number; width: number; height: number }> = []
 
     constructor(options?: { webPreferences?: Record<string, unknown> }) {
       FakeWebContentsView.instances.push(this)
@@ -148,7 +151,7 @@ const fakeElectron = vi.hoisted(() => {
     }
 
     setVisible(value: boolean) { this.visible = value }
-    setBounds(value: typeof this.bounds) { this.bounds = value }
+    setBounds(value: typeof this.bounds) { this.bounds = value; this.boundsHistory.push({ ...value }) }
   }
 
   return { FakeWebContentsView }
@@ -369,6 +372,55 @@ describe('BrowserViewManager', () => {
     expect(() => manager.setBounds('browser-1', null)).not.toThrow()
     expect(() => manager.setBounds('browser-1', { x: 0, y: 0, width: 100, height: 100 }))
       .not.toThrow()
+  })
+
+  it('re-applies bounds after the first frame so a loaded page is not left blank until resize', async () => {
+    // Electron 43 在 macOS 上：视图在挂载时就 setVisible(true)+setBounds（页面还没画），首帧要等到
+    // `did-finish-load`，而合成器一直显示那层空白，直到一次几何变化把它作废——"加载了却空白，resize
+    // 才出现"。修法是在首帧信号处把当前 bounds 原样再设一遍，用同一个几何事件强制重绘。
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-paint', 'https://example.com/')
+    const view = fixture.children[0]!
+
+    // 视图可见并拿到真实矩形。setBounds 本身算一次。
+    manager.setBounds('browser-paint', { x: 5, y: 6, width: 640, height: 480 })
+    const boundsCallsBeforeLoad = view.boundsHistory.length
+
+    // 一次真实的重新加载走完首帧信号（did-finish-load）。此时视图已可见，必须再设一次 bounds——
+    // 值不变，但那次调用就是让合成器丢掉空白层、画出新内容的几何事件。
+    await manager.reload('browser-paint')
+
+    expect(
+      view.boundsHistory.length,
+      'did-finish-load 之后没有对已可见的视图重设 bounds：加载完的页面会停在空白直到用户 resize'
+    ).toBe(boundsCallsBeforeLoad + 1)
+    // 重绘用的就是当前那份矩形，不是别的值。
+    expect(view.boundsHistory.at(-1)).toEqual({ x: 5, y: 6, width: 640, height: 480 })
+    manager.close('browser-paint')
+  })
+
+  it('does not force-show a hidden view on first frame — a parked/overlaid surface stays hidden', async () => {
+    // 反向控制：首帧重绘只对**已可见**的视图做。若视图正被 setBounds(null) 正当地藏着（parked、overlay、
+    // 焦点让位等），首帧信号绝不能替那些分支把它显示出来——否则原则 11/12 的隐藏语义被这次重绘旁路掉。
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-hidden', 'https://example.com/')
+    const view = fixture.children[0]!
+
+    manager.setBounds('browser-hidden', { x: 1, y: 2, width: 300, height: 200 })
+    manager.setBounds('browser-hidden', null) // 现在隐藏
+    expect(view.visible).toBe(false)
+    const boundsCallsWhileHidden = view.boundsHistory.length
+
+    await manager.reload('browser-hidden')
+
+    expect(
+      view.boundsHistory.length,
+      '首帧重绘把一个正被隐藏的视图重新设了 bounds——隐藏语义被旁路'
+    ).toBe(boundsCallsWhileHidden)
+    expect(view.visible).toBe(false)
+    manager.close('browser-hidden')
   })
 
   it('releases a hidden native owner without deleting the Browser Region and restores its projection', async () => {

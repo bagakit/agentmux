@@ -1349,6 +1349,24 @@ export class BrowserViewManager {
     entry.view.setVisible(true)
   }
 
+  /**
+   * 页面首帧画出来之后，强制原生视图重绘一次它当前的、已可见的矩形。
+   *
+   * Electron 43 在 macOS 上有一个 `WebContentsView` 合成器 bug：视图在 renderer 挂载时就拿到
+   * `setBounds`+`setVisible(true)`（那时页面还没画），首帧要等到 `did-finish-load` 才落地，而合成器
+   * 一直显示挂载时那层空白，直到一次几何变化把它作废——于是"页面加载了却空白，resize 一下才出现"。
+   * `webContents.invalidate()` 帮不上：它在 Electron 43 里只对 offscreen 渲染有效。
+   *
+   * 所以在首帧信号处把当前 bounds 原样重设一遍：`setBounds` 的调用本身就是让合成器作废旧层、
+   * 重绘新内容的那次几何事件（值不必变，用户手动 resize 起作用也是同一个机制）。只有在视图确实
+   * 已可见、且有一份真实矩形时才做——否则它还在被 `visible`/`released`/overlay 等分支正当地藏着，
+   * 不能替那些分支把它显示出来。
+   */
+  private repaintAfterFirstFrame(entry: BrowserEntry, view: WebContentsView): void {
+    if (!entry.visible || !entry.bounds) return
+    view.setBounds(entry.bounds)
+  }
+
   close(id: string): void {
     const entry = this.entries.get(id)
     if (!entry) {
@@ -1427,6 +1445,7 @@ export class BrowserViewManager {
       // 导航把页面内的东西全冲掉了，角标也在其中。这一处已经是"导航后重新施加状态"的既有位置
       // （上面两行就是），所以角标挂在这里，而不是另起一套重注机制。
       if (entry.driving) void this.showDriveBadge(entry, view)
+      this.repaintAfterFirstFrame(entry, view)
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame || !this.owns(entry, view)) return
