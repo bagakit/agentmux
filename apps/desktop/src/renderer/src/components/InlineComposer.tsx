@@ -206,7 +206,7 @@ export function InlineComposer(props: InlineComposerProps) {
     if (!editor || editor.isDestroyed) return
     editor.commands.updateDecorations()
   }, [editor, keywordKey])
-  return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled}>
+  return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
     <EditorContent editor={editor} />
     {!editor && props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
   </div>
