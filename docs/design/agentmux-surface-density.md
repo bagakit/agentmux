@@ -1063,3 +1063,7 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 - 远端 endpoint、Host 和可信身份属于低频元信息，放进既有 tooltip、context menu、服务窗或详情面，不新增一条常驻 Remote bar、第二套 Tab chrome 或重复的 Session/Run 标签。布局、Agent 名称和状态仍由原有工作面承担。
 - 远端 Runtime 使用现有紧凑服务窗表达连接、握手、能力探测和恢复阶段；告示说明失败步骤、当前保留的事实和可执行动作，不覆盖终端、输入区或焦点。恢复成功后收敛为轻量状态，不留下第二个恢复面板。
 - Linux headless Runtime 不引入桌面专属视觉组件。Desktop 只渲染统一的 Runtime/Session 投影，远端服务的 Provider、Hook、权限和 semantic resume 细节不在工作面复制一份。
+
+### 断电恢复中的状态与附着反馈
+
+断电后保留原 Tab/Region 的视觉骨架。旧 Run 不存在时，终端区域使用轻量恢复状态承载重试动作；不把红色“Attach failed”作为最终态。恢复成功后原位置直接显示新的实时 Run，避免用户手动重新打开 Tab。状态文案区分“旧 Run 已消失，正在恢复”“Provider 暂不可用”和“Session 已明确结束”，不以相同错误密度混在一起。
