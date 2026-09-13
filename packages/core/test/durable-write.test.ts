@@ -148,6 +148,10 @@ describe('durableWriteFile 失败与边界', () => {
 
     await expect(durableWriteFile(path, 'data')).rejects.toThrow('boom-rename')
 
+    // 自证 tmp 曾被打开过：邻近断言（无目标文件）也能背书当前实现，
+    // 但一旦实现改成「跳 tmp 直接写目标」，我们要求断言集合本身可以指认「tmp 该存在过又清理了」，
+    // 而不是依赖别的断言碰巧红。openCount>0 钉死这条自证。
+    expect(ctl.openCount).toBeGreaterThan(0)
     expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -185,6 +189,8 @@ describe('durableWriteFile 失败与边界', () => {
     await expect(durableWriteFile(path, 'data', { signal: controller.signal })).rejects.toThrow()
 
     // rename 前的 throwIfAborted 若被删，abort 会被无视，目标文件会被写出来。
+    // openCount>0 自证 tmp 曾被打开过——不依赖邻近断言碰巧红。
+    expect(ctl.openCount).toBeGreaterThan(0)
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
