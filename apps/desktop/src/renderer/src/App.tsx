@@ -164,15 +164,16 @@ function DesktopApp() {
   })
 
   useEffect(() => {
+    const updateToken = new URLSearchParams(window.location.search).get('renderer-update')
+    if (updateToken) void api.ui.rendererUpdateReady(updateToken)
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
     let dispose = () => {}
     void initialize().then((value) => {
       if (cancelled) value()
-      else {
-        dispose = value
-        const updateToken = new URLSearchParams(window.location.search).get('renderer-update')
-        if (updateToken) void api.ui.rendererUpdateReady(updateToken)
-      }
+      else dispose = value
     })
     return () => {
       cancelled = true
