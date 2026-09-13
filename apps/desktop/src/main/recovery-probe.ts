@@ -155,29 +155,6 @@ export function summarizeRecoverySessionStore(raw: string | null): RecoverySessi
   }
 }
 
-export function recoveryIdentityFromReport(report: {
-  userData: string
-  runtimeDirectory: string
-  workbench: RecoveryWorkbenchSummary
-  sessions: RecoverySessionSummary
-}): RecoveryIdentity {
-  return {
-    userData: report.userData,
-    runtimeDirectory: report.runtimeDirectory,
-    tabIds: report.workbench.tabIds,
-    regionIds: report.workbench.regionIds,
-    activeRegionIds: report.workbench.activeRegionIds,
-    activeWorkspaceId: report.workbench.activeWorkspaceId,
-    draftSessionIds: report.workbench.draftSessionIds,
-    drafts: report.workbench.drafts,
-    executionFocusSessionId: report.workbench.executionFocusSessionId,
-    executionFocusHistory: report.workbench.executionFocusHistory,
-    pmoFocusSessionId: report.workbench.pmoFocusSessionId,
-    sessionIds: report.sessions.sessions.map((session) => session.agentSessionId),
-    runIds: report.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : [])
-  }
-}
-
 export function recoveryIdentityMatches(
   before: RecoveryIdentity,
   after: RecoveryIdentity
