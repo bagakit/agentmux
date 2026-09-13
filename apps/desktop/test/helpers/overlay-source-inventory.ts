@@ -99,13 +99,21 @@ export function deriveOverlayInventoryFromSource(rendererSrcDir: string): Source
               let host: OverlayHostKind | 'unclassified' = 'unclassified'
               if (targetArg.includes('overlayHost') || targetArg.includes('WindowOverlayHost')) {
                 host = 'window-overlay-host'
-              } else if (targetArg.includes('focusPortalTarget') || targetArg.includes('portalTarget')) {
-                // Layout portal: not an overlay, moves an entire layout region into a designated
-                // parent container (e.g. Workbench into a focus/split target). Not an overlay
-                // host — it participates in layout, not in the z-stack of dialogs/tooltips.
-                // Skip: never added to inventory. Layout portals are outside the overlay adoption
-                // contract entirely — the test judges "every createPortal is an overlay adoption",
-                // so a layout portal in the inventory would fail that judge for the wrong reason.
+              } else if (targetArg.trim() === 'focusPortalTarget') {
+                // Layout portal, not overlay. `createPortal(workbench, focusPortalTarget)` at
+                // WorkspaceWorkbench.tsx:1323 relocates the entire Workbench region into a
+                // focus target (id `focus-workspace-slot`, App.tsx). Not a z-stack overlay; sits
+                // outside the overlay adoption contract. Skip: never added to inventory.
+                //
+                // The judge is **exact identifier equality**, not substring. A substring match
+                // (`.includes('portalTarget')`) is the laundering-hole shape memory
+                // [[widening-a-guard-opens-the-laundering-hole]] warns about — any future
+                // `dialogPortalTarget`/`overlayPortalTarget`/`myPortalTarget` overlay would
+                // silently pass through the "every createPortal must be window-overlay-host"
+                // contract downstream, because a skipped row cannot fail the judge. Whitelist by
+                // the exact identifier used at the single known layout-portal site; new layout
+                // portals are gated by having to name themselves the same way (or add themselves
+                // here with the same audit).
                 return
               } else if (targetArg.includes('document.body') || targetArg.includes('portalHost')) {
                 // Explicit body/legacy portal targets are deliberately unclassified.
