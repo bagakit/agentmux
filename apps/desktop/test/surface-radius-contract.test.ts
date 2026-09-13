@@ -22,7 +22,6 @@ const SMALLEST_TOKEN_PX = 6
 
 // Class 1 — compact interactive controls: 24px icon buttons, dense rows, close affordances.
 const COMPACT_CONTROLS = [
-  '.surface-switch button',
   '.explorer-header__actions button, .file-search button',
   '.file-tree-root-target',
   '.file-tree-drag-preview',
@@ -58,7 +57,11 @@ const MICRO_MARKS = [
   // 图标裁角，与上面 .agent-provider-icon > img 的 3px 同类：18px/30px 的 Provider 图标只是把
   // 方形图片的四角收一下，不是给它做一个圆角容器。
   '.pmo-teams-topic-floating__identity img',
-  '.pmo-teams-topic-compact-launcher__button img'
+  '.pmo-teams-topic-compact-launcher__button img',
+  // 28px 高的 recent-focus 时间轨（focus.css）与其中的时间段块：--radius-sm 的 6px 在这个高度上
+  // 把两端啃掉近半，同 .wf-rail 与 .activity-ruler 一族——微量级的装饰性刻度/段落，不是面性容器。
+  '.recent-focus__track',
+  '.recent-focus__segment'
 ]
 
 const DECLARED_EXCEPTIONS = new Set([...COMPACT_CONTROLS, ...MICRO_MARKS])
