@@ -4,10 +4,16 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
-import { useAppStore } from '../src/renderer/src/store.js'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
+// TerminalView requires a full linkOrigin/session-state graph to render; this test lives
+// entirely at the AttentionRequestPanel / GlobalFocusSurface layer and never inspects a terminal.
+// Mock it out so GlobalFocusSurface's fallback SessionObservationRegions path (used when no
+// selectedTab is set in this test's minimal store) doesn't trip TerminalView invariants.
+vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
+
+import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
+import { useAppStore } from '../src/renderer/src/store.js'
 
 function session(id: string, pendingInteraction?: unknown): SessionSnapshot {
   return {
@@ -22,6 +28,19 @@ function session(id: string, pendingInteraction?: unknown): SessionSnapshot {
 const request = { kind: 'question', id: 'request-a', questions: [{ id: 'q', title: 'Choose', prompt: 'Choose one', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] }] }
 const replacement = { kind: 'question', id: 'request-b', questions: [{ id: 'q', title: 'New request', prompt: 'Choose the replacement', options: [{ id: 'next', label: 'Next' }] }] }
 
+// GlobalFocusSurface renders session cards inside project lanes derived from `config.workspaces`.
+// Without a workspace matching a session's workspacePath, deriveFocusProjectLanes returns [] and no
+// `.global-session-card` is rendered — every test below then fails at the first `.click()` with
+// "Cannot read properties of null (reading 'click')". Pin one workspace matching fixtureRoot/repo.
+const testConfig = {
+  version: 9,
+  hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+  executors: {},
+  workspaces: [{ id: 'workspace', name: 'Repository', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' }],
+  appearance: { terminalTheme: 'graphite' },
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
+} as unknown as ReturnType<typeof useAppStore.getState>['config']
+
 describe('attention request resolution boundaries', () => {
   const baseline = useAppStore.getState()
   let root: Root
@@ -33,7 +52,7 @@ describe('attention request resolution boundaries', () => {
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true) })
 
   it('does not invent answer controls when Core has no typed request', async () => {
-    useAppStore.setState({ sessions: [session('a')], providerCatalog: [] })
+    useAppStore.setState({ config: testConfig, sessions: [session('a')], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
     await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
@@ -43,7 +62,7 @@ describe('attention request resolution boundaries', () => {
 
   it('keeps A and B request identities separate when the list changes', async () => {
     const selectSession = vi.fn()
-    useAppStore.setState({ sessions: [session('a', request), session('b', request)], providerCatalog: [], selectSession: selectSession as never })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', request)], providerCatalog: [], selectSession: selectSession as never })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const rows = [...container.querySelectorAll<HTMLElement>('.global-session-card')]
     await act(async () => rows[1]!.click())
@@ -62,7 +81,7 @@ describe('attention request resolution boundaries', () => {
   it('waits for Core to clear the request before moving to the next Agent', async () => {
     let resolveResponse!: () => void
     const response = new Promise<void>((resolve) => { resolveResponse = resolve })
-    useAppStore.setState({ sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
     const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
@@ -79,7 +98,7 @@ describe('attention request resolution boundaries', () => {
   it('does not paint the next request when an old response rejects late', async () => {
     let rejectResponse!: (error: Error) => void
     const response = new Promise<void>((_resolve, reject) => { rejectResponse = reject })
-    useAppStore.setState({ sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
     const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
@@ -92,7 +111,7 @@ describe('attention request resolution boundaries', () => {
   })
 
   it('keeps the same request and reports an answer failure', async () => {
-    useAppStore.setState({ sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => Promise.reject(new Error('Core rejected answer'))) as never })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => Promise.reject(new Error('Core rejected answer'))) as never })
     await openReview('a')
     const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
@@ -103,7 +122,7 @@ describe('attention request resolution boundaries', () => {
   it('shows a replacement request and never advances the old response', async () => {
     let resolveResponse!: () => void
     const response = new Promise<void>((resolve) => { resolveResponse = resolve })
-    useAppStore.setState({ sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
     const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
@@ -116,7 +135,7 @@ describe('attention request resolution boundaries', () => {
   })
 
   it('returns focus to Review here when Escape closes the panel', async () => {
-    useAppStore.setState({ sessions: [session('a', request)], providerCatalog: [] })
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
     const review = container.querySelector('.global-board-action') as HTMLButtonElement
