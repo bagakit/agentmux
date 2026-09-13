@@ -74,6 +74,7 @@ import {
   type TerminalLiveItem
 } from '../lib/terminal-live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
+import { isVanishedAgentRunError } from '../lib/terminal-attach-recovery'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   subscribeTerminalInput,
@@ -254,6 +255,8 @@ export function TerminalView({
   const [revealOverdue, setRevealOverdue] = useState(false)
   const [liveOutputReady, setLiveOutputReady] = useState(false)
   const [attachFailed, setAttachFailed] = useState(false)
+  const recoverVanishedRunRef = useRef<string | null>(null)
+  const recoverSession = useAppStore((state) => state.recoverSession)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
   const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
@@ -959,9 +962,19 @@ export function TerminalView({
         })
       } catch (error) {
         if (!disposed) {
-          setAttachFailed(true)
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+          const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
+          if (vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
+            // The durable Agent Session is still the owner. Ask the store to perform the
+            // Core continuity decision; when it produces a new Run, this component's existing
+            // run-id dependency reattaches the same terminal without a second xterm surface.
+            recoverVanishedRunRef.current = session.control.run.runId
+            reveal(false, false)
+            void recoverSession(session.id).catch(reportError)
+            return
+          }
+          setAttachFailed(true)
           await terminalWrite(
             terminal,
             `\r\n\u001b[31m[Attach failed: ${detail}]\u001b[0m\r\n`
