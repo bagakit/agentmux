@@ -271,10 +271,10 @@ function startPrimaryInstance(): void {
       // the isolated verification page never emits.
       if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
         // The smoke harness intentionally bypasses RendererUpdates because its page does not
-        // emit the renderer-update ready token. Normal startup is different: initialize() owns
-        // the first navigation (and waits for the page to become ready), so loading the bundled
-        // file again here would advance the renderer generation and reject healthy Session
-        // Attachments that are already in flight, leaving their Regions stuck on Connecting.
+        // emit the renderer-update ready token. Normal startup lets RendererUpdates.initialize()
+        // perform the one navigation it awaits; loading the bundled file again here would
+        // advance the renderer generation and reject healthy Session Attachments that are
+        // already in flight, leaving their Regions stuck on Connecting.
         reportStartupStage('before-load-file')
         await window.loadFile(packagedRendererPath, probeQuery ? { query: probeQuery } : undefined)
         reportStartupStage('after-load-file')
