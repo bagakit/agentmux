@@ -103,7 +103,15 @@
 .composer { --composer-input-max: calc(4lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); --composer-input-pad-top: var(--sp-4); --composer-input-pad-bottom: var(--sp-1); }
 .composer__editor .tiptap { position: relative; width: 100%; height: var(--composer-input-height, auto); min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__editor .tiptap p { margin: 0; }
-.composer__editor .tiptap:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; max-width: calc(100% - 2 * var(--sp-5)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * placeholder 只在真正 empty 时显示。判据从 JS 侧的 props.value 派生成
+ * .composer__editor[data-empty='true']——之前用 `:has(> p:only-child > br:only-child)` 探 tiptap
+ * 空态 DOM 结构,遇到"Enter 换行→两 p"或"Shift+Enter→p 里两 text+br"这两种 tiptap 常见换行形态
+ * 时并不总能可靠断言 empty(见用户 2026-09-27 报的"两行时 placeholder 还在叠着显示")。
+ * JS 侧 documentDraft() 是 tiptap value 的权威投影,空 tiptap 里两种空态 doc 都 join 出空串,
+ * 直接判 props.value.length === 0 即可,不再依赖 tiptap 内部 DOM shape。
+ */
+.composer__editor[data-empty='true'] .tiptap::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; max-width: calc(100% - 2 * var(--sp-5)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer__editor[data-disabled='true'] { color: var(--text-3); }
 .composer__editor .composer-semantic-token { font-size: inherit; vertical-align: baseline; border-bottom: 0; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
 .composer__editor .ProseMirror-selectednode { background: var(--surface-3); outline: 1px solid var(--focus-line); }

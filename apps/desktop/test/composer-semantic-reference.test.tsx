@@ -31,4 +31,18 @@ describe('composer semantic references', () => {
     const markup = renderToStaticMarkup(createElement(InlineComposer, { value: '', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
     expect(markup).toContain('data-placeholder="Ask"')
   })
+
+  it('flags data-empty by real value length, so a two-line draft hides the placeholder', () => {
+    // 2026-09-27 用户报："一行模式输入到两行时 placeholder 还在叠着显示"。原判据用 CSS
+    // `:has(> p:only-child > br:only-child)` 探 tiptap 空态 DOM 结构,遇到 Enter 换行(两 p)
+    // 或某些 tiptap 内部形态时不可靠。改成用 JS 侧真值(props.value.length===0)派生
+    // data-empty,CSS 只看这个属性决定 placeholder 显不显示。此测试钉的是 JS→DOM 那一步。
+    const empty = renderToStaticMarkup(createElement(InlineComposer, { value: '', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
+    expect(empty).toContain('data-empty="true"')
+    const oneLine = renderToStaticMarkup(createElement(InlineComposer, { value: 'hi', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
+    expect(oneLine).toContain('data-empty="false"')
+    // 两行 draft:documentDraft 会把两行拼成 "1\n2",value.length===3 非空。
+    const twoLines = renderToStaticMarkup(createElement(InlineComposer, { value: '1\n2', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
+    expect(twoLines).toContain('data-empty="false"')
+  })
 })
