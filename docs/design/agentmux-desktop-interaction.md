@@ -1627,3 +1627,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - `ExecutionHost`（文件、shell、SSH 等执行能力）与 `AgentMux Runtime endpoint` 是两种不同的产品能力。即使它们落在同一台远端机器上，也不能因为能访问工作区就假定 Agent Runtime 可用；两者的身份、能力和恢复状态分别呈现。
 - 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
 - ctxmux 的持久化语义必须如实表达：客户端断开和 daemon 重启可以保留历史 Run、Replay 与恢复线索；宿主机重启后的原生 PTY/进程连续性不是 ctxmux 的保证。宿主重启后由 AgentMux 使用 durable Provider handle 语义恢复同一 Session、创建新的 Run 时，界面应显示“同一 Session 的新 Run”，不能声称原 PTY 仍在继续运行。
+
+### 断电后旧 Run 消失时的 Agent 恢复
+
+断电或 Runtime 重启会使旧 CtxMux Run 失效，但不能使持久 Agent Session、Provider 原生会话句柄、Tab/Region 或焦点消失。恢复流程必须按稳定的 Agent Session 身份决定：旧 Run 存在时 reattach，旧 Run 不存在且 Provider 句柄可用时启动 Provider-native resume；任何恢复竞态都必须保留原工作面并给出可重试的服务窗提示。
+
+旧 Run 的 attach 失败属于恢复流程状态，不得直接把用户留在“Attach failed”终端错误上；恢复完成后必须重新解析当前 Session control，再附着新的 Run。Provider 探测失败只允许在权威探测确实失败时显示，不能由一次早于环境准备完成的探测把可恢复 Session 终结为不可恢复。
