@@ -32,11 +32,11 @@ describe('composer semantic references', () => {
     expect(markup).toContain('data-placeholder="Ask"')
   })
 
-  it('flags data-empty by real value length, so a two-line draft hides the placeholder', () => {
+  it('flags data-empty by real value length, so a typed draft hides the placeholder', () => {
     // 2026-09-27 用户报："一行模式输入到两行时 placeholder 还在叠着显示"。原判据用 CSS
-    // `:has(> p:only-child > br:only-child)` 探 tiptap 空态 DOM 结构,遇到 Enter 换行(两 p)
-    // 或某些 tiptap 内部形态时不可靠。改成用 JS 侧真值(props.value.length===0)派生
-    // data-empty,CSS 只看这个属性决定 placeholder 显不显示。此测试钉的是 JS→DOM 那一步。
+    // `:has(...)` 探 tiptap DOM shape,遇到某种 shape 时错答 empty。修法换到 JS 侧真值
+    // (props.value.length===0)派生 data-empty,CSS 只看这个属性决定 placeholder 显不显示。
+    // 此测试钉的是 JS→DOM 那一步:三个真实的 value 形态各自派生出正确的 data-empty。
     const empty = renderToStaticMarkup(createElement(InlineComposer, { value: '', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
     expect(empty).toContain('data-empty="true"')
     const oneLine = renderToStaticMarkup(createElement(InlineComposer, { value: 'hi', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
@@ -44,5 +44,11 @@ describe('composer semantic references', () => {
     // 两行 draft:documentDraft 会把两行拼成 "1\n2",value.length===3 非空。
     const twoLines = renderToStaticMarkup(createElement(InlineComposer, { value: '1\n2', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
     expect(twoLines).toContain('data-empty="false"')
+    // 语义决定:用户敲了 whitespace(空格/换行/tab)也算"在打字",placeholder 应该消失——
+    // 与主流编辑器(VS Code/IntelliJ)一致。判据钉在这里防止将来有人"优化"成 trim().length===0,
+    // 那会让用户敲空格时 placeholder 又叠回来。若确实要改成"trim 后判空",要**先**改这条断言、
+    // 让此测试红,承认这是语义决定翻转,而不是静默把主流行为改了。
+    const whitespace = renderToStaticMarkup(createElement(InlineComposer, { value: '   ', disabled: false, placeholder: 'Ask', 'aria-label': 'Message', onValueChange: () => {}, onKeyDown: () => {} }))
+    expect(whitespace).toContain('data-empty="false"')
   })
 })

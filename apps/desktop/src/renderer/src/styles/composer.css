@@ -104,12 +104,20 @@
 .composer__editor .tiptap { position: relative; width: 100%; height: var(--composer-input-height, auto); min-height: calc(1lh + var(--composer-input-pad-top) + var(--composer-input-pad-bottom)); max-height: var(--composer-input-max); overflow-y: auto; padding: var(--composer-input-pad-top) var(--sp-5) var(--composer-input-pad-bottom); outline: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.45; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer__editor .tiptap p { margin: 0; }
 /*
- * placeholder 只在真正 empty 时显示。判据从 JS 侧的 props.value 派生成
- * .composer__editor[data-empty='true']——之前用 `:has(> p:only-child > br:only-child)` 探 tiptap
- * 空态 DOM 结构,遇到"Enter 换行→两 p"或"Shift+Enter→p 里两 text+br"这两种 tiptap 常见换行形态
- * 时并不总能可靠断言 empty(见用户 2026-09-27 报的"两行时 placeholder 还在叠着显示")。
- * JS 侧 documentDraft() 是 tiptap value 的权威投影,空 tiptap 里两种空态 doc 都 join 出空串,
- * 直接判 props.value.length === 0 即可,不再依赖 tiptap 内部 DOM shape。
+ * placeholder 只在真正 empty 时显示。判据从 JS 侧 props.value 的空/非空派生成
+ * .composer__editor[data-empty='true'],CSS 只做样式激活,不做判据。
+ *
+ * 之前用 CSS `:has(> p:only-child > br:only-child)` 探 tiptap 空态 DOM 结构。这条 selector
+ * 只捕**一种** empty shape(单个 `<p>` 里单个 `<br>`,tiptap starter-kit paragraph 空态),
+ * 其它 empty shape(如 restore/reset 后的中间态、Shift+Enter 后回退到只剩换行的态、
+ * IME 提交前的过渡态)不一定长这个样子。用户 2026-09-27 报的"两行时 placeholder 还在叠着
+ * 显示"证明存在某种 DOM shape,它同时**非 empty**却仍匹配这条 selector——具体是哪一种 shape
+ * 我没有从第一性追出来,但归因不追出来也**不影响修法方向**:CSS `:has()` 只能问 DOM shape、
+ * 不能问语义,遇到"某组 DOM 形态映射同一语义状态"这一类问题时,判据应该搬去 JS 侧的权威真值。
+ *
+ * JS 侧的权威真值:`props.value: string` 是 `documentDraft(editor.getJSON())` 每次 update 都
+ * 派生的规范化投影,空 tiptap 的多种 shape 都投出空串,非空的多种 shape 都投出非空串。让
+ * CSS 只看这个真值派生的 data-attr,就绕过了 DOM shape 枚举遗漏这一整族问题。
  */
 .composer__editor[data-empty='true'] .tiptap::before { content: attr(data-placeholder); color: var(--neutral-2); pointer-events: none; position: absolute; max-width: calc(100% - 2 * var(--sp-5)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer__editor[data-disabled='true'] { color: var(--text-3); }
