@@ -80,6 +80,11 @@ type PromptSubmissionDeps = {
  */
 export class AgentPromptSubmissionCoordinator {
   private readonly readinessCancels = new Map<string, () => void>()
+  // Claims created by this Core instance are still live even when their first input call
+  // fails. A fresh instance after App restart has an empty set and may reconcile a
+  // persisted claim using CtxMux's accepted-input cursor; an in-process contender must
+  // retain the BUSY guard so two callers cannot interleave bytes.
+  private readonly localSubmissionClaims = new Set<string>()
 
   constructor(private readonly deps: PromptSubmissionDeps) {}
 
@@ -210,7 +215,17 @@ export class AgentPromptSubmissionCoordinator {
         return stored
       }
       assertAdmission(stored)
-      if (existing && !existing.submit.acknowledged) {
+      // A two-phase claim is a de-duplication record, not a lease that can strand a healthy
+      // Run across an application restart. CtxMux's accepted-input cursor is the only fact
+      // that tells us whether the submit byte (\r) reached the daemon. If it did not, the
+      // old attempt never started a turn and a new submission may take over its claim. An
+      // unknown cursor stays fail-closed: guessing here could inject a second prompt while
+      // the first one is already running.
+      const replaceableClaim = existing && !existing.submit.acknowledged &&
+        !this.localSubmissionClaims.has(existing.submissionId) &&
+        run.acceptedInputBytes !== null &&
+        run.acceptedInputBytes < existing.submit.inputByteRange.endByte
+      if (existing && !existing.submit.acknowledged && !replaceableClaim) {
         throw new AgentMuxError(
           'Another Agent prompt operation is incomplete for this Run.',
           'AGENT_PROMPT_SUBMISSION_BUSY',
@@ -222,13 +237,16 @@ export class AgentPromptSubmissionCoordinator {
             payloadStartByte: existing.payload.inputByteRange.startByte,
             payloadEndByte: existing.payload.inputByteRange.endByte,
             submitStartByte: existing.submit.inputByteRange.startByte,
-            submitEndByte: existing.submit.inputByteRange.endByte
+            submitEndByte: existing.submit.inputByteRange.endByte,
+            acceptedInputBytes: run.acceptedInputBytes ?? 'unknown'
           })
         )
       }
       const readiness = stored.terminalPromptReadiness
       const readinessEvidence = readiness && readiness.run.runId === session.run.runId &&
-        readiness.readyThroughByte !== undefined && readiness.consumedBySubmissionId === undefined
+        readiness.readyThroughByte !== undefined &&
+        (readiness.consumedBySubmissionId === undefined ||
+          (replaceableClaim && readiness.consumedBySubmissionId === existing?.submissionId))
         ? { source: readiness.source, id: readiness.id, outputCursorBytes: readiness.outputCursorBytes,
             readyThroughByte: readiness.readyThroughByte }
         : undefined
@@ -332,6 +350,7 @@ export class AgentPromptSubmissionCoordinator {
       )
     }
     assertSubmission(submission)
+    this.localSubmissionClaims.add(submission.submissionId)
     let acceptedInputBytes = run.acceptedInputBytes
 
     const applyPhase = async (
