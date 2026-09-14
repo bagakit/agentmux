@@ -29,8 +29,8 @@ describe('window-owned Workspace Workbench registry', () => {
   })
 
   it('parks inactive slots without unmounting their subtree', () => {
-    expect(app).toContain('className={`workspace-workbench-slot ${visible ? \'\' : \'workspace-workbench-slot--parked\'}`')
-    expect(app).toContain('inert={!visible}')
+    expect(app).toContain('className={`workspace-workbench-slot ${mounted ? \'\' : \'workspace-workbench-slot--parked\'}`')
+    expect(app).toContain('inert={!mounted}')
     const slotMatch = styles.match(/\.workspace-workbench-slot\s*\{([^}]*)\}/)
     expect(slotMatch).not.toBeNull()
     const slot = slotMatch?.[1] ?? ''
@@ -46,7 +46,7 @@ describe('window-owned Workspace Workbench registry', () => {
     // 整条表达式的其余条件（浮层让位的两把租约）归 workbench-browser-visibility.test.tsx 守：
     // 此前这里抄的是整行字面量，于是每加一个合法条件都要来改这一行，而它并不比那边的逐条判据更强。
     expect(workbench).toContain('nativeSurfacesVisible={visible &&')
-    expect(app).toContain('visible={visible}')
+    expect(app).toContain('visible={mounted}')
   })
 
   it('keeps native Browser surfaces mounted while a split handle is dragged', () => {

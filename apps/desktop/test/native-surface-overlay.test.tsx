@@ -7,6 +7,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as HoverMenu from '../src/renderer/src/components/HoverDropdownMenu'
 import { isOverlayNode, observeOverlays, openOverlayCount } from '../src/renderer/src/lib/native-surface-overlay'
+import { WindowOverlayHost, WindowOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
 
 /**
  * 「弹窗经常被浏览器挡了」的判据。
@@ -100,6 +101,11 @@ describe('真 Radix：开着的浮层被数到，React 根不被数到', () => {
     // 而承重的是**渲染出来的 DOM 长什么样**，不是 import 关系（记忆
     // import-relation-buys-presence-not-use）。Tab 条上的 Split 下拉走的就是这一层——
     // 删掉它手写的让位开关之前，必须先证明协议判据确实看得见它。
+    const hostEl = document.createElement('div')
+    hostEl.className = 'window-overlay-host'
+    hostEl.dataset.overlayHost = ''
+    document.body.append(hostEl)
+
     await render(
       <HoverMenu.Root open>
         <HoverMenu.Trigger>x</HoverMenu.Trigger>
@@ -144,6 +150,90 @@ describe('真 Radix：开着的浮层被数到，React 根不被数到', () => {
       outside.some((child) => isOverlayNode(child)),
       'portal 出去的节点里没有一个带 data-state="open"——判据找不到它要找的东西'
     ).toBe(true)
+  })
+
+  it('WindowOverlayHost 在 React 根内声明时，自动挂载到 React 根之外（document.body）', async () => {
+    await render(<WindowOverlayHost />)
+    const hostNode = document.body.querySelector('[data-overlay-host]')
+    expect(hostNode, 'WindowOverlayHost 必须在 DOM 中渲染').toBeTruthy()
+    expect(hostNode?.parentElement).toBe(document.body)
+    expect(
+      hostNode?.closest('#root'),
+      'WindowOverlayHost 不得作为 #root 的内部节点，否则 observeOverlays 会忽略它'
+    ).toBeNull()
+  })
+
+  it('挂载在 WindowOverlayHost 上的打开菜单计为 1', async () => {
+    const hostEl = document.createElement('div')
+    hostEl.className = 'window-overlay-host'
+    hostEl.dataset.overlayHost = ''
+    document.body.append(hostEl)
+
+    await render(
+      <HoverMenu.Root open>
+        <HoverMenu.Trigger>x</HoverMenu.Trigger>
+        <HoverMenu.Portal>
+          <HoverMenu.Content>
+            <HoverMenu.Item>item 1</HoverMenu.Item>
+          </HoverMenu.Content>
+        </HoverMenu.Portal>
+      </HoverMenu.Root>
+    )
+    expect(openOverlayCount(document.body)).toBe(1)
+  })
+
+  it('嵌套菜单在 WindowOverlayHost 中保持持有让位租约', async () => {
+    await render(
+      <>
+        <WindowOverlayHost />
+        <DropdownMenu.Root open>
+          <DropdownMenu.Trigger>Trigger</DropdownMenu.Trigger>
+          <DropdownMenu.Portal container={document.body.querySelector<HTMLElement>('[data-overlay-host]')}>
+            <DropdownMenu.Content data-state="open">
+              <DropdownMenu.Item>First</DropdownMenu.Item>
+              <DropdownMenu.Sub open>
+                <DropdownMenu.SubTrigger>More</DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal container={document.body.querySelector<HTMLElement>('[data-overlay-host]')}>
+                  <DropdownMenu.SubContent data-state="open">
+                    <DropdownMenu.Item>Sub Item</DropdownMenu.Item>
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </>
+    )
+    expect(openOverlayCount(document.body)).toBeGreaterThan(0)
+  })
+
+  it('Tooltip 在 WindowOverlayHost 中处于 open 状态时参与让位，关闭后归零', async () => {
+    function TooltipFixture({ open }: { open: boolean }) {
+      return (
+        <>
+          <WindowOverlayHost />
+          {open ? (
+            <WindowOverlayPortal layer="tooltip">
+              <span role="tooltip" data-state="open" className="surface-navigation__tooltip">
+                Tooltip
+              </span>
+            </WindowOverlayPortal>
+          ) : null}
+        </>
+      )
+    }
+
+    const host = mountAppRoot()
+    const root = createRoot(host)
+    await act(async () => {
+      root.render(<TooltipFixture open={true} />)
+    })
+    expect(openOverlayCount(document.body), '打开的 tooltip 必须持有让位租约').toBe(1)
+
+    await act(async () => {
+      root.render(<TooltipFixture open={false} />)
+    })
+    expect(openOverlayCount(document.body), '关闭的 tooltip 必须释放让位租约').toBe(0)
   })
 })
 

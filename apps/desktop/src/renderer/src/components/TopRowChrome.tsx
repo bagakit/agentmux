@@ -1,13 +1,9 @@
-import {
-  LayoutDashboard,
-  PanelLeft,
-  PanelsTopLeft,
-  RadioTower,
-  SquareTerminal,
-  Users
-} from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { PanelLeft, PanelsTopLeft, RadioTower } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
+import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
+import { WindowOverlayPortal } from './WindowOverlayHost'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -31,7 +27,7 @@ export function TopRowLeadingChrome() {
     && toolsOpen
     && (mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace)))
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
-  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board') && chromeOwnedOutsideMain
+  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey') && chromeOwnedOutsideMain
   return (
     <div
       className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}${globalSurfaceNeedsTrafficLightInset ? ' top-row-leading-chrome--global-inset' : ''}`}
@@ -103,6 +99,9 @@ export function TopBreadcrumb() {
   if (mainSurface === 'agents') {
     return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
   }
+  if (mainSurface === 'survey') {
+    return <div className="breadcrumbs"><strong>Survey</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Browse and verify</span></div>
+  }
   if (mainSurface === 'board') {
     return (
       <div className="breadcrumbs">
@@ -140,32 +139,88 @@ export function TopBreadcrumb() {
 export function SurfaceSwitch() {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
+  const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
+  // Window-level host [data-overlay-host] adapter (WindowOverlayPortal wraps createPortal into host):
+  const showTooltip = (id: string, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect()
+    setTooltip({ id, left: rect.left + rect.width / 2, top: rect.top - 8 })
+  }
+  const hideTooltip = (id: string) => {
+    setTooltip((current) => current?.id === id ? null : current)
+  }
+  useEffect(() => {
+    if (!tooltip) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTooltip(null)
+    }
+    const onBlur = () => setTooltip(null)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [tooltip])
+  const activePlugin = tooltip
+    ? SURFACE_NAVIGATION_PLUGINS.find((plugin) => plugin.id === tooltip.id)
+    : null
+  const renderTooltip = (plugin: typeof SURFACE_NAVIGATION_PLUGINS[number]) => (
+    <span
+      id={`surface-navigation-tooltip-${plugin.id}`}
+      className="surface-navigation__tooltip"
+      role="tooltip"
+      data-state="open"
+      data-overlay-layer="tooltip"
+      style={{ left: `${tooltip?.left ?? 0}px`, top: `${tooltip?.top ?? 0}px` }}
+    >
+      <strong>{plugin.label}</strong><small>{plugin.tooltip}</small>
+    </span>
+  )
   return (
-    <div className="surface-switch" role="group" aria-label="Main view">
-      <button
-        className={mainSurface === 'agents' ? 'selected' : ''}
-        aria-label="Focus: show execution contexts"
-        title="Focus — show execution contexts"
-        onClick={() => setMainSurface('agents')}
-      >
-        <Users size={13} /> Focus
-      </button>
-      <button
-        className={mainSurface === 'workbench' ? 'selected' : ''}
-        aria-label="Workspaces: show terminal and file workbench"
-        title="Workspaces — show terminal and file workbench"
-        onClick={() => setMainSurface('workbench')}
-      >
-        <SquareTerminal size={13} /> Workspaces
-      </button>
-      <button
-        className={mainSurface === 'board' ? 'selected' : ''}
-        aria-label="Work: show requests and ideas"
-        title="Work — show requests and ideas"
-        onClick={() => setMainSurface('board')}
-      >
-        <LayoutDashboard size={13} /> Work
-      </button>
-    </div>
+    <>
+      <nav className="surface-navigation" aria-label="Primary surfaces">
+      {SURFACE_NAVIGATION_PLUGINS.map((plugin) => {
+        if (plugin.kind === 'launcher') {
+          return (
+            <div
+              key={plugin.id}
+              className="surface-navigation__slot surface-navigation__slot--launcher"
+              onMouseEnter={(event) => showTooltip(plugin.id, event.currentTarget)}
+              onMouseLeave={() => hideTooltip(plugin.id)}
+              onFocusCapture={(event) => showTooltip(plugin.id, event.currentTarget)}
+              onBlurCapture={() => hideTooltip(plugin.id)}
+            >
+              {plugin.render()}
+            </div>
+          )
+        }
+        const Icon = plugin.icon
+        const selected = mainSurface === plugin.surface
+        return (
+          <button
+            key={plugin.id}
+            type="button"
+            className={`surface-navigation__slot surface-navigation__slot--surface${selected ? ' selected' : ''}`}
+            aria-label={plugin.ariaLabel}
+            aria-current={selected ? 'page' : undefined}
+            aria-describedby={tooltip?.id === plugin.id ? `surface-navigation-tooltip-${plugin.id}` : undefined}
+            title={plugin.title}
+            onMouseEnter={(event) => showTooltip(plugin.id, event.currentTarget)}
+            onMouseLeave={() => hideTooltip(plugin.id)}
+            onFocus={(event) => showTooltip(plugin.id, event.currentTarget)}
+            onBlur={() => hideTooltip(plugin.id)}
+            onClick={() => setMainSurface(plugin.surface)}
+          >
+            <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
+          </button>
+        )
+      })}
+      </nav>
+      {activePlugin && tooltip ? (
+        <WindowOverlayPortal layer="tooltip">
+          {renderTooltip(activePlugin)}
+        </WindowOverlayPortal>
+      ) : null}
+    </>
   )
 }

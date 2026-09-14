@@ -83,7 +83,7 @@ const config: AppConfig = {
 }
 
 function renderRail(): string {
-  return renderToStaticMarkup(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() }))
+  return renderToStaticMarkup(createElement(WorkspaceSidebar))
 }
 
 afterEach(() => {
@@ -201,7 +201,7 @@ describe('Project Rail density is durable', () => {
     document.body.append(container)
     const root = createRoot(container)
     try {
-      await act(async () => root.render(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() })))
+      await act(async () => root.render(createElement(WorkspaceSidebar)))
       const control = container.querySelector('[aria-label="Use compact project spacing"]') as HTMLButtonElement | null
       expect(control, '密度切换控件没渲染出来').not.toBeNull()
       await act(async () => control!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
@@ -222,7 +222,7 @@ describe('Project Rail density is durable', () => {
     document.body.append(container)
     const root = createRoot(container)
     try {
-      await act(async () => root.render(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() })))
+      await act(async () => root.render(createElement(WorkspaceSidebar)))
       const control = container.querySelector('[aria-label="Use extra compact project spacing"]') as HTMLButtonElement | null
       expect(control, 'compact 档没有邀请切到更紧凑').not.toBeNull()
       await act(async () => control!.dispatchEvent(new MouseEvent('click', { bubbles: true })))

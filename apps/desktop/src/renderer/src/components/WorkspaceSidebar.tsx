@@ -19,9 +19,7 @@ import {
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
-import type { SettingsSectionId } from './SettingsPanel'
 import { BrandIcon } from './BrandIcon'
-import { ProjectRailToolbar } from './ProjectRailToolbar'
 import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
@@ -34,11 +32,7 @@ function isPathInside(inner: string, outer: string): boolean {
   return inner.startsWith(`${root}/`) || inner.startsWith(`${root}\\`)
 }
 
-export function WorkspaceSidebar({
-  onOpenSettings
-}: {
-  onOpenSettings: (section: SettingsSectionId) => void
-}) {
+export function WorkspaceSidebar() {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -388,7 +382,6 @@ export function WorkspaceSidebar({
           <div className="workspace-list__empty"><strong>No projects yet</strong><span>Add a local folder, then manage its branches and worktrees from the navigator.</span><button className="small-button" onClick={() => void chooseFolder()}><Plus size={12} /> Add project</button></div>
         ) : null}
       </nav>
-      <ProjectRailToolbar onOpenSettings={onOpenSettings} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove project view?"

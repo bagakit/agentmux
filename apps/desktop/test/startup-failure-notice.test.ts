@@ -19,7 +19,7 @@ import { startupFailureNotice } from '../src/main/startup-failure-notice.js'
 // 只有第 1 半时，整个 `showErrorBox` 调用可以被删掉而全绿；那正是修复前的状态。
 // ---------------------------------------------------------------------------
 
-const CONFIG_PATH = '/Users/someone/Library/Application Support/AgentMux/agentmux.config.json'
+const CONFIG_PATH = 'home//Library/Application Support/AgentMux/agentmux.config.json'
 
 describe('启动失败通知的内容', () => {
   it('把原始诊断串原样带上——用户要能搜索它，也要能贴给我们', () => {
@@ -31,11 +31,11 @@ describe('启动失败通知的内容', () => {
     expect(notice.body).toContain('host list the current schema cannot read')
   })
 
-  it('说明磁盘上的东西没被改过——那是拒绝启动换来的唯一好处', () => {
-    // 不说这句，用户读到的就只是「打不开」，而正确的下一步（去修那个文件、别重装）无从得知。
+  it('说明已有磁盘数据被保留，但不声称启动前绝无写入', () => {
     const notice = startupFailureNotice(new Error('anything'), { configPath: CONFIG_PATH })
 
-    expect(notice.body).toMatch(/has not been changed/)
+    expect(notice.body).toMatch(/Existing data on disk was retained/)
+    expect(notice.body).not.toMatch(/before writing anything/)
   })
 
   it('给出配置文件的完整路径——没有它，「去修一个字节」是不可执行的建议', () => {

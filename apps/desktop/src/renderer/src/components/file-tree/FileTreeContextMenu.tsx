@@ -18,6 +18,7 @@ import {
   type FileExplorerMoveTarget
 } from '../../lib/file-explorer-move'
 import { isMacPlatform, revealInFileManagerLabel } from '../../lib/host-platform'
+import { resolveOverlayContainer } from '../WindowOverlayHost'
 
 function stopRightButtonSelection(event: React.PointerEvent): void {
   if (event.button !== 2) return
@@ -71,7 +72,7 @@ export function FileTreeContextMenu({
   return (
     <ContextMenu.Root onOpenChange={onOpenChange}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu file-context-menu"
           collisionPadding={8}
@@ -125,7 +126,7 @@ export function FileTreeContextMenu({
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={moveTargets.length === 0}>
               <FolderInput size={14} /><span>Move This Item to</span><span className="tab-context-menu__chevron">›</span>
             </ContextMenu.SubTrigger>
-            <ContextMenu.Portal>
+            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
               <ContextMenu.SubContent className="tab-context-menu file-context-menu" collisionPadding={8} sideOffset={4}>
                 {moveTargets.map((target) => (
                   <ContextMenu.Item

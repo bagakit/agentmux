@@ -3,10 +3,14 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
-import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 vi.mock('../src/renderer/src/components/SessionPane.js', () => ({ SessionPane: ({ sessionId }: { sessionId: string }) => createElement('div', { 'data-observing': sessionId }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+
+const config = {
+  workspaces: [{ id: 'agentmux', name: 'AgentMux', hostId: 'local', path: '/repo/agentmux', kind: 'folder' }]
+} as AppConfig
 
 function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: number): SessionSnapshot {
   return {
@@ -55,7 +59,7 @@ describe('Global Agents card board', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    useAppStore.setState({ agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, mainSurface: 'agents' })
+    useAppStore.setState({ config, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, mainSurface: 'agents' })
   })
 
   afterEach(async () => {
@@ -104,9 +108,9 @@ describe('Global Agents card board', () => {
       }
     })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
-    expect(container.querySelector('.focus-history')).toBeTruthy()
-    expect(container.querySelector('[data-focus-history-id="second"]')).toBeTruthy()
-    await act(async () => (container.querySelector('[data-focus-history-id="second"]') as HTMLButtonElement).click())
+    expect(container.querySelector('.recent-focus')).toBeTruthy()
+    expect(container.querySelector('[data-focus-timeline-id="second"]')).toBeTruthy()
+    await act(async () => (container.querySelector('[data-focus-timeline-id="second"] button') as HTMLButtonElement).click())
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('second')
   })
 
@@ -120,9 +124,9 @@ describe('Global Agents card board', () => {
       }
     })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
-    expect(container.querySelector('.focus-history')).toBeTruthy()
-    expect(container.querySelector('[data-focus-history-id="terminal-1"]')).toBeTruthy()
-    expect(container.querySelector('.focus-history__terminal-icon')).toBeTruthy()
-    expect(container.querySelector('.focus-history__entry .agent-avatar')).toBeNull()
+    expect(container.querySelector('.recent-focus')).toBeTruthy()
+    expect(container.querySelector('[data-focus-timeline-id="terminal-1"]')).toBeTruthy()
+    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .recent-focus__segment svg')).toBeTruthy()
+    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .agent-avatar')).toBeNull()
   })
 })

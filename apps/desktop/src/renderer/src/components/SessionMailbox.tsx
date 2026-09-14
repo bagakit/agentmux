@@ -70,6 +70,15 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
   function openFolder(): Folder {
     return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : counts.outbox ? 'outbox' : 'inbox'
   }
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+  useEffect(() => {
+    if (!open) return
+    acquireNativeSurfaceOverlay()
+    return () => {
+      releaseNativeSurfaceOverlay()
+    }
+  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (!open) return
     if (folder === 'inbox' && receipts.unread.length) receipts.acknowledge(receipts.unread)
@@ -84,6 +93,7 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
       {unread ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
     </button>
     <div id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
+      data-state={open ? 'open' : 'closed'}
       onToggle={(event) => { const opening = event.newState === 'open'; if (opening) setFolder(openFolder()); setOpen(opening) }}>
       <div className="composer-mailbox__heading"><strong>Mailbox</strong>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"><X size={14} /></button></div>

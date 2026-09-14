@@ -10,6 +10,7 @@ import { AgentEnamelFilter } from './AgentEnamelFilter'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { SemanticIcon } from './semantic-icons'
+import { getWindowOverlayHost } from './WindowOverlayHost'
 
 /** Desktop presentation only; Core continues to own the Session and Provider facts. */
 export const ExecutorIdentityContext = createContext<{
@@ -146,6 +147,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
       <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
     </span> : null}</>
+  const overlayHost = getWindowOverlayHost()
   return <>
     <Element ref={trigger} className={`agent-avatar${displayState ? ` status status--${displayState}` : ''}`}
       style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
@@ -174,7 +176,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
         : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
       {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
     </Element>
-    {position ? createPortal(<div ref={panel} id={panelId} className="agent-identity-popover" role="dialog" aria-label="Executor details"
+    {position && overlayHost ? createPortal(<div ref={panel} id={panelId} className="agent-identity-popover" role="dialog" aria-label="Executor details"
       style={position} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) hideSoon() }}
       onKeyDown={(event) => { if (event.key === 'Escape') { closeNow(); trigger.current?.focus(); event.stopPropagation() } }}
@@ -185,6 +187,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
         {resolvedExecutorId ? <><dt>Executor</dt><dd>{executor?.label ?? resolvedExecutorId} · {resolvedExecutorId}</dd></> : null}
         {statusLabel ? <><dt>Status</dt><dd>{statusLabel}</dd></> : null}</dl>
       {statusDetail ? <p>{statusDetail}</p> : null}
-    </div>, document.body) : null}
+    </div>, overlayHost) : null}
   </>
 }

@@ -13,10 +13,6 @@
 .workspace-list__empty { display: flex; flex-direction: column; align-items: flex-start; gap:var(--sp-3); margin:var(--sp-2); padding:var(--sp-5); border: 1px dashed var(--line); border-radius: var(--radius); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
 .workspace-list__empty strong { color: var(--text-2); font-size: var(--fs-micro); }
 .scratch-workspace-row__meta { display: inline-flex; align-items: center; gap:var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.surface-switch { height: 26px; display: flex; align-items: center; gap:1px; padding:var(--sp-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--bg); -webkit-app-region: no-drag; }
-.surface-switch button { height: 20px; display: inline-flex; align-items: center; gap:var(--sp-2); padding:0 var(--sp-4); border: 0; border-radius: 4px; color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; transition: background .12s ease, color .12s ease; }
-.surface-switch button:hover { color: var(--text-2); }
-.surface-switch button.selected { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
 .workspace-main-surface { min-width: 0; min-height: 0; position: relative; flex: 1; overflow: hidden; }
 .surface-tool-dock {
   width: 300px;

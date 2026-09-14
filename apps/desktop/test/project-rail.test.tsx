@@ -114,7 +114,7 @@ function session(
 }
 
 function renderRail(): string {
-  return renderToStaticMarkup(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() }))
+  return renderToStaticMarkup(createElement(WorkspaceSidebar))
 }
 
 /** 取出某一行的完整标记。按 aria-label 定位，因为那是这一行对辅助技术自称的名字。 */
@@ -504,16 +504,16 @@ describe('Project Rail 的分组与嵌套', () => {
     //
     // 父目录故意取得够深（4 段）：`/proj/kit` 那种两段路径根本不会被缩短，拿它断言"保留尾部"
     // 会得出一个与实现无关的绿——这条本来就是要判缩短方向的。
-    useWorkspaces([['one', '/Users/me/proj/kit/one'], ['two', '/Users/me/proj/kit/two']])
-    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', '/Users/me/proj/kit'])]: true }
+    useWorkspaces([['one', 'home//proj/kit/one'], ['two', 'home//proj/kit/two']])
+    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', 'home//proj/kit'])]: true }
     const markup = renderRail()
     expect(expandedStates(markup)).toEqual(['false'])
     // 成员行真的不在了——只把 chevron 转个方向而不藏行，是这个功能最容易的假实现。
     expect(markup).not.toMatch(/aria-label="one"/)
     expect(markup).not.toMatch(/aria-label="two"/)
-    // 保留尾部而不是砍尾部：靠后的段才有分辨力，`/Users/me` 那一头对区分身份毫无帮助。
+    // 保留尾部而不是砍尾部：靠后的段才有分辨力，`home/` 那一头对区分身份毫无帮助。
     expect(markup).toContain('…/me/proj/kit')
-    expect(markup).not.toContain('/Users/me/proj/kit</span>')
+    expect(markup).not.toContain('home//proj/kit</span>')
   })
 
   it('折叠的分组把里面等你的 Agent 卷到头上——不是藏起来', () => {

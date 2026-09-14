@@ -19,6 +19,7 @@ import {
   terminalSelectionSuppressionHint,
   type MouseTrackingMode
 } from '../lib/terminal-selection-mode'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function TerminalContextMenu({
   children,
@@ -85,7 +86,7 @@ export function TerminalContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu terminal-context-menu"
           collisionPadding={8}

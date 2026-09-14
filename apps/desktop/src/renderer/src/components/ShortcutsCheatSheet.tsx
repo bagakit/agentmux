@@ -1,5 +1,9 @@
+import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Command, X } from 'lucide-react'
 import { buildCheatSheet } from '../lib/shortcut-cheat-sheet'
+import { getWindowOverlayHost } from './WindowOverlayHost'
+import { useAppStore } from '../store'
 
 // The window's one discoverability surface: a read-only list of every keyboard binding, summoned by a
 // keystroke (help.shortcuts) that itself appears on the list. Because the app deliberately strips the
@@ -19,9 +23,21 @@ export function ShortcutsCheatSheet({
   onClose: () => void
   isMac: boolean
 }) {
-  if (!open) return null
+  const overlayHost = getWindowOverlayHost()
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+
+  useEffect(() => {
+    if (!open) return
+    acquireNativeSurfaceOverlay()
+    return () => {
+      releaseNativeSurfaceOverlay()
+    }
+  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
+
+  if (!open || !overlayHost) return null
   const groups = buildCheatSheet(isMac)
-  return (
+  return createPortal(
     <div className="shortcuts-help__overlay" role="presentation" onClick={onClose}>
       <div
         className="shortcuts-help"
@@ -58,6 +74,7 @@ export function ShortcutsCheatSheet({
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    overlayHost
   )
 }

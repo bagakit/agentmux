@@ -25,11 +25,14 @@ export function composerSession(id = 'agent-1', providerId = 'codex'): Extract<S
 export function composerDOM() {
   const initial = useAppStore.getState()
   let container: HTMLDivElement
+  let overlayHost: HTMLDivElement
   let root: Root
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div')
-    document.body.append(container)
+    overlayHost = document.createElement('div')
+    overlayHost.dataset.overlayHost = ''
+    document.body.append(container, overlayHost)
     root = createRoot(container)
     useAppStore.setState({ config: composerConfig, sessions: [composerSession()], error: null,
       agentNames: {}, agentComposerDrafts: { 'agent-1': 'Keep my draft' }, agentSteerQueues: {} })
@@ -37,6 +40,7 @@ export function composerDOM() {
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()
+    overlayHost.remove()
     useAppStore.setState(initial, true)
     vi.restoreAllMocks()
   })
