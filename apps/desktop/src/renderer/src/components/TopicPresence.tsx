@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Bot, FileCode2, Globe2, PanelTop, Sparkles, SquareTerminal } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
+import { getWindowOverlayHost } from './WindowOverlayHost'
 
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -60,7 +61,6 @@ function TopicTabGlyph({ tab }: { tab: TopicTabDetail }) {
     <span
       className={`topic-workbench-topology__tab-glyph${singleRegion ? ' topic-workbench-topology__tab-glyph--single' : ''}`}
       data-region-count={tab.regions.length}
-      aria-hidden="true"
     >
       {tab.regions.map((region) => (
         <span
@@ -75,7 +75,18 @@ function TopicTabGlyph({ tab }: { tab: TopicTabDetail }) {
                 width: `${region.bounds.width * 100}%`,
                 height: `${region.bounds.height * 100}%`
               }}
-        />
+        >
+          {/*
+           * f-27t8fe2kg T-001 acceptance: Agent icons map into their real cells without
+           * duplicating an outside avatar. The `singleRegion` short-circuit at line 55-58 above
+           * used to be the only branch that rendered a TopicRegionMark; the split branch left
+           * every cell empty and let the outside SelectorPresence roster carry the identity —
+           * which duplicates the Agent on split Tabs and hides it from its real cell. Render the
+           * mark in both branches; mounted-set filtering in TopicPresence keeps the outside
+           * roster to background/unknown-only, so the split Agent is not duplicated.
+           */}
+          <TopicRegionMark region={region} />
+        </span>
       ))}
     </span>
   )
@@ -154,8 +165,8 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
   const inspected = tabs.find((tab) => tab.tabId === inspectedTabId) ?? active
   const [aspectRatio, setAspectRatio] = useState(16 / 10)
   const label = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}. Hover or focus a Tab to inspect its Regions and recent activity.`
-  const portalHost = typeof document === 'undefined' ? null : document.body
-  const inspectorInPortal = inspectorOpen && portalHost !== null
+  const overlayHost = getWindowOverlayHost()
+  const inspectorInPortal = inspectorOpen && overlayHost !== null
 
   const inspectTab = (tabId: string) => {
     setInspectedTabId(tabId)
@@ -266,7 +277,8 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
           </button>
         ))}
       </span>
-      {inspectorInPortal ? createPortal(inspector, portalHost) : inspector}
+      {/* createPortal(inspector, portalHost) */}
+      {inspectorInPortal ? createPortal(inspector, overlayHost) : null}
     </span>
   )
 }
