@@ -142,6 +142,82 @@ describe('prompt readiness refusal diagnostics', () => {
 
   })
 
+  it('takes over an unsubmitted claim after restart when CtxMux has not accepted the submit byte', async () => {
+    const original = session()
+    const fixture = await coordinatorFixture(original)
+    const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
+    fixture.kernel.input.mockRejectedValueOnce(new Error('app stopped before input'))
+    await expect(fixture.coordinator.submitInputPlan(
+      original,
+      fixture.currentRun,
+      'submission-old',
+      'old draft',
+      firstPlan
+    )).rejects.toThrow('app stopped before input')
+
+    const stranded = fixture.registry.get(original.agentSessionId)
+    const claim = stranded.terminalPromptSubmission
+    expect(claim?.submit.acknowledged).toBe(false)
+    expect(claim?.submit.inputByteRange.endByte).toBeGreaterThan(0)
+    expect(stranded.terminalPromptReadiness?.consumedBySubmissionId).toBe('submission-old')
+
+    // A new Core instance models the App restart: its in-memory claim ownership is empty,
+    // while the durable stranded record is carried into the new registry.
+    const restarted = await coordinatorFixture(stranded)
+    const nextPlan = new AgentProviderRegistry().get('codex').planPromptInput('after restart')
+    await restarted.coordinator.submitInputPlan(
+      stranded,
+      run(0),
+      'submission-new',
+      'after restart',
+      nextPlan
+    )
+
+    expect(restarted.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['after restart', '\r'])
+    expect(restarted.registry.get(original.agentSessionId).terminalPromptSubmission?.submissionId).toBe('submission-new')
+    expect(restarted.registry.get(original.agentSessionId).terminalPromptReadiness?.consumedBySubmissionId).toBe('submission-new')
+  })
+
+  it('keeps the busy guard when CtxMux has already accepted the submit byte', async () => {
+    const original = session()
+    const fixture = await coordinatorFixture(original)
+    const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
+    let calls = 0
+    fixture.kernel.input.mockImplementation(async (_runId: string, operation: { expectedByte: number; data: string }) => {
+      calls += 1
+      if (calls === 1) {
+        return {
+          run: run(operation.expectedByte + Buffer.byteLength(operation.data)),
+          appliedByteRange: {
+            startByte: operation.expectedByte,
+            endByte: operation.expectedByte + Buffer.byteLength(operation.data)
+          }
+        }
+      }
+      throw new Error('receipt persistence interrupted')
+    })
+    await expect(fixture.coordinator.submitInputPlan(
+      original,
+      fixture.currentRun,
+      'submission-old',
+      'old draft',
+      firstPlan
+    )).rejects.toThrow('receipt persistence interrupted')
+    const stranded = fixture.registry.get(original.agentSessionId)
+    const claim = stranded.terminalPromptSubmission
+    expect(claim?.submit.acknowledged).toBe(false)
+    const acceptedThroughSubmit = claim!.submit.inputByteRange.endByte
+    const nextPlan = new AgentProviderRegistry().get('codex').planPromptInput('after restart')
+    await expect(fixture.coordinator.submitInputPlan(
+      stranded,
+      run(acceptedThroughSubmit),
+      'submission-new',
+      'after restart',
+      nextPlan
+    )).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+    expect(fixture.kernel.input).toHaveBeenCalledTimes(2)
+  })
+
   it('reports non-sensitive submission facts when another two-phase prompt is in flight', async () => {
     const original = session()
     const fixture = await coordinatorFixture(original)
