@@ -1113,24 +1113,34 @@ export class RuntimeController {
   async dispose(): Promise<void> {
     const hosts = [...this.hosts.entries()]
     for (const [hostId] of hosts) this.hostReconfigurationReservations.add(hostId)
-    await Promise.all(hosts.map(async ([hostId]) => await this.waitForHostQuiescence(hostId)))
-    this.hosts.clear()
-    this.clients.clear()
-    this.sessionAttachmentOwners.clear()
-    this.sessionAttachmentLeases.clear()
-    this.sessionAttachmentTails.clear()
-    this.rendererGenerations.clear()
-    this.hostLifecycleOperations.clear()
-    this.hostReconfigurationReservations.clear()
-    this.hostSignatures.clear()
-    this.terminalInputCursors.clear()
-    this.terminalInputTails.clear()
-    this.terminalColorQueryRemainders.clear()
-    this.pendingAgentColorQueryReplies.clear()
-    this.readyAgentColorQueryRuns.clear()
-    this.resourceSampler.dispose()
-    for (const [, host] of hosts) host.unsubscribe()
-    await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
+    try {
+      await Promise.all(hosts.map(async ([hostId]) => await this.waitForHostQuiescence(hostId)))
+      // Keep the current host/client projection until every owner has actually been disposed. If
+      // cleanup fails, the window can report the failure and retry/recover against still-live
+      // owners; clearing the maps first used to leave the reservation set behind and every later
+      // attach was rejected as "Host is being reconfigured" forever.
+      await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
+      this.hosts.clear()
+      this.clients.clear()
+      this.sessionAttachmentOwners.clear()
+      this.sessionAttachmentLeases.clear()
+      this.sessionAttachmentTails.clear()
+      this.rendererGenerations.clear()
+      this.hostLifecycleOperations.clear()
+      this.hostSignatures.clear()
+      this.terminalInputCursors.clear()
+      this.terminalInputTails.clear()
+      this.terminalColorQueryRemainders.clear()
+      this.pendingAgentColorQueryReplies.clear()
+      this.readyAgentColorQueryRuns.clear()
+      this.resourceSampler.dispose()
+      for (const [, host] of hosts) host.unsubscribe()
+    } finally {
+      // A failed quit/reconfiguration is a workflow error, not a new Runtime fact. Never leave
+      // the gate latched across the error path: the next attach or explicit retry must be able to
+      // reach the surviving owner and expose the real failure instead.
+      for (const [hostId] of hosts) this.hostReconfigurationReservations.delete(hostId)
+    }
   }
 
   private async prepareHost(

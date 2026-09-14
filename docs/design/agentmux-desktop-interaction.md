@@ -464,6 +464,9 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### Durable Runtime 健康
 
+- **状态库达到物理容量上限时不能把恢复流程伪装成 readiness 超时。** ctxmux 仍是容量与无损恢复的唯一 Owner；Desktop 必须保留已持久化的布局、Session 与 Run 投影，并把 `disk-full`/`database-full` 这类可行动诊断固定在服务窗。压实、备份或重试失败时不得删除 Session、回放或布局，也不得让后续健康 Agent 因一次启动失败被静默挡住。
+- **退出与 Host 重配置的 attach 门禁必须有明确终局。** 退出清理只拒绝新 attach 到正在销毁的 Host；清理完成后门禁必须释放，清理失败也必须回报“退出未完成”并允许恢复动作。真实重配置、退出中间态和 Agent 故障分别投影，不能用一个永久的 `Runtime host is being reconfigured` 拒绝所有健康 Session。
+
 - **打开 Terminal 不得被一次瞬态 WAL checkpoint 争用永久阻断**。ctxmux 是 WAL、SQLite durable state 与 persistence actor 的唯一 Owner；AgentMux 只消费它公开的可用性结果，不在 Desktop 另建 checkpoint、截断或修复逻辑。
 - **可恢复的 busy 不是永久失败**。当 WAL checkpoint 因短暂 reader/attachment 争用未能归零时，ctxmux 必须在有界窗口内重试并继续 FIFO 写入；一次可恢复的 busy 不得把 persistence actor 锁存在 `durable state rejected`，也不得让后续 Terminal 创建或 semantic resume 永久失败。
 - **真正的数据完整性或不变量失败仍需 fail closed**。无法确认 WAL 已安全回收、SQLite 报告 corruption、磁盘空间不足或 checkpoint 在有界窗口内持续失败时，界面要保留原投影并给出可操作的服务窗告示；不得静默丢掉 Run、Session 或布局，也不得手工删除/截断用户状态。

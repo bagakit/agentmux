@@ -25,6 +25,7 @@ import {
   type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
+import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import type { AgentMuxRunInputData } from './types.js'
@@ -61,6 +62,7 @@ const REQUIRED_RUNTIME_CAPABILITIES = {
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
+const DAEMON_DIAGNOSTIC_MAX_BYTES = 16 * 1024
 const DAEMON_SHUTDOWN_TIMEOUT_MS = 2_000
 const RUN_STATUS_CONCURRENCY = 8
 const execFileAsync = promisify(execFile)
@@ -774,10 +776,23 @@ export class CtxmuxRunAdapter {
         '3'
       ], {
         detached: true,
-        stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+        // Keep stderr bounded and scoped to this child. Readiness is the ownership handshake;
+        // stderr is only a diagnostic side channel for failures before that handshake (for
+        // example SQLite SQLITE_FULL), never a second Runtime protocol.
+        stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
         env: localProcessEnvironment()
       })
       child.unref()
+      let daemonStderr = ''
+      const stderrStream = child.stderr as Readable | null
+      stderrStream?.setEncoding('utf8')
+      stderrStream?.on('data', (chunk: string) => {
+        if (Buffer.byteLength(daemonStderr) >= DAEMON_DIAGNOSTIC_MAX_BYTES) return
+        daemonStderr += chunk
+        if (Buffer.byteLength(daemonStderr) > DAEMON_DIAGNOSTIC_MAX_BYTES) {
+          daemonStderr = daemonStderr.slice(0, DAEMON_DIAGNOSTIC_MAX_BYTES)
+        }
+      })
       try {
         const readinessStream = child.stdio[3] as Readable | null
         if (!readinessStream) {
@@ -825,15 +840,18 @@ export class CtxmuxRunAdapter {
           this.runtimeOwnership = 'unverified'
         }
       } catch (error) {
+        const startupError = withCtxmuxStartupDiagnostic(error, daemonStderr)
         try {
           await terminateSpawnedDaemon(child)
         } catch (cleanupError) {
           throw new AgentMuxError(
-            `CtxMux activation failed and its exact spawned daemon could not be cleaned up: ${error instanceof Error ? error.message : String(error)}; cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            `CtxMux activation failed and its exact spawned daemon could not be cleaned up: ${startupError instanceof Error ? startupError.message : String(startupError)}; cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
             'CTXMUX_OWNER_IDENTITY_UNPROVEN'
           )
         }
-        throw error
+        throw startupError
+      } finally {
+        stderrStream?.destroy()
       }
     }
     if (runtime === null) {
