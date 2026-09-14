@@ -277,7 +277,6 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
           </button>
         ))}
       </span>
-      {/* createPortal(inspector, portalHost) */}
       {inspectorInPortal ? createPortal(inspector, overlayHost) : null}
     </span>
   )
