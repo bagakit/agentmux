@@ -12,7 +12,12 @@
 /* Focus keeps a stable working ratio before any TUI or sibling Region attaches. */
 .global-focus-surface.global-board-surface--session-open { display: grid; grid-template-columns: minmax(0, .382fr) minmax(0, .618fr); }
 .global-focus-surface .global-session-workspace { width: 100%; min-width: 0; overflow: hidden; animation: none; }
-.global-focus-surface .global-focus-layout { min-width: 0; width: 100%; grid-template-columns: 132px clamp(205px, 18vw, 252px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+/*
+ * `.global-focus-surface .global-focus-layout` 的最终布局在 line 41 里定义为 flex row (v2)——
+ * 曾在此写过 `grid-template-columns` 三列,但缺 `display: grid`,静默不生效,且 line 41 的
+ * flex 覆盖了任何 display 意图。删掉那条僵尸 declaration,免得一个"看着像三列 grid"的字面量
+ * 误导下一个人。真正的分栏由 line 41+ 与 child 的 flex: 1 1 auto 承担。
+ */
 .global-focus-surface .focus-project-lanes { grid-column: 1; grid-row: 1; }
 .global-focus-surface .global-focus-main { grid-column: 3; grid-row: 1; border-top: 0; }
 .global-focus-surface .global-focus-main .global-board-columns { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
@@ -48,7 +53,7 @@
 .focus-project-lanes__all { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .focus-project-lanes__all span { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
 .focus-project-lanes__all:hover, .focus-project-lanes__all.is-selected { border-color: var(--line); background: var(--surface-3); color: var(--text); }
-.focus-project-lanes__rows { min-height: 0; overflow: auto; }
+.focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .focus-project-lanes__row { display: grid; grid-template-columns: clamp(150px, 15vw, 220px) minmax(0, 1fr); min-height: 132px; border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface-1) 38%, transparent); }
 .focus-project-lanes__row.is-selected { background: color-mix(in srgb, var(--green) 4%, var(--surface-1)); }
 .focus-project-lanes__axis { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
