@@ -1649,3 +1649,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 断电或 Runtime 重启会使旧 CtxMux Run 失效，但不能使持久 Agent Session、Provider 原生会话句柄、Tab/Region 或焦点消失。恢复流程必须按稳定的 Agent Session 身份决定：旧 Run 存在时 reattach，旧 Run 不存在且 Provider 句柄可用时启动 Provider-native resume；任何恢复竞态都必须保留原工作面并给出可重试的服务窗提示。
 
 旧 Run 的 attach 失败属于恢复流程状态，不得直接把用户留在“Attach failed”终端错误上；恢复完成后必须重新解析当前 Session control，再附着新的 Run。Provider 探测失败只允许在权威探测确实失败时显示，不能由一次早于环境准备完成的探测把可恢复 Session 终结为不可恢复。
+
+### 跨重启的 Prompt 投递凭据
+
+- Prompt 两阶段投递的持久化 claim 是去重与恢复记录，不是把下一条 Prompt 永久挡在门外的许可闸。应用重启后重新接入同一个仍为 `running` 的 Run 时，旧 claim 未确认本身不得触发 Resume、Retire 或删除健康 Session。
+- 恢复新 Prompt 时必须以 CtxMux 的权威 `acceptedInputBytes` 判断旧投递是否已经把字节交给 daemon：游标仍在旧 claim 的起点时，可以在保留去重记录的前提下由新 `submissionId` 接管；游标已经越过起点时，保留占用并如实说明正在进行的旧投递。不能用猜测的 TTL 或语义状态代替这个字节事实。
+- 旧 claim 被接管后，新的提交必须重新建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容仍走原有幂等续做，冲突内容仍拒绝。任何恢复流程失败都要保留可见工作面和健康 Session。
