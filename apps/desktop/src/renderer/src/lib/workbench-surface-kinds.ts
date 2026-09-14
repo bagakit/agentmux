@@ -1,5 +1,6 @@
 import type {
   AgentWorkbenchSurface,
+  LauncherWorkbenchSurface,
   TerminalWorkbenchSurface,
   WorkbenchSurface
 } from './workbench-tabs'
@@ -78,6 +79,30 @@ export function isSessionSurface(
       return true
     case 'file':
     case 'launcher':
+    case 'browser':
+      return false
+    default:
+      return assertUnreachableSurface(surface)
+  }
+}
+
+/**
+ * Whether a surface can own a scratch topic — the Launcher-plus-agent line where a topic
+ * lifecycle survives across the launcher→agent transition (e.g. openDemandPmo and
+ * createScratchTopic in store.ts). Two consumers had inlined `kind === 'agent' || kind ===
+ * 'launcher'`; centralising it here means a sixth topic-owning kind added to WorkbenchSurface
+ * is declared once — in the switch below — instead of being silently excluded by each of those
+ * call sites at once. Same shape as isSessionSurface for the agent-plus-terminal line above.
+ */
+export function isAgentOrLauncherSurface(
+  surface: WorkbenchSurface
+): surface is AgentWorkbenchSurface | LauncherWorkbenchSurface {
+  switch (surface.kind) {
+    case 'agent':
+    case 'launcher':
+      return true
+    case 'terminal':
+    case 'file':
     case 'browser':
       return false
     default:
