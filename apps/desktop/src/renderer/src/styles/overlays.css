@@ -5,10 +5,11 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.confirmation-dialog__overlay { position: fixed; z-index: 110; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.confirmation-dialog__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
 .confirmation-dialog {
   position: fixed;
-  z-index: 111;
+  z-index: var(--layer-dialog);
+  pointer-events: auto;
   top: 50%;
   left: 50%;
   width: min(380px, calc(100vw - 32px));
@@ -31,10 +32,11 @@
    and largest radius; layered by surface fill + top highlight + shadow, not a stroke (density SSOT:
    "描边不作为控件的主要视觉手段"). Accent appears only to express a row's STATE (needs-you / error),
    never as decoration; row title ≥12px, subtitle at the 10–11px metadata floor. */
-.quick-switch__overlay { position: fixed; z-index: 120; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.quick-switch__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
 .quick-switch {
   position: fixed;
-  z-index: 121;
+  z-index: var(--layer-dialog);
+  pointer-events: auto;
   top: 14vh;
   left: 50%;
   width: min(560px, calc(100vw - 32px));
@@ -93,7 +95,7 @@
    is not a discovery channel). A plain conditional overlay, not a Radix Dialog, so it renders under the
    repo's renderToStaticMarkup tests. Same graphite elevation language as the quick switcher: surface fill
    + top highlight + shadow carry the layer, no stroke as the primary means. */
-.shortcuts-help__overlay { position: fixed; z-index: 120; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding:12vh var(--sp-6) var(--sp-6); background: var(--scrim-3); backdrop-filter: blur(2px); }
+.shortcuts-help__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; display: flex; align-items: flex-start; justify-content: center; padding:12vh var(--sp-6) var(--sp-6); background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
 .shortcuts-help {
   width: min(640px, 100%);
   max-height: 76vh;
@@ -139,7 +141,8 @@
    arrives without a coordinate should land somewhere visible, not collapse onto the first cell and
    hide behind another button. */
 .open-destination-bar {
-  z-index: 40;
+  z-index: var(--layer-popover);
+  pointer-events: auto;
   width: max-content;
   max-width: calc(100vw - 20px);
   display: flex;
@@ -204,10 +207,11 @@
    window and clicking it closes (Radix routes an overlay click to onOpenChange); the content is only the
    image, sized to fit the viewport with room to breathe, so the whole point — seeing it larger — is met
    without chrome. The a11y title names the dialog for assistive tech without spending visible height. */
-.md-conversation-image__overlay { position: fixed; z-index: 130; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.md-conversation-image__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
 .md-conversation-image__lightbox {
   position: fixed;
-  z-index: 131;
+  z-index: var(--layer-dialog);
+  pointer-events: auto;
   top: 50%;
   left: 50%;
   max-width: calc(100vw - 48px);

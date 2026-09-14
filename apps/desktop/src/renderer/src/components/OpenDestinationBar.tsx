@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ExternalLink,
   PanelBottomClose,
@@ -12,6 +13,8 @@ import {
   openDestinationNeedsRegion,
   type OpenDestination
 } from '../lib/open-destination'
+import { getWindowOverlayHost } from './WindowOverlayHost'
+import { useAppStore } from '../store'
 
 export type OpenDestinationRequest = Readonly<{
   id: number
@@ -247,6 +250,17 @@ export function OpenDestinationPopover({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const requestId = request?.id ?? null
+  const overlayHost = getWindowOverlayHost()
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+
+  useEffect(() => {
+    if (!request) return
+    acquireNativeSurfaceOverlay()
+    return () => {
+      releaseNativeSurfaceOverlay()
+    }
+  }, [request, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
 
   useEffect(() => {
     if (requestId === null) return
@@ -269,9 +283,9 @@ export function OpenDestinationPopover({
     }
   }, [requestId, onDismiss])
 
-  if (!request) return null
+  if (!request || !overlayHost) return null
 
-  return (
+  return createPortal(
     <div
       ref={containerRef}
       className="open-destination-bar"
@@ -290,6 +304,7 @@ export function OpenDestinationPopover({
           {NEEDS_PANE_HINT}
         </p>
       ) : null}
-    </div>
+    </div>,
+    overlayHost
   )
 }

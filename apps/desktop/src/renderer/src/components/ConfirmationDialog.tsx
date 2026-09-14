@@ -1,5 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle } from 'lucide-react'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function ConfirmationDialog({
   open,
@@ -26,7 +27,7 @@ export function ConfirmationDialog({
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onCancel()}>
-      <Dialog.Portal>
+      <Dialog.Portal container={resolveOverlayContainer()}>
         <Dialog.Overlay className="confirmation-dialog__overlay" />
         <Dialog.Content className="confirmation-dialog" onEscapeKeyDown={onCancel}>
           <div className="confirmation-dialog__icon"><AlertTriangle size={17} /></div>

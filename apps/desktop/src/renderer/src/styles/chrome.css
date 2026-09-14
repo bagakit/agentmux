@@ -168,33 +168,6 @@
 .project-rail-entry--pinned::after { top: 50%; left: calc(var(--sp-4) + (var(--rail-depth) - 1) * var(--rail-indent) + var(--sp-2)); width: calc(var(--rail-indent) + var(--sp-5)); border-width: 1px 0 0; }
 .project-rail-entry--pinned > * { position: relative; z-index: 1; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
-.project-rail-toolbar {
-  min-height: 32px;
-  margin-top:auto;
-  flex: 0 0 32px;
-  display: flex;
-  align-items: center;
-  padding:var(--sp-2) var(--sp-4);
-  border-top: 1px solid var(--line-soft);
-}
-.project-rail-toolbar__group { display: flex; align-items: center; gap:var(--sp-1); }
-.project-rail-toolbar__button.icon-button { width: 24px; height: 24px; }
-.project-rail-toolbar__button.icon-button:not(:hover) { color: var(--text-3); }
-.project-rail-toolbar__button:hover { color: var(--text); background: var(--surface-2); }
-.project-rail-corner-toolbar {
-  width: 28px;
-  height: 28px;
-  position: absolute;
-  z-index: 40;
-  bottom: 4px;
-  left: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
-}
 .topbar {
   min-width: 0;
   display: flex;
@@ -244,7 +217,8 @@
 .topbar-button:disabled { opacity: .38; cursor: not-allowed; }
 .tab-context-menu {
   min-width: 176px;
-  z-index: 120;
+  z-index: var(--layer-popover);
+  pointer-events: auto;
   max-height: var(--radix-context-menu-content-available-height);
   overflow-x: hidden;
   overflow-y: auto;

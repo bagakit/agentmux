@@ -13,7 +13,7 @@ let root = createRoot(container)
 afterEach(async () => { await act(async () => root.unmount()); root = createRoot(container); useAppStore.setState(initial, true) })
 it('drags the product rail immediately, commits on release, and restores the same width after remount', async () => {
   useAppStore.setState({ projectRailWidth: 210, toolDockWidth: 300 })
-  await act(async () => root.render(<ProjectRail onOpenSettings={() => {}} />))
+  await act(async () => root.render(<ProjectRail />))
   const handle = container.querySelector('[role="separator"]')!
   expect(handle.getAttribute('aria-label')).toBe('Resize Projects')
   await act(async () => handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 210 })))
@@ -30,12 +30,12 @@ it('drags the product rail immediately, commits on release, and restores the sam
   expect(persisted.projectRailWidth).toBe(300)
   expect(restorePersistedUiState({ workspaces: [] } as never, persisted).projectRailWidth).toBe(300)
   await act(async () => root.render(null))
-  await act(async () => root.render(<ProjectRail onOpenSettings={() => {}} />))
+  await act(async () => root.render(<ProjectRail />))
   expect((container.firstElementChild as HTMLElement).style.width).toBe('300px')
 })
 it('supports keyboard width changes and clamps at each boundary without changing the tool dock', async () => {
   useAppStore.setState({ projectRailWidth: 210, toolDockWidth: 350 })
-  await act(async () => root.render(<ProjectRail onOpenSettings={() => {}} />))
+  await act(async () => root.render(<ProjectRail />))
   const handle = container.querySelector('[role="separator"]')!
   for (const [key, width] of [['ArrowRight', 226], ['Home', 180], ['ArrowLeft', 180], ['End', 420], ['ArrowRight', 420]] as const) {
     await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })))

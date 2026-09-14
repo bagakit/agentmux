@@ -1,7 +1,8 @@
-import { useId } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Gauge } from 'lucide-react'
 import type { AgentTurnUsage } from '@agentmux/core'
 import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
+import { useAppStore } from '../store'
 
 /**
  * The composer's context-usage indicator: an always-visible chip carrying the one scannable number,
@@ -29,6 +30,17 @@ import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
  */
 export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefined }) {
   const cardId = useId()
+  const [open, setOpen] = useState(false)
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+  useEffect(() => {
+    if (!open) return
+    acquireNativeSurfaceOverlay()
+    return () => {
+      releaseNativeSurfaceOverlay()
+    }
+  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
+
   const context = usage?.context
   // 「这个数知不知道」由 agent-usage 的 contextUsedPercent 独判——全窗口唯一一处。此处曾自己写那 6 行，
   // 项目活动行也照抄过一份；三份同源判定漂移，同一个 Agent 会在输入框、项目行、名册上给出三种说法。
@@ -49,7 +61,9 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
         popoverTarget={cardId} popoverTargetAction="toggle">
         <Gauge size={12} aria-hidden="true" /> {chip}
       </button>
-      <div id={cardId} popover="auto" className="composer__context-card" aria-label="Context window">
+      <div id={cardId} popover="auto" className="composer__context-card" aria-label="Context window"
+        data-state={open ? 'open' : 'closed'}
+        onToggle={(event) => setOpen(event.newState === 'open')}>
         <h3>Context window</h3>
         {known && usage ? (
           <>

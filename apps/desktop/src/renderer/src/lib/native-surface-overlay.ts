@@ -53,7 +53,15 @@ export function isOverlayNode(node: Element): boolean {
  */
 export function openOverlayCount(body: Pick<Element, 'children'>): number {
   let count = 0
-  for (const child of body.children) if (isOverlayNode(child)) count += 1
+  for (const child of body.children) {
+    if (child.id === APP_ROOT_ID) continue
+    if (child.hasAttribute('data-overlay-host')) {
+      const openDescendants = Array.from(child.children).filter((entry) => isOverlayNode(entry))
+      count += openDescendants.length > 0 ? openDescendants.length : (isOverlayNode(child) ? 1 : 0)
+    } else if (isOverlayNode(child)) {
+      count += 1
+    }
+  }
   return count
 }
 

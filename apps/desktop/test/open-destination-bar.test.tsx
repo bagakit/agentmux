@@ -1,4 +1,7 @@
-import type { ReactElement, ReactNode } from 'react'
+// @vitest-environment happy-dom
+import type { ComponentProps, ReactElement, ReactNode } from 'react'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
@@ -14,6 +17,20 @@ import {
   parseHttpLinkUrl,
   type OpenDestination
 } from '../src/renderer/src/lib/open-destination.js'
+
+function renderPopoverMarkup(props: ComponentProps<typeof OpenDestinationPopover>): string {
+  const container = document.createElement('div')
+  const host = document.createElement('div')
+  host.className = 'window-overlay-host'
+  host.dataset.overlayHost = ''
+  document.body.append(container, host)
+  const root = createRoot(container)
+  flushSync(() => root.render(<OpenDestinationPopover {...props} />))
+  const markup = host.innerHTML
+  root.unmount()
+  container.remove(); host.remove()
+  return markup
+}
 
 // The desktop test project has no DOM (no jsdom / testing-library), so behaviour is pinned two ways:
 // static markup for what renders, and a walk of the hookless element tree for what a click emits.
@@ -264,14 +281,12 @@ describe('OpenDestinationBar cluster geometry', () => {
 describe('OpenDestinationPopover', () => {
   it('keeps the URL in view so the choice never loses what it opens', () => {
     // Mutation guard (c): remove the URL display and this disappears while the shell still renders.
-    const markup = renderToStaticMarkup(
-      <OpenDestinationPopover
-        request={{ id: 7, url: 'https://example.com/a/long/path', x: 24, y: 32 }}
-        canSplit={false}
-        onSelect={() => {}}
-        onDismiss={() => {}}
-      />
-    )
+    const markup = renderPopoverMarkup({
+      request: { id: 7, url: 'https://example.com/a/long/path', x: 24, y: 32 },
+      canSplit: false,
+      onSelect: () => {},
+      onDismiss: () => {}
+    })
     // Anchor: the popover mounted, so a missing URL is a real loss, not a null render.
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('data-state="open"')
@@ -281,14 +296,12 @@ describe('OpenDestinationPopover', () => {
   })
 
   it('spells out the disabled directions for keyboard users who cannot land on a disabled button', () => {
-    const markup = renderToStaticMarkup(
-      <OpenDestinationPopover
-        request={{ id: 8, url: 'https://example.com/', x: 1, y: 2 }}
-        canSplit={false}
-        onSelect={() => {}}
-        onDismiss={() => {}}
-      />
-    )
+    const markup = renderPopoverMarkup({
+      request: { id: 8, url: 'https://example.com/', x: 1, y: 2 },
+      canSplit: false,
+      onSelect: () => {},
+      onDismiss: () => {}
+    })
     expect(markup).toContain('data-split-destination-explanation')
     expect(markup).toContain('Choose a precise pane to open beside it.')
     // Four directional buttons carry the reason on the button too.
@@ -296,27 +309,23 @@ describe('OpenDestinationPopover', () => {
   })
 
   it('drops the explanation once every direction is available', () => {
-    const markup = renderToStaticMarkup(
-      <OpenDestinationPopover
-        request={{ id: 9, url: 'https://example.com/', x: 0, y: 0 }}
-        canSplit
-        onSelect={() => {}}
-        onDismiss={() => {}}
-      />
-    )
+    const markup = renderPopoverMarkup({
+      request: { id: 9, url: 'https://example.com/', x: 0, y: 0 },
+      canSplit: true,
+      onSelect: () => {},
+      onDismiss: () => {}
+    })
     expect(markup).not.toContain('data-split-destination-explanation')
     expect(markup).not.toContain('data-disabled-reason')
   })
 
   it('renders nothing without a request, so a dismissed popover leaves no stale row', () => {
-    const markup = renderToStaticMarkup(
-      <OpenDestinationPopover
-        request={null}
-        canSplit
-        onSelect={() => {}}
-        onDismiss={() => {}}
-      />
-    )
+    const markup = renderPopoverMarkup({
+      request: null,
+      canSplit: true,
+      onSelect: () => {},
+      onDismiss: () => {}
+    })
     expect(markup).toBe('')
   })
 })

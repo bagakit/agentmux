@@ -30,6 +30,7 @@ import {
   workbenchSplitMenuIcon,
   workbenchSplitMenuKey
 } from './workbench-split-menu-icons'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /**
  * 每个动作一个稳定 id：作 React key，也是将来配图标 / 记遥测该用的键。
@@ -282,7 +283,7 @@ export function WorkbenchTabContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu"
           collisionPadding={8}
@@ -321,7 +322,7 @@ export function WorkbenchTabContextMenu({
               <span>Move Tab to New Group</span>
               <span className="tab-context-menu__chevron">›</span>
             </ContextMenu.SubTrigger>
-            <ContextMenu.Portal>
+            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                 {WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => {
                   const Icon = workbenchSplitDirectionIcon(action.direction)
@@ -356,7 +357,7 @@ export function WorkbenchTabContextMenu({
                 <span>Rearrange Splits</span>
                 <span className="tab-context-menu__chevron">›</span>
               </ContextMenu.SubTrigger>
-              <ContextMenu.Portal>
+              <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                   {layoutEntries.map((entry, index) => {
                     const Icon = workbenchSplitMenuIcon(entry)
@@ -382,7 +383,7 @@ export function WorkbenchTabContextMenu({
                 <span>Move to Workspace</span>
                 <span className="tab-context-menu__chevron">›</span>
               </ContextMenu.SubTrigger>
-              <ContextMenu.Portal>
+              <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                   {moveSessionViewTargets.map((target) => (
                     <ContextMenu.Item

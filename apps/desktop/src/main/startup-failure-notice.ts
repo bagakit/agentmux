@@ -52,8 +52,8 @@ export function startupFailureNotice(
     body: [
       detail,
       '',
-      // 明确说「没被改过」：这是那些守卫拒绝启动换来的唯一好处，不说出来就等于没换到。
-      'Your data on disk has not been changed. AgentMux stopped before writing anything.',
+      // 启动可能已经完成了受保护的恢复写入；只承诺现有数据被保留，不把流程失败误说成零写入。
+      'AgentMux stopped before completing startup. Existing data on disk was retained.',
       `Configuration file: ${paths.configPath}`
     ].join('\n')
   }

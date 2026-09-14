@@ -11,6 +11,7 @@ import { tabGroupForTab } from '../lib/workbench-tabs'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { AgentAvatar } from './AgentAvatar'
 import { StatusDot } from './StatusDot'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 
 // One modal overlay a single keystroke summons to jump anywhere in the window — any agent session or
@@ -78,7 +79,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
-      <Dialog.Portal>
+      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <Dialog.Overlay className="quick-switch__overlay" />
         <Dialog.Content
           className="quick-switch"

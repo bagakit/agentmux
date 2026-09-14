@@ -23,7 +23,8 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -39,6 +40,7 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
+import { focusLayoutForTab } from '../lib/focus-tab-projection'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -1179,7 +1181,9 @@ export function WorkspaceWorkbench({
   interactiveResize = false,
   visible = true,
   topicId,
-  topicIsolation = 'default'
+  topicIsolation = 'default',
+  focusTabId = null,
+  focusPortalTargetId = null
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1192,17 +1196,22 @@ export function WorkspaceWorkbench({
    * this seam to stop fit/bounds work until the slot is visible again.
   */
   visible?: boolean
+  /** When Focus owns a Session, keep this Workbench instance alive but project one complete Tab into Focus. */
+  focusTabId?: string | null
+  focusPortalTargetId?: string | null
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
+  const focusTab = focusTabId ? tabs[focusTabId] : null
+  const focusLayout = focusTab ? focusLayoutForTab(focusTab) : null
   const layout = useMemo(
-    () => storedLayout
+    () => focusLayout ?? (storedLayout
       ? layoutForActiveTopic(storedLayout, tabs, topicId ?? activeTopicIdFromLayout(storedLayout, tabs), topicIsolation !== 'bound-only')
-      : storedLayout,
-    [storedLayout, tabs, topicId, topicIsolation]
+      : storedLayout),
+    [focusLayout, storedLayout, tabs, topicId, topicIsolation]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
@@ -1214,6 +1223,18 @@ export function WorkspaceWorkbench({
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
   const activeTab = activeDrag ? tabs[activeDrag.tabId] : null
+  const [focusPortalTarget, setFocusPortalTarget] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (!focusPortalTargetId) {
+      setFocusPortalTarget(null)
+      return
+    }
+    const resolveTarget = () => setFocusPortalTarget(document.getElementById(focusPortalTargetId))
+    resolveTarget()
+    const observer = new MutationObserver(resolveTarget)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [focusPortalTargetId])
 
   // A Workspace switch can happen while a drag is in flight (for example through a keyboard command).
   // The parked DndContext must not retain a DragOverlay or finish the gesture against a stale layout
@@ -1266,7 +1287,7 @@ export function WorkspaceWorkbench({
   if (!layout) return null
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
-  return (
+  const workbench = (
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
@@ -1279,7 +1300,7 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}>
+      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-only' : ''}`}>
         <SplitNode
           node={layout.root}
           nodePath=""
@@ -1298,4 +1319,8 @@ export function WorkspaceWorkbench({
       </DragOverlay>
     </DndContext>
   )
+  if (focusPortalTargetId) {
+    return focusPortalTarget ? createPortal(workbench, focusPortalTarget) : null
+  }
+  return workbench
 }

@@ -98,6 +98,12 @@
   /* 叠加：黑色遮罩与白色高光的固定档位。此前散成四十多个 alpha 值，
      其中大量只差 1/255——那是手抖不是设计。 */
   --scrim-1: #00000040;
+  /* Window overlay bands: local z-index values cannot cross the host boundary. */
+  --layer-window-chrome: 20;
+  --layer-tooltip: 140;
+  --layer-popover: 180;
+  --layer-service: 240;
+  --layer-dialog: 320;
   --scrim-2: #00000073;
   --scrim-3: #000000a6;
   --mask-opaque: #000;

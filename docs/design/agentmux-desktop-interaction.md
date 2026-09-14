@@ -98,6 +98,9 @@
 
 ### 全页加载与启动大屏
 
+- 电脑重启后的启动预热与工作面恢复必须在启动大屏上持续显示当前真实阶段和已知进度；用户能看出是在读取持久工作面、连接 Runtime、恢复 Session，还是恢复其它工作面。没有可证明的总量时显示阶段，不编造百分比。启动大屏应先于耗时恢复出现，阶段变化时更新，完成后才让出工作面。
+- 界面已经加载、Agent 仍可能健康时，预热或恢复步骤超过固定等待时间不能被判成“更新界面未就绪”并退出应用。保留已恢复的 Tab、Region、焦点和 Session 引用；可继续工作时进入工作面并以服务窗说明未完成的步骤、当前可用状态及恢复动作。只有界面本身无法加载或进程确实不可用，才显示相应的真实启动失败。
+- 启动失败文案必须对应实际失败阶段；已发生恢复或持久化写入时，不得声称“停止前没有写入任何数据”。
 - AgentMux 启动、重启恢复和任何覆盖整个工作面的加载阶段都使用同一个可复用的 `FullPageLoadingSurface` 语义组件；调用方只提供阶段、短说明和可选恢复动作，不各自造一套 spinner、空白页或品牌动画。
 - Terminal 的 Restoring 也属于覆盖整个 Region 的恢复阶段，必须直接使用 `FullPageLoadingSurface` 的 `scope="region"` / `phase="recovering"`；恢复事实、输出重放、缺口和服务窗仍由 TerminalView 持有，组件不复制终端状态。
 - Browser 恢复和 Agent Terminal attach 同样使用这套 Region 级 loading/recovering 表面；恢复期间保留原 Tab/Region，完成后卸载加载层，失败由原有错误/服务窗承接。
@@ -1571,6 +1574,14 @@ PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic
 Focus 表面左侧提供一个独立的“最近上下文”列表，作为可点击的导航入口。列表每项表达 Session 身份、Agent 或 Terminal 类型、工作区和最近聚焦时间；当前项有明确的选中状态。主区展示按状态分组的可观察执行 Session，右侧保留当前 Session 的观察工作面。历史为空时显示短空态，不用空白面板或伪造 Agent。
 
 Focus 是主表面命名和导航语义，不改变底层 `agentFocus.execution` 与 `agentFocus.pmo` 的持久化分层。跨表面切换只投影同一 execution Session，不创建第二个工作面、Run 或 Region；重启恢复时先恢复历史和当前 Session，再尝试恢复其原有 Tab/Region。
+
+### Focus 项目泳道、Recent Focus 音轨与可调整工作面
+
+Focus 的项目不能作为与内容平行的独立左栏。项目是工作面纵轴：每个有活跃 Agent 的项目占一条横向泳道，项目名称、路径和活跃数量固定在该泳道的轴头，属于这一项目的 Agent/Terminal Context 在同一条泳道内排列；没有活跃 Agent 的项目不生成泳道。点击泳道只改变现有 Focus 投影，不创建第二份 Session 或历史。
+
+左侧 Recent contexts 改名为 **Recent Focus**，不再使用纵向列表。它位于 Focus 内容顶部，表现为视频编辑器式的时间音轨：每个已聚焦的对话是一条可点击的短轨，轨道位置由持久化 `focusedAt` 事件和下一次聚焦事件推导，当前焦点有播放头/高亮，时间刻度和起止时间可读。该音轨表达导航事实和聚焦时序，不伪造未持久化的精确停留时长。
+
+选中 Context 后，右侧完整 Tab 工作面必须从首帧开始保留输入和 Region 交互；Tab Portal 目标暂时不可见时要继续观察 DOM 并自动接管，不能把“标题已经加载、内容空白”当成成功。左侧 Focus 投影与右侧 Tab 之间保留可操作的垂直拖拽把手；拖拽只改变 Focus 分栏比例，不能重建 Session、Run 或 Region，键盘也能调整并读出当前比例。
 
 ### 全局工作面顶栏与 Work 命名
 

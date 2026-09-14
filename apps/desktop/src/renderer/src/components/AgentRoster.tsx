@@ -7,6 +7,7 @@ import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 // The roster behind the attention bar's total.
 //
@@ -133,7 +134,7 @@ export function RosterRowView({
           </span>
         </DropdownMenu.Item>
       </ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
           {menuActions.map((action) => (
             <ContextMenu.Item
