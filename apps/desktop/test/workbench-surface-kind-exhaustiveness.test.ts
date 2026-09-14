@@ -373,8 +373,19 @@ function collectSurfaceKindReaders(
     const visit = (node: ts.Node): void => {
       // ORIGIN 1: `surface.kind`. Assignable-to-WorkbenchSurface is the discriminator no regex can
       // make: it separates a surface read from a textually identical `session.kind` / `issue.kind`.
+      //
+      // Strip null/undefined off the receiver type before the assignability check: a receiver of
+      // `WorkbenchSurface | null` (or `| undefined`) is NOT assignable to `WorkbenchSurface`, so an
+      // inline predicate written on an optional-chained receiver (`x?.kind === 'agent' || x?.kind
+      // === 'terminal'`) used to escape classification. See memory
+      // [[exhaustiveness-guard-blind-to-nullable-receiver]] — historical offenders in
+      // WorkspaceWorkbench.tsx and elsewhere carried this exact pattern for months without ever
+      // tripping this scan. getNonNullableType lets nullable receivers of a Surface still be
+      // classified as a Surface read; downstream `readerFor` builds the same fn record and applies
+      // the same acceptance judge.
       if (ts.isPropertyAccessExpression(node) && node.name.text === 'kind') {
-        const objectType = checker.getTypeAtLocation(node.expression)
+        const rawType = checker.getTypeAtLocation(node.expression)
+        const objectType = checker.getNonNullableType(rawType)
         if (checker.isTypeAssignableTo(objectType, surfaceType)) {
           const fn = enclosingFunction(node)
           if (fn) {

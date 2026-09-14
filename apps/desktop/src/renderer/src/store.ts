@@ -192,7 +192,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './lib/workbench-tabs'
-import { isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
+import { isAgentOrLauncherSurface, isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
 import { resolveSpatialCommit } from './lib/control-spatial-commit'
 import {
   applyWorkbenchViewCloseTopology,
@@ -3703,7 +3703,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       mappedTab.topicId === PMO_TEAMS_TOPIC_ID &&
       layout &&
       tabGroupForTab(layout, mappedTab.id) !== null &&
-      (mappedRegion?.kind === 'agent' || mappedRegion?.kind === 'launcher')
+      mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
     )
     if (mappedTabIsUsable && mappedTab) {
       await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
@@ -4148,7 +4148,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const activeSurface = activeTab ? titleWorkbenchSurface(activeTab) : undefined
     const canOwnTopic = activeTab &&
       !activeTab.topicId &&
-      (activeSurface?.kind === 'launcher' || activeSurface?.kind === 'agent') &&
+      activeSurface !== undefined && isAgentOrLauncherSurface(activeSurface) &&
       isScratchTopicId(activeTab.id)
     const targetTab = canOwnTopic ? activeTab : newLauncherTab(workspace.id)
     const topicId = targetTab.topicId ?? targetTab.id

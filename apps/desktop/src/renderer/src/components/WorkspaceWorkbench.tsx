@@ -892,10 +892,15 @@ function PaneGroup({
     groupIds(layout.root).length
   )
   const activeSurface = activeTab ? activeWorkbenchSurface(activeTab) : null
-  const activeRuntimeSession =
-    activeSurface?.kind === 'agent' || activeSurface?.kind === 'terminal'
-      ? sessions.find((session) => session.id === activeSurface.sessionId)
-      : null
+  // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
+  // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
+  // (`WorkbenchSurface | null` from the ternary above) — the assignability check the guard used
+  // rejected nullable Surface variants. Guard widened in the same commit; this call site is the
+  // first-listed offender it caught. A sixth session-bearing kind now fails at
+  // `isSessionSurface`'s exhaustive switch instead of silently being excluded here.
+  const activeRuntimeSession = activeSurface && isSessionSurface(activeSurface)
+    ? sessions.find((session) => session.id === activeSurface.sessionId)
+    : null
   const pendingStopSession = pendingStopSessionId
     ? sessions.find((session) => session.id === pendingStopSessionId) ?? null
     : null

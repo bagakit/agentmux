@@ -15,6 +15,7 @@ import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-do
 // 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
 import { resolveAgentName } from '../lib/display-name'
 import { firstPromptFromTimeline, tabDisplayName } from '../lib/workbench-tabs'
+import { assertUnreachableSurface } from '../lib/workbench-surface-kinds'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
@@ -155,14 +156,28 @@ export function WorkspaceTopicsPanel({
         regions: entry.cells.map((cell) => {
           const surface = tab.regions[cell.regionId]
           const session = surface && 'sessionId' in surface ? sessionById.get(surface.sessionId) : undefined
-          const executorLabel = surface?.kind === 'agent'
-            ? (session && session.kind === 'agent' && session.executorId
-              ? config?.executors[session.executorId]?.label ?? session.executorId
-              : 'Agent')
-            : surface?.kind === 'terminal' ? 'Terminal'
-              : surface?.kind === 'browser' ? 'Browser'
-                : surface?.kind === 'file' ? 'File'
-                  : 'Launcher'
+          // executorLabel and activity below used to be ternary chains that fell through to a
+          // silent `'Launcher'` / `'No recent activity'` — the chain worked by ordering, not by
+          // exhaustive coverage, so a sixth kind added to WorkbenchSurface would silently be
+          // labelled as the fallback. Route through the exhaustive switch + assertUnreachableSurface
+          // (SSOT in workbench-surface-kinds.ts) so a new kind fails to compile here instead.
+          // Guard flagged this file at line 155 after the 2026-09-28 nullable-receiver widening
+          // (see memory [[exhaustiveness-guard-blind-to-nullable-receiver]]).
+          const executorLabel: string = surface
+            ? (() => {
+                switch (surface.kind) {
+                  case 'agent':
+                    return session && session.kind === 'agent' && session.executorId
+                      ? config?.executors[session.executorId]?.label ?? session.executorId
+                      : 'Agent'
+                  case 'terminal': return 'Terminal'
+                  case 'browser': return 'Browser'
+                  case 'file': return 'File'
+                  case 'launcher': return 'Launcher'
+                  default: return assertUnreachableSurface(surface)
+                }
+              })()
+            : 'Launcher'
           const activity = session?.kind === 'agent'
             ? (timelines[session.id]?.items.length || session.pendingInteraction || session.status.detail
               ? sessionRecentActivity(session, timelines[session.id]?.items ?? [], workspace.path)
