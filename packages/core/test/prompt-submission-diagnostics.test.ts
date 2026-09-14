@@ -146,14 +146,27 @@ describe('prompt readiness refusal diagnostics', () => {
     const original = session()
     const fixture = await coordinatorFixture(original)
     const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
-    fixture.kernel.input.mockRejectedValueOnce(new Error('app stopped before input'))
+    let calls = 0
+    fixture.kernel.input.mockImplementation(async (_runId: string, operation: { expectedByte: number; data: string }) => {
+      calls += 1
+      if (calls === 1) {
+        return {
+          run: run(operation.expectedByte + Buffer.byteLength(operation.data)),
+          appliedByteRange: {
+            startByte: operation.expectedByte,
+            endByte: operation.expectedByte + Buffer.byteLength(operation.data)
+          }
+        }
+      }
+      throw new Error('app stopped before submit')
+    })
     await expect(fixture.coordinator.submitInputPlan(
       original,
       fixture.currentRun,
       'submission-old',
       'old draft',
       firstPlan
-    )).rejects.toThrow('app stopped before input')
+    )).rejects.toThrow('app stopped before submit')
 
     const stranded = fixture.registry.get(original.agentSessionId)
     const claim = stranded.terminalPromptSubmission
@@ -167,7 +180,7 @@ describe('prompt readiness refusal diagnostics', () => {
     const nextPlan = new AgentProviderRegistry().get('codex').planPromptInput('after restart')
     await restarted.coordinator.submitInputPlan(
       stranded,
-      run(0),
+      run(claim!.payload.inputByteRange.endByte),
       'submission-new',
       'after restart',
       nextPlan
