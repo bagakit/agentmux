@@ -13,7 +13,8 @@ import {
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
 import { AgentStatusBar } from './components/AgentStatusBar'
-import { ProjectRailToolbar } from './components/ProjectRailToolbar'
+import { WindowUtilityBar } from './components/WindowUtilityBar'
+import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { ShortcutsCheatSheet } from './components/ShortcutsCheatSheet'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
@@ -22,12 +23,14 @@ import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
+import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
-import { PmoTeamsTopicEntry } from './components/PmoTeamsTopicEntry'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
+import { executionFocusSessionId } from './lib/agent-focus'
+import { tabForFocusedSession } from './lib/focus-tab-projection'
 import { api } from './lib/api'
 import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
@@ -44,6 +47,7 @@ import {
 } from './lib/surface-memory-budget-coordinator'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
+import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
 
 export function App() {
   const workflowComponentGallery = typeof window !== 'undefined' &&
@@ -60,6 +64,7 @@ function DesktopApp() {
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
+  const startupProgress = useAppStore((state) => state.startupProgress)
   const error = useAppStore((state) => state.error)
   const lastError = useAppStore((state) => state.lastError)
   const errorDismissed = useAppStore((state) => state.errorDismissed)
@@ -69,9 +74,11 @@ function DesktopApp() {
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
+  const tabs = useAppStore((state) => state.tabs)
+  const agentFocus = useAppStore((state) => state.agentFocus)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents'
+  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -127,6 +134,8 @@ function DesktopApp() {
     publish()
     return () => { unsubscribeStore(); unsubscribeRejectedLoads() }
   }, [fileEditingProbe])
+  const focusSessionId = mainSurface === 'agents' ? executionFocusSessionId(agentFocus) : null
+  const focusTab = tabForFocusedSession(tabs, focusSessionId)
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
@@ -134,7 +143,7 @@ function DesktopApp() {
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
   const toolsVisible = toolsAvailable && toolsOpen
@@ -147,11 +156,11 @@ function DesktopApp() {
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const parkedTerminalRegionIds = useTerminalColdParking({
-    workbenchVisible,
+    workbenchVisible: workbenchVisible || Boolean(focusTab),
     measurementActive: terminalParkingMeasurement
   })
   const surfaceMemoryBudget = useSurfaceMemoryBudget({
-    workbenchVisible,
+    workbenchVisible: workbenchVisible || Boolean(focusTab),
     measurementActive: terminalParkingMeasurement
   })
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
@@ -163,15 +172,21 @@ function DesktopApp() {
     setWidth: setToolDockWidth
   })
 
-  useEffect(() => {
-    const updateToken = new URLSearchParams(window.location.search).get('renderer-update')
-    if (updateToken) void api.ui.rendererUpdateReady(updateToken)
-  }, [])
+  // rendererUpdateReady is reported from inside beginRendererStartup below — it fires
+  // announceReady before awaiting initialize(), so a mounted interface is announced ready even
+  // while workspace recovery is still running (the intent 1b4fdabb landed). A separate useEffect
+  // here that also called rendererUpdateReady doubled the report; `ready` was called twice with
+  // the same token and the handshake test caught it. Route through beginRendererStartup only.
 
   useEffect(() => {
     let cancelled = false
     let dispose = () => {}
-    void initialize().then((value) => {
+    const updateToken = new URLSearchParams(window.location.search).get('renderer-update')
+    void beginRendererStartup(
+      initialize,
+      updateToken ? () => api.ui.rendererUpdateReady(updateToken) : undefined,
+      (error) => useAppStore.getState().reportError(error)
+    ).then((value) => {
       if (cancelled) value()
       else dispose = value
     })
@@ -223,7 +238,7 @@ function DesktopApp() {
   }, [])
 
   if (loading) {
-    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux boot sequence" title="Starting AgentMux" detail="Starting the local Runtime. Your saved workspace will return when it is ready." />
+    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux startup" title="Restoring your workspace" detail={startupProgressDetail(startupProgress)} />
   }
 
   if (!config && error) {
@@ -242,14 +257,9 @@ function DesktopApp() {
         inert={Boolean(settingsRoute)}
       >
       {!globalSurfaceOwnsProjectRail && projectRailOpen ? (
-        <ProjectRail
-          onOpenSettings={openSettings}
-        />
+        <ProjectRail />
       ) : globalSurfaceOwnsProjectRail ? null : (
-        <ProjectRailToolbar
-          collapsed
-          onOpenSettings={openSettings}
-        />
+        null
       )}
       <main className={`main-shell ${mergedTopRow ? 'main-shell--merged' : ''}`}>
         {!mergedTopRow ? (
@@ -295,28 +305,33 @@ function DesktopApp() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
+              {mainSurface === 'survey' ? <GlobalSurveySurface /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
-              {workspace ? (
+              {config && (workspace || focusTab) ? (
                 <div
-                  className={`workspace-workbench-registry ${workbenchVisible ? '' : 'workspace-workbench-registry--parked'}`}
-                  aria-hidden={!workbenchVisible}
-                  inert={!workbenchVisible}
-                >
+                  className={`workspace-workbench-registry ${workbenchVisible || focusTab ? '' : 'workspace-workbench-registry--parked'}`}
+                  aria-hidden={!workbenchVisible && !focusTab}
+                  inert={!workbenchVisible && !focusTab}
+                  >
                   {mountedWorkspaces.map((candidate) => {
                     const visible = workbenchVisible && candidate.id === activeWorkspaceId
+                    const focusVisible = Boolean(focusTab && focusTab.workspaceId === candidate.id)
+                    const mounted = visible || focusVisible
                     return (
                       <div
                         key={candidate.id}
-                        className={`workspace-workbench-slot ${visible ? '' : 'workspace-workbench-slot--parked'}`}
+                        className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'}`}
                         data-workspace-id={candidate.id}
-                        data-visible={visible ? 'true' : 'false'}
-                        aria-hidden={!visible}
-                        inert={!visible}
+                        data-visible={mounted ? 'true' : 'false'}
+                        aria-hidden={!mounted}
+                        inert={!mounted}
                       >
                         <WorkspaceWorkbench
                           workspaceId={candidate.id}
-                          visible={visible}
+                          visible={mounted}
+                          focusTabId={focusVisible && focusTab ? focusTab.id : null}
+                          focusPortalTargetId={focusVisible ? 'focus-workspace-slot' : null}
                           interactiveResize={windowResizeActive || isResizing}
                         />
                       </div>
@@ -339,10 +354,12 @@ function DesktopApp() {
         </div>
       </main>
       <footer className="window-status-bar">
-        <AgentStatusBar />
+        <WindowUtilityBar onOpenSettings={openSettings} />
+        <div className="window-status-bar__status"><AgentStatusBar /></div>
         <div className="window-status-bar__surface-switch"><SurfaceSwitch /></div>
-        <div className="window-status-bar__pmo-entry"><PmoTeamsTopicEntry placement="compact" /></div>
-        <GlobalSystemNotices />
+        <div className="window-status-bar__right">
+          <GlobalSystemNotices />
+        </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
       <ShortcutsCheatSheet
@@ -351,6 +368,7 @@ function DesktopApp() {
         isMac={isMacPlatform()}
       />
       </div>
+      <WindowOverlayHost />
       </BoardRowsProvider>
       </SurfaceMemoryBudgetProvider>
       </TerminalParkingProvider>
