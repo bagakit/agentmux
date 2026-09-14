@@ -42,6 +42,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -407,7 +408,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           }
         }}
       >
-        <Dialog.Portal>
+        <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
           <Dialog.Overlay className="confirmation-dialog__overlay" />
           <Dialog.Content
             className="branch-create-dialog"
@@ -463,7 +464,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           if (!open) setActionError(null)
         }}
       >
-        <Dialog.Portal>
+        <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
           <Dialog.Overlay className="confirmation-dialog__overlay" />
           <Dialog.Content
             className="branch-create-dialog"

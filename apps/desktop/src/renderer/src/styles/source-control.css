@@ -56,7 +56,7 @@
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
 .branches-empty--error span { max-width: 230px; line-height: 1.4; }
-.branch-create-dialog { position: fixed; z-index: 111; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%); border: 1px solid var(--neutral-1); border-radius: var(--radius-lg); outline: none; color: var(--text); background: var(--surface-2); box-shadow: 0 30px 90px var(--scrim-3); }
+.branch-create-dialog { position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%); border: 1px solid var(--neutral-1); border-radius: var(--radius-lg); outline: none; color: var(--text); background: var(--surface-2); box-shadow: 0 30px 90px var(--scrim-3); }
 .branch-create-dialog form { display: flex; flex-direction: column; }
 .branch-create-dialog header { display: grid; grid-template-columns: 30px minmax(0, 1fr) 24px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6) var(--sp-5); border-bottom: 1px solid var(--line); }
 .branch-create-dialog header > span { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); }

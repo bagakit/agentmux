@@ -197,7 +197,7 @@
 }
 .topic-workbench-topology__inspector--portal {
   position: fixed;
-  z-index: 10000;
+  z-index: var(--layer-tooltip);
   right: auto;
   bottom: auto;
   display: grid;

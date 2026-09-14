@@ -1,18 +1,23 @@
+// @vitest-environment happy-dom
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from 'vitest'
 import { ShortcutsCheatSheet } from '../src/renderer/src/components/ShortcutsCheatSheet.js'
 import { SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry.js'
 
-// The cheat-sheet's presentation shell. It is a PLAIN conditional overlay, not a Radix Dialog — Radix's
-// Portal renders nothing under renderToStaticMarkup, which would make this whole guard blind (this repo's
-// "组件触发面可静默失效" lesson: a trigger that never renders while every test stays green). So the shell
-// renders inline and these assertions actually reach its markup.
-
 function render(props: { open: boolean; isMac: boolean }): string {
-  return renderToStaticMarkup(
-    createElement(ShortcutsCheatSheet, { ...props, onClose: () => {} })
-  )
+  const container = document.createElement('div')
+  const host = document.createElement('div')
+  host.className = 'window-overlay-host'
+  host.dataset.overlayHost = ''
+  document.body.append(container, host)
+  const root = createRoot(container)
+  flushSync(() => root.render(createElement(ShortcutsCheatSheet, { ...props, onClose: () => {} })))
+  const markup = host.innerHTML
+  root.unmount()
+  container.remove(); host.remove()
+  return markup
 }
 
 describe('ShortcutsCheatSheet', () => {

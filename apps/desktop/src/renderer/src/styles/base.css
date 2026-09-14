@@ -37,9 +37,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--bg);
 }
 .app-shell.app-shell--project-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
-/* When the rail is collapsed its Settings badge floats at the bottom-left; lift it clear of the bar
-   only while the bar is present, with no JS coupling. */
-.app-shell:has(.window-status-bar) .project-rail-corner-toolbar { bottom: 28px; }
 .brand-mark {
   width: 24px;
   height: 24px;

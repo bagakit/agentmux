@@ -242,6 +242,7 @@ import {
   createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
+import type { StartupProgress } from './lib/startup-progress'
 
 type ViewMode = SessionViewMode
 
@@ -257,7 +258,7 @@ export type EditorRegionDiffState = {
   diff: GitFileDiff | null
   error: string | null
 }
-export type MainSurface = 'agents' | 'workbench' | 'board'
+export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
@@ -501,6 +502,7 @@ type AppState = {
    */
   editorRegionDiffs: Record<string, EditorRegionDiffState | undefined>
   loading: boolean
+  startupProgress: StartupProgress
   error: string | null
   /** Last transient error remains available after dismissal/navigation for a deliberate reopen. */
   lastError: string | null
@@ -1762,6 +1764,7 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
+  if (candidate === 'survey') return 'survey'
   if (candidate === 'agents') return 'agents'
   return candidate === 'board' ? 'board' : 'workbench'
 }
@@ -1835,6 +1838,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   projectRailWidth: PROJECT_RAIL_DEFAULT_WIDTH,
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
+  startupProgress: { step: 'saved-workspace' },
   runtimeOwnershipWarnings: undefined,
   environmentWarning: undefined,
   localHome: '',
@@ -1904,6 +1908,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
+      set({ startupProgress: { step: 'runtime' } })
       // Keep the write fence closed until the restored Workbench has been projected into the live
       // store below. Opening it immediately after hydration allows startup observers (and React's
       // first render) to serialize the pre-runtime empty shell over the durable Tab/Region record.
@@ -2000,8 +2005,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const recoveryFailures: SessionSnapshot[] = []
       let recovered = false
-      for (const candidate of snapshotVerified ? snapshot.recoveryCandidates : []) {
-        if (!persistedSessionIds.has(candidate.agentSessionId)) continue
+      const recoveryCandidates = (snapshotVerified ? snapshot.recoveryCandidates : [])
+        .filter((candidate) => persistedSessionIds.has(candidate.agentSessionId))
+      for (const [index, candidate] of recoveryCandidates.entries()) {
+        set({ startupProgress: { step: 'sessions', current: index + 1, total: recoveryCandidates.length } })
         try {
           const recovery = await api.sessions.recover({
             kind: 'agent',
@@ -2062,6 +2069,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot = refreshedSnapshot
       }
       const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
+      set({ startupProgress: { step: 'layout' } })
       const visibleSessions = [
         ...snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id)),
         ...recoveryFailures
@@ -2141,9 +2149,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // and startup visibly drags: give BrowserPane a "create on first became-visible" seam so hidden
       // tabs defer their create. Not built now — no measured need (YAGNI).
       const browserRebuildFailures: string[] = []
+      const browserSurfaces = Object.values(get().tabs).flatMap(workbenchSurfaces)
+        .filter((surface) => surface.kind === 'browser')
+      let browserIndex = 0
       for (const tab of Object.values(get().tabs)) {
         for (const surface of workbenchSurfaces(tab)) {
           if (surface.kind !== 'browser') continue
+          browserIndex += 1
+          set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
           try {
             const browser = await api.browser.create(surface.browserId, surface.url)
             get().applyBrowserEvent({ type: 'updated', browser })

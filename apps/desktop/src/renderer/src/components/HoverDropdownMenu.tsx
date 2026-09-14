@@ -3,10 +3,15 @@ import {
   createContext, forwardRef, useContext, useEffect, useRef, useState,
   type ComponentPropsWithoutRef, type PointerEvent
 } from 'react'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
-// Radix owns selection, dismissal, keyboard navigation and portals. This adapter only adds mouse
-// disclosure, keeping its open callback as the owner for native-view yielding and subscriptions.
-export { Portal, Item, Separator, Label, RadioGroup, RadioItem, ItemIndicator } from '@radix-ui/react-dropdown-menu'
+// Radix owns selection, dismissal, keyboard navigation and portals. This adapter adds mouse
+// disclosure and routes portals to the window overlay host or explicit container.
+export { Item, Separator, Label, RadioGroup, RadioItem, ItemIndicator } from '@radix-ui/react-dropdown-menu'
+
+export function Portal({ container, ...props }: ComponentPropsWithoutRef<typeof Menu.Portal>) {
+  return <Menu.Portal container={resolveOverlayContainer(container)} {...props} />
+}
 const OPEN_EVENT = 'agentmux:hover-menu-open'
 const Context = createContext<{
   open: boolean

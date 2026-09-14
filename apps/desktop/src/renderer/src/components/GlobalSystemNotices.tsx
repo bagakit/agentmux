@@ -45,6 +45,15 @@ export function GlobalSystemNotices() {
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
+  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
+  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+  useEffect(() => {
+    if (!open) return
+    acquireNativeSurfaceOverlay()
+    return () => {
+      releaseNativeSurfaceOverlay()
+    }
+  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
   }, [open, environmentInbox, ownershipInbox, displacedInbox])
@@ -53,11 +62,12 @@ export function GlobalSystemNotices() {
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
       aria-expanded={open} aria-controls={id} title="System notifications"
       popoverTarget={id} popoverTargetAction="toggle">
-      <Bell size={13} aria-hidden="true" />System
+      <Bell size={14} aria-hidden="true" />
       {notices.length ? <span aria-hidden="true">{notices.length}</span> : null}
       {unread ? <span className="global-system-notices__dot" aria-hidden="true" /> : null}
     </button>
     <div id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
+      data-state={open ? 'open' : 'closed'}
       onToggle={(event) => setOpen(event.newState === 'open')}>
       <div className="global-system-notices__heading">
         <strong>System notifications</strong>

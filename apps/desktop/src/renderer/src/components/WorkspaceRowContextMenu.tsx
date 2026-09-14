@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { revealInFileManagerLabel } from '../lib/host-platform'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 
 /**
@@ -158,7 +159,7 @@ export function WorkspaceRowContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu project-rail-context-menu"
           collisionPadding={8}

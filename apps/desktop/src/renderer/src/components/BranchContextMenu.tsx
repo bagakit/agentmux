@@ -1,6 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, FolderOpen, GitFork, RefreshCw, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function BranchContextMenu({
   children,
@@ -22,7 +23,7 @@ export function BranchContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu branch-context-menu"
           collisionPadding={8}

@@ -22,6 +22,7 @@ import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from './ComposerTextarea'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function BoardDiscussionCanvas({
   row,
@@ -113,7 +114,7 @@ export function BoardDiscussionCanvas({
 
   return (
     <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
-      <Dialog.Portal>
+      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <Dialog.Overlay className="discussion-canvas__overlay" />
         <Dialog.Content
           className="discussion-canvas"

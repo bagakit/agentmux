@@ -252,7 +252,7 @@ function startPrimaryInstance(): void {
           let timer: ReturnType<typeof setTimeout> | undefined
           const ready = new Promise<void>((resolve, reject) => {
             updateReady = { token, resolve }
-            timer = setTimeout(() => reject(new Error('Updated interface did not become ready')), 20_000)
+            timer = setTimeout(() => reject(new Error('Interface did not load or respond')), 20_000)
           })
           appOrigin = topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: file })
           try { await Promise.all([window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }), ready]) }

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /**
  * 一格的右键菜单。
@@ -236,7 +237,7 @@ export function RegionContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
           {model.entries.map((entry, index) => {
             if (entry.kind === 'separator') {

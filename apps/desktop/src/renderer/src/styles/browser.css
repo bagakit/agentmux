@@ -88,7 +88,7 @@
 .browser-toolbar label { min-width: 0; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 11px "SFMono-Regular", monospace; }
-.browser-menu { min-width: 210px; z-index: 130; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2, 0 10px 24px var(--scrim-2)), 0 14px 36px rgba(0, 0, 0, 0.45); }
+.browser-menu { min-width: 210px; z-index: var(--layer-popover); pointer-events: auto; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2, 0 10px 24px var(--scrim-2)), 0 14px 36px rgba(0, 0, 0, 0.45); }
 .browser-menu [role="group"] { display: grid; gap:1px; }
 .browser-menu [role="menuitemradio"], .browser-menu [role="menuitemcheckbox"] { position: relative; }
 .browser-menu > [role="menuitemradio"] + [role="menuitemradio"] { margin-top:1px; }
