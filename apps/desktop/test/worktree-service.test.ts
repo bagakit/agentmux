@@ -1411,6 +1411,64 @@ describe('WorktreeService', () => {
     const branch = await executionHost.run('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', 'lane-a'])
     expect(branch.exitCode, '分支也留下了').toBe(0)
   }, 30000)
+
+  /**
+   * f-25f8ffrme 的行为守卫:worktree create 之后,`.git/info/exclude` 里必须有 `/.worktrees/`,
+   * 且**仓根**的 `git status --porcelain` 不因新 worktree 变脏——这是 goal 里"建一个 worktree 之后
+   * git status 在目标仓库里不因它变脏"的判据。
+   *
+   * 判据是**行为的**(读真 info/exclude + 跑真 git status),不是"我们发了那条 sh 命令"(那是恒真的
+   * 假 host 断言,本仓反复栽过的坑,line 1417 就在提醒)。exclude line 是 idempotent 的——同一 repo
+   * 建两个 worktree 只写一次;所以第二次 create 之后 info/exclude 里那行仍然只出现一次。
+   *
+   * `--force` 分支路径:goal 里也提到"手工创建单个 worktree"由 BranchesPanel 让用户填路径,
+   * 与 fan-out 的约定路径分岔。当用户填的路径**恰好**是 `<repo>/.worktrees/<branch>` 时,exclude
+   * 命中;填别的地方(比如 /tmp/other/foo)时,exclude 依旧写 `/.worktrees/`——但 worktree 本身在
+   * 仓外,`git status` 也不会看见它。两种情形都不弄脏用户仓库。
+   */
+  it('worktree create 之后仓根 git status 不因新 worktree 变脏(fan-out 与手动路径同一守卫)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-exclude-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(repoPath)
+    const host = new LocalExecutionHost()
+    await host.run('git', ['-C', repoPath, 'init', '--initial-branch=main'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+    await host.run('git', ['-C', repoPath, 'config', 'user.email', 'a@b'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+    await host.run('git', ['-C', repoPath, 'config', 'user.name', 'a'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+    await writeFile(join(repoPath, 'README.md'), 'seed\n')
+    await host.run('git', ['-C', repoPath, 'add', '.'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+    await host.run('git', ['-C', repoPath, 'commit', '-m', 'seed'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+
+    const service = new WorktreeService(() => host, { save: vi.fn(async (value: AppConfig) => value) })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+
+    // 建两个 worktree,验 exclude 幂等 + status 不脏。
+    await service.createForBranch({
+      workspaceId: 'repo',
+      branch: 'lane-a',
+      path: join(repoPath, '.worktrees', 'lane-a'),
+      createBranch: true
+    }, branchConfig)
+    await service.createForBranch({
+      workspaceId: 'repo',
+      branch: 'lane-b',
+      path: join(repoPath, '.worktrees', 'lane-b'),
+      createBranch: true
+    }, branchConfig)
+
+    // 1) info/exclude 里有 `/.worktrees/`,只有一次。
+    const excludeContent = await readFile(join(repoPath, '.git', 'info', 'exclude'), 'utf8')
+    expect(excludeContent).toContain('/.worktrees/')
+    const occurrences = excludeContent.split('/.worktrees/').length - 1
+    expect(occurrences, 'exclude line 必须幂等,建 N 个 worktree 只写一次').toBe(1)
+
+    // 2) 仓根 git status --porcelain 不看到 `.worktrees/`——这是 goal 里的最终行为判据。
+    const status = await host.run('git', ['-C', repoPath, 'status', '--porcelain'], { timeoutMs: 15_000, maxOutputBytes: 32_768 })
+    expect(status.stdout, `git status 看到未被忽略的 .worktrees:\n${status.stdout}`).not.toContain('.worktrees')
+  }, 30000)
 })
 
 /**
