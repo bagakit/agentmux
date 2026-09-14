@@ -186,7 +186,11 @@ describe('Message Tools three-state interaction', () => {
     }
     const root = ruleList.find(({ selector }) => selector === COLLAPSED)
     expect(root).toBeDefined()
-    expect(root!.body).toContain('grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) max-content')
+    // Column 1 is `fit-content(6rem)`, not `minmax(0, 6rem)`: c9498b98 stopped reserving a
+    // permanent 6rem gutter for the tool column and let it size to its content up to a 6rem cap,
+    // so an empty tool row does not leave a 96px dead strip before the editor. The three-column
+    // shape ( tools | editor | primary-action ) is preserved.
+    expect(root!.body).toContain('grid-template-columns: fit-content(6rem) minmax(0, 1fr) max-content')
   })
 
   it('一行态里那一行文字垂直居中，而工具/主动作控件仍锚在底部', () => {
@@ -271,7 +275,10 @@ it('uses the Region width to shed tool text while retaining labelled icon contro
 it('clips an empty editor placeholder to its own input column at narrow widths', () => {
   const css = allStyleRules()
   const editor = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].find(([, selector]) => selector!.trim() === '.composer__editor .tiptap')
-  const placeholder = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].find(([, selector]) => selector!.includes('.tiptap:has(') && selector!.includes('::before'))
+  // 37a60456 replaced the CSS `:has(...)` empty-state probe with a JS-derived data-empty attribute
+  // on the outer `.composer__editor` (memory [[css-shape-probe-cannot-judge-semantic-emptiness]]).
+  // The placeholder selector is now `.composer__editor[data-empty='true'] .tiptap::before`.
+  const placeholder = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].find(([, selector]) => selector!.includes(".composer__editor[data-empty='true']") && selector!.includes('::before'))
   expect(editor).toBeDefined()
   expect(placeholder).toBeDefined()
   expect(editor![2]).toContain('position: relative')
