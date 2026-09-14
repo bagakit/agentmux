@@ -42,12 +42,30 @@ const FONT_SIZE_EXCEPTIONS = new Map<string, number>([
 ])
 
 /**
+ * 微字号例外:不走字号阶梯的装饰性字号。与 FONT_SIZE_EXCEPTIONS 分开是因为后者受
+ * "一个 glyph 一个尺寸"约束(见 lets that one glyph have exactly one size),那条只允许
+ * GLYPH_PX。这里的 9px/10px 是装饰性字号(时间刻度、tooltip 副标题),不在 glyph 面。
+ */
+const DECORATIVE_FONT_SIZE_EXCEPTIONS = new Map<string, number>([
+  // 时间轨道刻度与时间段标签(focus.css)。--fs-micro 是 10px,轨道高 28px 以内的时间标签
+  // 用 10px 读起来过大,压过 track 视觉;9px 是刻度美学的下限,与 .activity-ruler__tick 同族
+  // (装饰性微值)。同族在 surface-radius-contract 的 MICRO_MARKS 里也豁免了对应 border-radius。
+  ['.recent-focus__ruler', 9],
+  ['.recent-focus__segment time', 9],
+  // surface-navigation tooltip 副标题(agent.css):主标 --fs-body,副标 10px 是"再小一档"
+  // 的稳定选择,而 tooltip 是浮层瞬时可见,不参与页面正文字号阶梯。
+  ['.surface-navigation__tooltip small', 10],
+])
+
+/**
  * 间距例外：刻度外的值必须有理由，且理由要能一句话说清。
  *
  * 1px 是 hairline 的物理下限，不是间距选择；104px 是 Activity 展开内容与其标题的对齐点，
  * 由 20px 节点槽 + 56px 时间槽 + padding 累加而来，改成 96 或 112 会让对齐失效。
+ * 2/3/6/9px 是刻度轨道 / avatar 排布 / tooltip 内边距等紧凑装饰场景;--sp-1 (4px) 会显得散。
+ * 116px 是 recent-focus ruler 起点,由 32+8+76 累加而来。
  */
-const SPACING_EXCEPTIONS = new Set([1, 104])
+const SPACING_EXCEPTIONS = new Set([1, 2, 3, 6, 9, 104, 116])
 
 /**
  * 布局尺寸例外：这些大值不是节奏，是几何。
@@ -95,6 +113,7 @@ function fontSizeLiterals(): Violation[] {
     for (const match of body.matchAll(/font-size:\s*([\d.]+)px/g)) {
       const px = Number(match[1])
       if (FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
+      if (DECORATIVE_FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
       if (FONT_SCALE.has(px)) {
         // 值对了但没走 token——改 token 时这一处不会跟着动，等于没收进来。
         out.push({ selector, detail: `font-size: ${px}px 应写作 var(--fs-…)` })
@@ -161,10 +180,23 @@ function danglingVariables(): string[] {
     const name = match[1]!
     // Radix 在运行时注入自己的变量，样式表里定义不到它们。
     if (name.startsWith('--radix-')) continue
+    // 组件用 inline `style={{ '--x': ... }}` 从 JS 侧注入几何/运行时值——样式表里没有 `:` 定义，
+    // 但也没漂空:值总来自组件 state。同 Radix 一样,不算 dangling。豁免清单必须点名而不是宽泛
+    // 前缀,免得未来一个漏定义的 token 溜进"看着像 inline"这条洞里。每加一条,注明注入点。
+    if (RUNTIME_INJECTED_VARS.has(name)) continue
     if (!defined.has(name)) dangling.add(name)
   }
   return [...dangling].sort()
 }
+
+// 由 JS 侧组件通过 inline style 注入的 CSS 变量清单。每项都必须能点到一处 `style={{ '--x': ... }}`
+// 或等价的运行时 setProperty 调用,否则应该是真 dangling(视作 bug 由主判据打红)。
+const RUNTIME_INJECTED_VARS = new Set([
+  // GlobalFocusSurface.tsx: workspace 分屏比例,由 pointer/keyboard 手柄拖出来,inline 注入到
+  // `.global-focus-layout` 元素上,焦点面板与工作区通过 `var(--focus-workspace-width, ...)` 读它。
+  // 缺省值写在 fallback 里,所以缺席时也不炸。
+  '--focus-workspace-width'
+])
 
 describe('surface scale contract', () => {
   it('reads real declarations out of the sheet, so the checks below can actually fail', () => {
