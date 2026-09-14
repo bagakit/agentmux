@@ -450,6 +450,25 @@ describe('RuntimeController configuration transaction', () => {
     controller.commit(preparation)
   })
 
+  it('releases the quit reservation when owner cleanup fails so a healthy host is not fenced forever', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances.at(-1)!
+    client.dispose.mockRejectedValueOnce(new Error('old app did not exit'))
+
+    await expect(controller.dispose()).rejects.toThrow('Failed to dispose prepared Runtime hosts.')
+
+    // The cleanup failure is a Desktop workflow fact. It must not leave the host reservation
+    // latched, otherwise every subsequent operation reports the same reconfiguration error and
+    // the healthy Runtime can never be retried or recovered.
+    const retry = await controller.prepare({
+      ...localConfig,
+      hosts: [{ ...localConfig.hosts[0]!, label: 'Retry after failed quit' }]
+    })
+    expect(retry.hosts).toHaveLength(1)
+    await controller.discard(retry)
+    expect(client.dispose).toHaveBeenCalledOnce()
+  })
+
   it('maps one Terminal shell command only at the Desktop creation boundary', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
