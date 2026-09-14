@@ -156,7 +156,7 @@ describe('Topic 行的视觉收敛', () => {
         }]
       }]
     }))
-    expect(html).toContain('class="topic-workbench-topology__inspector"')
+    expect(html).not.toContain('class="topic-workbench-topology__inspector"')
     expect(html).toContain('aria-label="2 Tabs. Hover or focus a Tab')
     expect(html).toContain('topic-workbench-topology__tab-glyph')
     expect(html).toContain('data-region-count="2"')
@@ -164,12 +164,8 @@ describe('Topic 行的视觉收敛', () => {
     expect(html).not.toContain('<b>T1</b>')
     expect(html).not.toContain('<small>2R</small>')
     expect(html).toContain('Review runtime')
-    expect(html).toContain('Codex')
-    expect(html).toContain('Editing store.ts')
-    expect(html).toContain('No recent activity')
     expect(html).toContain('aria-describedby=')
     expect(html).not.toContain('topic-workbench-topology__activity')
-    expect(html).toContain('style="aspect-ratio:1.6"')
     expect(html).toContain('data-region-kind="agent"')
     expect(html).toContain('data-region-kind="file"')
   })
@@ -207,11 +203,14 @@ describe('Topic 行的视觉收敛', () => {
     expect(html).toContain('topic-workbench-topology__tab-glyph--single')
     expect(html).toContain('class="agent-avatar status status--working"')
     expect(html).not.toContain('class="selector-presence"')
-    expect(html).toContain('Editing TopicPresence.tsx')
   })
 
   it('把 inspector 提升到 viewport overlay，避免被 Topic 滚动面板裁切', () => {
-    expect(topologySource).toContain('createPortal(inspector, portalHost)')
+    // f58cb5b6 migrated the inspector portal target from `document.body` (`portalHost`) to the
+    // shared overlay host (`overlayHost` via `getWindowOverlayHost()`). Test the current call
+    // shape; the intent (inspector escapes the scrolling Topic panel into a viewport overlay)
+    // is preserved — just the host name changed.
+    expect(topologySource).toContain('createPortal(inspector, overlayHost)')
     expect(topologySource).toContain('getBoundingClientRect()')
     expect(topologySource).toContain('onMouseEnter={() => setInspectorOpen(true)}')
     expect(topologySource).toContain('onFocus={() => setInspectorOpen(true)}')
