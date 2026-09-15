@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { applyNormalizedTimelineMutation, MAX_TIMELINE_ITEMS_PER_WINDOW } from './session-timeline-reducer.js'
 import type {
   AgentMuxAcpEvent,
   AgentMuxEvidence,
@@ -18,7 +19,6 @@ export type {
   AgentTimelineSnapshot
 } from './types.js'
 
-const MAX_TIMELINE_ITEMS_PER_WINDOW = 200
 export const MAX_AGENT_TIMELINE_ITEMS = 2 * MAX_TIMELINE_ITEMS_PER_WINDOW
 const MAX_TIMELINE_MUTATION_BYTES = 128 * 1024
 const UTF8_ENCODER = new TextEncoder()
@@ -96,11 +96,6 @@ function optionalField(
   return value === undefined ? {} : { [name]: value }
 }
 
-function sameItemSemantics(left: AgentTimelineItem, right: AgentTimelineItem): boolean {
-  const { createdAt: _leftCreatedAt, updatedAt: _leftUpdatedAt, ...leftSemantics } = left
-  const { createdAt: _rightCreatedAt, updatedAt: _rightUpdatedAt, ...rightSemantics } = right
-  return JSON.stringify(leftSemantics) === JSON.stringify(rightSemantics)
-}
 
 function acpTimelineItemId(
   evidence: AgentMuxEvidence,
@@ -193,19 +188,6 @@ export function normalizeAgentTimelineMutation(value: unknown): AgentTimelineMut
   }
 }
 
-// Inputs and activity share one ordered durable history, but cannot evict each other.
-function retainTimelineWindows(items: AgentTimelineItem[]): AgentTimelineItem[] {
-  let inputs = 0
-  let activity = 0
-  const retained: AgentTimelineItem[] = []
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]!
-    const count = item.kind === 'user_message' ? ++inputs : ++activity
-    if (count <= MAX_TIMELINE_ITEMS_PER_WINDOW) retained.push(item)
-  }
-  return retained.reverse()
-}
-
 export function applyAgentTimelineMutation(
   current: readonly AgentTimelineItem[],
   value: AgentTimelineMutation
@@ -215,58 +197,7 @@ export function applyAgentTimelineMutation(
   if (items.some((item) => item.agentSessionId !== mutation.agentSessionId)) {
     throw new AgentMuxError('Timeline contains another Agent Session.', 'INVALID_AGENT_TIMELINE')
   }
-  if (mutation.type === 'append') {
-    const existing = items.find((item) => item.id === mutation.item.id)
-    if (existing) {
-      if (sameItemSemantics(existing, mutation.item)) return items
-      throw new AgentMuxError('Timeline item identity conflicts with existing content.', 'AGENT_TIMELINE_ID_CONFLICT')
-    }
-    return retainTimelineWindows([...items, structuredClone(mutation.item)])
-  }
-  if (mutation.type === 'upsert') {
-    const index = items.findIndex((item) => item.id === mutation.item.id)
-    if (index < 0) {
-      // 目标不在（事前那条丢投或被逐出）：补落一条自洽的终态行，而不是抛错吞掉整条 hook 事件。
-      return retainTimelineWindows([...items, structuredClone(mutation.item)])
-    }
-    // 就地替换。保留最初的 createdAt——这仍是「同一件事」，创建时刻不该被事后投递改写；
-    // 语义未变则原样返回，避免推空的 revision。
-    const previous = items[index]!
-    // 更旧的观测**不许**改写更新的：否则一条乱序/重投的事件会把已完成的工具结果静默回退成
-    // 在途态（`complete/有 toolOutput` → `streaming/旧输出`，`updatedAt` 甚至倒流），而这一行随后
-    // 被持久化、被 renderer 原样重放——那次调用在界面上「退回未完成」。
-    //
-    // 与 update 路径（下面那处抛 `STALE_AGENT_TIMELINE_ITEM`）判的是同一件事，但**处置不同**：
-    // upsert 的调用方是 hook 事件，抛错会让整条事件回 503（这正是 index<0 那支补落而不抛的理由）。
-    // 所以这里保留原行、原样返回——拒绝这次回退，而不是把回退变成一次失败。
-    if (mutation.item.updatedAt < previous.updatedAt) return items
-    const next: AgentTimelineItem = { ...structuredClone(mutation.item), createdAt: previous.createdAt }
-    if (sameItemSemantics(previous, next)) return items
-    items[index] = next
-    return retainTimelineWindows(items)
-  }
-  const index = items.findIndex((item) => item.id === mutation.itemId)
-  if (index < 0) {
-    throw new AgentMuxError('Timeline update target is unavailable.', 'UNKNOWN_AGENT_TIMELINE_ITEM')
-  }
-  const previous = items[index]!
-  if (mutation.updatedAt < previous.updatedAt) {
-    throw new AgentMuxError('Timeline update is stale.', 'STALE_AGENT_TIMELINE_ITEM')
-  }
-  const next: AgentTimelineItem = {
-    ...previous,
-    updatedAt: mutation.updatedAt,
-    ...(mutation.status === undefined ? {} : { status: mutation.status }),
-    ...(mutation.title === undefined ? {} : { title: mutation.title }),
-    ...(mutation.content === undefined ? {} : { content: mutation.content }),
-    ...(mutation.toolName === undefined ? {} : { toolName: mutation.toolName }),
-    ...(mutation.toolInput === undefined ? {} : { toolInput: mutation.toolInput }),
-    ...(mutation.toolOutput === undefined ? {} : { toolOutput: mutation.toolOutput }),
-    ...(mutation.eventName === undefined ? {} : { eventName: mutation.eventName })
-  }
-  if (sameItemSemantics(previous, next)) return items
-  items[index] = next
-  return items
+  return applyNormalizedTimelineMutation(items, mutation)
 }
 
 export function normalizeAgentTimeline(
@@ -281,11 +212,11 @@ export function normalizeAgentTimeline(
   if (inputs > MAX_TIMELINE_ITEMS_PER_WINDOW || normalized.length - inputs > MAX_TIMELINE_ITEMS_PER_WINDOW) {
     throw new AgentMuxError('Agent Timeline exceeds its retention window.', 'AGENT_TIMELINE_LIMIT')
   }
-  return normalized.reduce<AgentTimelineItem[]>((items, item) => applyAgentTimelineMutation(items, {
+  return normalized.reduce<AgentTimelineItem[]>((items, item) => applyNormalizedTimelineMutation(items, normalizeAgentTimelineMutation({
     type: 'append',
     agentSessionId,
     item
-  }), [])
+  })), [])
 }
 
 export function agentTimelineMutationFromAcpEvent(

@@ -7,6 +7,7 @@ import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
+import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import {
   applyAgentTimelineMutation,
   normalizeAgentTimeline,
@@ -1925,8 +1926,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
       }
       const timeline = await this.readTimeline(canonicalMutation.agentSessionId, signal)
-      const items = applyAgentTimelineMutation(timeline.items, canonicalMutation)
-      const changed = JSON.stringify(items) !== JSON.stringify(timeline.items)
+      const items = applyNormalizedTimelineMutation(timeline.items, canonicalMutation)
+      const changed = items !== timeline.items
       result = {
         agentSessionId: canonicalMutation.agentSessionId,
         revision: changed ? nextTimelineRevision(timeline.revision) : timeline.revision,
@@ -2223,8 +2224,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (mutation.agentSessionId !== agentSessionId) {
           throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
         }
-        const next = applyAgentTimelineMutation(items, mutation)
-        if (JSON.stringify(next) !== JSON.stringify(items)) revision = nextTimelineRevision(revision)
+        const next = applyNormalizedTimelineMutation(items, mutation)
+        if (next !== items) revision = nextTimelineRevision(revision)
         items = next
       } catch (error) {
         if (index === lines.length - 1) break
