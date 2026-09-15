@@ -89,6 +89,25 @@ function evidenceThrowing(code: string): {
 }
 
 /**
+ * wait 成功 resolve 但 predicate 从**未跑一次**——真实 wait 契约会跑 predicate 直到返回 true，
+ * 但旧证据的 short-circuit 路径、上游代码疏漏、或将来 wait 的重构都可能让 predicate 不被调用。
+ * admission 里 `composer` 变量因此保持初始 null。这条 fake 让 module 里的
+ * `if (composer === null) return degraded/screen-evidence-gap` fail-safe 分支能被独立测中：
+ * 删掉那一行 → 后面的 `composer === ''` 判定会把 null 当非空 (`null === ''` → false) → 返回 busy，
+ * 而 busy 是一个**确定的"生成中"观察** —— 对一个我们根本没看清的屏幕说"确定非空"，等于把
+ * 「没看清」错判成「非空」，会拦掉一个健康 Agent。这条守卫必须由 test 钉住。
+ */
+function evidenceWaitResolvesWithoutRunningPredicate(): {
+  wait: ReturnType<typeof vi.fn>
+  generation: ReturnType<typeof vi.fn>
+} {
+  return {
+    wait: vi.fn(async (..._args: Parameters<AgentScreenEvidenceStore['wait']>) => 512),
+    generation: vi.fn((..._args: Parameters<AgentScreenEvidenceStore['generation']>) => 0)
+  }
+}
+
+/**
  * candidate d 世代守卫的替身：观察前 generation=0，观察后 generation=1（模拟 wait 期间上游触发过
  * discard 且 rebuild 了 evidence——wait 依旧用旧证据 resolve 出来了）。这条 fake 让我们在没有真
  * discard 的情况下测「世代变化必须让判定作废」这条不变量。
@@ -246,6 +265,19 @@ describe('queryPromptAdmission：从当下屏幕判「现在能不能发」', ()
       } finally {
         screen.dispose()
       }
+    })
+  })
+
+  describe('composer null fail-safe（wait 成功但从未见到一帧）', () => {
+    it('wait 直接 resolve 未跑 predicate → degraded/screen-evidence-gap（绝不当 ready/busy 放行）', async () => {
+      // 真实 wait 契约里 predicate 至少跑一次，但**旧证据的 short-circuit / 上游疏漏 / 未来重构**
+      // 都可能让它一次都不跑。此时 admission 里 `composer` 保持初始 null——若无 fail-safe，`null === ''`
+      // 是 false 会掉进 busy 分支，把「没看清」错判成「Agent 正在生成中，拒绝」这条**确定的观察**。
+      // 那是把第 2 类流程问题写成第 1 类 Agent 忙问题（RED-LINES.md）——一条实际会拦掉健康 Agent。
+      // 这条 test 与 prompt-admission.ts:140 的 fail-safe 一一对应：删那一行，本用例即红。
+      const result = await admit(evidenceWaitResolvesWithoutRunningPredicate())
+      expect(result, 'composer 为 null 必须走 degraded，不能被 `!== ""` 逻辑推进成 busy')
+        .toEqual({ kind: 'degraded', reason: 'screen-evidence-gap' })
     })
   })
 })
