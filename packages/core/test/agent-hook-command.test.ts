@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Readable } from 'node:stream'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -52,6 +52,10 @@ describe('agent hook command usage relay', () => {
     }) + '\n'
 
   let restoreStdin: (() => void) | null = null
+
+  beforeEach(() => {
+    vi.stubEnv('AGENTMUX_ENV', '1')
+  })
 
   function feedStdin(json: string): void {
     const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
@@ -110,6 +114,19 @@ describe('agent hook command usage relay', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('does not POST when a foreign Provider process invokes the shared hook command', async () => {
+    vi.stubEnv('AGENTMUX_ENV', '')
+    vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+    vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+    vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
+    const { bodies } = captureHookPost()
+    feedStdin(JSON.stringify({ session_id: 'external-provider' }))
+
+    await runAgentHookCommand()
+
+    expect(bodies, 'unmanaged shared-config hook must be a passive no-op').toHaveLength(0)
   })
 
   it('attaches NO usage when the provider did not declare a transcript format (never a fabricated one)', async () => {
@@ -318,6 +335,10 @@ describe('agent hook command usage relay', () => {
 describe('POST 失败后真的重投一次', () => {
   let restoreStdin: (() => void) | null = null
 
+  beforeEach(() => {
+    vi.stubEnv('AGENTMUX_ENV', '1')
+  })
+
   function feedStdin(json: string): void {
     const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
     Object.defineProperty(process, 'stdin', {
@@ -453,6 +474,10 @@ describe('POST 失败后真的重投一次', () => {
  */
 describe('门控决策先于读 stdin', () => {
   let restoreStdin: (() => void) | null = null
+
+  beforeEach(() => {
+    vi.stubEnv('AGENTMUX_ENV', '1')
+  })
 
   /** 塞一段任意大小的 stdin；返回的函数还原原描述符。 */
   function feedRawStdin(chunk: Buffer): void {

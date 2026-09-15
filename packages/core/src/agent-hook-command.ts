@@ -85,6 +85,15 @@ export function resolveHookProvider(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 /**
+ * Hook commands are installed in Provider-owned configuration, so the command itself can be
+ * invoked by a Provider process that AgentMux did not launch. Only the launch environment carrying
+ * the AgentMux marker may read the ingress endpoint/token or emit a hook POST.
+ */
+export function isAgentMuxManagedHookEnvironment(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AGENTMUX_ENV === '1'
+}
+
+/**
  * The stdout a provider's hook protocol expects from a passive status observer.
  *
  * Only Antigravity gates tool calls on this hook and reads empty/absent stdout as a HARD DENY
@@ -137,6 +146,11 @@ export async function runAgentHookCommand(): Promise<void> {
   // test/agent-hook-command.test.ts 的 describe「门控决策先于读 stdin」，其中一条从 provider 注册表
   // 算出哪些 Provider 是门控的（问 hookResponseFor 自己），再要求每一家的 eventNameSource 都是 flag。
   process.stdout.write(hookResponseFor(resolveHookProvider(), flagEvent ?? envEvent))
+
+  // The command is stored in shared Provider config. A foreign Provider process may therefore
+  // execute it; keep the passive stdout contract, but never let that process read AgentMux
+  // credentials or send an ingress request. The marker is injected by AgentMux terminal env.
+  if (!isAgentMuxManagedHookEnvironment()) return
 
   const chunks: Buffer[] = []
   let bytes = 0
