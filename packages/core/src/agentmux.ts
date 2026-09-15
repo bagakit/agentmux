@@ -24,7 +24,7 @@ import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { pmoSessionMatches } from './pmo-session-filter.js'
-import { OrderedSessionOutputFollow } from './session-output-follow.js'
+import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
@@ -752,6 +752,10 @@ function afterByte(value: string | undefined): number {
   return parsed
 }
 
+function formatOutputBytes({ dataBytes, ...range }: FollowOutput) {
+  return { ...range, dataBase64: Buffer.from(dataBytes).toString('base64') }
+}
+
 async function outputCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' })
   await normalizeSessionFlags(flags)
@@ -762,12 +766,21 @@ async function outputCommand(args: readonly string[]): Promise<number> {
     const runId = client.agentSession(agentSessionId).run.runId
     let finish: ((value: { state: string; exitCode?: number; exitSignal?: string }) => void) | null = null
     const completed = new Promise<{ state: string; exitCode?: number; exitSignal?: string }>((resolve) => { finish = resolve })
-    const ordered = new OrderedSessionOutputFollow(runId, requestedAfterByte, (event) => printStream('output', 'output', { runId: event.runId, replay: event.replay, startByte: event.startByte, endByte: event.endByte, data: event.data }), (event) => finish?.(event))
+    const replayOutput: FollowOutput[] = []
+    const ordered = new OrderedSessionOutputFollow(runId, requestedAfterByte, (event) => {
+      if (follow) printStream('output', 'output', formatOutputBytes(event))
+      else replayOutput.push(event)
+    }, (event) => finish?.(event))
     const unsubscribe = follow ? client.onEvent((event) => ordered.accept(event)) : () => {}
     let attached: Awaited<ReturnType<AgentMuxClient['reattachAgent']>> | null = null
     try {
       attached = await client.reattachAgent(agentSessionId, requestedAfterByte)
-      if (!follow) { printSuccess('output', { session: attached.session, run: attached.attachment.run, replay: attached.attachment.replay, gap: attached.attachment.gap }); return 0 }
+      if (!follow) {
+        ordered.finishReplay(attached.attachment.replay)
+        printSuccess('output', { session: attached.session, run: attached.attachment.run,
+          replay: replayOutput.map(formatOutputBytes), gap: attached.attachment.gap })
+        return 0
+      }
       printStream('output', 'attached', { session: attached.session, run: attached.attachment.run, gap: attached.attachment.gap })
       ordered.finishReplay(attached.attachment.replay)
       if (attached.attachment.run.state !== 'running') { printStream('output', 'end', { runId, state: attached.attachment.run.state }); return 0 }

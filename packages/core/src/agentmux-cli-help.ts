@@ -454,8 +454,9 @@ rearranges in the background.`],
 
 Usage: agentmux output --session <session-id|self> [--after-byte <n>] [--follow]
 
---after-byte is a cumulative UTF-8 byte cursor. Follow emits attached, ordered output,
-then end. Releasing the reader never stops the Run.`],
+--after-byte is a cumulative Run byte cursor. Replay and follow output carry original
+bytes as dataBase64. Follow emits attached, ordered output, then end. Releasing the
+reader never stops the Run.`],
   ['interrupt', `Interrupt one Agent Session
 
 Usage: agentmux interrupt --session <session-id|self>

@@ -141,6 +141,9 @@ export type AgentMuxRunDataEvent = AgentMuxRunRef & {
   type: 'data'
   startByte: number
   endByte: number
+  /** Original Run bytes; byteLength equals endByte - startByte, including partial UTF-8 sequences. */
+  dataBytes: Uint8Array
+  /** Streaming semantic text observation; may be empty and is not a byte-addressable payload. */
   data: string
 }
 
@@ -822,8 +825,11 @@ export type AgentMuxClientEvent =
       type: 'terminal-output'
       agentSessionId?: string
       run: AgentMuxRunRef
+      /** Original bytes for ordered terminal parsing; length matches evidence.outputByteRange. */
+      dataBytes: Uint8Array
+      /** Streaming semantic text observation; never re-encode this to reconstruct Run bytes. */
       data: string
-      evidence: AgentMuxEvidence
+      evidence: AgentMuxEvidence & { outputByteRange: { startByte: number; endByte: number } }
     }
   | {
       type: 'process-state'

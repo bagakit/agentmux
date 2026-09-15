@@ -4158,6 +4158,7 @@ export class AgentMuxClient {
         runId: event.runId,
         startByte: event.startByte,
         endByte: event.endByte,
+        dataBytes: event.dataBytes,
         data: event.data
       }
       this.publisher.publishRunEvent(projected, agentSession)
