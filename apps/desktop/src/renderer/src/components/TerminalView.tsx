@@ -175,7 +175,8 @@ export function TerminalView({
   visible = true,
   autoFocus = true,
   readOnly = false,
-  linkOrigin
+  linkOrigin,
+  onReadConversationHistory
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -191,6 +192,7 @@ export function TerminalView({
   // The reusable terminal on the create page must not steal focus from the prompt.
   autoFocus?: boolean
   readOnly?: boolean
+  onReadConversationHistory?: () => void
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const autoFocusRef = useRef(autoFocus)
@@ -1359,14 +1361,17 @@ export function TerminalView({
               compact={!replayGap}
               canRedraw={canControlRun}
               onRedraw={redrawCurrentScreen}
+              {...(onReadConversationHistory ? { onReadConversationHistory } : {})}
             />
           ) : null}
           {!hydrating && historyReadFailure ? <div className="terminal-replay-gap" role="status" title={historyBoundary ?? undefined}>
             <History size={12} aria-hidden="true" />
             <span>{runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} {!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput, liveReady: liveOutputReady }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'} Reopen this session to replay retained output.</span>
+            {onReadConversationHistory ? <button type="button" onClick={onReadConversationHistory}>Conversation history</button> : null}
           </div> : null}
           {!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap && historyBoundary ? <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={historyBoundary} aria-label={historyBoundary}>
             <History size={12} aria-hidden="true" /><span>{historyBoundary.startsWith('The full-screen') ? 'Full-screen history' : 'History line limit'}</span>
+            {onReadConversationHistory ? <button type="button" onClick={onReadConversationHistory}>Conversation history</button> : null}
           </div> : null}
           {searchOpen ? (
             <div className="terminal-search" role="search">

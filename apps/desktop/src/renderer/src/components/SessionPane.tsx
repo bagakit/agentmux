@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
+import { AlertTriangle, CircleStop, History, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
@@ -30,6 +30,7 @@ import {
 } from '../lib/continuity-failure-notice'
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
+import { SessionHistoryView } from './SessionHistoryView'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 
@@ -92,6 +93,8 @@ export function SessionPane({
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  useEffect(() => { setHistoryOpen(false) }, [sessionId, viewMode])
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
@@ -305,8 +308,19 @@ export function SessionPane({
                 visible={visible}
             readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
+                {...(session.kind === 'agent' ? { onReadConversationHistory: () => setHistoryOpen(true) } : {})}
               />
             )}
+            {session.kind === 'agent' && !historyOpen ? <button type="button" className="small-button terminal-history-action" onClick={() => setHistoryOpen(true)}><History size={12} /> Conversation history</button> : null}
+            {historyOpen && session.kind === 'agent' ? <SessionHistoryView
+              key={`${session.control.hostId}:${session.id}:${session.control.run.runId}`}
+              control={session.control}
+              label={agentInputIdentity ?? session.label}
+              onClose={() => setHistoryOpen(false)}
+              workspaceRoot={activeWorkspaceRoot}
+              openWorkspaceFile={openWorkspaceFile}
+              openHttpLink={onProseLinkClick}
+            /> : null}
             {disconnected || missing || exited ? (
               <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">

@@ -24,6 +24,7 @@ const userData = join(temporaryRoot, 'user-data')
 const runtimeDirectory = join(temporaryRoot, 'runtime')
 const workspacePath = join(temporaryRoot, 'workspace')
 const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const probeDigest = hash(await readFile(import.meta.filename))
 const children = new Set()
 let client
 let session
@@ -116,6 +117,7 @@ const fileRegionId = 'history-probe-file'
 const groupId = 'history-probe-group'
 const workspaceId = 'history-probe-workspace'
 const draft = 'Unsent draft survives native reading and Electron interruption'
+let expectedWorkbench
 
 async function seedWorkbench(seed) {
   // Reuse the production restart probe's flushed, seed-then-exit seam. It exits before an unload
@@ -152,8 +154,15 @@ async function readSurface(processProbe) {
   })()`)
   assert.equal(before.terminalPresent, true)
   assert.deepEqual(before.tabs, [tabId])
+  assert.deepEqual(before.workbench.layouts, expectedWorkbench.layouts)
+  assert.deepEqual(before.workbench.tabs[tabId].layout, expectedWorkbench.tabs[tabId].layout)
+  assert.deepEqual(Object.keys(before.workbench.tabs[tabId].regions).sort(), [regionId, fileRegionId].sort())
   assert.equal(before.draft, draft)
   assert.equal(before.focus.execution.sessionId, session.agentSessionId)
+  assert.deepEqual(before.focus.execution.history.map((item) => item.sessionId), [session.agentSessionId])
+  const renderedRegions = await cdp.evaluate(`Array.from(document.querySelectorAll('[data-workbench-region-id]'))
+    .filter(el => el.getClientRects().length > 0).map(el => el.dataset.workbenchRegionId).sort()`)
+  assert.deepEqual(renderedRegions, [regionId, fileRegionId].sort())
   await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${regionId}"] .terminal-history-action').click()`)
   const snapshot = () => cdp.evaluate(`(() => {
     const history = document.querySelector('[data-workbench-region-id="${regionId}"] .session-history')
@@ -233,6 +242,7 @@ try {
           [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId, path: join(workspacePath, 'split.txt') } } } },
       layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId } }
     } } }
+  expectedWorkbench = seed.state.restoredWorkbench
   await seedWorkbench(seed)
   const firstProcess = await launch('first')
   const first = await readSurface(firstProcess)
@@ -254,7 +264,8 @@ try {
     return next?.acceptedInputBytes > run.acceptedInputBytes
   })
   const git = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: resolve(desktopRoot, '../..') })
-  result = { schema: 'agentmux.native-history-delivery.v1', sourceCommit: git.stdout.trim(),
+  result = { schema: 'agentmux.native-history-delivery.v1', sourceCommit: git.stdout.trim(), probeDigest,
+    inputDigest: hash(JSON.stringify({ nativeSessionId, seed })),
     coreDigest: hash(await readFile(resolve(desktopRoot, '../../packages/core/dist/index.js'))),
     desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     nativeSource: { providerId: 'codex', nativeSessionId }, fixture: { syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId },
