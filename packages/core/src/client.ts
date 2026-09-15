@@ -1543,14 +1543,15 @@ export class AgentMuxClient {
     recipientRunId: string | null
   }): void {
     const sender = this.authorizeAgentCaller(input.capability, input.callerAgentSessionId)
-    if (input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
+    if (input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
       throw new AgentMuxError('A2A sender facts do not match the authorized Agent Session/Run.', 'MESSAGE_SENDER_MISMATCH')
     }
-    if (input.recipientSessionId !== null) {
-      const recipient = this.agentSession(input.recipientSessionId)
-      if (input.recipientRunId !== recipient.run.runId) {
-        throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
-      }
+    if (input.recipientSessionId === null || input.recipientRunId === null) {
+      throw new AgentMuxError('A2A recipient Session/Run facts are required.', 'MESSAGE_RECIPIENT_MISMATCH')
+    }
+    const recipient = this.agentSession(input.recipientSessionId)
+    if (input.recipientRunId !== recipient.run.runId) {
+      throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
   }
 
