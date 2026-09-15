@@ -13,7 +13,7 @@ import {
   type AgentMuxRegion
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
+import { renderAgentMuxMessageEnvelope, type AgentCatalogEntry, type AgentMuxInteractionResponse, type LaunchOptionSelection } from '@agentmux/core'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
   AgentLaunchResult,
@@ -2703,7 +2703,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       requireActive()
       // One-shot manual submit: the id is born and dies with this single call. There is no store-held
       // retry here (unlike the steer queue), so a fresh id per invocation is the correct lifetime.
-      await api.sessions.submitPrompt(session.control, request.text, crypto.randomUUID(), request.caller?.agentSessionId)
+      const prompt = request.message
+        ? renderAgentMuxMessageEnvelope(request.message)
+        : request.text
+      if (request.message) {
+        if (request.message.body !== request.text) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Message body does not match Control text.')
+        if (request.message.recipient.kind === 'agent-session' && request.message.recipient.agentSessionId !== session.id) {
+          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient is not the resolved Agent Session.')
+        }
+        if (request.message.recipientSessionId !== null && request.message.recipientSessionId !== session.id) {
+          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Session is not the resolved Agent Session.')
+        }
+        if (request.message.recipientRunId !== null && request.message.recipientRunId !== session.control.run.runId) {
+          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Run is not the resolved Run.')
+        }
+      }
+      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? crypto.randomUUID(), request.caller?.agentSessionId)
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {

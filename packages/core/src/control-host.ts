@@ -300,6 +300,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
     const message = source.message === undefined ? undefined : validateAgentMuxMessageEnvelope(source.message as AgentMuxMessageEnvelope)
+    if (message && message.body !== source.text) throw new AgentMuxError('Message body must equal Control text.', 'MESSAGE_ENVELOPE_INVALID')
+    if (message?.sender.kind === 'agent-session' && (!owner || message.sender.agentSessionId !== owner.agentSessionId || message.senderSessionId !== owner.agentSessionId)) {
+      throw new AgentMuxError('Message sender does not match the managed caller.', 'MESSAGE_SENDER_MISMATCH')
+    }
+    if (message?.recipient.kind === 'agent-session' && target.kind === 'agent-session' && message.recipient.agentSessionId !== target.agentSessionId) {
+      throw new AgentMuxError('Message recipient does not match the Control target.', 'MESSAGE_RECIPIENT_MISMATCH')
+    }
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, text: text(source.text, 'Message text'), ...(owner ? { caller: owner } : {}), ...(message ? { message } : {}) }
   }
   if (source.operation === 'list.agents') {

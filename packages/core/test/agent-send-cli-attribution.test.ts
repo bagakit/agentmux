@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { AgentMuxControlServer } from '../src/control-host.js'
-import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { DurableAgentMuxMessageQueue, renderAgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
 
 const exec = promisify(execFile)
@@ -14,12 +14,14 @@ const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 it('real CLI send retains managed authors for every target without inventing an author for human CLI use', async () => {
   const runtime = await mkdtemp('/tmp/amux-mail-cli-')
   const requests: AgentMuxControlRequest[] = []
+  const delivered: string[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
     requests.push(request)
     if (request.operation === 'open.agent') return { operation: 'open.agent', region: {
       kind: 'agent', regionId: 'new-region', tabId: 'tab', workspaceId: 'workspace',
       agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex'
     } }
+    if (request.operation === 'send') delivered.push(request.message ? renderAgentMuxMessageEnvelope(request.message) : request.text)
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
   await server.start()
@@ -27,7 +29,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     const outputs: Array<Record<string, any>> = []
     for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab'], ['--to-session', 'self']]) {
       const result = await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
-        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender'
+        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender'
       } })
       outputs.push(JSON.parse(result.stdout) as Record<string, any>)
     }
@@ -37,7 +39,7 @@ it('real CLI send retains managed authors for every target without inventing an 
       [{ kind: 'tab', tabId: 'tab' }, { agentSessionId: 'sender' }, 'actual mail'],
       [{ kind: 'self' }, { agentSessionId: 'sender' }, 'actual mail']
     ])
-    const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
+    const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
     await exec(cli, ['send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
     expect(requests.at(-1)).toMatchObject({ operation: 'send', text: 'human mail' })
     expect(requests.at(-1)).not.toHaveProperty('caller')
@@ -50,6 +52,8 @@ it('real CLI send retains managed authors for every target without inventing an 
     expect(records[0]!.envelope.recipient).toEqual({ kind: 'agent-session', agentSessionId: 'other' })
     expect(records[0]!.envelope.body).toBe('actual mail')
     expect(requests[0]).toMatchObject({ operation: 'send', message: { sender: { agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
+    expect(delivered[0]).toContain('<amux from="sender" to="other"')
+    expect(delivered[0]).toContain('actual mail')
     await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests).toHaveLength(5)

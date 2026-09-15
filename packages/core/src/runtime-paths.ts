@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -44,7 +44,12 @@ export function defaultAgentMuxControlSocketPath(): string {
 }
 
 export function defaultAgentMuxMessageQueuePath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'state', 'global-messages.ndjson')
+  const override = process.env.AGENTMUX_MESSAGE_QUEUE_PATH?.trim()
+  if (override) {
+    if (!isAbsolute(override)) throw new Error('AGENTMUX_MESSAGE_QUEUE_PATH must be an absolute path.')
+    return resolve(override)
+  }
+  return join(homedir(), '.agentmux', 'state', 'global-messages.ndjson')
 }
 
 export function defaultAgentMuxHookPort(): number {

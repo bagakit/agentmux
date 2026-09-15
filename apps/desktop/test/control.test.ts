@@ -9,6 +9,7 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxExecutorProbeOutcome
 } from '@agentmux/core'
+import type { AgentMuxMessageEnvelope } from '@agentmux/core'
 import { BUILT_IN_AGENT_LABELS, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
@@ -237,6 +238,26 @@ describe('Desktop Control owner', () => {
         { agentSessionId: 'reviewer', regionIds: ['region-reviewer'] }
       ]
     })
+  })
+
+  it('delivers the verified A2A envelope to the resolved recipient instead of dropping to bare text', async () => {
+    const tab = fixture()
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    const message: AgentMuxMessageEnvelope = {
+      schema: 'agentmux.a2a.v1', messageId: 'message-envelope-1', operationId: 'control-request-1', createdAt: 1,
+      sender: { kind: 'agent-session', agentSessionId: 'caller' },
+      recipient: { kind: 'target', target: { kind: 'tab', tabId: tab.id } },
+      threadId: 'thread-1', correlationId: 'correlation-1', replyTo: null, workspaceId: 'workspace',
+      senderSessionId: 'caller', senderRunId: 'run-caller', recipientSessionId: 'caller', recipientRunId: 'run-caller',
+      body: 'keep this exact body'
+    }
+    await useAppStore.getState().executeControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
+      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message
+    })
+    expect(submit).toHaveBeenCalledWith(agent('caller').control, expect.stringContaining('<amux from="caller" to="tab"'), 'message-envelope-1', 'caller')
+    expect(submit.mock.calls[0]?.[1]).toContain('keep this exact body')
   })
 
   // T-002 身份关联 + 环境安全：新开的 Agent Region 与它的 Session（agentSessionId）、Run（runId）、

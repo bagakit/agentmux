@@ -167,6 +167,20 @@ describe('Control protocol', () => {
     })).toThrow('operation')
   })
 
+  it('binds an A2A sender to the managed caller and its explicit Control target', () => {
+    const message = {
+      schema: 'agentmux.a2a.v1', messageId: 'message-1', operationId: 'request-1', createdAt: 1,
+      sender: { kind: 'agent-session', agentSessionId: 'caller' },
+      recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
+      threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null,
+      senderSessionId: 'caller', senderRunId: null, recipientSessionId: 'recipient', recipientRunId: null,
+      body: 'body'
+    } as const
+    expect(parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toMatchObject({ message })
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-2', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'other' }, message })).toThrow('sender')
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('recipient')
+  })
+
   it('keeps open content and destinations as closed discriminated unions', () => {
     expect(parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
