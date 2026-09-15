@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
@@ -146,7 +146,11 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
 }
 
 function sameEnvelope(left: AgentMuxMessageEnvelope, right: AgentMuxMessageEnvelope): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  const comparable = (value: AgentMuxMessageEnvelope): Omit<AgentMuxMessageEnvelope, 'operationId' | 'createdAt'> => {
+    const { operationId: _operationId, createdAt: _createdAt, ...rest } = value
+    return rest
+  }
+  return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right))
 }
 
 function queueIdFor(path: string): string {
@@ -191,11 +195,30 @@ export class DurableAgentMuxMessageQueue {
     for (let attempt = 0; attempt < 500; attempt += 1) {
       try { handle = await open(lockPath, 'wx', 0o600); break } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        let stale = false
+        try {
+          const metadata = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: number; acquiredAt?: number }
+          const pid = metadata.pid
+          if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+            try { process.kill(pid, 0) } catch (probeError) {
+              stale = (probeError as NodeJS.ErrnoException).code === 'ESRCH'
+            }
+          } else stale = true
+          if (!stale && typeof metadata.acquiredAt === 'number' && Date.now() - metadata.acquiredAt > 30_000) stale = false
+        } catch {
+          try {
+            const stat = await lstat(lockPath)
+            stale = Date.now() - stat.mtimeMs > 30_000
+          } catch { stale = true }
+        }
+        if (stale) { await rm(lockPath, { force: true }); continue }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     }
     if (!handle) throw new AgentMuxError('Message queue writer is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
     try {
+      await handle.writeFile(JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }))
+      await handle.sync()
       this.loaded = false
       this.bytes = 0
       this.nextSequence = 1

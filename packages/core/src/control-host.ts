@@ -92,12 +92,16 @@ function finiteNumber(value: unknown, message: string): number {
   return value
 }
 
-function caller(value: unknown): { agentSessionId: string } {
+function caller(value: unknown): { agentSessionId: string; capability?: string } {
   const source = object(value, 'Control caller is invalid.', 'INVALID_CONTROL_REQUEST')
-  return { agentSessionId: identity(source.agentSessionId, 'Control caller is invalid.', 'INVALID_CONTROL_REQUEST') }
+  const agentSessionId = identity(source.agentSessionId, 'Control caller is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.capability !== undefined && (typeof source.capability !== 'string' || !source.capability.trim())) {
+    throw new AgentMuxError('Control caller capability is invalid.', 'INVALID_CONTROL_REQUEST')
+  }
+  return { agentSessionId, ...(source.capability === undefined ? {} : { capability: source.capability }) }
 }
 
-function optionalCaller(value: unknown): { agentSessionId: string } | undefined {
+function optionalCaller(value: unknown): { agentSessionId: string; capability?: string } | undefined {
   return value === undefined ? undefined : caller(value)
 }
 
@@ -301,7 +305,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
     const message = source.message === undefined ? undefined : validateAgentMuxMessageEnvelope(source.message as AgentMuxMessageEnvelope)
     if (message && message.body !== source.text) throw new AgentMuxError('Message body must equal Control text.', 'MESSAGE_ENVELOPE_INVALID')
-    if (message?.sender.kind === 'agent-session' && (!owner || message.sender.agentSessionId !== owner.agentSessionId || message.senderSessionId !== owner.agentSessionId)) {
+    if (message?.sender.kind === 'agent-session' && (!owner || !owner.capability || message.sender.agentSessionId !== owner.agentSessionId || message.senderSessionId !== owner.agentSessionId)) {
       throw new AgentMuxError('Message sender does not match the managed caller.', 'MESSAGE_SENDER_MISMATCH')
     }
     if (message?.recipient.kind === 'agent-session' && target.kind === 'agent-session' && message.recipient.agentSessionId !== target.agentSessionId) {
