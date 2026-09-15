@@ -7,9 +7,9 @@ import type {
 export type FollowOutput = {
   runId: string
   replay: boolean
-  startByte: number | null
-  endByte: number | null
-  data: string
+  startByte: number
+  endByte: number
+  dataBytes: Uint8Array
 }
 
 export type FollowEnd = {
@@ -21,11 +21,6 @@ export type FollowEnd = {
 type FollowEvent = Extract<AgentMuxClientEvent, {
   type: 'terminal-output' | 'process-state'
 }>
-
-function dataAfterByte(data: string, eventStartByte: number, afterByte: number): string {
-  if (afterByte <= eventStartByte) return data
-  return Buffer.from(data).subarray(afterByte - eventStartByte).toString('utf8')
-}
 
 export class OrderedSessionOutputFollow {
   private readonly pending: FollowEvent[] = []
@@ -56,14 +51,7 @@ export class OrderedSessionOutputFollow {
   finishReplay(replay: readonly AgentMuxRunDataEvent[]): void {
     if (this.replayFinished) return
     for (const event of replay) {
-      this.output({
-        runId: event.runId,
-        replay: true,
-        startByte: event.startByte,
-        endByte: event.endByte,
-        data: event.data
-      })
-      this.cursor = Math.max(this.cursor, event.endByte)
+      this.emitBytes(event.dataBytes, event.startByte, event.endByte, true)
     }
     this.replayFinished = true
     for (const event of this.pending.splice(0)) this.emitLive(event)
@@ -80,25 +68,19 @@ export class OrderedSessionOutputFollow {
       return
     }
     const range = event.evidence.outputByteRange
-    if (!range) {
-      this.output({
-        runId: this.runId,
-        replay: false,
-        startByte: null,
-        endByte: null,
-        data: event.data
-      })
-      return
-    }
-    if (range.endByte <= this.cursor) return
-    const startByte = Math.max(range.startByte, this.cursor)
+    this.emitBytes(event.dataBytes, range.startByte, range.endByte, false)
+  }
+
+  private emitBytes(dataBytes: Uint8Array, eventStartByte: number, endByte: number, replay: boolean): void {
+    if (endByte <= this.cursor) return
+    const startByte = Math.max(eventStartByte, this.cursor)
     this.output({
       runId: this.runId,
-      replay: false,
+      replay,
       startByte,
-      endByte: range.endByte,
-      data: dataAfterByte(event.data, range.startByte, startByte)
+      endByte,
+      dataBytes: dataBytes.subarray(startByte - eventStartByte)
     })
-    this.cursor = range.endByte
+    this.cursor = endByte
   }
 }

@@ -40,6 +40,8 @@ await client.releaseRunAttachment(attachment.run)
 
 Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 建立 retained Attachment，`readRunReplay(run, afterByte)` 在不新增 retained owner 的前提下为另一个 View 读取有界 Replay，`releaseRunAttachment(run)` 按 exact RunRef 释放。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。Remote 当前返回 `REMOTE_UNSUPPORTED`。
 
+Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `output` 与 `output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
+
 Shell checkpoint 已证明：same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live、complete stubborn-tree Stop，以及 checkout-external packed consumer。
 
 Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与有界 retired Run tombstone；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。

@@ -79,7 +79,7 @@ export class AgentMuxClientEventPublisher {
     agentSession?: AgentMuxAgentSession
   ): void {
     if (event.type === 'data') {
-      const evidence: AgentMuxEvidence = {
+      const evidence: Extract<AgentMuxClientEvent, { type: 'terminal-output' }>['evidence'] = {
         source: 'terminal-output',
         observedAt: Date.now(),
         run: runRef(event),
@@ -89,6 +89,7 @@ export class AgentMuxClientEventPublisher {
         type: 'terminal-output',
         ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
         run: runRef(event),
+        dataBytes: event.dataBytes,
         data: event.data,
         evidence
       })
