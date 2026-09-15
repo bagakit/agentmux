@@ -34,6 +34,7 @@ const runtimeFixture = vi.hoisted(() => {
       }
     })
     readonly dispose = vi.fn(async () => {})
+    readonly authorizeAgentMessage = vi.fn(() => {})
     eventListener: ((event: unknown) => void) | null = null
     readonly onEvent = vi.fn((listener: (event: unknown) => void) => {
       this.eventListener = listener
@@ -358,6 +359,23 @@ function agentStatusFixture() {
 }
 
 describe('RuntimeController configuration transaction', () => {
+  it('routes complete A2A Session/Run facts through Core at the main-process boundary', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient?.instances?.at(-1)
+    await controller.authorizeAgentMessage({
+      capability: 'capability', callerAgentSessionId: 'caller-cli',
+      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
+      recipientSessionId: 'recipient', recipientRunId: 'run-recipient'
+    })
+    expect(client?.authorizeAgentMessage).toHaveBeenCalledWith(expect.objectContaining({ recipientRunId: 'run-recipient' }))
+    client?.authorizeAgentMessage.mockImplementationOnce(() => { throw Object.assign(new Error('recipient facts mismatch'), { code: 'MESSAGE_RECIPIENT_MISMATCH' }) })
+    await expect(controller.authorizeAgentMessage({
+      capability: 'capability', callerAgentSessionId: 'caller-cli',
+      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
+      recipientSessionId: 'recipient', recipientRunId: null
+    })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
+    await controller.dispose()
+  })
   beforeEach(() => {
     runtimeFixture.FakeClient.instances.length = 0
     runtimeFixture.FakeClient.failNextConnect = false
