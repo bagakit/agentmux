@@ -14,7 +14,7 @@
 // 反过来：接口是三个纯取值方法，用假 buffer 就能逐条断言，包括下面那条最容易写错的换行合并。
 //
 // 取值范围有两档，因为「复制」在终端里本就是两个意思，不该合成一个按钮：可视区（我现在看见的这屏）
-// 与整个回滚缓冲（这个会话到目前为止的全部输出）。
+// 与当前保留的正常回滚缓冲。
 
 /** 一行缓冲区文本。取 xterm `IBufferLine` 的**最小**子集——这一层只需要这两样。 */
 export interface TerminalBufferLine {
@@ -117,12 +117,12 @@ export function terminalViewportText(buffer: TerminalBufferSnapshot, rows: numbe
 }
 
 /**
- * 整个回滚缓冲的文本——「复制这个会话到目前为止的全部输出」。
+ * 当前保留的 normal 回滚缓冲的文本，不包含已淘汰行或 alternate 输出。
  *
  * 调用方必须喂 **normal buffer**，不是 `buffer.active`。这是 #638 那次修复漏掉的半条：全屏 TUI
  * 会把终端切到 alternate buffer（DECSET ?1049），那块缓冲按定义只有一屏、没有回滚，而此刻
  * `buffer.active` 正指着它。跟着 active 走，「全部输出」就在 TUI 开着时缩水成当前一屏，
- * 想复制的内容一旦滚出去就直接取空——而且是静默取空。会话历史始终留在 normal buffer 里。
+ * 想复制的内容一旦滚出去就直接取空——而且是静默取空。normal buffer 只保留自身的有限历史，alternate 中的输出不会自动追加进去。
  *
  * 这一层不接收终端对象、也不自己挑缓冲区：挑哪一块是**调用点的判定**，在那里被
  * terminal-buffer-copy-wiring 逐个调用点钉死取值身份。这里多一个「要不要 normal」的开关，

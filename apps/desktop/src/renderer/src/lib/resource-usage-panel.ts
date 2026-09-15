@@ -72,6 +72,14 @@ export function formatCpu(cpuPercent: number | null): string {
   return `${cpuPercent.toFixed(1)}%`
 }
 
+/** Runtime retention/storage are byte counts, not process RSS. Keep small values visible. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`
+}
+
 /**
  * `usagePanelRows` 的可选输入。
  *

@@ -2,15 +2,17 @@ import { useState } from 'react'
 import { History, LoaderCircle, RefreshCw } from 'lucide-react'
 import { presentError } from '../lib/error-presentation'
 
-export function TerminalReplayGapNotice({ canRedraw, onRedraw }: {
+export function TerminalReplayGapNotice({ canRedraw, onRedraw, compact = false }: {
   canRedraw: boolean
+  compact?: boolean
   onRedraw(): Promise<boolean>
 }) {
   const [redrawing, setRedrawing] = useState(false)
   const [requested, setRequested] = useState(false)
   const [error, setError] = useState('')
-  const explanation = 'Earlier scrollback is unavailable. Redraw requests a repaint of the current screen; it cannot restore missing history.'
-  if (requested) return <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={`Screen redraw requested. ${explanation}`} aria-label={`Screen redraw requested. ${explanation}`}>
+  const explanation = 'Earlier Runtime output is no longer retained or the source reported a byte gap. Redraw requests a repaint of the current screen; it cannot restore missing history.'
+  const detail = `${requested ? 'Screen redraw requested.' : 'History gap.'} ${explanation}`
+  if (requested || compact) return <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={detail} aria-label={detail}>
     <History size={12} aria-hidden="true" />
   </div>
   return <div className="terminal-replay-gap" role="status">

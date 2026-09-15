@@ -4,6 +4,7 @@ import {
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
+  endpointDirectoryUsage,
   type AgentCapabilities,
   type AgentCatalogEntry,
   type AgentExecutorId,
@@ -34,6 +35,7 @@ import type {
   RuntimeEvent,
   RuntimeSnapshot,
   SessionAttachResult,
+  SessionReplayResult,
   SessionControl,
   SessionRecoveryResult,
   SessionSnapshot,
@@ -47,6 +49,7 @@ import {
 import { createExecutionHost } from './host-factory.js'
 import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
 import { ProcessResourceSampler } from './process-resource-sampler.js'
+import type { RuntimeUsage } from '../shared/process-usage.js'
 import { humanizePromptDeliveryError } from './prompt-readiness-diagnostics.js'
 import {
   SCRATCH_WORKSPACE_ID,
@@ -290,6 +293,9 @@ export class RuntimeController {
   private readonly sessionAttachmentOwners = new Map<string, SessionAttachmentOwner>()
   private readonly sessionAttachmentLeases = new Map<string, SessionAttachmentLease>()
   private readonly sessionAttachmentTails = new Map<string, Promise<void>>()
+  // SDK replay cannot currently be canceled. Keep one pending read per exact Run even if a
+  // timed-out pane is recreated; a client deadline must not accumulate transient attachments.
+  private readonly sessionReplayReads = new Map<string, Promise<SessionReplayResult>>()
   private readonly rendererGenerations = new Map<number, number>()
   private readonly hostLifecycleOperations = new Map<string, Set<Promise<void>>>()
   private readonly hostReconfigurationReservations = new Set<string>()
@@ -324,6 +330,42 @@ export class RuntimeController {
       sessionAttachmentOwners: this.sessionAttachmentOwners.size,
       sessionAttachmentLeases: this.sessionAttachmentLeases.size
     }
+  }
+
+  /** Observe already-connected owners; this never reconnects, stops, attaches, or removes a Run. */
+  async resourceUsageObservation(): Promise<RuntimeUsage[]> {
+    const hosts = [...this.hosts]
+    const storage = hosts.some(([, host]) => host.executionHost.kind === 'local')
+      ? endpointDirectoryUsage().then(
+        (endpointStorage) => ({ endpointStorage, endpointStorageUnavailable: null }),
+        (error: unknown) => ({
+          endpointStorage: null,
+          endpointStorageUnavailable: error instanceof Error ? error.message : String(error)
+        })
+      )
+      : Promise.resolve({ endpointStorage: null, endpointStorageUnavailable: 'Remote endpoint storage is unavailable' })
+    return await Promise.all(hosts.map(async ([hostId, { client, executionHost }]): Promise<RuntimeUsage> => {
+      const [resources, endpoint] = await Promise.all([
+        client.runtimeResourceSnapshot().then(
+          (resources) => ({ resources, unavailable: null }),
+          (error: unknown) => ({ resources: null, unavailable: error instanceof Error ? error.message : String(error) })
+        ),
+        executionHost.kind === 'local'
+          ? storage
+          : Promise.resolve({ endpointStorage: null, endpointStorageUnavailable: 'Remote endpoint storage is unavailable' })
+      ])
+      return {
+        hostId,
+        ...resources,
+        ...endpoint,
+        process: {
+          cpuPercent: null,
+          rssKib: null,
+          unavailable: 'ctxmux does not publish its daemon PID'
+        },
+        endpointReclaim: client.endpointReclaim()
+      }
+    }))
   }
 
   async prepare(config: AppConfig): Promise<RuntimePreparation> {
@@ -769,6 +811,33 @@ export class RuntimeController {
         throw error
       }
     })
+  }
+
+  async readSessionReplay(webContentsId: number, attachmentId: string, afterByte: number): Promise<SessionReplayResult> {
+    const lease = this.sessionAttachmentLeases.get(attachmentId)
+    if (!lease || lease.webContentsId !== webContentsId) {
+      throw new Error('Retained history requires this Desktop client’s Session Attachment lease.')
+    }
+    const owner = this.sessionAttachmentOwners.get(lease.key)
+    if (!owner || !owner.attachmentIds.has(attachmentId)) {
+      throw new Error('The Session Attachment owner is no longer available.')
+    }
+    if (this.sessionReplayReads.has(lease.key)) {
+      throw new Error('A retained history read for this Run is still pending. Live input remains available.')
+    }
+    const read = (async (): Promise<SessionReplayResult> => {
+      const client = await this.connectedClient(owner.control.hostId)
+      const result = await client.readRunReplay(owner.control.run, afterByte)
+      if (result.run.runId !== owner.control.run.runId) {
+        throw new Error('Retained history returned a different Run.')
+      }
+      return { replay: result.replay, gap: result.gap }
+    })()
+    this.sessionReplayReads.set(lease.key, read)
+    try { return await read }
+    finally {
+      if (this.sessionReplayReads.get(lease.key) === read) this.sessionReplayReads.delete(lease.key)
+    }
   }
 
   async detachSession(webContentsId: number, attachmentId: string): Promise<void> {

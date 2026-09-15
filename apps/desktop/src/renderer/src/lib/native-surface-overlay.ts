@@ -1,5 +1,6 @@
 /**
- * 窗口级原生视图（Browser 的 WebContentsView、编辑器）合成在**所有 renderer 像素之上**。
+ * 窗口级原生 Browser 视图（WebContentsView）合成在**所有 renderer 像素之上**。
+ * Terminal 与 Monaco Editor 都在 renderer DOM 内，浮层遮挡不能改变它们的实际可见性。
  * 任何画在 DOM 里的浮层——对话框、右键菜单、下拉、命令面板、提示条——都会被它盖住，
  * 与 z-index 无关：它们根本不在同一个合成层里。
  *

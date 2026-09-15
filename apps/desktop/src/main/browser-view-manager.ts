@@ -336,6 +336,25 @@ export class BrowserViewManager {
     private readonly operationJournal?: BrowserOperationJournal
   ) {}
 
+  resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
+    return {
+      browserViews: [...this.entries.values()].filter((entry) => !entry.view.webContents.isDestroyed()).length,
+      releasedBrowserViews: this.releasedEntries.size
+    }
+  }
+
+  /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
+  resourceProcessIds(): number[] {
+    const pids = new Set<number>()
+    for (const { view } of this.entries.values()) {
+      if (view.webContents.isDestroyed()) continue
+      for (const frame of view.webContents.mainFrame.framesInSubtree) {
+        if (!frame.detached && frame.osProcessId > 0) pids.add(frame.osProcessId)
+      }
+    }
+    return [...pids]
+  }
+
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     if (this.entries.has(id) || this.releasedEntries.has(id)) throw new Error(`Browser already exists: ${id}`)

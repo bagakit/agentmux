@@ -1,7 +1,7 @@
 import type { TerminalGridSize } from './terminal-viewport-sync'
 
 export type TerminalLiveOutputChunk = {
-  data: string
+  dataBytes: Uint8Array
   startByte: number
   endByte: number
 }
@@ -12,16 +12,9 @@ export type TerminalLiveItem = TerminalLiveOutputChunk | { size: TerminalGridSiz
 export const TERMINAL_LIVE_OUTPUT_BATCH_BYTES = 64 * 1024
 
 /**
- * 未消费的 live 输出总量上限。超出的部分从**队头**丢弃。
- *
- * 为什么可以丢：scrollback 只有 5000 行，flood 期间积压的那几十上百 MB 一旦 parse 完立刻被挤出
- * 缓冲——为马上就要滚没的行做无用功，代价却是 renderer 堆随「已产出 − 已 parse」近似线性上涨
- * （agent `cat` 一个 50MB 文件是几十 MB 尖峰，`yes` 跑几秒能到数百 MB，够 GC 抖动乃至 OOM）。
- *
- * 为什么丢队头而不是丢队尾：队尾是**最新**的字节，也是用户正在看的那一屏；丢掉它等于让终端停在
- * 过去。丢队头则只损失中间一段，而那段的省略由 drain 里既有的「序列不连续」告示如实说出来。
- *
- * 上限取 2MiB：约等于 5000 行 × 80 列的几倍，足够覆盖一屏之外的正常回看，又远低于会让堆抖动的量级。
+ * Keep unparsed events bounded at 2 MiB. Overflow drops the oldest queued events, not Runtime
+ * history: the drain must recover retained bytes from its last parsed cursor before consuming
+ * a discontinuous tail. Only Runtime Gap or failed recovery permits an honest omission notice.
  */
 export const TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES = 2 * 1024 * 1024
 
@@ -38,7 +31,7 @@ function chunkBytes(chunk: TerminalLiveItem): number {
  * 告示。这条性质是「恰好一条告示」的来源，不是巧合——测试里钉着它。
  *
  * cursor 的推进不在这里做：drain 逐块把 `nextCursor` 推到 `output.endByte`，所以被丢掉的那段字节
- * 会随着它后面那块一起被跨过去。生产者永远不会因为我们丢了字节而卡住。
+ * 必须先通过 Runtime retained replay 回补，不能把客户端裁剪当成 Runtime 淘汰。
  */
 export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
   chunks: readonly T[],
@@ -67,20 +60,15 @@ export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
   return { queue, droppedBytes }
 }
 
-// 一个模块级的编解码器对：无状态（不用 stream 模式），所以共用是安全的，也避免了「同一份字节
-// 在两个各自新建的 decoder 之间往返」那类隐患。
-const utf8Encoder = new TextEncoder()
-const utf8Decoder = new TextDecoder()
-
 /**
  * 这一块里 `afterByte` 之后的那截。
  *
- * 按**字节**切而不是按字符切：startByte/endByte 是 UTF-8 字节偏移，用 `String.prototype.slice`
- * 会在任何非 ASCII 输出上错位（一个 CJK 字符 3 字节、emoji 4 字节）。
+ * Runtime offsets refer to the original bytes. Semantic text can be empty when a chunk ends
+ * inside UTF-8, or can include a character begun in the preceding chunk; it cannot recreate
+ * this payload. The existing xterm parser owns continuation across raw writes.
  */
-function dataAfterByte(chunk: TerminalLiveOutputChunk, afterByte: number): string {
-  if (afterByte <= chunk.startByte) return chunk.data
-  return utf8Decoder.decode(utf8Encoder.encode(chunk.data).subarray(afterByte - chunk.startByte))
+function dataAfterByte(chunk: TerminalLiveOutputChunk, afterByte: number): Uint8Array {
+  return chunk.dataBytes.subarray(Math.max(0, afterByte - chunk.startByte))
 }
 
 /**
@@ -101,17 +89,26 @@ function dataAfterByte(chunk: TerminalLiveOutputChunk, afterByte: number): strin
 export function composeTerminalLiveOutputWrite(
   batch: readonly TerminalLiveOutputChunk[],
   cursor: number
-): { data: string; cursor: number; gap: boolean } {
-  const parts: string[] = []
+): { dataBytes: Uint8Array; cursor: number; gap: boolean } {
+  const parts: Uint8Array[] = []
+  let bytes = 0
   let nextCursor = cursor
   let gap = false
   for (const chunk of batch) {
     if (chunk.endByte <= nextCursor) continue
     if (chunk.startByte > nextCursor) gap = true
-    parts.push(dataAfterByte(chunk, nextCursor))
+    const suffix = dataAfterByte(chunk, nextCursor)
+    parts.push(suffix)
+    bytes += suffix.byteLength
     nextCursor = chunk.endByte
   }
-  return { data: parts.join(''), cursor: nextCursor, gap }
+  const dataBytes = new Uint8Array(bytes)
+  let offset = 0
+  for (const part of parts) {
+    dataBytes.set(part, offset)
+    offset += part.byteLength
+  }
+  return { dataBytes, cursor: nextCursor, gap }
 }
 
 /** Takes the largest ordered prefix that fits the visual batch budget. */

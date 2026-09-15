@@ -25,10 +25,10 @@ describe('attachment geometry across asynchronous replay', () => {
     const calls: string[] = []
     const onRecoveryError = vi.fn()
     let releasedLine: string | undefined
-    const write = async (data: string) => await new Promise<void>((resolve) => terminal.write(data, resolve))
+    const write = async (data: string | Uint8Array) => await new Promise<void>((resolve) => terminal.write(data, resolve))
     try {
       sync.beginReplay()
-      await hydrateTerminalReplay([{ data: '\x1b[?1049hretained', endByte: 16 }], write)
+      await hydrateTerminalReplay([{ dataBytes: new TextEncoder().encode('\x1b[?1049hretained'), endByte: 16 }], write)
       await expect(finishTerminalReplayRecovery({
         gap: false,
         canControlRun: canControl,
@@ -79,7 +79,7 @@ describe('attachment geometry across asynchronous replay', () => {
       await sync.startLiveSynchronization()
       terminal.resize(132, 45)
       const replay = '\x1b[?1049h\x1b[40;100HWIDE_MARK'
-      await hydrateTerminalReplay([{ data: replay, endByte: replay.length }],
+      await hydrateTerminalReplay([{ dataBytes: new TextEncoder().encode(replay), endByte: replay.length }],
         async (data) => await new Promise<void>((resolve) => terminal.write(data, resolve)),
         async () => {
           sync.observeViewport()
@@ -339,7 +339,7 @@ function redrawRoundTrips(
   ])
   let trips = 0
   for (let index = 0; index + 1 < calls.length; index += 1) {
-    if (oneCellOff.has(calls[index]) && calls[index + 1] === settledKey) trips += 1
+    if (oneCellOff.has(calls[index]!) && calls[index + 1] === settledKey) trips += 1
   }
   return trips
 }

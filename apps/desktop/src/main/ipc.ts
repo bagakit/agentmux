@@ -96,7 +96,7 @@ import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
-import { WorkspaceFiles } from './workspace-files.js'
+import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { sessionSnapshotPayload } from './session-snapshot-payload.js'
@@ -167,6 +167,20 @@ export async function registerIpc(args: {
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
   }, browserOperationJournal)
+  const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
+    observeRuntime: () => args.runtime.resourceUsageObservation(),
+    processOwners: () => ({
+      rendererPids: args.window.webContents.mainFrame.framesInSubtree
+        .filter((frame) => !frame.detached && frame.osProcessId > 0)
+        .map((frame) => frame.osProcessId),
+      browserPids: browsers.resourceProcessIds()
+    }),
+    mainOwners: () => ({
+      ...args.runtime.resourceOwnerCounts(),
+      ...browsers.resourceOwnerCounts(),
+      fileWatchers: workspaceFileObserverCount()
+    })
+  })
   const notifier = createAgentNotifier({
     window: args.window,
     onActivate: (sessionId) => {
@@ -637,6 +651,9 @@ export async function registerIpc(args: {
     await args.runtime.detachSession(event.sender.id, result.attachmentId)
     throw new Error('The Desktop View disappeared before its Session Attachment was delivered.')
   })
+  handleWithEvent('sessions:replay', async (event, attachmentId: string, afterByte: number) => (
+    args.runtime.readSessionReplay(event.sender.id, attachmentId, afterByte)
+  ))
   handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })
@@ -838,6 +855,11 @@ export async function registerIpc(args: {
       },
       async () => await control.stop(),
       () => detach(),
+      () => {
+        for (const unsubscribe of usageSubscriptions.values()) unsubscribe()
+        usageSubscriptions.clear()
+        releaseResourceObservation()
+      },
       () => notifier.dispose(),
       () => browsers.dispose(),
       async () => await browserProfiles.dispose(),

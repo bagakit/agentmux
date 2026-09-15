@@ -957,6 +957,9 @@ export type SessionAttachResult = {
   gap: AgentMuxRunReplayGap | null
 }
 
+/** Ordered retained bytes for an already-owned attachment; creates no Desktop lease. */
+export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
+
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
   | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
@@ -1387,6 +1390,7 @@ export type AgentMuxDesktopApi = {
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
+    replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: AgentMuxRunInputData): Promise<void>
     // `operationId` is the caller's correlation key for ONE submission attempt. A retry of the same
