@@ -282,6 +282,8 @@
 | Tooltip / Context Menu | Session ID、Host、开始/活动时间 | 常驻占用内容高度 |
 | Activity View | 最近消息和结构化事件 | Terminal 上方的重复摘要 |
 
+消息与 Agent 地址的具体可读性约束见交互合同《A2A 消息要让人一眼看懂》；本层只要求工作面优先显示紧凑地址，不常驻铺开机器回执或完整 ID。
+
 ## 顶行与 Tabbar
 
 - Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
