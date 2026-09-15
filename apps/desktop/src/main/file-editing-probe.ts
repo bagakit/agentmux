@@ -604,11 +604,21 @@ async function runExplorerInteractionProbe(options: {
   await waitFor('Radix Move submenu trigger', async () => (
     await window.webContents.executeJavaScript(`Boolean(${submenuTrigger})`) as boolean
   ))
-  await nativeHover(window, 'Radix Move submenu trigger', submenuTrigger)
+  // Radix SubTrigger 打开 SubContent 需要**持续的 pointer hover 信号**：Radix 用 `onPointerMove`
+  // 起 open timer（默认 ~100ms delayHint），单次 mouseMove 若与该 timer 的 pointer 跟踪窗口错位，
+  // sub-menu 就打不开——尤其是 packaged App 的 Chromium 版本合成 pointer 事件时可能丢掉 pointerType
+  // 或 primary 标记。同族问题 `waitForActivePointerDropTarget`（本文件 :412-417）已经踩过一次，那里
+  // 的处置是**每次 poll 都重新送 mouseMove**。这里照抄那条模式：hover 一次后，若 SubContent 未出现，
+  // 每 25ms 重发一次 mouseMove——直到 destination item 可见。20s waitFor 预算不变；断言（destination
+  // item 可见）不变，所以 SubContent 若真的永远打不开、超时照旧红。
+  const submenuPoint = await elementPoint(window, 'Radix Move submenu trigger', submenuTrigger)
+  sendMouse(window, 'mouseMove', submenuPoint)
   const menuTarget = visibleMenuItemSource('targets/menu')
-  await waitFor('Radix Move destination item', async () => (
-    await window.webContents.executeJavaScript(`Boolean(${menuTarget})`) as boolean
-  ))
+  await waitFor('Radix Move destination item', async () => {
+    const ready = await window.webContents.executeJavaScript(`Boolean(${menuTarget})`) as boolean
+    if (!ready) sendMouse(window, 'mouseMove', submenuPoint)
+    return ready
+  })
   const moveCommitReached = options.control.armMoveCommitBarrier()
   await nativeClick(window, 'Radix Move destination item', menuTarget)
   await withTimeout('committed Radix menu move', moveCommitReached)
