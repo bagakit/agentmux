@@ -531,7 +531,6 @@ export async function registerIpc(args: {
   const usageSubscriptions = new Map<number, () => void>()
   const stopUsageSubscription = (webContentsId: number): void => {
     usageSubscriptions.get(webContentsId)?.()
-    usageSubscriptions.delete(webContentsId)
   }
   handleWithEvent('resourceUsage:subscribe', (event) => {
     const sender = event.sender
@@ -540,8 +539,16 @@ export async function registerIpc(args: {
       if (sender.isDestroyed()) return
       sender.send(RESOURCE_USAGE_CHANNEL, snapshot)
     })
-    usageSubscriptions.set(sender.id, unsubscribe)
-    const cleanup = (): void => stopUsageSubscription(sender.id)
+    let disposed = false
+    const cleanup = (): void => {
+      if (disposed) return
+      disposed = true
+      sender.removeListener('destroyed', cleanup)
+      sender.removeListener('did-start-navigation', cleanup)
+      if (usageSubscriptions.get(sender.id) === cleanup) usageSubscriptions.delete(sender.id)
+      unsubscribe()
+    }
+    usageSubscriptions.set(sender.id, cleanup)
     sender.once('destroyed', cleanup)
     sender.once('did-start-navigation', cleanup)
   })
