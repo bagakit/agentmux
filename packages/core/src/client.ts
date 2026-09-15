@@ -379,7 +379,10 @@ export function terminalEnvironment(
     // Tell every process AgentMux spawns where the Agent Session store lives, so the CLI an Agent runs
     // resolves sessions out of the SAME file this Client writes — not the temp default it would otherwise
     // reach. The path's authority is whoever constructed the store (the desktop points it at userData).
-    ...(agentSessionStorePath ? { AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath } : {})
+    ...(agentSessionStorePath ? {
+      AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath,
+      AGENTMUX_MESSAGE_QUEUE_PATH: join(dirname(agentSessionStorePath), 'global-messages.ndjson')
+    } : {})
   }
   // `environment` is the last merge before the PTY boundary. A desktop process can carry
   // NO_COLOR/CLICOLOR=0 from the shell that launched it, and passing those values through here makes

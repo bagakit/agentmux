@@ -1678,6 +1678,8 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### A2A 身份信封与持久化全局消息队列
 
+- **验收修正：发送成功必须意味着收件 Agent 实际收到可读来源/目标信封，且 Core 已按真实 Session/Run 与已解析目标核验身份。** CLI 环境变量只是身份线索，不是权威；Desktop 不得忽略结构化消息后只投递裸正文。正文原样嵌在信封内，Control requestId 仍只作请求关联；同一消息的重试必须复用稳定的消息身份。
+- **持久队列的唯一写入权属于 AgentMux Core。** 同一路径即使遇到多个进程或多个对象并发，也必须保持全局唯一、递增的顺序号和可重放的完整记录；队列所在位置不得受 ctxmux 版本化临时端点回收影响。失去持久写入确认时明确拒绝入队并告知状态，不能宣称已投递或判定健康 Agent 死亡。
 - `agentmux send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
