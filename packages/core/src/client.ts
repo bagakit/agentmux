@@ -79,6 +79,7 @@ import { mintAgentSessionId } from './agent-session-id.js'
 import type { EndpointReclaimOutcome } from './runtime-endpoint-reclaim.js'
 import {
   AgentMuxFileAgentSessionStore,
+  loadAgentSessions,
   type AgentMuxAgentSessionStore
 } from './agent-session-store.js'
 import {
@@ -123,6 +124,8 @@ import type {
   AgentMuxRuntimeIdentity,
   AgentMuxRuntimeResourceSnapshot,
   AgentNativeSessionHandle,
+  AgentSessionHistoryPage,
+  AgentSessionHistoryPageOptions,
   AgentTerminalCapabilityState,
   AgentTerminalOutputChannelState,
   AgentTimelineItem,
@@ -132,9 +135,11 @@ import type {
   AgentStatus,
   NativeHookEnvelope
 } from './types.js'
+import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
+const SESSION_HISTORY_MAX_CONCURRENT = 4
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('agentmux')
 
 export type AgentMuxAgentCreateInput = {
@@ -528,6 +533,8 @@ export class AgentMuxClient {
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, Promise<void>>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
+  private readonly sessionHistoryReads = new Set<AbortController>()
+  private sessionHistoryDisposed = false
   // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
   // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
@@ -797,6 +804,7 @@ export class AgentMuxClient {
     const verdict = judgeReconnectFlap({ flapCount: this.reconnectFlaps })
     this.reconnectFlaps = verdict.flapCount
     this.connected = false
+    this.cancelSessionHistoryReads()
     // 线断了 ⇒ 一切**长命的屏幕观察**当场失效。这不是卫生，是可观测的行为改变，也是 #628 的关键一环：
     //
     // 掉线时，`observeOutput` 的排空循环把错误交给 adapter 那个**全局** errorListener，而不是交给某次观察
@@ -1154,6 +1162,7 @@ export class AgentMuxClient {
   }
 
   disconnect(): void {
+    this.cancelSessionHistoryReads()
     this.connectionEpoch += 1
     this.connected = false
     this.connecting = null
@@ -1176,6 +1185,8 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.sessionHistoryDisposed = true
+    this.cancelSessionHistoryReads()
     await this.hookServer.stop()
     this.disconnect()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
@@ -1208,6 +1219,81 @@ export class AgentMuxClient {
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
     this.requireAgentSession(agentSessionId)
     return await this.store.loadTimeline(agentSessionId)
+  }
+
+  /** Read existing Provider conversation history without controlling the Session's Run. */
+  async sessionHistoryPage(
+    agentSessionId: string,
+    options: AgentSessionHistoryPageOptions = {}
+  ): Promise<AgentSessionHistoryPage> {
+    if (this.sessionHistoryDisposed) {
+      throw new AgentMuxError('History reading client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
+    }
+    const limit = options.limit ?? 30
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      (options.cursor !== undefined && (typeof options.cursor !== 'string' || !options.cursor || options.cursor.length > 16_384))) {
+      throw new AgentMuxError('History page requires a finite limit from 1 to 100 and an opaque cursor.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
+    }
+    if (this.sessionHistoryReads.size >= SESSION_HISTORY_MAX_CONCURRENT) {
+      throw new AgentMuxError('History reading is busy; retry after the current page finishes.', 'AGENT_SESSION_HISTORY_BUSY')
+    }
+    const controller = new AbortController()
+    this.sessionHistoryReads.add(controller)
+    const timer = setTimeout(() => controller.abort(new AgentMuxError(
+      'Native history page timed out.', 'AGENT_SESSION_HISTORY_TIMEOUT'
+    )), SESSION_HISTORY_TIMEOUT_MS)
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(controller.signal.reason)
+      controller.signal.addEventListener('abort', abort, { once: true })
+    })
+    let currentRead: Promise<unknown> | undefined
+    const read = <T>(operation: Promise<T>): Promise<T> => {
+      currentRead = operation
+      return Promise.race([operation, cancelled])
+    }
+    try {
+      // Conversation identity belongs to the durable Store, even before Runtime connection or recovery.
+      const sessions = await read(loadAgentSessions(this.store))
+      controller.signal.throwIfAborted()
+      const session = sessions.find((entry) => entry.agentSessionId === agentSessionId)
+      if (!session) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+      const provider = this.providers.get(session.providerId)
+      if (!provider.readSessionHistoryPage) {
+        throw new AgentMuxError('This Provider does not expose native conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
+      }
+      const handle = session.nativeHandle
+      if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) {
+        throw new AgentMuxError('The main native Session identity has not been established.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+      }
+      const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      const page = await read(provider.readSessionHistoryPage({
+        source, limit, signal: controller.signal,
+        ...(options.cursor === undefined ? {} : { cursor: options.cursor })
+      }))
+      controller.signal.throwIfAborted()
+      const current = (await read(loadAgentSessions(this.store)))
+        .find((entry) => entry.agentSessionId === agentSessionId)
+      controller.signal.throwIfAborted()
+      if (!current || current.providerId !== source.providerId || current.nativeHandle?.kind !== 'provider' ||
+        current.nativeHandle.providerId !== source.providerId || current.nativeHandle.sessionId !== source.nativeSessionId) {
+        throw new AgentMuxError('Native history identity changed while reading; reopen its newest page.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }
+    } finally {
+      clearTimeout(timer)
+      controller.signal.removeEventListener('abort', abort)
+      // The current Store or Provider operation owns its read slot until it settles.
+      const release = (): void => { this.sessionHistoryReads.delete(controller) }
+      if (currentRead) void currentRead.then(release, release)
+      else release()
+    }
+  }
+
+  private cancelSessionHistoryReads(): void {
+    for (const controller of this.sessionHistoryReads) {
+      controller.abort(new AgentMuxError('History reading was cancelled when the client disconnected.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+    }
   }
 
   resolveAgentSession(lookup: AgentMuxAgentSessionLookup): AgentMuxAgentSession {
