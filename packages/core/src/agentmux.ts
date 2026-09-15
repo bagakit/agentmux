@@ -644,6 +644,16 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     recipientRunId: facts?.recipient.run.runId ?? null,
     body
   }
+  if (owner && capability) {
+    await withClient((client) => Promise.resolve(client.authorizeAgentMessage({
+      capability,
+      callerAgentSessionId: owner.agentSessionId,
+      senderSessionId: messageInputBase.senderSessionId,
+      senderRunId: messageInputBase.senderRunId,
+      recipientSessionId: messageInputBase.recipientSessionId,
+      recipientRunId: messageInputBase.recipientRunId
+    })))
+  }
   const requestedMessageId = flags.values.get('--message-id')
   const messageInput: AgentMuxMessageAppendInput = requestedMessageId === undefined ? messageInputBase : { ...messageInputBase, messageId: requestedMessageId }
   const queued = await appendGlobalMessage(messageInput)
