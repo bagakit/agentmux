@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
@@ -10,6 +10,8 @@ import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
 
 export type AgentMuxMessageIdentity =
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
+  /** Unattributed local ingress. The established wire kind does not authenticate a human;
+   * principal records the transport and must never be displayed as participant identity. */
   | { readonly kind: 'human'; readonly principal: 'local-cli' }
 
 export type AgentMuxMessageRecipient =
@@ -203,6 +205,9 @@ export class DurableAgentMuxMessageQueue {
     const mutexPath = `${this.path}.mutex.sqlite`
     let mutex: DatabaseSync
     try {
+      // Loading the queue's validator or CLI help must not initialize SQLite or put an
+      // experimental-module warning in the machine-readable error receipt stream.
+      const { DatabaseSync } = await import('node:sqlite')
       mutex = new DatabaseSync(mutexPath)
       await chmod(mutexPath, 0o600)
       mutex.exec('PRAGMA busy_timeout = 10000')

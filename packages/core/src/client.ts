@@ -75,6 +75,7 @@ import {
   type CtxmuxAdapterStopOperation
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
+import { mintAgentSessionId } from './agent-session-id.js'
 import type { EndpointReclaimOutcome } from './runtime-endpoint-reclaim.js'
 import {
   AgentMuxFileAgentSessionStore,
@@ -189,6 +190,8 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 }
 
 export type AgentMuxAgentPromptInput = {
+  /** Explicit choice for this message only: the previous turn may still be running. */
+  allowUncertainTurn?: boolean
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
   expectedCompletionId?: string
   /** Cancellation before admission; an already claimed input transaction finishes or reconciles. */
@@ -1537,13 +1540,14 @@ export class AgentMuxClient {
   authorizeAgentMessage(input: {
     capability: string
     callerAgentSessionId: string
+    senderAgentSessionId: string | null
     senderSessionId: string | null
     senderRunId: string | null
     recipientSessionId: string | null
     recipientRunId: string | null
   }): void {
     const sender = this.authorizeAgentCaller(input.capability, input.callerAgentSessionId)
-    if (input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
+    if (input.senderAgentSessionId !== sender.agentSessionId || input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
       throw new AgentMuxError('A2A sender facts do not match the authorized Agent Session/Run.', 'MESSAGE_SENDER_MISMATCH')
     }
     if (input.recipientSessionId === null || input.recipientRunId === null) {
@@ -1700,7 +1704,7 @@ export class AgentMuxClient {
   }> {
     this.requireConnected()
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
-    const agentSessionId = safeId(input.agentSessionId ?? randomUUID(), 'Agent Session id')
+    const agentSessionId = safeId(input.agentSessionId ?? mintAgentSessionId(), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'create',
@@ -2412,7 +2416,7 @@ export class AgentMuxClient {
 
   async respawnAgent(input: AgentMuxAgentRespawnInput): Promise<AgentMuxAgentSession> {
     const previous = this.requireAgentSession(input.previousAgentSessionId)
-    const agentSessionId = input.agentSessionId ?? randomUUID()
+    const agentSessionId = input.agentSessionId ?? mintAgentSessionId()
     if (agentSessionId === previous.agentSessionId) {
       throw new AgentMuxError('Respawn must create a new Agent Session identity.', 'AGENT_SESSION_ID_REUSE')
     }
@@ -2433,8 +2437,8 @@ export class AgentMuxClient {
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
     this.requireConnected()
-    const content = input.prompt.trim()
-    if (!content) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    const content = input.prompt
+    if (!content.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(content)
     // send 是纯用户话：出站文本经唯一出口产出，但不加 amux 信封——用户原文逐字节透传。
     const outbound = composeOutboundMessage({ user: content })
@@ -2446,7 +2450,7 @@ export class AgentMuxClient {
     const session = this.requireAgentSession(input.agentSessionId)
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     await this.serializeAgentInput(session, async (current, run) => {
-      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal)
+      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal, input.allowUncertainTurn)
     })
     await this.recordPromptAfterSideEffect(
       this.requireAgentSession(input.agentSessionId),
@@ -2454,7 +2458,9 @@ export class AgentMuxClient {
       'Prompt',
       outbound,
       Date.now(),
-      input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {}
+      {
+        ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {})
+      }
     )
   }
 

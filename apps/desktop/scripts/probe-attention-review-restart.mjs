@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { isDeepStrictEqual } from 'node:util'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
@@ -20,6 +21,9 @@ const sessionId = 'session-restart-probe'
 const runId = 'run-restart-probe'
 const tabId = 'tab-restart-probe'
 const regionId = 'region-restart-probe'
+const fileRegionId = 'region-restart-probe-file'
+const filePath = join(workspacePath, 'restart-layout.txt')
+const expectedRegionIds = [regionId, fileRegionId].sort()
 const draft = 'draft survives a real Electron restart'
 
 const fixtureConfig = {
@@ -46,8 +50,11 @@ const workbenchSeed = {
     restoredWorkbench: {
       tabs: { [tabId]: {
         id: tabId, workspaceId: 'workspace-restart-probe', titleRegionId: regionId,
-        layout: { root: { type: 'leaf', regionId }, activeRegionId: regionId },
-        regions: { [regionId]: { regionId, kind: 'agent', phase: 'attached', workspaceId: 'workspace-restart-probe', sessionId } }
+        layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.4, first: { type: 'leaf', regionId }, second: { type: 'leaf', regionId: fileRegionId } }, activeRegionId: regionId },
+        regions: {
+          [regionId]: { regionId, kind: 'agent', phase: 'attached', workspaceId: 'workspace-restart-probe', sessionId },
+          [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId: 'workspace-restart-probe', path: filePath }
+        }
       } },
       layouts: { 'workspace-restart-probe': {
         root: { type: 'leaf', groupId: 'group-restart-probe' },
@@ -58,6 +65,10 @@ const workbenchSeed = {
   }, version: 1
 }
 const workbenchSeedRaw = JSON.stringify(workbenchSeed)
+const expectedWorkbenchStructure = {
+  tabs: { [tabId]: workbenchSeed.state.restoredWorkbench.tabs[tabId].layout },
+  layouts: workbenchSeed.state.restoredWorkbench.layouts
+}
 const inputDigest = createHash('sha256').update(JSON.stringify({ fixtureConfig, fixtureSession, workbenchSeed })).digest('hex')
 
 async function waitForJson(path, timeoutMs = 30_000) {
@@ -78,7 +89,8 @@ function identity(report) {
     executionFocusHistory: report.workbench.executionFocusHistory,
     pmoFocusSessionId: report.workbench.pmoFocusSessionId,
     sessionIds: report.sessions.sessions.map((session) => session.agentSessionId),
-    runIds: report.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : [])
+    runIds: report.sessions.sessions.flatMap((session) => session.runId ? [session.runId] : []),
+    workbenchStructure: report.workbenchStructure
   }
 }
 
@@ -87,8 +99,9 @@ function assertReport(report, label) {
   if (!Number.isInteger(report.pid) || report.pid <= 0) throw new Error(`${label}: Electron PID is missing.`)
   if (report.userData !== userData || report.runtimeDirectory !== runtimeDirectory) throw new Error(`${label}: durable roots drifted.`)
   if (report.workbench.storagePresent !== true) throw new Error(`${label}: Workbench storage is absent.`)
+  if (!isDeepStrictEqual(report.workbenchStructure, expectedWorkbenchStructure)) throw new Error(`${label}: Tab Group or split layout/focus changed.`)
   if (JSON.stringify(report.workbench.tabIds) !== JSON.stringify([tabId])) throw new Error(`${label}: Tab identity was not recovered.`)
-  if (JSON.stringify(report.workbench.regionIds) !== JSON.stringify([regionId])) throw new Error(`${label}: Region identity was not recovered.`)
+  if (JSON.stringify(report.workbench.regionIds) !== JSON.stringify(expectedRegionIds)) throw new Error(`${label}: Region identity was not recovered.`)
   if (JSON.stringify(report.workbench.activeRegionIds) !== JSON.stringify([regionId])) throw new Error(`${label}: active Region focus was not recovered.`)
   if (report.workbench.activeWorkspaceId !== 'workspace-restart-probe') throw new Error(`${label}: active Workspace was not recovered.`)
   if (report.workbench.drafts[sessionId] !== draft) throw new Error(`${label}: composer draft was not recovered.`)
@@ -96,6 +109,13 @@ function assertReport(report, label) {
   if (JSON.stringify(report.workbench.executionFocusHistory) !== JSON.stringify([sessionId])) throw new Error(`${label}: execution focus history was not recovered.`)
   const session = report.sessions.sessions.find((candidate) => candidate.agentSessionId === sessionId)
   if (!session || session.runId !== runId || session.nativeSessionId !== 'native-restart-probe') throw new Error(`${label}: Core Session identity was not recovered.`)
+  if (label === 'second') {
+    for (const [field, expected] of [['tabIds', [tabId]], ['regionIds', expectedRegionIds], ['activeRegionIds', [regionId]]]) {
+      if (JSON.stringify(report.renderedWorkbench?.[field]) !== JSON.stringify(expected)) {
+        throw new Error(`${label}: recovered ${field} are not rendered after hydration.`)
+      }
+    }
+  }
 }
 
 async function launch(label, seed) {
@@ -120,6 +140,7 @@ let result
 try {
   await mkdir(userData, { recursive: true, mode: 0o700 })
   await mkdir(workspacePath, { recursive: true, mode: 0o700 })
+  await writeFile(filePath, 'Durable split Region\n', { mode: 0o600 })
   await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify(fixtureConfig)}\n`, { mode: 0o600 })
   await writeFile(join(userData, 'agent-sessions.json'), `${JSON.stringify({ version: 5, sessions: [fixtureSession], reservations: [], retiredRuns: [], retiredAgentSessions: [] })}\n`, { mode: 0o600 })
   const first = await launch('first', workbenchSeedRaw)
@@ -129,10 +150,10 @@ try {
   if (first.ready.packaged !== second.ready.packaged) throw new Error('Restart changed packaging state.')
   const before = identity(first.report)
   const after = identity(second.report)
-  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('Durable restart identity drifted.')
+  if (!isDeepStrictEqual(before, after)) throw new Error('Durable restart identity drifted.')
   result = { event: 'attention-review-restart', schema: 'agentmux.desktop-restart-recovery.v1', inputDigest,
     first: { pid: first.report.pid, userData: first.report.userData, runtimeDirectory: first.report.runtimeDirectory, identity: before, cleanup: first.execution },
-    second: { pid: second.report.pid, userData: second.report.userData, runtimeDirectory: second.report.runtimeDirectory, identity: after, cleanup: second.execution },
+    second: { pid: second.report.pid, userData: second.report.userData, runtimeDirectory: second.report.runtimeDirectory, identity: after, renderedWorkbench: second.report.renderedWorkbench, cleanup: second.execution },
     sameUserData: first.report.userData === second.report.userData, sameRuntimeDirectory: first.report.runtimeDirectory === second.report.runtimeDirectory,
     differentPid: first.report.pid !== second.report.pid }
 } finally {

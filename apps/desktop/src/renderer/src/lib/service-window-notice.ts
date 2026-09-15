@@ -273,13 +273,16 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
   const steps: Record<NonNullable<typeof session.terminalPromptDelivery>['reason'], string> = {
     'screen-evidence-gap': 'Screen confirmation from retained terminal output',
     'prompt-render-timeout': 'Confirming the prompt on screen',
-    'screen-evidence-replaced': 'Confirming the prompt while the terminal refreshed'
+    'screen-evidence-replaced': 'Confirming the prompt while the terminal refreshed',
+    'turn-end-unconfirmed': 'Confirming the previous turn ended'
   }
   return {
     completed: false,
     step: {
       label: steps[session.terminalPromptDelivery.reason],
-      degradedMode: session.terminalPromptDelivery.reason === 'screen-evidence-gap'
+      degradedMode: session.terminalPromptDelivery.reason === 'turn-end-unconfirmed'
+        ? 'You chose to submit while the previous turn may still be running. Delivery as a new turn is not confirmed.'
+        : session.terminalPromptDelivery.reason === 'screen-evidence-gap'
         ? 'Earlier terminal output is no longer retained. Prompt input continued without full screen confirmation.'
         : 'Prompt input continued without full screen confirmation.',
       restore: 'Check the Agent’s response. You can review this notice in System; a verified prompt clears it.'
