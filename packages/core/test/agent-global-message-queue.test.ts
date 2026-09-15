@@ -151,6 +151,23 @@ describe('Core-owned durable A2A global message queue', () => {
     expect((await new DurableAgentMuxMessageQueue(first.path).listAfter(0)).map((item) => item.sequence)).toEqual([1, 2])
   })
 
+  it('reclaims one stale lock safely before sixteen independent writers append', async () => {
+    const first = await queue()
+    const lockPath = `${first.path}.lock`
+    await mkdir(dirname(lockPath), { recursive: true })
+    await writeFile(lockPath, JSON.stringify({ pid: 99_999_999, acquiredAt: Date.now() - 60_000 }))
+    const modulePath = fileURLToPath(new URL('../dist/agent-global-message-queue.js', import.meta.url))
+    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); await q.append(JSON.parse(process.env.QUEUE_INPUT));`
+    const launch = (index: number) => exec(process.execPath, ['--input-type=module', '--eval', script], {
+      env: { ...process.env, QUEUE_PATH: first.path, QUEUE_INPUT: JSON.stringify(input({ operationId: `stale-${index}-op`, messageId: `stale-${index}`, sender: { kind: 'agent-session', agentSessionId: `sender-${index}` } })) }
+    })
+    await Promise.all(Array.from({ length: 16 }, (_, index) => launch(index)))
+    const records = await new DurableAgentMuxMessageQueue(first.path).listAfter(0)
+    expect(records).toHaveLength(16)
+    expect(records.map((item) => item.sequence)).toEqual(Array.from({ length: 16 }, (_, index) => index + 1))
+    expect(new Set(records.map((item) => item.envelope.sender.kind === 'agent-session' ? item.envelope.sender.agentSessionId : '')).size).toBe(16)
+  })
+
   it('rejects requestId masquerading as messageId and malformed envelope fields', () => {
     expect(() => validateAgentMuxMessageEnvelope({ ...input(), schema: 'agentmux.a2a.v1', messageId: 'request-1' })).toThrow('Control request id')
     expect(() => validateAgentMuxMessageEnvelope({ ...input(), schema: 'agentmux.a2a.v1', messageId: 'message-2', body: undefined })).toThrow('Message body')
