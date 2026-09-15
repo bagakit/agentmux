@@ -28,7 +28,7 @@ import { AgentMuxError } from './errors.js'
 import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
-import type { AgentMuxRunInputData } from './types.js'
+import type { AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot } from './types.js'
 import {
   reclaimOrphanEndpointDirectories,
   type EndpointReclaimOutcome
@@ -886,6 +886,41 @@ export class CtxmuxRunAdapter {
       daemonInstanceId: this.runtime.daemonInstanceId,
       protocolVersion: PROTOCOL_VERSION,
       buildIdentity: `ctxmux@${CTXMUX_VERSION}+${CTXMUX_COMMIT}`
+    }
+  }
+
+  /** Read thin public pages directly: resource observation never needs launch specs or status hydration. */
+  async resourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
+    const snapshot: AgentMuxRuntimeResourceSnapshot = {
+      observedAt: 0,
+      runCount: 0,
+      runningRuns: 0,
+      terminatedRuns: 0,
+      terminatedUnattachedRuns: 0,
+      attachments: 0,
+      retainedOutputBytes: 0
+    }
+    try {
+      const client = this.requireClient()
+      let cursor: string | null = null
+      do {
+        const page = await client.listPage(cursor)
+        for (const run of page.runs) {
+          snapshot.runCount += 1
+          if (run.state.type === 'running') snapshot.runningRuns += 1
+          else {
+            snapshot.terminatedRuns += 1
+            if (run.attachments === 0) snapshot.terminatedUnattachedRuns += 1
+          }
+          snapshot.attachments += run.attachments
+          snapshot.retainedOutputBytes += run.retained_output_bytes
+        }
+        cursor = page.nextCursor
+      } while (cursor !== null)
+      snapshot.observedAt = Date.now()
+      return snapshot
+    } catch (error) {
+      throw translateCtxmuxError(error)
     }
   }
 

@@ -1,8 +1,9 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import * as filesystem from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   endpointDirectoryUsage,
   isOwnEndpointDirectoryName,
@@ -11,6 +12,11 @@ import {
   socketIsDirectChildOfEndpoint
 } from '../src/runtime-endpoint-reclaim.js'
 import { defaultAgentMuxRuntimeDirectory, defaultCtxmuxSocketPath } from '../src/runtime-paths.js'
+
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, stat: vi.fn(actual.stat) }
+})
 
 const UID = typeof process.getuid === 'function' ? process.getuid() : 0
 const CURRENT = `amx-${UID}-${'a'.repeat(24)}`
@@ -191,6 +197,11 @@ describe('reclaimOrphanEndpointDirectories', () => {
     }
   })
 
+  it('size observation reports a missing root as unavailable instead of a confirmed empty inventory', async () => {
+    const root = await makeRoot()
+    await expect(endpointDirectoryUsage(join(root, 'missing', CURRENT))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('never throws when the runtime root does not exist', async () => {
     const outcome = await reclaimOrphanEndpointDirectories(
       join(tmpdir(), 'amx-reclaim-missing-root', CURRENT)
@@ -277,6 +288,20 @@ describe('reclaimOrphanEndpointDirectories', () => {
 })
 
 describe('endpointDirectoryUsage', () => {
+  it('reports an unreadable file observation as unavailable rather than a zero-byte endpoint', async () => {
+    const root = await makeRoot()
+    await mkdir(join(root, CURRENT))
+    const payload = join(root, CURRENT, 'payload')
+    await writeFile(payload, 'present')
+    const failedStat = vi.spyOn(filesystem, 'stat').mockRejectedValueOnce(new Error('file metadata unavailable'))
+    try {
+      await expect(endpointDirectoryUsage(join(root, CURRENT))).rejects.toThrow('file metadata unavailable')
+      expect(failedStat).toHaveBeenCalledWith(payload)
+    } finally {
+      failedStat.mockRestore()
+    }
+  })
+
   it('reports own endpoints by size, flags the current one, and ignores strangers', async () => {
     const root = await makeRoot()
     await mkdir(join(root, CURRENT), { recursive: true })

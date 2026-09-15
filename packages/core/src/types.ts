@@ -62,6 +62,19 @@ export type AgentMuxRuntimeDiagnostics = {
   }
 }
 
+/** Public, best-effort inventory of the Runtime's retained Runs, including historical Runs. */
+export type AgentMuxRuntimeResourceSnapshot = {
+  observedAt: number
+  runCount: number
+  runningRuns: number
+  terminatedRuns: number
+  /** Terminal and without a live attachment; this does not prove removal eligibility. */
+  terminatedUnattachedRuns: number
+  attachments: number
+  /** Currently retained output payload in memory, not lifetime output or durable disk bytes. */
+  retainedOutputBytes: number
+}
+
 export type AgentSemanticState =
   | 'unknown'
   | 'working'

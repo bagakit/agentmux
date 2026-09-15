@@ -135,13 +135,13 @@ async function socketHasListener(path: string): Promise<boolean> {
 }
 
 async function directoryBytes(path: string): Promise<number> {
-  const entries = await readdir(path, { withFileTypes: true }).catch(() => [])
+  const entries = await readdir(path, { withFileTypes: true })
   let total = 0
   for (const entry of entries) {
     const child = join(path, entry.name)
     // 只跟目录递归，不跟 symlink——symlink 会把统计（以及任何据此做的判断）引到目录树之外。
     if (entry.isDirectory()) total += await directoryBytes(child)
-    else if (entry.isFile()) total += await stat(child).then((s) => s.size).catch(() => 0)
+    else if (entry.isFile()) total += (await stat(child)).size
   }
   return total
 }
@@ -157,7 +157,7 @@ export async function endpointDirectoryUsage(
   const uid = typeof process.getuid === 'function' ? process.getuid() : 0
   const root = dirname(runtimeDirectory)
   const currentName = basename(runtimeDirectory)
-  const names = await readdir(root).catch(() => [] as string[])
+  const names = await readdir(root)
   const own = names.filter((name) => isOwnEndpointDirectoryName(name, uid))
   const usage = await Promise.all(
     own.map(async (name) => ({
