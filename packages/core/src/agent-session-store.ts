@@ -630,7 +630,10 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
   if (new Set(questions.map((question) => question.id)).size !== questions.length) {
     throw new AgentMuxError('Questions contain duplicate identifiers.', 'INVALID_AGENT_SESSION_STORE')
   }
-  return { kind: 'question', ...base, questions }
+  return { kind: 'question', ...base, questions,
+    ...(source.nativeToolCallId === undefined ? {} : {
+      nativeToolCallId: string(source.nativeToolCallId, 'pendingInteraction.request.nativeToolCallId')
+    }) }
 }
 
 function pendingInteraction(value: unknown): AgentMuxPendingInteraction {

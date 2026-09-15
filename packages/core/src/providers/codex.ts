@@ -104,6 +104,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PreToolUse'],
       questionTools: ['request_user_input', 'askuserquestion'],
+      questionCompletionEvents: ['PostToolUse'],
       permissionOptions: CODEX_PERMISSION_OPTIONS
     }),
     hook: CODEX_HOOKS,

@@ -150,6 +150,19 @@ function subagentId(
   return stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
 }
 
+/** The same declared subject boundary used for native locator and interaction promotion. */
+export function nativeHookHasSubagentSubject(
+  specification: AgentNativeHookSpecification,
+  eventName: string,
+  payload: Record<string, unknown>
+): boolean {
+  const tracking = specification.subagentTracking
+  return Boolean(tracking && (
+    subagentId(tracking, flattenNestedPayload(payload)) ||
+    tracking.startEvents.includes(eventName) || tracking.stopEvents.includes(eventName)
+  ))
+}
+
 /**
  * 把一条 hook 事件并入子代理花名册，返回**经过在途压制后**的语义状态。
  *
@@ -282,11 +295,7 @@ function nativeHandle(
   if (!definition) return undefined
   // Hook 的 Run 绑定属于主 Session，但子主体可共用主 native ID、携带自己的记录路径。
   // 子事件照常处理；只禁止把其 locator 晋升成主 Session 的恢复身份。
-  const tracking = specification.subagentTracking
-  if (tracking && (
-    subagentId(tracking, payload) ||
-    tracking.startEvents.includes(eventName) || tracking.stopEvents.includes(eventName)
-  )) return undefined
+  if (nativeHookHasSubagentSubject(specification, eventName, payload)) return undefined
   const sessionId = sessionIdField(payload, definition.sessionIdKeys)
   if (!sessionId) return undefined
   const transcriptPath = definition.transcriptPathKeys
@@ -350,6 +359,10 @@ const TOOL_CALL_ID_KEYS = [
   'callId'
 ] as const
 
+export function nativeHookToolCallId(payload: Record<string, unknown>): string | undefined {
+  return stringField(flattenNestedPayload(payload), ...TOOL_CALL_ID_KEYS)
+}
+
 function buildTimeline(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
@@ -393,7 +406,7 @@ function buildTimeline(
     // 完全失明——那两家虽都声明了 `timeline: 'complete-events'`，失败的命令却和成功的长得一模一样。
     // 认不出生命周期（`undefined`）时按事前处理：没有 canonical 依据就不宣称「已经有结果了」。
     const isToolResult = lifecycleEvent === 'tool-use-end'
-    const toolCallId = stringField(payload, ...TOOL_CALL_ID_KEYS)
+    const toolCallId = nativeHookToolCallId(payload)
     // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
     const outcome = isToolResult ? hookToolOutcome(payload) : undefined
     if (toolCallId && kind === 'tool_call') {

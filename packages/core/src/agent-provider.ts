@@ -10,11 +10,12 @@ import {
 import {
   createPostureControl,
   normalizeTerminalInteraction,
+  normalizeTerminalInteractionCompletion,
   type AgentPostureProtocol,
   type AgentTerminalInteractionProtocol,
   type PostureControlDeclaration
 } from './agent-interaction.js'
-import { normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
+import { nativeHookHasSubagentSubject, normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import { createBuiltInAgentProviders, MANAGED_HOOK_PLAN_RESOLVERS } from './providers/index.js'
 import type {
@@ -308,7 +309,11 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       const interaction = definition.interaction
         ? normalizeTerminalInteraction(envelope, normalized.status.observedAt, definition.interaction)
         : undefined
-      return interaction ? { ...normalized, interaction } : normalized
+      const interactionCompletion = definition.interaction && !nativeHookHasSubagentSubject(
+        definition.hook, normalized.eventName, envelope.payload ?? {}
+      ) ? normalizeTerminalInteractionCompletion(envelope, normalized.status.observedAt, definition.interaction) : undefined
+      return { ...normalized, ...(interaction ? { interaction } : {}),
+        ...(interactionCompletion ? { interactionCompletion } : {}) }
     }
   }
 }
