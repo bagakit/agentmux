@@ -29,6 +29,8 @@ import type {
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
+  AgentProviderSessionHistoryContext,
+  AgentProviderSessionHistoryPage,
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
   NativeHookEnvelope,
@@ -53,6 +55,8 @@ export type AgentProvider = {
   readonly hook: AgentNativeHookSpecification
   readonly terminalHandshake?: AgentTerminalHandshake
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  /** This contribution is the native history capability; its absence is explicitly unsupported. */
+  readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
@@ -75,6 +79,7 @@ export type AgentProviderDefinition = {
   launchOptions?: readonly LaunchOptionDeclaration[]
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
@@ -196,6 +201,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     hook: definition.hook,
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
+    ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = executable(commandOverride, catalog.executable)
       return {

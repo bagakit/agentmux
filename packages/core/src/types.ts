@@ -468,6 +468,42 @@ export type AgentTerminalPromptReadinessState = {
   consumedBySubmissionId?: string
 }
 
+export type AgentSessionHistoryContentPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other'; reference: string; label?: string }
+
+export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
+
+export type AgentSessionHistoryItem = {
+  id: string
+  turnId?: string
+  kind: 'user-message' | 'assistant-message' | 'activity'
+  title?: string
+  contentParts: AgentSessionHistoryContentPart[]
+  startedAt?: number
+  completedAt?: number
+}
+
+/** Native conversation pages are separate from captured AgentMux Timeline and Run byte Replay. */
+export type AgentSessionHistoryPage = {
+  agentSessionId: string
+  source: AgentSessionHistorySource
+  /** Each page is chronological; the first page contains the newest items. */
+  items: AgentSessionHistoryItem[]
+  nextCursor: string | null
+}
+
+export type AgentSessionHistoryPageOptions = { cursor?: string; limit?: number }
+
+export type AgentProviderSessionHistoryContext = {
+  source: AgentSessionHistorySource
+  cursor?: string
+  limit: number
+  signal: AbortSignal
+}
+
+export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
+
 export type AgentMuxAgentSession = {
   kind: 'agent'
   agentSessionId: string
