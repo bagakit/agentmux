@@ -369,9 +369,10 @@ async function nativeHover(
   window: BrowserWindow,
   description: string,
   source: string
-): Promise<void> {
+): Promise<Point> {
   const point = await elementPoint(window, description, source)
   sendMouse(window, 'mouseMove', point)
+  return point
 }
 
 function sendKey(window: BrowserWindow, keyCode: string, modifiers: InputModifier[] = []): void {
@@ -611,8 +612,7 @@ async function runExplorerInteractionProbe(options: {
   // 的处置是**每次 poll 都重新送 mouseMove**。这里照抄那条模式：hover 一次后，若 SubContent 未出现，
   // 每 25ms 重发一次 mouseMove——直到 destination item 可见。20s waitFor 预算不变；断言（destination
   // item 可见）不变，所以 SubContent 若真的永远打不开、超时照旧红。
-  const submenuPoint = await elementPoint(window, 'Radix Move submenu trigger', submenuTrigger)
-  sendMouse(window, 'mouseMove', submenuPoint)
+  const submenuPoint = await nativeHover(window, 'Radix Move submenu trigger', submenuTrigger)
   const menuTarget = visibleMenuItemSource('targets/menu')
   await waitFor('Radix Move destination item', async () => {
     const ready = await window.webContents.executeJavaScript(`Boolean(${menuTarget})`) as boolean
