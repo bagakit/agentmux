@@ -31,7 +31,9 @@ import type {
   AgentMuxControlResult,
   AgentMuxExecutorProbeOutcome,
   AgentTimelineItem,
-  AgentTimelineSnapshot
+  AgentTimelineSnapshot,
+  AgentSessionHistoryPage,
+  AgentSessionHistoryPageOptions
 } from '@agentmux/core'
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
@@ -1389,6 +1391,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
+    historyPage(session: AgentSessionControl, options?: AgentSessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>

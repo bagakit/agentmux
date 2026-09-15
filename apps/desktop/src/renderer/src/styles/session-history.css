@@ -1,0 +1,17 @@
+.session-history { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; min-height: 0; background: var(--surface-0); color: var(--text); }
+.session-history__toolbar { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line-soft); flex: none; }
+.session-history__toolbar > span { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; flex: 1; color: var(--text-2); font-size: var(--fs-body); }
+.session-history__source { padding: var(--sp-2) var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); }
+.session-history__viewport { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 0 var(--sp-5) var(--sp-5); scrollbar-gutter: stable; overflow-anchor: none; }
+.session-history__item { padding: var(--sp-5) 0; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.session-history__item > header { display: flex; align-items: center; gap: var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); margin-bottom: var(--sp-3); }
+.session-history__item time { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
+.session-history__item .md { font-size: var(--fs-prose); }
+.session-history__resource { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; font-size: var(--fs-meta); }
+.session-history__resource code { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.session-history__resource small { color: var(--text-3); font-size: var(--fs-micro); }
+.session-history__boundary, .session-history__notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.session-history__notice { color: var(--amber); border-bottom: 1px solid var(--line-soft); }
+.session-history__notice > span { flex: 1; min-width: 0; }
+.session-history__empty { color: var(--text-3); font-size: var(--fs-body); }
+.terminal-history-action { position: absolute; z-index: 36; top: var(--sp-3); right: var(--sp-3); }
