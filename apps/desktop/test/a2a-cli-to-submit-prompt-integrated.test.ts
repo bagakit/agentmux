@@ -9,8 +9,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, DurableAgentMuxMessageQueue, type AgentMuxControlRequest, type AgentMuxControlResponse } from '@agentmux/core'
-import { AgentMuxControlServer } from '../../../packages/core/src/control-host.js'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer, DurableAgentMuxMessageQueue, type AgentMuxControlRequest, type AgentMuxControlResponse } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -114,8 +113,10 @@ it('CLI-written envelope reaches production submitPrompt with the same bytes and
 
   try {
     // 1) 真 CLI 走 send 到 sock。AGENTMUX_ENV=1 + AGENTMUX_AGENT_SESSION_ID 让 CLI 认作 managed sender。
+    //    timeout=15000 而非 5000：CLI 子进程 + fs + sock 握手 + queue append + store executeControl 一整套，
+    //    在忙碌 CI 机上 5s 会 flake。见 MINOR-4 (review 2026-09-29)。
     const stdout = await exec(cli, ['send', '--to-session', recipient.id, '--text', 'integrated body bytes'], {
-      timeout: 5000,
+      timeout: 15000,
       env: {
         ...process.env,
         AGENTMUX_RUNTIME_DIRECTORY: runtime,
@@ -135,6 +136,8 @@ it('CLI-written envelope reaches production submitPrompt with the same bytes and
     expect(submit).toHaveBeenCalledTimes(1)
     const [, submittedPrompt, submittedMessageId] = submit.mock.calls[0]!
     expect(submittedMessageId, 'submitPrompt 拿到的 messageId 就是 CLI 出的那个').toBe(cliMessageId)
+    // mutation-kill: store.ts:2706-2708 —— 把 renderAgentMuxMessageEnvelope(request.message) 换成 request.text
+    // 会让下面两条 toContain 里的第一条红：messageId 属性只从 renderAgentMuxMessageEnvelope 出。
     expect(submittedPrompt, 'wrapper 必须携带 CLI 生成的 messageId 属性')
       .toContain(`messageId="${cliMessageId}"`)
     expect(submittedPrompt, 'wrapper 里必须一字不差携带 CLI 传的 body')
@@ -143,11 +146,27 @@ it('CLI-written envelope reaches production submitPrompt with the same bytes and
       .toMatch(/^<amux\s/)
 
     // 3) 双向 verify：queue 落盘的 envelope 与 CLI stdout messageId 一致，说明 sock 与 durable
-    //    队列同源、没有编造。
+    //    队列同源、没有编造。**恰好** 1 条 message record——多写一次就红，钉住 append 只走了一次。
     const queue = new DurableAgentMuxMessageQueue(queuePath)
     const records = await queue.listAfter(0)
-    const message = records.find((r) => r.envelope.messageId === cliMessageId)
-    expect(message, 'CLI 写的 envelope 必须以同一 messageId 落到 queue 文件').toBeDefined()
+    const messages = records.filter((r) => r.envelope.messageId === cliMessageId)
+    expect(messages, 'CLI 只 append 一次，queue 里恰好一条同 messageId 的记录').toHaveLength(1)
+
+    // 4) recipientRunId 反例：store.ts:2717-2719 那道 recipient-run-mismatch 交叉校验 CLI 本身走不进
+    //    （agentmux.ts:627 恒设 null），本 test 主线也覆盖不到——手工构造一条带**错** runId 的请求
+    //    直接送 executeControl，钉住那道守卫存在且真会红。缺了这条，把 store.ts:2717-2719 整段删掉
+    //    上面的主断言仍绿——覆盖会有洞。见 MINOR-3 (review 2026-09-29)。
+    const cliMessage = messages[0]!.envelope
+    const badRunId = 'run-not-the-recipient'
+    await expect(useAppStore.getState().executeControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'control-run-mismatch',
+      operation: 'send',
+      target: { kind: 'agent-session', agentSessionId: recipient.id },
+      text: cliMessage.body,
+      caller: { agentSessionId: 'caller-cli' },
+      message: { ...cliMessage, messageId: 'test-run-mismatch', recipientRunId: badRunId }
+    })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
   } finally {
     await server.stop()
     await rm(runtime, { recursive: true, force: true })
