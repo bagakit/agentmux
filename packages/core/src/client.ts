@@ -4030,6 +4030,17 @@ export class AgentMuxClient {
       observedAt: normalized.status.observedAt,
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
+    const completion = normalized.interactionCompletion
+    if (completion && (
+      typeof completion.nativeToolCallId !== 'string' || !completion.nativeToolCallId.trim() ||
+      completion.kind !== 'question' || completion.agentSessionId !== session.agentSessionId ||
+      completion.evidence.source !== 'native-hook' ||
+      completion.evidence.run?.runId !== session.run.runId ||
+      completion.evidence.hookReceiptId !== receipt.id
+    )) throw new AgentMuxError('Provider question completion does not match its native Hook receipt.', 'INVALID_AGENT_INTERACTION')
+    const completedRequestId = completion && session.pendingInteraction?.request.kind === 'question' &&
+      session.pendingInteraction.request.nativeToolCallId === completion.nativeToolCallId
+      ? session.pendingInteraction.request.id : undefined
     const persistReceipt = (
       current: AgentMuxStoredAgentSession
     ): AgentMuxStoredAgentSession => {
@@ -4102,6 +4113,13 @@ export class AgentMuxClient {
             : current.turnUsage
               ? { turnUsage: current.turnUsage }
               : {})
+      }
+      const pending = current.pendingInteraction
+      if (completion && completedRequestId && pending?.request.kind === 'question' &&
+        pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
+        pending.request.evidence.source === 'native-hook' && pending.request.evidence.run?.runId === current.run.runId &&
+        pending.request.nativeToolCallId === completion.nativeToolCallId && pending.response === undefined) {
+        delete next.pendingInteraction
       }
       if (normalized.interaction) {
         const interaction = normalized.interaction

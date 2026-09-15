@@ -133,6 +133,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PermissionRequest', 'PreToolUse'],
       questionTools: ['askuserquestion'],
+      questionCompletionEvents: ['PostToolUse'],
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,
