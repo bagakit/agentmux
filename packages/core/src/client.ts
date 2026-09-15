@@ -1533,6 +1533,27 @@ export class AgentMuxClient {
     return this.agentSession(callerAgentSessionId)
   }
 
+  /** Bind every persisted A2A identity fact to the authoritative live Session/Run before append. */
+  authorizeAgentMessage(input: {
+    capability: string
+    callerAgentSessionId: string
+    senderSessionId: string | null
+    senderRunId: string | null
+    recipientSessionId: string | null
+    recipientRunId: string | null
+  }): void {
+    const sender = this.authorizeAgentCaller(input.capability, input.callerAgentSessionId)
+    if (input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
+      throw new AgentMuxError('A2A sender facts do not match the authorized Agent Session/Run.', 'MESSAGE_SENDER_MISMATCH')
+    }
+    if (input.recipientSessionId !== null) {
+      const recipient = this.agentSession(input.recipientSessionId)
+      if (input.recipientRunId !== recipient.run.runId) {
+        throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
+      }
+    }
+  }
+
   /** 取最旧的一批未确认投递。Ack 之前重复调用重放同一批——崩溃重连才不会丢消息。 */
   checkDeliveries(input: {
     capability: string
