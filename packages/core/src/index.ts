@@ -43,4 +43,3 @@ export { discoverAgentSkills, type AgentSkill } from './agent-skills.js'
 
 export * from "./continuous-progress-scheduler.js"
 export * from './agent-role-directory.js'
-export * from './prompt-admission.js'
