@@ -116,6 +116,7 @@ const regionId = 'history-probe-agent'
 const fileRegionId = 'history-probe-file'
 const groupId = 'history-probe-group'
 const workspaceId = 'history-probe-workspace'
+const scratchGroupId = 'history-probe-scratch-group'
 const draft = 'Unsent draft survives native reading and Electron interruption'
 let expectedWorkbench
 
@@ -240,7 +241,12 @@ try {
         layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.7, first: { type: 'leaf', regionId }, second: { type: 'leaf', regionId: fileRegionId } }, activeRegionId: regionId },
         regions: { [regionId]: { regionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: session.agentSessionId },
           [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId, path: join(workspacePath, 'split.txt') } } } },
-      layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId } }
+      layouts: {
+        [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId },
+        // Scratch is a mandatory configured workspace. Seed its empty canonical layout too, so
+        // startup reconciliation cannot trail the first localStorage baseline by the writer delay.
+        __scratch__: { root: { type: 'leaf', groupId: scratchGroupId }, groups: [{ id: scratchGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: scratchGroupId }
+      }
     } } }
   expectedWorkbench = seed.state.restoredWorkbench
   await seedWorkbench(seed)
