@@ -88,9 +88,14 @@ export async function queryPromptAdmission(
   // 冗余**——`wait` 尊重 timeoutMs 时（生产路径）内部 timer 先赢；`wait` 因任何原因不尊重（并发
   // 观察相互阻塞的 in-flight 场景、上游代码路径尚未接线 timer、或将来重构疏漏），外层 race 兜底防
   // 止 admission 拖住整条 submit 队列。健康 Agent 稳态下毫秒级返回，两条路径都不会触发。
+  //
+  // timer 句柄提到 race 外面持有，happy path（wait 先赢）用 `finally { clearTimeout }` 主动清掉——
+  // `unref?.()` 已确保它不阻塞进程退出，但让 250ms 后 fire-then-discard 的定时器堆积是无谓的 GC
+  // 压力，紧循环里可测（review MINOR-1 2026-09-29）。timer 已 fired 之后再 clearTimeout 是 no-op。
+  let admissionBudgetTimer: ReturnType<typeof setTimeout> | undefined
   const admissionBudgetElapsed = new Promise<'admission-budget-elapsed'>((resolve) => {
-    const t = setTimeout(() => resolve('admission-budget-elapsed'), LIVE_ADMISSION_QUERY_BUDGET_MS)
-    t.unref?.()
+    admissionBudgetTimer = setTimeout(() => resolve('admission-budget-elapsed'), LIVE_ADMISSION_QUERY_BUDGET_MS)
+    admissionBudgetTimer.unref?.()
   })
   try {
     const outcome = await Promise.race([
@@ -121,6 +126,11 @@ export async function queryPromptAdmission(
     // fail-closed——那不是慢证据，放行它才是把别的故障说成「就绪」。
     if (reason === undefined) throw error
     return { kind: 'degraded', reason }
+  } finally {
+    // Happy path 主动清 timer——`unref?.()` 已保证它不阻塞进程退出，但避免 250ms 后 fire-then-discard
+    // 的定时器堆积、以及紧循环里的 GC 压力（review MINOR-1 2026-09-29）。已 fired 的 timer clearTimeout
+    // 是 no-op、幂等。
+    if (admissionBudgetTimer !== undefined) clearTimeout(admissionBudgetTimer)
   }
   // 观察后**再核一次世代**：若在等待窗口里发生过 discard（本次 wait 已经用旧证据 resolve，或者
   // 下一次 wait 会 rebuild 一具全新 evidence），当次判定必须作废——判成 degraded 让下游拿到同样
