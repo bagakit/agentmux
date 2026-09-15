@@ -205,8 +205,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData) => ipcRenderer.invoke('sessions:write', session, data),
-    submitPrompt: (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, authorAgentSessionId),
+    submitPrompt: (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, authorAgentSessionId, choice),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
     setPosture: (session: AgentSessionControl, modeId: string) =>

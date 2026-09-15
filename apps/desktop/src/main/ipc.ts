@@ -1,5 +1,5 @@
 import { projectAppearance } from './project-appearance.js'
-import { discoverAgentSkills, runProcess } from '@agentmux/core'
+import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { captureComposerScreenshot } from './composer-screenshot.js'
 import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
@@ -200,6 +200,7 @@ export async function registerIpc(args: {
       await args.runtime.authorizeAgentMessage({
         capability: request.caller.capability,
         callerAgentSessionId: request.caller.agentSessionId,
+        senderAgentSessionId: request.message.sender.agentSessionId,
         senderSessionId: request.message.senderSessionId,
         senderRunId: request.message.senderRunId,
         recipientSessionId: request.message.recipientSessionId,
@@ -386,7 +387,7 @@ export async function registerIpc(args: {
             hostId: source.hostId,
             workspacePath: launchInput.workspacePath,
             prompt: launchInput.prompt,
-            agentSessionId: randomUUID(),
+            agentSessionId: mintAgentSessionId(),
             createOperationId: randomUUID()
           }, current)
           return { sessionId: launched.session.id }
@@ -642,8 +643,8 @@ export async function registerIpc(args: {
   handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData) => {
     await args.runtime.write(session, data)
   })
-  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string) => {
-    await args.runtime.submitPrompt(session, prompt, operationId, undefined, authorAgentSessionId)
+  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) => {
+    await args.runtime.submitPrompt(session, prompt, operationId, undefined, authorAgentSessionId, choice)
   })
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,

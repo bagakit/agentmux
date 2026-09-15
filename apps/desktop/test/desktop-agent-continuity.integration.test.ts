@@ -33,6 +33,7 @@ const ctxmuxDaemon = fileURLToPath(
   new URL('../../../packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)
 )
 const terminalSizeRestartWorker = fileURLToPath(new URL('./fixtures/terminal-size-restart-worker.mjs', import.meta.url))
+const agentSessionRestartWorker = fileURLToPath(new URL('./fixtures/agent-session-restart-worker.mjs', import.meta.url))
 
 const roots: string[] = []
 const runtimeDirectories: string[] = []
@@ -248,6 +249,48 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     await runtime.detachSession(renderer.id, attached.attachmentId)
     detach()
   }, 30_000)
+
+  it('recovers the original Agent and durable prompt identity in a new Node process without rewriting bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amux-agent-restart-'))
+    roots.push(root)
+    const runtimeDirectory = join(root, 'runtime')
+    runtimeDirectories.push(runtimeDirectory)
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    const storePath = join(root, 'sessions.json')
+    const worker = async (mode: string, runId?: string) => {
+      const result = await execFileAsync(process.execPath, [agentSessionRestartWorker, mode, root,
+        storePath, fakeCodexFixture, ...(runId ? [runId] : [])], {
+        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory }, timeout: 25_000
+      })
+      return JSON.parse(result.stdout.trim())
+    }
+    const created = await worker('create')
+    activePid = created.run.pid
+    expect(isProcessAlive(created.clientPid)).toBe(false)
+    expect(created.session.nativeHandle).toBeDefined()
+    const recovered = await worker('recover', created.run.runId)
+    expect(recovered.clientPid).not.toBe(created.clientPid)
+    expect(isProcessAlive(recovered.clientPid)).toBe(false)
+    expect(recovered.continuity).toBe('reattachable')
+    expect(recovered.attachedRunId).toBe(created.run.runId)
+    expect(recovered.daemonInstance).toBe(created.daemonInstance)
+    expect(recovered.session).toMatchObject({ agentSessionId: created.session.agentSessionId,
+      nativeHandle: created.session.nativeHandle, run: { runId: created.run.runId },
+      terminalPromptSubmission: { submissionId: 'retained-message', submit: { acknowledged: true } } })
+    expect(recovered.run).toMatchObject({ runId: created.run.runId, pid: created.run.pid, state: 'running' })
+    expect(recovered.acceptedAfter).toBe(created.acceptedAfter)
+    expect(recovered.acceptedBefore).toBe(recovered.acceptedAfter)
+    console.info('p0-agent-restart-evidence', JSON.stringify({
+      root, runtimeDirectory, firstClientPid: created.clientPid, secondClientPid: recovered.clientPid,
+      retainedPid: recovered.run.pid, daemonInstance: recovered.daemonInstance,
+      agentSessionId: recovered.session.agentSessionId, runId: recovered.run.runId,
+      nativeHandle: recovered.session.nativeHandle, operationId: recovered.session.terminalPromptSubmission.submissionId,
+      acceptedBefore: recovered.acceptedBefore, acceptedAfter: recovered.acceptedAfter,
+      firstClientExited: !isProcessAlive(created.clientPid), secondClientExited: !isProcessAlive(recovered.clientPid)
+    }))
+    const cleanup = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(storePath) })
+    try { await cleanup.stopAgent(created.session.agentSessionId, created.session.run) } finally { await cleanup.dispose() }
+  }, 55_000)
 
   it('preserves exact Run attachment, replay, live I/O, and suppresses recovery overlay across Renderer reload and Desktop restart without provider handle', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-desktop-continuity-'))

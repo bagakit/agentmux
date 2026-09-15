@@ -15,6 +15,7 @@ import {
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
 import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
+import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
   AgentLaunchResult,
@@ -293,6 +294,7 @@ export type AgentSteerQueueEntry = {
   text: string
   status: 'queued' | 'deferred' | 'failed'
   error?: string
+  errorCode?: string
 }
 
 type AppState = {
@@ -780,7 +782,8 @@ type AppState = {
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
-  flushAgentSteerQueue(sessionId: string): Promise<void>
+  continueQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
+  flushAgentSteerQueue(sessionId: string, continueOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
@@ -2907,7 +2910,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!state.config?.executors[executorId]) {
         throw controlFailure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Agent Executor is not configured.')
       }
-      const agentSessionId = crypto.randomUUID()
+      const agentSessionId = mintAgentSessionId()
       // The target Topic is carried explicitly by the destination View's binding. A brand-new
       // Tab has no binding and therefore no Topic — we never mint one from the Tab identity.
       const scratchTopicId = isScratchWorkspaceId(workspace.id)
@@ -4545,7 +4548,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Scratch Agent View has an invalid Topic identity')
     }
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
-    const sessionId = crypto.randomUUID()
+    const sessionId = mintAgentSessionId()
     const pendingSurface: AgentWorkbenchSurface = {
       regionId,
       kind: 'agent',
@@ -5322,7 +5325,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Manual retry uses the same ordered consumer and the entry's original operation identity.
     await get().flushAgentSteerQueue(sessionId)
   },
-  flushAgentSteerQueue(sessionId) {
+  async continueQueuedAgentSteer(sessionId, operationId) {
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (session?.kind !== 'agent') return
+    const head = get().agentSteerQueues[sessionId]?.find((item) => steerEntryTargetsRun(item, session.control.run.runId))
+    if (head?.operationId !== operationId || head.errorCode !== 'AGENT_TURN_END_UNCONFIRMED') return
+    await get().flushAgentSteerQueue(sessionId, operationId)
+  },
+  flushAgentSteerQueue(sessionId, continueOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
     const active = agentSteerDrains.get(sessionId)
     if (active) {
@@ -5342,7 +5352,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (!entry) return
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
           try {
-            await api.sessions.submitPrompt(session.control, entry.text, entry.operationId)
+            await api.sessions.submitPrompt(session.control, entry.text, entry.operationId, undefined,
+              continueOperationId === entry.operationId ? { allowUncertainTurn: true } : undefined)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }
@@ -5350,7 +5361,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               else delete agentSteerQueues[sessionId]
               return { agentSteerQueues }
             })
+            // One explicit choice authorizes one message; the next queued turn waits for its own boundary.
+            if (continueOperationId !== undefined) return
           } catch (error) {
+            const message = presentError(error)
+            const turnEndUnconfirmed = typeof error === 'object' && error !== null &&
+              'code' in error && error.code === 'AGENT_TURN_END_UNCONFIRMED' ||
+              message.includes('Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
             // A delivery refusal is a retained local fact, not another global notification.
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]
@@ -5358,15 +5375,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               return {
                 agentSteerQueues: {
                   ...current.agentSteerQueues,
-                  [sessionId]: pending.map((item) =>
-                    item.operationId === entry.operationId ? { ...item, status: 'deferred', error: presentError(error) } : item
-                  )
+                  [sessionId]: pending.map((item) => {
+                    if (item.operationId !== entry.operationId) return item
+                    const { errorCode: _oldCode, ...retained } = item
+                    return { ...retained, status: 'deferred', error: message,
+                      ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' } : {}) }
+                  })
                 }
               }
             })
             // A readiness/reconnect wake arriving during the attempt must not be lost.
             const stillPending = get().agentSteerQueues[sessionId]?.some((item) => item.operationId === entry.operationId)
-            if (stillPending && !drain.wake) return
+            if (continueOperationId !== undefined || stillPending && !drain.wake) return
           } finally {
             set((current) => {
               const agentSteerInFlight = { ...current.agentSteerInFlight }
@@ -5574,8 +5594,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     const core = event.event
-    const previous = core.type === 'agent-session'
-      ? get().sessions.find((session) => session.id === core.session.agentSessionId) : undefined
+    const previous = core.type === 'agent-session' || core.type === 'agent-status'
+      ? get().sessions.find((session) => session.id === (core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId)) : undefined
     const interactionCleared = core.type === 'agent-session' && !core.session.pendingInteraction &&
       previous?.kind === 'agent' && Boolean(previous.pendingInteraction)
     const pendingBefore = core.type === 'agent-timeline' ? get().agentSteerQueues[core.agentSessionId] : undefined
@@ -5600,11 +5620,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } else {
       // A consumed/degraded snapshot can be emitted by the attempt itself. It is not a new
       // delivery opportunity: waking on it would let a persistent refusal sustain its own loop.
-      const ready = core.type === 'agent-session' && core.session.terminalPromptReadiness
-      const sessionId = core.type === 'agent-session' && (interactionCleared ||
-        (ready && ready.readyThroughByte !== undefined && ready.consumedBySubmissionId === undefined))
+      const completed = core.type === 'agent-session' ? core.session.semanticStatus
+        : core.type === 'agent-status' ? { state: core.state, observedAt: core.evidence.observedAt } : undefined
+      const projected = core.type === 'agent-session' || core.type === 'agent-status'
+        ? get().sessions.find((session) => session.id === (core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId)) : undefined
+      const freshCompletion = completed?.state === 'done' &&
+        projected?.status.state === 'done' && projected.status.observedAt === completed.observedAt &&
+        (previous?.status.state !== 'done' || previous.status.observedAt !== completed.observedAt)
+      const sessionId = core.type === 'agent-session' && (interactionCleared || freshCompletion)
         ? core.session.agentSessionId
-        : core.type === 'agent-status' || (core.type === 'process-state' && core.state === 'running') ? core.agentSessionId : undefined
+        : core.type === 'agent-status' && freshCompletion ? core.agentSessionId : undefined
       if (sessionId && get().agentSteerQueues[sessionId]?.length) void get().flushAgentSteerQueue(sessionId)
     }
   },

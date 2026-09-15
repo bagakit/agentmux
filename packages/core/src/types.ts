@@ -550,7 +550,7 @@ export type AgentTerminalOutputChannelState = {
  * fail-closed 丢掉且无编译错。
  */
 export const PROMPT_DELIVERY_DEGRADED_REASONS = [
-  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced'
+  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced', 'turn-end-unconfirmed'
 ] as const
 export type PromptDeliveryDegradedReason = (typeof PROMPT_DELIVERY_DEGRADED_REASONS)[number]
 

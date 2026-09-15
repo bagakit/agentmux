@@ -48,6 +48,10 @@
       "types": "./dist/agent-message-render.d.ts",
       "import": "./dist/agent-message-render.js"
     },
+    "./agent-session-id": {
+      "types": "./dist/agent-session-id.d.ts",
+      "import": "./dist/agent-session-id.js"
+    },
     "./provider-id": {
       "types": "./dist/agent-provider-id.d.ts",
       "import": "./dist/agent-provider-id.js"
