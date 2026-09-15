@@ -73,3 +73,25 @@ it('real CLI send retains managed authors for every target without inventing an 
     await rm(runtime, { recursive: true, force: true })
   }
 })
+
+it('real CLI retries the same messageId across new processes with the original durable receipt', async () => {
+  const runtime = await mkdtemp('/tmp/amux-mail-cli-retry-')
+  const queuePath = join(runtime, 'state', 'global-messages.ndjson')
+  const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'send') return { operation: 'send', agentSessionId: 'recipient' }
+    return { operation: 'send', agentSessionId: 'recipient' }
+  } }, join(runtime, 'control.sock'))
+  await server.start()
+  try {
+    const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' }
+    const first = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
+    const second = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
+    const firstPayload = JSON.parse(first.stdout) as { result: { receiptId: string; messageId: string } }
+    const secondPayload = JSON.parse(second.stdout) as { result: { receiptId: string; messageId: string } }
+    expect(secondPayload.result).toMatchObject({ receiptId: firstPayload.result.receiptId, messageId: 'stable-id' })
+    expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
+  } finally {
+    await server.stop()
+    await rm(runtime, { recursive: true, force: true })
+  }
+})

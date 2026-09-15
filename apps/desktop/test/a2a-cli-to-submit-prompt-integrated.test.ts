@@ -9,7 +9,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer, DurableAgentMuxMessageQueue, type AgentMuxControlRequest, type AgentMuxControlResponse } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxControlServer, AgentMuxFileAgentSessionStore, DurableAgentMuxMessageQueue, hashAgentCapability, issueAgentCapability, type AgentMuxControlRequest, type AgentMuxControlResponse, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -71,6 +71,20 @@ function seedStore(recipientId: string) {
   return { recipient, tab }
 }
 
+async function seedCoreSessionStore(path: string): Promise<{ readonly capability: string }> {
+  const capability = issueAgentCapability()
+  const now = Date.now()
+  const make = (agentSessionId: string, runId: string, withCapability = false): AgentMuxStoredAgentSession => ({
+    kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo',
+    run: { runId }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
+    ...(withCapability ? { capabilityHash: hashAgentCapability(capability) } : {}), outputCursorBytes: 0, createdAt: now, updatedAt: now
+  })
+  const store = new AgentMuxFileAgentSessionStore(path)
+  await store.compareAndSwap(null, make('caller-cli', 'run-caller-cli', true))
+  await store.compareAndSwap(null, make('mailbox-recipient', 'run-mailbox-recipient'))
+  return { capability }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
@@ -98,14 +112,33 @@ afterEach(() => {
 it('CLI-written envelope reaches production submitPrompt with the same bytes and messageId', async () => {
   const runtime = await mkdtemp('/tmp/amux-a2a-integrated-')
   const queuePath = join(runtime, 'state', 'global-messages.ndjson')
+  const sessionStorePath = join(runtime, 'state', 'agent-sessions.json')
   const sock = join(runtime, 'control.sock')
 
   const { recipient } = seedStore('mailbox-recipient')
+  const { capability } = await seedCoreSessionStore(sessionStorePath)
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+
+  // Exercise the same Core capability and Session/Run binding used by main IPC before handing the
+  // request to the renderer Control executor. The CLI child reads this durable store through the
+  // injected path; no caller/session title or mock identity is accepted.
+  const core = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(sessionStorePath) })
+  await (core as unknown as { registry: { load(hostId: string): Promise<void> } }).registry.load('local')
 
   // 起真 AgentMuxControlServer。execute 转发到 store.executeControl —— 就是生产 ipc.ts:781 那条路。
   const server = new AgentMuxControlServer({
     execute: async (request: AgentMuxControlRequest): Promise<AgentMuxControlResponse> => {
+      if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
+        if (!request.caller?.capability) throw new Error('managed capability missing')
+        core.authorizeAgentMessage({
+          capability: request.caller.capability,
+          callerAgentSessionId: request.caller.agentSessionId,
+          senderSessionId: request.message.senderSessionId,
+          senderRunId: request.message.senderRunId,
+          recipientSessionId: request.message.recipientSessionId,
+          recipientRunId: request.message.recipientRunId
+        })
+      }
       return (await useAppStore.getState().executeControl(request)) as AgentMuxControlResponse
     }
   }, sock)
@@ -121,8 +154,10 @@ it('CLI-written envelope reaches production submitPrompt with the same bytes and
         ...process.env,
         AGENTMUX_RUNTIME_DIRECTORY: runtime,
         AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
+        AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
         AGENTMUX_ENV: '1',
-        AGENTMUX_AGENT_SESSION_ID: 'caller-cli'
+        AGENTMUX_AGENT_SESSION_ID: 'caller-cli',
+        AGENTMUX_AGENT_CAPABILITY: capability
       }
     }).then((r) => JSON.parse(r.stdout) as Record<string, unknown>)
 
@@ -164,11 +199,12 @@ it('CLI-written envelope reaches production submitPrompt with the same bytes and
       operation: 'send',
       target: { kind: 'agent-session', agentSessionId: recipient.id },
       text: cliMessage.body,
-      caller: { agentSessionId: 'caller-cli' },
+      caller: { agentSessionId: 'caller-cli', capability },
       message: { ...cliMessage, messageId: 'test-run-mismatch', recipientRunId: badRunId }
     })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
   } finally {
     await server.stop()
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 })

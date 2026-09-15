@@ -629,13 +629,14 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     : null
   const recipient = { kind: 'agent-session', agentSessionId: recipientSessionId } as const
   const sender = owner ? { kind: 'agent-session', agentSessionId: owner.agentSessionId } as const : { kind: 'human', principal: 'local-cli' } as const
+  const requestedMessageId = flags.values.get('--message-id')
   const messageInputBase = {
     operationId: request.requestId,
     createdAt: Date.now(),
     sender,
     recipient,
-    threadId: flags.values.get('--thread') ?? request.requestId,
-    correlationId: flags.values.get('--correlation') ?? request.requestId,
+    threadId: flags.values.get('--thread') ?? requestedMessageId ?? request.requestId,
+    correlationId: flags.values.get('--correlation') ?? requestedMessageId ?? request.requestId,
     replyTo: flags.values.get('--reply-to') ?? null,
     workspaceId: process.env.AGENTMUX_WORKSPACE_ID?.trim() || null,
     senderSessionId: owner?.agentSessionId ?? null,
@@ -654,9 +655,12 @@ async function sendCommand(args: readonly string[]): Promise<number> {
       recipientRunId: messageInputBase.recipientRunId
     })))
   }
-  const requestedMessageId = flags.values.get('--message-id')
   const messageInput: AgentMuxMessageAppendInput = requestedMessageId === undefined ? messageInputBase : { ...messageInputBase, messageId: requestedMessageId }
   const queued = await appendGlobalMessage(messageInput)
+  if (queued.delivery.state === 'delivered') {
+    printSuccess('send', { messageId: queued.messageId, queueId: queued.queueId, receiptId: queued.receiptId, envelope: queued.envelope, delivery: queued.delivery })
+    return 0
+  }
   try {
     const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, ...(owner && capability ? { caller: { ...owner, capability } } : {}), message: queued.envelope })
     const delivered = await recordGlobalMessageDelivery(queued.messageId, 'delivered')
