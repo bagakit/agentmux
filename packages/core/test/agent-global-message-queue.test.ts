@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import {
   DurableAgentMuxMessageQueue,
   validateAgentMuxMessageEnvelope,
@@ -139,6 +140,7 @@ describe('Core-owned durable A2A global message queue', () => {
     const reopened = new DurableAgentMuxMessageQueue(first.path)
     expect((await reopened.listAfter(0)).map((item) => item.sequence)).toEqual([1, 2])
   })
+
 
   it('serializes concurrent OS processes on one durable path', async () => {
     const first = await queue()
