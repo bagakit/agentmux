@@ -154,6 +154,7 @@
 - **Topic 行必须能看懂它的工作面结构。** presence 组件在一行内给出该 Topic 当前可见的 Tab 数量；hover 时显示每个 Tab 的顺序/标题、Region 的分屏结构，以及每个 Region 当前绑定的 Executor。每个 Region 的摘要必须能定位到对应 Tab，不把多个 Tab 的内容压成一个无法操作的总数。
 - **Region hover 要回答“最近在做什么”。** Agent Region 使用最近一条可读的用户/Agent活动摘要；没有可读摘要时明确显示 `No recent activity`，不能编造或用 Session id 冒充工作内容。摘要来源复用已有 timeline/first prompt 投影，Topic 行只负责呈现，不维护第二份活动状态。
 - Topic presence 的 Tab/Region 结构由一个可复用组件渲染，Branch/Topic 等同形列表只注入数据与定位动作；组件必须保留键盘可达的等价信息，hover 只是加速阅读，不是唯一入口。
+- Topic presence 的交付态以真实工作面投影为准：打开 Tab 的 Agent 身份嵌在对应 Region 结构中，健康但未挂载到可见 Region 的后台 Agent 保留在同一行，已结束 Agent 不占用在场名额；Tab 顺序、Region 边界、Executor、最近活动与焦点状态都来自现有 Workspace/Session/Timeline 事实，不创建第二份布局或 Session 状态。
 - **旧配置的 Executor 身份不能丢**。头像设置迁移到 Executor 后，旧 `Appearance` 中按 Executor ID 保存的 tint/badge 仍先显示在对应模板与所有头像簇/Tab 标记中；用户明确点击 Reset 才写入一个空的 Executor 覆盖，不能静默删除旧记录或把它误认成默认 Provider。
 - Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
