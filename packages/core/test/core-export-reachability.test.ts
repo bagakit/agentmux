@@ -125,22 +125,23 @@ const DELIBERATE: ReadonlyArray<{
   {
     module: 'src/prompt-admission.ts',
     name: 'queryPromptAdmission',
-    barrel: true,
     premise:
-      '经 barrel 公开的实时准入判定 (f-25q8fccdm / T-001)。此模块的两处内测在场：' +
-      'test/prompt-admission.test.ts 完整覆盖 ready/busy/degraded 三支互斥 + candidate d ' +
-      '世代守卫（顺序吞噬 fix）。生产接线是 T-002 才做的事——本 commit 只把模块与守卫落到 main，' +
-      '接线时机由 T-002 的「不删闸门」前提约束（现在的 composer 判据不足以区分「闲着」与「生成中」，' +
-      '见 tracker T-002 前提修正 2026-09-13）。删该导出等于把 T-001 硬回滚。'
+      '实时准入判定 (f-25q8fccdm / T-001) 完整落库。**故意不经 barrel export**：admission 依赖链' +
+      '（agent-terminal-screen → screen-evidence）间接引入 node:path 一族，barrel re-export 会让' +
+      'renderer 打包时 vite/rollup 挂在 "isAbsolute is not exported by __vite-browser-external"' +
+      '（memory: renderer-value-import-of-core-barrel-breaks-packaging）。生产接线是 T-002 的事，' +
+      '接线时直接从 "./prompt-admission.js" 相对导入即可，不必经 barrel。目前 test/prompt-admission.test.ts ' +
+      '完整覆盖 ready/busy/degraded 三支互斥 + candidate d 世代守卫；T-002 明说 "不删闸门" 的 ' +
+      '2026-09-13 前提约束（Codex ESC[K 让 composerText === "" 在生成中也真，判据不足以区分闲/生成）' +
+      '决定了 T-002 的接线时机与替换信号——不由本 gate 单方面决定。'
   },
   {
     module: 'src/prompt-admission.ts',
     name: 'LIVE_ADMISSION_QUERY_BUDGET_MS',
-    barrel: true,
     premise:
       '同 queryPromptAdmission：admission 的读屏预算常量，在 test/prompt-admission.test.ts:172 ' +
-      '被断言（"稳态用同步快照，带上界预算"），是 SSOT 的一份锚点。经 barrel 公开与其配套的 ' +
-      'queryPromptAdmission 一同交给 T-002 接线时消费。'
+      '被断言（"稳态用同步快照，带上界预算"），是 SSOT 的一份锚点。同样不经 barrel，避免拉 node:* ' +
+      '到 renderer 打包。T-002 接线时消费。'
   }
 ]
 
