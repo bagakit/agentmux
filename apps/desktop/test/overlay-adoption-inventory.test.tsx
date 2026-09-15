@@ -20,15 +20,13 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
   const rendererSrcDir = join(import.meta.dirname, '../src/renderer/src')
   let root: Root | null = null
   let container: HTMLDivElement | null = null
-  let hostEl: HTMLDivElement | null = null
+  let hostEl: HTMLElement | null = null
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div')
-    hostEl = document.createElement('div')
-    hostEl.className = 'window-overlay-host'
-    hostEl.dataset.overlayHost = ''
-    document.body.append(container, hostEl)
+    document.body.append(container)
+    hostEl = getWindowOverlayHost()
     root = createRoot(container)
   })
 

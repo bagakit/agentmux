@@ -200,6 +200,7 @@ export function TerminalView({
   readOnlyRef.current = readOnly
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const webglVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
   const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
   const terminalGenerationRef = useRef(0)
@@ -370,6 +371,7 @@ export function TerminalView({
       const buffer = terminal.buffer.active
       viewportMemoryRef.current = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
     }
+    webglVisibilityRef.current?.(visible)
     viewportRef.current?.setVisible(visible)
     if (!visible || !terminal) return
     // Restore after the synchronizer's first visibility frame as well: fit/resize can otherwise
@@ -377,6 +379,7 @@ export function TerminalView({
     const restore = () => {
       if (!visibleRef.current || terminalRef.current !== terminal) return
       restoreRememberedViewport(terminal)
+      terminal.refresh(0, terminal.rows - 1)
     }
     restore()
     const frame = requestAnimationFrame(restore)
@@ -585,27 +588,43 @@ export function TerminalView({
       }
     })
 
-    let webgl: WebglAddon | null = null
-    let webglContextLoss: { dispose(): void } | null = null
-    try {
-      webgl = new WebglAddon()
-      terminal.loadAddon(webgl)
-      webglContextLoss = webgl.onContextLoss(() => {
-        webgl?.dispose()
-        webgl = null
-      })
-    } catch (error) {
-      webgl?.dispose()
-      webgl = null
-      console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
-    }
-    const releaseResourceOwners = acquireTerminalResourceOwners({
-      addons: webgl ? 4 : 3,
+    const resourceOwners = acquireTerminalResourceOwners({
+      addons: 3,
       // 8 而非 7：onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
       // 加上 search addon 的 onDidChangeResults（计数订阅）。三者都在 cleanup 里释放。
       // 少数一个就等于把一条泄漏账瞒下去。
       listeners: 8
     })
+    let webgl: WebglAddon | null = null
+    let webglContextLoss: { dispose(): void } | null = null
+    const releaseWebgl = (): void => {
+      webglContextLoss?.dispose()
+      webglContextLoss = null
+      const addon = webgl
+      webgl = null
+      addon?.dispose()
+      resourceOwners.setAddons(3)
+    }
+    // Visibility owns only the GPU addon. The retained parser and Run attachment keep their
+    // existing lifetime, including ordered output while this Region is hidden.
+    const synchronizeWebglVisibility = (shown: boolean): void => {
+      if (!shown) {
+        releaseWebgl()
+        return
+      }
+      if (webgl) return
+      try {
+        webgl = new WebglAddon()
+        terminal.loadAddon(webgl)
+        webglContextLoss = webgl.onContextLoss(releaseWebgl)
+        resourceOwners.setAddons(4)
+      } catch (error) {
+        releaseWebgl()
+        console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
+      }
+    }
+    webglVisibilityRef.current = synchronizeWebglVisibility
+    synchronizeWebglVisibility(visibleRef.current)
 
     let disposed = false
     let observedOutput = false
@@ -1003,8 +1022,8 @@ export function TerminalView({
       if (searchAddonRef.current === search) searchAddonRef.current = null
       viewport.dispose()
       renderReady?.dispose()
-      webglContextLoss?.dispose()
-      webgl?.dispose()
+      if (webglVisibilityRef.current === synchronizeWebglVisibility) webglVisibilityRef.current = null
+      releaseWebgl()
       oscHandlers.dispose()
       searchCounter.dispose()
       selection.dispose()
@@ -1019,7 +1038,7 @@ export function TerminalView({
         })
       }
       terminal.dispose()
-      releaseResourceOwners()
+      resourceOwners.release()
     }
   }, [session.control.run.runId, session.id, themeId])
 
