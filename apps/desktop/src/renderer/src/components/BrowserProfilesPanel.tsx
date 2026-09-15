@@ -60,6 +60,11 @@ export function BrowserProfileCatalog({
             <span>
               <strong>{profile.label}{profile.isDefault ? <em>Default</em> : null}</strong>
               <small>{importedProfileDescription(profile)}</small>
+              {confirming && !profile.isDefault && !inUse ? (
+                <small className="browser-profiles__delete-impact">
+                  Delete {profile.label}? Cookies and site data will be permanently removed. All sign-ins in this Profile will be lost.
+                </small>
+              ) : null}
             </span>
             {profile.isDefault || inUse ? (
               <button
@@ -72,8 +77,8 @@ export function BrowserProfileCatalog({
               </button>
             ) : confirming ? (
               <span className="browser-profiles__delete-confirm">
-                <button type="button" onClick={onCancelDelete}>Cancel</button>
-                <button type="button" onClick={() => onDelete(profile.id)}>Delete</button>
+                <button type="button" disabled={busy !== null} onClick={onCancelDelete}>Cancel</button>
+                <button type="button" disabled={busy !== null} onClick={() => onDelete(profile.id)}>Delete</button>
               </span>
             ) : (
               <button
@@ -206,7 +211,7 @@ export function BrowserProfilesPanel({
   }
 
   async function deleteProfile(profileId: string): Promise<void> {
-    if (busy) return
+    if (busy || confirmDeleteId !== profileId) return
     setBusy(`delete:${profileId}`)
     setError(null)
     try {

@@ -36,6 +36,7 @@
 .browser-profiles__catalog article > button:hover:not(:disabled) { color: var(--red); background: var(--surface-3); }
 .browser-profiles__catalog article > button:disabled { opacity: .35; cursor: not-allowed; }
 .browser-profiles__delete-confirm { display: flex; gap:var(--sp-1); }
+.browser-profiles__catalog article small.browser-profiles__delete-impact { white-space: normal; color: var(--red-text); }
 .browser-profiles__delete-confirm button { min-height: 22px; padding:0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font-size: var(--fs-micro); cursor: pointer; }
 .browser-profiles__delete-confirm button:last-child { color: var(--red-text); border-color: rgba(255, 106, 106, .35); background: rgba(255, 106, 106, .13); }
 .browser-profiles__create { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap:var(--sp-2); }
