@@ -5,17 +5,25 @@ let terminalListeners = 0
 export function acquireTerminalResourceOwners(input: {
   addons: number
   listeners: number
-}): () => void {
+}): { setAddons(addons: number): void; release(): void } {
   terminalViews += 1
   terminalAddons += input.addons
   terminalListeners += input.listeners
+  let addons = input.addons
   let released = false
-  return () => {
-    if (released) return
-    released = true
-    terminalViews -= 1
-    terminalAddons -= input.addons
-    terminalListeners -= input.listeners
+  return {
+    setAddons(next) {
+      if (released) return
+      terminalAddons += next - addons
+      addons = next
+    },
+    release() {
+      if (released) return
+      released = true
+      terminalViews -= 1
+      terminalAddons -= addons
+      terminalListeners -= input.listeners
+    }
   }
 }
 

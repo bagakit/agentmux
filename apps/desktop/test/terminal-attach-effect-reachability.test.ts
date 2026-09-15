@@ -58,14 +58,8 @@ describe('attach effect 的六处接线都可达（在 effect 体内 if (!root) 
     assertEarlyExitGuards(calls[0]!, ATTACH_EARLY_EXITS, 'TerminalView attach: 文件路径 link provider')
   })
 
-  it('onContextLoss：WebGL 上下文丢失回调被接（丢了则 GPU 上下文丢失后不回退 DOM renderer、画布变黑）', () => {
-    // `webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })` 是「GPU 上下文丢了就 dispose
-    // WebGL addon、让 xterm 退回 DOM renderer」的唯一触发器。删掉它，上下文丢失后终端停止渲染而无人
-    // 收拾。它长在 try 块里（try 不是函数边界），故它之前的 effect 级早退仍只有那句 if (!root) return。
-    const calls = findCallsToMember(load(), 'onContextLoss')
-    expect(calls, 'webgl.onContextLoss(...) 应恰有一处').toHaveLength(1)
-    assertEarlyExitGuards(calls[0]!, ATTACH_EARLY_EXITS, 'TerminalView attach: WebGL 上下文丢失回退')
-  })
+  // WebGL now belongs to visibility within the attachment. Its guards and context-loss cleanup
+  // are exercised by the mounted terminal-webgl-visibility test, rather than this attach scan.
 
   it('acquireTerminalResourceOwners：addon / listener 泄漏账本被登记（丢了则泄漏检测启动期失明）', () => {
     // 变异实测存活（本任务 MUTATION C）：换成返回 no-op release 的壳，cleanup 里 releaseResourceOwners()
