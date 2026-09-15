@@ -176,9 +176,10 @@ describe('Control protocol', () => {
       senderSessionId: 'caller', senderRunId: null, recipientSessionId: 'recipient', recipientRunId: null,
       body: 'body'
     } as const
-    expect(parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toMatchObject({ message })
+    expect(parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toMatchObject({ message })
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-spoof', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('sender')
     expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-2', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'other' }, message })).toThrow('sender')
-    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('recipient')
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toThrow('recipient')
   })
 
   it('keeps open content and destinations as closed discriminated unions', () => {

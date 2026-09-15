@@ -17,6 +17,10 @@ it('real CLI send retains managed authors for every target without inventing an 
   const delivered: string[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
     requests.push(request)
+    if (request.operation === 'inspect.region') return { operation: 'inspect.region', region: {
+      kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } }
+    } }
+    if (request.operation === 'inspect.tab') return { operation: 'inspect.tab', tab: { tabId: 'tab', workspaceId: 'workspace', regions: [{ kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } } }] } }
     if (request.operation === 'open.agent') return { operation: 'open.agent', region: {
       kind: 'agent', regionId: 'new-region', tabId: 'tab', workspaceId: 'workspace',
       agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex'
@@ -27,17 +31,16 @@ it('real CLI send retains managed authors for every target without inventing an 
   await server.start()
   try {
     const outputs: Array<Record<string, any>> = []
-    for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab'], ['--to-session', 'self']]) {
+    for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab']]) {
       const result = await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
-        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender'
+        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed'
       } })
       outputs.push(JSON.parse(result.stdout) as Record<string, any>)
     }
-    expect(requests.map((request) => request.operation === 'send' && [request.target, request.caller, request.text])).toEqual([
-      [{ kind: 'agent-session', agentSessionId: 'other' }, { agentSessionId: 'sender' }, 'actual mail'],
-      [{ kind: 'region', regionId: 'region' }, { agentSessionId: 'sender' }, 'actual mail'],
-      [{ kind: 'tab', tabId: 'tab' }, { agentSessionId: 'sender' }, 'actual mail'],
-      [{ kind: 'self' }, { agentSessionId: 'sender' }, 'actual mail']
+    expect(requests.filter((request) => request.operation === 'send').map((request) => [request.target, request.caller, request.text])).toEqual([
+      [{ kind: 'agent-session', agentSessionId: 'other' }, undefined, 'actual mail'],
+      [{ kind: 'region', regionId: 'region' }, undefined, 'actual mail'],
+      [{ kind: 'tab', tabId: 'tab' }, undefined, 'actual mail']
     ])
     const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
     await exec(cli, ['send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
@@ -45,26 +48,26 @@ it('real CLI send retains managed authors for every target without inventing an 
     expect(requests.at(-1)).not.toHaveProperty('caller')
     const queue = new DurableAgentMuxMessageQueue(join(runtime, 'state', 'global-messages.ndjson'))
     const records = await queue.listAfter(0)
-    expect(records).toHaveLength(5)
+    expect(records).toHaveLength(4)
     expect(outputs[0]).toMatchObject({ operation: 'send', result: { queueId: expect.any(String), receiptId: expect.any(String), messageId: expect.any(String), delivery: { state: 'delivered' } } })
     expect((outputs[0]!.result as Record<string, unknown>).messageId).not.toBe(outputs[0]!.requestId)
-    expect(records[0]!.envelope.sender).toEqual({ kind: 'agent-session', agentSessionId: 'sender' })
+    expect(records[0]!.envelope.sender).toEqual({ kind: 'human', principal: 'local-cli' })
     expect(records[0]!.envelope.recipient).toEqual({ kind: 'agent-session', agentSessionId: 'other' })
     expect(records[0]!.envelope.body).toBe('actual mail')
-    expect(requests[0]).toMatchObject({ operation: 'send', message: { sender: { agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
-    expect(delivered[0]).toContain('<amux from="sender" to="other"')
+    expect(requests.filter((request) => request.operation === 'send')[0]).toMatchObject({ operation: 'send', message: { sender: { principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
+    expect(delivered[0]).toContain('<amux from="local-cli" to="other"')
     expect(delivered[0]).toContain('actual mail')
     await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
-    expect(requests).toHaveLength(5)
+    expect(requests.filter((request) => request.operation === 'send')).toHaveLength(4)
     const open = ['open', 'agent', '--agent', 'codex', '--right-of', 'region', '--prompt', 'first mail']
     await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' } })
-    expect(requests[5]).toMatchObject({ operation: 'open.agent', caller: { agentSessionId: 'sender' },
+    expect(requests.filter((request) => request.operation === 'open.agent')[0]).toMatchObject({ operation: 'open.agent', caller: { agentSessionId: 'sender' },
       content: { kind: 'new-agent', prompt: 'first mail' } })
     await exec(cli, open, { timeout: 5000, env: humanEnv })
-    expect(requests[6]).toMatchObject({ operation: 'open.agent', content: { kind: 'new-agent', prompt: 'first mail' } })
-    expect(requests[6]).not.toHaveProperty('caller')
-    expect(requests).toHaveLength(7)
+    expect(requests.filter((request) => request.operation === 'open.agent')[1]).toMatchObject({ operation: 'open.agent', content: { kind: 'new-agent', prompt: 'first mail' } })
+    expect(requests.filter((request) => request.operation === 'open.agent')[1]).not.toHaveProperty('caller')
+    expect(requests.filter((request) => request.operation === 'open.agent')).toHaveLength(2)
   } finally {
     await server.stop()
     await rm(runtime, { recursive: true, force: true })

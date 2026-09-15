@@ -68,7 +68,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
-export type AgentMuxControlCaller = { agentSessionId: string }
+export type AgentMuxControlCaller = { agentSessionId: string; capability?: string }
 export type AgentMuxRegionBounds = { x: number; y: number; width: number; height: number }
 
 /**

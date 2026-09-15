@@ -26,6 +26,7 @@ import {
 } from 'electron'
 import {
   AgentMuxControlServer,
+  AgentMuxError,
   type AgentExecutorId,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
@@ -192,7 +193,13 @@ export async function registerIpc(args: {
   }
   const executeControl = async (
     request: AgentMuxControlRequest
-  ): Promise<AgentMuxControlResult> => await controlBridge.execute(request)
+  ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
+      if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')
+      await args.runtime.authorizeAgentCaller({ agentSessionId: request.caller.agentSessionId, capability: request.caller.capability })
+    }
+    return await controlBridge.execute(request)
+  }
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,

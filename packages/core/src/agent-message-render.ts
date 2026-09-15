@@ -16,5 +16,6 @@ export function renderAgentMuxMessageEnvelope(envelope: AgentMuxMessageEnvelope)
   const recipient = envelope.recipient.kind === 'agent-session'
     ? envelope.recipient.agentSessionId
     : envelope.recipient.target.kind === 'agent-session' ? envelope.recipient.target.agentSessionId : envelope.recipient.target.kind
-  return `<amux from="${sender}" to="${recipient}" messageId="${envelope.messageId}">\n${envelope.body}\n</amux>`
+  const escape = (value: string): string => value.replace(/[&<>"']/gu, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[character]!))
+  return `<amux from="${escape(sender)}" to="${escape(recipient)}" messageId="${escape(envelope.messageId)}">\n${envelope.body}\n</amux>`
 }
