@@ -11,6 +11,8 @@ export const OVERLAY_LAYER_BANDS = {
 
 export type OverlayLayerBand = (typeof OVERLAY_LAYER_BANDS)[keyof typeof OVERLAY_LAYER_BANDS]
 
+const WINDOW_OVERLAY_HOST_ID = 'agentmux-window-overlay-host'
+
 /**
  * Internal helper to synchronously and idempotently ensure that the shared
  * window overlay host exists directly under document.body outside #root.
@@ -20,9 +22,12 @@ export type OverlayLayerBand = (typeof OVERLAY_LAYER_BANDS)[keyof typeof OVERLAY
  */
 function ensureWindowOverlayHost(): HTMLElement | null {
   if (typeof document === 'undefined') return null
-  let host = document.querySelector<HTMLElement>('[data-overlay-host]')
+  // The host is a single window identity. Descendant selectors traverse retained
+  // terminal content before reaching this body child on every Portal render.
+  let host = document.getElementById(WINDOW_OVERLAY_HOST_ID)
   if (!host) {
     host = document.createElement('div')
+    host.id = WINDOW_OVERLAY_HOST_ID
     host.className = 'window-overlay-host'
     host.dataset.overlayHost = ''
     document.body.appendChild(host)

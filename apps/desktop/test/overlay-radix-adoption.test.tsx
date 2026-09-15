@@ -34,16 +34,14 @@ const BROWSER_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/
 describe('T-002: Radix Portal overlay families adoption', () => {
   let root: Root | null = null
   let container: HTMLDivElement | null = null
-  let host: HTMLDivElement | null = null
+  let host: HTMLElement | null = null
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div')
     container.id = 'root'
-    host = document.createElement('div')
-    host.className = 'window-overlay-host'
-    host.dataset.overlayHost = ''
-    document.body.append(container, host)
+    document.body.append(container)
+    host = getWindowOverlayHost()
     root = createRoot(container)
   })
 
