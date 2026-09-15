@@ -1105,3 +1105,10 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 - Hook 未安装、来源未关联、共享配置冲突或探测失败使用靠近受影响 Agent 的一行 warning/info 服务窗；文案说明步骤、当前降级能力和恢复动作，不展示 Provider 共享配置的内部路径作为常驻产品信息。
 - 非 AgentMux 会话被识别为无关联事件时只保留低干扰诊断，不弹出阻塞对话框、不禁用 Composer，也不把健康 Agent 标成错误终局。
 - Hook 的 AgentMux 关联身份属于低频元信息，放入 tooltip、详情或诊断收据；主工作面只显示当前能力和可执行恢复入口。
+
+### A2A 消息队列与身份信息密度
+
+- Message Tools 的首层只显示发送者、接收者、当前投递状态和必要的失败/重试动作；`messageId`、receipt、generation、thread/correlation 和 workspace/session/run 关联进入详情或审计入口，不占用 Composer 主输入区。
+- `<amux ...>` 署名保留为正文附近的一行可读来源提示，不能被渲染成认证徽章；Core 已验证的 sender/recipient 身份才是权威信息。正文必须保持用户原样，不把协议字段插入正文。
+- 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。
+- 读取和审计入口支持按 thread、recipient、session 或 receipt 收窄范围；默认列表按 durable sequence 排序，不能用当前 Region 或视觉位置替代消息身份。
