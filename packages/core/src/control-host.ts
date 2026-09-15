@@ -49,6 +49,7 @@ import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { isSplitDirection } from './split-direction-ssot.js'
+import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
 const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
@@ -298,7 +299,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const target = messageTarget(source.target)
     const owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, text: text(source.text, 'Message text'), ...(owner ? { caller: owner } : {}) }
+    const message = source.message === undefined ? undefined : validateAgentMuxMessageEnvelope(source.message as AgentMuxMessageEnvelope)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, text: text(source.text, 'Message text'), ...(owner ? { caller: owner } : {}), ...(message ? { message } : {}) }
   }
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
