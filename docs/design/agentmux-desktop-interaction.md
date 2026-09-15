@@ -855,8 +855,10 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### Status Bar CPU/Memory 资源面板
 
-- CPU/Memory 面板复用 Activity/Agents 的列表语言：图标、对象、当前值、次级上下文和处理动作，不使用孤立的大数字卡片。
-- 每个资源对象尽量显示所属 Project/Workspace、Agent/Provider 和最近活动/idle 时长；没有归属时明确显示 unknown。资源采样与 Agent 语义状态分开，不能把低 CPU 误判成 Agent idle。
+- 用户要求「性能指标在右下角的观测面板看不出」「ctxmux 的泄漏管理应该也能看出来」。观测面板必须分清应用、Agent CLI 和 ctxmux：应用按 Main、Renderer、GPU、Browser/Utility 显示 CPU 与内存，Agent 按现有 Run 归属，Runtime 显示其公开合同提供的 Run、attachment、保留输出及回收事实。不能以应用内存总数代替卡顿来源，也不能从 RSS 高直接判为泄漏。
+- 进程指标、资源 owner 数量、保留历史容量与回收结果是不同事实；观察时间、CPU 聚合口径、未知/过期与失败原因必须可读。首次尚未形成 CPU 测量窗口不能冒充 0；Runtime 缺少公开指标时准确说缺少什么，不读写其私有数据库来补一个假完整面板。
+- 观测仅在面板打开期间按需采样，关闭即停，慢采样不堆积。Runtime 存储统计不随每秒 CPU 采样反复遍历；局部指标失败不使其他指标消失，也不停止、删除或重启 Agent。既有孤儿目录回收与当前 Run 的历史回收分别显示，打开面板不是删除历史的授权。
+- 每个资源对象尽量显示所属 Project/Workspace、Agent/Provider 和最近活动/idle 时长；没有归属时明确显示 unknown。资源采样与 Agent 语义状态分开，不能把低 CPU 误判成 Agent idle。信息层级与紧凑布局归 Surface 密度合同。
 
 ###  资源与 Activity 观测
 Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Provider 与当前 Agent 状态；空闲时显示可理解的 idle 时长。资源数值与 Agent 语义状态分开，缺失数据保持未知。Activity 展开行只补充能帮助定位的上下文，不重复左侧 Agents 入口。
@@ -1719,3 +1721,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 所有以 Agent Session ID 寻址的 CLI 动词都应接受唯一前缀：只在当前权威 Session 集合中恰好命中一个 ID 时解析；零命中或多命中明确报错，绝不能按最近活跃、标题、View 或位置猜一个。前缀是便捷输入，不是另一个持久身份；新 Session 出现后旧前缀可能变成歧义，但不能静默改指向。Core 拥有铸造、查找和碰撞判定，Renderer 只展示权威结果。
 - Demand 的关联 Session 和 PMO 的混合 Session 筛选可以包含普通 Terminal，归现有通用 Session 入口所有；不得拿 Core 的 Agent 集合拒绝这些完整引用。只有领域明确要求 Agent 的入口才做 Agent 前缀解析。
 - 一条消息在收件 Agent 和人类阅读面上只有一份简洁的表达；机器回执留在命令结果/审计入口，不作为消息正文再转发。可读信封只是展示，不是认证；发送授权仍按上节的 capability 与 Session/Run 事实核验。
+
+### Terminal 连续向上阅读历史
+
+用户反馈「terminal 只能往上滚一点，应该可以一直往上滚」。用户向上阅读时必须能连续到达当前会话仍可用的历史，新输出、尺寸变化和切换工作面不能把阅读位置反复拉回底部或丢掉已有历史。输入、PTY 和原 Session 保持可用，明确回到最新输出才恢复跟随。
+
+正常屏幕与全屏应用的 alternate buffer 按协议区分：不能把滚动手势暗中变成 Agent 命令，也不能把重绘帧伪造为对话历史。恢复和积压处理不得因界面自己的小窗口把 Runtime 仍保留的历史当成不存在；Runtime 确已淘汰的字节、终端行缓存边界或应用自身的全屏历史能力必须准确说明，不能声称无限历史、不能新增第二份 Runtime 输出账本。
