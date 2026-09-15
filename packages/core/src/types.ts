@@ -750,6 +750,8 @@ export type AgentMuxQuestionRequest = {
   kind: 'question'
   id: string
   agentSessionId: string
+  /** Provider-native identity of this question tool invocation, when actually reported. */
+  nativeToolCallId?: string
   questions: AgentMuxQuestion[]
   evidence: AgentMuxEvidence
 }
@@ -1088,6 +1090,12 @@ export type NormalizedHookEvent = {
   status: AgentStatus
   timeline: AgentTimelineMutation[]
   interaction?: AgentMuxInteractionRequest
+  interactionCompletion?: {
+    kind: 'question'
+    agentSessionId: string
+    nativeToolCallId: string
+    evidence: AgentMuxEvidence
+  }
   nativeHandle?: AgentNativeSessionHandle
   /**
    * 从收尾事件 payload 里抽出的本 turn 真实 token 用量，仅当 Provider 声明了 usage 能力、hook 命令

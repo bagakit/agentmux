@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { canonicalHookLifecycleEvent, resolveHookEventName } from './agent-hook-event.js'
+import { nativeHookToolCallId } from './hook-normalizer.js'
 import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
@@ -9,7 +10,8 @@ import type {
   AgentPostureControl,
   AgentPostureInputPlan,
   AgentPostureMode,
-  NativeHookEnvelope
+  NativeHookEnvelope,
+  NormalizedHookEvent
 } from './types.js'
 
 const MAX_QUESTIONS = 1
@@ -20,6 +22,8 @@ const ESC = '\u001b'
 export type AgentTerminalInteractionDetection = {
   questionEvents: readonly string[]
   questionTools: readonly string[]
+  /** Successful completion events for those exact question invocations, when supported. */
+  questionCompletionEvents?: readonly string[]
   permissionOptions: readonly TerminalPermissionOption[]
 }
 
@@ -242,10 +246,12 @@ function questionRequest(
   if (rawQuestions.length === 0 || rawQuestions.length > MAX_QUESTIONS) return undefined
   const questions = rawQuestions.map(parseQuestion)
   if (questions.some((question) => question === null)) return undefined
+  const nativeToolCallId = nativeHookToolCallId(envelope.payload ?? {})
   return {
     kind: 'question',
     id: envelope.receiptId,
     agentSessionId: envelope.agentSessionId,
+    ...(nativeToolCallId ? { nativeToolCallId } : {}),
     questions: questions as AgentMuxQuestion[],
     evidence: {
       source: 'native-hook',
@@ -315,6 +321,23 @@ export function normalizeTerminalInteraction(
   return undefined
 }
 
+export function normalizeTerminalInteractionCompletion(
+  envelope: NativeHookEnvelope,
+  observedAt: number,
+  protocol: AgentTerminalInteractionDetection
+): NormalizedHookEvent['interactionCompletion'] {
+  const payload = envelope.payload ?? {}
+  const eventName = resolveHookEventName(envelope.eventName, payload)
+  const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
+  const nativeToolCallId = nativeHookToolCallId(payload)
+  if (!eventName || !protocol.questionCompletionEvents?.includes(eventName) ||
+    !toolName || !protocol.questionTools.includes(toolName.toLowerCase()) || !nativeToolCallId) return undefined
+  return {
+    kind: 'question', agentSessionId: envelope.agentSessionId, nativeToolCallId,
+    evidence: { source: 'native-hook', observedAt, run: { runId: envelope.runId }, hookReceiptId: envelope.receiptId }
+  }
+}
+
 /**
  * Build a Provider's numbered terminal-interaction protocol from its declared detection config. The
  * returned `planResponse` CLOSES OVER `permissionOptions`, so the reply resolves the picked option's
@@ -328,6 +351,7 @@ export function createNumberedTerminalInteractionProtocol(
   return {
     questionEvents: config.questionEvents,
     questionTools: config.questionTools,
+    ...(config.questionCompletionEvents ? { questionCompletionEvents: config.questionCompletionEvents } : {}),
     permissionOptions: config.permissionOptions,
     planResponse(request, response) {
       const normalized = normalizeAgentInteractionResponse(request, response)
