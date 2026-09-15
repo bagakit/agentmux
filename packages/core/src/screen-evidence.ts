@@ -182,6 +182,25 @@ export class AgentScreenEvidenceStore {
     return built
   }
 
+  /**
+   * 当前 session 的 discard 世代计数。每次 `discard(sessionId)` +1（也包括 `build()` 首行的
+   * 隐式 discard）。**这是 admission 用来判「本轮读屏期间是否发生过 discard」的唯一稳定标识**：
+   *
+   *   const g = store.generation(sid)
+   *   await store.wait(...)                     // predicate 或 timeout
+   *   if (store.generation(sid) !== g) → **本次观察作废**（当 degraded 处理，别当 ready/busy）
+   *
+   * 这条 accessor 存在的唯一理由是解「顺序吞噬」（docs/reviews/prompt-admission-cutover-plan.md
+   * §顺序吞噬 candidate d）：admission 先跑，若因 upstream discard 拿到 CANCELLED 就消化掉、
+   * 后跑的 confirmRenderOrDegrade 就再也拿不到该信号，只能等 10s 完整 TERMINAL_PROMPT_RENDER_TIMEOUT
+   * 完整超时。用 generation 让**两个消费者都能独立观测到 discard 发生过**、各自走自己的降级路径。
+   *
+   * Read-only：调用者不得写它。故意不返 `readonly`——number 是值类型，没有可变面。
+   */
+  generation(agentSessionId: string): number {
+    return this.generations.get(agentSessionId) ?? 0
+  }
+
   discard(agentSessionId: string): void {
     // 世代**无条件**递增，且排在早退之前：在途的 build 此刻还没有 entry，只有让它的世代过期才拦得住
     // 它事后登记（见 `generations` 的说明）。写成「有 entry 才递增」会让那条路径原封不动地留着。
