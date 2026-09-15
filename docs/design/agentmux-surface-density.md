@@ -494,6 +494,7 @@ styles/
 ## 本地文件查看与编辑表面
 
 - 网页、图片与文本的展示应符合各自内容类型，沿用工作台已有控件语言；行为和范围见 [Desktop interaction](agentmux-desktop-interaction.md)“本地文件预览与按格式编辑”。具体工具栏与编辑能力在成熟产品调研后评审。
+- 文件树目录的“Open as Project”只出现在目录右键菜单中，和 New Folder / Open in Terminal 同一菜单密度；文件行不留禁用占位。动作成功后由 Project Rail 的既有选中态表达结果，失败使用既有错误面，不在菜单里增加第二种确认卡。
 
 ## 输入区 Context 监控
 
