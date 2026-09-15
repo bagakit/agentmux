@@ -221,6 +221,17 @@ describe('BrowserProfileManager', () => {
     await expect(manager.deleteProfile(CREATED_ID, approval(DEFAULT_ID))).rejects.toMatchObject({
       code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
     })
+    for (const invalid of [
+      { ...approval(CREATED_ID), kind: 'agent-confirmed' },
+      { ...approval(CREATED_ID), operation: 'clear-profile' },
+      { ...approval(CREATED_ID), scope: 'all-profiles' }
+    ]) {
+      await expect(manager.deleteProfile(CREATED_ID, invalid as never)).rejects.toMatchObject({
+        code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+      })
+    }
+    expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).not.toHaveBeenCalled()
+    expect(electronMocks.sessionFor(partition(DEFAULT_ID)).clearStorageData).not.toHaveBeenCalled()
     expect(manager.listProfiles().some((profile) => profile.id === CREATED_ID)).toBe(true)
   })
 
