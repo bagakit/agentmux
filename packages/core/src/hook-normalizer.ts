@@ -44,7 +44,7 @@ export type AgentNativeSubagentTracking = {
   stopEvents: readonly string[]
   /** 主 Agent 的收尾事件——roster 非空时压成 `working`，为空时才放行 rules 给出的 `done`。 */
   mainStopEvents: readonly string[]
-  /** 关联同一个子代理 start/stop 的 id 键。Claude/Codex 都给 `agent_id`。取第一个能读出的。 */
+  /** 顶层子主体 id 键，普通工具事件也可携带；同时关联子代理 start/stop。取第一个能读出的。 */
   idKeys?: readonly string[]
 }
 
@@ -143,6 +143,13 @@ function subagentRosterAlive(roster: SubagentRoster): boolean {
   return roster.live.size > 0
 }
 
+function subagentId(
+  tracking: AgentNativeSubagentTracking,
+  payload: Record<string, unknown>
+): string | undefined {
+  return stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
+}
+
 /**
  * 把一条 hook 事件并入子代理花名册，返回**经过在途压制后**的语义状态。
  *
@@ -162,7 +169,7 @@ function applySubagentTracking(
   const tracking = specification.subagentTracking
   if (!tracking) return baseState
   const key = subagentRosterKey(envelope)
-  const id = stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
+  const id = subagentId(tracking, payload)
   if (tracking.startEvents.includes(eventName)) {
     // 只按 id 记账。内建 Provider 的子代理事件都带 id；无 id 时不虚记一个够不到 stop 的幽灵条目，
     // Agent 照旧显示 working（子代理确实在跑），但不会把主 Stop 永远压住。
@@ -268,10 +275,18 @@ function toolAwaitsUser(specification: AgentNativeHookSpecification, toolName: s
 function nativeHandle(
   providerId: AgentProviderId,
   specification: AgentNativeHookSpecification,
+  eventName: string,
   payload: Record<string, unknown>
 ): AgentNativeSessionHandle | undefined {
   const definition = specification.nativeHandle
   if (!definition) return undefined
+  // Hook 的 Run 绑定属于主 Session，但子主体可共用主 native ID、携带自己的记录路径。
+  // 子事件照常处理；只禁止把其 locator 晋升成主 Session 的恢复身份。
+  const tracking = specification.subagentTracking
+  if (tracking && (
+    subagentId(tracking, payload) ||
+    tracking.startEvents.includes(eventName) || tracking.stopEvents.includes(eventName)
+  )) return undefined
   const sessionId = sessionIdField(payload, definition.sessionIdKeys)
   if (!sessionId) return undefined
   const transcriptPath = definition.transcriptPathKeys
@@ -487,7 +502,7 @@ export function normalizeNativeHook(
     // 诊断带的是**原始**事件名：一条 Core 没认出来的事件，唯一有用的线索就是 Provider 到底叫它什么。
     detail: eventName
   }
-  const handle = nativeHandle(envelope.providerId, specification, payload)
+  const handle = nativeHandle(envelope.providerId, specification, eventName, payload)
   // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
   // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
   const turnUsage = parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined
