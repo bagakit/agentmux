@@ -196,7 +196,14 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
       if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')
-      await args.runtime.authorizeAgentCaller({ agentSessionId: request.caller.agentSessionId, capability: request.caller.capability })
+      await args.runtime.authorizeAgentMessage({
+        capability: request.caller.capability,
+        callerAgentSessionId: request.caller.agentSessionId,
+        senderSessionId: request.message.senderSessionId,
+        senderRunId: request.message.senderRunId,
+        recipientSessionId: request.message.recipientSessionId,
+        recipientRunId: request.message.recipientRunId
+      })
     }
     return await controlBridge.execute(request)
   }

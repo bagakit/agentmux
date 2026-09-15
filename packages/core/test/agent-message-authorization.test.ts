@@ -11,5 +11,7 @@ describe('Core A2A envelope authorization', () => {
     runtime.agentSession = () => recipient
     expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'wrong-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).toThrow('sender facts')
     expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'wrong-run' })).toThrow('recipient facts')
+    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: null, recipientRunId: null })).toThrow('recipient Session/Run')
+    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: null })).toThrow('recipient Session/Run')
   })
 })

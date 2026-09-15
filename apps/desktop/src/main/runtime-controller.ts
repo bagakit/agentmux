@@ -1211,6 +1211,26 @@ export class RuntimeController {
     throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')
   }
 
+  /** Validate the complete A2A envelope binding at the main-process Control boundary. */
+  async authorizeAgentMessage(input: {
+    capability: string
+    callerAgentSessionId: string
+    senderSessionId: string | null
+    senderRunId: string | null
+    recipientSessionId: string | null
+    recipientRunId: string | null
+  }): Promise<void> {
+    const hosts = [...this.hosts.values()]
+    let lastError: unknown
+    for (const host of hosts) {
+      try {
+        host.client.authorizeAgentMessage(input)
+        return
+      } catch (error) { lastError = error }
+    }
+    throw lastError instanceof Error ? lastError : new AgentMuxError('A2A message facts could not be verified.', 'MESSAGE_ENVELOPE_INVALID')
+  }
+
   private async trackHostLifecycleOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)
