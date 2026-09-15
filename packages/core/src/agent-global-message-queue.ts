@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rm } from 'node:fs/promises'
+import { lstat, link, mkdir, open, readFile, rm, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
@@ -196,8 +196,10 @@ export class DurableAgentMuxMessageQueue {
       try { handle = await open(lockPath, 'wx', 0o600); break } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
         let stale = false
+        let observedLock = ''
         try {
-          const metadata = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: number; acquiredAt?: number }
+          observedLock = await readFile(lockPath, 'utf8')
+          const metadata = JSON.parse(observedLock) as { pid?: number; acquiredAt?: number }
           const pid = metadata.pid
           if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
             try { process.kill(pid, 0) } catch (probeError) {
@@ -211,7 +213,29 @@ export class DurableAgentMuxMessageQueue {
             stale = Date.now() - stat.mtimeMs > 30_000
           } catch { stale = true }
         }
-        if (stale) { await rm(lockPath, { force: true }); continue }
+        if (stale) {
+          // Never unlink the pathname directly: another process may have reclaimed the old inode
+          // and acquired a fresh lock between our read and this branch. Hard-link the exact inode,
+          // re-read it, and only unlink the original path when its bytes are unchanged. A new writer
+          // can then create the pathname, while the private link still points at the old stale inode.
+          const reclaimPath = `${lockPath}.reclaim-${randomUUID()}`
+          try {
+            await link(lockPath, reclaimPath)
+            const linked = await readFile(reclaimPath, 'utf8')
+            const [linkedStat, currentStat] = await Promise.all([lstat(reclaimPath), lstat(lockPath)])
+            if (linked === observedLock && linkedStat.dev === currentStat.dev && linkedStat.ino === currentStat.ino) {
+              await unlink(lockPath)
+              await rm(reclaimPath, { force: true })
+              continue
+            }
+          } catch (reclaimError) {
+            const code = (reclaimError as NodeJS.ErrnoException).code
+            if (code === 'ENOENT' || code === 'EEXIST') continue
+            throw reclaimError
+          } finally {
+            await rm(reclaimPath, { force: true }).catch(() => {})
+          }
+        }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     }
