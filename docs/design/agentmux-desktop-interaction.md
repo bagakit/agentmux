@@ -1688,3 +1688,11 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
 - 队列必须有界并明确背压或拒绝码。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，`<amux ...>` 只作可读声明，不是认证。
 - 第一条可验收竖切是真实 CLI `agentmux send` 进入生产 Core path、落入 durable queue 并返回 envelope 与 queue/receipt identity；随后提供受控读取/审计或现有 Core consumer 可用的入口。事件事实保持稳定、可序列化、可版本化，不在本 Closure 引入 traj 分析引擎。
+
+### A2A 消息要让人一眼看懂
+
+- 用户原话：「`from="local-cli" to="765ae7ef-b886-4681-b9b5-0bbc561e8f1a"`，from 和 to 的语义完全不同；amux 中包 JSON 太奇怪了；冗余信息也多；人类完全不可读」「现在的 agent id 设计太长了，非常浪费」。消息里表示发送者和收件者时，两端必须是同一层的参与者身份；`local-cli` 是进入系统的通道，不是一个人或 Agent 的身份，不能占据 `from`。通道、已核验身份与未核验来源必须分开表达；无法核实发送者时如实标未知，不能猜成某个 Agent。
+- Core 的持久消息事实与投递回执供机器审计和重试；投递给 Agent 的文本只保留完成交流所需的来源、正文，以及确有回复需要时的简短引用。不得把整个回执 JSON、`requestId`、`queueId`、Run ID 或一串重复的 Session ID 自动塞进可读消息。正文若本来就是发送者写的 JSON，仍按原文保留，并明确它是正文，不让它看起来像 AgentMux 协议层。
+- 用户明确选择「持久地址也缩短，从防撞目标出发，不用这么长；还要支持类似 Git 的部分 hash 寻址」。新建 Agent Session 的**持久 ID 本身**应缩短，而不是给长 UUID 再套一层别名；长度由明确的碰撞概率目标决定，不靠“看起来够短”。同一完整 ID 重启后仍指向同一 Session，已存在的长 ID 保持原身份并可恢复，不为缩短地址重写它们。
+- 所有以 Agent Session ID 寻址的 CLI 动词都应接受唯一前缀：只在当前权威 Session 集合中恰好命中一个 ID 时解析；零命中或多命中明确报错，绝不能按最近活跃、标题、View 或位置猜一个。前缀是便捷输入，不是另一个持久身份；新 Session 出现后旧前缀可能变成歧义，但不能静默改指向。Core 拥有铸造、查找和碰撞判定，Renderer 只展示权威结果。
+- 一条消息在收件 Agent 和人类阅读面上只有一份简洁的表达；机器回执留在命令结果/审计入口，不作为消息正文再转发。可读信封只是展示，不是认证；发送授权仍按上节的 capability 与 Session/Run 事实核验。
