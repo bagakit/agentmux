@@ -1664,11 +1664,24 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 旧 Run 的 attach 失败属于恢复流程状态，不得直接把用户留在“Attach failed”终端错误上；恢复完成后必须重新解析当前 Session control，再附着新的 Run。Provider 探测失败只允许在权威探测确实失败时显示，不能由一次早于环境准备完成的探测把可恢复 Session 终结为不可恢复。
 
+### P0 的共同交付边界
+
+用户要求完成当前六项 P0 的设计与实现，包括此前只规划的可读 A2A 协议。各项约束仍归其所属章节；“代码已有”不能代表交付，必须证明真实入口、失败分支和重启后的恢复。发送与恢复的检查失败不能拿走健康 Agent 的工作能力；无法确认的事实保持未知，并在原工作面持续说明恢复动作。Browser 批准只授权被确认的目标和操作；Demand 详情保留原需求身份与编辑能力。
+
+### 操作成本与当前卡顿
+
+- 隐藏终端仍要接收和解析输出，保留原 Session 与 Runtime attachment；GPU 绘制资源只属于当前可见的终端。切换可见性不能重新启动 Agent、丢输出或换身份。
+
+- 用户原话：「现在进程非常卡」「让系统成本只随真正相关的工作增长，先缩小范围再做重处理，不要让无关数据、历史和功能拖慢当前操作」。输入、切换与当前工作面的更新不能被无关 Session、历史或后台观察反复拖慢。
+- 卡顿定位必须区分主进程、Renderer、Runtime、Agent CLI 和验证负载，结论绑定采样版本与操作；不能以一次体感或静态代码推测冒充根因。局部修复须证明原热点成本收敛并保留 ordered bytes、恢复与健康 Agent 的工作能力。
+- 默认不保留兼容层、legacy、fallback 或临时 workaround；不做 migration。复用当前依赖和平台能力，在权威事实的所属层修复，避免为探测、重试或性能增加竞争状态与中间层。P2/P3 的独立问题不能作为本轮 P0 交付的阻断门。
+
 ### 跨重启的 Prompt 投递凭据
 
 - Prompt 两阶段投递的持久化 claim 是去重与恢复记录，不是把下一条 Prompt 永久挡在门外的许可闸。应用重启后重新接入同一个仍为 `running` 的 Run 时，旧 claim 未确认本身不得触发 Resume、Retire 或删除健康 Session。
 - 恢复新 Prompt 时必须以 CtxMux 的权威 `acceptedInputBytes` 判断旧投递是否已经把字节交给 daemon：游标仍在旧 claim 的起点时，可以在保留去重记录的前提下由新 `submissionId` 接管；游标已经越过起点时，保留占用并如实说明正在进行的旧投递。不能用猜测的 TTL 或语义状态代替这个字节事实。
 - 旧 claim 被接管后，新的提交必须重新建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容仍走原有幂等续做，冲突内容仍拒绝。任何恢复流程失败都要保留可见工作面和健康 Session。
+- 一个仍能接受输入的 Agent 必须有明确可达的发送路径。回合结束回执缺失不能把 readiness 变成永久许可闸；无法确认回合边界时说明风险并提供显式继续发送的动作，不能自动猜测空输入框等于回合已结束。已被接受但未确认的 Prompt 使用原 operation identity 续做，不重新发送正文；排队消息不因无关 Runtime 事件反复提交。
 
 ### Hook 配置隔离与非 AgentMux 会话
 
@@ -1678,7 +1691,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### A2A 身份信封与持久化全局消息队列
 
-- **验收修正：发送成功必须意味着收件 Agent 实际收到可读来源/目标信封，且 Core 已按真实 Session/Run 与已解析目标核验身份。** CLI 环境变量只是身份线索，不是权威；Desktop 不得忽略结构化消息后只投递裸正文。正文原样嵌在信封内，Control requestId 仍只作请求关联；同一消息的重试必须复用稳定的消息身份。
+- **验收修正：发送成功必须意味着收件 Agent 实际收到可读来源和原始正文，且 Core 已按真实 Session/Run 与已解析目标核验身份。** CLI 环境变量只是身份线索，不是权威；Desktop 不得忽略结构化来源后只投递裸正文。可读表达归下节约束，目标的完整关联留在持久事实中。Control requestId 仍只作请求关联；同一消息的重试必须复用稳定的消息身份。
 - **持久队列的唯一写入权属于 AgentMux Core。** 同一路径即使遇到多个进程或多个对象并发，也必须保持全局唯一、递增的顺序号和可重放的完整记录；队列所在位置不得受 ctxmux 版本化临时端点回收影响。失去持久写入确认时明确拒绝入队并告知状态，不能宣称已投递或判定健康 Agent 死亡。
 - **身份授权必须在 Core 里完成，不能把 `AGENTMUX_AGENT_SESSION_ID` 或 Control caller 字段当凭证。** 受管 Agent 的 send 必须携带当前 Run 的 invocation capability，由 Core 核对 capability hash、Session 和 Run；没有 capability 或 capability 属于旧 Run 的请求必须拒绝，健康 Agent 仍可继续工作。
 - **队列写入必须能从写入者崩溃中恢复，且回收不能碰掉新写入者。** 同一路径的跨进程排他性以系统可随进程退出释放的事务锁为准；遗留的孤儿 `.lock` 文件不得阻断新写入。并发恢复后每条消息仍只能占一个唯一、连续的顺序号，健康 Agent 不能永久收到 backpressure。
@@ -1686,19 +1699,19 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - `agentmux send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
-- 队列必须有界并明确背压或拒绝码。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，`<amux ...>` 只作可读声明，不是认证。
+- 队列必须有界并明确背压或拒绝码。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，可读来源只是展示，不是认证。
 
 ### 破坏性 Browser 操作的作用域与人工批准
 
 - 清理 Profile 数据、删除 Profile 或登出等不可逆操作必须带明确的操作作用域；本轮最小闭环只允许用户删除一个指定的非默认 Profile，不能把整个 Browser 或所有 Profile 作为隐含范围。
 - 破坏性操作必须经过用户在当前界面明确确认。调用入口传递结构化批准事实（操作、作用域、目标 Profile），主进程再次校验目标未被打开的 Browser 使用、不能是默认 Profile，并拒绝缺少批准事实的请求。
 - Agent 浏览器自动化不能借用人的 UI 确认；没有专用的人批准事实时必须返回类型化拒绝，健康 Browser 与其登录态保持不变。
-- 第一条可验收竖切是真实 CLI `agentmux send` 进入生产 Core path、落入 durable queue 并返回 envelope 与 queue/receipt identity；随后提供受控读取/审计或现有 Core consumer 可用的入口。事件事实保持稳定、可序列化、可版本化，不在本 Closure 引入 traj 分析引擎。
 
 ### A2A 消息要让人一眼看懂
 
 - 用户原话：「`from="local-cli" to="765ae7ef-b886-4681-b9b5-0bbc561e8f1a"`，from 和 to 的语义完全不同；amux 中包 JSON 太奇怪了；冗余信息也多；人类完全不可读」「现在的 agent id 设计太长了，非常浪费」。消息里表示发送者和收件者时，两端必须是同一层的参与者身份；`local-cli` 是进入系统的通道，不是一个人或 Agent 的身份，不能占据 `from`。通道、已核验身份与未核验来源必须分开表达；无法核实发送者时如实标未知，不能猜成某个 Agent。
 - Core 的持久消息事实与投递回执供机器审计和重试；投递给 Agent 的文本只保留完成交流所需的来源、正文，以及确有回复需要时的简短引用。不得把整个回执 JSON、`requestId`、`queueId`、Run ID 或一串重复的 Session ID 自动塞进可读消息。正文若本来就是发送者写的 JSON，仍按原文保留，并明确它是正文，不让它看起来像 AgentMux 协议层。
 - 用户明确选择「持久地址也缩短，从防撞目标出发，不用这么长；还要支持类似 Git 的部分 hash 寻址」。新建 Agent Session 的**持久 ID 本身**应缩短，而不是给长 UUID 再套一层别名；长度由明确的碰撞概率目标决定，不靠“看起来够短”。同一完整 ID 重启后仍指向同一 Session，已存在的长 ID 保持原身份并可恢复，不为缩短地址重写它们。
+- 防撞目标是在一千万个 Session 下，任意两个新 ID 碰撞的概率低于万亿分之一；字符必须能直接用作 CLI 参数与持久引用。新 ID 的前缀同样不能被误当作另一项命令选项。
 - 所有以 Agent Session ID 寻址的 CLI 动词都应接受唯一前缀：只在当前权威 Session 集合中恰好命中一个 ID 时解析；零命中或多命中明确报错，绝不能按最近活跃、标题、View 或位置猜一个。前缀是便捷输入，不是另一个持久身份；新 Session 出现后旧前缀可能变成歧义，但不能静默改指向。Core 拥有铸造、查找和碰撞判定，Renderer 只展示权威结果。
 - 一条消息在收件 Agent 和人类阅读面上只有一份简洁的表达；机器回执留在命令结果/审计入口，不作为消息正文再转发。可读信封只是展示，不是认证；发送授权仍按上节的 capability 与 Session/Run 事实核验。
