@@ -1198,6 +1198,19 @@ export class RuntimeController {
     return host.client
   }
 
+  /** Core is the authority for managed caller capabilities; the renderer never authenticates them. */
+  async authorizeAgentCaller(input: { agentSessionId: string; capability: string }): Promise<void> {
+    const hosts = [...this.hosts.values()]
+    let lastError: unknown
+    for (const host of hosts) {
+      try {
+        await host.client.authorizeAgentCaller(input.capability, input.agentSessionId)
+        return
+      } catch (error) { lastError = error }
+    }
+    throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')
+  }
+
   private async trackHostLifecycleOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)

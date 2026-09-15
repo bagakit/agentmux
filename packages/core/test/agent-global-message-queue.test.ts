@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, utimes } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   DurableAgentMuxMessageQueue,
@@ -73,6 +73,24 @@ describe('Core-owned durable A2A global message queue', () => {
     expect(retry).toMatchObject({ queueId: first.queueId, receiptId: first.receiptId, messageId: 'message-1', sequence: 1 })
     await expect(durable.append(input({ messageId: 'message-2' }))).rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
     expect(await durable.listAfter(0)).toHaveLength(1)
+  })
+
+  it('reopens the original receipt when a retry uses a new operation and timestamp', async () => {
+    const durable = await queue()
+    const first = await durable.append(input({ messageId: 'stable-message', operationId: 'first-op', createdAt: 100 }))
+    const retry = await durable.append(input({ messageId: 'stable-message', operationId: 'retry-op', createdAt: 999 }))
+    expect(retry.receiptId).toBe(first.receiptId)
+    expect(await durable.readJournal()).toHaveLength(1)
+  })
+
+  it('reclaims a malformed stale lock after a writer crash', async () => {
+    const durable = await queue()
+    const lockPath = `${durable.path}.lock`
+    await mkdir(dirname(lockPath), { recursive: true })
+    await writeFile(lockPath, 'dead writer metadata')
+    const old = new Date(Date.now() - 60_000)
+    await utimes(lockPath, old, old)
+    await expect(durable.append(input({ messageId: 'after-crash' }))).resolves.toMatchObject({ sequence: 1 })
   })
 
   it('replays an unacked non-empty batch and fences stale acknowledgements', async () => {

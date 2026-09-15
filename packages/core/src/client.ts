@@ -1527,6 +1527,12 @@ export class AgentMuxClient {
     }, caller.run.runId)
   }
 
+  /** Validate the caller capability and return the authoritative live Session/Run facts. */
+  authorizeAgentCaller(capability: string, callerAgentSessionId: string): AgentMuxAgentSession {
+    this.resolveMessageAuthor(capability, callerAgentSessionId)
+    return this.agentSession(callerAgentSessionId)
+  }
+
   /** 取最旧的一批未确认投递。Ack 之前重复调用重放同一批——崩溃重连才不会丢消息。 */
   checkDeliveries(input: {
     capability: string

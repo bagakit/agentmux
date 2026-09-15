@@ -595,8 +595,7 @@ async function sendCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data', '--message-id': 'value', '--thread': 'value', '--correlation': 'value', '--reply-to': 'value' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
   const value = flags.values.get(selected)!
-  const owner = (selected === '--to-session' && value === 'self') || process.env.AGENTMUX_ENV === '1'
-    ? managedCaller() : undefined
+  const owner = (selected === '--to-session' && value === 'self') || process.env.AGENTMUX_ENV === '1' ? managedCaller() : undefined
   const target = selected === '--to-session'
     ? value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: identifier(value, 'Agent Session id') } as const
     : selected === '--to-region'
@@ -604,14 +603,32 @@ async function sendCommand(args: readonly string[]): Promise<number> {
       : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } as const
   const request = requestBase()
   const body = requiredData(flags, '--text', 'Message text')
-  const recipient = target.kind === 'self'
-    ? { kind: 'agent-session', agentSessionId: owner!.agentSessionId } as const
-    : target.kind === 'agent-session'
-      ? { kind: 'agent-session', agentSessionId: target.agentSessionId } as const
-      : { kind: 'target', target } as const
-  const sender = owner
-    ? { kind: 'agent-session', agentSessionId: owner.agentSessionId } as const
-    : { kind: 'human', principal: 'local-cli' } as const
+  const capability = owner ? process.env.AGENTMUX_AGENT_CAPABILITY?.trim() : undefined
+  if (owner && !capability) throw new AgentMuxError('This command requires an AgentMux-managed Agent capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
+  const recipientSessionId = await (async (): Promise<string> => {
+    if (target.kind === 'self') return owner!.agentSessionId
+    if (target.kind === 'agent-session') return target.agentSessionId
+    const inspected = target.kind === 'region'
+      ? await requestAgentMuxControl({ ...request, operation: 'inspect.region', target: { kind: 'region', regionId: target.regionId } })
+      : await requestAgentMuxControl({ ...request, operation: 'inspect.tab', target: { kind: 'tab', tabId: target.tabId } })
+    if (inspected.operation === 'inspect.region') {
+      const region = (inspected.result as { region: { kind: string; agentSessionId?: string } }).region
+      if (region.kind !== 'agent' || !region.agentSessionId) throw new AgentMuxError('Target Region is not an Agent.', 'MESSAGE_TARGET_NOT_AGENT')
+      return region.agentSessionId
+    }
+    const regions = (inspected.result as { tab: { regions: Array<{ kind: string; agentSessionId?: string }> } }).tab.regions
+    const candidates = regions.filter((region) => region.kind === 'agent' && region.agentSessionId)
+    if (candidates.length !== 1) throw new AgentMuxError('Target Tab does not contain exactly one Agent Session.', 'MESSAGE_TARGET_NOT_UNIQUE')
+    return candidates[0]!.agentSessionId!
+  })()
+  const facts = owner && capability
+    ? await withClient((client) => Promise.resolve({
+      sender: client.authorizeAgentCaller(capability, owner.agentSessionId),
+      recipient: client.agentSession(recipientSessionId)
+    }))
+    : null
+  const recipient = { kind: 'agent-session', agentSessionId: recipientSessionId } as const
+  const sender = owner ? { kind: 'agent-session', agentSessionId: owner.agentSessionId } as const : { kind: 'human', principal: 'local-cli' } as const
   const messageInputBase = {
     operationId: request.requestId,
     createdAt: Date.now(),
@@ -622,18 +639,16 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     replyTo: flags.values.get('--reply-to') ?? null,
     workspaceId: process.env.AGENTMUX_WORKSPACE_ID?.trim() || null,
     senderSessionId: owner?.agentSessionId ?? null,
-    senderRunId: process.env.AGENTMUX_AGENT_RUN_ID?.trim() || null,
-    recipientSessionId: recipient.kind === 'agent-session' ? recipient.agentSessionId : null,
-    recipientRunId: null,
+    senderRunId: facts?.sender.run.runId ?? null,
+    recipientSessionId,
+    recipientRunId: facts?.recipient.run.runId ?? null,
     body
   }
   const requestedMessageId = flags.values.get('--message-id')
-  const messageInput: AgentMuxMessageAppendInput = requestedMessageId === undefined
-    ? messageInputBase
-    : { ...messageInputBase, messageId: requestedMessageId }
+  const messageInput: AgentMuxMessageAppendInput = requestedMessageId === undefined ? messageInputBase : { ...messageInputBase, messageId: requestedMessageId }
   const queued = await appendGlobalMessage(messageInput)
   try {
-    const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, ...(owner ? { caller: owner } : {}), message: queued.envelope })
+    const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, ...(owner && capability ? { caller: { ...owner, capability } } : {}), message: queued.envelope })
     const delivered = await recordGlobalMessageDelivery(queued.messageId, 'delivered')
     printSuccess(receipt.operation, { ...receipt.result, messageId: delivered.messageId, queueId: delivered.queueId, receiptId: delivered.receiptId, envelope: delivered.envelope, delivery: delivered.delivery })
     return 0
@@ -642,7 +657,6 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     throw error
   }
 }
-
 async function focusCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--region': 'value', '--tab': 'value' })
   const selected = exactlyOne(flags, ['--region', '--tab'], 'focus')
