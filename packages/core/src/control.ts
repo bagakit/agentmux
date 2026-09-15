@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import type { AgentExecutorId, AgentProviderId } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
+import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -197,7 +198,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; caller?: AgentMuxControlCaller
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; caller?: AgentMuxControlCaller; message?: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: { kind: 'tab'; tabId: string } | { kind: 'region'; regionId: string }
