@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, link, mkdir, open, readFile, rm, unlink } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
@@ -72,6 +73,8 @@ export type AgentMuxMessageQueueOptions = {
   readonly maxMessages?: number
   readonly maxBytes?: number
 }
+
+const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope }
@@ -183,66 +186,37 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private withLock<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(() => this.withFileLock(operation), () => this.withFileLock(operation))
+    const key = `${this.path}.mutex.sqlite`
+    const processTail = processQueueTails.get(key) ?? Promise.resolve()
+    const instanceTail = this.tail
+    const result = processTail.then(() => instanceTail.then(() => this.withFileLock(operation), () => this.withFileLock(operation)), () => this.withFileLock(operation))
     this.tail = result.then(() => undefined, () => undefined)
+    processQueueTails.set(key, result.then(() => undefined, () => undefined))
     return result
   }
 
   private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    const lockPath = `${this.path}.lock`
-    let handle: Awaited<ReturnType<typeof open>> | undefined
-    for (let attempt = 0; attempt < 500; attempt += 1) {
-      try { handle = await open(lockPath, 'wx', 0o600); break } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
-        let stale = false
-        let observedLock = ''
-        try {
-          observedLock = await readFile(lockPath, 'utf8')
-          const metadata = JSON.parse(observedLock) as { pid?: number; acquiredAt?: number }
-          const pid = metadata.pid
-          if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
-            try { process.kill(pid, 0) } catch (probeError) {
-              stale = (probeError as NodeJS.ErrnoException).code === 'ESRCH'
-            }
-          } else stale = true
-          if (!stale && typeof metadata.acquiredAt === 'number' && Date.now() - metadata.acquiredAt > 30_000) stale = false
-        } catch {
-          try {
-            const stat = await lstat(lockPath)
-            stale = Date.now() - stat.mtimeMs > 30_000
-          } catch { stale = true }
-        }
-        if (stale) {
-          // Never unlink the pathname directly: another process may have reclaimed the old inode
-          // and acquired a fresh lock between our read and this branch. Hard-link the exact inode,
-          // re-read it, and only unlink the original path when its bytes are unchanged. A new writer
-          // can then create the pathname, while the private link still points at the old stale inode.
-          const reclaimPath = `${lockPath}.reclaim-${randomUUID()}`
-          try {
-            await link(lockPath, reclaimPath)
-            const linked = await readFile(reclaimPath, 'utf8')
-            const [linkedStat, currentStat] = await Promise.all([lstat(reclaimPath), lstat(lockPath)])
-            if (linked === observedLock && linkedStat.dev === currentStat.dev && linkedStat.ino === currentStat.ino) {
-              await unlink(lockPath)
-              await rm(reclaimPath, { force: true })
-              continue
-            }
-          } catch (reclaimError) {
-            const code = (reclaimError as NodeJS.ErrnoException).code
-            if (code === 'ENOENT' || code === 'EEXIST') continue
-            throw reclaimError
-          } finally {
-            await rm(reclaimPath, { force: true }).catch(() => {})
-          }
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-    }
-    if (!handle) throw new AgentMuxError('Message queue writer is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
+    // SQLite's BEGIN IMMEDIATE is the cross-process writer mutex. The kernel releases it when a
+    // process dies, including a crash during append, so there is no pathname to reclaim with a
+    // check-then-unlink race. A legacy orphan .lock file is deliberately ignored.
+    const mutexPath = `${this.path}.mutex.sqlite`
+    let mutex: DatabaseSync
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }))
-      await handle.sync()
+      mutex = new DatabaseSync(mutexPath)
+      await chmod(mutexPath, 0o600)
+      mutex.exec('PRAGMA busy_timeout = 10000')
+    } catch {
+      throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
+    let acquired = false
+    try {
+      try { mutex.exec('BEGIN IMMEDIATE'); acquired = true } catch (error) {
+        if ((error as { code?: string }).code !== 'ERR_SQLITE_ERROR' || !String(error).includes('database is locked')) {
+          throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        }
+      }
+      if (!acquired) throw new AgentMuxError('Message queue writer is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
       this.loaded = false
       this.bytes = 0
       this.nextSequence = 1
@@ -251,10 +225,15 @@ export class DurableAgentMuxMessageQueue {
       this.consumers.clear()
       this.journal.length = 0
       await this.ensureLoaded()
-      return await operation()
+      const result = await operation()
+      mutex.exec('COMMIT')
+      acquired = false
+      return result
     } finally {
-      await handle.close()
-      await rm(lockPath, { force: true })
+      if (acquired) {
+        try { mutex.exec('ROLLBACK') } catch { /* A crashed or closed transaction is already released. */ }
+      }
+      mutex.close()
     }
   }
 
