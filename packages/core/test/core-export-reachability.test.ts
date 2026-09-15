@@ -121,6 +121,26 @@ const DELIBERATE: ReadonlyArray<{
       '真的出现在生成的扩展源码里（声明 ↔ 生成代码的漂移守卫），' +
       'test/agent-provider-protocol.test.ts 也按它核对 provider 自报的事件名。' +
       '删掉它等于删掉那两道守卫。真正该做的是让 PI_HOOKS.rules 从它派生（另一次改动）。'
+  },
+  {
+    module: 'src/prompt-admission.ts',
+    name: 'queryPromptAdmission',
+    barrel: true,
+    premise:
+      '经 barrel 公开的实时准入判定 (f-25q8fccdm / T-001)。此模块的两处内测在场：' +
+      'test/prompt-admission.test.ts 完整覆盖 ready/busy/degraded 三支互斥 + candidate d ' +
+      '世代守卫（顺序吞噬 fix）。生产接线是 T-002 才做的事——本 commit 只把模块与守卫落到 main，' +
+      '接线时机由 T-002 的「不删闸门」前提约束（现在的 composer 判据不足以区分「闲着」与「生成中」，' +
+      '见 tracker T-002 前提修正 2026-09-13）。删该导出等于把 T-001 硬回滚。'
+  },
+  {
+    module: 'src/prompt-admission.ts',
+    name: 'LIVE_ADMISSION_QUERY_BUDGET_MS',
+    barrel: true,
+    premise:
+      '同 queryPromptAdmission：admission 的读屏预算常量，在 test/prompt-admission.test.ts:172 ' +
+      '被断言（"稳态用同步快照，带上界预算"），是 SSOT 的一份锚点。经 barrel 公开与其配套的 ' +
+      'queryPromptAdmission 一同交给 T-002 接线时消费。'
   }
 ]
 
