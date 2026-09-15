@@ -6,6 +6,7 @@ import type {
   AppConfig,
   BrowserEvent,
   BrowserProfileImportSourceSummary,
+  BrowserProfileDeleteApproval,
   BrowserProfileSummary,
   BrowserSnapshot,
   BrowserViewport,
@@ -94,7 +95,7 @@ let mockConfig: AppConfig = {
   ],
   executors: mockExecutors,
   workspaces: [
-    { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: new URL("Users/river/agentmux", new URL('/', new URL(import.meta.url))).pathname, kind: 'folder' },
+    { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: 'home//agentmux', kind: 'folder' },
     { id: 'workspace-remote', name: 'render-lab', hostId: 'studio', path: new URL("srv/render-lab", new URL('/', new URL(import.meta.url))).pathname, kind: 'worktree', branch: 'feat/materials' }
   ],
   appearance: { terminalTheme: 'graphite' },
@@ -158,7 +159,7 @@ const mockSessions: SessionSnapshot[] = [
     executorId: 'codex',
     capabilities: mockStructuredCapabilities,
     hostId: 'local',
-    workspacePath: new URL("Users/river/agentmux", new URL('/', new URL(import.meta.url))).pathname,
+    workspacePath: 'home//agentmux',
     label: 'Codex · runtime core',
     createdAt: now - 12 * 60_000,
     updatedAt: now,
@@ -1008,7 +1009,10 @@ const mockApi: AgentMuxDesktopApi = {
       mockBrowserProfiles = [...mockBrowserProfiles, profile]
       return structuredClone(profile)
     },
-    deleteProfile: async (profileId) => {
+    deleteProfile: async (profileId, approval: BrowserProfileDeleteApproval) => {
+      if (approval.kind !== 'user-confirmed' || approval.operation !== 'delete-profile' || approval.scope !== 'profile' || approval.profileId !== profileId) {
+        throw Object.assign(new Error('Browser Profile deletion requires explicit user approval'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
+      }
       if ([...mockBrowsers.values()].some((browser) => browser.profileId === profileId)) {
         throw new Error('Browser Profile is still used by an open Browser')
       }

@@ -40,6 +40,7 @@ import type {
   BrowserAnnotationMarker,
   BrowserBounds,
   BrowserPng,
+  BrowserProfileDeleteApproval,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -683,12 +684,12 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:createProfile', event)
     return await browserProfiles.createProfile(label)
   })
-  handleWithEvent('browser:deleteProfile', async (event, profileId: string) => {
+  handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
     requireTrustedSender('browser:deleteProfile', event)
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
     }
-    await browserProfiles.deleteProfile(profileId)
+    await browserProfiles.deleteProfile(profileId, approval)
   })
   handleWithEvent('browser:detectProfileImportSources', async (event) => {
     requireTrustedSender('browser:detectProfileImportSources', event)
