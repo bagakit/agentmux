@@ -411,6 +411,10 @@ Usage:
   agentmux send --to-region <region-id> --text <prompt>
   agentmux send --to-tab <tab-id> --text <prompt>
 
+Optional A2A facts: --message-id <id> --thread <id> --correlation <id> --reply-to <id>.
+The Core-owned queue records explicit sender/recipient facts and returns a durable receipt;
+the readable <amux ...> text in the prompt is not authentication.
+
 Region must display an Agent. Tab succeeds only when it resolves to exactly one distinct
 Agent Session; zero or multiple candidates fail with MESSAGE_TARGET_NOT_UNIQUE. Send
 never resumes an ended Session.`],

@@ -26,6 +26,7 @@ import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
+import { appendGlobalMessage, recordGlobalMessageDelivery, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -591,7 +592,7 @@ async function handoffCommand(args: readonly string[]): Promise<number> {
 }
 
 async function sendCommand(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data' })
+  const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data', '--message-id': 'value', '--thread': 'value', '--correlation': 'value', '--reply-to': 'value' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
   const value = flags.values.get(selected)!
   const owner = (selected === '--to-session' && value === 'self') || process.env.AGENTMUX_ENV === '1'
@@ -601,8 +602,45 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     : selected === '--to-region'
       ? { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } as const
       : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } as const
-  const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'send', target, text: requiredData(flags, '--text', 'Message text'), ...(owner ? { caller: owner } : {}) })
-  printSuccess(receipt.operation, receipt.result); return 0
+  const request = requestBase()
+  const body = requiredData(flags, '--text', 'Message text')
+  const recipient = target.kind === 'self'
+    ? { kind: 'agent-session', agentSessionId: owner!.agentSessionId } as const
+    : target.kind === 'agent-session'
+      ? { kind: 'agent-session', agentSessionId: target.agentSessionId } as const
+      : { kind: 'target', target } as const
+  const sender = owner
+    ? { kind: 'agent-session', agentSessionId: owner.agentSessionId } as const
+    : { kind: 'human', principal: 'local-cli' } as const
+  const messageInputBase = {
+    operationId: request.requestId,
+    createdAt: Date.now(),
+    sender,
+    recipient,
+    threadId: flags.values.get('--thread') ?? request.requestId,
+    correlationId: flags.values.get('--correlation') ?? request.requestId,
+    replyTo: flags.values.get('--reply-to') ?? null,
+    workspaceId: process.env.AGENTMUX_WORKSPACE_ID?.trim() || null,
+    senderSessionId: owner?.agentSessionId ?? null,
+    senderRunId: process.env.AGENTMUX_AGENT_RUN_ID?.trim() || null,
+    recipientSessionId: recipient.kind === 'agent-session' ? recipient.agentSessionId : null,
+    recipientRunId: null,
+    body
+  }
+  const requestedMessageId = flags.values.get('--message-id')
+  const messageInput: AgentMuxMessageAppendInput = requestedMessageId === undefined
+    ? messageInputBase
+    : { ...messageInputBase, messageId: requestedMessageId }
+  const queued = await appendGlobalMessage(messageInput)
+  try {
+    const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, ...(owner ? { caller: owner } : {}), message: queued.envelope })
+    const delivered = await recordGlobalMessageDelivery(queued.messageId, 'delivered')
+    printSuccess(receipt.operation, { ...receipt.result, messageId: delivered.messageId, queueId: delivered.queueId, receiptId: delivered.receiptId, envelope: delivered.envelope, delivery: delivered.delivery })
+    return 0
+  } catch (error) {
+    await recordGlobalMessageDelivery(queued.messageId, 'failed', Date.now(), error instanceof Error ? error.message : String(error)).catch(() => {})
+    throw error
+  }
 }
 
 async function focusCommand(args: readonly string[]): Promise<number> {

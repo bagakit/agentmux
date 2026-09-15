@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { AgentMuxControlServer } from '../src/control-host.js'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
 
 const exec = promisify(execFile)
@@ -23,10 +24,12 @@ it('real CLI send retains managed authors for every target without inventing an 
   } }, join(runtime, 'control.sock'))
   await server.start()
   try {
+    const outputs: Array<Record<string, any>> = []
     for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab'], ['--to-session', 'self']]) {
-      await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
+      const result = await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
         ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender'
       } })
+      outputs.push(JSON.parse(result.stdout) as Record<string, any>)
     }
     expect(requests.map((request) => request.operation === 'send' && [request.target, request.caller, request.text])).toEqual([
       [{ kind: 'agent-session', agentSessionId: 'other' }, { agentSessionId: 'sender' }, 'actual mail'],
@@ -38,6 +41,15 @@ it('real CLI send retains managed authors for every target without inventing an 
     await exec(cli, ['send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
     expect(requests.at(-1)).toMatchObject({ operation: 'send', text: 'human mail' })
     expect(requests.at(-1)).not.toHaveProperty('caller')
+    const queue = new DurableAgentMuxMessageQueue(join(runtime, 'state', 'global-messages.ndjson'))
+    const records = await queue.listAfter(0)
+    expect(records).toHaveLength(5)
+    expect(outputs[0]).toMatchObject({ operation: 'send', result: { queueId: expect.any(String), receiptId: expect.any(String), messageId: expect.any(String), delivery: { state: 'delivered' } } })
+    expect((outputs[0]!.result as Record<string, unknown>).messageId).not.toBe(outputs[0]!.requestId)
+    expect(records[0]!.envelope.sender).toEqual({ kind: 'agent-session', agentSessionId: 'sender' })
+    expect(records[0]!.envelope.recipient).toEqual({ kind: 'agent-session', agentSessionId: 'other' })
+    expect(records[0]!.envelope.body).toBe('actual mail')
+    expect(requests[0]).toMatchObject({ operation: 'send', message: { sender: { agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
     await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests).toHaveLength(5)

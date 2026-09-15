@@ -43,6 +43,10 @@ export function defaultAgentMuxControlSocketPath(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'control.sock')
 }
 
+export function defaultAgentMuxMessageQueuePath(): string {
+  return join(defaultAgentMuxRuntimeDirectory(), 'state', 'global-messages.ndjson')
+}
+
 export function defaultAgentMuxHookPort(): number {
   const digest = createHash('sha256').update(defaultAgentMuxRuntimeDirectory()).digest()
   return 40_000 + (digest.readUInt16BE(0) % 20_000)
