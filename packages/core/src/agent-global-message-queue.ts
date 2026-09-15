@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
@@ -57,6 +57,15 @@ export type AgentMuxMessageReceipt = {
 
 export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' | 'messageId'> & {
   readonly messageId?: string
+}
+
+/** Readable recipient-side wrapper; envelope facts have already been validated by Core. */
+export function renderAgentMuxMessageEnvelope(envelope: AgentMuxMessageEnvelope): string {
+  const sender = envelope.sender.kind === 'agent-session' ? envelope.sender.agentSessionId : envelope.sender.principal
+  const recipient = envelope.recipient.kind === 'agent-session'
+    ? envelope.recipient.agentSessionId
+    : envelope.recipient.target.kind === 'agent-session' ? envelope.recipient.target.agentSessionId : envelope.recipient.target.kind
+  return `<amux from="${sender}" to="${recipient}" messageId="${envelope.messageId}">\n${envelope.body}\n</amux>`
 }
 
 export type AgentMuxMessageQueueOptions = {
@@ -170,9 +179,36 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private withLock<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(operation, operation)
+    const result = this.tail.then(() => this.withFileLock(operation), () => this.withFileLock(operation))
     this.tail = result.then(() => undefined, () => undefined)
     return result
+  }
+
+  private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+    const lockPath = `${this.path}.lock`
+    let handle: Awaited<ReturnType<typeof open>> | undefined
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      try { handle = await open(lockPath, 'wx', 0o600); break } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    if (!handle) throw new AgentMuxError('Message queue writer is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
+    try {
+      this.loaded = false
+      this.bytes = 0
+      this.nextSequence = 1
+      this.messages.clear()
+      this.operations.clear()
+      this.consumers.clear()
+      this.journal.length = 0
+      await this.ensureLoaded()
+      return await operation()
+    } finally {
+      await handle.close()
+      await rm(lockPath, { force: true })
+    }
   }
 
   private async ensureLoaded(): Promise<void> {

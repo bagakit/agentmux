@@ -1108,6 +1108,7 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 
 ### A2A 消息队列与身份信息密度
 
+- 发送回执与收件侧信封必须能对应同一条消息：首层明确显示已入队、已投递或失败，详情能核对稳定 `messageId` 和 Core 核验的双方 Session/Run；重试不得像一条新消息，队列暂不可写时不得出现虚假的“已送达”。交互行为以《A2A 身份信封与持久化全局消息队列》为准。
 - Message Tools 的首层只显示发送者、接收者、当前投递状态和必要的失败/重试动作；`messageId`、receipt、generation、thread/correlation 和 workspace/session/run 关联进入详情或审计入口，不占用 Composer 主输入区。
 - `<amux ...>` 署名保留为正文附近的一行可读来源提示，不能被渲染成认证徽章；Core 已验证的 sender/recipient 身份才是权威信息。正文必须保持用户原样，不把协议字段插入正文。
 - 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。

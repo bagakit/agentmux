@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -7,8 +10,10 @@ import {
   validateAgentMuxMessageEnvelope,
   type AgentMuxMessageAppendInput
 } from '../src/agent-global-message-queue.js'
+import { defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory } from '../src/runtime-paths.js'
 
 const roots: string[] = []
+const exec = promisify(execFile)
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })) ) })
 
 function input(overrides: Partial<AgentMuxMessageAppendInput> = {}): AgentMuxMessageAppendInput {
@@ -37,6 +42,11 @@ async function queue(options: ConstructorParameters<typeof DurableAgentMuxMessag
 }
 
 describe('Core-owned durable A2A global message queue', () => {
+  it('uses a durable Core state location separate from the ctxmux artifact endpoint by default', () => {
+    expect(defaultAgentMuxMessageQueuePath()).not.toContain(defaultAgentMuxRuntimeDirectory())
+    expect(defaultAgentMuxMessageQueuePath()).toMatch(/global-messages\.ndjson$/u)
+  })
+
   it('keeps sender and recipient facts directional, distinct from requestId, and preserves body on reopen', async () => {
     const first = await queue()
     const left = await first.append(input())
@@ -98,6 +108,29 @@ describe('Core-owned durable A2A global message queue', () => {
     expect(journal.map((record) => record.sequence)).toEqual([1, 2])
     expect(journal[1]).toMatchObject({ kind: 'delivery', messageId: appended.messageId, state: 'failed', reason: 'recipient session stopped' })
     expect((await reopened.listAfter(0))[0]!.delivery).toMatchObject({ state: 'failed', reason: 'recipient session stopped' })
+  })
+
+  it('serializes concurrent queue instances on one durable path with one global sequence', async () => {
+    const first = await queue()
+    const second = new DurableAgentMuxMessageQueue(first.path)
+    const [left, right] = await Promise.all([
+      first.append(input({ operationId: 'concurrent-left-op', messageId: 'concurrent-left' })),
+      second.append(input({ operationId: 'concurrent-right-op', messageId: 'concurrent-right' }))
+    ])
+    expect(new Set([left.sequence, right.sequence])).toEqual(new Set([1, 2]))
+    const reopened = new DurableAgentMuxMessageQueue(first.path)
+    expect((await reopened.listAfter(0)).map((item) => item.sequence)).toEqual([1, 2])
+  })
+
+  it('serializes concurrent OS processes on one durable path', async () => {
+    const first = await queue()
+    const modulePath = fileURLToPath(new URL('../dist/agent-global-message-queue.js', import.meta.url))
+    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); await q.append(JSON.parse(process.env.QUEUE_INPUT));`
+    const launch = (suffix: string) => exec(process.execPath, ['--input-type=module', '--eval', script], {
+      env: { ...process.env, QUEUE_PATH: first.path, QUEUE_INPUT: JSON.stringify(input({ operationId: `process-${suffix}-op`, messageId: `process-${suffix}` })) }
+    })
+    await Promise.all([launch('left'), launch('right')])
+    expect((await new DurableAgentMuxMessageQueue(first.path).listAfter(0)).map((item) => item.sequence)).toEqual([1, 2])
   })
 
   it('rejects requestId masquerading as messageId and malformed envelope fields', () => {
