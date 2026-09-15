@@ -779,6 +779,9 @@ const mockApi: AgentMuxDesktopApi = {
       if (!timeline) throw new Error(`Timeline not found: ${control.agentSessionId}`)
       return structuredClone(timeline)
     },
+    historyPage: async () => {
+      throw new Error('Native conversation history is unavailable in the web preview.')
+    },
     attach: async (control, afterByte = 0) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)

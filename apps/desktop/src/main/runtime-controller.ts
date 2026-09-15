@@ -9,6 +9,8 @@ import {
   type AgentCatalogEntry,
   type AgentExecutorId,
   type AgentProviderId,
+  type AgentSessionHistoryPage,
+  type AgentSessionHistoryPageOptions,
   type AgentMuxClient,
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
@@ -712,6 +714,26 @@ export class RuntimeController {
       throw new Error(`Timeline snapshot belongs to another Session: ${timeline.agentSessionId}`)
     }
     return timeline
+  }
+
+  async sessionHistoryPage(
+    control: Extract<SessionControl, { kind: 'agent' }>,
+    options?: AgentSessionHistoryPageOptions
+  ): Promise<AgentSessionHistoryPage> {
+    if (control.kind !== 'agent') throw new Error('Conversation history requires an Agent Session.')
+    if (this.hostReconfigurationReservations.has(control.hostId)) {
+      throw new Error(`Runtime host is being reconfigured: ${control.hostId}`)
+    }
+    const host = this.hosts.get(control.hostId)
+    if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
+    const page = await host.client.sessionHistoryPage(control.agentSessionId, options)
+    if (this.hosts.get(control.hostId) !== host) {
+      throw new Error('History host configuration changed while reading. Reopen conversation history.')
+    }
+    if (page.agentSessionId !== control.agentSessionId) {
+      throw new Error(`History page belongs to another Session: ${page.agentSessionId}`)
+    }
+    return page
   }
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {

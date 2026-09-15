@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData } from '@agentmux/core'
+import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   BROWSER_EVENT_CHANNEL,
@@ -201,6 +201,8 @@ const api: AgentMuxPreloadApi = {
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
     timeline: (session: AgentSessionControl) => ipcRenderer.invoke('sessions:timeline', session),
+    historyPage: (session: AgentSessionControl, options?: AgentSessionHistoryPageOptions) =>
+      ipcRenderer.invoke('sessions:historyPage', session, options),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
     replay: (attachmentId: string, afterByte: number) =>
