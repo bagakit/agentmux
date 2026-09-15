@@ -121,6 +121,7 @@ import type {
   AgentMuxStoredAgentSession,
   AgentMuxRuntimeDiagnostics,
   AgentMuxRuntimeIdentity,
+  AgentMuxRuntimeResourceSnapshot,
   AgentNativeSessionHandle,
   AgentTerminalCapabilityState,
   AgentTerminalOutputChannelState,
@@ -1265,6 +1266,12 @@ export class AgentMuxClient {
    */
   endpointReclaim(): EndpointReclaimOutcome | null {
     return this.kernel.lastEndpointReclaim
+  }
+
+  /** Retained Run/output/attachment facts from ctxmux's public paged inventory, without lifecycle changes. */
+  async runtimeResourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
+    this.requireConnected()
+    return await this.kernel.resourceSnapshot()
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
