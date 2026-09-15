@@ -59,14 +59,14 @@ export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' 
   readonly messageId?: string
 }
 
-/** Readable recipient-side wrapper; envelope facts have already been validated by Core. */
-export function renderAgentMuxMessageEnvelope(envelope: AgentMuxMessageEnvelope): string {
-  const sender = envelope.sender.kind === 'agent-session' ? envelope.sender.agentSessionId : envelope.sender.principal
-  const recipient = envelope.recipient.kind === 'agent-session'
-    ? envelope.recipient.agentSessionId
-    : envelope.recipient.target.kind === 'agent-session' ? envelope.recipient.target.agentSessionId : envelope.recipient.target.kind
-  return `<amux from="${sender}" to="${recipient}" messageId="${envelope.messageId}">\n${envelope.body}\n</amux>`
-}
+/** Readable recipient-side wrapper; envelope facts have already been validated by Core.
+ *
+ * Re-exported from `./agent-message-render.js` to preserve the original public API — the
+ * pure-string implementation moved to a renderer-safe module so `apps/desktop/src/renderer`
+ * can consume it without dragging node:* into the vite/rollup bundle graph. Details:
+ * memory renderer-value-import-of-core-barrel-breaks-packaging.
+ */
+export { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 
 export type AgentMuxMessageQueueOptions = {
   readonly maxMessages?: number

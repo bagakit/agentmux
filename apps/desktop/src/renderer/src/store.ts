@@ -13,7 +13,8 @@ import {
   type AgentMuxRegion
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import { renderAgentMuxMessageEnvelope, type AgentCatalogEntry, type AgentMuxInteractionResponse, type LaunchOptionSelection } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
+import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
   AgentLaunchResult,

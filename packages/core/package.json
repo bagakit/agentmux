@@ -44,6 +44,10 @@
       "types": "./dist/agent-status-freshness.d.ts",
       "import": "./dist/agent-status-freshness.js"
     },
+    "./agent-message-render": {
+      "types": "./dist/agent-message-render.d.ts",
+      "import": "./dist/agent-message-render.js"
+    },
     "./provider-id": {
       "types": "./dist/agent-provider-id.d.ts",
       "import": "./dist/agent-provider-id.js"
