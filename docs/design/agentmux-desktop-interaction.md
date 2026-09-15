@@ -1687,6 +1687,12 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
 - 队列必须有界并明确背压或拒绝码。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，`<amux ...>` 只作可读声明，不是认证。
+
+### 破坏性 Browser 操作的作用域与人工批准
+
+- 清理 Profile 数据、删除 Profile 或登出等不可逆操作必须带明确的操作作用域；本轮最小闭环只允许用户删除一个指定的非默认 Profile，不能把整个 Browser 或所有 Profile 作为隐含范围。
+- 破坏性操作必须经过用户在当前界面明确确认。调用入口传递结构化批准事实（操作、作用域、目标 Profile），主进程再次校验目标未被打开的 Browser 使用、不能是默认 Profile，并拒绝缺少批准事实的请求。
+- Agent 浏览器自动化不能借用人的 UI 确认；没有专用的人批准事实时必须返回类型化拒绝，健康 Browser 与其登录态保持不变。
 - 第一条可验收竖切是真实 CLI `agentmux send` 进入生产 Core path、落入 durable queue 并返回 envelope 与 queue/receipt identity；随后提供受控读取/审计或现有 Core consumer 可用的入口。事件事实保持稳定、可序列化、可版本化，不在本 Closure 引入 traj 分析引擎。
 
 ### A2A 消息要让人一眼看懂

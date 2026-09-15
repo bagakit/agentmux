@@ -210,7 +210,12 @@ export function BrowserProfilesPanel({
     setBusy(`delete:${profileId}`)
     setError(null)
     try {
-      await api.browser.deleteProfile(profileId)
+      await api.browser.deleteProfile(profileId, {
+        kind: 'user-confirmed',
+        operation: 'delete-profile',
+        scope: 'profile',
+        profileId
+      })
       if (!mounted.current) return
       setProfiles((current) => current?.filter((profile) => profile.id !== profileId) ?? null)
       setConfirmDeleteId(null)

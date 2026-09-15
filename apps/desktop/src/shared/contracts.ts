@@ -1045,6 +1045,13 @@ export type BrowserProfileSummary = {
   source: BrowserProfileImportedSource | null
 }
 
+export type BrowserProfileDeleteApproval = {
+  kind: 'user-confirmed'
+  operation: 'delete-profile'
+  scope: 'profile'
+  profileId: string
+}
+
 export type BrowserProfileImportSourceSummary = {
   token: string
   browserLabel: string
@@ -1432,7 +1439,7 @@ export type AgentMuxDesktopApi = {
     switchProfile(id: string, profileId: string): Promise<BrowserSnapshot>
     listProfiles(): Promise<BrowserProfileSummary[]>
     createProfile(label: string): Promise<BrowserProfileSummary>
-    deleteProfile(profileId: string): Promise<void>
+    deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     openDevTools(id: string): Promise<void>

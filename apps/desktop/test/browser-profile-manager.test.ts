@@ -102,6 +102,9 @@ const DEFAULT_ID = '11111111-1111-4111-8111-111111111111'
 const CREATED_ID = '22222222-2222-4222-8222-222222222222'
 const IMPORT_ID = '33333333-3333-4333-8333-333333333333'
 const PENDING_ID = '44444444-4444-4444-8444-444444444444'
+const approval = (profileId: string) => ({
+  kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId
+} as const)
 const partition = (id: string) => `persist:agentmux-browser-profile:${id}`
 
 const defaultProfile: BrowserProfileSummary = {
@@ -207,6 +210,20 @@ afterEach(() => {
 })
 
 describe('BrowserProfileManager', () => {
+  it('requires a current user confirmation bound to the exact Profile before deletion', async () => {
+    const { manager } = managerFixture()
+    await manager.initialize()
+    await manager.createProfile('Work')
+
+    await expect(manager.deleteProfile(CREATED_ID, undefined as never)).rejects.toMatchObject({
+      code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+    })
+    await expect(manager.deleteProfile(CREATED_ID, approval(DEFAULT_ID))).rejects.toMatchObject({
+      code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+    })
+    expect(manager.listProfiles().some((profile) => profile.id === CREATED_ID)).toBe(true)
+  })
+
   it('initializes the strict resolver and recovers pending unpublished partitions before use', async () => {
     const { store, manager } = managerFixture()
     store.pending.push({ profileId: PENDING_ID, label: 'Interrupted', startedAt: 2 })
@@ -229,10 +246,10 @@ describe('BrowserProfileManager', () => {
     expect(created).toMatchObject({ id: CREATED_ID, label: 'Work' })
     expect(JSON.stringify(manager.listProfiles())).not.toContain('partition')
 
-    await manager.deleteProfile(CREATED_ID)
+    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
     expect(store.profiles).toEqual([defaultProfile])
     expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).toHaveBeenCalledOnce()
-    await expect(manager.deleteProfile(DEFAULT_ID)).rejects.toThrow('default Browser Profile cannot be deleted')
+    await expect(manager.deleteProfile(DEFAULT_ID, approval(DEFAULT_ID))).rejects.toThrow('default Browser Profile cannot be deleted')
   })
 
   it('makes a Profile unavailable before its destructive partition clear can yield', async () => {
@@ -244,7 +261,7 @@ describe('BrowserProfileManager', () => {
       async () => await new Promise<void>((resolve) => { releaseClear = resolve })
     )
 
-    const deleting = manager.deleteProfile(CREATED_ID)
+    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
 
     expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
     releaseClear()
@@ -290,7 +307,7 @@ describe('BrowserProfileManager', () => {
       await deleteProfile(profileId)
     })
 
-    const deleting = manager.deleteProfile(CREATED_ID)
+    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
     await vi.waitFor(() => expect(deleteStarted).toBe(true))
     let disposed = false
     const disposing = manager.dispose().then(() => { disposed = true })
