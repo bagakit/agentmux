@@ -1669,3 +1669,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - Prompt 两阶段投递的持久化 claim 是去重与恢复记录，不是把下一条 Prompt 永久挡在门外的许可闸。应用重启后重新接入同一个仍为 `running` 的 Run 时，旧 claim 未确认本身不得触发 Resume、Retire 或删除健康 Session。
 - 恢复新 Prompt 时必须以 CtxMux 的权威 `acceptedInputBytes` 判断旧投递是否已经把字节交给 daemon：游标仍在旧 claim 的起点时，可以在保留去重记录的前提下由新 `submissionId` 接管；游标已经越过起点时，保留占用并如实说明正在进行的旧投递。不能用猜测的 TTL 或语义状态代替这个字节事实。
 - 旧 claim 被接管后，新的提交必须重新建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容仍走原有幂等续做，冲突内容仍拒绝。任何恢复流程失败都要保留可见工作面和健康 Session。
+
+### Hook 配置隔离与非 AgentMux 会话
+
+- AgentMux Hook 的安装、读取、更新和卸载必须只作用于 AgentMux 自己的受管配置作用域；Provider 的共享配置文件仍保留用户和项目已有条目，不能把 AgentMux Hook 当成共享默认值。
+- Hook 事件必须携带并校验 AgentMux Session/Run 关联身份。没有该关联、关联不匹配或无法确认来源的 Provider 事件不得触发 AgentMux ingress；应记录可诊断的降级事实，不影响外部 Provider 会话继续工作。
+- Hook 探测、合并或安装失败属于流程问题时，健康 Agent 继续可用；服务窗说明哪一步未完成、当前按什么能力运行和恢复动作。只有 Agent/进程本身明确终止才允许阻断。
