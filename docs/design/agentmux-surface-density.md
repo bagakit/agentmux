@@ -1116,3 +1116,8 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 - `<amux ...>` 署名保留为正文附近的一行可读来源提示，不能被渲染成认证徽章；Core 已验证的 sender/recipient 身份才是权威信息。正文必须保持用户原样，不把协议字段插入正文。
 - 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。
 - 读取和审计入口支持按 thread、recipient、session 或 receipt 收窄范围；默认列表按 durable sequence 排序，不能用当前 Region 或视觉位置替代消息身份。
+
+### 破坏性 Browser 确认密度
+
+- Profile 删除确认必须在目标 Profile 行内表达目标名称、不可逆影响和当前打开 Browser 阻断状态；确认按钮只对当前 Profile 生效，不使用全局或模糊的“清理全部”动作。
+- 未确认或被打开 Browser 阻断时，列表保留原 Profile 和一行可操作原因，不显示成功态，不把失败转成空白。

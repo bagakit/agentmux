@@ -24,6 +24,7 @@ import type {
   BrowserOperation,
   BrowserReplayPlan,
   BrowserPng,
+  BrowserProfileDeleteApproval,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -250,7 +251,7 @@ const api: AgentMuxPreloadApi = {
     switchProfile: (id: string, profileId: string) => ipcRenderer.invoke('browser:switchProfile', id, profileId),
     listProfiles: () => ipcRenderer.invoke('browser:listProfiles'),
     createProfile: (label: string) => ipcRenderer.invoke('browser:createProfile', label),
-    deleteProfile: (profileId: string) => ipcRenderer.invoke('browser:deleteProfile', profileId),
+    deleteProfile: (profileId: string, approval: BrowserProfileDeleteApproval) => ipcRenderer.invoke('browser:deleteProfile', profileId, approval),
     detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),
     importProfile: (sourceToken: string, label: string) =>
       ipcRenderer.invoke('browser:importProfile', sourceToken, label),

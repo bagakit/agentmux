@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session, type Session } from 'electron'
 import type {
   BrowserProfileImportSourceSummary,
-  BrowserProfileSummary
+  BrowserProfileSummary,
+  BrowserProfileDeleteApproval
 } from '../shared/contracts.js'
 import type {
   BrowserProfileImportSource,
@@ -96,7 +97,17 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     })())
   }
 
-  async deleteProfile(profileId: string): Promise<void> {
+  async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void> {
+    if (
+      approval?.kind !== 'user-confirmed' ||
+      approval.operation !== 'delete-profile' ||
+      approval.scope !== 'profile' ||
+      approval.profileId !== profileId
+    ) {
+      throw Object.assign(new Error('Browser Profile deletion requires explicit user approval'), {
+        code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+      })
+    }
     this.resolvePartition(profileId)
     if (profileId === this.defaultId) throw new Error('The default Browser Profile cannot be deleted')
     const profile = this.profiles.get(profileId)!
