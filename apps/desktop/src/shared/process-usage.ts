@@ -8,6 +8,12 @@
  * 与 `ps` 调用分开，就能在没有真实进程的情况下验证归并对不对。
  */
 
+import type {
+  AgentMuxRuntimeResourceSnapshot,
+  EndpointDirectoryUsage,
+  EndpointReclaimOutcome
+} from '@agentmux/core'
+
 /** `ps -Ao pid,ppid,rss,pcpu` 的一行。rss 单位是 KiB，cpu 是百分比。 */
 export type ProcessRow = {
   pid: number
@@ -100,7 +106,7 @@ export function rollUpSubtrees(
  *
  * 把它们合成一个"刷新率"会同时定死三个不相干的取舍：采多密（开销）、看多长一段（可读性）、
  * 怎么把一段压成一个数（这段时间里什么才算这个指标的真相）。CPU 与内存对这三件事的答案
- * 本来就不同——CPU 是瞬时速率，抖动大，用户想知道的是"这十秒里它最凶的时候有多凶"；
+ * 本来就不同——CPU 是来源各自定义的平均读数，抖动大，用户想知道的是"这十秒里它最凶的时候有多凶"；
  * 内存是一个水位，最近一次读数就是此刻的真相，取峰值反而会把一个早就释放掉的高点一直挂着。
  */
 export type UsageAggregate = 'peak' | 'latest' | 'mean'
@@ -112,7 +118,7 @@ export type MetricSpec = {
 }
 
 export const USAGE_METRIC_SPECS: { cpu: MetricSpec; rss: MetricSpec } = {
-  // 用户口径：每秒采样，显示前 10 秒窗口的峰值。
+  // 用户口径：每秒采样，显示前 10 秒窗口内采集读数的峰值，不改变底层平均区间。
   cpu: { windowMs: 10_000, aggregate: 'peak' },
   // 内存是水位不是速率，最近一次读数即真相；窗口只用于在采样断档时判定读数是否已过期。
   rss: { windowMs: 10_000, aggregate: 'latest' }
@@ -182,6 +188,44 @@ export type RunUsage = {
   rssKib: number | null
 }
 
+export type AppProcessRole = 'main' | 'renderer' | 'browser' | 'gpu' | 'utility' | 'other'
+
+export type AppUsageGroup = {
+  role: AppProcessRole
+  processCount: number
+  cpuPercent: number | null
+  rssKib: number
+}
+
+export type AppUsage = {
+  processCount: number | null
+  cpuPercent: number | null
+  rssKib: number | null
+  groups: AppUsageGroup[]
+  /** Electron sampling or process attribution failed; retained readings are stale. */
+  unavailable: string | null
+}
+
+export type MainResourceOwnerCounts = {
+  sessionAttachmentOwners: number
+  sessionAttachmentLeases: number
+  fileWatchers: number
+  browserViews: number
+  releasedBrowserViews: number
+}
+
+export type RuntimeUsage = {
+  hostId: string
+  resources: AgentMuxRuntimeResourceSnapshot | null
+  unavailable: string | null
+  /** The vendored Runtime identity does not publish a daemon PID. */
+  process: { cpuPercent: null; rssKib: null; unavailable: string }
+  endpointStorage: EndpointDirectoryUsage[] | null
+  endpointStorageUnavailable: string | null
+  /** Last startup directory cleanup, independent of retained Run/output inventory. */
+  endpointReclaim: EndpointReclaimOutcome | null
+}
+
 /**
  * 一次采样的成品。
  *
@@ -192,7 +236,11 @@ export type UsageSnapshot = {
   observedAt: number
   runs: RunUsage[]
   /** Electron 自身进程，与 Agent 子树分开——混成一个数就没法回答"是谁在吃"。 */
-  app: { processCount: number; rssKib: number } | null
+  app: AppUsage | null
+  /** One observation on panel open; null until that observation has completed. */
+  runtime: RuntimeUsage[] | null
+  runtimeUnavailable: string | null
+  mainOwners: MainResourceOwnerCounts | null
   /** 采样失败时的原因。有它就说明下面的数字是旧的，不是此刻的。 */
   unavailable: string | null
 }

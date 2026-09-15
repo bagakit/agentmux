@@ -7,6 +7,10 @@ import {
   pruneSamples,
   rollUpSubtrees,
   type RunUsage,
+  type AppUsage,
+  type AppProcessRole,
+  type MainResourceOwnerCounts,
+  type RuntimeUsage,
   type UsageSample,
   type UsageSnapshot
 } from '../shared/process-usage.js'
@@ -28,6 +32,12 @@ const PS_TIMEOUT_MS = 5_000
 /** 注入点：测试喂预设的 `ps` 输出，不起真实子进程。 */
 export type ProcessTableReader = () => Promise<string>
 
+export type ProcessResourceObservationSources = {
+  observeRuntime(): Promise<RuntimeUsage[]>
+  processOwners(): { rendererPids: readonly number[]; browserPids: readonly number[] }
+  mainOwners(): MainResourceOwnerCounts
+}
+
 function readProcessTable(): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('ps', ['-Ao', 'pid,ppid,rss,pcpu'], {
@@ -48,7 +58,12 @@ export class ProcessResourceSampler {
   private timer: NodeJS.Timeout | null = null
   private inFlight: Promise<void> | null = null
   private latest: UsageSnapshot | null = null
-  private lastError: string | null = null
+  private observationSources: ProcessResourceObservationSources | null = null
+  private runtime: RuntimeUsage[] | null = null
+  private runtimeUnavailable: string | null = null
+  private runtimeInFlight: Promise<void> | null = null
+  private readonly appProcesses = new Set<string>()
+  private readonly appSamples = new Map<string, UsageSample[]>()
   /**
    * 「这次采样属于哪一段观察」。
    *
@@ -67,6 +82,14 @@ export class ProcessResourceSampler {
     private readonly now: () => number = Date.now,
     private readonly appMetrics: () => Electron.ProcessMetric[] = () => app.getAppMetrics()
   ) {}
+
+  /** Wire the existing Main owners once; none of these readers run while the panel is closed. */
+  setObservationSources(sources: ProcessResourceObservationSources): () => void {
+    this.observationSources = sources
+    return () => {
+      if (this.observationSources === sources) this.observationSources = null
+    }
+  }
 
   /**
    * 记下一个 run 的 pid。
@@ -90,6 +113,7 @@ export class ProcessResourceSampler {
   subscribe(onSample: (snapshot: UsageSnapshot) => void): () => void {
     this.subscribers.add(onSample)
     if (this.timer === null) {
+      void this.observeRuntime(this.generation)
       // 立刻采一次，否则面板要空等一个周期才有数。
       void this.sampleOnce()
       this.timer = setInterval(() => void this.sampleOnce(), USAGE_SAMPLE_INTERVAL_MS)
@@ -106,8 +130,99 @@ export class ProcessResourceSampler {
     // 样本一并丢掉：面板再打开时，旧样本描述的是另一段时间。
     this.samples.clear()
     this.latest = null
+    this.runtime = null
+    this.runtimeUnavailable = null
+    this.appProcesses.clear()
+    this.appSamples.clear()
     // 递增之后，任何在途采样落地时都会发现自己属于上一段观察，从而不写回刚清掉的东西。
     this.generation += 1
+  }
+
+  private observeRuntime(generation: number): void {
+    if (this.runtimeInFlight) return
+    this.runtimeInFlight = this.runRuntimeObservation(generation).finally(() => {
+      this.runtimeInFlight = null
+      // Close/reopen invalidates the old reading, but cannot cancel its I/O. Only the
+      // currently open generation gets a new read after it settles; no queue of old opens.
+      if (generation !== this.generation && this.subscribers.size > 0) this.observeRuntime(this.generation)
+    })
+  }
+
+  private async runRuntimeObservation(generation: number): Promise<void> {
+    try {
+      if (!this.observationSources) throw new Error('Runtime resource observation is not connected')
+      const runtime = await this.observationSources.observeRuntime()
+      if (generation !== this.generation) return
+      this.runtime = runtime
+      this.runtimeUnavailable = null
+    } catch (error) {
+      if (generation !== this.generation) return
+      this.runtimeUnavailable = error instanceof Error ? error.message : String(error)
+    }
+    if (this.latest) {
+      this.latest = { ...this.latest, runtime: this.runtime, runtimeUnavailable: this.runtimeUnavailable }
+      this.notify()
+    }
+  }
+
+  private sampleApp(observedAt: number): AppUsage {
+    try {
+      const metrics = [...new Map(this.appMetrics().map((metric) => [metric.pid, metric])).values()]
+      const owners = this.observationSources?.processOwners()
+      const rendererPids = new Set(owners?.rendererPids ?? [])
+      const browserPids = new Set(owners?.browserPids ?? [])
+      const roleFor = (metric: Electron.ProcessMetric): AppProcessRole => {
+        switch (metric.type) {
+          // Electron calls its Main process "Browser"; embedded Browser pages are "Tab".
+          case 'Browser': return 'main'
+          case 'GPU': return 'gpu'
+          case 'Utility': return 'utility'
+          case 'Tab':
+            // A shared process cannot truthfully be assigned exclusively to either surface.
+            if (rendererPids.has(metric.pid) && browserPids.has(metric.pid)) return 'other'
+            if (rendererPids.has(metric.pid)) return 'renderer'
+            if (browserPids.has(metric.pid)) return 'browser'
+            return 'other'
+          default: return 'other'
+        }
+      }
+      const roles: AppProcessRole[] = ['main', 'renderer', 'browser', 'gpu', 'utility', 'other']
+      const groups = roles.map((role) => {
+        const owned = metrics.filter((metric) => roleFor(metric) === role)
+        const rssKib = owned.reduce((sum, metric) => sum + metric.memory.workingSetSize, 0)
+        return {
+          role,
+          processCount: owned.length,
+          rssKib,
+          cpuPercent: owned.length === 0 ? 0 : this.appCpu(role, owned, observedAt, rssKib)
+        }
+      })
+      const rssKib = metrics.reduce((sum, metric) => sum + metric.memory.workingSetSize, 0)
+      const cpuPercent = metrics.length === 0 ? 0 : this.appCpu('total', metrics, observedAt, rssKib)
+      this.appProcesses.clear()
+      for (const metric of metrics) this.appProcesses.add(`${metric.pid}:${metric.creationTime}`)
+      return { processCount: metrics.length, rssKib, cpuPercent, groups, unavailable: null }
+    } catch (error) {
+      return {
+        processCount: this.latest?.app?.processCount ?? null,
+        rssKib: this.latest?.app?.rssKib ?? null,
+        cpuPercent: this.latest?.app?.cpuPercent ?? null,
+        groups: this.latest?.app?.groups ?? [],
+        unavailable: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  private appCpu(key: string, metrics: readonly Electron.ProcessMetric[], observedAt: number, rssKib: number): number | null {
+    // Electron's first reading is 0 without an interval. A new/reused PID must warm up again.
+    if (metrics.some((metric) => !this.appProcesses.has(`${metric.pid}:${metric.creationTime}`))) return null
+    const next = pruneSamples([...(this.appSamples.get(key) ?? []), {
+      observedAt,
+      rssKib,
+      cpuPercent: metrics.reduce((sum, metric) => sum + metric.cpu.percentCPUUsage, 0)
+    }], observedAt)
+    this.appSamples.set(key, next)
+    return aggregateUsage(next, observedAt).cpuPercent
   }
 
   /**
@@ -124,30 +239,22 @@ export class ProcessResourceSampler {
 
   private async runSample(generation: number): Promise<void> {
     const observedAt = this.now()
-    let rows
+    let rows = null
+    let unavailable: string | null = null
     try {
       rows = parseProcessTable(await this.readTable())
       if (generation !== this.generation) return
-      this.lastError = null
     } catch (cause) {
       if (generation !== this.generation) return
       // 采样失败降级为"不可用"，不是 0——0 会被读成真值。上一次的数字保留但标记为过期。
-      this.lastError = cause instanceof Error ? cause.message : String(cause)
-      this.latest = {
-        observedAt,
-        runs: this.latest?.runs ?? [],
-        app: this.latest?.app ?? null,
-        unavailable: this.lastError
-      }
-      this.notify()
-      return
+      unavailable = cause instanceof Error ? cause.message : String(cause)
     }
 
     const roots = [...this.runPids].map(([runId, pid]) => ({ key: runId, pid }))
-    const usage = rollUpSubtrees(rows, roots)
-    const runs: RunUsage[] = []
-    for (const { key: runId } of roots) {
-      const subtree = usage.get(runId) ?? null
+    const usage = rows ? rollUpSubtrees(rows, roots) : null
+    const runs: RunUsage[] = usage ? [] : this.latest?.runs ?? []
+    for (const { key: runId } of usage ? roots : []) {
+      const subtree = usage!.get(runId) ?? null
       const history = this.samples.get(runId) ?? []
       const next = subtree
         ? pruneSamples([...history, {
@@ -161,19 +268,15 @@ export class ProcessResourceSampler {
       runs.push({ runId, processCount: subtree?.processCount ?? 0, cpuPercent, rssKib })
     }
 
-    let appUsage: UsageSnapshot['app'] = null
-    try {
-      const metrics = this.appMetrics()
-      appUsage = {
-        processCount: metrics.length,
-        rssKib: metrics.reduce((sum, metric) => sum + metric.memory.workingSetSize, 0)
-      }
-    } catch {
-      // Electron 自身指标拿不到不影响 Agent 子树那半边——如实留空即可。
-      appUsage = null
+    this.latest = {
+      observedAt,
+      runs,
+      app: this.sampleApp(observedAt),
+      runtime: this.runtime,
+      runtimeUnavailable: this.runtimeUnavailable,
+      mainOwners: this.observationSources?.mainOwners() ?? null,
+      unavailable
     }
-
-    this.latest = { observedAt, runs, app: appUsage, unavailable: null }
     this.notify()
   }
 
@@ -187,5 +290,6 @@ export class ProcessResourceSampler {
     this.stop()
     this.subscribers.clear()
     this.runPids.clear()
+    this.observationSources = null
   }
 }

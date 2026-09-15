@@ -12,6 +12,8 @@ import type {
   BrowserViewport,
   RuntimeEvent,
   RuntimeSnapshot,
+  SessionControl,
+  SessionReplayResult,
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
@@ -197,10 +199,22 @@ const mockSessions: SessionSnapshot[] = [
   }
 ]
 
+const mockAttachmentControls = new Map<string, SessionControl>()
 const mockOutput = new Map<string, string>([
   ['session-codex', '\u001b[1;36mAgentMux core\u001b[0m\r\n\r\n✓ Run attached\r\n✓ local Provider ready\r\n\r\nEditing packages/core/src/runtime.ts\r\nRunning pnpm test…\r\n'],
   ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
 ])
+
+function mockRetainedReplay(control: SessionControl, afterByte: number): SessionReplayResult {
+  const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
+  const bytes = new TextEncoder().encode(mockOutput.get(sessionId) ?? '')
+  const startByte = Math.min(afterByte, bytes.length)
+  return {
+    replay: startByte < bytes.length ? [{ type: 'data', runId: control.run.runId,
+      startByte, endByte: bytes.length, data: new TextDecoder().decode(bytes.subarray(startByte)), dataBytes: bytes.subarray(startByte) }] : [],
+    gap: null
+  }
+}
 
 const mockControlListeners = new Set<(
   request: AgentMuxControlRequest,
@@ -765,27 +779,25 @@ const mockApi: AgentMuxDesktopApi = {
       if (!timeline) throw new Error(`Timeline not found: ${control.agentSessionId}`)
       return structuredClone(timeline)
     },
-    attach: async (control) => {
+    attach: async (control, afterByte = 0) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
-      const data = mockOutput.get(sessionId) ?? ''
-      const endByte = new TextEncoder().encode(data).byteLength
+      const attachmentId = crypto.randomUUID()
+      mockAttachmentControls.set(attachmentId, control)
       return {
-        attachmentId: crypto.randomUUID(),
+        attachmentId,
         session: structuredClone(session),
         currentSize: null,
-        replay: data ? [{
-          type: 'data' as const,
-          runId: control.run.runId,
-          startByte: 0,
-          endByte,
-          data
-        }] : [],
-        gap: null
+        ...mockRetainedReplay(control, afterByte)
       }
     },
-    detach: async () => {},
+    replay: async (attachmentId, afterByte) => {
+      const control = mockAttachmentControls.get(attachmentId)
+      if (!control) throw new Error('Session Attachment not found')
+      return mockRetainedReplay(control, afterByte)
+    },
+    detach: async (attachmentId) => { mockAttachmentControls.delete(attachmentId) },
     write: async (control, input) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)

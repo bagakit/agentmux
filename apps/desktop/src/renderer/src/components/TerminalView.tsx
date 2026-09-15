@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ExternalLink, FileCode, History, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -58,7 +58,7 @@ import {
   TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
   subscribeTerminalSearchCount
 } from '../lib/terminal-search-count'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork } from '../lib/terminal-replay'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay, recoverTerminalRetainedOutput, terminalHistoryBoundary, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
@@ -98,7 +98,7 @@ import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
 
-function terminalWrite(terminal: Terminal, data: string): Promise<void> {
+function terminalWrite(terminal: Terminal, data: string | Uint8Array): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
 }
 
@@ -164,8 +164,7 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
     core.type !== 'terminal-output' ||
     core.run.runId !== session.control.run.runId
   ) return null
-  const byteRange = core.evidence.outputByteRange
-  return byteRange ? { ...core, ...byteRange } : null
+  return { ...core, ...core.evidence.outputByteRange }
 }
 
 export function TerminalView({
@@ -260,6 +259,9 @@ export function TerminalView({
   const recoverSession = useAppStore((state) => state.recoverSession)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
+  const [runtimeHistoryGap, setRuntimeHistoryGap] = useState(false)
+  const [historyReadFailure, setHistoryReadFailure] = useState(false)
+  const [historyBoundary, setHistoryBoundary] = useState<string | null>(null)
   const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
   const [viewportSyncFailed, setViewportSyncFailed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -410,6 +412,9 @@ export function TerminalView({
     setAttachFailed(false)
     setHasOutput(false)
     setReplayGap(false)
+    setRuntimeHistoryGap(false)
+    setHistoryReadFailure(false)
+    setHistoryBoundary(null)
     setReplaySizeUnknown(false)
     setViewportSyncFailed(false)
     setPathActions(null)
@@ -641,6 +646,9 @@ export function TerminalView({
     let droppedPendingSize: { cols: number; rows: number } | null = null
     // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
     let kittyKeyboard = initialKittyKeyboardState()
+    // Semantic inspection only. xterm receives the original bytes and owns UTF-8/ANSI parsing;
+    // this decoder never participates in the byte cursor, overlap, or terminal writes.
+    const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
@@ -697,6 +705,38 @@ export function TerminalView({
       setHasOutput(true)
     }
 
+    const writeOutput = async (data: Uint8Array): Promise<void> => {
+      if (disposed) return
+      await terminalWrite(terminal, data)
+      kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
+      if (!disposed) setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+    }
+    const backfillRetainedOutput = async (throughByte: number): Promise<void> => {
+      if (attachmentId === null || disposed) return
+      try {
+        const recovered = await recoverTerminalRetainedOutput({
+          cursor,
+          throughByte,
+          read: (afterByte) => api.sessions.replay(attachmentId!, afterByte),
+          write: writeOutput
+        })
+        if (disposed) return
+        cursor = recovered.cursor
+        acknowledger.queue(cursor)
+        if (recovered.incomplete) setHistoryReadFailure(true)
+        if (recovered.gap) {
+          setRuntimeHistoryGap(true)
+          setReplayGap(true)
+          liveGapRedrawPending = true
+        }
+      } catch (error) {
+        // Keep live/input available. A failed read says nothing about Runtime eviction, and a
+        // later cursor cannot prove that this earlier missing range was ever reconstructed.
+        if (!disposed) setHistoryReadFailure(true)
+        console.warn('[terminal] retained history recovery failed', error)
+      }
+    }
+
     const drainLiveOutput = async (): Promise<void> => {
       // Let same-turn IPC events accumulate so xterm sees one visual write instead of one write
       // per RuntimeEvent. The loop remains bounded and yields between batches when output is large.
@@ -710,27 +750,34 @@ export function TerminalView({
         }
         // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
         // 「部分已有」曾落到告示分支，于是无缺字节也报缺、且把已显示的内容重写一遍。
+        // A dropped startup resize is queued before the bytes it governed. Apply that owner
+        // fact above before recovering those bytes: alternate buffers cannot reflow columns
+        // discarded while parsing on the old grid.
+        if (droppedPendingThrough > cursor || composeTerminalLiveOutputWrite(taken.batch, cursor).gap) {
+          await backfillRetainedOutput(Math.max(droppedPendingThrough, taken.batch.at(-1)!.endByte))
+        }
         const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
         if (composed.gap) {
-          // A bounded queue can lose an old prefix. Keep that fact out of the PTY screen: injecting a
-          // diagnostic string changes TUI state and is exactly why the visible screen can look wrong.
+          // Recovery either confirmed a Runtime gap or could not read history. Keep that fact
+          // outside the PTY screen; a repaint can repair only the current screen.
           // The service window owns the notice; a healthy Run gets one current-screen repaint below.
           liveGapRedrawPending = true
-          if (!disposed) setReplayGap(true)
         }
-        if (composed.data.length === 0) {
+        if (composed.dataBytes.byteLength === 0) {
           // 整批都已在屏上。cursor 仍要跟上（它只增不减），否则同一批会被反复认成新字节。
           cursor = composed.cursor
           continue
         }
-        const data = composed.data
+        const data = composed.dataBytes
         const nextCursor = composed.cursor
-        await terminalWrite(terminal, data)
-        kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
+        await writeOutput(data)
         cursor = nextCursor
         acknowledger.queue(cursor)
         if (liveOutputQueue.length > 0) await yieldTerminalWork()
       }
+      // The bounded startup queue can retain only geometry after dropping its byte prefix.
+      // Leading owner sizes have now landed even when no live byte batch remains.
+      if (!disposed && droppedPendingThrough > cursor) await backfillRetainedOutput(droppedPendingThrough)
       if (liveGapRedrawPending && canControlRunRef.current && !disposed) {
         liveGapRedrawPending = false
         try {
@@ -742,13 +789,15 @@ export function TerminalView({
       }
     }
 
-    const scheduleLiveOutputDrain = (output: TerminalLiveItem): void => {
+    const scheduleLiveOutputDrain = (output?: TerminalLiveItem): void => {
       if (disposed) return
       // 入队必须**经过** admit：直接 push 会让这个队列无界，而 attach 之后再没有第二道闸
-      // （MAX_PENDING_* 那对只管 attach 前的启动缓冲）。积压超上限时从队头丢，省略由 drain 里
-      // 既有的「序列不连续」告示如实说出来。
-      const admitted = admitTerminalLiveOutput(liveOutputQueue, output)
-      liveOutputQueue.splice(0, liveOutputQueue.length, ...admitted.queue)
+      // （MAX_PENDING_* 那对只管 attach 前的启动缓冲）。积压超上限时从队头丢，drain 从
+      // Runtime 回补仍保留的字节；只有真实 Gap 或读取失败才产生历史缺失提示。
+      if (output) {
+        const admitted = admitTerminalLiveOutput(liveOutputQueue, output)
+        liveOutputQueue.splice(0, liveOutputQueue.length, ...admitted.queue)
+      }
       if (liveDrain) return
       const drain = drainLiveOutput()
       liveDrain = drain
@@ -768,7 +817,7 @@ export function TerminalView({
       const size = event.hostId === session.hostId && core.type === 'terminal-resized' &&
         core.run.runId === session.control.run.runId ? { cols: core.cols, rows: core.rows } : null
       if (!output && !size) return
-      if (output && output.data.length > 0) observeOutput()
+      if (output && output.dataBytes.byteLength > 0) observeOutput()
       if (!readyForLiveOutput) {
         pending.push(event)
         pendingBytes += output ? output.endByte - output.startByte : 0
@@ -788,7 +837,7 @@ export function TerminalView({
       }
       if (size) scheduleLiveOutputDrain({ size })
       else if (output) scheduleLiveOutputDrain({
-        data: output.data,
+        dataBytes: output.dataBytes,
         startByte: output.startByte,
         endByte: output.endByte
       })
@@ -925,33 +974,23 @@ export function TerminalView({
         }
         attachmentId = result.attachmentId
         if (result.currentSize) terminal.resize(result.currentSize.cols, result.currentSize.rows)
-        const hasReplay = result.replay.some((chunk) => chunk.data.length > 0)
+        const hasReplay = result.replay.some((chunk) => chunk.dataBytes.byteLength > 0)
         setReplaySizeUnknown(hasReplay && result.currentSize === null)
         if (result.gap) {
           setReplayGap(true)
+          setRuntimeHistoryGap(true)
           cursor = result.gap.firstAvailableByte
         }
         if (hasReplay) observeOutput()
         cursor = await hydrateTerminalReplay(
           result.replay,
           async (data) => {
-            await terminalWrite(terminal, data)
-            // 回放也要读：重新 attach 到一个早已协商过的 Agent 时，那次协商就在回放里。
-            // 漏掉它会让协议状态静默退回"没协商过"，Shift+Enter 于是送错编码。
-            kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
+            await writeOutput(data)
           }
         ) ?? cursor
-        // Initial attaches and true rebuilds have no previous viewport to restore. Explicitly pin
-        // their first visible frame to the latest output instead of relying on xterm's parser
-        // default, which can be the top of a freshly-created normal buffer.
-        if (visibleRef.current) restoreRememberedViewport(terminal)
-        if (droppedPendingThrough > cursor) {
-          await terminalWrite(
-            terminal,
-            '\r\n\u001b[33m[Live output exceeded the pane startup buffer; omitted bytes were acknowledged]\u001b[0m\r\n'
-          )
-          cursor = droppedPendingThrough
-        }
+        // Only the first hidden frame belongs to initial positioning. The reveal deadline may
+        // already have made this buffer readable; a late replay must preserve the user's scroll.
+        if (!revealed && visibleRef.current) restoreRememberedViewport(terminal)
         // 画面正确真正依赖的就是上面这些字节写完——隐藏画布的正当理由到此结束，先揭示。
         // 恢复收尾（live 视口同步 / gap redraw）继续跑，但不再决定画面何时可看：它经
         // api.sessions.resize 与 attach 争用同一把按 Run 串行的锁，排在揭示之前时，该 Run 上
@@ -969,6 +1008,8 @@ export function TerminalView({
             if (cursor > 0) acknowledger.queue(cursor)
             if (droppedPendingSize) scheduleLiveOutputDrain({ size: droppedPendingSize })
             for (const event of pending.splice(0)) accept(event)
+            // Even a queue consisting only of later size observations can have omitted output.
+            if (droppedPendingThrough > cursor) scheduleLiveOutputDrain()
             await outputTail
           },
           redrawCurrentScreen: async () => {
@@ -1313,12 +1354,20 @@ export function TerminalView({
               <ServiceWindowNotice notice={viewportSyncNotice} />
             </div>
           ) : null}
-          {!hydrating && replayGap ? (
+          {!hydrating && !historyReadFailure && (replayGap || runtimeHistoryGap) ? (
             <TerminalReplayGapNotice
+              compact={!replayGap}
               canRedraw={canControlRun}
               onRedraw={redrawCurrentScreen}
             />
           ) : null}
+          {!hydrating && historyReadFailure ? <div className="terminal-replay-gap" role="status" title={historyBoundary ?? undefined}>
+            <History size={12} aria-hidden="true" />
+            <span>{runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} {!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput, liveReady: liveOutputReady }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'} Reopen this session to replay retained output.</span>
+          </div> : null}
+          {!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap && historyBoundary ? <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={historyBoundary} aria-label={historyBoundary}>
+            <History size={12} aria-hidden="true" /><span>{historyBoundary.startsWith('The full-screen') ? 'Full-screen history' : 'History line limit'}</span>
+          </div> : null}
           {searchOpen ? (
             <div className="terminal-search" role="search">
               <Search size={13} />

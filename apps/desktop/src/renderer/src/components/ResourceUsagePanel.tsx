@@ -2,20 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, Cpu } from 'lucide-react'
 import { api } from '../lib/api'
-import { useAppStore } from '../store'
-import type { UsageSnapshot } from '../../../shared/contracts'
-import { formatRss, subscribeWhileOpen, usagePanelRows, type UsagePanelRow } from '../lib/resource-usage-panel'
+import { readRendererResourceOwnerCounts, useAppStore } from '../store'
+import type { SessionSnapshot, AgentTimelineSnapshot, UsageSnapshot } from '../../../shared/contracts'
+import { USAGE_METRIC_SPECS, USAGE_SAMPLE_INTERVAL_MS, type AppProcessRole, type RuntimeUsage } from '../../../shared/process-usage'
+import { formatBytes, formatCpu, formatRss, subscribeWhileOpen, usagePanelRows, type UsagePanelRow } from '../lib/resource-usage-panel'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 
-// 状态栏上的资源面板。
-//
-// **折叠态零开销是这个组件的首要约束**：订阅只在面板打开时存在，关闭即退订，主进程那边
-// 因此一次 `ps` 都不起。一个常驻的全主机轮询不会让任何测试变红，只会让空闲窗口持续耗电——
-// 所以采样的生命周期绑在这个 effect 上，而不是绑在组件挂载上。
-//
-// 数字的口径见 `shared/process-usage.ts`：CPU 每秒采样、显示 10 秒窗口的峰值（它是瞬时速率，
-// 用户想知道的是"最凶的时候有多凶"），内存取最近一次读数（它是水位，取峰值会把早已释放的
-// 高点一直挂着）。
+const CPU_WINDOW_SECONDS = USAGE_METRIC_SPECS.cpu.windowMs / 1000
+const SAMPLE_TARGET_SECONDS = USAGE_SAMPLE_INTERVAL_MS / 1000
+
+const NO_SESSIONS: SessionSnapshot[] = []
+const NO_TIMELINES: Record<string, AgentTimelineSnapshot> = {}
+const ROLE_LABELS: Record<AppProcessRole, string> = {
+  main: 'Main', renderer: 'Renderer', browser: 'Browser', gpu: 'GPU', utility: 'Utility', other: 'Other'
+}
 
 function UsageRow({ row }: { row: UsagePanelRow }) {
   return (
@@ -23,28 +23,67 @@ function UsageRow({ row }: { row: UsagePanelRow }) {
       <span className="resource-usage__identity">
         <strong className="resource-usage__name">{row.label}</strong>
         <small className="resource-usage__context">{row.contextText} · {row.stateText}</small>
-        {/* 「最近在改什么」：只在比裸状态更具体时才由 usagePanelRows 填上，缺席就不占行——
-            自成一行而非续接到 context 后面，是因为三段挤一行在面板宽度下必然折行、读不成句。 */}
         {row.activity ? <small className="resource-usage__activity">{row.activity}</small> : null}
       </span>
-      {/* 拿不到就留空，不填 0——0 会被读成"它在跑但不吃资源"这个真值。 */}
       <span className="resource-usage__metric">{row.cpuText}</span>
       <span className="resource-usage__metric">{row.rssText}</span>
     </div>
   )
 }
 
+function RuntimeObservation({ runtime }: { runtime: RuntimeUsage }) {
+  const facts = runtime.resources
+  const storage = runtime.endpointStorage
+  const cleanup = runtime.endpointReclaim
+  return (
+    <section className="resource-usage__section" aria-label={`Runtime ${runtime.hostId}`}>
+      <div className="resource-usage__row">
+        <strong className="resource-usage__name">ctxmux · {runtime.hostId}</strong>
+        <span className="resource-usage__metric">—</span>
+        <span className="resource-usage__metric">—</span>
+      </div>
+      <p className="resource-usage__note">CPU / RSS unavailable: {runtime.process.unavailable}</p>
+      {facts ? <p className="resource-usage__note">Run snapshot on open · {new Date(facts.observedAt).toLocaleTimeString()}</p> : null}
+      {runtime.unavailable ? <p className="resource-usage__unavailable resource-usage__note">Run inventory unavailable: {runtime.unavailable}</p> : null}
+      {facts ? (
+        <dl className="resource-usage__facts">
+          <dt>Retained output</dt><dd>{formatBytes(facts.retainedOutputBytes)}</dd>
+          <dt>Runs · running / ended</dt><dd>{facts.runCount} · {facts.runningRuns} / {facts.terminatedRuns}</dd>
+          <dt>Attachments</dt><dd>{facts.attachments}</dd>
+          <dt>Ended without attachments</dt><dd>{facts.terminatedUnattachedRuns}</dd>
+        </dl>
+      ) : null}
+      <details className="resource-usage__details">
+        <summary>Storage & cleanup <span>{storage ? formatBytes(storage.reduce((sum, item) => sum + item.bytes, 0)) : '—'}</span></summary>
+        <p className="resource-usage__note">Retention and owners are observations, not a leak verdict.</p>
+        {runtime.endpointStorageUnavailable ? <p className="resource-usage__unavailable resource-usage__note">Storage unavailable: {runtime.endpointStorageUnavailable}</p> : null}
+        {storage?.map((item) => (
+          <div className="resource-usage__storage" key={item.path}>
+            <span title={item.path}>{item.current ? 'Current endpoint' : 'Other endpoint'}<small>{item.path}</small></span>
+            <span className="resource-usage__metric">{formatBytes(item.bytes)}</span>
+          </div>
+        ))}
+        {cleanup ? (
+          <dl className="resource-usage__facts">
+            <dt>Startup directories reclaimed</dt><dd>{cleanup.reclaimed.length}</dd>
+            <dt>Directories preserved</dt><dd>{cleanup.skippedLive.length}</dd>
+            <dt>Cleanup failures</dt><dd>{cleanup.failed.length}</dd>
+          </dl>
+        ) : <p className="resource-usage__note">No startup directory cleanup result.</p>}
+        {cleanup?.failed.map((item) => <p className="resource-usage__unavailable resource-usage__note" key={item.path} title={item.path}>{item.path}: {item.reason}</p>)}
+        <p className="resource-usage__note">Directory cleanup does not reclaim retained Runs. Unattached Runs can still hold history.</p>
+      </details>
+    </section>
+  )
+}
+
 export function ResourceUsagePanel() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null)
   const [open, setOpen] = useState(false)
-  const sessions = useAppStore((state) => state.sessions)
-  // 时间轴是 store 里那份实时数据：启动时拉全、之后由事件流持续补齐（store.ts 的 onEvent →
-  // agent-timeline）。所以打开面板**不需要**触发一轮重拉——数据本就在手，读它即可。
-  const timelines = useAppStore((state) => state.timelines)
-  // 每个 Session 的仓根，用来把「最近在改什么」里的绝对路径缩成相对路径。必须逐个解：这张面板一次
-  // 列出所有 Run，它们分属不同仓库，没有「当前那个根」可用。问的是**包含**不是归属（子目录终端
-  // 不被任何 workspace 精确拥有，但它的路径确实在那个仓里），故走 workspaceRootForPath。
-  const config = useAppStore((state) => state.config)
+  // Closed panels neither sample processes nor follow unrelated Session/timeline updates.
+  const sessions = useAppStore((state) => open ? state.sessions : NO_SESSIONS)
+  const timelines = useAppStore((state) => open ? state.timelines : NO_TIMELINES)
+  const config = useAppStore((state) => open ? state.config : null)
   const workspaceRoots = useMemo(() => {
     const roots: Record<string, string> = {}
     for (const session of sessions) {
@@ -59,54 +98,54 @@ export function ResourceUsagePanel() {
     [open]
   )
 
+  const rendererOwners = useMemo(() => snapshot ? readRendererResourceOwnerCounts() : null, [snapshot])
   const rows = usagePanelRows(snapshot, sessions, { timelines, workspaceRoots })
+  const app = snapshot?.app
+  const mainOwners = snapshot?.mainOwners
   return (
     <DropdownMenu.Root open={open} onOpenChange={setOpen}>
       <DropdownMenu.Trigger asChild>
-        <button
-          className="agent-status-bar__segment agent-status-bar__segment--action"
-          type="button"
-          aria-label="Show CPU and memory use per agent"
-          title="CPU and memory use"
-        >
+        <button className="agent-status-bar__segment agent-status-bar__segment--action" type="button"
+          aria-label="Show performance and resource owners" title="Performance and resource owners">
           <Cpu size={11} aria-hidden="true" />
           <ChevronUp size={10} aria-hidden="true" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        {/* Presence-managed：这里的动画必须限定在 [data-state='open']，否则关闭时会等一个
-            永远不会来的 animationend。见 presence-exit-animation.test.ts。 */}
-        <DropdownMenu.Content
-          className="resource-usage"
-          side="top"
-          align="end"
-          sideOffset={6}
-          collisionPadding={8}
-        >
-          <div className="resource-usage__heading">
-            <span>CPU · Memory</span>
-            {/* 采样失败时如实说，不把旧数字当此刻的。 */}
-            {snapshot?.unavailable ? (
-              <span className="resource-usage__unavailable">unavailable</span>
-            ) : null}
-          </div>
+        <DropdownMenu.Content className="resource-usage" side="top" align="end" sideOffset={6} collisionPadding={8}>
+          <div className="resource-usage__heading"><strong>Performance</strong><span>{snapshot ? new Date(snapshot.observedAt).toLocaleTimeString() : 'Sampling…'}</span></div>
+          <div className="resource-usage__row resource-usage__columns"><span>Process resources</span><span title={`Highest available CPU reading over ${CPU_WINDOW_SECONDS}s; sources are described below`}>CPU · peak</span><span title="Resident memory, latest sample">RSS · latest</span></div>
           <div className="resource-usage__list">
-            {rows.length === 0 ? (
-              <div className="resource-usage__empty">
-                {snapshot ? 'No agent processes' : 'Sampling…'}
-              </div>
-            ) : (
-              rows.map((row) => <UsageRow key={row.key} row={row} />)
-            )}
+            <section className="resource-usage__section" aria-label="Application resources">
+              <details className="resource-usage__details">
+                <summary className="resource-usage__row"><strong>AgentMux <small>{app?.processCount ?? '—'} processes</small></strong><span className="resource-usage__metric">{formatCpu(app?.cpuPercent ?? null)}</span><span className="resource-usage__metric">{formatRss(app?.rssKib ?? null)}</span></summary>
+                {app?.groups.map((group) => <div className="resource-usage__row" key={group.role}><span>{ROLE_LABELS[group.role]} <small>{group.processCount}</small></span><span className="resource-usage__metric">{formatCpu(group.cpuPercent)}</span><span className="resource-usage__metric">{formatRss(group.rssKib)}</span></div>)}
+              </details>
+              <p className="resource-usage__note">CPU: interval average · {CPU_WINDOW_SECONDS}s reading peak</p>
+              {app?.unavailable ? <p className="resource-usage__unavailable resource-usage__note">Application readings stale: {app.unavailable}</p> : app && app.cpuPercent === null ? <p className="resource-usage__note">CPU warming up · waiting for a second sample</p> : null}
+            </section>
+            {snapshot?.runtimeUnavailable ? <p className="resource-usage__unavailable resource-usage__note">Runtime observation unavailable: {snapshot.runtimeUnavailable}</p> : null}
+            {!snapshot || (snapshot.runtime === null && !snapshot.runtimeUnavailable) ? <p className="resource-usage__note">Observing Runtime…</p> : snapshot.runtime?.length === 0 ? <p className="resource-usage__note">No connected Runtime</p> : snapshot.runtime?.map((runtime) => <RuntimeObservation key={runtime.hostId} runtime={runtime} />)}
+            <section className="resource-usage__section" aria-label="Agent resources">
+              <details className="resource-usage__details" open>
+                <summary>Agents <span>{snapshot ? `${rows.length} ${rows.length === 1 ? 'Run' : 'Runs'}` : '—'}</span></summary>
+                <p className="resource-usage__note">CPU: ps averaged reading · {CPU_WINDOW_SECONDS}s reading peak · {SAMPLE_TARGET_SECONDS}s sampling target</p>
+                {snapshot?.unavailable ? <p className="resource-usage__unavailable resource-usage__note">Agent readings stale: {snapshot.unavailable}</p> : null}
+                {rows.length ? rows.map((row) => <UsageRow key={row.key} row={row} />) : <p className="resource-usage__note">{snapshot ? 'No agent processes' : 'Sampling…'}</p>}
+              </details>
+            </section>
+            <details className="resource-usage__details resource-usage__section">
+              <summary>Resource owners <span>Main & this window</span></summary>
+              <dl className="resource-usage__facts">
+                <dt>Main attachment owners / leases</dt><dd>{mainOwners ? `${mainOwners.sessionAttachmentOwners} / ${mainOwners.sessionAttachmentLeases}` : '—'}</dd>
+                <dt>File watchers</dt><dd>{mainOwners?.fileWatchers ?? '—'}</dd>
+                <dt>Browser views / released</dt><dd>{mainOwners ? `${mainOwners.browserViews} / ${mainOwners.releasedBrowserViews}` : '—'}</dd>
+                <dt>Terminal views / addons / listeners</dt><dd>{rendererOwners ? `${rendererOwners.terminalViews} / ${rendererOwners.terminalAddons} / ${rendererOwners.terminalListeners}` : '—'}</dd>
+                <dt>Editors / models / documents</dt><dd>{rendererOwners ? `${rendererOwners.monacoEditors} / ${rendererOwners.monacoModels} / ${rendererOwners.documents}` : '—'}</dd>
+                <dt>Runtime subscriptions</dt><dd>{rendererOwners?.runtimeSubscriptions ?? '—'}</dd>
+              </dl>
+            </details>
           </div>
-          {snapshot?.app ? (
-            <div className="resource-usage__app">
-              {/* Electron 自己单独一行：混进 Agent 的数里就没法回答"是谁在吃"。 */}
-              <span className="resource-usage__name">AgentMux</span>
-              <span className="resource-usage__metric">{snapshot.app.processCount} proc</span>
-              <span className="resource-usage__metric">{formatRss(snapshot.app.rssKib)}</span>
-            </div>
-          ) : null}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

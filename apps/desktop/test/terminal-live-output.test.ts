@@ -25,7 +25,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function chunk(startByte: number, size: number): TerminalLiveOutputChunk {
-  return { data: 'x'.repeat(size), startByte, endByte: startByte + size }
+  return { dataBytes: new TextEncoder().encode('x'.repeat(size)), startByte, endByte: startByte + size }
 }
 
 function totalBytes(chunks: readonly TerminalLiveOutputChunk[]): number {
@@ -128,28 +128,28 @@ describe('live 输出积压的上界', () => {
 // ---------------------------------------------------------------------------
 
 function chunkOf(startByte: number, data: string): TerminalLiveOutputChunk {
-  return { data, startByte, endByte: startByte + Buffer.byteLength(data, 'utf8') }
+  return { dataBytes: new TextEncoder().encode(data), startByte, endByte: startByte + Buffer.byteLength(data, 'utf8') }
 }
 
 describe('已写过的字节不重写，没缺的段不报缺', () => {
   it('部分重叠只写 cursor 之后那截，且不发告示', () => {
     // 回放写到第 6 字节；补送上来的那块从 0 开始、盖过 6。
     const composed = composeTerminalLiveOutputWrite([chunkOf(0, 'abcdefGHI')], 6)
-    expect(composed.data, 'cursor 之前的字节被重写了一遍').toBe('GHI')
+    expect(new TextDecoder().decode(composed.dataBytes), 'cursor 之前的字节被重写了一遍').toBe('GHI')
     expect(composed.gap, '没缺字节却报了缺').toBe(false)
     expect(composed.cursor).toBe(9)
   })
 
   it('整块已有则整块跳过，且 cursor 不倒退', () => {
     const composed = composeTerminalLiveOutputWrite([chunkOf(0, 'abcdef')], 6)
-    expect(composed.data).toBe('')
+    expect(new TextDecoder().decode(composed.dataBytes)).toBe('')
     expect(composed.cursor).toBe(6)
   })
 
   it('真缺一段只返回一次结构化缺口信号，数据本身保持干净', () => {
     // 队头起点在 cursor 之后 = 中间那段真的没有了，必须说。
     const composed = composeTerminalLiveOutputWrite([chunkOf(10, 'xyz'), chunkOf(13, 'w')], 6)
-    expect(composed.data).toBe('xyzw')
+    expect(new TextDecoder().decode(composed.dataBytes)).toBe('xyzw')
     expect(composed.gap).toBe(true)
     expect(composed.cursor).toBe(14)
   })
@@ -157,8 +157,16 @@ describe('已写过的字节不重写，没缺的段不报缺', () => {
   it('按字节裁剪，不是按字符——非 ASCII 输出上按字符切会错位', () => {
     // '中' 是 3 字节。cursor 停在 3 时正确结果是 '文'，按 String.slice(3) 会得到空串。
     const composed = composeTerminalLiveOutputWrite([chunkOf(0, '中文')], 3)
-    expect(composed.data).toBe('文')
+    expect(new TextDecoder().decode(composed.dataBytes)).toBe('文')
     expect(composed.cursor).toBe(6)
+  })
+
+  it('keeps an overlap suffix beginning inside UTF-8 as the original continuation bytes', () => {
+    const composed = composeTerminalLiveOutputWrite([chunkOf(0, '中文')], 1)
+    expect(composed.dataBytes).toEqual(new TextEncoder().encode('中文').subarray(1))
+    expect(composed.dataBytes[0]).toBe(0xb8)
+    expect(composed.cursor).toBe(6)
+    expect(composed.gap).toBe(false)
   })
 
   it('一批里三种关系混在一起时各按各的处理', () => {
@@ -167,16 +175,16 @@ describe('已写过的字节不重写，没缺的段不报缺', () => {
       5
     )
     // 第一块整块已有；第二块部分已有（写 'CC'，不报缺）；第三块真缺一段（报缺）。
-    expect(composed.data).toBe('CCzz')
+    expect(new TextDecoder().decode(composed.dataBytes)).toBe('CCzz')
     expect(composed.gap).toBe(true)
     expect(composed.cursor).toBe(22)
   })
 
   it('缺口信号不会把诊断文字或控制字节写进 xterm', () => {
     const composed = composeTerminalLiveOutputWrite([chunkOf(10, 'xyz')], 6)
-    expect(composed.data).toBe('xyz')
-    expect(composed.data).not.toContain('Output sequence gap')
-    expect(composed.data).not.toContain(String.fromCharCode(27))
+    expect(new TextDecoder().decode(composed.dataBytes)).toBe('xyz')
+    expect(new TextDecoder().decode(composed.dataBytes)).not.toContain('Output sequence gap')
+    expect(new TextDecoder().decode(composed.dataBytes)).not.toContain(String.fromCharCode(27))
     expect(composed.gap).toBe(true)
   })
 })

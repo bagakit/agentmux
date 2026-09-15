@@ -132,7 +132,7 @@ beforeEach(() => {
   fixture.receive = null
   vi.clearAllMocks()
   fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [{ data: 'before ', endByte: 7 }] })
+    gap: null, replay: [{ data: 'before ', dataBytes: new TextEncoder().encode('before '), endByte: 7 }] })
   fixture.detach.mockResolvedValue(undefined)
   fixture.acknowledge.mockResolvedValue(undefined)
   const container = document.createElement('div')
@@ -158,7 +158,7 @@ async function hiddenOutput(data: string, startByte: number) {
   expect(fixture.receive).not.toBeNull()
   await act(async () => {
     fixture.receive!({ type: 'core', hostId: 'local', event: {
-      type: 'terminal-output', run: session.control.run, data,
+      type: 'terminal-output', run: session.control.run, data, dataBytes: new TextEncoder().encode(data),
       evidence: { outputByteRange: { startByte, endByte: startByte + data.length } }
     } } as RuntimeEvent)
     await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, startByte + data.length))

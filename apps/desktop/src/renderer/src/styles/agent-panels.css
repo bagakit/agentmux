@@ -167,12 +167,11 @@
 /* 资源面板与花名册是同一档的浮层，因此共用同一套 Surface、圆角与 elevation——
    两个都挂在状态栏上的面板长得不一样，会让人以为它们是两种东西。 */
 .resource-usage {
-  min-width: 236px;
-  max-width: 340px;
+  width: min(420px, calc(100vw - var(--sp-8)));
   /* 菜单层，与 `.agent-roster`、`.tab-context-menu` 同使用全局 popover 层级 token。 */
   z-index: var(--layer-popover);
   pointer-events: auto;
-  max-height: 320px;
+  max-height: min(560px, calc(100vh - var(--sp-8)));
   padding:var(--sp-2);
   /* 面板经 Radix Portal 挂到 `document.body`，落在 `.app-shell` 之外；全站没有一处基准 font-size
      （tokens 那层只设 font-family），所以不写这一行，name/metric/空态/app 行会继承 UA 默认的 16px，
@@ -208,22 +207,16 @@
 /* 采样失败是一个状态，不是装饰：用 STATUS 色而不是加一道边。 */
 .resource-usage__unavailable { color: var(--amber-text); letter-spacing: 0; text-transform: none; }
 .resource-usage__list { min-height: 0; display: flex; flex-direction: column; gap:var(--sp-1); overflow-y: auto; }
-.resource-usage__row,
-.resource-usage__app {
+.resource-usage__row {
   display: grid;
   /* 名字可挤，两个数字各占固定一列——数字列宽固定，读数变化时不会让整行左右跳。 */
-  grid-template-columns: minmax(0, 1fr) 56px 68px;
+  grid-template-columns: minmax(0, 1fr) 80px 68px;
   align-items: baseline;
   gap:var(--sp-4);
   padding:var(--sp-2) var(--sp-4);
   border-radius: var(--radius-sm);
 }
-.resource-usage__app {
-  margin-top:var(--sp-1);
-  padding-top:var(--sp-2);
-  border-top: 1px solid var(--scrim-2);
-  color: var(--text-3);
-}
+
 .resource-usage__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resource-usage__metric { text-align: right; font-variant-numeric: tabular-nums; }
 .resource-usage__empty { padding:var(--sp-2) var(--sp-4); color: var(--text-3); }
@@ -232,3 +225,21 @@
 /* 「最近在改什么」那一行：比 context 略亮（它是用户点开面板真正想读的内容，不是元信息），
    仍单行截断——面板窄，宁可省略号也不折行破坏行网格。 */
 .resource-usage__activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-micro); }
+.resource-usage__columns { color: var(--text-3); font-size: var(--fs-micro); }
+.resource-usage__columns span:not(:first-child) { text-align: right; }
+.resource-usage__section + .resource-usage__section { border-top: 1px solid var(--overlay-line); }
+.resource-usage__note { margin: 0; padding: var(--sp-1) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.resource-usage__note.resource-usage__unavailable { color: var(--amber-text); }
+.resource-usage__details > summary { position: relative; cursor: pointer; padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-6); list-style: none; }
+.resource-usage__details > summary::before { content: "›"; position: absolute; left: var(--sp-2); color: var(--text-3); }
+.resource-usage__details[open] > summary::before { transform: rotate(90deg); }
+.resource-usage__details > summary:not(.resource-usage__row) { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.resource-usage__details > summary span { color: var(--text-3); }
+.resource-usage__details > summary::marker { color: var(--text-3); }
+.resource-usage__details > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; border-radius: var(--radius-sm); }
+.resource-usage__details small { color: var(--text-3); font-weight: 400; }
+.resource-usage__facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-4); margin: 0; padding: var(--sp-2) var(--sp-4); }
+.resource-usage__facts dt { color: var(--text-3); }
+.resource-usage__facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.resource-usage__storage { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-4); padding: var(--sp-2) var(--sp-4); }
+.resource-usage__storage small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
