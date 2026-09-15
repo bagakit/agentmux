@@ -290,16 +290,16 @@ function startPrimaryInstance(): void {
       // normal startup. The first isolated launch may seed a fixture after normal hydration, then exits
       // without letting the unload writer replace it; no probe-only layout or Session owner is introduced.
       const recoverySeed = process.env.AGENTMUX_DESKTOP_RECOVERY_SEED
-      if (recoverySeed) {
-        await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
           const deadline = Date.now() + 20_000
           const check = () => {
-            if (!document.querySelector('.boot')) { resolve(true); return }
-            if (Date.now() >= deadline) { reject(new Error('Recovery probe initial renderer readiness timed out.')); return }
+            if (document.querySelector('.app-shell')) { requestAnimationFrame(() => resolve(true)); return }
+            if (Date.now() >= deadline) { reject(new Error('Recovery probe renderer hydration timed out.')); return }
             setTimeout(check, 50)
           }
           check()
         })`)
+      if (recoverySeed) {
         await window.webContents.executeJavaScript(
           `localStorage.setItem('agentmux-workbench-v1', ${JSON.stringify(recoverySeed)});`
         )
@@ -308,13 +308,30 @@ function startPrimaryInstance(): void {
       const storage = await window.webContents.executeJavaScript(
         "localStorage.getItem('agentmux-workbench-v1')"
       ) as string | null
+      const persistedWorkbench = storage ? JSON.parse(storage)?.state?.restoredWorkbench : null
+      const workbenchStructure = persistedWorkbench ? {
+        tabs: Object.fromEntries(Object.entries(persistedWorkbench.tabs ?? {}).map(([id, tab]) => [id, (tab as { layout?: unknown }).layout])),
+        layouts: persistedWorkbench.layouts ?? null
+      } : null
       const sessionStore = await readFile(desktopAgentSessionStorePath(), 'utf8').catch(() => null)
+      const renderedWorkbench = await window.webContents.executeJavaScript(`(() => {
+        const ids = (selector, attribute) => Array.from(document.querySelectorAll(selector))
+          .filter((element) => element.getClientRects().length > 0)
+          .map((element) => element.getAttribute(attribute)).filter(Boolean).sort()
+        return {
+          tabIds: ids('[data-workbench-tab-id]', 'data-workbench-tab-id'),
+          regionIds: ids('[data-workbench-region-id]', 'data-workbench-region-id'),
+          activeRegionIds: ids('.workbench-region--active[data-workbench-region-id]', 'data-workbench-region-id')
+        }
+      })()`)
       const report = {
         schema: 'agentmux.desktop-restart-recovery.v1',
         pid: process.pid,
         userData: app.getPath('userData'),
         runtimeDirectory: process.env.AGENTMUX_RUNTIME_DIRECTORY ?? '',
         rendererLoadedAtMs,
+        renderedWorkbench,
+        workbenchStructure,
         workbench: summarizeRecoveryStorage(storage),
         sessions: summarizeRecoverySessionStore(sessionStore)
       }

@@ -848,7 +848,8 @@ export class RuntimeController {
     // distinct attempts collide on one id.
     operationId?: string,
     automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal },
-    authorAgentSessionId?: string
+    authorAgentSessionId?: string,
+    choice?: { allowUncertainTurn: true }
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -868,6 +869,7 @@ export class RuntimeController {
           operationId: operationId ?? randomUUID(),
           ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
           prompt,
+          ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {})
         })
       } catch (error) {
@@ -1215,6 +1217,7 @@ export class RuntimeController {
   async authorizeAgentMessage(input: {
     capability: string
     callerAgentSessionId: string
+    senderAgentSessionId: string | null
     senderSessionId: string | null
     senderRunId: string | null
     recipientSessionId: string | null

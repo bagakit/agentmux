@@ -111,7 +111,7 @@ describe('prompt readiness refusal diagnostics', () => {
     expect(registry.get('agent-1').terminalPromptSubmission?.submit.acknowledged).toBe(true)
   })
 
-  it('sends a steer after acknowledged delivery without waiting for Stop', async () => {
+  it('continues explicitly after acknowledged delivery without waiting for Stop', async () => {
     const stored = session()
     stored.terminalPromptReadiness = {
       ...stored.terminalPromptReadiness!,
@@ -137,12 +137,12 @@ describe('prompt readiness refusal diagnostics', () => {
     const { coordinator, currentRun, kernel } = await coordinatorFixture(stored)
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('must remain private')
 
-    await coordinator.submitInputPlan(stored, currentRun, 'submission-contender', 'must remain private', plan)
+    await coordinator.submitInputPlan(stored, currentRun, 'submission-contender', 'must remain private', plan, undefined, undefined, true)
     expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['must remain private', '\r'])
 
   })
 
-  it('takes over an unsubmitted claim after restart when CtxMux has not accepted the submit byte', async () => {
+  it('takes over an unsubmitted claim after restart only when CtxMux has accepted no payload bytes', async () => {
     const original = session()
     const fixture = await coordinatorFixture(original)
     const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
@@ -180,10 +180,13 @@ describe('prompt readiness refusal diagnostics', () => {
     const nextPlan = new AgentProviderRegistry().get('codex').planPromptInput('after restart')
     await restarted.coordinator.submitInputPlan(
       stranded,
-      run(claim!.payload.inputByteRange.endByte),
+      run(claim!.payload.inputByteRange.startByte),
       'submission-new',
       'after restart',
-      nextPlan
+      nextPlan,
+      undefined,
+      undefined,
+      true
     )
 
     expect(restarted.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['after restart', '\r'])
@@ -630,7 +633,7 @@ it('rejects a stale automatic completion at the durable input claim, while leavi
   await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]'))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan)
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan, undefined, undefined, true)
   expect(fixture.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['next', '\r'])
 })
 
@@ -714,7 +717,7 @@ it.each(['single-phase', 'two-phase'] as const)('consumes done atomically for ma
   await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, '["run-1",1]'))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes)
-  await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan)
+  await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan, undefined, undefined, true)
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 2)
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))

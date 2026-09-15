@@ -19,6 +19,7 @@ import { CONFIG_VERSION } from '../../../shared/contracts'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
+import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import {
@@ -701,7 +702,7 @@ const mockApi: AgentMuxDesktopApi = {
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]
       if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)
-      const agentSessionId = input.agentSessionId ?? crypto.randomUUID()
+      const agentSessionId = input.agentSessionId ?? mintAgentSessionId()
       const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: agentSessionId,

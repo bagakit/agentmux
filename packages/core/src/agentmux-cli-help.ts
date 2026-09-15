@@ -412,8 +412,12 @@ Usage:
   agentmux send --to-tab <tab-id> --text <prompt>
 
 Optional A2A facts: --message-id <id> --thread <id> --correlation <id> --reply-to <id>.
-The Core-owned queue records explicit sender/recipient facts and returns a durable receipt;
-the readable <amux ...> text in the prompt is not authentication.
+The Core-owned queue records explicit sender/recipient facts and returns a durable receipt.
+The recipient reads a short source label followed by exactly the authored body. CLI receipts
+remain on stdout and in durable storage; do not forward them as the message. Authored JSON
+is ordinary body text. A local process without a managed capability is an unverified source.
+Session IDs accept unique prefixes; an ambiguous or unknown prefix fails before sending.
+The source label in the prompt is not authentication.
 
 Region must display an Agent. Tab succeeds only when it resolves to exactly one distinct
 Agent Session; zero or multiple candidates fail with MESSAGE_TARGET_NOT_UNIQUE. Send
@@ -677,6 +681,14 @@ agentmux send --to-tab <tab-id> --text "Continue"
 
 Tab send succeeds only for one distinct Agent Session. If candidates are returned, inspect
 the Tab and select an exact Session. Send never broadcasts and never resumes.
+
+Agent-addressed Session commands accept a full canonical ID or a currently unique prefix.
+Full IDs win exact matches. Ambiguous prefixes require more characters; unknown prefixes
+never select an Agent. New canonical IDs contain 96 random bits in 16 base64url characters.
+Generic Demand links and mixed PMO Session filters keep full Session IDs, including Terminals;
+Agent prefixes apply to demand start, pmo agents/sessions --session, and PMO --agent.
+Keep CLI JSON receipts separate from message text: recipients read a source label and the
+unchanged authored body, including JSON only when it was explicitly authored as that body.
 
 Tab \`self\` resolves by deduplicating every caller Region's \`tabId\`; Region \`self\` must
 resolve to exactly one caller Region. Zero or multiple matches fail closed.

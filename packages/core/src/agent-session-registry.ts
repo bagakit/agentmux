@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { randomUUID } from 'node:crypto'
+import { resolveAgentSessionId } from './agent-session-id.js'
 import {
   loadAgentSessions,
   normalizeStoredAgentSession,
@@ -100,7 +101,7 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   resolve(lookup: AgentMuxAgentSessionLookup): AgentMuxStoredAgentSession {
-    if (lookup.kind === 'agent-session') return this.get(lookup.agentSessionId)
+    if (lookup.kind === 'agent-session') return this.get(resolveAgentSessionId(lookup.agentSessionId, [...this.sessions.keys(), ...this.retiredAgentSessions.keys()]))
     const agentSessionId = lookup.kind === 'run'
       ? this.providerIdByRun.get(lookup.run.runId)
       : this.providerIdByNative.get(lookup.kind === 'provider-native'

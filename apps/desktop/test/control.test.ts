@@ -256,7 +256,7 @@ describe('Desktop Control owner', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
       target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message
     })
-    expect(submit).toHaveBeenCalledWith(agent('caller').control, expect.stringContaining('<amux from="caller" to="tab"'), 'message-envelope-1', 'caller')
+    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1', 'caller')
     expect(submit.mock.calls[0]?.[1]).toContain('keep this exact body')
   })
 

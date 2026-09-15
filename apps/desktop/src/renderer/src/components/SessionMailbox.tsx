@@ -44,12 +44,13 @@ function MessageHistory({ items, incoming, onCopy }: { items: readonly AgentTime
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSendQueued, onCopyQueued }: {
+export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSendQueued, onContinueQueued, onCopyQueued }: {
   system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
   timeline?: AgentTimelineSnapshot | undefined
   onRemoveQueued?: (id: string) => void
   onSendQueued?: (id: string) => void
+  onContinueQueued?: (id: string) => void
   onCopyQueued?: (text: string) => void
 }) {
   const id = useId()
@@ -118,7 +119,7 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onSen
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         <ComposerOutbox queued={pending} {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})}
-          {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
+          {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onContinueQueued ? { onContinue: onContinueQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} />
         <MessageHistory items={sent} incoming={false} onCopy={onCopyQueued} />
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>

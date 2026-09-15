@@ -103,7 +103,8 @@ const PERMISSION_KIND_ANCHOR: Record<PermissionOptionKind, true> = {
 const DEGRADED_REASON_ANCHOR: Record<PromptDeliveryDegradedReason, true> = {
   'screen-evidence-gap': true,
   'prompt-render-timeout': true,
-  'screen-evidence-replaced': true
+  'screen-evidence-replaced': true,
+  'turn-end-unconfirmed': true
 }
 /** 同一份锚点在 control-host.test.ts 里也有一处（那边用它钉「每个操作都被显式定过档」）。两处都被 tsc 钉住，故不会互相漂移。 */
 const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true> = {

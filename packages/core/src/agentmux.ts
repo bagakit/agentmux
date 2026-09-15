@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import packageManifest from '../package.json' with { type: 'json' }
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
+import { resolveAgentSessionId } from './agent-session-id.js'
+import { AgentMuxFileAgentSessionStore, loadAgentSessions } from './agent-session-store.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT, type SelfViewOutcome } from './agent-self-context.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, AGENTMUX_SELF_CONTEXT_VERB, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { AgentMuxClient } from './client.js'
@@ -54,6 +56,22 @@ const CLI_ERROR_CODES = [
   // 不进控制码表而进这里：它是**进程内**抛的（CLI 直接 new AgentMuxClient，registry 是本地 Map），
   // 不经 daemon 往返，定型它的是这条顶层 catch。
   'UNKNOWN_AGENT_SESSION_BINDING',
+  'AMBIGUOUS_AGENT_SESSION',
+  // Preserve Core durable-store and queue errors at the CLI's local catch boundary.
+  'AGENT_SESSION_BUSY',
+  'AGENT_SESSION_STORE_BUSY',
+  'AGENT_SESSION_STORE_LIMIT',
+  'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED',
+  'AGENT_TIMELINE_REVISION_LIMIT',
+  'AGENT_TIMELINE_STORE_LIMIT',
+  'DUPLICATE_AGENT_SESSION',
+  'INVALID_AGENT_TIMELINE_STORE',
+  'MESSAGE_ACK_GENERATION_STALE',
+  'MESSAGE_ID_CONFLICT',
+  'MESSAGE_ID_REQUEST_ID_COLLISION',
+  'MESSAGE_NOT_FOUND',
+  'MESSAGE_QUEUE_BACKPRESSURE',
+  'MESSAGE_QUEUE_UNAVAILABLE',
   // Session 存档自身读不出来。判据是一条真命令：把 store 的 `version` 改成 5 以外的值，
   // `agentmux inspect --session <任意>` 报的是「Agent Session store is invalid.」，而码折成了
   // `AGENTMUX_FAILED`——与「命令打错了」同一个码。和 `AGENT_ROLE_DIRECTORY_UNREADABLE` 完全同族：
@@ -77,6 +95,7 @@ const CLI_ERROR_CODES = [
   'AGENT_MESSAGE_CROSS_WORKSPACE'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
+// Opaque data values include Session selectors: valid canonical IDs can begin with --.
 type FlagKind = 'boolean' | 'value' | 'data'
 type ParsedFlags = { values: Map<string, string>; booleans: Set<string> }
 
@@ -144,6 +163,21 @@ function callerForSelf(value: string): AgentMuxControlCaller | undefined {
 }
 
 function sessionId(value: string): string { return value === 'self' ? managedCaller().agentSessionId : identifier(value, 'Agent Session id') }
+
+/** Resolve against Core's durable identities without requiring the Run daemon to be available. */
+async function normalizeSessionFlags(flags: ParsedFlags, names: readonly string[] = ['--session', '--to-session']): Promise<void> {
+  const selectors = names.filter((name) => flags.values.has(name) && flags.values.get(name) !== 'self')
+  if (selectors.length === 0) return
+  const store = new AgentMuxFileAgentSessionStore()
+  const [sessions, retired] = await Promise.all([loadAgentSessions(store), store.loadRetiredAgentSessions()])
+  const activeIds = new Set(sessions.map((session) => session.agentSessionId))
+  const knownIds = [...activeIds, ...retired.map((session) => session.agentSessionId)]
+  for (const name of selectors) {
+    const resolved = resolveAgentSessionId(identifier(flags.values.get(name), 'Agent Session id'), knownIds)
+    if (!activeIds.has(resolved)) throw new AgentMuxError(`Agent Session is retired: ${resolved}`, 'UNKNOWN_AGENT_SESSION')
+    flags.values.set(name, resolved)
+  }
+}
 function requestBase() { return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID } as const }
 function writeJson(value: unknown, stream: NodeJS.WritableStream = process.stdout): void { stream.write(`${JSON.stringify(value)}\n`) }
 function printSuccess(operation: string, result: unknown): void {
@@ -163,7 +197,7 @@ async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>):
 
 async function inspectCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, {
-    '--session': 'value', '--run': 'value', '--tab': 'value', '--region': 'value',
+    '--session': 'data', '--run': 'value', '--tab': 'value', '--region': 'value',
     '--provider-native': 'value', '--provider': 'value', '--acp-native': 'value', '--adapter': 'value'
   })
   const selector = exactlyOne(flags, ['--session', '--run', '--tab', '--region', '--provider-native', '--acp-native'], 'inspect')
@@ -173,6 +207,8 @@ async function inspectCommand(args: readonly string[]): Promise<number> {
   if ((selector === '--acp-native') !== flags.values.has('--adapter')) {
     throw cliError('--acp-native and --adapter must be used together.')
   }
+  // Refuse an ambiguous/unknown Session before connecting can start or repair any Run service.
+  await normalizeSessionFlags(flags)
   if (selector === '--tab') {
     const value = flags.values.get(selector)!
     const owner = callerForSelf(value)
@@ -271,7 +307,7 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
     throw cliError('pmo requires snapshot, projects, workspaces, topics, agents, sessions, demands, activity, or inspect.')
   }
   const flags = parseFlags(args.slice(1), {
-    '--project': 'value', '--workspace': 'value', '--topic': 'value', '--agent': 'value', '--session': 'value', '--demand': 'value', '--executor': 'value', '--status': 'value', '--since': 'value', '--limit': 'value'
+    '--project': 'value', '--workspace': 'value', '--topic': 'value', '--agent': 'data', '--session': 'data', '--demand': 'value', '--executor': 'value', '--status': 'value', '--since': 'value', '--limit': 'value'
   })
   const limitValue = flags.values.get('--limit')
   const limit = limitValue === undefined ? 100 : Number(limitValue)
@@ -279,6 +315,9 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
   const sinceValue = flags.values.get('--since')
   const since = sinceValue === undefined ? undefined : Number(sinceValue)
   if (since !== undefined && !Number.isFinite(since)) throw cliError('--since must be a timestamp in milliseconds.')
+  // PMO's mixed observations include generic Desktop Session links in Demands.
+  // Only the strictly Agent projections resolve --session through Core.
+  await normalizeSessionFlags(flags, action === 'agents' || action === 'sessions' ? ['--session', '--agent'] : ['--agent'])
 
   const [projectsReceipt, agentsReceipt, demandsReceipt] = await Promise.allSettled([
     requestAgentMuxControl({ ...requestBase(), operation: 'list.projects' }),
@@ -333,12 +372,12 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
 async function demandCommand(args: readonly string[]): Promise<number> {
   const action = args[0]
   if (action === 'list') {
-    const flags = parseFlags(args.slice(1), { '--status': 'value', '--project': 'value', '--executor': 'value', '--session': 'value', '--limit': 'value' })
+    const flags = parseFlags(args.slice(1), { '--status': 'value', '--project': 'value', '--executor': 'value', '--session': 'data', '--limit': 'value' })
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.list' })
     if (receipt.operation !== 'demand.list') throw new AgentMuxError('Demand list receipt operation does not match.', 'CONTROL_PROTOCOL_ERROR')
     const limit = flags.values.get('--limit') === undefined ? 100 : Number(flags.values.get('--limit'))
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw cliError('--limit must be an integer between 1 and 1000.')
-    const filtered = receipt.result.demands.filter((demand) => (!flags.values.has('--status') || demand.status === flags.values.get('--status')) && (!flags.values.has('--project') || demand.projectId === flags.values.get('--project')) && (!flags.values.has('--executor') || demand.assigneeExecutorId === flags.values.get('--executor')) && (!flags.values.has('--session') || demand.sessionIds.includes(identifier(flags.values.get('--session'), 'Agent Session id')))).slice(0, limit)
+    const filtered = receipt.result.demands.filter((demand) => (!flags.values.has('--status') || demand.status === flags.values.get('--status')) && (!flags.values.has('--project') || demand.projectId === flags.values.get('--project')) && (!flags.values.has('--executor') || demand.assigneeExecutorId === flags.values.get('--executor')) && (!flags.values.has('--session') || demand.sessionIds.includes(identifier(flags.values.get('--session'), 'Session id')))).slice(0, limit)
     printSuccess(receipt.operation, { demands: filtered })
     return 0
   }
@@ -349,7 +388,7 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   if (action === 'create') {
-    const flags = parseFlags(args.slice(1), { '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value', '--risk': 'value', '--confirm': 'value', '--wiki-version': 'value' })
+    const flags = parseFlags(args.slice(1), { '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'data', '--risk': 'value', '--confirm': 'value', '--wiki-version': 'value' })
     const priority = flags.values.get('--priority')
     const status = flags.values.get('--status')
     if (priority && !(AGENTMUX_DEMAND_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown demand priority: ${priority}`)
@@ -359,19 +398,19 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     if (!['low', 'medium', 'high', 'unknown'].includes(risk)) throw cliError(`Unknown demand risk: ${risk}`)
     if (!['automatic', 'user', 'pending'].includes(confirmation)) throw cliError(`Unknown demand confirmation: ${confirmation}`)
     const decision = { input: requiredData(flags, '--title', 'Demand title'), candidates: projectId ? [{ projectId, reason: 'explicit CLI project' }] : [], selectedProjectId: projectId ?? null, risk: risk as 'low' | 'medium' | 'high' | 'unknown', confirmation: confirmation as 'automatic' | 'user' | 'pending', wikiVersion: flags.values.get('--wiki-version') ?? null, recordedAt: Date.now(), sourceSessionId: process.env.AGENTMUX_AGENT_SESSION_ID ?? null }
-    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.create', title: requiredData(flags, '--title', 'Demand title'), ...(description === undefined ? {} : { description }), ...(projectId === undefined ? {} : { projectId }), ...(priority ? { priority: priority as AgentMuxDemandPriority } : {}), ...(status ? { status: status as AgentMuxDemandStatus } : {}), ...(flags.values.has('--session') ? { sessionIds: [identifier(flags.values.get('--session'), 'Agent Session id')] } : {}), decision })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.create', title: requiredData(flags, '--title', 'Demand title'), ...(description === undefined ? {} : { description }), ...(projectId === undefined ? {} : { projectId }), ...(priority ? { priority: priority as AgentMuxDemandPriority } : {}), ...(status ? { status: status as AgentMuxDemandStatus } : {}), ...(flags.values.has('--session') ? { sessionIds: [identifier(flags.values.get('--session'), 'Session id')] } : {}), decision })
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
   if (action === 'update') {
-    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'value' })
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'data' })
     const priority = flags.values.get('--priority'); const status = flags.values.get('--status')
     if (priority && !(AGENTMUX_DEMAND_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown demand priority: ${priority}`)
     if (status && !(AGENTMUX_DEMAND_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown demand status: ${status}`)
     const patch: Record<string, unknown> = {}
     for (const [flag, key] of [['--title', 'title'], ['--description', 'description'], ['--project', 'projectId'], ['--priority', 'priority'], ['--status', 'status'], ['--session', 'sessionIds']] as const) {
       if (!flags.values.has(flag)) continue
-      patch[key] = flag === '--session' ? [identifier(flags.values.get(flag), 'Agent Session id')] : flags.values.get(flag)
+      patch[key] = flag === '--session' ? [identifier(flags.values.get(flag), 'Session id')] : flags.values.get(flag)
     }
     if (Object.keys(patch).length === 0) throw cliError('demand update requires at least one patch option.')
     const typedPatch = { ...patch, ...(typeof patch.priority === 'string' ? { priority: patch.priority as AgentMuxDemandPriority } : {}), ...(typeof patch.status === 'string' ? { status: patch.status as AgentMuxDemandStatus } : {}) }
@@ -386,14 +425,15 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   if (action === 'start') {
-    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--session': 'value' })
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--session': 'data' })
+    await normalizeSessionFlags(flags)
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.start', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--session') ? { sessionId: identifier(flags.values.get('--session'), 'Agent Session id') } : {}) })
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
   if (action === 'handoff') {
-    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--executor': 'value', '--session': 'value' })
-    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.handoff', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--executor') ? { assigneeExecutorId: identifier(flags.values.get('--executor'), 'Agent id') } : {}), ...(flags.values.has('--session') ? { sessionId: identifier(flags.values.get('--session'), 'Agent Session id') } : {}) })
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--executor': 'value', '--session': 'data' })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'demand.handoff', demandId: identifier(flags.values.get('--demand'), 'Demand id'), ...(flags.values.has('--executor') ? { assigneeExecutorId: identifier(flags.values.get('--executor'), 'Agent id') } : {}), ...(flags.values.has('--session') ? { sessionId: identifier(flags.values.get('--session'), 'Session id') } : {}) })
     printSuccess(receipt.operation, receipt.result)
     return 0
   }
@@ -405,9 +445,9 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   if (action === 'link-session' || action === 'link-project') {
-    const flags = parseFlags(args.slice(1), { '--demand': 'value', [action === 'link-session' ? '--session' : '--project']: 'value' })
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', [action === 'link-session' ? '--session' : '--project']: action === 'link-session' ? 'data' : 'value' })
     const receipt = action === 'link-session'
-      ? await requestAgentMuxControl({ ...requestBase(), operation: 'demand.link-session', demandId: identifier(flags.values.get('--demand'), 'Demand id'), sessionId: identifier(flags.values.get('--session'), 'Agent Session id') })
+      ? await requestAgentMuxControl({ ...requestBase(), operation: 'demand.link-session', demandId: identifier(flags.values.get('--demand'), 'Demand id'), sessionId: identifier(flags.values.get('--session'), 'Session id') })
       : await requestAgentMuxControl({ ...requestBase(), operation: 'demand.link-project', demandId: identifier(flags.values.get('--demand'), 'Demand id'), projectId: identifier(flags.values.get('--project'), 'Project id') })
     printSuccess(receipt.operation, receipt.result)
     return 0
@@ -443,7 +483,7 @@ async function openCommand(args: readonly string[]): Promise<number> {
     throw cliError('open requires agent, terminal, or browser.')
   }
   const flags = parseFlags(args.slice(1), {
-    '--agent': 'value', '--session': 'value', '--prompt': 'data',
+    '--agent': 'value', '--session': 'data', '--prompt': 'data',
     '--command': 'data', '--url': 'value',
     '--left-of': 'value', '--right-of': 'value', '--above': 'value', '--below': 'value',
     '--new-tab-after': 'value', '--in-region': 'value'
@@ -478,6 +518,8 @@ async function openCommand(args: readonly string[]): Promise<number> {
   }
   const contentFlag = exactlyOne(flags, ['--agent', '--session'], 'open agent')
   if (contentFlag === '--session' && flags.values.has('--prompt')) throw cliError('--prompt is valid only with --agent.')
+  if (contentFlag === '--session') explicitSelectorId(flags.values.get(contentFlag), 'Agent Session id')
+  await normalizeSessionFlags(flags)
   const receipt = await requestAgentMuxControl({
     ...requestBase(), operation: 'open.agent',
     content: contentFlag === '--agent'
@@ -565,7 +607,7 @@ async function discussCommand(args: readonly string[]): Promise<number> {
  * 故不接受 self。handoff 只转移所有权，不投递消息、不开 Session：要送文本走 send/discuss。
  */
 async function handoffCommand(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, { '--to-session': 'value', '--task': 'value' })
+  const flags = parseFlags(args, { '--to-session': 'data', '--task': 'value' })
   const caller = managedCaller()
   const capability = process.env.AGENTMUX_AGENT_CAPABILITY?.trim()
   if (!capability) {
@@ -574,12 +616,13 @@ async function handoffCommand(args: readonly string[]): Promise<number> {
       'MANAGED_AGENT_CONTEXT_REQUIRED'
     )
   }
-  const toAgentSessionId = explicitSelectorId(flags.values.get('--to-session'), 'Handoff target Agent Session id')
+  explicitSelectorId(flags.values.get('--to-session'), 'Handoff target Agent Session id')
   const taskId = identifier(flags.values.get('--task'), 'Task id')
+  await normalizeSessionFlags(flags)
   const result = await withClient(async (client) => client.handOff({
     capability,
     callerAgentSessionId: caller.agentSessionId,
-    toAgentSessionId,
+    toAgentSessionId: flags.values.get('--to-session')!,
     taskId
   }))
   printSuccess('handoff', {
@@ -592,12 +635,13 @@ async function handoffCommand(args: readonly string[]): Promise<number> {
 }
 
 async function sendCommand(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data', '--message-id': 'value', '--thread': 'value', '--correlation': 'value', '--reply-to': 'value' })
+  const flags = parseFlags(args, { '--to-session': 'data', '--to-region': 'value', '--to-tab': 'value', '--text': 'data', '--message-id': 'value', '--thread': 'value', '--correlation': 'value', '--reply-to': 'value' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
   const value = flags.values.get(selected)!
   const owner = (selected === '--to-session' && value === 'self') || process.env.AGENTMUX_ENV === '1' ? managedCaller() : undefined
+  await normalizeSessionFlags(flags)
   const target = selected === '--to-session'
-    ? value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: identifier(value, 'Agent Session id') } as const
+    ? value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: identifier(flags.values.get(selected), 'Agent Session id') } as const
     : selected === '--to-region'
       ? { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } as const
       : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } as const
@@ -628,6 +672,7 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     }))
     : null
   const recipient = { kind: 'agent-session', agentSessionId: recipientSessionId } as const
+  // The established non-Agent wire branch records ingress, never proof of a human participant.
   const sender = owner ? { kind: 'agent-session', agentSessionId: owner.agentSessionId } as const : { kind: 'human', principal: 'local-cli' } as const
   const requestedMessageId = flags.values.get('--message-id')
   const messageInputBase = {
@@ -649,6 +694,7 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     await withClient((client) => Promise.resolve(client.authorizeAgentMessage({
       capability,
       callerAgentSessionId: owner.agentSessionId,
+      senderAgentSessionId: sender.kind === 'agent-session' ? sender.agentSessionId : null,
       senderSessionId: messageInputBase.senderSessionId,
       senderRunId: messageInputBase.senderRunId,
       recipientSessionId: messageInputBase.recipientSessionId,
@@ -707,7 +753,8 @@ function afterByte(value: string | undefined): number {
 }
 
 async function outputCommand(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, { '--session': 'value', '--after-byte': 'value', '--follow': 'boolean' })
+  const flags = parseFlags(args, { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' })
+  await normalizeSessionFlags(flags)
   const agentSessionId = sessionId(identifier(flags.values.get('--session'), 'Agent Session id'))
   const follow = flags.booleans.has('--follow')
   const requestedAfterByte = afterByte(flags.values.get('--after-byte'))
@@ -733,7 +780,8 @@ async function outputCommand(args: readonly string[]): Promise<number> {
 }
 
 async function sessionMutation(operation: 'interrupt' | 'resume' | 'stop', args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, operation === 'resume' ? { '--session': 'value', '--text': 'data' } : { '--session': 'value' })
+  const flags = parseFlags(args, operation === 'resume' ? { '--session': 'data', '--text': 'data' } : { '--session': 'data' })
+  await normalizeSessionFlags(flags)
   const value = identifier(flags.values.get('--session'), 'Agent Session id')
   const owner = callerForSelf(value)
   const target = value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: value } as const

@@ -162,7 +162,7 @@ describe('submitAgentPrompt during screen replacement', () => {
     expect(fixture.client.agentSessions()[0]!.terminalPromptDelivery).toBeUndefined()
   })
 
-  it('allows repeated mid-turn steer without a Stop, including a fresh client over the persisted Session', async () => {
+  it('continues explicitly without a Stop, including a fresh client over the persisted Session', async () => {
     const fixture = await submitClient(UNOBSERVED_READINESS)
     vi.spyOn(fixture.state.screenEvidence, 'wait').mockResolvedValue(20)
     const first = { agentSessionId: AGENT_SESSION_ID, operationId: 'op-2', prompt: 'first steer' }
@@ -170,7 +170,7 @@ describe('submitAgentPrompt during screen replacement', () => {
     const persisted = fixture.client.agentSessions()[0]!
     expect(persisted.terminalPromptSubmission?.submit.acknowledged).toBe(true)
     expect(persisted.terminalPromptSubmission?.readinessEvidence).toBeUndefined()
-    await fixture.client.submitAgentPrompt({ ...first, operationId: 'op-3', prompt: 'second steer' })
+    await fixture.client.submitAgentPrompt({ ...first, operationId: 'op-3', prompt: 'second steer', allowUncertainTurn: true })
     expect(fixture.writes).toEqual(['first steer', '\r', 'second steer', '\r'])
     const last = fixture.client.agentSessions()[0]!
     const restored = await submitClient(UNOBSERVED_READINESS)
@@ -178,7 +178,7 @@ describe('submitAgentPrompt during screen replacement', () => {
     await registry.put({ ...storedSession(UNOBSERVED_READINESS), ...last })
     restored.state.kernel.status = async () => runProjection(Buffer.byteLength(fixture.writes.join('')))
     vi.spyOn(restored.state.screenEvidence, 'wait').mockResolvedValue(30)
-    await restored.client.submitAgentPrompt({ ...first, operationId: 'op-4', prompt: 'after restart' })
+    await restored.client.submitAgentPrompt({ ...first, operationId: 'op-4', prompt: 'after restart', allowUncertainTurn: true })
     expect(restored.writes).toEqual(['after restart', '\r'])
     await fixture.client.dispose()
     await restored.client.dispose()

@@ -363,14 +363,14 @@ describe('RuntimeController configuration transaction', () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient?.instances?.at(-1)
     await controller.authorizeAgentMessage({
-      capability: 'capability', callerAgentSessionId: 'caller-cli',
+      capability: 'capability', callerAgentSessionId: 'caller-cli', senderAgentSessionId: 'caller-cli',
       senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
       recipientSessionId: 'recipient', recipientRunId: 'run-recipient'
     })
     expect(client?.authorizeAgentMessage).toHaveBeenCalledWith(expect.objectContaining({ recipientRunId: 'run-recipient' }))
     client?.authorizeAgentMessage.mockImplementationOnce(() => { throw Object.assign(new Error('recipient facts mismatch'), { code: 'MESSAGE_RECIPIENT_MISMATCH' }) })
     await expect(controller.authorizeAgentMessage({
-      capability: 'capability', callerAgentSessionId: 'caller-cli',
+      capability: 'capability', callerAgentSessionId: 'caller-cli', senderAgentSessionId: 'caller-cli',
       senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
       recipientSessionId: 'recipient', recipientRunId: null
     })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
@@ -880,6 +880,24 @@ describe('RuntimeController configuration transaction', () => {
     await expect(controller.submitPrompt(control, 'next', 'stopped', { completionId: '["run-1",1]', isCurrent: () => false, signal }))
       .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes explicit uncertainty only for this manual message, never for automation', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
+    const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
+    await controller.submitPrompt(control, 'first', 'original', undefined, undefined, { allowUncertainTurn: true })
+    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', operationId: 'original',
+      prompt: 'first', allowUncertainTurn: true })
+    await controller.submitPrompt(control, 'second', 'other')
+    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', operationId: 'other', prompt: 'second' })
+    await controller.submitPrompt(control, 'auto', 'automatic', {
+      completionId: '["run-1",1]', isCurrent: () => true, signal: new AbortController().signal
+    }, undefined, { allowUncertainTurn: true })
+    expect(client.submitAgentPrompt.mock.calls.at(-1)?.[0]).not.toHaveProperty('allowUncertainTurn')
+    await controller.dispose()
   })
 
   it.each([
