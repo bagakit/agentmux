@@ -40,9 +40,9 @@ describe('long-lived View follows its PTY owner', () => {
       const old = '\x1b[?1049h\x1b[24;1HOLD'
       const wide = '\x1b[40;100HWIDE_MARK'
       const input: TerminalLiveItem[] = [
-        { data: old, startByte: 0, endByte: old.length },
+        { dataBytes: new TextEncoder().encode(old), startByte: 0, endByte: old.length },
         { size: { cols: 132, rows: 45 } },
-        { data: wide, startByte: old.length, endByte: old.length + wide.length }
+        { dataBytes: new TextEncoder().encode(wide), startByte: old.length, endByte: old.length + wide.length }
       ]
       let queue: TerminalLiveItem[] = []
       for (const item of input) queue = admitTerminalLiveOutput(queue, item).queue
@@ -53,9 +53,9 @@ describe('long-lived View follows its PTY owner', () => {
         queue = taken.rest
         if (taken.size) { h.sync.acceptOwnerSize(taken.size); order.push('132x45'); continue }
         const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
-        await new Promise<void>((resolve) => h.terminal.write(composed.data, resolve))
+        await new Promise<void>((resolve) => h.terminal.write(composed.dataBytes, resolve))
         cursor = composed.cursor
-        order.push(composed.data)
+        order.push(new TextDecoder().decode(composed.dataBytes))
       }
       expect(order).toEqual([old, '132x45', wide])
       expect(h.terminal.buffer.active.getLine(23)?.translateToString(true)).toBe('OLD')
@@ -98,9 +98,9 @@ describe('long-lived View follows its PTY owner', () => {
   })
 
   it('keeps the geometry of retained bytes when bounded backlog drops an older prefix', () => {
-    const old = { data: 'old!', startByte: 0, endByte: 4 }
+    const old = { dataBytes: new TextEncoder().encode('old!'), startByte: 0, endByte: 4 }
     const size = { size: { cols: 132, rows: 45 } }
-    const recent = { data: 'new!', startByte: 4, endByte: 8 }
+    const recent = { dataBytes: new TextEncoder().encode('new!'), startByte: 4, endByte: 8 }
     expect(admitTerminalLiveOutput<TerminalLiveItem>([size, old], recent, 4)).toEqual({ queue: [size, recent], droppedBytes: 4 })
     expect(admitTerminalLiveOutput<TerminalLiveItem>([size], { size: { cols: 100, rows: 30 } }).queue).toEqual([{ size: { cols: 100, rows: 30 } }])
   })

@@ -23,6 +23,7 @@ const fakeElectron = vi.hoisted(() => {
     title = ''
     loading = false
     destroyed = false
+    mainFrame = { framesInSubtree: [{ osProcessId: 10, detached: false }] }
     zoomFactor = 1
     deviceEmulation: Record<string, unknown> | null = null
     readonly disableDeviceEmulation = vi.fn(() => { this.deviceEmulation = null })
@@ -238,6 +239,29 @@ function fakeWindow() {
 }
 
 describe('BrowserViewManager', () => {
+  it('reports native Browser owners and actual frame OS PIDs without counting shared or detached processes twice', async () => {
+    const { window } = fakeWindow()
+    const manager = browserManager(window)
+    await manager.create('owner-a', 'about:blank')
+    await manager.create('owner-b', 'about:blank')
+    const views = fakeElectron.FakeWebContentsView.instances.slice(-2)
+    expect(views).toHaveLength(2)
+    views[0]!.webContents.mainFrame.framesInSubtree = [
+      { osProcessId: 100, detached: false }, { osProcessId: 101, detached: false },
+      { osProcessId: 102, detached: true }
+    ]
+    views[1]!.webContents.mainFrame.framesInSubtree = [{ osProcessId: 100, detached: false }]
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 2, releasedBrowserViews: 0 })
+    expect(manager.resourceProcessIds()).toEqual([100, 101])
+    await manager.release('owner-a')
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 1 })
+    expect(manager.resourceProcessIds()).toEqual([100])
+    manager.close('owner-a')
+    manager.close('owner-b')
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
+    expect(manager.resourceProcessIds()).toEqual([])
+  })
+
   it('normalizes only embeddable web URLs', () => {
     expect(normalizeBrowserUrl('example.com')).toBe('https://example.com/')
     expect(normalizeBrowserUrl('localhost:4173')).toBe('http://localhost:4173/')

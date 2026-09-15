@@ -223,7 +223,7 @@ describe('ProcessResourceSampler', () => {
     const sampler = new ProcessResourceSampler(
       readTable,
       () => now,
-      () => [{ memory: { workingSetSize: 4096 } }] as Electron.ProcessMetric[]
+      () => [{ pid: 900, creationTime: 1, type: 'Browser', cpu: { percentCPUUsage: 5 }, memory: { workingSetSize: 4096 } }] as Electron.ProcessMetric[]
     )
     // 全部经由 subscribe 观察，因为那是产品唯一的读取口（ipc.ts:359）。给测试单开一个
     // `snapshot()` 取数口，等于让断言走一条用户永远不走的路——那条路完好，产品那条坏了，
@@ -374,7 +374,7 @@ describe('ProcessResourceSampler', () => {
       expect(latest()?.runs.find((run) => run.runId === 'gone')?.rssKib).toBeNull()
       expect(latest()?.runs.find((run) => run.runId === 'run-a')?.rssKib).toBe(12_000)
       // 混成一个数就没法回答"是谁在吃"。
-      expect(latest()?.app).toEqual({ processCount: 1, rssKib: 4096 })
+      expect(latest()?.app).toMatchObject({ processCount: 1, rssKib: 4096, cpuPercent: null })
       stop()
       sampler.dispose()
     } finally {

@@ -491,6 +491,7 @@ function SurfaceContent({
   surface,
   tabId,
   groupId,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
   focus
@@ -498,6 +499,7 @@ function SurfaceContent({
   surface: WorkbenchSurface
   tabId: string
   groupId: string
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
@@ -512,7 +514,7 @@ function SurfaceContent({
         sessionId={surface.sessionId}
         surfaceKind={surface.kind}
         interactiveResize={interactiveResize}
-        visible={nativeSurfacesVisible}
+        visible={surfaceVisible}
         parked={parked}
         linkOrigin={{
           workspaceId: surface.workspaceId,
@@ -527,7 +529,7 @@ function SurfaceContent({
   if (surface.kind === 'file') {
     return (
       <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Editor" title="Loading editor" detail="Bringing up the code editor for this file." />}>
-        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} visible={nativeSurfacesVisible} />
+        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} visible={surfaceVisible} />
       </Suspense>
     )
   }
@@ -551,7 +553,7 @@ function SurfaceContent({
         tabGroupId={groupId}
         tabId={tabId}
         regionId={surface.regionId}
-        visible={nativeSurfacesVisible}
+        visible={surfaceVisible}
       />
     )
   }
@@ -563,6 +565,7 @@ function WorkbenchRegionNode({
   nodePath,
   tab,
   groupId,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize
 }: {
@@ -570,6 +573,7 @@ function WorkbenchRegionNode({
   nodePath: string
   tab: WorkbenchTab
   groupId: string
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
 }) {
@@ -579,6 +583,7 @@ function WorkbenchRegionNode({
         node={node}
         tab={tab}
         groupId={groupId}
+        surfaceVisible={surfaceVisible}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
       />
@@ -590,6 +595,7 @@ function WorkbenchRegionNode({
       nodePath={nodePath}
       tab={tab}
       groupId={groupId}
+      surfaceVisible={surfaceVisible}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
     />
@@ -602,12 +608,14 @@ function WorkbenchRegionLeaf({
   node,
   tab,
   groupId,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
   groupId: string
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
 }) {
@@ -736,6 +744,7 @@ function WorkbenchRegionLeaf({
           surface={surface}
           tabId={tab.id}
           groupId={groupId}
+          surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={interactiveResize}
           focus={focus}
@@ -778,6 +787,7 @@ function WorkbenchRegionBranch({
   nodePath,
   tab,
   groupId,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize
 }: {
@@ -785,6 +795,7 @@ function WorkbenchRegionBranch({
   nodePath: string
   tab: WorkbenchTab
   groupId: string
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
 }) {
@@ -813,6 +824,7 @@ function WorkbenchRegionBranch({
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           tab={tab}
           groupId={groupId}
+          surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
         />
@@ -830,6 +842,7 @@ function WorkbenchRegionBranch({
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           tab={tab}
           groupId={groupId}
+          surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
         />
@@ -844,6 +857,7 @@ function PaneGroup({
   layout,
   allLayout,
   splitTarget,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
   isRootLeaf,
@@ -855,6 +869,7 @@ function PaneGroup({
   /** Unprojected layout keeps Topic-hidden tabs mounted while the projected layout drives chrome. */
   allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   isRootLeaf?: boolean
@@ -998,14 +1013,15 @@ function PaneGroup({
               nodePath=""
               tab={tab}
               groupId={group.id}
-              // 隐藏的格子里，原生表面与终端一律停工：不 fit、不 resize、不渲染。
-              // 保住实例的前提是它闲着不花钱，否则开十个 Tab 就是十份持续开销。
+              // Inactive Tabs park every surface. Renderer overlays only occlude native Browser
+              // composition; the visible DOM terminal/editor retains its geometry and resources.
+              surfaceVisible={surfaceVisible && tab.id === group.activeTabId}
               nativeSurfacesVisible={nativeSurfacesVisible && tab.id === group.activeTabId}
               interactiveResize={interactiveResize}
             />
           </div>
         )) : (
-          <NewTabSurface tabGroupId={group.id} visible={nativeSurfacesVisible} />
+          <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
         )}
       </div>
       <ConfirmationDialog
@@ -1034,6 +1050,7 @@ function SplitNode({
   layout,
   allLayout,
   splitTarget,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize = false,
   isRootLeaf = false,
@@ -1045,6 +1062,7 @@ function SplitNode({
   layout: WorkspaceLayout
   allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize?: boolean
   isRootLeaf?: boolean
@@ -1059,6 +1077,7 @@ function SplitNode({
         layout={layout}
         allLayout={allLayout}
         splitTarget={splitTarget}
+        surfaceVisible={surfaceVisible}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
@@ -1074,6 +1093,7 @@ function SplitNode({
       layout={layout}
       allLayout={allLayout}
       splitTarget={splitTarget}
+      surfaceVisible={surfaceVisible}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
@@ -1088,6 +1108,7 @@ function SplitBranch({
   layout,
   allLayout,
   splitTarget,
+  surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
   showWindowChrome
@@ -1098,6 +1119,7 @@ function SplitBranch({
   layout: WorkspaceLayout
   allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
+  surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   showWindowChrome: boolean
@@ -1131,6 +1153,7 @@ function SplitBranch({
           layout={layout}
           allLayout={allLayout}
           splitTarget={splitTarget}
+          surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
@@ -1151,6 +1174,7 @@ function SplitBranch({
           layout={layout}
           allLayout={allLayout}
           splitTarget={splitTarget}
+          surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={false}
@@ -1313,7 +1337,8 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
-            nativeSurfacesVisible={visible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+          surfaceVisible={visible}
+          nativeSurfacesVisible={visible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}

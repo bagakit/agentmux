@@ -2,46 +2,46 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   finishTerminalReplayRecovery,
   hydrateTerminalReplay,
-  TERMINAL_REPLAY_BATCH_CHARS
+  TERMINAL_REPLAY_BATCH_BYTES
 } from '../src/renderer/src/lib/terminal-replay'
 
 describe('hydrateTerminalReplay', () => {
   it('restores ordered replay bytes through one xterm write', async () => {
-    const write = vi.fn(async (_data: string) => {})
+    const write = vi.fn(async (_data: Uint8Array) => {})
 
     const cursor = await hydrateTerminalReplay([
-      { data: '\u001b[2J', endByte: 4 },
-      { data: 'ready', endByte: 9 },
-      { data: '\r\n', endByte: 11 }
+      { dataBytes: new TextEncoder().encode('\u001b[2J'), endByte: 4 },
+      { dataBytes: new TextEncoder().encode('ready'), endByte: 9 },
+      { dataBytes: new TextEncoder().encode('\r\n'), endByte: 11 }
     ], write)
 
     expect(write).toHaveBeenCalledTimes(1)
-    expect(write).toHaveBeenCalledWith('\u001b[2Jready\r\n')
+    expect(write).toHaveBeenCalledWith(new TextEncoder().encode('\u001b[2Jready\r\n'))
     expect(cursor).toBe(11)
   })
 
   it('does not schedule an empty replay write', async () => {
-    const write = vi.fn(async (_data: string) => {})
+    const write = vi.fn(async (_data: Uint8Array) => {})
 
     await expect(hydrateTerminalReplay([], write)).resolves.toBeNull()
     expect(write).not.toHaveBeenCalled()
   })
 
   it('splits a large replay into bounded writes and yields between parser batches', async () => {
-    const writes: string[] = []
+    const writes: Uint8Array[] = []
     const yields: number[] = []
-    const data = 'x'.repeat(TERMINAL_REPLAY_BATCH_CHARS * 2 + 17)
+    const data = 'x'.repeat(TERMINAL_REPLAY_BATCH_BYTES * 2 + 17)
 
     const cursor = await hydrateTerminalReplay([
-      { data, endByte: data.length }
+      { dataBytes: new TextEncoder().encode(data), endByte: data.length }
     ], async (chunk) => { writes.push(chunk) }, async () => { yields.push(writes.length) })
 
     expect(writes.map((chunk) => chunk.length)).toEqual([
-      TERMINAL_REPLAY_BATCH_CHARS,
-      TERMINAL_REPLAY_BATCH_CHARS,
+      TERMINAL_REPLAY_BATCH_BYTES,
+      TERMINAL_REPLAY_BATCH_BYTES,
       17
     ])
-    expect(writes.join('')).toBe(data)
+    expect(Buffer.concat(writes)).toEqual(Buffer.from(data))
     expect(yields).toEqual([1, 2, 3])
     expect(cursor).toBe(data.length)
   })

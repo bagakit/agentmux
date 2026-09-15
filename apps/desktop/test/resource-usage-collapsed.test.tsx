@@ -89,7 +89,7 @@ describe('订阅只在面板打开期间存在', () => {
     const onSnapshot = vi.fn()
     let push: ((snapshot: UsageSnapshot) => void) | null = null
     subscribeWhileOpen(true, (listener) => { push = listener; return vi.fn() }, onSnapshot)
-    const snapshot: UsageSnapshot = { observedAt: 1, runs: [], app: null, unavailable: null }
+    const snapshot: UsageSnapshot = { observedAt: 1, runs: [], app: null, runtime: null, runtimeUnavailable: null, mainOwners: null, unavailable: null }
     push!(snapshot)
     expect(onSnapshot).toHaveBeenCalledWith(snapshot)
   })
@@ -110,7 +110,7 @@ describe('面板把订阅生命周期绑在 open 上，而不是挂载上', () =
     // 连 "Sampling…" 的空态都不该出现——出现就说明它已经在等数了。
     expect(markup).not.toContain('resource-usage__list')
     expect(markup).not.toContain('Sampling')
-    expect(markup).toContain('aria-label="Show CPU and memory use per agent"')
+    expect(markup).toContain('aria-label="Show performance and resource owners"')
     // 渲染路径上也没有同步订阅。
     expect(fixture.subscribe).not.toHaveBeenCalled()
   })

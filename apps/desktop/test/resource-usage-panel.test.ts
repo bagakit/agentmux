@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatBytes,
   formatCpu,
   formatRss,
   usagePanelRows
@@ -25,6 +26,9 @@ function snapshot(overrides: Partial<UsageSnapshot> = {}): UsageSnapshot {
     observedAt: 1_000,
     runs: [],
     app: null,
+    runtime: null,
+    runtimeUnavailable: null,
+    mainOwners: null,
     unavailable: null,
     ...overrides
   }
@@ -84,6 +88,13 @@ describe('资源面板的读数', () => {
   it('内存按量级换单位，不甩一串 KiB 给人读', () => {
     expect(formatRss(524_288)).toBe('512 MiB')
     expect(formatRss(2_097_152)).toBe('2.0 GiB')
+  })
+
+  it('Runtime 字节不与 RSS 混淆，小读数不变成零', () => {
+    expect(formatBytes(7)).toBe('7 B')
+    expect(formatBytes(2048)).toBe('2.0 KiB')
+    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MiB')
+    expect(formatBytes(2 * 1024 * 1024 * 1024)).toBe('2.0 GiB')
   })
 
   it('CPU 只留一位小数——第二位是噪音在跳', () => {

@@ -1513,24 +1513,28 @@ function forgetUnclaimedTerminalSession(ids: readonly string[], sessionId: strin
   return ids.filter((id) => id !== sessionId)
 }
 
+export function readRendererResourceOwnerCounts() {
+  const resourceWindow = window as typeof window & {
+    __agentmuxMonacoEditorCount?: () => number
+    __agentmuxMonacoModelCount?: () => number
+  }
+  return rendererResourceOwnerCounts({
+    documentCount: Object.keys(useAppStore.getState().documents).length,
+    runtimeSubscriptionCount,
+    terminalOwners: terminalResourceOwnerCounts(),
+    ...(resourceWindow.__agentmuxMonacoEditorCount
+      ? { monacoEditorCount: resourceWindow.__agentmuxMonacoEditorCount }
+      : {}),
+    ...(resourceWindow.__agentmuxMonacoModelCount
+      ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
+      : {})
+  })
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('agentmux:resource-owner-counts', (event) => {
     const target = event as CustomEvent<Record<string, number | boolean>>
-    const resourceWindow = window as typeof window & {
-      __agentmuxMonacoEditorCount?: () => number
-      __agentmuxMonacoModelCount?: () => number
-    }
-    Object.assign(target.detail, rendererResourceOwnerCounts({
-      documentCount: Object.keys(useAppStore.getState().documents).length,
-      runtimeSubscriptionCount,
-      terminalOwners: terminalResourceOwnerCounts(),
-      ...(resourceWindow.__agentmuxMonacoEditorCount
-        ? { monacoEditorCount: resourceWindow.__agentmuxMonacoEditorCount }
-        : {}),
-      ...(resourceWindow.__agentmuxMonacoModelCount
-        ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
-        : {})
-    }))
+    Object.assign(target.detail, readRendererResourceOwnerCounts())
     target.detail.observed = true
   })
 }

@@ -203,6 +203,8 @@ const api: AgentMuxPreloadApi = {
     timeline: (session: AgentSessionControl) => ipcRenderer.invoke('sessions:timeline', session),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
+    replay: (attachmentId: string, afterByte: number) =>
+      ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData) => ipcRenderer.invoke('sessions:write', session, data),
     submitPrompt: (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) =>

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
+import { getWindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 const APP = readFileSync(join(import.meta.dirname, '../src/renderer/src/App.tsx'), 'utf8')
@@ -17,14 +18,14 @@ const TOKENS = readFileSync(join(import.meta.dirname, '../src/renderer/src/style
 describe('window overlay host contract', () => {
   let root: Root | null = null
   let container: HTMLDivElement | null = null
-  let host: HTMLDivElement | null = null
+  let host: HTMLElement | null = null
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div')
-    host = document.createElement('div')
-    host.dataset.overlayHost = ''
-    document.body.append(container, host)
+    document.body.append(container)
+    host = getWindowOverlayHost()
+    expect(host).not.toBeNull()
     root = createRoot(container)
   })
 
@@ -43,8 +44,8 @@ describe('window overlay host contract', () => {
     expect(hostAnchor).toBeGreaterThan(-1)
     expect(shellCloseBeforeHost).toBeGreaterThan(-1)
     expect(HOST).toContain('data-overlay-host')
-    expect(TOP_ROW).toContain('createPortal')
-    expect(TOP_ROW).toContain('[data-overlay-host]')
+    expect(TOP_ROW).toContain('<WindowOverlayPortal')
+    expect(HOST).toContain('return createPortal(')
     expect(STYLES).toContain('.window-overlay-host {')
     expect(STYLES).toContain('.window-overlay-host { position: fixed;')
     expect(STYLES).toContain('isolation: isolate')
