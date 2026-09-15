@@ -856,7 +856,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 ### Status Bar CPU/Memory 资源面板
 
 - 用户要求「性能指标在右下角的观测面板看不出」「ctxmux 的泄漏管理应该也能看出来」。观测面板必须分清应用、Agent CLI 和 ctxmux：应用按 Main、Renderer、GPU、Browser/Utility 显示 CPU 与内存，Agent 按现有 Run 归属，Runtime 显示其公开合同提供的 Run、attachment、保留输出及回收事实。不能以应用内存总数代替卡顿来源，也不能从 RSS 高直接判为泄漏。
-- 进程指标、资源 owner 数量、保留历史容量与回收结果是不同事实；观察时间、CPU 聚合口径、未知/过期与失败原因必须可读。首次尚未形成 CPU 测量窗口不能冒充 0；Runtime 缺少公开指标时准确说缺少什么，不读写其私有数据库来补一个假完整面板。
+- 进程指标、资源 owner 数量、保留历史容量与回收结果是不同事实；观察时间、CPU 聚合口径、未知/过期与失败原因必须可读。应用 CPU 的测量区间平均与 Agent 的平台 ps 平均读数必须分开说明；10 秒读数峰值不能冒充同一种瞬时 CPU。首次尚未形成 CPU 测量窗口不能冒充 0；Runtime 缺少公开指标时准确说缺少什么，不读写其私有数据库来补一个假完整面板。
 - 观测仅在面板打开期间按需采样，关闭即停，慢采样不堆积。Runtime 存储统计不随每秒 CPU 采样反复遍历；局部指标失败不使其他指标消失，也不停止、删除或重启 Agent。既有孤儿目录回收与当前 Run 的历史回收分别显示，打开面板不是删除历史的授权。
 - 每个资源对象尽量显示所属 Project/Workspace、Agent/Provider 和最近活动/idle 时长；没有归属时明确显示 unknown。资源采样与 Agent 语义状态分开，不能把低 CPU 误判成 Agent idle。信息层级与紧凑布局归 Surface 密度合同。
 
@@ -1727,3 +1727,13 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 用户反馈「terminal 只能往上滚一点，应该可以一直往上滚」。用户向上阅读时必须能连续到达当前会话仍可用的历史，新输出、尺寸变化和切换工作面不能把阅读位置反复拉回底部或丢掉已有历史。输入、PTY 和原 Session 保持可用，明确回到最新输出才恢复跟随。
 
 正常屏幕与全屏应用的 alternate buffer 按协议区分：不能把滚动手势暗中变成 Agent 命令，也不能把重绘帧伪造为对话历史。恢复和积压处理不得因界面自己的小窗口把 Runtime 仍保留的历史当成不存在；Runtime 确已淘汰的字节、终端行缓存边界或应用自身的全屏历史能力必须准确说明，不能声称无限历史、不能新增第二份 Runtime 输出账本。
+
+### ordered bytes 的公开传输边界
+
+「核心路径可用」「从根上保证正确」要求 Runtime 的原始字节穿过 Core 公开 Replay 和 Live API 后仍原样到达消费者。字节游标与裁剪只作用于同一份原始字节；UTF-8 字符、ANSI 序列可以跨事件，不能把已解码文本重新编码后冒充该事件的字节范围。终端使用平台已有的流式字节解析能力，客户端不新增字符游标或第二份输出账本。
+
+Core 的语义文本供 Provider/readiness 等文本观察使用，与 ordered bytes 分工明确：一个事件的文本可以为空，也可以包含前一事件留下的字符尾部，不能由文本长度推断字节范围。CLI 的 ordered output 同样裁剪原始字节；JSON 输出使用明确的 base64 字节字段，Replay 与 Follow 保持同一种表示，不把解码损失冒充完整输出。不保留旧的文本裁剪兼容分支。
+
+### Hover 提示不改变 Terminal 几何
+
+用户反馈「现在 hover 的时候，terminal size 会变得有问题」。提示、菜单与其他浮层的出现和关闭只改变浮层本身；没有真实工作面尺寸变化时，Terminal 的容器边界、解析行列、Runtime 确认尺寸、阅读位置和 Session 身份必须保持稳定。原生 Browser 为浮层让位不能被当成 Terminal 的布局变化，不能因短暂不可见或浮层测量过程提交错误 PTY resize。真实分割、窗口尺寸与可见 Region 变化仍按既有权威尺寸合同同步；失败明确提示而不阻断健康 Agent。
