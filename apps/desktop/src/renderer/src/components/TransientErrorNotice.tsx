@@ -13,11 +13,10 @@ import { serviceNoticeAriaLive } from '../lib/service-window-notice'
  *
  * `kind` defaults to `'indeterminate'`, the safe side for an unlabelled caller. A caught `unknown` reaching
  * `reportError` carries no agent-viability to read; principle 11 keeps `unknown` first-class (never folded
- * into "alive" or "dead"), and a survey of the ~69 call sites found them class-2 by construction — the
- * agent-death facts flow through session status, not this banner. `indeterminate` maps to the
- * quiet-but-visible tier (`polite`/`status`): non-interrupting, but never silent. A caller that KNOWS the
- * agent is dead passes `kind="agent-broken"` for the loud tier; labelling the individual call sites is the
- * follow-up, not this change.
+ * into "alive" or "dead"). `indeterminate` maps to the quiet-but-visible tier (`polite`/`status`):
+ * non-interrupting, but never silent. The App's Session subscription passes `agent-broken` only after
+ * the existing projection accepts a Core-confirmed current Run crash. Generic workflow failures,
+ * user stops and unknown exits do not acquire that classification.
  *
  * f-25h8fysz9 disposition: layer 3 (this alarm-fatigue collapse) is handled here; layers 1-2 (re-picking an
  * already-registered folder should not error; a schema's internals should not leak) were fixed by
