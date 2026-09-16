@@ -5,7 +5,7 @@ import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 describe('canonical Agent Session identity', () => {
-  it('uses all 96 random bits with the same browser-safe canonical format', () => {
+  it('preserves every accepted sampled byte with the same browser-safe canonical format', () => {
     const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((array) => {
       expect(array).toBeInstanceOf(Uint8Array)
       expect(array?.byteLength).toBe(12)
@@ -22,7 +22,7 @@ describe('canonical Agent Session identity', () => {
     const ids = Array.from({ length: 1000 }, () => mintAgentSessionId())
     expect(ids).toHaveLength(1000)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{16}$/u)
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{15}$/u)
   })
 
   it('prefers exact identity, rejects collisions, and never guesses an unknown prefix', () => {
@@ -44,9 +44,56 @@ describe('canonical Agent Session identity', () => {
     try {
       await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: '/repo', injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
       expect(reserved).toHaveLength(1)
-      expect(reserved[0]).toMatch(/^[A-Za-z0-9_-]{16}$/u)
+      expect(reserved[0]).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{15}$/u)
     } finally { await client.dispose() }
   })
+
+  it('rejects both forbidden first samples before public Core creation reaches the valid lifecycle reservation', async () => {
+    const samples = [new Uint8Array(12).fill(248), new Uint8Array(12).fill(252),
+      Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 253, 254, 255])]
+    expect(globalThis.btoa(String.fromCharCode(...samples[0]!)).replace(/\+/gu, '-')).toMatch(/^-/u)
+    expect(globalThis.btoa(String.fromCharCode(...samples[1]!)).replace(/\//gu, '_')).toMatch(/^_/u)
+    let sampleIndex = 0
+    const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(array => {
+      expect(array).toBeInstanceOf(Uint8Array)
+      expect(array?.byteLength).toBe(12)
+      expect(sampleIndex).toBeLessThan(samples.length)
+      ;(array as Uint8Array).set(samples[sampleIndex++]!)
+      return array
+    })
+    const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+    const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean };
+      registry: { reserveNew(id: string, operationId: string): Promise<never> } }
+    internals.connected = true
+    internals.kernel.isConnected = () => true
+    const reserved: string[] = []
+    internals.registry.reserveNew = async id => { reserved.push(id); throw new Error('reservation reached') }
+    try {
+      await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: '/repo',
+        injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
+      expect(reserved).toEqual(['AAECAwQFBgcI_f7_'])
+      expect(entropy).toHaveBeenCalledTimes(3)
+    } finally { entropy.mockRestore(); await client.dispose() }
+  })
+
+  it.each(['', '-forbidden', '_forbidden', 'invalid/session', 'invalid.id', 'x'.repeat(129)])(
+    'keeps invalid external identity %j rejected before lifecycle reservation', async agentSessionId => {
+      const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+      const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean };
+        registry: { reserveNew(id: string, operationId: string): Promise<never> } }
+      internals.connected = true
+      internals.kernel.isConnected = () => true
+      const reserve = vi.fn<(...args: string[]) => Promise<never>>()
+      internals.registry.reserveNew = reserve
+      const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues')
+      try {
+        await expect(client.createAgent({ agentSessionId, executorId: 'codex', providerId: 'codex',
+          workspacePath: '/repo', injectAgentMuxGuide: false })).rejects.toThrowError(expect.objectContaining({ code: 'INVALID_SESSION_ID' }))
+        expect(reserve).not.toHaveBeenCalled()
+        expect(entropy).not.toHaveBeenCalled()
+      } finally { entropy.mockRestore(); await client.dispose() }
+    }
+  )
 
   it('Core respawn mints a new canonical identity while preserving the previous durable long identity', async () => {
     const store = new AgentMuxMemoryAgentSessionStore()
@@ -62,7 +109,7 @@ describe('canonical Agent Session identity', () => {
     try {
       const next = await client.respawnAgent({ previousAgentSessionId: previous.agentSessionId, injectAgentMuxGuide: false })
       expect(create).toHaveBeenCalledTimes(1)
-      expect(next.agentSessionId).toMatch(/^[A-Za-z0-9_-]{16}$/u)
+      expect(next.agentSessionId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{15}$/u)
       expect(next.agentSessionId).not.toBe(previous.agentSessionId)
       expect(client.agentSession(previous.agentSessionId).agentSessionId).toBe(previous.agentSessionId)
     } finally { await client.dispose() }

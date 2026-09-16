@@ -685,7 +685,8 @@ the Tab and select an exact Session. Send never broadcasts and never resumes.
 
 Agent-addressed Session commands accept a full canonical ID or a currently unique prefix.
 Full IDs win exact matches. Ambiguous prefixes require more characters; unknown prefixes
-never select an Agent. New canonical IDs contain 96 random bits in 16 base64url characters.
+never select an Agent. New canonical IDs use 16 base64url characters, an alphanumeric first
+character, and over 95 bits of effective entropy.
 Generic Demand links and mixed PMO Session filters keep full Session IDs, including Terminals;
 Agent prefixes apply to demand start, pmo agents/sessions --session, and PMO --agent.
 Keep CLI JSON receipts separate from message text: recipients read a source label and the
