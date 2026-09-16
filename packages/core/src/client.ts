@@ -94,7 +94,7 @@ import {
   type AgentMuxAgentContinuityResult
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
-import { AgentManagedHookInstaller } from './managed-hook-installer.js'
+import { AgentManagedHookInstaller, type AgentManagedHookInspection } from './managed-hook-installer.js'
 import { defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
@@ -141,7 +141,7 @@ import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS } from './sessi
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
-const SESSION_HISTORY_MAX_CONCURRENT = 4
+const PROVIDER_READ_MAX_CONCURRENT = 4
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('agentmux')
 
 export type AgentMuxAgentCreateInput = {
@@ -537,8 +537,8 @@ export class AgentMuxClient {
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, Promise<void>>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
-  private readonly sessionHistoryReads = new Set<AbortController>()
-  private sessionHistoryDisposed = false
+  private readonly providerReads = new Set<AbortController>()
+  private providerReadsDisposed = false
   // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
   // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
@@ -808,7 +808,7 @@ export class AgentMuxClient {
     const verdict = judgeReconnectFlap({ flapCount: this.reconnectFlaps })
     this.reconnectFlaps = verdict.flapCount
     this.connected = false
-    this.cancelSessionHistoryReads()
+    this.cancelProviderReads()
     // 线断了 ⇒ 一切**长命的屏幕观察**当场失效。这不是卫生，是可观测的行为改变，也是 #628 的关键一环：
     //
     // 掉线时，`observeOutput` 的排空循环把错误交给 adapter 那个**全局** errorListener，而不是交给某次观察
@@ -1166,7 +1166,7 @@ export class AgentMuxClient {
   }
 
   disconnect(): void {
-    this.cancelSessionHistoryReads()
+    this.cancelProviderReads()
     this.connectionEpoch += 1
     this.connected = false
     this.connecting = null
@@ -1189,8 +1189,8 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
-    this.sessionHistoryDisposed = true
-    this.cancelSessionHistoryReads()
+    this.providerReadsDisposed = true
+    this.cancelProviderReads()
     await this.hookServer.stop()
     this.disconnect()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
@@ -1206,6 +1206,62 @@ export class AgentMuxClient {
    */
   onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
     return this.publisher.onEvent(listener)
+  }
+
+  /** A scoped, fresh observation; intentionally available before Runtime connection or repair. */
+  async inspectManagedHooks(providerId: AgentProviderId, options: {
+    workspacePath?: string
+    env?: Readonly<Record<string, string | undefined>>
+    command?: string
+    args?: readonly string[]
+    endpoint?: { url: string; token: string }
+  } = {}): Promise<AgentManagedHookInspection & { workspacePath: string | null }> {
+    const workspacePath = options.workspacePath ?? null
+    const skipped = (code: string, action: string | null): AgentManagedHookInspection & { workspacePath: string | null } => ({
+      providerId, workspacePath, checkedAt: Date.now(), status: 'skipped', code, action, targets: []
+    })
+    try {
+      const provider = this.providers.get(providerId)
+      const strategy = provider.catalog.hookStrategy
+      if (strategy.kind !== 'native' || strategy.installation !== 'explicit-managed') {
+        return skipped(strategy.kind === 'none' ? 'HOOKS_UNSUPPORTED' : 'HOOKS_NOT_MANAGED',
+          strategy.kind === 'none' ? null : 'This Provider owns its Hook setup; inspect it through the Provider.')
+      }
+      if (workspacePath === null) return skipped('HOOK_WORKSPACE_REQUIRED', 'Provide the exact workspace for this inspection.')
+      const planEnv = options.env === undefined ? undefined : Object.fromEntries(
+        Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
+      )
+      const plan = resolveManagedHookPlan(providerId, workspacePath, planEnv, options.endpoint)
+      if (!plan) return skipped('HOOK_PLAN_CONTEXT_UNAVAILABLE', 'Provide the existing native binding context or a managed Hook plan; inspection does not create a binding.')
+      const disk = await this.hookInstaller.inspect(plan)
+      if (disk.status !== 'installed' || !provider.inspectHookActivation) return { ...disk, workspacePath }
+      if (this.providerReadsDisposed) return { ...disk, workspacePath, status: 'error', code: 'AGENT_HOOK_READ_CANCELLED',
+        action: 'The inspection client was disposed. Inspect with an active client.' }
+      if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) return { ...disk, workspacePath, status: 'error', code: 'AGENT_HOOK_READ_BUSY',
+        action: 'Native reading is busy. Retry after a current read finishes.' }
+      const lifetime = this.providerReadLifetime('hooks')
+      const { controller } = lifetime
+      let activation
+      try {
+        activation = await lifetime.read(provider.inspectHookActivation({
+          plan, workspacePath, command: resolveAgentExecutable(options.command, provider.executable), args: options.args ?? [],
+          env: options.env ?? {}, signal: controller.signal
+        }))
+        controller.signal.throwIfAborted()
+      } catch {
+        return { ...disk, workspacePath, checkedAt: Date.now(), status: 'error',
+          code: controller.signal.aborted ? controller.signal.reason?.code === 'AGENT_HOOK_READ_TIMEOUT'
+            ? 'AGENT_HOOK_READ_TIMEOUT' : 'AGENT_HOOK_READ_CANCELLED' : 'HOOK_ACTIVATION_CHECK_FAILED',
+          action: 'The scoped native Hook check did not complete. Check the Provider configuration and native reader, then inspect again.' }
+      } finally {
+        lifetime.close()
+      }
+      return { ...disk, workspacePath, checkedAt: Date.now(), status: activation.active ? 'installed' : 'partial',
+        code: activation.code, action: activation.action }
+    } catch {
+      return { providerId, workspacePath, checkedAt: Date.now(), status: 'error', code: 'MANAGED_HOOK_CHECK_FAILED',
+        action: 'The scoped Hook inspection did not complete. Check the Provider configuration and native reader, then inspect again.', targets: [] }
+    }
   }
 
   catalog(): AgentCatalogEntry[] {
@@ -1230,7 +1286,7 @@ export class AgentMuxClient {
     agentSessionId: string,
     options: AgentSessionHistoryPageOptions = {}
   ): Promise<AgentSessionHistoryPage> {
-    if (this.sessionHistoryDisposed) {
+    if (this.providerReadsDisposed) {
       throw new AgentMuxError('History reading client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     }
     const limit = options.limit ?? 30
@@ -1238,24 +1294,11 @@ export class AgentMuxClient {
       (options.cursor !== undefined && (typeof options.cursor !== 'string' || !options.cursor || options.cursor.length > 16_384))) {
       throw new AgentMuxError('History page requires a finite limit from 1 to 100 and an opaque cursor.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     }
-    if (this.sessionHistoryReads.size >= SESSION_HISTORY_MAX_CONCURRENT) {
+    if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) {
       throw new AgentMuxError('History reading is busy; retry after the current page finishes.', 'AGENT_SESSION_HISTORY_BUSY')
     }
-    const controller = new AbortController()
-    this.sessionHistoryReads.add(controller)
-    const timer = setTimeout(() => controller.abort(new AgentMuxError(
-      'Native history page timed out.', 'AGENT_SESSION_HISTORY_TIMEOUT'
-    )), SESSION_HISTORY_TIMEOUT_MS)
-    let abort!: () => void
-    const cancelled = new Promise<never>((_resolve, reject) => {
-      abort = () => reject(controller.signal.reason)
-      controller.signal.addEventListener('abort', abort, { once: true })
-    })
-    let currentRead: Promise<unknown> | undefined
-    const read = <T>(operation: Promise<T>): Promise<T> => {
-      currentRead = operation
-      return Promise.race([operation, cancelled])
-    }
+    const lifetime = this.providerReadLifetime('history')
+    const { controller, read } = lifetime
     try {
       // Conversation identity belongs to the durable Store, even before Runtime connection or recovery.
       const sessions = await read(loadAgentSessions(this.store))
@@ -1287,17 +1330,45 @@ export class AgentMuxClient {
       }
       return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }
     } finally {
-      clearTimeout(timer)
-      controller.signal.removeEventListener('abort', abort)
-      // The current Store or Provider operation owns its read slot until it settles.
-      const release = (): void => { this.sessionHistoryReads.delete(controller) }
-      if (currentRead) void currentRead.then(release, release)
-      else release()
+      lifetime.close()
     }
   }
 
-  private cancelSessionHistoryReads(): void {
-    for (const controller of this.sessionHistoryReads) {
+  private providerReadLifetime(purpose: 'history' | 'hooks') {
+    const prefix = purpose === 'history' ? 'AGENT_SESSION_HISTORY' : 'AGENT_HOOK_READ'
+    if (this.providerReadsDisposed) throw new AgentMuxError('Provider reading client was disposed.', `${prefix}_CANCELLED`)
+    if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) {
+      throw new AgentMuxError('Provider reading is busy; retry after a current read finishes.', `${prefix}_BUSY`)
+    }
+    const controller = new AbortController()
+    this.providerReads.add(controller)
+    const timer = setTimeout(() => controller.abort(new AgentMuxError(
+      'Native Provider reading timed out.', `${prefix}_TIMEOUT`
+    )), SESSION_HISTORY_TIMEOUT_MS)
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(controller.signal.reason)
+      controller.signal.addEventListener('abort', abort, { once: true })
+    })
+    let currentRead: Promise<unknown> | undefined
+    return {
+      controller,
+      read: <T>(operation: Promise<T>): Promise<T> => {
+        currentRead = operation
+        return Promise.race([operation, cancelled])
+      },
+      close: (): void => {
+        clearTimeout(timer)
+        controller.signal.removeEventListener('abort', abort)
+        const release = (): void => { this.providerReads.delete(controller) }
+        if (currentRead) void currentRead.then(release, release)
+        else release()
+      }
+    }
+  }
+
+  private cancelProviderReads(): void {
+    for (const controller of this.providerReads) {
       controller.abort(new AgentMuxError('History reading was cancelled when the client disconnected.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
   }

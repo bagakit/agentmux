@@ -1,3 +1,4 @@
+import { inspectHookDisableSetting } from './shared.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -126,6 +127,7 @@ export function createDroidProvider(defineAgentProvider: ProviderFactory): Agent
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: DROID_HOOKS,
+    inspectHookActivation: context => inspectHookDisableSetting(context, 'hooksDisabled'),
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]

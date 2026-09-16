@@ -1,3 +1,4 @@
+import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -109,6 +110,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     }),
     hook: CODEX_HOOKS,
     readSessionHistoryPage: readCodexSessionHistoryPage,
+    inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       'resume', sessionId,

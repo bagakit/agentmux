@@ -988,9 +988,10 @@ async function whoamiCommand(args: readonly string[]): Promise<number> {
  */
 async function doctorCommand(args: readonly string[]): Promise<number> {
   if (args.length > 0) throw cliError('doctor takes no arguments.')
-  const client = await connectLocalAgentMux()
+  const client = new AgentMuxClient()
   try {
-    printSuccess('doctor', await diagnoseAgentMux({ client }))
+    printSuccess('doctor', await diagnoseAgentMux({ client, workspacePath: process.cwd(),
+      env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)) }))
   } finally {
     await client.dispose()
   }

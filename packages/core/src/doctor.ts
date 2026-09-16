@@ -24,6 +24,7 @@ export type AgentMuxDoctorAgent = {
   action: string | null
   capabilities: AgentCapabilities
   hook: AgentCatalogEntry['hookStrategy']
+  hookInstallation: Awaited<ReturnType<AgentMuxClient['inspectManagedHooks']>> & { phase: 'pre-connect' }
   permission: AgentCapabilities['permission']
   acp: AgentCatalogEntry['acpStrategy']
 }
@@ -100,9 +101,11 @@ export type AgentMuxDoctorReport = {
 export type DiagnoseAgentMuxOptions = {
   client: AgentMuxClient
   commandOverrides?: Readonly<Record<string, string>>
+  workspacePath?: string
+  env?: Readonly<Record<string, string>>
 }
 
-function blockedAgent(catalog: AgentCatalogEntry): AgentMuxDoctorAgent {
+function blockedAgent(catalog: AgentCatalogEntry, hookInstallation: AgentMuxDoctorAgent['hookInstallation']): AgentMuxDoctorAgent {
   return {
     id: catalog.id,
     label: catalog.label,
@@ -111,6 +114,7 @@ function blockedAgent(catalog: AgentCatalogEntry): AgentMuxDoctorAgent {
     action: 'Restore the Runtime connection, then rerun doctor.',
     capabilities: { ...catalog.capabilities },
     hook: { ...catalog.hookStrategy },
+    hookInstallation,
     permission: catalog.capabilities.permission,
     acp: { ...catalog.acpStrategy }
   }
@@ -119,7 +123,8 @@ function blockedAgent(catalog: AgentCatalogEntry): AgentMuxDoctorAgent {
 async function probeAgent(
   client: AgentMuxClient,
   catalog: AgentCatalogEntry,
-  commandOverride: string | undefined
+  commandOverride: string | undefined,
+  hookInstallation: AgentMuxDoctorAgent['hookInstallation']
 ): Promise<AgentMuxDoctorAgent> {
   try {
     const capability = await client.probeAgent(catalog.id, commandOverride)
@@ -144,13 +149,14 @@ async function probeAgent(
           : `Install ${catalog.label} on this Host or configure an explicit executable.`,
       capabilities: { ...capability.capabilities },
       hook: { ...catalog.hookStrategy },
+      hookInstallation,
       permission: catalog.capabilities.permission,
       acp: { ...catalog.acpStrategy }
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     return {
-      ...blockedAgent(catalog),
+      ...blockedAgent(catalog, hookInstallation),
       action: `Fix the ${catalog.label} executable probe, then rerun doctor: ${detail}`
     }
   }
@@ -158,15 +164,22 @@ async function probeAgent(
 
 export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promise<AgentMuxDoctorReport> {
   const catalog = options.client.catalog()
+  const hookInstallations = await Promise.all(catalog.map(async entry => ({
+    ...await options.client.inspectManagedHooks(entry.id, {
+      ...(options.workspacePath === undefined ? {} : { workspacePath: options.workspacePath }),
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.commandOverrides?.[entry.id] === undefined ? {} : { command: options.commandOverrides[entry.id] })
+    }), phase: 'pre-connect' as const
+  })))
   try {
     await options.client.connect()
     const identity = options.client.runtimeIdentity()
     const [runtime, agents] = await Promise.all([
       options.client.runtimeDiagnostics(),
-      Promise.all(catalog.map(async (entry) => await probeAgent(
+      Promise.all(catalog.map(async (entry, index) => await probeAgent(
         options.client,
         entry,
-        options.commandOverrides?.[entry.id]
+        options.commandOverrides?.[entry.id], hookInstallations[index]!
       )))
     ])
     return {
@@ -239,7 +252,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
           action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
         }
       },
-      agents: catalog.map(blockedAgent),
+      agents: catalog.map((entry, index) => blockedAgent(entry, hookInstallations[index]!)),
       integration: {
         hookIngress: 'authenticated-loopback'
       }
