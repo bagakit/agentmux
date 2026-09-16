@@ -2003,16 +2003,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let booting = true
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
-        if (event.event.type !== 'terminal-output' && event.event.type !== 'terminal-resized') {
-          pendingSessionEvents.push(event)
-          if (pendingSessionEvents.length > 256) {
-            pendingSessionEvents.shift()
-            sessionEventBufferOverflowed = true
-          }
+        pendingSessionEvents.push(event)
+        if (pendingSessionEvents.length > 256) {
+          pendingSessionEvents.shift()
+          sessionEventBufferOverflowed = true
         }
         return
       }
-      if (event.event.type !== 'terminal-output' && event.event.type !== 'terminal-resized') get().applyEvent(event)
+      get().applyEvent(event)
     })
     const disposeBrowsers = api.browser.onEvent((event) => {
       if (booting) {

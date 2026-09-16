@@ -885,7 +885,7 @@ export function TerminalView({
         endByte: output.endByte
       })
     }
-    const disposeEvents = api.sessions.onEvent(accept)
+    const disposeEvents = api.sessions.onEvent(accept, session.control)
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(root)
     /**
