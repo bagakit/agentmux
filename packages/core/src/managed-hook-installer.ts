@@ -11,7 +11,7 @@ import {
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
-import { renderMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
+import { inspectManagedHookContent, renderMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
 import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
@@ -33,6 +33,15 @@ export type AgentManagedHookMutation = {
 export type AgentManagedHookPlan = {
   providerId: AgentProviderId
   mutations: readonly AgentManagedHookMutation[]
+}
+
+export type AgentManagedHookInspection = {
+  providerId: AgentProviderId
+  checkedAt: number
+  status: 'installed' | 'not_installed' | 'partial' | 'error' | 'skipped'
+  code: string
+  action: string | null
+  targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string }>
 }
 
 export type AgentManagedHookPreview = {
@@ -80,7 +89,7 @@ function hash(content: Buffer | string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-async function readCurrent(path: string): Promise<{ content: Buffer; mode: number } | null> {
+export async function readManagedHookTarget(path: string): Promise<{ content: Buffer; mode: number } | null> {
   try {
     const info = await lstat(path)
     if (!info.isFile() || info.isSymbolicLink()) {
@@ -89,7 +98,17 @@ async function readCurrent(path: string): Promise<{ content: Buffer; mode: numbe
     if (info.size > MAX_HOOK_FILE_BYTES) {
       throw new AgentMuxError('Managed Hook target exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
     }
-    return { content: await readFile(path), mode: info.mode }
+    const content = await readFile(path)
+    // A target may grow after lstat. The actual bytes, not the earlier metadata, own this bound.
+    if (content.byteLength > MAX_HOOK_FILE_BYTES) {
+      throw new AgentMuxError('Managed Hook target exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
+    }
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(content)
+    } catch {
+      throw new AgentMuxError('Managed Hook target is not valid UTF-8.', 'HOOK_TARGET_UNPARSEABLE')
+    }
+    return { content, mode: info.mode }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
@@ -128,23 +147,46 @@ export class AgentManagedHookInstaller {
     }
   }
 
-  async preview(plan: AgentManagedHookPlan): Promise<AgentManagedHookPreview> {
-    if (plan.mutations.length === 0 || plan.mutations.length > MAX_HOOK_MUTATIONS) {
-      throw new AgentMuxError('Managed Hook plan has an invalid mutation count.', 'INVALID_HOOK_PLAN')
+  /** Fresh disk observation only: no preview admission, receipt, mkdir or native process. */
+  async inspect(plan: AgentManagedHookPlan): Promise<AgentManagedHookInspection> {
+    const targets: AgentManagedHookInspection['targets'] = []
+    try {
+      validatePlan(plan)
+      for (const mutation of plan.mutations) {
+        try {
+          const target = await readManagedHookTarget(mutation.path)
+          const content = target?.content.toString('utf8')
+          const facts = content === undefined ? { present: false, current: false }
+            : mutation.merge ? inspectManagedHookContent(content, mutation.content, mutation.merge)
+              : { present: true, current: content === mutation.content }
+          targets.push({ path: mutation.path, status: facts.current ? 'current' : facts.present ? 'partial' : 'not_present' })
+        } catch (error) {
+          targets.push({ path: mutation.path, status: 'error', code: inspectionErrorCode(error) })
+        }
+      }
+    } catch (error) {
+      return { providerId: plan.providerId, checkedAt: Date.now(), status: 'error', targets,
+        code: inspectionErrorCode(error), action: 'Fix the scoped Hook plan or target, then inspect again.' }
     }
+    const status = targets.some(target => target.status === 'error') ? 'error'
+      : targets.every(target => target.status === 'current') ? 'installed'
+        : targets.every(target => target.status === 'not_present') ? 'not_installed' : 'partial'
+    return { providerId: plan.providerId, checkedAt: Date.now(), status, targets,
+      code: status === 'installed' ? 'MANAGED_HOOK_CURRENT' : status === 'not_installed' ? 'MANAGED_HOOK_ABSENT'
+        : status === 'error' ? 'MANAGED_HOOK_CHECK_FAILED' : 'MANAGED_HOOK_INCOMPLETE',
+      action: status === 'installed' ? null : status === 'error' ? 'Fix the unreadable or invalid scoped Hook target, then inspect again.'
+        : 'Install or repair the managed Hook configuration for this scope, then inspect again.' }
+  }
+
+  async preview(plan: AgentManagedHookPlan): Promise<AgentManagedHookPreview> {
+    validatePlan(plan)
     if (this.previews.size >= MAX_PENDING_PREVIEWS) {
       throw new AgentMuxError('Managed Hook preview limit reached.', 'HOOK_PREVIEW_LIMIT')
     }
-    const paths = new Set<string>()
     const mutations: PreparedMutation[] = []
     for (const mutation of plan.mutations) {
-      const path = safeTarget(mutation.path)
-      if (paths.has(path)) throw new AgentMuxError('Managed Hook plan repeats a target.', 'INVALID_HOOK_PLAN')
-      paths.add(path)
-      if (Buffer.byteLength(mutation.content) > MAX_HOOK_FILE_BYTES) {
-        throw new AgentMuxError('Managed Hook content exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
-      }
-      const current = await readCurrent(path)
+      const path = mutation.path
+      const current = await readManagedHookTarget(path)
       const currentContent = current ? current.content.toString('utf8') : null
       const effectiveContent = mutation.merge
         ? renderMergedHookContent(currentContent, mutation.content, mutation.merge)
@@ -201,7 +243,7 @@ export class AgentManagedHookInstaller {
     this.previews.delete(previewId)
     const installMutations: InstallMutation[] = []
     for (const mutation of prepared.mutations) {
-      const current = await readCurrent(mutation.path)
+      const current = await readManagedHookTarget(mutation.path)
       const currentHash = current ? hash(current.content) : null
       if (currentHash !== mutation.currentHash) {
         throw new AgentMuxError('Managed Hook target changed after preview.', 'HOOK_TARGET_CHANGED')
@@ -274,7 +316,7 @@ export class AgentManagedHookInstaller {
     const restorations: Array<{ entry: AgentManagedHookInstallReceipt['entries'][number]; backup: Buffer | null }> = []
     for (const entry of receipt.entries) {
       const path = safeTarget(entry.path)
-      const current = await readCurrent(path)
+      const current = await readManagedHookTarget(path)
       if (!current || hash(current.content) !== entry.installedHash) {
         throw new AgentMuxError('Managed Hook target changed after installation.', 'HOOK_TARGET_CHANGED')
       }
@@ -325,4 +367,21 @@ export class AgentManagedHookInstaller {
     }
     return normalized
   }
+}
+
+function validatePlan(plan: AgentManagedHookPlan): void {
+  if (plan.mutations.length === 0 || plan.mutations.length > MAX_HOOK_MUTATIONS) {
+    throw new AgentMuxError('Managed Hook plan has an invalid mutation count.', 'INVALID_HOOK_PLAN')
+  }
+  const paths = new Set<string>()
+  for (const mutation of plan.mutations) {
+    safeTarget(mutation.path)
+    if (paths.has(mutation.path)) throw new AgentMuxError('Managed Hook plan repeats a target.', 'INVALID_HOOK_PLAN')
+    paths.add(mutation.path)
+    if (Buffer.byteLength(mutation.content) > MAX_HOOK_FILE_BYTES) throw new AgentMuxError('Managed Hook content exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
+  }
+}
+
+function inspectionErrorCode(error: unknown): string {
+  return error instanceof AgentMuxError ? error.code : 'HOOK_TARGET_READ_FAILED'
 }

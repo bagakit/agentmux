@@ -1,3 +1,4 @@
+import { inspectHookDisableSetting } from './shared.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -137,6 +138,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,
+    inspectHookActivation: context => inspectHookDisableSetting(context, 'disableAllHooks'),
     launchOptions: CLAUDE_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
