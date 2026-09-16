@@ -3,7 +3,7 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
@@ -150,7 +150,7 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
     expect(button).toBeDefined()
     await act(async () => button!.click())
   }
-  await action('Retry queue')
+  await action('Send queued message')
   expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', 'queued-1')
   await action('Copy all')
   expect(copy).toHaveBeenCalledExactlyOnceWith('First exact words\n\nSecond exact words')
@@ -158,6 +158,85 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued[1]])
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
   expect(trigger().textContent).toBe('1')
+})
+
+it.each(['queued', 'restoring'] as const)('shows exact nonempty %s, deferred, failed and old-Run facts without executing on read', async (status) => {
+  const queued: AgentSteerQueueEntry[] = [
+    { operationId: 'in-flight', runId: 'run-agent-1', text: 'Exact active request', status },
+    { operationId: 'deferred', runId: 'run-agent-1', text: 'Exact deferred request', status: 'deferred',
+      error: 'Provider is not ready. Diagnostic: private-helper=91' },
+    { operationId: 'failed', runId: 'run-agent-1', text: 'Exact failed request', status: 'failed',
+      error: 'Input was refused. Diagnostic: private-failure=92' },
+    { operationId: 'old', runId: 'old-run', text: 'Exact old Run request', status: 'queued' }
+  ]
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': queued },
+    agentSteerInFlight: { 'agent-1': 'in-flight' } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  const recover = vi.spyOn(api.sessions, 'recover')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  await folder('outbox')
+  const rows = [...mailbox().querySelectorAll<HTMLLIElement>('.composer-outbox li')]
+  expect(rows.map(row => row.querySelector('span:first-child')?.textContent)).toEqual([
+    'Exact active request', 'Exact deferred request', 'Exact failed request', 'Exact old Run request'
+  ])
+  expect(rows.map(row => row.dataset.state)).toEqual([status, 'deferred', 'failed', 'queued'])
+  expect(rows[0]!.textContent).toContain(status === 'restoring'
+    ? 'Restoring the Agent. This message has not been dispatched.' : 'Sending. Waiting for delivery confirmation.')
+  expect(rows[1]!.textContent).toContain('Provider is not ready.')
+  expect(rows[2]!.textContent).toContain('Input was refused.')
+  expect(rows[3]!.textContent).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
+  expect(mailbox().textContent).not.toContain('private-helper')
+  expect(mailbox().textContent).not.toContain('private-failure')
+  expect(rows[0]!.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual(queued)
+  expect(submit).not.toHaveBeenCalled()
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('explicit mailbox Send retries the real Store with the same exact operation and Run while keeping old work paused', async () => {
+  const pending: AgentSteerQueueEntry = { operationId: 'restored-intent', runId: 'run-agent-1',
+    text: 'Keep the exact restored request', status: 'deferred', errorCode: 'AGENT_EXECUTION_NOT_REQUESTED',
+    error: 'Queued before restart. Choose Send to execute this message.' }
+  const old: AgentSteerQueueEntry = { operationId: 'old-intent', runId: 'old-run',
+    text: 'Keep the unavailable old request', status: 'queued' }
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [pending, old] } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+    .mockRejectedValueOnce(new Error('Provider is still preparing. Diagnostic: private-helper=93'))
+    .mockResolvedValueOnce()
+  const recover = vi.spyOn(api.sessions, 'recover')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open')
+  await folder('outbox')
+  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(row => row.textContent))
+    .toEqual([pending.text, old.text])
+  expect(submit).not.toHaveBeenCalled()
+  expect(recover).not.toHaveBeenCalled()
+  const clickSend = async () => {
+    const send = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox > button')]
+      .find(button => button.textContent?.trim() === 'Send queued message')
+    expect(send).toBeDefined()
+    await act(async () => send!.click())
+  }
+  await clickSend()
+  expect(submit.mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
+    [composerSession().control, pending.text, pending.operationId]
+  ])
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([
+    { operationId: pending.operationId, runId: pending.runId, text: pending.text, status: 'deferred',
+      error: 'Provider is still preparing. Diagnostic: private-helper=93' }, old
+  ])
+  expect(mailbox().querySelector('.composer-outbox li')?.textContent).toContain('Provider is still preparing.')
+  expect(mailbox().textContent).not.toContain('private-helper')
+  await clickSend()
+  expect(submit.mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
+    [composerSession().control, pending.text, pending.operationId],
+    [composerSession().control, pending.text, pending.operationId]
+  ])
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([old])
+  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(row => row.textContent)).toEqual([old.text])
+  expect(mailbox().querySelectorAll('.composer-outbox > button')).toHaveLength(1) // Copy only; no Send to another Run.
+  expect(recover).not.toHaveBeenCalled()
 })
 
 it('does not confuse a healthy pending count with unread notices and supports keyboard folder switching', async () => {
@@ -201,7 +280,7 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
   const clickAction = async () => {
-    const label = kind === 'copy' ? 'Copy message' : 'Retry queue'
+    const label = kind === 'copy' ? 'Copy message' : 'Send queued message'
     const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find((item) => item.textContent?.trim() === label)
     expect(button).toBeDefined()
     await act(async () => button!.click())
