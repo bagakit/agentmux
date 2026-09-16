@@ -38,10 +38,10 @@ export function composerSubmitMode(
     return { canType: false, canSubmit: false, primaryAction: 'send', placeholder: 'Agent is connecting…' }
   }
   if (session.status.state === 'disconnected') {
-    return { canType: false, canSubmit: false, primaryAction: 'send', placeholder: 'Agent is disconnected' }
+    return { canType: true, canSubmit: true, primaryAction: 'send', placeholder: 'Send to restore this Agent…' }
   }
   if (session.processState !== 'running') {
-    return { canType: false, canSubmit: false, primaryAction: 'send', placeholder: 'Agent is not running' }
+    return { canType: true, canSubmit: true, primaryAction: 'send', placeholder: 'Send to restore this Agent…' }
   }
   // Deliberately NO `state === 'error'` gate here. A running process whose live OUTPUT channel died
   // (RECONNECT_REATTACH_FAILED, a vanished-handshake run) and one that merely emitted a live-channel

@@ -566,14 +566,16 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
       new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
       'utf8'
     )
-    const button = source.slice(
-      source.indexOf('continuityNotice ? ('),
-      source.indexOf('</button>', source.indexOf('continuityNotice ? ('))
-    )
+    const start = source.indexOf('continuityNotice ? (')
+    const end = source.indexOf('</button>', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const button = source.slice(start, end)
+    expect(button).toContain('onClick=')
 
     // refresh 判据在前、且落在 refresh()；retry 判据落在 recover()。两者不许互换。
-    expect(button).toContain('continuityRefreshEnabled(continuityNotice)\n                          ? () => void refresh()')
-    expect(button).toContain('continuityRetryEnabled(continuityNotice)\n                            ? () => void recover()')
+    expect(button).toMatch(/continuityRefreshEnabled\(continuityNotice\)\s*\?\s*\(\) => void refresh\(\)/)
+    expect(button).toMatch(/continuityRetryEnabled\(continuityNotice\)\s*\?\s*\(\) => void recover\(\)/)
     // 两个判据都要参与 disabled，否则其中一类的按钮会是死的。
     expect(button).toContain('continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)')
   })

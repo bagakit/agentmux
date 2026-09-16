@@ -3,14 +3,14 @@ import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
-import type { AgentSessionControl, SessionSnapshot } from '../src/shared/contracts'
+import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 
 const fixture = vi.hoisted(() => ({
   historyPage: vi.fn(), write: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
   resizeObservers: [] as Array<() => void>,
-  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] }, pendingAgentLaunches: {}, recoveryCandidates: [],
+  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
     timelines: {}, agentNames: {}, viewModes: {}, regionCaretFocus: null,
     clearRegionCaretFocus: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
@@ -28,7 +28,7 @@ vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionRe
 vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: () => <div>Captured Activity</div> }))
 
 const control: AgentSessionControl = {kind:'agent',hostId:'local',agentSessionId:'agent-history',run:{runId:'run-history'}}
-const session: SessionSnapshot = {
+const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
   id: control.agentSessionId, hostId:'local',workspacePath:'/synthetic',label:'Reader',createdAt:1,updatedAt:1,
   processState:'running',status:{state:'running',source:'run-process',observedAt:1},latestOutputBytes:0,
   kind:'agent',providerId:'codex',executorId:'codex',control,
@@ -46,6 +46,7 @@ beforeEach(() => {
   fixture.resizeObservers.length = 0
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { fixture.resizeObservers.push(callback) } observe() {} disconnect() {} })
   fixture.state.sessions = [session]
+  fixture.state.recoveryCandidates = []
   fixture.historyPage.mockResolvedValue(page('latest','older-1'))
   container = document.createElement('div'); document.body.append(container); root=createRoot(container)
 })
@@ -81,12 +82,54 @@ it('opens native history in the actual SessionPane while keeping the original Te
 it('keeps the native history entry reachable when the Agent Run is unavailable', async () => {
   fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
-  expect(container.textContent).toContain('Agent process exited')
-  await act(async () => button('Conversation history').click())
+  expect(container.textContent).toContain('Ready to restore')
   expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(control, undefined)
   expect(container.textContent).toContain('body latest')
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
   expect(fixture.write).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
+  await act(async () => button('Resume').click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  await act(async () => button('Session').click())
+  expect(button('Conversation history')).toBeDefined()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
+  await act(async () => button('Resume').click())
+  expect(fixture.state.recoverSession.mock.calls).toEqual([[session.id], [session.id]])
+})
+
+it('keeps a missing Run readable with a direct restore action when the independent history read fails', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'disconnected', source: 'run-process', observedAt: 1, detail: 'Idle time is unknown.' } }]
+  fixture.state.recoveryCandidates = [{ agentSessionId: session.id, hostId: 'local', workspacePath: session.workspacePath,
+    providerId: 'codex', executorId: 'codex', capabilities: session.capabilities,
+    label: 'Pending', createdAt: 1, updatedAt: 1, run: control.run }]
+  fixture.historyPage.mockRejectedValue(new Error('Native reader unavailable'))
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(container.textContent).toContain('Ready to restore')
+  expect(container.textContent).toContain('Idle time is unknown')
+  expect(container.textContent).toContain('History read failed: Native reader unavailable')
+  expect(button('Resume')).toBeDefined()
+  expect(container.querySelector('[aria-label="Original Agent composer"]')).not.toBeNull()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+  expect(fixture.write).not.toHaveBeenCalled()
+})
+
+it('does not start independent history reads for a hidden pending view', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'exited' }]
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible={false} linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(fixture.historyPage).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+})
+
+it('re-reads a changed canonical Run from the pending history notice without resuming again', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: 1,
+    continuity: 'conflict', continuityConflict: 'session-run-changed' } }]
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  await act(async () => button('Re-read this Agent').click())
+  expect(fixture.state.refreshSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
 })
 
 it('real upward wheel pages once while pending, keeps ordered resources, and does not infer end from an empty page', async () => {

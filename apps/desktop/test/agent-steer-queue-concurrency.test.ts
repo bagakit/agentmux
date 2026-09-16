@@ -48,6 +48,14 @@ function readinessEvent(id = 's'): RuntimeEvent {
   }
 }
 
+function completionEvent(id = 's'): RuntimeEvent {
+  const event = readinessEvent(id)
+  if (event.event.type !== 'agent-session') throw new Error('Expected Agent Session fixture')
+  delete event.event.session.terminalPromptReadiness
+  event.event.session.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 2 }
+  return event
+}
+
 describe('one Session owns one live queue drain', () => {
   it('refuses overflow admission without evicting earlier user messages', () => {
     useAppStore.setState({ sessions: [agent()] })
@@ -113,7 +121,7 @@ describe('one Session owns one live queue drain', () => {
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('retains a readiness wake arriving before a pending refusal is received', async () => {
+  it('retains a native completion wake arriving before a pending refusal is received', async () => {
     useAppStore.setState({ sessions: [agent()] })
     const [entry] = enqueue('retry after readiness')
     const gate = deferred()
@@ -122,7 +130,7 @@ describe('one Session owns one live queue drain', () => {
       .mockResolvedValue(undefined)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
     await Promise.resolve()
-    useAppStore.getState().applyEvent(readinessEvent())
+    useAppStore.getState().applyEvent(completionEvent())
     gate.resolve()
     await drain
     expect(submit.mock.calls.map((call) => call[2])).toEqual([entry!.operationId, entry!.operationId])
@@ -269,7 +277,7 @@ describe('one Session owns one live queue drain', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 
-  it('ignores terminal output and wakes only the Session named by readiness', async () => {
+  it('ignores terminal output and wakes only the Session named by native completion', async () => {
     useAppStore.setState({ sessions: [agent(), agent('other')] })
     enqueue('s message')
     useAppStore.getState().enqueueAgentSteer('other', 'other message')
@@ -280,7 +288,7 @@ describe('one Session owns one live queue drain', () => {
     } })
     await Promise.resolve()
     expect(submit).not.toHaveBeenCalled()
-    useAppStore.getState().applyEvent(readinessEvent())
+    useAppStore.getState().applyEvent(completionEvent())
     await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
     expect(submit.mock.calls.map((call) => [call[0].agentSessionId, call[1]])).toEqual([['s', 's message']])
     expect(useAppStore.getState().agentSteerQueues.other).toEqual([
@@ -299,10 +307,10 @@ describe('one Session owns one live queue drain', () => {
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     await useAppStore.getState().refreshSession('s')
     await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
-    expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'after refresh', entry!.operationId)
+    expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'after refresh', entry!.operationId, undefined, undefined)
   })
 
-  it('drains a persisted queue when startup restores a healthy snapshot without any event', async () => {
+  it('keeps a persisted queue paused until explicit Send even when startup restores a healthy snapshot', async () => {
     const running = agent()
     const tab = createWorkbenchTab('restored-tab', {
       regionId: 'restored-region', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 's'
@@ -330,8 +338,14 @@ describe('one Session owns one live queue drain', () => {
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     const dispose = await useAppStore.getState().initialize()
     try {
-      await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
-      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op')
+      await useAppStore.getState().flushAgentSteerQueue('s')
+      expect(useAppStore.getState().agentSteerQueues.s).toEqual([
+        expect.objectContaining({ operationId: 'persisted-op', runId: 's-run', errorCode: 'AGENT_EXECUTION_NOT_REQUESTED' })
+      ])
+      expect(submit).not.toHaveBeenCalled()
+      await useAppStore.getState().sendQueuedAgentSteer('s', 'persisted-op')
+      expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op', undefined, undefined)
       expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
     } finally { dispose() }
   })

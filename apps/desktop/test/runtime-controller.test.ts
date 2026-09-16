@@ -3,6 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AgentMuxClient as ActualCoreClient, type AgentMuxAgentPromptInput } from '../../../packages/core/src/client.js'
+import { AgentMuxMemoryAgentSessionStore as ActualCoreMemoryStore } from '../../../packages/core/src/agent-session-store.js'
+import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/agent-session-registry.js'
+import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter.js'
+import type { AgentScreenEvidenceStore } from '../../../packages/core/src/screen-evidence.js'
+import type { AgentMuxStoredAgentSession } from '../../../packages/core/src/types.js'
 import {
   AgentMuxError,
   type AgentCapabilities,
@@ -151,8 +157,8 @@ const runtimeFixture = vi.hoisted(() => {
       createdAt: 1,
       updatedAt: 2
     }))
-    readonly agentSessions = vi.fn(() => [])
-    readonly submitAgentPrompt = vi.fn(async () => {})
+    readonly agentSessions = vi.fn((): AgentMuxAgentSession[] => [])
+    readonly submitAgentPrompt = vi.fn(async (_input: AgentMuxAgentPromptInput) => {})
     readonly respondAgentInteraction = vi.fn(async () => {})
     readonly resumeAgent = vi.fn(async () => {})
     readonly ensureAgentContinuity = vi.fn(async (): Promise<AgentMuxAgentContinuityResult> => {
@@ -862,9 +868,78 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
     expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({
       agentSessionId: 'agent-1',
+      expectedRun: control.run,
       prompt: 'hello',
       authorAgentSessionId: 'reviewer'
     }))
+  })
+
+  it('fences the actual Core admission if a healthy Run changes after Main precheck', async () => {
+    const controller = await configuredController()
+    const bridge = runtimeFixture.FakeClient.instances[0]!
+    const privateStore = new ActualCoreMemoryStore()
+    const original: AgentMuxStoredAgentSession = {
+      kind: 'agent', agentSessionId: 'agent-1', providerId: 'codex', executorId: 'review',
+      hostId: 'local', workspacePath: '/repo', run: { runId: 'run-1' }, retiredRuns: [],
+      hookBindingId: 'race-binding', hookToken: 'race-token', outputCursorBytes: 0,
+      createdAt: 1, updatedAt: 1
+    }
+    await privateStore.compareAndSwap(null, original)
+    const core = new ActualCoreClient({ store: privateStore })
+    const inner = core as unknown as {
+      connected: boolean
+      registry: AgentMuxAgentSessionRegistry
+      screenEvidence: AgentScreenEvidenceStore
+      kernel: {
+        isConnected(): boolean
+        identity(): { daemonInstanceId: string }
+        status(runId: string): Promise<CtxmuxAdapterRun>
+        input(runId: string, operation: { expectedByte: number; data: string }): Promise<{
+          run: CtxmuxAdapterRun; appliedByteRange: { startByte: number; endByte: number }
+        }>
+      }
+    }
+    await inner.registry.load('local')
+    inner.connected = true
+    const cursors = new Map<string, number>()
+    const run = (runId: string): CtxmuxAdapterRun => ({
+      runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: '/repo',
+      pid: runId === 'run-1' ? 123 : 124, state: { type: 'running' }, cols: 80, rows: 24,
+      latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0
+    })
+    const writes: Array<{ runId: string; data: string }> = []
+    inner.kernel.isConnected = () => true
+    inner.kernel.identity = () => ({ daemonInstanceId: 'race-daemon' })
+    inner.kernel.status = async (runId) => run(runId)
+    inner.kernel.input = async (runId, operation) => {
+      writes.push({ runId, data: operation.data })
+      const endByte = operation.expectedByte + Buffer.byteLength(operation.data)
+      cursors.set(runId, endByte)
+      return { run: run(runId), appliedByteRange: { startByte: operation.expectedByte, endByte } }
+    }
+    vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
+    bridge.statusAgent.mockImplementation(async () => {
+      const checked = await core.statusAgent('agent-1')
+      await inner.registry.put({ ...original, run: { runId: 'run-2' }, updatedAt: 2 }, original.run)
+      expect(checked.run).toMatchObject({ runId: 'run-1', state: 'running' })
+      expect(core.agentSession('agent-1').run).toEqual({ runId: 'run-2' })
+      return checked
+    })
+    bridge.submitAgentPrompt.mockImplementation(async (input) => await core.submitAgentPrompt(input))
+    const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: original.run }
+    try {
+      await expect(controller.submitPrompt(control, 'bound text', 'bound-operation'))
+        .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+      expect(bridge.submitAgentPrompt).toHaveBeenCalledWith({ agentSessionId: 'agent-1',
+        expectedRun: original.run, operationId: 'bound-operation', prompt: 'bound text' })
+      expect(writes).toEqual([])
+      expect(core.agentSession('agent-1').promptCompletionAdmission).toBeUndefined()
+      expect((await privateStore.loadTimeline('agent-1')).items).toEqual([])
+      expect(await core.statusAgent('agent-1')).toMatchObject({ run: { runId: 'run-2', state: 'running' } })
+    } finally {
+      await core.dispose()
+      await controller.dispose()
+    }
   })
 
   it('carries completion and cancellation through the Core boundary', async () => {
@@ -876,7 +951,7 @@ describe('RuntimeController configuration transaction', () => {
     const signal = new AbortController().signal
     await controller.submitPrompt(control, 'next', 'original', { completionId: '["run-1",1]', isCurrent: () => true, signal })
     expect(client.submitAgentPrompt).toHaveBeenCalledWith({ agentSessionId: 'agent-1', operationId: 'original', prompt: 'next',
-      expectedCompletionId: '["run-1",1]', signal })
+      expectedRun: control.run, expectedCompletionId: '["run-1",1]', signal })
     await expect(controller.submitPrompt(control, 'next', 'stopped', { completionId: '["run-1",1]', isCurrent: () => false, signal }))
       .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
@@ -890,9 +965,10 @@ describe('RuntimeController configuration transaction', () => {
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
     await controller.submitPrompt(control, 'first', 'original', undefined, undefined, { allowUncertainTurn: true })
     expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', operationId: 'original',
-      prompt: 'first', allowUncertainTurn: true })
+      expectedRun: control.run, prompt: 'first', allowUncertainTurn: true })
     await controller.submitPrompt(control, 'second', 'other')
-    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', operationId: 'other', prompt: 'second' })
+    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', expectedRun: control.run,
+      operationId: 'other', prompt: 'second' })
     await controller.submitPrompt(control, 'auto', 'automatic', {
       completionId: '["run-1",1]', isCurrent: () => true, signal: new AbortController().signal
     }, undefined, { allowUncertainTurn: true })
@@ -1134,13 +1210,14 @@ describe('RuntimeController configuration transaction', () => {
       hostId: 'local',
       agentSessionId: 'agent-1',
       run: { runId: 'run-1' }
-    }, config)).resolves.toMatchObject({
+    }, config, undefined, 'first-execution-stable-op')).resolves.toMatchObject({
       kind: 'resumed',
       session: { id: 'agent-1', control: { run: { runId: 'run-2' } } }
     })
     expect(client.ensureAgentContinuity).toHaveBeenCalledWith(expect.objectContaining({
       agentSessionId: 'agent-1',
       expectedRun: { runId: 'run-1' },
+      operationId: 'first-execution-stable-op',
       commandOverride: 'codex'
     }))
     expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('prompt')
@@ -1185,6 +1262,37 @@ describe('RuntimeController configuration transaction', () => {
       evidence: { kind: 'run-missing', observedAt: 2 }
     })
     expect(client.runtimeProjection).not.toHaveBeenCalled()
+    expect(client.resumeAgent).not.toHaveBeenCalled()
+  })
+
+  it.each(['exact-running', 'other-run', 'ended'] as const)('reconciles a lost recovery conflict only from exact canonical running facts: %s', async situation => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const config: AppConfig = { ...localConfig, executors: {
+      review: { label: 'Review', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false }
+    } }
+    const previous = agentStatusFixture()
+    const canonicalRunId = situation === 'other-run' ? 'different-run' : 'canonical-run'
+    const canonicalSession = { ...previous.session, run: { runId: canonicalRunId } }
+    const { exitCode: _exit, ...run } = previous.run
+    client.runtimeProjection.mockResolvedValueOnce({ hostId: 'local', subjects: [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: '/repo',
+      providerId: 'codex', executorId: 'review', agentSession: canonicalSession,
+      run: { ...run, runId: canonicalRunId, state: situation === 'ended' ? 'exited' : 'running' }
+    }] })
+    const conflict = { kind: 'conflict' as const, agentSessionId: 'agent-1',
+      previousRun: previous.session.run, currentRun: { runId: 'canonical-run' },
+      reason: 'session-run-changed' as const, evidence: { kind: 'agent-session-store' as const } }
+    client.ensureAgentContinuity.mockResolvedValueOnce(conflict)
+    const result = await controller.recoverSession({ kind: 'agent', hostId: 'local', agentSessionId: 'agent-1',
+      run: previous.session.run }, config, undefined, 'same-stable-intent')
+    if (situation === 'exact-running') {
+      expect(result).toMatchObject({ kind: 'reattachable', session: { processState: 'running', control: { run: { runId: 'canonical-run' } } } })
+    } else expect(result).toEqual(conflict)
+    expect(client.ensureAgentContinuity).toHaveBeenCalledTimes(1)
+    expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).toMatchObject({ operationId: 'same-stable-intent' })
+    expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('prompt')
+    expect(client.submitAgentPrompt).not.toHaveBeenCalled()
     expect(client.resumeAgent).not.toHaveBeenCalled()
   })
 
@@ -1725,6 +1833,31 @@ describe('RuntimeController configuration transaction', () => {
     expect(snapshot.recoveryCandidates[0]?.capabilities)
       .not.toEqual(runtimeFixture.FakeClient.PROVIDER_CAPABILITIES.codex)
     expect(client.providers.get).toHaveBeenCalledWith('claude')
+  })
+
+  it.each(['ended', 'missing'] as const)('passes the durable native epoch independently of %s process display status', async (kind) => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: 999, stateEnteredAt: 7 }
+    const stored = { ...status.session, semanticStatus }
+    client.agentSessions.mockReturnValue([stored])
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: kind === 'missing' ? [] : [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: '/repo',
+      providerId: stored.providerId, executorId: stored.executorId, agentSession: stored,
+      run: { ...status.run, state: 'exited', observedAt: 1234, exitCode: 0 }
+    }] })
+    const snapshot = await controller.snapshot(localConfig)
+    if (kind === 'ended') {
+      expect(snapshot.sessions).toHaveLength(1)
+      expect(snapshot.sessions[0]).toMatchObject({ processState: 'exited', status: { state: 'exited', observedAt: 1234 }, semanticStatus })
+    } else {
+      expect(snapshot.recoveryCandidates).toHaveLength(1)
+      expect(snapshot.recoveryCandidates[0]?.semanticStatus).toEqual(semanticStatus)
+    }
+    stored.semanticStatus.stateEnteredAt = 12
+    const carried = kind === 'ended' ? snapshot.sessions.find((session) => session.kind === 'agent') : snapshot.recoveryCandidates[0]
+    expect(carried?.semanticStatus?.stateEnteredAt).toBe(7)
   })
 
   it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {

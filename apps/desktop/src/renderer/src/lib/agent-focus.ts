@@ -130,12 +130,13 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
 export function sanitizeAgentFocus(
   context: AgentFocusContext,
   sessions: readonly SessionSnapshot[],
-  laneForSession: (session: SessionSnapshot) => AgentFocusLane
+  laneForSession: (session: SessionSnapshot) => AgentFocusLane,
+  retainedUnknownSessionIds?: ReadonlySet<string>
 ): AgentFocusContext {
   const byId = new Map(sessions.map((session) => [session.id, session]))
   const executionHistory = context.execution.history.filter((entry) => {
     const session = byId.get(entry.sessionId)
-    return session !== undefined && laneForSession(session) === 'execution'
+    return session ? laneForSession(session) === 'execution' : retainedUnknownSessionIds?.has(entry.sessionId) === true
   })
   const executionSession = context.execution.sessionId
     ? byId.get(context.execution.sessionId)
@@ -147,13 +148,15 @@ export function sanitizeAgentFocus(
     execution: {
       sessionId: executionSession && laneForSession(executionSession) === 'execution'
         ? executionSession.id
-        : null,
+        : !executionSession && context.execution.sessionId && retainedUnknownSessionIds?.has(context.execution.sessionId)
+          ? context.execution.sessionId : null,
       history: executionHistory
     },
     pmo: {
       sessionId: pmoSession && laneForSession(pmoSession) === 'pmo'
         ? pmoSession.id
-        : null
+        : !pmoSession && context.pmo.sessionId && retainedUnknownSessionIds?.has(context.pmo.sessionId)
+          ? context.pmo.sessionId : null
     }
   }
 }

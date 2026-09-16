@@ -5,6 +5,7 @@ import type {
   AgentMuxAgentContinuityUnavailableReason,
   AgentCapabilities,
   AgentDisplayState,
+  AgentStatus,
   AgentExecutorConfig as CoreAgentExecutorConfig,
   AgentExecutorId,
   AgentProviderId,
@@ -885,6 +886,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       providerId: AgentProviderId
       executorId: AgentExecutorId
       capabilities: AgentCapabilities
+      /** Durable native semantic fact, independent of the current Run's display status. */
+      semanticStatus?: AgentStatus
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
@@ -941,6 +944,8 @@ export type AgentSessionRecoveryCandidate = {
   providerId: AgentProviderId
   executorId: AgentExecutorId
   capabilities: AgentCapabilities
+  /** Core's last native semantic state; missing entry time remains unknown. */
+  semanticStatus?: AgentStatus
   terminalCapability?: AgentTerminalCapabilityState
   label: string
   createdAt: number
@@ -1326,6 +1331,8 @@ export type AgentMuxDesktopApi = {
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {
+    /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
+    requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
     captureScreenshot(): Promise<string | null>
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
@@ -1426,7 +1433,7 @@ export type AgentMuxDesktopApi = {
     // Transport loss remains an error and never authorizes resume.
     // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
     // Agent or a newly restarted raw Terminal.
-    recover(session: SessionControl, workspacePath?: string): Promise<SessionRecoveryResult>
+    recover(session: SessionControl, workspacePath?: string, operationId?: string): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }

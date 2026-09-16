@@ -219,6 +219,7 @@ function projectSession(
       providerId: subject.providerId,
       executorId: subject.executorId,
       capabilities: capabilitiesFor(subject.providerId),
+      ...(semantic ? { semanticStatus: structuredClone(semantic) } : {}),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),
@@ -579,6 +580,7 @@ export class RuntimeController {
           providerId: session.providerId,
           executorId: session.executorId,
           capabilities: capabilitiesFor(session.providerId),
+          ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),
@@ -968,6 +970,7 @@ export class RuntimeController {
         }
         await client.submitAgentPrompt({
           agentSessionId: control.agentSessionId,
+          expectedRun: control.run,
           operationId: operationId ?? randomUUID(),
           ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
           prompt,
@@ -1106,18 +1109,20 @@ export class RuntimeController {
   async recoverSession(
     control: SessionControl,
     config: AppConfig,
-    workspacePath?: string
+    workspacePath?: string,
+    operationId: string = randomUUID()
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostLifecycleOperation(
       control.hostId,
-      async () => await this.performRecovery(control, config, workspacePath)
+      async () => await this.performRecovery(control, config, workspacePath, operationId)
     )
   }
 
   private async performRecovery(
     control: SessionControl,
     config: AppConfig,
-    workspacePath?: string
+    workspacePath: string | undefined,
+    operationId: string
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'terminal') {
@@ -1151,7 +1156,7 @@ export class RuntimeController {
       const result = await client.ensureAgentContinuity({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        operationId: randomUUID()
+        operationId
       })
       if (result.kind === 'reattachable' || result.kind === 'resumed') {
         throw new Error('Core returned live continuity without a current Agent Session.')
@@ -1168,7 +1173,7 @@ export class RuntimeController {
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
-      operationId: randomUUID(),
+      operationId,
       args: executor.args,
       env: {
         ...executor.env,
@@ -1176,6 +1181,13 @@ export class RuntimeController {
       },
       commandOverride: executor.command
     })
+    if (result.kind === 'conflict' && result.reason === 'session-run-changed' && result.currentRun) {
+      // A prior recovery whose reply was lost may already own the canonical Run.
+      const session = await this.sessionByTarget(client,
+        { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
+      if (session.kind === 'agent' && session.processState === 'running' &&
+        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session }
+    }
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
     return {
       kind: result.kind,

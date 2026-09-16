@@ -22,7 +22,7 @@ const fixture = vi.hoisted(() => ({
     viewModes: {} as Record<string, 'terminal' | 'timeline'>,
     agentComposerDrafts: {} as Record<string, string>,
     noticeReadReceipts: {},
-    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId: string; text: string; status: 'queued' | 'deferred' | 'failed'; error?: string }>>,
+    agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId?: string; text: string; status: 'queued' | 'restoring' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     // Returns true = "the queue took it". The composer clears the draft only on true, so a mock that
@@ -493,7 +493,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.setPosture).toHaveBeenCalledWith('agent-1', 'always-approve')
   })
 
-  it('does not guess that a disconnected running process can accept input', () => {
+  it('offers an explicit restore-and-send attempt without claiming a disconnected Agent already accepts input', () => {
     const disconnected = agentSession({
       status: { state: 'disconnected', source: 'run-process', observedAt: 2 }
     })
@@ -502,11 +502,11 @@ describe('AgentSessionComposer adapter', () => {
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
     expect(agentComposerAvailability(disconnected)).toEqual({
-      disabled: true,
-      placeholder: 'Agent is disconnected'
+      disabled: false,
+      placeholder: 'Send to restore this Agent…'
     })
-    expect(markup).toContain('placeholder="Agent is disconnected"')
-    expect(markup).toMatch(/data-disabled="true"/)
+    expect(markup).toContain('placeholder="Send to restore this Agent…"')
+    expect(markup).toMatch(/data-disabled="false"/)
   })
 
   it('stays visible and disabled before the Agent snapshot exists', () => {
@@ -517,7 +517,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).toMatch(/data-disabled="true"/)
   })
 
-  it('stays visible and disabled after the Agent Run exits', () => {
+  it('keeps draft and explicit typed restore-and-send available after the Agent Run exits', () => {
     const exited = agentSession({
       processState: 'exited',
       status: { state: 'exited', source: 'run-process', observedAt: 3 }
@@ -527,11 +527,33 @@ describe('AgentSessionComposer adapter', () => {
     const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
 
     expect(agentComposerAvailability(exited)).toEqual({
-      disabled: true,
-      placeholder: 'Agent is not running'
+      disabled: false,
+      placeholder: 'Send to restore this Agent…'
     })
-    expect(markup).toContain('placeholder="Agent is not running"')
-    expect(markup).toMatch(/data-disabled="true"/)
+    expect(markup).toContain('placeholder="Send to restore this Agent…"')
+    expect(markup).toMatch(/data-disabled="false"/)
+  })
+
+  it.each(['exited', 'interrupted', 'disconnected'] as const)('connects explicit typed Send but withholds raw posture during %s restoration', async state => {
+    fixture.state.sessions = [agentSession({ providerId: 'grok',
+      ...(state === 'disconnected'
+        ? { status: { state: 'disconnected', source: 'run-process', observedAt: 3 } }
+        : { processState: state }) })]
+    fixture.state.providerCatalog = [postureCatalogEntry()]
+    const text = `first deliberate execution from ${state}`
+    fixture.state.agentComposerDrafts = { 'agent-1': text }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
+      props: { disabled: boolean; onSubmit?: () => void; onSetPosture?: (id: string) => void; onChange: (text: string) => void }
+    }
+    expect(composer.props.disabled).toBe(false)
+    expect(composer.props.onSubmit).toBeTypeOf('function')
+    expect(composer.props.onSetPosture).toBeUndefined()
+    composer.props.onChange('draft edit without execution')
+    expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', 'draft edit without execution')
+    expect(fixture.state.send).not.toHaveBeenCalled()
+    composer.props.onSubmit!()
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('agent-1', text, expect.any(Function)))
+    expect(fixture.state.setPosture).not.toHaveBeenCalled()
   })
 
   it('renders a Provider-declared posture control on the composer, drawn from its catalog declaration', () => {
@@ -583,7 +605,7 @@ describe('AgentSessionComposer adapter', () => {
 
     expect(agentComposerAvailability(waiting)).toEqual({
       disabled: true,
-      placeholder: 'Answer the Agent request above…'
+      placeholder: 'Answer the Agent request above… Draft a steer…'
     })
   })
 
@@ -671,6 +693,20 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
 
   it('running 时为 true', () => {
     expect(deliverable(agentSession({ processState: 'running' }))).toBe(true)
+  })
+
+  it('allows one newly unbound intent to request restoration without claiming an old bound intent is deliverable', () => {
+    fixture.state.sessions = [agentSession({ processState: 'interrupted' })]
+    fixture.state.agentSteerQueues = { 'agent-1': [
+      { operationId: 'first', text: 'restore explicitly', status: 'restoring' },
+      { operationId: 'old', runId: 'run-1', text: 'old binding is not replayable', status: 'deferred' }
+    ] }
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
+      props: { mailbox: { props: { queued: Array<{ id: string; deliverable: boolean }> } } }
+    }
+    expect(composer.props.mailbox.props.queued.map(entry => [entry.id, entry.deliverable])).toEqual([
+      ['first', true], ['old', false]
+    ])
   })
 
   it('exited 时为 false——这正是搁浅那一刻', () => {

@@ -33,6 +33,7 @@ import { SessionResultReview } from './SessionResultReview'
 import { SessionHistoryView } from './SessionHistoryView'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
+import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -80,6 +81,7 @@ export function SessionPane({
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId)
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
@@ -95,6 +97,10 @@ export function SessionPane({
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const [historyOpen, setHistoryOpen] = useState(false)
   useEffect(() => { setHistoryOpen(false) }, [sessionId, viewMode])
+  const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
+  useEffect(() => {
+    if (pendingAgentRestore && visible) setHistoryOpen(true)
+  }, [sessionId, pendingAgentRestore, visible])
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
@@ -286,15 +292,46 @@ export function SessionPane({
     setRefreshing(false)
   }
 
+  // The history notice and the underlying Session share one Core-reasoned action.
+  const agentRecoveryAction = !projectionPolicy.allowsRecovery ? (
+    <span>Open this Session in its Project to restore it.</span>
+  ) : continuityNotice ? (
+    <button type="button" className="small-button"
+      disabled={!(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) || recovering || refreshing}
+      title={continuityNotice.reason}
+      onClick={continuityRefreshEnabled(continuityNotice)
+        ? () => void refresh() : continuityRetryEnabled(continuityNotice) ? () => void recover() : undefined}>
+      <RotateCcw size={12} /> {recovering && continuityRetryEnabled(continuityNotice)
+        ? 'Resuming…' : refreshing && continuityRefreshEnabled(continuityNotice) ? 'Re-reading…' : continuityNotice.actionLabel}
+    </button>
+  ) : (
+    <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+      <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
+    </button>
+  )
+  const pendingRestoreDetail = pendingAgentRestore ? continuityNotice?.reason ?? (recoveryCandidate
+    ? session.status.detail
+    : agentStartupRecoveryDetail(agentStartupRecoveryDecision({
+      runState: session.processState,
+      ...(session.kind === 'agent' && session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
+      canonical: !(runtimeOwnershipWarnings ?? []).includes(session.hostId),
+      now: Date.now()
+    }))) : undefined
+
   return (
     <section
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
-        {session.kind === 'terminal' || viewMode === 'terminal' ? (
+        {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
           <div className="agent-terminal-stage">
-            {parked ? (
+            {pendingAgentRestore ? (
+              <div className="terminal-cold-parked" role="status">
+                <strong>Ready to restore</strong>
+                <span>Existing history and your draft are kept. Send your next request or use Resume.</span>
+              </div>
+            ) : parked ? (
               <div className="terminal-cold-parked" role="status" aria-live="polite">
                 <strong>Terminal parked</strong>
                 <span>Switch back to this tab to restore its terminal view.</span>
@@ -319,8 +356,12 @@ export function SessionPane({
               workspaceRoot={activeWorkspaceRoot}
               openWorkspaceFile={openWorkspaceFile}
               openHttpLink={onProseLinkClick}
+              {...(pendingAgentRestore ? {
+                returnLabel: 'Session',
+                serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
+              } : {})}
             /> : null}
-            {disconnected || missing || exited ? (
+            {(disconnected || missing || exited) && !(pendingAgentRestore && historyOpen) ? (
               <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
                   {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
@@ -347,42 +388,7 @@ export function SessionPane({
                         <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
                       </button>
                     )
-                  ) : continuityNotice ? (
-                    // Four distinct reasons, four distinct things to do. A retry that cannot
-                    // succeed is worse than a disabled button: it promises something untrue.
-                    // `refresh` deliberately calls refresh(), NOT recover(): this Agent is already
-                    // alive on a newer Run, so resuming again would be a second claim on it — the
-                    // view only needs to catch up, which refresh does by stable agentSessionId.
-                    <button
-                      type="button"
-                      className="small-button"
-                      disabled={
-                        !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) ||
-                        recovering ||
-                        refreshing
-                      }
-                      title={continuityNotice.reason}
-                      onClick={
-                        continuityRefreshEnabled(continuityNotice)
-                          ? () => void refresh()
-                          : continuityRetryEnabled(continuityNotice)
-                            ? () => void recover()
-                            : undefined
-                      }
-                    >
-                      <RotateCcw size={12} /> {
-                        recovering && continuityRetryEnabled(continuityNotice)
-                          ? 'Resuming…'
-                          : refreshing && continuityRefreshEnabled(continuityNotice)
-                            ? 'Re-reading…'
-                            : continuityNotice.actionLabel
-                      }
-                    </button>
-                  ) : (
-                    <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                      <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
-                    </button>
-                  )}
+                  ) : agentRecoveryAction}
                 </div>
               </div>
             ) : null}

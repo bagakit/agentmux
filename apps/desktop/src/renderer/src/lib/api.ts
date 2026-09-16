@@ -647,6 +647,7 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
+    requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },

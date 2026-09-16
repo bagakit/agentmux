@@ -49,22 +49,8 @@ export function agentComposerAvailability(
   session: SessionSnapshot | undefined,
   forceDisabled = false
 ): AgentComposerAvailability {
-  if (!session || session.kind !== 'agent') {
-    return { disabled: true, placeholder: 'Agent is connecting…' }
-  }
-  if (forceDisabled) {
-    return { disabled: true, placeholder: 'Agent is connecting…' }
-  }
-  if (session.status.state === 'disconnected') {
-    return { disabled: true, placeholder: 'Agent is disconnected' }
-  }
-  if (session.processState !== 'running') {
-    return { disabled: true, placeholder: 'Agent is not running' }
-  }
-  if (session.pendingInteraction) {
-    return { disabled: true, placeholder: 'Answer the Agent request above…' }
-  }
-  return { disabled: false, placeholder: 'Ask, steer, or paste a command…' }
+  const mode = composerSubmitMode(session, forceDisabled)
+  return { disabled: !mode.canSubmit, placeholder: mode.placeholder }
 }
 
 export function AgentSessionComposer({
@@ -247,11 +233,14 @@ export function AgentSessionComposer({
     if (notice) notices.push({ id, notice })
   }
 
-  const queueProblem = queuedEntries.find((entry) => entry.status === 'deferred' || entry.status === 'failed' ||
+  const queueProblem = queuedEntries.find((entry) => entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
     session?.kind === 'agent' && (!steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState)))
   if (queueProblem) notices.push({ id: 'queue', notice: { kind: 'process-degraded', notice: {
-    step: 'A queued message has not been sent',
-    mode: errorIdentity(queueProblem.error ?? 'The message targets a Run that is no longer available.'),
+    step: queueProblem.status === 'restoring' && sendingId === queueProblem.operationId
+      ? 'Restoring the Agent before execution' : 'A queued message has not been sent',
+    mode: errorIdentity(queueProblem.error ?? (queueProblem.status === 'restoring'
+      ? 'Your message is kept while its Session is restored and the Run binding is saved.'
+      : 'The bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.')),
     restore: 'Your message is kept. Open the outbox to inspect, retry, copy or remove it.'
   } } })
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
@@ -272,7 +261,8 @@ export function AgentSessionComposer({
           text: entry.text,
           status: entry.status,
           sending: entry.operationId === sendingId,
-          deliverable: session?.kind === 'agent' && steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId),
+          deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
+            steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
           ...(entry.errorCode === 'AGENT_TURN_END_UNCONFIRMED' ? { turnEndUnconfirmed: true } : {})
         }))}
@@ -344,22 +334,12 @@ export function AgentSessionComposer({
         onPasteImage: (file: File, insert: ComposerInsert) => { void feedback.run(() => pasteImage(file, insert)) },
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
-      // Posture and submit share one gate because they are literally the same write.
-      // `client.setAgentPosture` resolves the Provider's keystroke and then calls `writeAgentInput` —
-      // the very function that throws AGENT_INTERACTION_PENDING while a card is up. So this is 原则 11
-      // 第 1 类 (the capability is genuinely gone), not 第 2 类: "绕过我这段代码，这条路还能不能通？→
-      // 不能". Withholding it is the honest surface; offering it would render a picker whose every
-      // click earns an error banner.
-      //
-      // An earlier pass grouped posture with the draft helpers on the claim that "setAgentPosture does
-      // not depend on submit readiness". That was wrong — it never read past the keystroke lookup to
-      // the write. `canSubmit` is not a coincidental proxy here: canSubmit ≡ canType && no pending
-      // card ≡ exactly writeAgentInput's own precondition. The test pins that equivalence, so the day
-      // canSubmit grows a condition writeAgentInput does not share, it reds instead of drifting.
-      {...(submitMode.canSubmit ? {
-        onSubmit: () => void submit(),
-        ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {})
-      } : {})}
+      {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
+      // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run;
+      // it cannot be buffered or replayed through that restoration boundary.
+      {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' &&
+        session.processState === 'running' && session.status.state !== 'disconnected'
+        ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
         onQueue: () => queue()
       } : {})}

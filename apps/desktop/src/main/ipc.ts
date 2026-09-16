@@ -556,6 +556,11 @@ export async function registerIpc(args: {
   handleWithEvent('resourceUsage:unsubscribe', (event) => {
     stopUsageSubscription(event.sender.id)
   })
+  handleWithEvent('ui:requestStorageFlush', (event) => {
+    requireTrustedSender('ui:requestStorageFlush', event)
+    // Electron returns void: this requests flush without claiming a disk acknowledgement.
+    args.window.webContents.session.flushStorageData()
+  })
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
     requireTrustedSender('ui:rendererUpdateReady', event)
     args.onRendererUpdateReady?.(token)
@@ -694,7 +699,7 @@ export async function registerIpc(args: {
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handle('sessions:recover', async (session: SessionControl, workspacePath?: string) => await args.runtime.recoverSession(session, config, workspacePath))
+  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string) => await args.runtime.recoverSession(session, config, workspacePath, operationId))
   handle('sessions:stop', async (session: SessionControl) => await args.runtime.stopSession(session))
   handle('browser:create', async (id: string, url: string) => await browsers.create(id, url))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))

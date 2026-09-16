@@ -129,6 +129,7 @@ type WriteFencedStorage<Value> = {
   storage: PersistentStorage<Value>
   /** Let writes through from here on. Idempotent; there is no way back — see the doc comment. */
   openWrites: () => void
+  isOpen: () => boolean
 }
 
 /**
@@ -164,6 +165,7 @@ export function createWriteFencedStorage<Value>(base: PersistentStorage<Value>):
     },
     openWrites: () => {
       writesEnabled = true
-    }
+    },
+    isOpen: () => writesEnabled
   }
 }

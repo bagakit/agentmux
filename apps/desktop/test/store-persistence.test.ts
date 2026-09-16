@@ -647,6 +647,7 @@ describe('Renderer persistence boundary', () => {
     })
     const candidate: AgentSessionRecoveryCandidate = {
       agentSessionId: sessionId,
+      semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() },
       hostId: 'local',
       workspacePath: '/repo/a',
       providerId: 'codex',
@@ -740,6 +741,7 @@ describe('Renderer persistence boundary', () => {
     })
     const candidate: AgentSessionRecoveryCandidate = {
       agentSessionId: sessionId,
+      semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() },
       hostId: 'local',
       workspacePath: '/repo/a',
       providerId: 'codex',
