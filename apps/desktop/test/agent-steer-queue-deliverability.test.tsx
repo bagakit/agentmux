@@ -17,7 +17,8 @@ describe('queue delivery facts and recovery actions', () => {
   it('promises ordered attempts as soon as the Provider accepts, without an idle-only promise', () => {
     const html = render([entry()])
     expect(html).toContain('1 message queued for delivery')
-    expect(html).toContain('as soon as the Agent can accept them')
+    expect(html).toContain('New messages for the current Run are sent in order when the Agent can accept them.')
+    expect(html).toContain('Choose Send to execute messages restored from a previous application session.')
     expect(html).not.toContain('finishes its current turn')
     expect(html).not.toContain('role="status"')
     expect(html).toContain('Keep these exact words')
@@ -27,7 +28,7 @@ describe('queue delivery facts and recovery actions', () => {
     const html = render([entry({ status: 'deferred', error: 'Readiness not observed Diagnostic: latestOutputBytes=123' })])
     expect(html).toContain('Readiness not observed')
     expect(html).toContain('data-state="deferred"')
-    expect(html).toContain('Retry queue')
+    expect(html).toContain('Send queued message')
     expect(html).not.toContain('composer__queue-notice')
     expect(html).not.toContain('role="status"')
   })
@@ -38,14 +39,14 @@ describe('queue delivery facts and recovery actions', () => {
     expect(html).toContain('Keep these exact words')
     expect(html).toContain('Copy message')
     expect(html).not.toContain('retries when')
-    expect(html).not.toContain('Retry queue')
+    expect(html).not.toContain('Send queued message')
     expect(html).toContain('Keep these exact words')
   })
 
   it('derives actions per entry when old and current Runs coexist', () => {
     const html = render([entry({ deliverable: false }), entry({ id: 'q2', text: 'Current Run', status: 'deferred' })])
     expect(html).toContain('1 of 2 messages cannot be sent')
-    expect(html.match(/Retry queue/g)).toHaveLength(1)
+    expect(html.match(/Send queued message/g)).toHaveLength(1)
     expect(html.match(/>Remove</g)).toHaveLength(2)
     expect(html).toContain('Copy all')
     expect(html).toContain('Current Run')
@@ -55,7 +56,7 @@ describe('queue delivery facts and recovery actions', () => {
     const html = render([entry({ sending: true })])
     expect(html).toContain('Waiting for delivery confirmation')
     expect(html).toContain('disabled="">Remove')
-    expect(html).toContain('disabled="">Retry queue')
+    expect(html).toContain('disabled="">Send queued message')
   })
 
   it('only describes copying when the caller supplies that action', () => {
