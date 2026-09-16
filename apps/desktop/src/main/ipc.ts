@@ -634,6 +634,13 @@ export async function registerIpc(args: {
     // for a sound; main only delivers, and says so honestly when it cannot present in that mode.
     return notifier.notify(input)
   })
+  handleWithEvent('ui:setAgentAttentionCount', (event, count: number) => {
+    requireTrustedSender('ui:setAgentAttentionCount', event)
+    if (!Number.isSafeInteger(count) || count < 0) throw new TypeError('Agent attention count must be a nonnegative safe integer.')
+    if (process.platform !== 'darwin' || !app.dock) return false
+    app.dock.setBadge(count === 0 ? '' : String(count))
+    return true
+  })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
   handle('sessions:snapshot', async () => (

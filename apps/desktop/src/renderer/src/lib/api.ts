@@ -674,6 +674,8 @@ const mockApi: AgentMuxDesktopApi = {
       status: 'unsupported' as const,
       reason: 'Native notifications require the desktop app.'
     }),
+    // A web preview has no native Dock. False is platform absence, not a fake successful badge.
+    setAgentAttentionCount: async () => false,
     // Nothing can raise one here, so nothing can be clicked; the unsubscribe is still real.
     onAgentAttentionActivate: () => () => {},
     getZoomFactor: () => 1,

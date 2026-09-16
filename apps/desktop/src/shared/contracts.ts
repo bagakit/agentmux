@@ -1376,6 +1376,8 @@ export type AgentMuxDesktopApi = {
      * or the platform downgraded it — so a caller never assumes a persistent banner it did not get.
      */
     notifyAgentAttention(input: AgentAttentionNotifyInput): Promise<NotificationDelivery>
+    /** Project the current needsYou count. False means this platform has no native Dock surface. */
+    setAgentAttentionCount(count: number): Promise<boolean>
     /**
      * Fires when the user clicks one of those notifications, carrying the Session id it was about.
      * Main focuses the window; WHERE to go inside it stays with the renderer, which owns View/Region.

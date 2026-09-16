@@ -159,6 +159,7 @@ const api: AgentMuxPreloadApi = {
     revealCrashLog: () => ipcRenderer.invoke('ui:revealCrashLog'),
     notifyAgentAttention: (input: AgentAttentionNotifyInput) =>
       ipcRenderer.invoke('ui:notifyAgentAttention', input),
+    setAgentAttentionCount: (count: number) => ipcRenderer.invoke('ui:setAgentAttentionCount', count),
     onAgentAttentionActivate(listener: (sessionId: string) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string): void => listener(sessionId)
       ipcRenderer.on(AGENT_ATTENTION_ACTIVATE_CHANNEL, wrapped)
