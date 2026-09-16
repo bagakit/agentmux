@@ -14,6 +14,7 @@ import {
 } from './agent-launch-option.js'
 import {
   AgentProviderRegistry,
+  resolveAgentExecutable,
   resolveManagedHookPlan,
   splitLaunchPromptByDelivery,
   type AgentProvider
@@ -1269,6 +1270,8 @@ export class AgentMuxClient {
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
       const page = await read(provider.readSessionHistoryPage({
         source, limit, signal: controller.signal,
+        command: resolveAgentExecutable(options.commandOverride, provider.executable),
+        args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
         ...(options.cursor === undefined ? {} : { cursor: options.cursor })
       }))
       controller.signal.throwIfAborted()

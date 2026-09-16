@@ -304,11 +304,10 @@ export function SessionPane({
                 session={session}
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
-            interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
+                interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
                 visible={visible}
-            readOnly={!projectionPolicy.acceptsInput}
+                readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
-                {...(session.kind === 'agent' ? { onReadConversationHistory: () => setHistoryOpen(true) } : {})}
               />
             )}
             {session.kind === 'agent' && !historyOpen ? <button type="button" className="small-button terminal-history-action" onClick={() => setHistoryOpen(true)}><History size={12} /> Conversation history</button> : null}
