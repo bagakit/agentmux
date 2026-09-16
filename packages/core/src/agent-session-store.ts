@@ -995,7 +995,6 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.capabilityHash === undefined
       ? {}
       : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),
-    outputCursorBytes: timestamp(source.outputCursorBytes, 'outputCursorBytes'),
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
     ...(source.launchOptions === undefined

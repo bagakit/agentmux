@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,13 +29,13 @@ function session(capabilityHash: string): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-1',
     hookToken: 'token-1',
     capabilityHash,
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

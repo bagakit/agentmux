@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -56,9 +56,9 @@ async function seed(snapshot: AgentTimelineItem[], journal: AgentTimelineMutatio
   const store = new AgentMuxFileAgentSessionStore(path)
   const session: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: ownerId, providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: upstreamFixturePath("synthetic"), run: { runId: 'synthetic-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId: 'synthetic-run' }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+     createdAt: 1, updatedAt: 1
   }
   await store.compareAndSwap(null, session)
   const directory = join(root, 'agent-timelines')

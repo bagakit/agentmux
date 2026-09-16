@@ -189,10 +189,6 @@ export type AgentMuxRunInputAck = AgentMuxRunRef & {
   acceptedThroughByte: number
 }
 
-export type AgentMuxRunOutputAck = AgentMuxRunRef & {
-  acknowledgedThroughByte: number
-}
-
 export type AgentMuxRunAppliedSize = AgentMuxRunRef & {
   cols: number
   rows: number
@@ -524,7 +520,6 @@ export type AgentMuxAgentSession = {
   workspacePath: string
   run: AgentMuxRunRef
   retiredRuns: AgentMuxRunRef[]
-  outputCursorBytes: number
   createdAt: number
   updatedAt: number
   /**

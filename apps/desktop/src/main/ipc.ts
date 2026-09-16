@@ -704,9 +704,6 @@ export async function registerIpc(args: {
   handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
     await args.runtime.resumeSession(session, prompt, operationId, config)
   ))
-  handle('sessions:acknowledge', async (session: SessionControl, sequence: number) => {
-    await args.runtime.acknowledge(session, sequence)
-  })
   handle('sessions:interrupt', async (session: SessionControl) => await args.runtime.interrupt(session))
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)

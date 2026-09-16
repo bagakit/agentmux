@@ -197,8 +197,10 @@ export type CtxmuxAdapterInputOperation = {
 }
 
 type LiveAttachment = {
-  attachment: Attachment
+  attachment: Attachment | null
   token: symbol
+  /** Last raw byte published by this process, not a Renderer parse acknowledgement. */
+  publishedThroughByte: number
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -670,6 +672,10 @@ export class CtxmuxRunAdapter {
   private connectionLostListener: (() => void) | null = null
 
   private projectRun(run: RunInfo): CtxmuxAdapterRun {
+    // A terminal snapshot is authoritative even when the wire ended before its event arrived.
+    if (run.state.type !== 'running' && this.attachments.get(run.id)?.attachment === null) {
+      this.attachments.delete(run.id)
+    }
     const size = snapshotCurrentSize(run)
     return {
       runId: run.id,
@@ -723,8 +729,7 @@ export class CtxmuxRunAdapter {
    */
   private markConnectionLost(): void {
     if (this.client === null) return
-    for (const { attachment } of this.attachments.values()) attachment.close()
-    this.attachments.clear()
+    this.resetConnection()
     this.client = null
     this.runtime = null
     this.runtimeOwnership = null
@@ -866,12 +871,24 @@ export class CtxmuxRunAdapter {
     this.client = client
   }
 
-  disconnect(): void {
-    for (const { attachment } of this.attachments.values()) attachment.close()
-    this.attachments.clear()
+  /** A failed wire/setup keeps exact-Run continuation; it never persists output state. */
+  resetConnection(): void {
+    for (const [runId, owner] of this.attachments) {
+      owner.attachment?.close()
+      this.attachments.set(runId, { ...owner, attachment: null, token: Symbol(runId) })
+    }
     this.client = null
     this.runtime = null
     this.runtimeOwnership = null
+  }
+
+  disconnect(): void {
+    this.resetConnection()
+    this.attachments.clear()
+  }
+
+  continuationByte(runId: string): number {
+    return this.attachments.get(runId)?.publishedThroughByte ?? 0
   }
 
   isConnected(): boolean {
@@ -946,7 +963,10 @@ export class CtxmuxRunAdapter {
         try {
           return await this.requireClient().status(summary.id)
         } catch (error) {
-          if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null
+          if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') {
+            if (this.attachments.get(summary.id)?.attachment === null) this.attachments.delete(summary.id)
+            return null
+          }
           throw error
         }
       })
@@ -960,7 +980,11 @@ export class CtxmuxRunAdapter {
     try {
       return this.projectRun(await this.requireClient().status(runId))
     } catch (error) {
-      throw translateCtxmuxError(error)
+      const translated = translateCtxmuxError(error)
+      if (translated.code === 'CTXMUX_run_not_found' && this.attachments.get(runId)?.attachment === null) {
+        this.attachments.delete(runId)
+      }
+      throw translated
     }
   }
 
@@ -993,7 +1017,7 @@ export class CtxmuxRunAdapter {
     afterByte: number,
     beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void
   ): Promise<CtxmuxAdapterAttachment> {
-    if (this.attachments.has(runId)) {
+    if (this.hasAttachment(runId)) {
       throw new AgentMuxError('This client already owns an Attachment for the Run.', 'ATTACHMENT_EXISTS')
     }
     try {
@@ -1011,18 +1035,23 @@ export class CtxmuxRunAdapter {
           firstAvailableByte: attachment.snapshot.replay.first_available_byte
         })
       }
-      // Reconnect consumers publish this snapshot synchronously before the live iterator is read.
+      // Record the offered snapshot before synchronous publication can lose the connection.
       // No second queue: the SDK attachment owns all bytes until its pump starts.
+      const token = Symbol(runId)
+      this.attachments.set(runId, { attachment, token, publishedThroughByte: snapshot.run.latestOutputBytes })
       try { beforeLive?.(snapshot) } catch (error) {
+        if (this.attachments.get(runId)?.token === token) this.attachments.delete(runId)
         try { await attachment.detach() } catch (cleanupError) {
           attachment.close()
           throw new AggregateError([error, cleanupError], 'Run snapshot delivery and attachment cleanup failed.')
         }
         throw error
       }
-      const token = Symbol(runId)
-      this.attachments.set(runId, { attachment, token })
-      void this.pump(runId, token, attachment, decoder)
+      if (this.attachments.get(runId)?.token === token) {
+        void this.pump(runId, token, attachment, decoder)
+      } else {
+        attachment.close()
+      }
       return snapshot
     } catch (error) {
       throw translateCtxmuxError(error)
@@ -1030,7 +1059,7 @@ export class CtxmuxRunAdapter {
   }
 
   hasAttachment(runId: string): boolean {
-    return this.attachments.has(runId)
+    return this.attachments.get(runId)?.attachment != null
   }
 
   async replay(runId: string, afterByte: number): Promise<CtxmuxAdapterAttachment> {
@@ -1133,6 +1162,7 @@ export class CtxmuxRunAdapter {
     const live = this.attachments.get(runId)
     if (!live) return
     this.attachments.delete(runId)
+    if (!live.attachment) return
     try {
       await live.attachment.detach()
     } catch (error) {
@@ -1240,6 +1270,11 @@ export class CtxmuxRunAdapter {
       for await (const event of attachment.events()) {
         if (this.attachments.get(runId)?.token !== token) return
         if (event.type === 'exited' || event.type === 'interrupted') sawTerminalEvent = true
+        // Record the delivered range before synchronous callbacks can reset/replace this owner.
+        if (event.type === 'output') {
+          const current = this.attachments.get(runId)
+          if (current?.token === token) current.publishedThroughByte = event.chunk.end_byte
+        }
         this.emitRunEvent(runId, decoder, event)
       }
     } catch (error) {
@@ -1247,7 +1282,6 @@ export class CtxmuxRunAdapter {
       this.errorListener?.(translateCtxmuxError(error), runId)
     } finally {
       const stillOwned = this.attachments.get(runId)?.token === token
-      if (stillOwned) this.attachments.delete(runId)
       // 这条流怎么结束的，决定了要不要对账。分类是纯函数（ctxmux-stream-end），三种结局：
       // - detached：我们自己换/删了 attachment，什么都不做。
       // - run-exited：发过终结事件、干净结束，退出已如实发出，无需再做。
@@ -1256,6 +1290,7 @@ export class CtxmuxRunAdapter {
       //   markConnectionLost 驱动整套重连去问 daemon 真相，而不是在此刻瞎猜这个 run 死没死。
       const end = classifyStreamEnd({ threw, sawTerminalEvent, stillOwned })
       if (end === 'connection-lost') this.markConnectionLost()
+      else if (stillOwned) this.attachments.delete(runId)
     }
   }
 

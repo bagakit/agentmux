@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../../src/agent-session-store.js'
@@ -60,10 +60,10 @@ function session(): AgentMuxAgentSession {
     providerId: 'kimi',
     executorId: 'kimi',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

@@ -122,7 +122,7 @@ function sessionSnapshotStatus(semantic: 'working' | 'waiting', observedAt: numb
       workspacePath: _hygiene_fixturePath("repo"),
       run: { runId: 'run-1' },
       retiredRuns: [],
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: observedAt,
       semanticStatus: { state: semantic, source: 'native-hook', observedAt }

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -539,7 +539,7 @@ describe('Store worker stdout protocol', () => {
 
 describe('File Store multi-process authority', () => {
   it('settles corrupt, trailing, and early worker failures without leaking children', () => withWorkerOwner(async (owner) => {
-    const root = await owner.createRoot(upstreamFixturePath("tmp/agentmux-store-protocol-"))
+    const root = await owner.createRoot(fixturePath("tmp/agentmux-store-protocol-"))
     const cases: Array<{
       workerId: string
       fixtureScenario?: WorkerFixtureScenario
@@ -610,7 +610,7 @@ describe('File Store multi-process authority', () => {
   }))
 
   it('drains a worker left live after ready through its authoritative settlement', () => withWorkerOwner(async (owner) => {
-    const root = await owner.createRoot(upstreamFixturePath("tmp/agentmux-store-live-worker-"))
+    const root = await owner.createRoot(fixturePath("tmp/agentmux-store-live-worker-"))
     const handle = worker(owner, {
       mode: 'timeline',
       storePath: join(root, 'agent-sessions.json'),
@@ -632,12 +632,12 @@ describe('File Store multi-process authority', () => {
       acquiredLateRoot = await mkdtemp(prefix)
       return acquiredLateRoot
     })
-    const lateRoot = staleOwner.createRoot(upstreamFixturePath("tmp/agentmux-store-stale-owner-"))
+    const lateRoot = staleOwner.createRoot(fixturePath("tmp/agentmux-store-stale-owner-"))
     const lateRootFailure = lateRoot.then(
       () => null,
       (error: unknown) => error
     )
-    const nextRoot = await nextOwner.createRoot(upstreamFixturePath("tmp/agentmux-store-next-owner-"))
+    const nextRoot = await nextOwner.createRoot(fixturePath("tmp/agentmux-store-next-owner-"))
     const staleSpawnRoot = join(nextRoot, 'stale-spawn')
     const input: WorkerInput = {
       mode: 'create',
@@ -650,7 +650,7 @@ describe('File Store multi-process authority', () => {
 
     const closing = staleOwner.close()
     expect(staleContinuation).toThrow('Store worker owner is closed.')
-    expect(() => staleOwner.createRoot(upstreamFixturePath("tmp/agentmux-store-too-late-")))
+    expect(() => staleOwner.createRoot(fixturePath("tmp/agentmux-store-too-late-")))
       .toThrow('Store worker owner is closed.')
     releaseRoot()
     await closing
@@ -692,7 +692,7 @@ describe('File Store multi-process authority', () => {
     const staleOwner = createWorkerOwner()
     let staleRoot = ''
     const staleBody = staleOwner.runBody(async () => {
-      staleRoot = await staleOwner.createRoot(upstreamFixturePath("tmp/agentmux-store-body-owner-"))
+      staleRoot = await staleOwner.createRoot(fixturePath("tmp/agentmux-store-body-owner-"))
       announcePaused()
       await bodyResume
       await writeFile(join(staleRoot, 'late-write'), 'stale generation\n')
@@ -703,7 +703,7 @@ describe('File Store multi-process authority', () => {
     let closeCompleted = false
     try {
       await Promise.race([bodyPaused, staleBody])
-      const nextRoot = await nextOwner.createRoot(upstreamFixturePath("tmp/agentmux-store-body-owner-next-"))
+      const nextRoot = await nextOwner.createRoot(fixturePath("tmp/agentmux-store-body-owner-next-"))
       const nextMarker = join(nextRoot, 'next-generation')
       await writeFile(nextMarker, 'next generation\n')
       closing = staleOwner.close().then(() => { closeCompleted = true })
@@ -734,7 +734,7 @@ describe('File Store multi-process authority', () => {
   }))
 
   it('clears an ambient fault scenario for a normal worker', () => withWorkerOwner(async (owner) => {
-    const root = await owner.createRoot(upstreamFixturePath("tmp/agentmux-store-scenario-isolation-"))
+    const root = await owner.createRoot(fixturePath("tmp/agentmux-store-scenario-isolation-"))
     const scenarioKey = 'AGENTMUX_STORE_WORKER_SCENARIO'
     const hadScenario = Object.hasOwn(process.env, scenarioKey)
     const previousScenario = process.env[scenarioKey]
@@ -758,7 +758,7 @@ describe('File Store multi-process authority', () => {
   }))
 
   it('allows exactly one create and one resume binding commit across processes', () => withWorkerOwner(async (owner) => {
-    const root = await owner.createRoot(upstreamFixturePath("tmp/agentmux-store-process-"))
+    const root = await owner.createRoot(fixturePath("tmp/agentmux-store-process-"))
     const storePath = join(root, 'agent-sessions.json')
     const createResults = await runRace(owner, 'create', storePath, join(root, 'start-create'))
     expect(createResults.filter((result) => result.ok)).toHaveLength(1)
@@ -795,7 +795,7 @@ describe('File Store multi-process authority', () => {
   }))
 
   it('serializes concurrent Timeline revisions without losing either process update', () => withWorkerOwner(async (owner) => {
-    const root = await owner.createRoot(upstreamFixturePath("tmp/agentmux-timeline-process-"))
+    const root = await owner.createRoot(fixturePath("tmp/agentmux-timeline-process-"))
     const storePath = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, normalizeStoredAgentSession({
@@ -804,12 +804,12 @@ describe('File Store multi-process authority', () => {
       providerId: 'codex',
       executorId: 'codex',
       hostId: 'local',
-      workspacePath: upstreamFixturePath("tmp/store-race"),
+      workspacePath: fixturePath("tmp/store-race"),
       run: { runId: 'timeline-run' },
       retiredRuns: [],
       hookBindingId: 'timeline-binding',
       hookToken: 'timeline-token',
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: 1
     }))

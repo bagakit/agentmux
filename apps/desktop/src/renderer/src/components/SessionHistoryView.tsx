@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
-import type { AgentSessionControl } from '../../../shared/contracts'
+import type { AgentSessionControl, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
+import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 
 type ReadingAnchor = { id: string; offset: number }
@@ -38,17 +39,22 @@ function readingAnchor(viewport: HTMLElement): ReadingAnchor | null {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, label, onClose, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice
+  control, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice
 }: {
   control: AgentSessionControl
   label: string
-  onClose(): void
+  onClose?(): void
+  visible: boolean
+  themeId: TerminalThemeId
+  fontSize: number
   returnLabel?: string
   serviceNotice?: ReactNode
   workspaceRoot: string
   openWorkspaceFile: OpenWorkspaceFile
   openHttpLink(url: string, event: LinkClickModifiers): void
 }) {
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
   const [reading, setReading] = useState<ReadingState>(emptyReading)
   const readingRef = useRef(reading)
   readingRef.current = reading
@@ -69,7 +75,7 @@ export function SessionHistoryView({
   function restoreAnchor(): void {
     const viewport = viewportRef.current
     const anchor = anchorRef.current
-    if (!viewport || !anchor) return
+    if (!visibleRef.current || !viewport || !anchor) return
     const row = Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-item-id]'))
       .find((candidate) => candidate.dataset.historyItemId === anchor.id)
     if (!row) return
@@ -77,13 +83,14 @@ export function SessionHistoryView({
     lastScrollTopRef.current = viewport.scrollTop
   }
   async function readPage(direction: 'latest' | 'older'): Promise<void> {
-    if (pendingRef.current) return
+    if (!visibleRef.current || pendingRef.current) return
     const before = readingRef.current
     if (direction === 'older' && before.nextCursor === null) return
     pendingRef.current = true
     retryDirectionRef.current = direction
     const generation = generationRef.current
     const cursor = direction === 'older' ? before.nextCursor! : undefined
+    const requestedAnchor = direction === 'older' && viewportRef.current ? readingAnchor(viewportRef.current) : null
     update({ ...before, loading: true, error: null })
     try {
       const page = await api.sessions.historyPage(control, cursor === undefined ? undefined : { cursor })
@@ -94,7 +101,9 @@ export function SessionHistoryView({
       }
       if (cursor !== undefined && page.nextCursor === cursor) throw new Error('The history cursor did not advance. Retry the read.')
       const viewport = viewportRef.current
-      anchorRef.current = direction === 'older' && viewport ? readingAnchor(viewport) : null
+      anchorRef.current = direction === 'older'
+        ? visibleRef.current && viewport ? readingAnchor(viewport) : requestedAnchor
+        : null
       const existingIds = new Set(before.pages.flatMap((entry) => entry.items.map((item) => item.id)))
       const olderItems = direction === 'older' ? page.items.filter((item) => !existingIds.has(item.id)) : page.items
       const pages = direction === 'latest'
@@ -126,20 +135,24 @@ export function SessionHistoryView({
     pendingRef.current = false
     anchorRef.current = null
     update(emptyReading)
-    returnRef.current?.focus()
+    if (visibleRef.current) returnRef.current?.focus()
     void readPage('latest')
     return () => { generationRef.current += 1 }
   }, [control.hostId, control.agentSessionId, control.run.runId])
 
+  useEffect(() => {
+    if (visible && !readingRef.current.source && !readingRef.current.error) void readPage('latest')
+  }, [visible])
+
   useLayoutEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport) return
+    if (!visible || !viewport) return
     if (bottomRef.current) {
       viewport.scrollTop = viewport.scrollHeight
       lastScrollTopRef.current = viewport.scrollTop
       bottomRef.current = false
     } else restoreAnchor()
-  }, [reading.pages])
+  }, [reading.pages, visible])
 
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined' || !contentRef.current) return
@@ -149,12 +162,21 @@ export function SessionHistoryView({
   }, [])
 
   const items = reading.pages.flatMap((page) => page.items)
-  return <section className="session-history" aria-label="Conversation history" onKeyDown={(event) => {
-    if (event.key === 'Escape') { event.stopPropagation(); onClose() }
+  const appearance = terminalOptions(themeId, fontSize)
+  const theme = terminalTheme(themeId)
+  const style = {
+    backgroundColor: theme.background, color: theme.foreground,
+    fontFamily: appearance.fontFamily, fontSize: appearance.fontSize,
+    fontWeight: appearance.fontWeight, lineHeight: appearance.lineHeight,
+    '--history-selection-background': theme.selectionBackground,
+    '--history-selection-foreground': theme.selectionForeground
+  } as CSSProperties
+  return <section className={`session-history${onClose ? '' : ' session-history--inline'}`} style={style} hidden={!visible} aria-label="Conversation history" onKeyDown={(event) => {
+    if (event.key === 'Escape' && onClose) { event.stopPropagation(); onClose() }
     else anchorRef.current = null
   }}>
     <div className="session-history__toolbar">
-      <button ref={returnRef} type="button" className="small-button" onClick={onClose}><ArrowLeft size={12} /> {returnLabel}</button>
+      {onClose ? <button ref={returnRef} type="button" className="small-button" onClick={onClose}><ArrowLeft size={12} /> {returnLabel}</button> : null}
       <span><History size={12} /> Conversation history</span>
       <button type="button" className="small-button" disabled={reading.loading} onClick={() => void readPage('latest')}><ArrowDown size={12} /> Latest</button>
     </div>
