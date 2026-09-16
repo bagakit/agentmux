@@ -112,13 +112,15 @@ describe('one Session owns one live queue drain', () => {
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('manual delivery of a tail preserves order instead of bypassing its head', async () => {
+  it('explicit delivery selects only the clicked tail and leaves its queue-only head', async () => {
     useAppStore.setState({ sessions: [agent()] })
-    const [, tail] = enqueue('first', 'clicked second')
+    const [head, tail] = enqueue('first', 'clicked second')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     await useAppStore.getState().sendQueuedAgentSteer('s', tail!.operationId)
-    expect(submit.mock.calls.map((call) => call[1])).toEqual(['first', 'clicked second'])
-    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+    expect(submit.mock.calls.map((call) => [call[1], call[2], call[4]])).toEqual([
+      ['clicked second', tail!.operationId, { allowUncertainTurn: true }]
+    ])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([head])
   })
 
   it('retains a native completion wake arriving before a pending refusal is received', async () => {
@@ -345,7 +347,7 @@ describe('one Session owns one live queue drain', () => {
       expect(submit).not.toHaveBeenCalled()
       await useAppStore.getState().sendQueuedAgentSteer('s', 'persisted-op')
       expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
-      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op', undefined, undefined)
+      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op', undefined, { allowUncertainTurn: true })
       expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
     } finally { dispose() }
   })

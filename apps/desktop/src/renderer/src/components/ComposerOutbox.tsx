@@ -11,16 +11,14 @@ export type ComposerQueuedMessage = {
   deliverable: boolean
   sending?: boolean
   error?: string
-  turnEndUnconfirmed?: boolean
 }
 
-export function ComposerOutbox({ queued, onCopy, onRemove, onMove, onSend, onContinue }: {
+export function ComposerOutbox({ queued, onCopy, onRemove, onMove, onSend }: {
   queued: readonly ComposerQueuedMessage[]
   onCopy?: (text: string) => void
   onRemove?: (id: string) => void
   onMove?: (id: string, direction: 'up' | 'down') => void
   onSend?: (id: string) => void
-  onContinue?: (id: string) => void
 }) {
   if (!queued.length) return <p>No pending messages.</p>
   const retryEntry = queued.find((entry) => entry.deliverable)
@@ -55,11 +53,7 @@ export function ComposerOutbox({ queued, onCopy, onRemove, onMove, onSend, onCon
           </li>})}
         </ol>
         {onSend && retryEntry ? <button type="button" className="composer-tool" disabled={sending} onClick={() => onSend(retryEntry.id)}>Send queued message</button> : null}
-        {onContinue && retryEntry?.turnEndUnconfirmed ? <>
-          <p>The previous turn may still be running. Sending now can leave a draft or start another turn. This sends only the first queued message.</p>
-          <button type="button" className="composer-tool" disabled={sending} onClick={() => onContinue(retryEntry.id)}>Send now — turn may still be running</button>
-        </> : null}
-        <p>Choose Send to execute messages restored from a previous application session. New messages for the current Run are sent in order when the Agent can accept them.</p>
+        <p>Send explicitly steers this message, including during the current turn. It does not send the other queued messages. Messages restored from a previous application session wait for your explicit Send.</p>
         {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
           <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
         </button> : null}
