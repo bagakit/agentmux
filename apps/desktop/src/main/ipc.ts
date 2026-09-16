@@ -62,6 +62,8 @@ import type {
 } from '../shared/contracts.js'
 import type {
   CreatePullRequestInput,
+  GitBranchCompareInput,
+  GitBranchDiffDescriptor,
   GitPullStrategy,
   GitPushOptions,
   GitRemoteOptions
@@ -419,6 +421,10 @@ export async function registerIpc(args: {
     config = result.config
     return { keptWorkspaceId: result.keptWorkspaceId, outcomes: result.outcomes }
   })
+  handle('git:compareBranches', async (workspaceId: string, input: GitBranchCompareInput) =>
+    await git.compareBranches(workspaceId, input, config))
+  handle('git:branchDiff', async (workspaceId: string, descriptor: GitBranchDiffDescriptor) =>
+    await git.branchDiff(workspaceId, descriptor, config))
   handle('git:status', async (workspaceId: string) => await git.status(workspaceId, config))
   handle('git:stage', async (workspaceId: string, path: string) => {
     await git.stage(workspaceId, path, config)

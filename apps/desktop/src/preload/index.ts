@@ -46,6 +46,8 @@ import type {
 } from '../shared/contracts.js'
 import type {
   CreatePullRequestInput,
+  GitBranchCompareInput,
+  GitBranchDiffDescriptor,
   GitPullStrategy,
   GitPushOptions,
   GitRemoteOptions
@@ -78,6 +80,10 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)
   },
   git: {
+    compareBranches: (workspaceId: string, input: GitBranchCompareInput) =>
+      ipcRenderer.invoke('git:compareBranches', workspaceId, input),
+    branchDiff: (workspaceId: string, descriptor: GitBranchDiffDescriptor) =>
+      ipcRenderer.invoke('git:branchDiff', workspaceId, descriptor),
     status: (workspaceId: string) => ipcRenderer.invoke('git:status', workspaceId),
     stage: (workspaceId: string, path: string) => ipcRenderer.invoke('git:stage', workspaceId, path),
     commit: (workspaceId: string, message: string) =>

@@ -7,6 +7,11 @@ import type {
 } from '../shared/contracts.js'
 import type {
   GitAheadBehind,
+  GitBranchChange,
+  GitBranchCompareInput,
+  GitBranchComparisonResult,
+  GitBranchComparisonSnapshot,
+  GitBranchDiffDescriptor,
   GitDiffSide,
   GitFileChange,
   GitFileDiff,
@@ -420,6 +425,53 @@ function isHeadUnborn(stderr: string): boolean {
 
 /** The largest blob or worktree file held as diffable text; anything larger is reported as binary. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
+const MAX_COMPARISON_FILES = 1_000
+const FULL_COMMIT_OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u
+
+function assertComparisonPath(path: string): void {
+  if (typeof path !== 'string' || path === '' || path.includes('\0') ||
+    path.split('/').some((part) => part === '' || part === '.' || part === '..')) {
+    throw new Error('Comparison file paths must be repository-relative')
+  }
+}
+
+/** name-status -z has separate status/path tokens; rename consumes old then new path. */
+function parseBranchChanges(output: string): GitBranchChange[] {
+  if (output === '') return []
+  if (!output.endsWith('\0')) throw new Error('Git returned an incomplete comparison file list')
+  const tokens = output.slice(0, -1).split('\0')
+  const entries: GitBranchChange[] = []
+  for (let cursor = 0; cursor < tokens.length;) {
+    const status = tokens[cursor++]!
+    const firstPath = tokens[cursor++]
+    if (firstPath === undefined) throw new Error('Git returned an incomplete comparison file entry')
+    assertComparisonPath(firstPath)
+    let path = firstPath
+    let origPath: string | null = null
+    let change: GitBranchChange['change']
+    if (/^R\d{1,3}$/u.test(status)) {
+      origPath = firstPath
+      const renamedPath = tokens[cursor++]
+      if (renamedPath === undefined) throw new Error('Git returned an incomplete rename entry')
+      assertComparisonPath(renamedPath)
+      path = renamedPath
+      change = 'renamed'
+    } else {
+      switch (status) {
+        case 'A': change = 'added'; break
+        case 'D': change = 'deleted'; break
+        case 'M': change = 'modified'; break
+        case 'T': change = 'type-changed'; break
+        default: throw new Error(`Git returned an unsupported comparison status: ${status}`)
+      }
+    }
+    entries.push({ path, origPath, change })
+    if (entries.length > MAX_COMPARISON_FILES) {
+      throw new Error(`Comparison exceeds the ${MAX_COMPARISON_FILES}-file limit; narrow the selected branches`)
+    }
+  }
+  return entries
+}
 
 /**
  * One side of a diff as read from the working tree: absent (the file is not on disk), present but too
@@ -540,6 +592,125 @@ export class GitService {
     private readonly hostFor: (id: string) => ExecutionHost,
     private readonly readWorktreeFile: WorktreeReader = defaultWorktreeReader
   ) {}
+
+  async compareBranches(
+    workspaceId: string,
+    input: GitBranchCompareInput,
+    config: AppConfig
+  ): Promise<GitBranchComparisonResult> {
+    if (!input || (input.mode !== 'merge-base' && input.mode !== 'two-point')) {
+      throw new Error('Choose an explicit branch comparison mode')
+    }
+    const workspace = this.workspace(config, workspaceId)
+    const host = this.hostFor(workspace.hostId)
+    const repoPath = await this.resolveRepoPath(host, workspace.path)
+    if (repoPath === null) {
+      return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
+    }
+    const [baseOid, targetOid] = await Promise.all([
+      this.resolveBranchCommit(host, repoPath, input.baseBranch),
+      this.resolveBranchCommit(host, repoPath, input.targetBranch)
+    ])
+    let comparisonBaseOid = baseOid
+    if (input.mode === 'merge-base') {
+      const result = await this.comparisonGit(host, repoPath, ['merge-base', baseOid, targetOid],
+        'These branches have no readable common ancestor; choose two-commit comparison explicitly')
+      comparisonBaseOid = this.commitOid(result.stdout)
+    }
+    const snapshot: GitBranchComparisonSnapshot = {
+      hostId: workspace.hostId, repoPath, mode: input.mode,
+      baseBranch: input.baseBranch, targetBranch: input.targetBranch,
+      baseOid, targetOid, comparisonBaseOid
+    }
+    const result = await this.comparisonGit(host, repoPath,
+      ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M',
+        `-l${MAX_COMPARISON_FILES}`, comparisonBaseOid, targetOid, '--'], 'Could not compare the selected commits')
+    return {
+      kind: 'ready', snapshot, entries: parseBranchChanges(result.stdout),
+      warnings: result.stderr.trim() ? [scrubGitCredentials(result.stderr.trim())] : []
+    }
+  }
+
+  async branchDiff(
+    workspaceId: string,
+    descriptor: GitBranchDiffDescriptor,
+    config: AppConfig
+  ): Promise<GitFileDiff> {
+    const snapshot = descriptor?.snapshot
+    const file = descriptor?.file
+    if (!snapshot || !file || (snapshot.mode !== 'merge-base' && snapshot.mode !== 'two-point') ||
+      typeof snapshot.hostId !== 'string' || typeof snapshot.repoPath !== 'string') {
+      throw new Error('A fixed branch comparison descriptor is required')
+    }
+    for (const oid of [snapshot.baseOid, snapshot.targetOid, snapshot.comparisonBaseOid]) this.commitOid(oid)
+    if (snapshot.mode === 'two-point' && snapshot.comparisonBaseOid !== snapshot.baseOid) {
+      throw new Error('Two-commit comparison must read its selected base commit')
+    }
+    assertComparisonPath(file.path)
+    if (file.origPath !== null) assertComparisonPath(file.origPath)
+    const workspace = this.workspace(config, workspaceId)
+    const host = this.hostFor(workspace.hostId)
+    const repoPath = await this.requireRepoPath(workspaceId, config)
+    if (workspace.hostId !== snapshot.hostId || repoPath !== snapshot.repoPath) {
+      throw new Error('The Workspace no longer refers to this comparison repository')
+    }
+    const [oldSide, newSide] = await Promise.all([
+      this.readComparisonBlob(host, repoPath, snapshot.comparisonBaseOid, file.origPath ?? file.path),
+      this.readComparisonBlob(host, repoPath, snapshot.targetOid, file.path)
+    ])
+    return buildFileDiff(file.path, oldSide, newSide)
+  }
+
+  private commitOid(value: string): string {
+    if (typeof value !== 'string' || !FULL_COMMIT_OID.test(value.trim())) {
+      throw new Error('Git comparison requires a complete commit object ID')
+    }
+    return value.trim()
+  }
+
+  private async resolveBranchCommit(host: ExecutionHost, repoPath: string, branch: string): Promise<string> {
+    if (typeof branch !== 'string' || !branch || branch.startsWith('-') || branch.includes('\0')) {
+      throw new Error('Choose a valid local branch name')
+    }
+    const ref = `refs/heads/${branch}`
+    await this.comparisonGit(host, repoPath, ['check-ref-format', ref], 'Invalid local branch name')
+    const result = await this.comparisonGit(host, repoPath,
+      ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], 'Selected local branch has no readable commit')
+    return this.commitOid(result.stdout)
+  }
+
+  private async comparisonGit(host: ExecutionHost, repoPath: string, args: string[], failure: string) {
+    let result
+    try {
+      result = await host.run('git', ['-C', repoPath, ...args], GIT_RUN_OPTIONS)
+    } catch (error) {
+      if (isOutputLimitError(error)) throw error
+      throw gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, failure)
+    }
+    this.assertGit(result, failure)
+    return result
+  }
+
+  private async readComparisonBlob(host: ExecutionHost, repoPath: string, oid: string, path: string): Promise<GitDiffSide> {
+    // Absence comes from a successful exact tree lookup, never a stderr pattern or failed show.
+    const tree = await this.comparisonGit(host, repoPath,
+      ['ls-tree', '--full-tree', '-z', oid, '--', toLiteralPathspec(path)], 'Could not read the comparison tree')
+    if (tree.stdout === '') return { present: false }
+    const records = tree.stdout.split('\0')
+    const entry = /^(\d{6}) (blob|tree|commit) ([0-9a-f]+)\t([\s\S]+)$/u.exec(records[0] ?? '')
+    if (records.length !== 2 || records[1] !== '' || !entry || entry[4] !== path) {
+      throw new Error('Git returned an invalid comparison tree entry')
+    }
+    if (entry[2] !== 'blob') throw new Error('This comparison entry is not a readable file blob')
+    const blobOid = this.commitOid(entry[3]!)
+    try {
+      const blob = await this.comparisonGit(host, repoPath, ['cat-file', 'blob', blobOid], 'Could not read the comparison file')
+      return blobTextToDiffSide(blob.stdout)
+    } catch (error) {
+      if (isOutputLimitError(error)) return { present: true, binary: true }
+      throw error
+    }
+  }
 
   async status(workspaceId: string, config: AppConfig): Promise<GitStatusResult> {
     const workspace = this.workspace(config, workspaceId)
