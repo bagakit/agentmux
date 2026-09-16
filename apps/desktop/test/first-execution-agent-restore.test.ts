@@ -118,6 +118,8 @@ describe('one existing intent owns first execution', () => {
     await store.getState().flushAgentSteerQueue(sessionId)
     expect(queue()).toEqual([expect.objectContaining({ operationId, runId: 'canonical-run', status: 'restoring', error: 'Chromium flush request failed' })])
     expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+    expect(api.sessions.recover).toHaveBeenCalledTimes(1)
+    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2)
     await store.getState().sendQueuedAgentSteer(sessionId, operationId)
     expect(api.sessions.recover).toHaveBeenCalledTimes(1)
     expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(4)
@@ -213,11 +215,64 @@ describe('one existing intent owns first execution', () => {
     await store.getState().flushAgentSteerQueue(sessionId)
     expect(queue()).toEqual([expect.objectContaining({ operationId, status: 'restoring', error: 'canonical facts unavailable' })])
     expect(queue()[0]).not.toHaveProperty('runId')
+    expect(api.sessions.recover).toHaveBeenCalledTimes(1)
+    expect(api.sessions.refresh).toHaveBeenCalledTimes(1)
+    expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
     const other = agent('other-run', 'running', 'other')
     store.setState(state => ({ sessions: [...state.sessions, other] }))
     expect(store.getState().send('other', 'healthy input')).toBe(true)
     await store.getState().flushAgentSteerQueue('other')
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0].agentSessionId, call[1]])).toEqual([['other', 'healthy input']])
+    await store.getState().sendQueuedAgentSteer(sessionId, operationId)
+    expect(api.sessions.recover).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0].agentSessionId, call[2]])).toEqual([
+      ['other', expect.any(String)], [sessionId, operationId]
+    ])
+    expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
+  })
+
+  it('ends one refused recovery attempt even when a second recovery would succeed', async () => {
+    await initialize()
+    // The second result makes the broken loop terminate, so its failure is an assertion rather
+    // than a timeout that could hide cleanup or starve Vitest's timers.
+    const recover = vi.spyOn(store.getState(), 'recoverSession')
+      .mockRejectedValueOnce(new Error('one restoration refused'))
+      .mockImplementation(async () => { store.setState({ sessions: [revived] }); return revived })
+    expect(store.getState().send(sessionId, 'single failed attempt')).toBe(true)
+    const entry = queue()[0]!
+    await store.getState().flushAgentSteerQueue(sessionId)
+    expect(recover).toHaveBeenCalledExactlyOnceWith(sessionId, entry.operationId)
+    expect(queue()).toEqual([{ ...entry, status: 'restoring', error: 'one restoration refused' }])
+    expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+    expect(store.getState().agentSteerInFlight[sessionId]).toBeUndefined()
+  })
+
+  it.each(['same', 'different'] as const)('keeps a new %s intent authorization received during a failed restoration', async mode => {
+    await initialize()
+    const gate = deferred()
+    vi.mocked(api.sessions.recover).mockImplementationOnce(async () => {
+      await gate.promise; throw new Error('first restoration refused')
+    })
+    vi.spyOn(api.sessions, 'refresh').mockRejectedValueOnce(new Error('first canonical read refused'))
+    store.getState().send(sessionId, 'first retained intent')
+    const first = queue()[0]!
+    const drain = store.getState().flushAgentSteerQueue(sessionId)
+    await vi.waitFor(() => expect(api.sessions.recover).toHaveBeenCalledTimes(1))
+    let selectedId = first.operationId
+    if (mode === 'same') void store.getState().sendQueuedAgentSteer(sessionId, first.operationId)
+    else {
+      expect(store.getState().send(sessionId, 'new explicit intent')).toBe(true)
+      selectedId = queue()[1]!.operationId
+    }
+    gate.resolve(); await drain
+    expect(api.sessions.recover).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(api.sessions.recover).mock.calls.map(call => call[2])).toEqual([first.operationId, selectedId])
+    expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[2], call[4]])).toEqual([
+      [selectedId, { allowUncertainTurn: true }]
+    ])
+    if (mode === 'same') expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
+    else expect(queue()).toEqual([expect.objectContaining({ operationId: first.operationId,
+      text: first.text, status: 'restoring', error: 'first canonical read refused' })])
   })
 
   it.each(['AGENT_STATE_ENTRY_PERSIST_FAILED', 'PRIVATE_UNSCOPED_DIAGNOSTIC'])('shows %s through real subscribed ingress without painting or blocking the healthy Agent', async code => {

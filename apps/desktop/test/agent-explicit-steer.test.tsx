@@ -300,3 +300,26 @@ it('a synchronous subscriber Send at final in-flight clear starts a live owner r
     ])
   } finally { release() }
 })
+
+it('retains a fresh exact authorization arriving during a default Core attempt until its one explicit retry', async () => {
+  const gate = deferred()
+  const original = client.submitAgentPrompt.bind(client)
+  let first = true
+  vi.spyOn(client, 'submitAgentPrompt').mockImplementation(async (...args) => {
+    if (first) { first = false; await gate.promise }
+    return original(...args)
+  })
+  await draft('default awaiting explicit choice'); await enter()
+  await vi.waitFor(() => expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1))
+  const entry = queue()[0]!
+  let retry!: Promise<void>
+  await act(async () => { retry = useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId) })
+  gate.resolve(); await act(async () => { await retry })
+  expect(client.submitAgentPrompt).toHaveBeenCalledTimes(2)
+  expect(writes).toEqual(['default awaiting explicit choice', '\r'])
+  expect(queue()).toEqual([])
+  const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
+  expect(submits.map(call => [call[3], call[5]])).toEqual([
+    [entry.operationId, undefined], [entry.operationId, { allowUncertainTurn: true }]
+  ])
+})

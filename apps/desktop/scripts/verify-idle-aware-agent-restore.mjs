@@ -459,7 +459,7 @@ try {
     await selectTab(first.cdp, label)
     const notice = await waitFor(`${label} honest isolated history error`, () => first.cdp.evaluate(`(() => {const h=document.querySelector('[data-workbench-region-id="idle-agent-${label}"] .session-history');return [...(h?.querySelectorAll('.session-history__notice')??[])].find(e=>e.querySelector('span')?.textContent.startsWith('History read failed:')&&[...e.querySelectorAll('button')].some(b=>b.textContent.trim()==='Retry'))?.textContent})()`))
     assert.ok(notice.trim().length > 0)
-    assert.match(notice, label === 'unavailable' ? /ENOENT|unavailable|not found|spawn|configured native history helper could not start/i : /thread|session|not found|missing/i)
+    assert.match(notice, label === 'unavailable' ? /configured native read helper could not start/i : /thread|session|not found|missing/i)
   }
   await selectTab(first.cdp, 'expired'); await assertNoExtraAgents(startupCounts)
   for (const label of labels.filter(label => !['recent', 'missing'].includes(label))) assert.equal((await nativeRun(fixture[label].run)).applied_input_bytes, initialRuns[label].applied_input_bytes)
