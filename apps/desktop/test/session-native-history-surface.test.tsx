@@ -12,7 +12,7 @@ const fixture = vi.hoisted(() => ({
   resizeObservers: [] as Array<() => void>,
   state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
     timelines: {}, agentNames: {}, viewModes: {}, regionCaretFocus: null,
-    clearRegionCaretFocus: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
+    clearRegionCaretFocus: vi.fn(), focusRegion: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: { historyPage: fixture.historyPage, write: fixture.write } } }))

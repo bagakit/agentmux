@@ -8,7 +8,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, ExternalLink, FileCode, History, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
+import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -177,7 +177,8 @@ export function TerminalView({
   visible = true,
   autoFocus = true,
   readOnly = false,
-  linkOrigin
+  linkOrigin,
+  onReadHistory
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -194,7 +195,11 @@ export function TerminalView({
   autoFocus?: boolean
   readOnly?: boolean
   linkOrigin: OpenHttpLinkOrigin
+  /** The Agent pane owns the distinct native-record reading surface. */
+  onReadHistory?: (control: SessionControl) => boolean
 }) {
+  const onReadHistoryRef = useRef(onReadHistory)
+  onReadHistoryRef.current = onReadHistory
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
   const readOnlyRef = useRef(readOnly)
@@ -660,6 +665,19 @@ export function TerminalView({
       }
     }
     observationReaderRef.current = readObservation
+    // Continue reading at the local history boundary without encoding input or changing VT state.
+    // xterm still owns every gesture outside this explicit transition to the Agent pane's reader.
+    terminal.attachCustomWheelEventHandler((event) => {
+      const buffer = terminal.buffer.active
+      if (disposed || terminalRef.current !== terminal || !readyForLiveOutput || !visibleRef.current ||
+          buffer.type !== 'normal' || terminal.modes.mouseTrackingMode !== 'none' || buffer.viewportY !== 0 ||
+          !Number.isFinite(event.deltaY) || event.deltaY >= 0 || event.deltaX !== 0 || event.deltaZ !== 0 ||
+          event.ctrlKey || event.shiftKey || event.altKey || event.metaKey ||
+          !onReadHistoryRef.current?.(session.control)) return true
+      event.preventDefault()
+      event.stopPropagation()
+      return false
+    })
     let cursor = 0
     let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
