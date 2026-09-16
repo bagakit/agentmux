@@ -102,6 +102,23 @@ export function useAgentAttentionNotifications(): void {
     // to that slice rather than firing on every store write.
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (state.sessions === previous.sessions) return
+      // Initial history is a baseline, not news. Thereafter the accepted Session projection is the
+      // single fact owner, including membership replay and new members that crashed during launch.
+      if (!state.loading && !previous.loading) {
+        const previousSessions = new Map(previous.sessions.map((session) => [session.id, session]))
+        for (const session of state.sessions) {
+          if (session.kind !== 'agent' || session.processState !== 'exited' || session.status.exitReason !== 'crashed') continue
+          const before = previousSessions.get(session.id)
+          if (before?.kind === 'agent' && before.hostId === session.hostId
+            && before.control.run.runId === session.control.run.runId
+            && before.processState === 'exited' && before.status.exitReason === 'crashed') continue
+          const facts = [session.status.detail, session.status.exitCode === undefined ? undefined : `exit code ${session.status.exitCode}`]
+            .filter(Boolean).join(', ')
+          reportError(new Error(
+            `Agent "${session.label}" crashed${facts ? ` (${facts})` : ''}. Its Session and history are kept. Open the Session to review its available recovery actions.`
+          ), { kind: 'agent-broken', subject: session.control })
+        }
+      }
       void publishBadge()
       reconcile()
     })

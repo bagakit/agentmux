@@ -21,6 +21,7 @@ import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type {
   AgentLaunchResult,
+  AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
   AppConfig,
@@ -60,6 +61,7 @@ import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
 import { errorIdentity, presentError } from './lib/error-presentation'
+import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
@@ -283,6 +285,12 @@ export type HostCheckState = {
   result?: HostCheckResult
   detail?: string
   observedAt?: number
+}
+
+/** Attributes of the one current/last transient notice, never a second Agent status record. */
+export type ErrorNoticeContext = {
+  kind: ServiceNoticeKind
+  subject?: AgentSessionControl
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -516,6 +524,7 @@ type AppState = {
   error: string | null
   /** Last transient error remains available after dismissal/navigation for a deliberate reopen. */
   lastError: string | null
+  errorNoticeContext: ErrorNoticeContext | null
   errorDismissed: boolean
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
@@ -810,7 +819,7 @@ type AppState = {
    */
   decayStaleAgentStatuses(now: number): void
   setConfig(config: AppConfig): void
-  reportError(error: unknown): void
+  reportError(error: unknown, context?: ErrorNoticeContext): void
   dismissError(): void
   reopenError(): void
 }
@@ -1954,6 +1963,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   displacedAgentSessionIds: [],
   error: null,
   lastError: null,
+  errorNoticeContext: null,
   errorDismissed: false,
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
@@ -2261,6 +2271,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: false,
         error: startupError || null,
         lastError: startupError || null,
+        errorNoticeContext: null,
         errorDismissed: false
       })
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
@@ -2346,6 +2357,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: false,
         error: presentError(error),
         lastError: presentError(error),
+        errorNoticeContext: null,
         errorDismissed: false
       })
       // If hydration itself failed, keep the write fence closed: opening it here would let the
@@ -5921,7 +5933,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       hostChecks: {}
     }))
   },
-  reportError(error) {
+  reportError(error, context) {
     const message = presentError(error)
     // Replayed runtime events and polling can report the same transient failure repeatedly. Once the
     // user dismissed that failure, do not resurrect it until a different one arrives or they explicitly
@@ -5937,9 +5949,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // remembered. Storing a precomputed key beside `lastError` would be the same defect one level up: two
     // places deciding identity, drifting the first time a write site forgets one of them.
     const current = get()
+    const previousSubject = current.errorNoticeContext?.subject
+    const subject = context?.subject
     if (current.errorDismissed && current.lastError !== null
+      && (current.errorNoticeContext?.kind ?? 'indeterminate') === (context?.kind ?? 'indeterminate')
+      && previousSubject?.hostId === subject?.hostId
+      && previousSubject?.agentSessionId === subject?.agentSessionId
+      && previousSubject?.run.runId === subject?.run.runId
       && errorIdentity(current.lastError) === errorIdentity(message)) return
-    set({ error: message, lastError: message, errorDismissed: false })
+    set({ error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false })
   },
   dismissError() {
     if (!get().error) return
