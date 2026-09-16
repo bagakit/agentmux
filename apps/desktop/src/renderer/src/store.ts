@@ -293,6 +293,8 @@ const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean
 
 export type AgentSteerQueueEntry = {
   operationId: string
+  /** The first accepted local intent time; absent means it was never recorded. */
+  enqueuedAt?: number
   runId?: string
   text: string
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
@@ -784,6 +786,7 @@ type AppState = {
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
+  moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   continueQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string, continueOperationId?: string): Promise<void>
@@ -1783,9 +1786,27 @@ function workbenchStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 // 那行 `if` 删掉，五个持久化测试文件 62 条全绿。这里剩下的只有转发，没有可以被掏空的判断。
 const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedAppState>({
   getItem: (name) => workbenchStorage().getItem(name),
-  setItem: (name, value) => workbenchStorage().setItem(name, value),
-  removeItem: (name) => workbenchStorage().removeItem(name)
+  setItem: (name, value) => {
+    workbenchStorage().setItem(name, value)
+    requestWorkbenchStorageCommit()
+  },
+  removeItem: (name) => {
+    const storage = workbenchStorage()
+    if (storage.getItem(name) === null) return
+    storage.removeItem(name)
+    requestWorkbenchStorageCommit()
+  }
 })
+
+// The writer batches real presentation changes before this boundary. A visible localStorage value
+// is not a cross-process durability receipt; ask its existing platform owner to commit that batch.
+// Failure is advisory: retain the written state and retry on the next real storage mutation.
+function requestWorkbenchStorageCommit(): void {
+  void api.ui.requestStorageFlush().catch((error) => useAppStore.getState().reportError(new Error(
+    'Saving the workbench is unconfirmed. Your current layout and drafts remain visible; the next workbench change will retry saving.',
+    { cause: error }
+  )))
+}
 const workbenchWriteFence = createWriteFencedStorage(persistentWorkbenchStorage.storage)
 
 /** 放行持久化写入。启动路径上的两个开启点都只走这一处。 */
@@ -5406,6 +5427,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const entry: AgentSteerQueueEntry = {
       operationId: crypto.randomUUID(),
+      enqueuedAt: Date.now(),
       ...(session.processState === 'running' && session.status.state !== 'disconnected'
         ? { runId: session.control.run.runId } : {}),
       text: text.trim(),
@@ -5427,6 +5449,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentSteerQueues }
     })
     void get().flushAgentSteerQueue(sessionId)
+  },
+  moveAgentSteer(sessionId, operationId, direction) {
+    set((state) => {
+      // The mailbox hides confirmed delivery too. Resolve adjacency from the same pending facts.
+      const current = reconcileDeliveredSteers(state, sessionId)
+      const queue = current.agentSteerQueues[sessionId]
+      if (!queue) return current
+      const index = queue.findIndex((entry) => entry.operationId === operationId)
+      const adjacent = index + (direction === 'up' ? -1 : 1)
+      const entry = queue[index], neighbor = queue[adjacent]
+      if (!entry || !neighbor) return current
+      const sending = current.agentSteerInFlight[sessionId]
+      if (entry.operationId === sending || neighbor.operationId === sending) return current
+      const next = [...queue]
+      next[index] = neighbor
+      next[adjacent] = entry
+      return { agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: next } }
+    })
+    // Rearranging intent grants no execution permission and does not wake the consumer.
   },
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
