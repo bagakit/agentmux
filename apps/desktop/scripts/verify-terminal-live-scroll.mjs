@@ -97,7 +97,7 @@ try {
     turnId: `private-native-turn-${i}`, startedAtMs: 1000 + i, completedAtMs: 1001 + i,
     item: { id: `private-native-item-${i}`, type: i % 2 ? 'userMessage' : 'agentMessage',
       ...(i % 2 ? { content: [{ type: 'text', text: `Private persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }] }
-        : { text: `${i === 62 ? '**Private**' : 'Private'} persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }) }
+        : { text: `**Private persisted record ${i}.** ` + 'Synthetic readable native text. '.repeat(35) }) }
   }))
   await fs.writeFile(path.join(privateRoot, 'native-items.json'), JSON.stringify(items), { mode: 0o600 })
   await fs.writeFile(path.join(privateRoot, 'native-reader.mjs'), readerSource, { mode: 0o600 })
