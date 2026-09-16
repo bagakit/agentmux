@@ -1438,7 +1438,8 @@ export type AgentMuxDesktopApi = {
     // Agent or a newly restarted raw Terminal.
     recover(session: SessionControl, workspacePath?: string, operationId?: string): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
-    onEvent(listener: (event: RuntimeEvent) => void): () => void
+    /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
+    onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void
   }
   /**
    * 进程资源用量。**只在有人订阅时才采样**——折叠态一次 `ps` 都不发生。
@@ -1524,7 +1525,11 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent'> & {
+    /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
+    onEvent(listener: (event: RuntimeEvent) => void): () => void
+  }
   control: {
     onRequest(listener: (request: AgentMuxControlRequest) => void): () => void
     onCancellation(listener: (cancellation: DesktopControlCancellation) => void): () => void
