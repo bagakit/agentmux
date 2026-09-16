@@ -60,7 +60,7 @@ export type GitStatusResult =
     }
 
 /**
- * One side (old = HEAD blob, new = worktree file) of a single-file diff. Absent is a first-class
+ * One side of a single-file diff: HEAD/worktree or pinned comparison commits. Absent is a first-class
  * state, not empty text: a missing old side is how an added file is drawn, a missing new side a
  * deleted one. `binary` carries no `text` — a file with a NUL byte or one too large to read is
  * reported as binary rather than having raw bytes stuffed into a string field.
@@ -197,3 +197,71 @@ export type CreatePullRequestResult =
   | { kind: 'created'; url: string }
   | { kind: 'refused'; reason: string }
   | { kind: 'failed'; message: string }
+
+export type GitBranchCompareMode = 'merge-base' | 'two-point'
+
+export type GitBranchCompareInput = {
+  // Names from WorkspaceBranchesSnapshot.branches, without the refs/heads/ prefix.
+  // Main validates and resolves exact refs/heads/<name>^{commit}; no arbitrary rev expression.
+  baseBranch: string
+  targetBranch: string
+  mode: GitBranchCompareMode
+}
+
+export type GitBranchComparisonSnapshot = {
+  // Main derives this provenance from the configured Workspace and actual Git repository.
+  // On every subsequent read it must match the Workspace's current host/repository.
+  hostId: string
+  repoPath: string
+  mode: GitBranchCompareMode
+  baseBranch: string
+  targetBranch: string
+  // Complete immutable commit OIDs from the initial comparison. Never re-resolve labels on file read.
+  baseOid: string
+  targetOid: string
+  // baseOid for two-point; actual merge-base commit for merge-base.
+  comparisonBaseOid: string
+}
+
+export type GitBranchChange = {
+  // Both coordinates are repo-root-relative, exactly from name-status -z; never FileService paths.
+  path: string
+  origPath: string | null
+  change: 'added' | 'deleted' | 'modified' | 'renamed' | 'type-changed'
+}
+
+export type GitBranchComparisonResult =
+  | {
+      kind: 'ready'
+      snapshot: GitBranchComparisonSnapshot
+      entries: GitBranchChange[]
+      // Actual credential-scrubbed Git diagnostics, including a bounded rename-detection warning.
+      // Empty means Git emitted none. These are transient result data, not a new notice registry.
+      warnings: string[]
+    }
+  | {
+      kind: 'not-a-git-repository'
+      hostId: string
+      workspacePath: string
+    }
+
+// The same minimal descriptor crosses IPC and lives in the persisted git-diff surface.
+// No blob payload, loading flag, error state, whole change list or second snapshot identity.
+export type GitBranchDiffDescriptor = {
+  snapshot: GitBranchComparisonSnapshot
+  file: Pick<GitBranchChange, 'path' | 'origPath'>
+}
+
+export interface GitBranchComparisonApi {
+  // Existing handle('git:compareBranches') -> GitService.compareBranches(workspaceId,input,config).
+  // Invalid branch / no merge base / timeout / output or row limit rejects with scrubbed error.
+  // A ready empty list is exclusively a successful actual zero-change comparison.
+  compareBranches(workspaceId: string, input: GitBranchCompareInput): Promise<GitBranchComparisonResult>
+
+  // Existing handle('git:branchDiff') -> GitService.branchDiff(workspaceId,descriptor,config).
+  // Read only comparisonBaseOid:(origPath ?? path) and targetOid:path in the configured repo.
+  // Added/deleted absence is explicit; unrelated read failure rejects, never becomes empty content.
+  // Returns the existing old/new renderer shape. Its binary flag already includes the read-size cap;
+  // the shared canvas must say "binary or too large for textual diff", not claim a specific cause.
+  branchDiff(workspaceId: string, descriptor: GitBranchDiffDescriptor): Promise<GitFileDiff>
+}
