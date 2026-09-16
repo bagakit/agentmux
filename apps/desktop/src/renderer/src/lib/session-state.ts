@@ -591,6 +591,7 @@ export function projectRuntimeEvent(
         ? (() => {
             const {
               pendingInteraction: _pendingInteraction,
+              semanticStatus: _semanticStatus,
               terminalCapability: _terminalCapability,
               terminalPromptDelivery: _terminalPromptDelivery,
               terminalOutputChannel: _terminalOutputChannel,
@@ -603,6 +604,11 @@ export function projectRuntimeEvent(
               hostId: core.session.hostId,
               workspacePath: core.session.workspacePath,
               updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
+              // Mirror the Core fact independently of the display freshness gate below.
+              // An accepted snapshot may clear an idle epoch without a new observation.
+              ...(core.session.semanticStatus
+                ? { semanticStatus: structuredClone(core.session.semanticStatus) }
+                : {}),
               ...(core.session.terminalCapability
                 ? { terminalCapability: structuredClone(core.session.terminalCapability) }
                 : {}),

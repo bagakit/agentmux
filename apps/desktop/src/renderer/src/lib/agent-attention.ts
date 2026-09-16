@@ -18,7 +18,7 @@ export type AgentAttentionRollup = {
   needsYou: number
   error: number
   // The earliest Session by status.observedAt in each attention class, so a click lands on the one
-  // that has been waiting longest — null when that class is empty.
+  // with the earliest observation — null when that class is empty.
   needsYouSessionId: string | null
   errorSessionId: string | null
 }
@@ -107,12 +107,12 @@ export function summarizeProviderActivity(
  * 下一个要你处理的 Agent——从 `from` 往后数的那一个，没有则 null。
  *
  * 为什么是「循环」而不是「跳到最急的那一个」：状态栏那两个按钮已经在做后者（`needsYouSessionId` /
- * `errorSessionId`，各自跳到本档里等得最久的）。键盘要答的是另一个问题——**把它们一个个过一遍**。
+ * `errorSessionId`，各自跳到本档里观察最早的）。键盘要答的是另一个问题——**把它们一个个过一遍**。
  * 只跳最急那一个的话，处理完第一个之前，这个键会一直把你送回同一行；而真实动作是「这个回完了，下一个
  * 是谁」。所以按键的语义是游标推进，`from` 就是游标。
  *
  * 顺序 = 急迫档（`attentionSortClass` → `attentionSortRank`，与切换器、花名册、活动列表同一张表）
- * 内按 `observedAt` 升序，即等得最久的先来——与状态栏那两个按钮的「跳到等得最久的那个」是同一条约定，
+ * 内按 `observedAt` 升序，即观察最早的先来——与状态栏那两个按钮的「跳到观察最早的那个」是同一条约定，
  * 于是从任意一处进入、键盘继续往下走，走的都是同一条队。**不另写一份排序**：这正是本仓反复出现的
  * 那个形状（同一个问题两处各判一次，今天一致，加成员那天分岔）。
  *
