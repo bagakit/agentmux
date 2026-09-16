@@ -289,18 +289,26 @@ describe('observeOverlays：变化被上报，且不重复上报', () => {
     disconnected: () => boolean
     options: () => MutationObserverInit | undefined
   } {
-    const callbacks: Array<() => void> = []
+    const callbacks: Array<(records: MutationRecord[]) => void> = []
     let disconnected = false
     let options: MutationObserverInit | undefined
     class Fake {
-      constructor(callback: () => void) { callbacks.push(callback) }
-      observe(_target: Node, init?: MutationObserverInit): void { options = init }
+      constructor(callback: (records: MutationRecord[]) => void) { callbacks.push(callback) }
+      observe(_target: Node, init?: MutationObserverInit): void { disconnected = false; options = init }
       disconnect(): void { disconnected = true }
       takeRecords(): [] { return [] }
     }
     return {
       ctor: Fake as unknown as typeof MutationObserver,
-      fire: () => { for (const callback of callbacks) callback() },
+      fire: () => {
+        for (const callback of callbacks) callback([{
+          type: 'childList', target: document.body,
+          addedNodes: document.createDocumentFragment().childNodes,
+          removedNodes: document.createDocumentFragment().childNodes,
+          previousSibling: null, nextSibling: null,
+          attributeName: null, attributeNamespace: null, oldValue: null
+        }])
+      },
       disconnected: () => disconnected,
       options: () => options
     }
@@ -386,10 +394,134 @@ describe('observeOverlays：变化被上报，且不重复上报', () => {
     // Radix 复用同一个节点在 open/closed 之间切换（退场动画），那是一次**属性**变化而不是增删。
     // 只订阅 childList 会让原生视图在浮层关掉后再不回来。
     const observer = syncObserver()
+    document.body.append(document.createElement('div'))
     observeOverlays(document.body, vi.fn(), observer.ctor)
     expect(observer.options()).toMatchObject({ childList: true, subtree: true, attributes: true })
     expect(observer.options()?.attributeFilter, '没有按 data-state 过滤，每一次属性变化都要重算').toEqual([
       'data-state'
     ])
+  })
+})
+
+describe('真实观察范围：只为外部浮层产生回调', () => {
+  // Count delivery at the real platform callback, before the implementation can filter records.
+  // The subclass delegates observe/disconnect/delivery unchanged to happy-dom's MutationObserver.
+  function countedObserver() {
+    const delivered = vi.fn<(records: MutationRecord[]) => void>()
+    class CountedObserver extends MutationObserver {
+      constructor(callback: MutationCallback) {
+        super((records, observer) => { delivered(records); callback(records, observer) })
+      }
+    }
+    return { ctor: CountedObserver, delivered }
+  }
+
+  const settleMutations = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+  it('非空终端正文 childList 和 data-state 变化产生零观察回调', async () => {
+    const root = mountAppRoot()
+    const observer = countedObserver()
+    const report = vi.fn<(count: number) => void>()
+    const stop = observeOverlays(document.body, report, observer.ctor)
+    try {
+      for (let line = 0; line < 256; line++) root.append(document.createElement('span'))
+      root.firstElementChild!.setAttribute('data-state', 'open')
+      root.setAttribute('data-state', 'open')
+      await settleMutations()
+      expect(root.children).toHaveLength(256)
+      expect(observer.delivered.mock.calls).toEqual([])
+      expect(report.mock.calls).toEqual([[0]])
+    } finally { stop() }
+  })
+
+  it('空 portal 后挂内容、嵌套 open 和 closed 都被真实观察', async () => {
+    mountAppRoot()
+    const portal = document.createElement('div')
+    document.body.append(portal)
+    const observer = countedObserver()
+    const report = vi.fn<(count: number) => void>()
+    const stop = observeOverlays(document.body, report, observer.ctor)
+    try {
+      const content = document.createElement('div')
+      portal.append(content)
+      await settleMutations()
+      content.setAttribute('data-state', 'open')
+      await settleMutations()
+      const nested = document.createElement('div')
+      nested.setAttribute('data-state', 'open')
+      content.append(nested)
+      content.setAttribute('data-state', 'closed')
+      await settleMutations()
+      nested.setAttribute('data-state', 'closed')
+      await settleMutations()
+      expect(Array.from(portal.children)).toEqual([content])
+      expect(Array.from(content.children)).toEqual([nested])
+      expect(observer.delivered.mock.calls.length).toBeGreaterThan(0)
+      expect(report.mock.calls).toEqual([[0], [1], [0]])
+    } finally { stop() }
+  })
+
+  it('成员同批移除、新增与打开会重绑；已移除子树不再产生回调', async () => {
+    mountAppRoot()
+    const removed = document.createElement('div')
+    removed.setAttribute('data-state', 'open')
+    document.body.append(removed)
+    const observer = countedObserver()
+    const report = vi.fn<(count: number) => void>()
+    const stop = observeOverlays(document.body, report, observer.ctor)
+    try {
+      const replacement = document.createElement('div')
+      const content = document.createElement('div')
+      replacement.append(content)
+      removed.remove()
+      document.body.append(replacement)
+      content.setAttribute('data-state', 'open')
+      await settleMutations()
+      expect(Array.from(document.body.children)).toEqual([document.getElementById('root'), replacement])
+      expect(observer.delivered.mock.calls.length).toBeGreaterThan(0)
+      observer.delivered.mockClear()
+      removed.append(document.createElement('span'))
+      removed.setAttribute('data-state', 'closed')
+      await settleMutations()
+      expect(removed.children).toHaveLength(1)
+      expect(observer.delivered.mock.calls).toEqual([])
+      content.setAttribute('data-state', 'closed')
+      await settleMutations()
+      expect(observer.delivered.mock.calls.length).toBeGreaterThan(0)
+      expect(report.mock.calls).toEqual([[1], [0]])
+    } finally { stop() }
+  })
+
+  it('新插空 portal 后来的内容可见；stop 后当前子树与 body 都不再回调', async () => {
+    mountAppRoot()
+    const observer = countedObserver()
+    const report = vi.fn<(count: number) => void>()
+    const stop = observeOverlays(document.body, report, observer.ctor)
+    try {
+      const portal = document.createElement('div')
+      portal.setAttribute('data-overlay-host', '')
+      document.body.append(portal)
+      await settleMutations()
+      const outer = document.createElement('div')
+      const nested = document.createElement('div')
+      outer.setAttribute('data-state', 'open')
+      nested.setAttribute('data-state', 'open')
+      portal.append(outer, nested)
+      await settleMutations()
+      outer.setAttribute('data-state', 'closed')
+      await settleMutations()
+      nested.remove()
+      await settleMutations()
+      expect(Array.from(portal.children)).toEqual([outer])
+      expect(observer.delivered.mock.calls.length).toBeGreaterThan(0)
+      expect(report.mock.calls).toEqual([[0], [2], [1], [0]])
+      stop()
+      observer.delivered.mockClear()
+      outer.setAttribute('data-state', 'open')
+      document.body.append(document.createElement('div'))
+      await settleMutations()
+      expect(observer.delivered.mock.calls).toEqual([])
+      expect(report.mock.calls).toEqual([[0], [2], [1], [0]])
+    } finally { stop() }
   })
 })
