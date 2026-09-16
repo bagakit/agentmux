@@ -34,10 +34,11 @@ describe('steer queue operationId correlation (T-008)', () => {
     submit.mockImplementationOnce(async (_c, _p, operationId) => { ids.push(operationId!) })
 
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
+    const admitted = useAppStore.getState().agentSteerQueues.s![0]!
     await useAppStore.getState().flushAgentSteerQueue('s')
     // Retained, and marked `deferred` — NOT `failed`. This used to assert `failed`, which was the defect
     // written down: a healthy Agent's message judged dead because OUR readiness probe had not completed.
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: ids[0], runId: 'r', text: 'steer me', status: 'deferred', error: 'busy' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ ...admitted, status: 'deferred', error: 'busy' }])
 
     // The whole point of `deferred`: the next runtime event retries on its own. No user action, no
     // "Send now" click. This assertion used to read `expect(ids).toHaveLength(1)` — i.e. it pinned the
