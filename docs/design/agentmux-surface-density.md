@@ -338,6 +338,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
 | Terminal link span | 裸 URL 下划线只覆盖 ASCII URL 本身；相邻 CJK 文字/标点保持普通终端字形 | 链接边界属于交互合同（见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md) 的 Terminal 链接约束）；不因相邻中文输出改变 URL 的目标或悬停范围 |
 | Terminal restart projection | Runtime 未确认期间保留布局但在 Region 内显示中性等待/不可用状态；权威 snapshot 确认旧 PTY 不存在后清掉 Terminal Region/Tab，不留只有标题的空壳 | Terminal 没有 Provider-native semantic resume，不能把未知身份伪装成可用终端，也不能让临时探测失败变成永久空 Tab |
+| Confirmed Agent crash notice | 沿用现有服务窗与唯一错误提示；由同一分类派生 ARIA 音量 | 行为边界归交互合同《我们的流程坏了，不等于 Agent 坏了》。不另造弹窗、严重度颜色表或覆盖工作面的遮罩 |
 | Managed Hook notice | 服务窗/状态行；不覆盖 Terminal 内容、不抢焦点 | Hook 路径失效属于流程降级，Agent 仍可用；说明如何让当前 App 重新校正配置 |
 | Provider capability notice | 服务窗/状态行；与 Managed Hook notice 共用告示槽 | Provider 的 Hook、resume 或探测能力缺失/降级时只在对应 Agent 旁说明，不覆盖工作面、不抢焦点；unsupported 与暂时 unavailable 必须分开，不画一个看似可点击但必然失败的 Resume 按钮 |
 
