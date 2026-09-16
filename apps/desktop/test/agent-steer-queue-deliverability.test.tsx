@@ -14,11 +14,12 @@ const entry = (overrides: Partial<ComposerQueuedMessage> = {}): ComposerQueuedMe
 })
 
 describe('queue delivery facts and recovery actions', () => {
-  it('promises ordered attempts as soon as the Provider accepts, without an idle-only promise', () => {
+  it('describes explicit per-message steer without promising an automatic tail', () => {
     const html = render([entry()])
     expect(html).toContain('1 message queued for delivery')
-    expect(html).toContain('New messages for the current Run are sent in order when the Agent can accept them.')
-    expect(html).toContain('Choose Send to execute messages restored from a previous application session.')
+    expect(html).toContain('Send explicitly steers this message, including during the current turn.')
+    expect(html).toContain('It does not send the other queued messages.')
+    expect(html).toContain('Messages restored from a previous application session wait for your explicit Send.')
     expect(html).not.toContain('finishes its current turn')
     expect(html).not.toContain('role="status"')
     expect(html).toContain('Keep these exact words')

@@ -10,7 +10,7 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const unknownError = () => new Error('The previous turn has not been confirmed complete. Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
 
-it('preserves the operation identity and grants one head message from the visible risk action', async () => {
+it('the existing Send grants its exact head message without an additional continuation action', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(unknownError()).mockResolvedValue(undefined)
   const state = useAppStore.getState()
   state.enqueueAgentSteer('agent-1', 'first')
@@ -21,12 +21,12 @@ it('preserves the operation identity and grants one head message from the visibl
   expect(pending[0]).toMatchObject({ text: 'first', status: 'deferred', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })
   const firstId = pending[0]!.operationId
   await dom.render(<ComposerOutbox queued={pending.map((entry) => ({ id: entry.operationId,
-    text: entry.text, status: entry.status, deliverable: true,
-    turnEndUnconfirmed: entry.errorCode === 'AGENT_TURN_END_UNCONFIRMED'
-  }))} onContinue={(id) => { void useAppStore.getState().continueQueuedAgentSteer('agent-1', id) }} />)
-  expect(dom.container.textContent).toContain('Sending now can leave a draft or start another turn')
+    text: entry.text, status: entry.status, deliverable: true
+  }))} onSend={(id) => { void useAppStore.getState().sendQueuedAgentSteer('agent-1', id) }} />)
+  expect(dom.container.textContent).toContain('Send explicitly steers this message')
+  expect(dom.container.textContent).not.toContain('Send now — turn may still be running')
   const button = Array.from(dom.container.querySelectorAll('button')).find((item) =>
-    item.textContent === 'Send now — turn may still be running')
+    item.textContent === 'Send queued message')
   expect(button).toBeDefined()
   await act(async () => { button!.click() })
   expect(submit.mock.calls).toEqual([
