@@ -43,13 +43,14 @@
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
 
-### AgentMux 自操作与外部 Computer Use 边界
+### AgentMux 自操作与 Computer Use 边界
 
 - Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
 - AgentMux 的产品运行、Session/Run 生命周期、Board/PMO 管理和发布验收不得把外部 Computer Use 工具作为前置条件。外部工具不可用、权限过期或观察失败时，保留产品自身的真实状态并给出诊断，不得阻断健康 Agent。
 - 内嵌 Browser 的网页操作继续使用已有 CDP/Browser Control；它是页面语义通道，不是 macOS 辅助功能，也不复制一套桌面自动化 Runtime。
-- Codex Computer Use 或未来的其他桌面自动化实现只能作为开发验收或跨应用场景的可选外部适配器；它们不得进入 `packages/core`、不得成为 AgentMux 启动依赖，也不得写入产品状态真相。
-- 如果未来需要跨应用桌面自动化，应新增隔离的可选 adapter 包并通过能力声明接入；本 Feature 不扩展为通用桌面机器人，也不把 macOS Accessibility 权限引入 AgentMux 主流程。
+- 用户确认：「agentmux 应该有自己的 computer use 方案」。AgentMux 应向 Agent 提供自己拥有的 Computer Use 能力入口与真实执行反馈，用于桌面观察和操作；这是一条独立需求，不能把开发者临时调用外部工具算成已经交付。
+- AgentMux 的 Computer Use 与已有自操作 Control、Browser CDP 各有清晰职责：已有产品语义操作仍走其现有 owner；系统桌面能力的实际执行属于 Desktop／平台适配边界，不把 Electron、系统窗口或辅助功能实现带入无 UI 的 Core，也不复制 Agent／Run 生命周期。
+- 桌面权限缺失、目标窗口消失或操作失败必须如实反馈，不能冒充成功；该能力不可用不能阻断健康 Agent 的输入、启动与恢复。外部桌面自动化工具仍可用于独立开发验收，但不是产品启动或发布的前置条件。
 
 ### 打包、安装与启动事实
 
