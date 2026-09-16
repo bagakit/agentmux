@@ -453,7 +453,7 @@
 - **Composer 要认 skill 与 slash 命令**。用户原话：「现在对话组件对 skill 的支持不太好」。今天的缺口是**整条链路都没有这个概念**：Composer 是一个纯 textarea，没有 `/` 触发、没有补全、没有发现；Core 的 timeline kind 是一个被校验器封住的闭集（`user_message | assistant_message | tool_call | permission | lifecycle`），没有 skill 的位置。于是一次 skill 调用要么根本不进 timeline，要么塌进一条**与任何别的工具无法区分**的 `tool_call`（同一枚 Hammer）。
   - **触发前缀由 Provider 声明，不在 Renderer 里按 providerId 分支**。各家 CLI 的前缀并不统一（有用 `/` 的，也有用 `$` 的），这正是既有 Provider 能力声明（posture、interaction 同处）该多一条的东西——与 permission option 的 DESCRIBE/CONTRIBUTE 拆分同构：声明半边跨 IPC 供 Renderer 渲染，兑现半边留在 Core。
   - **两个来源合并成一个选择器**：一份**手工维护的命令目录**（CLI 不提供任何机器可读的命令列表，这是事实约束，不是偷懒），加一份**磁盘发现的 skill**（扫 skill 根下 `SKILL.md` 的 frontmatter 取名字与描述）。前者是纯数据，可以自由生长。
-  - **发送时按"行首 token"分流，且不得先 trim**。一句以空格开头的正文即便看着像命令也仍是正文——抢一条"已派发"的记号给一段从未派发的文本，是在制造假状态。这条与"不做输入队列"同源。
+  - **发送时按"行首 token"分流，且不得先 trim**。一句以空格开头的正文即便看着像命令也仍是正文——抢一条"已派发"的记号给一段从未派发的文本，是在制造假状态。入队不等于实际派发，不能拿排队记录充作送达。
   - **一次派发在 timeline 里要看得出是派发**，既不是用户气泡，也不是一张完整工具卡。这需要 Core 侧动那个闭集（新增一个 kind 是**公共合同变更**，不是 Renderer 的自由），否则 Renderer 无论怎么画都是在给 `tool_call` 打补丁。
   - **有歧义就显示歧义，不替用户裁决**：一个名字同时是命令又是 skill、或来自多个来源时，标注出来交给 Agent 解析。参数是**自由文本**，不做 schema、不做发送前校验——参数语义归 CLI 所有，我们插入 token 加一个空格就收手。
   - **发现按 skill 真正运行的位置取值**，带明确超时与 Retry；**远端 host 下明确"不可用"而不是给一个空列表**——空列表说的是"这儿没有 skill"，那是假话。与 Editor 失败态的 Reveal 在远端**以缺席表达**是同一条规矩。
@@ -461,9 +461,9 @@
 - Composer 使用独立、受控、无 Store 依赖的可复用输入组件；Session adapter 负责草稿、当前文件、Submit 与 Interrupt 绑定，为附件和其他富输入能力保留唯一扩展面。
 - Renderer 不根据 `working`、`waiting`、`blocked` 或 `done` 猜测 Prompt readiness。Core 拒绝提交时保留草稿供重试；semantic resume 和恢复动作继续由现有 Owner 负责。
 - **运行中可 steer**：Agent 处于 `working` 时界面仍允许提交，补的那句话经**既有** send 通路（store.send → submitPrompt → Core.submitAgentPrompt）送出，与普通 prompt 同一条路——不新增 Renderer 侧第二条写通道。「界面是否允许提交」与「主动作是 Send 还是打断」是两个不同问题：working 时前者为真而后者仍是打断，一个跑动中的 Agent 既要能被补话也要能被叫停，二者不互斥。判定收敛为一个纯函数（`lib/composer-submit-mode.ts`），不读 Store、不按 providerId 分支。
-  - 这**不是**"working 时提交一律送达"的承诺。能否送达仍由 Core 裁决：render-then-submit Provider（9 家里只有 codex）的 mid-turn steer 会被 Core fail-closed 拒绝，那是一等预期而非缺陷。被拒时草稿保留（这就是诚实的"没送出去"信号），且不产生任何 user 回合——Core 在记录回合之前就抛错。合同不得被改写成普遍送达承诺，那会与 codex 已封的 readiness 门自相矛盾，并诱导后人去削弱它。
+  - 投递结果仍由 Core 按真实输入能力与回执裁决；显式 steer 不因缺少回合结束／readiness 观测而变为永久排队。正在进行的部分投递、同操作幂等、错 Run、待答交互和 Provider 确实不支持的输入边界仍保留。发送意图只在下述「Cmd+Enter 直接 steer」定义，队列归「Composer 消息队列与紧凑状态」。
   - pending interaction 期间**不允许** steer：待答请求期间卡片是唯一输入面（既有合同），Renderer 侧不提供提交、Core 侧亦抛 `AGENT_INTERACTION_PENDING`，双重保险。
-  - 不做输入队列：下游 CLI 自带输入行，且就绪门控对 8/9 Provider 不可实现，排队只会制造一份界面以为已送达、进程并不知情的假状态。
+
 - **终端要像终端：宿主不许悄悄改写按键与选择行为**。Agent 跑的是它自己的 TUI，用户练熟的是那套 TUI 的手感；我们只是宿主。宿主把某个键翻译错了，用户会以为是那个 CLI 坏了——这类缺陷最难归因，因为它在 CLI 自己的终端里复现不出来。而且**代价是双份的**：不像终端不仅让用户理解不了，也会推高我们自己的复杂度——每偏离一次，就要为这个偏离补一层解释、一处特例和一条它自己的回归，而照着终端既有的约定做，这些都不必存在。所以"像终端"是省复杂度的选择，不是额外的工。
   - **Shift+Enter 换行，不提交**。终端默认对 Enter 与 Shift+Enter 不可分辨（都送 `\r`），所以"分得开"必须由我们**显式**兑现：拦下这个键，在下游 TUI 已协商 kitty keyboard 协议时送 CSI-u 编码（`\x1b[13;2u`），否则退回 `\x1b\r`。协议是否生效要从该 TUI 自己的输出里**探测**，不能假定、更不能强开——强开会让没协商过的 TUI 收到一串它不认识的字节。
   - **能用鼠标选中并复制，而这条能力真正的敌人不在复制这条路上**。终端里的选中/复制是读日志、抄报错的基本动作。用户会用四种不同手势触发它，它们是**四条独立的路**、不是一条路的四种叫法，所以要**分别**守：**拖选**走 xterm 原生选择；**右键菜单 Copy** 只在有选中时可点、点下去走复制动作，且右键前先快照选中（菜单夺焦会清空 xterm 的实时选区）；**裸 Ctrl+C** 有选中时复制、无选中时把键原样交还终端（那一刻它是 SIGINT）；**⌘C（mac）／Ctrl+Shift+C（其他平台）** 走注册表和弦复制。四条路都要在，因为它们覆盖不同的肌肉记忆——少一条用户就会说"复制坏了"。
@@ -1087,6 +1087,8 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
   按住 command + 回车的话，应该就是直接 steer 发送出去这条消息」。约束：`Cmd+Enter` 表示"插到当前
   这一轮里去"，与裸 Enter 的"按常规发送"是两个不同的意图，不能互相退化；Agent 闲着时它也必须有
   确定含义，而不是只在忙的时候才存在。
+  - 用户再次反馈「MessageTool 原始需求是发送直接 steer，结果现在都在排队」：Cmd/Ctrl+Enter、显式 Send 和发件条目的“立即发送”本身就是**这一条消息**的 steer 授权，不要求再点 Continue。它应立即尝试向当前 Run 投递；真实交互、部分投递或错误 Run 仍可拒绝，并保留原因和文字。缺少回合结束或屏幕确认属于流程观测，须如实说明，不能因此永久阻断本可输入的 Agent。
+  - 裸 Enter 在 working／待答时仍表示排队，不借用另一条消息的显式授权。旧 queue-only 项不阻塞新明确 steer；多个明确 steer 保持自身队列顺序，共用唯一消费者，不双发。发送中再来的 steer 意图不能因 await 丢失；重启、自动消费、阅读、队列重排或其他消息不生成新的 steer 授权。
 
 #### Message Tools 的身份与右上角那行字
 
@@ -1738,7 +1740,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - Prompt 两阶段投递的持久化 claim 是去重与恢复记录，不是把下一条 Prompt 永久挡在门外的许可闸。应用重启后重新接入同一个仍为 `running` 的 Run 时，旧 claim 未确认本身不得触发 Resume、Retire 或删除健康 Session。
 - 恢复新 Prompt 时必须以 CtxMux 的权威 `acceptedInputBytes` 判断旧投递是否已经把字节交给 daemon：游标仍在旧 claim 的起点时，可以在保留去重记录的前提下由新 `submissionId` 接管；游标已经越过起点时，保留占用并如实说明正在进行的旧投递。不能用猜测的 TTL 或语义状态代替这个字节事实。
 - 旧 claim 被接管后，新的提交必须重新建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容仍走原有幂等续做，冲突内容仍拒绝。任何恢复流程失败都要保留可见工作面和健康 Session。
-- 一个仍能接受输入的 Agent 必须有明确可达的发送路径。回合结束回执缺失不能把 readiness 变成永久许可闸；无法确认回合边界时说明风险并提供显式继续发送的动作，不能自动猜测空输入框等于回合已结束。已被接受但未确认的 Prompt 使用原 operation identity 续做，不重新发送正文；排队消息不因无关 Runtime 事件反复提交。
+- 一个仍能接受输入的 Agent 必须有明确可达的发送路径。回合结束回执缺失不能把 readiness 变成永久许可闸；无法确认回合边界时说明风险，人工显式发送按「Cmd+Enter 直接 steer」执行；自动消费仍不能猜测空输入框等于回合已结束。已被接受但未确认的 Prompt 使用原 operation identity 续做，不重新发送正文；排队消息不因无关 Runtime 事件反复提交。
 
 ### Hook 配置隔离与非 AgentMux 会话
 
