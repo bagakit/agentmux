@@ -95,7 +95,7 @@ const CLI_ERROR_CODES = [
   'AGENT_MESSAGE_CROSS_WORKSPACE'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
-// Opaque data values include Session selectors: valid canonical IDs can begin with --.
+// Session selectors are opaque data values, not CLI options; their identity is resolved by Core.
 type FlagKind = 'boolean' | 'value' | 'data'
 type ParsedFlags = { values: Map<string, string>; booleans: Set<string> }
 
