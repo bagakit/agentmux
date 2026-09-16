@@ -9,8 +9,9 @@ import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../pa
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
-// source is bound or read. Seed-only flushing establishes the old baseline; after actual UI edits,
-// there is no unload, storage flush, app quit, or stopped producer before the first SIGKILL.
+// source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
+// separately proves first admission's real clock. Seed-only flushing establishes the old baseline; after actual UI edits,
+// the fixture requests no extra flush, unload, app quit, or stopped producer before the first SIGKILL; production write-triggered platform commits remain active.
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
 const require = createRequire(import.meta.url)
@@ -19,15 +20,16 @@ const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
 const root = await mkdtemp('/tmp/amx-workbench-crash-')
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace')
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
+const codexHome = join(root, 'codex-home')
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
-  AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson') }
+  AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
 const deadline = Date.now() + 110_000
 const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-file'
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
-let client, session, producer, failure, result
+let client, session, producer, failure, result, ownedRunProcess
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -60,6 +62,7 @@ async function connectCdp(url) {
 }
 
 async function launch(label) {
+  for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, 'Ordinary private launches must not inherit seed controls: ' + name)
   const readyFile = join(root, `ready-${label}.json`)
   const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
@@ -77,7 +80,7 @@ async function launch(label) {
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.call('Runtime.enable')
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]') && document.querySelector('[data-workbench-region-id="${fileRegionId}"]'))`))
-  return { child, cdp }
+  const origin = await cdp.evaluate('({url:location.href,origin:location.origin})'); return { child, cdp, origin }
 }
 
 async function seedWorkbench(seed) {
@@ -102,6 +105,10 @@ async function surface(cdp) {
     const editor = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')
     const panel = document.querySelector('.workbench-region-split > [data-panel]')
     return { workbench: state.restoredWorkbench, focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
+      queued: state.agentSteerQueues[${JSON.stringify(session.agentSessionId)}],
+      outbox: visible('.composer-outbox li').map(row => ({ text: row.querySelector('span')?.textContent,
+        datetime: row.querySelector('time')?.getAttribute('datetime') ?? null,
+        unknownTime: row.textContent.includes('Queued time unknown') })),
       editorText: editor?.innerText, splitPercent: panel ? Number(panel.getAttribute('data-panel-size')) : null,
       tabs: visible('[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
       regions: visible('[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
@@ -110,8 +117,21 @@ async function surface(cdp) {
 }
 
 async function key(cdp, key, code) {
-  await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code })
-  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code })
+  const windowsVirtualKeyCode = key === 'Enter' ? 13 : key === 'ArrowLeft' ? 37 : undefined
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode,
+    ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
+}
+
+async function activateButton(cdp, expression) {
+  const ready = await cdp.evaluate(`(() => {
+    const button = ${expression}
+    if (!button || button.disabled || button.getClientRects().length === 0) return false
+    button.focus()
+    return document.activeElement === button
+  })()`)
+  assert.equal(ready, true, 'The exact visible queue action must accept keyboard focus')
+  await key(cdp, 'Enter', 'Enter')
 }
 
 async function assertPrivateRunOutsideElectronGroup(electronPid, runPid) {
@@ -119,6 +139,17 @@ async function assertPrivateRunOutsideElectronGroup(electronPid, runPid) {
   const runGroup = Number(stdout.trim())
   assert.ok(runGroup > 0); assert.notEqual(runGroup, electronPid, 'Private Run must not belong to the Electron process group being killed')
   return runGroup
+}
+
+async function runProcessIdentity(pid) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 1)
+  let stdout
+  try { ({ stdout } = await exec('ps', ['-p', String(pid), '-o', 'pgid=,lstart='], { timeout: 5_000 })) }
+  catch (error) { if (error.code === 1) return null; throw error }
+  const match = /^\s*(\d+)\s+(.+)$/.exec(stdout.trim())
+  assert.ok(match, 'A live private Run must have an exact process birth identity')
+  const group = Number(match[1]); assert.ok(group > 1)
+  return { pid, group, born: match[2] }
 }
 
 async function compiledRendererIdentity() {
@@ -134,8 +165,12 @@ async function compiledRendererIdentity() {
 
 try {
   const rendererIdentity = await compiledRendererIdentity()
-  Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_MESSAGE_QUEUE_PATH: fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH })
+  // Provider Hook installation occurs even for a synthetic command. Parent Core setup and every
+  // Electron child must share this private home rather than touching the user's native CLI config.
+  Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+    AGENTMUX_MESSAGE_QUEUE_PATH: fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
+  await mkdir(codexHome, { recursive: true, mode: 0o700 })
   const executable = join(workspacePath, 'private-cat.sh'), bindingPath = join(root, 'private-hook-binding.json')
   // Generated identifiers/URL/token contain only the Core-defined safe ASCII alphabet. Never print
   // the binding or put it in argv; it belongs to this one temporary private Run only.
@@ -143,19 +178,27 @@ try {
   const store = new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json'))
   client = await connectLocalAgentMux({ store })
   session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'probe', providerId: 'codex', commandOverride: executable,
-    workspacePath, injectAgentMuxGuide: false, cols: 100, rows: 30 })
+    workspacePath, env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false, cols: 100, rows: 30 })
   const originalRun = (await client.listRuns()).find(run => run.runId === session.run.runId)
   assert.equal(originalRun?.state, 'running'); assert.ok(originalRun.pid)
+  assert.ok(Number.isFinite(originalRun.acceptedInputBytes) && originalRun.acceptedInputBytes >= 0,
+    'Zero-replay proof requires an actual known Runtime input cursor')
+  ownedRunProcess = await runProcessIdentity(originalRun.pid); assert.ok(ownedRunProcess)
   await client.dispose(); client = null
   await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region stays present\n')
   await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private crash fixture' }],
-    executors: { probe: { label: 'Private cat', providerId: 'codex', command: executable, args: [], env: {}, injectAgentMuxGuide: false } },
+    executors: { probe: { label: 'Private cat', providerId: 'codex', command: executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
     workspaces: [{ id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
   const seed = { version: 1, state: { activeWorkspaceId: workspaceId, mainSurface: 'workbench',
     agentFocus: { execution: { sessionId: session.agentSessionId, history: [{ sessionId: session.agentSessionId, focusedAt: 1 }] }, pmo: { sessionId: null } },
-    agentComposerDrafts: { [session.agentSessionId]: oldDraft }, restoredWorkbench: {
+    agentComposerDrafts: { [session.agentSessionId]: oldDraft },
+    agentSteerQueues: { [session.agentSessionId]: [
+      { operationId: 'private-queue-first', runId: session.run.runId, text: 'Private first pending intent', status: 'queued', enqueuedAt: 1_790_832_000_000 },
+      { operationId: 'private-queue-unknown', runId: session.run.runId, text: 'Private unknown-time pending intent', status: 'queued' },
+      { operationId: 'private-queue-last', runId: session.run.runId, text: 'Private last pending intent', status: 'queued', enqueuedAt: 1_790_832_090_000 }
+    ] }, restoredWorkbench: {
       tabs: { [tabId]: { id: tabId, workspaceId, titleRegionId: agentRegionId,
         layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.7, first: { type: 'leaf', regionId: agentRegionId }, second: { type: 'leaf', regionId: fileRegionId } }, activeRegionId: agentRegionId },
         regions: { [agentRegionId]: { regionId: agentRegionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: session.agentSessionId },
@@ -169,6 +212,8 @@ try {
   const before = await surface(first.cdp)
   assert.deepEqual(before.tabs, [tabId]); assert.deepEqual(before.regions, [agentRegionId, fileRegionId].sort())
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
+  assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
+  assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
   await first.cdp.evaluate(`(() => {
     window.__crashProof = { hooks: [], writes: [], unloads: [] }
     const original = Storage.prototype.setItem
@@ -191,6 +236,24 @@ try {
   let producerTail = ''
   producer.stdout.on('data', data => { producerTail += data; const lines = producerTail.split('\n'); producerTail = lines.pop(); for (const line of lines) if (line) acknowledgements.push(JSON.parse(line)) })
   await waitFor('real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
+  // Keyboard activation exercises actual native popover and React buttons without changing Agent
+  // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
+  await activateButton(first.cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer__mailbox')`)
+  await waitFor('actual mailbox visible', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length > 0"))
+  await activateButton(first.cdp, "document.querySelector('.composer-mailbox [role=tab][id$=\"-outbox-tab\"]')")
+  const beforeMove = await surface(first.cdp)
+  assert.deepEqual(beforeMove.outbox, [
+    { text: 'Private first pending intent', datetime: new Date(1_790_832_000_000).toISOString(), unknownTime: false },
+    { text: 'Private unknown-time pending intent', datetime: null, unknownTime: true },
+    { text: 'Private last pending intent', datetime: new Date(1_790_832_090_000).toISOString(), unknownTime: false }
+  ])
+  const moveLastUp = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('span')?.textContent === 'Private last pending intent')?.querySelectorAll('button')[0]"
+  await activateButton(first.cdp, moveLastUp)
+  await activateButton(first.cdp, moveLastUp)
+  const expectedQueue = [before.queued[2], before.queued[0], before.queued[1]]
+  await waitFor('actual outbox reordered', async () => (await surface(first.cdp)).outbox.map(row => row.text).join('|') === expectedQueue.map(entry => entry.text).join('|'))
+  await activateButton(first.cdp, "document.querySelector('.composer-mailbox button[aria-label=\"Close mailbox\"]')")
+  await waitFor('mailbox closed', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length === 0"))
   // Focus the already-active Agent editor without a pointer event that would change its MRU time.
   await first.cdp.evaluate(`(() => { const e = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]'); e.focus(); const s = getSelection(); s.selectAllChildren(e); return true })()`)
   await first.cdp.call('Input.insertText', { text: newDraft })
@@ -220,6 +283,7 @@ try {
   assert.equal(acknowledgements.at(-1)?.status, 204); assert.ok(crashAt-acknowledgements.at(-1).at < 400)
   assert.deepEqual(observer.unloads, [])
   assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, 60)
+  assert.deepEqual(immediatelyBeforeCrash.queued, expectedQueue, 'Actual queue order and its recorded or unknown times must be written before the abrupt crash')
   assert.deepEqual(immediatelyBeforeCrash.activeRegions, [fileRegionId])
   first.cdp.close()
   process.kill(-first.child.pid, 'SIGKILL') // Exact detached private Electron group; the Run is outside it.
@@ -229,27 +293,32 @@ try {
   await waitFor('producer exit after crash', () => producer.signalCode !== null || producer.exitCode !== null, 3_000)
   children.delete(producer)
   const second = await launch('second')
+  assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: Math.max(...gaps), successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
-      newLayoutWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.workbench) === JSON.stringify(expectedWorkbench) },
+      newLayoutWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.workbench) === JSON.stringify(expectedWorkbench),
+      movedQueueWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.queued) === JSON.stringify(expectedQueue) },
     second: { pid: second.child.pid, workbenchDigest: hash(JSON.stringify(restored.workbench)), draftDigest: hash(restored.draft ?? ''),
       exactDraftRestored: restored.draft === newDraft, exactWorkbenchRestored: JSON.stringify(restored.workbench) === JSON.stringify(expectedWorkbench),
-      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(before.focus), visibleRegions: restored.regions, activeRegions: restored.activeRegions },
+      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(before.focus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
+      exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
-      'No post-edit flushStorageData, unload, quit or quiet-event interval before SIGKILL.',
+      'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
+      'Historical queue admission times are synthetic seeded facts; actual first-admission clock behavior is separately bound by the owning source test.',
       'Renderer status counts observe public IPC arrival; actual Store consumption and projection bounds are verified by the owning behavioral suite.',
       'Source hashes are reference observations; compiled Main/Renderer identities and the separate build receipt bind executed code.',
       'Same Run process survival and input acceptance are checked separately from durable UI state.'] }
   assert.notEqual(first.child.pid, second.child.pid)
   assert.deepEqual(restored.workbench, expectedWorkbench, 'The exact edited workbench must survive sudden process termination while Agent events are active')
   assert.equal(restored.draft, newDraft, 'The unsent edited draft must survive without an unload flush')
+  assert.deepEqual(restored.queued, expectedQueue, 'Moved pending order, immutable admission time and historical execution pause must survive the second process')
   assert.deepEqual(restored.focus, before.focus); assert.deepEqual(restored.regions, [agentRegionId, fileRegionId].sort()); assert.deepEqual(restored.activeRegions, [fileRegionId])
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
@@ -259,22 +328,44 @@ try {
   client = await connectLocalAgentMux({ store })
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
+  assert.equal(run.acceptedInputBytes, originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write any input to this private Run')
+  result.pendingQueueAutomaticallyReplayed = false
   await client.writeTerminal(session.run, { ownerInstanceId: client.runtimeIdentity().instanceId, operationId: randomUUID(), expectedByte: run.acceptedInputBytes, data: 'private-input-after-crash\r' })
   await waitFor('same private Run accepts input', async () => (await client.listRuns()).find(value => value.runId === session.run.runId)?.acceptedInputBytes > run.acceptedInputBytes)
   result.sameRunStillRunning = true; result.sameRunPid = true; result.privateInputAccepted = true
 } catch (error) {
   failure = error
 } finally {
-  try {
-    for (const child of children) { try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error } }
+  const cleanupErrors = []
+  const attempt = async action => { try { await action() } catch (error) { cleanupErrors.push(error) } }
+  for (const child of children) await attempt(async () => {
+    if (!child.pid) return
+    assert.ok(Number.isSafeInteger(child.pid) && child.pid > 1)
+    try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
+  })
+  await attempt(async () => {
     if (!client && session) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
     if (client) { try { if (session) await client.stopAgent(session.agentSessionId, session.run) } finally { await client.dispose() } }
+  })
+  // A Core/transport cleanup failure cannot skip the detached cat whose argv no longer
+  // contains its private wrapper path. Birth identity prevents acting on a reused PID.
+  await attempt(async () => {
+    if (!ownedRunProcess) return
+    const actual = await runProcessIdentity(ownedRunProcess.pid)
+    if (!actual || actual.born !== ownedRunProcess.born) return
+    assert.equal(actual.group, ownedRunProcess.group)
+    try { process.kill(-actual.group, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
+  })
+  await attempt(async () => {
     await stopProbeProcesses(process.pid + 1_000_000_000, root)
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, root), [])
+    const remainingRun = ownedRunProcess && await runProcessIdentity(ownedRunProcess.pid)
+    assert.ok(!remainingRun || remainingRun.born !== ownedRunProcess.born, 'The exact private Agent process must also be reaped')
     cleanup.privateProcessesReaped = true
     await rm(root, { recursive: true, force: true })
     cleanup.temporaryRootRemoved = true
-  } catch (error) { failure ??= error }
+  })
+  if (cleanupErrors.length) { failure ??= cleanupErrors[0]; cleanup.errors = cleanupErrors.map(error => error.message) }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, passed: !failure,

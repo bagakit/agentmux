@@ -72,6 +72,7 @@ export function AgentSessionComposer({
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
   const removeAgentSteer = useAppStore((state) => state.removeAgentSteer)
+  const moveAgentSteer = useAppStore((state) => state.moveAgentSteer)
   const sendQueuedAgentSteer = useAppStore((state) => state.sendQueuedAgentSteer)
   const continueQueuedAgentSteer = useAppStore((state) => state.continueQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
@@ -259,6 +260,7 @@ export function AgentSessionComposer({
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,
+          ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
           sending: entry.operationId === sendingId,
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
@@ -267,6 +269,7 @@ export function AgentSessionComposer({
           ...(entry.errorCode === 'AGENT_TURN_END_UNCONFIRMED' ? { turnEndUnconfirmed: true } : {})
         }))}
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
+        onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
         onContinueQueued={(operationId) => { void feedback.run(() => continueQueuedAgentSteer(sessionId, operationId)) }}
         onCopyQueued={(text) => { void feedback.run(async () => { await copyTextToClipboard(text, feedback.report) }) }}

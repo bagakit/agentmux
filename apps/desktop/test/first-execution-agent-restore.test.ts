@@ -72,7 +72,10 @@ describe('one existing intent owns first execution', () => {
     await initialize()
     const gate = deferred()
     const submit = vi.mocked(api.sessions.submitPrompt)
-    vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => {
+    vi.mocked(api.ui.requestStorageFlush).mockImplementationOnce(async () => {
+      expect(persistedQueue()).toEqual([expect.objectContaining({ runId: 'canonical-run', status: 'restoring' })])
+      expect(submit).not.toHaveBeenCalled()
+    }).mockImplementationOnce(() => {
       expect(persistedQueue()).toEqual([expect.objectContaining({ runId: 'canonical-run', status: 'restoring' })])
       expect(submit).not.toHaveBeenCalled()
       return gate.promise
@@ -81,7 +84,7 @@ describe('one existing intent owns first execution', () => {
     const entry = queue()[0]!
     expect(entry).not.toHaveProperty('runId')
     const drain = store.getState().flushAgentSteerQueue(sessionId)
-    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2))
     expect(api.sessions.recover).toHaveBeenCalledExactlyOnceWith(agent().control, agent().workspacePath, entry.operationId)
     expect(queue()).toEqual([expect.objectContaining({ ...entry, runId: 'canonical-run', status: 'restoring' })])
     expect(submit).not.toHaveBeenCalled()
@@ -108,7 +111,8 @@ describe('one existing intent owns first execution', () => {
 
   it('retains the exact binding after a flush-request failure and retries without another recovery', async () => {
     await initialize()
-    vi.mocked(api.ui.requestStorageFlush).mockRejectedValueOnce(new Error('Chromium flush request failed'))
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Chromium flush request failed'))
     store.getState().send(sessionId, 'retain intent')
     const operationId = queue()[0]!.operationId
     await store.getState().flushAgentSteerQueue(sessionId)
@@ -116,7 +120,7 @@ describe('one existing intent owns first execution', () => {
     expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
     await store.getState().sendQueuedAgentSteer(sessionId, operationId)
     expect(api.sessions.recover).toHaveBeenCalledTimes(1)
-    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2)
+    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(4)
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => call[2])).toEqual([operationId])
   })
 
@@ -190,10 +194,10 @@ describe('one existing intent owns first execution', () => {
   it('does not resurrect an intent removed while the binding flush request is outstanding', async () => {
     await initialize()
     const gate = deferred()
-    vi.mocked(api.ui.requestStorageFlush).mockReturnValueOnce(gate.promise)
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValueOnce(undefined).mockReturnValueOnce(gate.promise)
     store.getState().send(sessionId, 'removed while pending')
     const drain = store.getState().flushAgentSteerQueue(sessionId)
-    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2))
     store.setState({ agentSteerQueues: {} })
     gate.resolve(); await drain
     expect(store.getState().agentSteerQueues).toEqual({})
@@ -270,11 +274,11 @@ describe('one existing intent owns first execution', () => {
   it('never rebinds an old bound intent, including a Run change while its flush request is pending', async () => {
     await initialize()
     const gate = deferred()
-    vi.mocked(api.ui.requestStorageFlush).mockReturnValueOnce(gate.promise)
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValueOnce(undefined).mockReturnValueOnce(gate.promise)
     store.getState().send(sessionId, 'bound once')
     const operationId = queue()[0]!.operationId
     const drain = store.getState().flushAgentSteerQueue(sessionId)
-    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2))
     store.setState({ sessions: [agent('replacement-run', 'running')] })
     gate.resolve(); await drain
     expect(queue()).toEqual([expect.objectContaining({ operationId, runId: 'canonical-run', status: 'deferred', error: expect.stringContaining('delivery result is unknown') })])
