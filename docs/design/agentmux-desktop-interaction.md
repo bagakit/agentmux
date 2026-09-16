@@ -463,6 +463,7 @@
 - Renderer 不根据 `working`、`waiting`、`blocked` 或 `done` 猜测 Prompt readiness。Core 拒绝提交时保留草稿供重试；semantic resume 和恢复动作继续由现有 Owner 负责。
 - **运行中可 steer**：Agent 处于 `working` 时界面仍允许提交，补的那句话经**既有** send 通路（store.send → submitPrompt → Core.submitAgentPrompt）送出，与普通 prompt 同一条路——不新增 Renderer 侧第二条写通道。「界面是否允许提交」与「主动作是 Send 还是打断」是两个不同问题：working 时前者为真而后者仍是打断，一个跑动中的 Agent 既要能被补话也要能被叫停，二者不互斥。判定收敛为一个纯函数（`lib/composer-submit-mode.ts`），不读 Store、不按 providerId 分支。
   - 投递结果仍由 Core 按真实输入能力与回执裁决；显式 steer 不因缺少回合结束／readiness 观测而变为永久排队。正在进行的部分投递、同操作幂等、错 Run、待答交互和 Provider 确实不支持的输入边界仍保留。发送意图只在下述「Cmd+Enter 直接 steer」定义，队列归「Composer 消息队列与紧凑状态」。
+  - 明确发送所需的恢复或持久化步骤失败时，保留原条目与具体原因，结束这一次尝试；同一次授权不能让失败的恢复进入无界重试。其他明确发送仍按各自意图与 Run 边界处理，用户对原条目的下一次明确重试才发起新的尝试。
   - pending interaction 期间**不允许** steer：待答请求期间卡片是唯一输入面（既有合同），Renderer 侧不提供提交、Core 侧亦抛 `AGENT_INTERACTION_PENDING`，双重保险。
 
 - **终端要像终端：宿主不许悄悄改写按键与选择行为**。Agent 跑的是它自己的 TUI，用户练熟的是那套 TUI 的手感；我们只是宿主。宿主把某个键翻译错了，用户会以为是那个 CLI 坏了——这类缺陷最难归因，因为它在 CLI 自己的终端里复现不出来。而且**代价是双份的**：不像终端不仅让用户理解不了，也会推高我们自己的复杂度——每偏离一次，就要为这个偏离补一层解释、一处特例和一条它自己的回归，而照着终端既有的约定做，这些都不必存在。所以"像终端"是省复杂度的选择，不是额外的工。
