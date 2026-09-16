@@ -41,6 +41,7 @@ import { useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
+import { BranchComparisonPanel } from './BranchComparisonPanel'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
@@ -66,6 +67,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const [worktreePath, setWorktreePath] = useState('')
   const [busyBranch, setBusyBranch] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [comparisonOpen, setComparisonOpen] = useState(false)
+  useEffect(() => { setComparisonOpen(false) }, [workspace.id])
   const [fanOutOpen, setFanOutOpen] = useState(false)
   const [fanOutPrompt, setFanOutPrompt] = useState('')
   const [fanOutCount, setFanOutCount] = useState(3)
@@ -366,6 +369,11 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         count={snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}
         actions={
           <>
+            {snapshot?.kind === 'git-repository' ? (
+              <button type="button" title="Compare two local branches" aria-label="Compare two local branches" aria-pressed={comparisonOpen} onClick={() => setComparisonOpen((open) => !open)}>
+                <GitCompareArrows size={13} />
+              </button>
+            ) : null}
             {/* Absent outside a git repository: a fan-out needs branches, and a button that could only fail
                 answers nothing. */}
             {snapshot?.kind === 'git-repository' ? (
@@ -385,7 +393,10 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         }
       />
       {snapshot?.kind === 'git-repository' ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
-      <div className="branches-scroll">
+      {comparisonOpen && snapshot?.kind === 'git-repository' ? (
+        <BranchComparisonPanel key={JSON.stringify([workspace.id, snapshot.hostId, snapshot.repoPath])} workspaceId={workspace.id} branches={snapshot.branches} />
+      ) : null}
+      <div className="branches-scroll" hidden={comparisonOpen && snapshot?.kind === 'git-repository'}>
         {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{pinFirst(bound).map(branchRow)}</div> : null}
         {unbound.length > 0 ? <div className="branch-group"><span>Without worktree</span>{pinFirst(unbound).map(branchRow)}</div> : null}
         {!loading && snapshot?.kind === 'not-a-git-repository' ? (

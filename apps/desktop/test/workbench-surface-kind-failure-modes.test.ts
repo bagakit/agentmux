@@ -48,6 +48,9 @@ function browserTab(id: string): ReturnType<typeof createWorkbenchTab> {
     kind: 'browser',
     workspaceId: 'ws',
     browserId: `br-${id}`,
+    id: `br-${id}`,
+    driving: false,
+    appLinkPrompt: null,
     navigationId: `nav-${id}`,
     profileId: 'default',
     url: 'https://example.com/',
@@ -82,6 +85,7 @@ describe('the SSOT predicate itself: no kind may get a silent verdict', () => {
       ['agent', true],
       ['browser', false],
       ['file', false],
+      ['git-diff', false],
       ['launcher', false],
       ['terminal', true]
     ])
@@ -126,6 +130,7 @@ describe('close obligations: what a Region releases must be decided per kind, no
       agent: { browserViewId: null, releasesDocument: false },
       terminal: { browserViewId: null, releasesDocument: false },
       file: { browserViewId: null, releasesDocument: true },
+      'git-diff': { browserViewId: null, releasesDocument: false },
       launcher: { browserViewId: null, releasesDocument: false },
       browser: { browserViewId: 'br-1', releasesDocument: false }
     })
@@ -163,6 +168,7 @@ describe('Agent addressability: which Region can be named as an Agent', () => {
       // A Session, but not an Agent — this is the row that separates this decision from isSessionSurface.
       terminal: null,
       file: null,
+      'git-diff': null,
       launcher: null,
       browser: null
     })

@@ -177,6 +177,8 @@ export function quickSwitchTabTitle(tab: WorkbenchTab): string {
   // this, agent/terminal fell off the end of an `if`-chain into that fallback, and so would any new
   // kind — silently. `assertUnreachableSurface` at the default makes a 6th kind name its own title.
   switch (surface.kind) {
+    case 'git-diff':
+      return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':
       return surface.path.split('/').at(-1) ?? surface.path
     case 'launcher':

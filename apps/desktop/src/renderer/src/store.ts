@@ -1,3 +1,4 @@
+import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
@@ -62,7 +63,7 @@ import { errorIdentity, presentError } from './lib/error-presentation'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
-import { gitBridge, ghBridge } from './lib/git-bridge'
+import { gitBridge, ghBridge, type GitBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
@@ -174,6 +175,7 @@ import {
   createWorkbenchTab,
   documentKey,
   fileTabId,
+  gitDiffIdentity,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
   inheritedTopicIdForNewTab,
@@ -629,6 +631,8 @@ type AppState = {
    * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
    */
   openFileDiff(path: string, workspaceId?: string): Promise<void>
+  openBranchDiff(workspaceId: string, comparison: GitBranchDiffDescriptor): void
+  loadBranchDiff(regionId: string): Promise<void>
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
@@ -1088,15 +1092,15 @@ const hostCheckRequestIds = new Map<string, number>()
 const timelineResyncs = new Map<string, { requested: boolean; promise: Promise<void> }>()
 
 /**
- * Load a file Region's diff from the EXISTING git bridge — HEAD blob (old) vs worktree file (new).
- *
- * There is no new shell-out here: `window.agentmux.git.diff` is the same Desktop-main capability the
- * Changes panel already reaches, and it returns a structured {@link GitFileDiff} (both sides read as
- * blobs, never parsed from unified-diff text). This wrapper only owns the loading/error presentation
- * and the stale-result guard. The two sides' directionality is fixed downstream in `diffEditorSides`.
+ * Shared loading/error presentation for worktree and fixed-commit diffs through the existing Git
+ * bridge. Blob ownership and old/new direction stay in Main; this owns one transient request token
+ * per Region. Close/reconcile invalidates it, and only the latest request may install a reply.
  */
-async function loadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void> {
-  const requestId = (regionDiffRequestIds.get(regionId) ?? 0) + 1
+async function loadRegionDiff(
+  regionId: string,
+  read: (bridge: GitBridge) => Promise<GitFileDiff>
+): Promise<void> {
+  const requestId = Symbol()
   regionDiffRequestIds.set(regionId, requestId)
   useAppStore.setState((state) => ({
     editorRegionDiffs: {
@@ -1105,32 +1109,37 @@ async function loadRegionDiff(regionId: string, workspaceId: string, path: strin
       [regionId]: { loading: true, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: null }
     }
   }))
-  const lookup = gitBridge()
-  if (!lookup.available) {
-    if (regionDiffRequestIds.get(regionId) !== requestId) return
-    useAppStore.setState((state) => ({
-      editorRegionDiffs: {
-        ...state.editorRegionDiffs,
-        [regionId]: { loading: false, diff: null, error: lookup.reason }
-      }
-    }))
-    return
-  }
+  const current = (): boolean => regionDiffRequestIds.get(regionId) === requestId
   try {
-    const diff = await lookup.bridge.diff(workspaceId, path)
-    if (regionDiffRequestIds.get(regionId) !== requestId) return
-    useAppStore.setState((state) => ({
-      editorRegionDiffs: { ...state.editorRegionDiffs, [regionId]: { loading: false, diff, error: null } }
-    }))
-  } catch (error) {
-    if (regionDiffRequestIds.get(regionId) !== requestId) return
-    useAppStore.setState((state) => ({
-      editorRegionDiffs: {
-        ...state.editorRegionDiffs,
-        // A failed reload keeps the last good diff beside the error rather than blanking the pane.
-        [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: presentError(error) }
-      }
-    }))
+    const lookup = gitBridge()
+    if (!lookup.available) {
+      if (!current()) return
+      useAppStore.setState((state) => ({
+        editorRegionDiffs: {
+          ...state.editorRegionDiffs,
+          [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: lookup.reason }
+        }
+      }))
+      return
+    }
+    try {
+      const diff = await read(lookup.bridge)
+      if (!current()) return
+      useAppStore.setState((state) => ({
+        editorRegionDiffs: { ...state.editorRegionDiffs, [regionId]: { loading: false, diff, error: null } }
+      }))
+    } catch (error) {
+      if (!current()) return
+      useAppStore.setState((state) => ({
+        editorRegionDiffs: {
+          ...state.editorRegionDiffs,
+          // A failed reload keeps the last good diff beside the error rather than blanking the pane.
+          [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: presentError(error) }
+        }
+      }))
+    }
+  } finally {
+    if (regionDiffRequestIds.get(regionId) === requestId) regionDiffRequestIds.delete(regionId)
   }
 }
 
@@ -1145,6 +1154,9 @@ function pruneEditorRegionState(tabs: Readonly<Record<string, WorkbenchTab>>): v
   const live = new Set(
     Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab).map((surface) => surface.regionId))
   )
+  for (const regionId of regionDiffRequestIds.keys()) {
+    if (!live.has(regionId)) regionDiffRequestIds.delete(regionId)
+  }
   useAppStore.setState((state) => {
     const modes = Object.fromEntries(
       Object.entries(state.editorRegionModes).filter(([regionId]) => live.has(regionId))
@@ -3731,11 +3743,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Only entering diff triggers a load, and only when this Region has no diff yet — switching back
     // and forth must not refetch. An explicit refresh goes through reloadRegionDiff.
     if (mode === 'diff' && !get().editorRegionDiffs[regionId]) {
-      await loadRegionDiff(regionId, workspaceId, path)
+      await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
     }
   },
   async reloadRegionDiff(regionId, workspaceId, path) {
-    await loadRegionDiff(regionId, workspaceId, path)
+    await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
   async openFileDiff(path, requestedWorkspaceId) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
@@ -3748,6 +3760,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // than read back — a wrong regionId here would flip a different Region into diff mode (or none).
     const regionId = initialWorkbenchRegionId(fileTabId(workspaceId, path))
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
+  },
+  openBranchDiff(workspaceId, comparison) {
+    const state = get()
+    if (!state.config?.workspaces.some((workspace) => workspace.id === workspaceId)) return
+    const id = gitDiffIdentity(workspaceId, comparison)
+    const existing = Object.values(state.tabs).flatMap((tab) => workbenchSurfaces(tab).flatMap((surface) => (
+      surface.kind === 'git-diff' && gitDiffIdentity(surface.workspaceId, surface.comparison) === id
+        ? [{ tab, surface }] : []
+    )))[0]
+    const tabId = existing?.tab.id ?? `view:${crypto.randomUUID()}`
+    const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
+    const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
+    const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
+    if (!nextLayout) { get().reportError(new Error('The Tab Group is no longer available')); return }
+    const tab = existing
+      ? focusWorkbenchTabRegion(existing.tab, existing.surface.regionId)
+      : createWorkbenchTab(tabId, { kind: 'git-diff', regionId: newRegionId(), workspaceId, comparison })
+    set((current) => ({
+      activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+      tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout }
+    }))
+  },
+  async loadBranchDiff(regionId) {
+    const surface = findWorkbenchRegion(get().tabs, regionId)?.surface
+    if (surface?.kind !== 'git-diff') return
+    await loadRegionDiff(
+      regionId, (bridge) => bridge.branchDiff(surface.workspaceId, surface.comparison)
+    )
   },
   renameAgent(sessionId, name) {
     const trimmed = name?.trim() ?? ''

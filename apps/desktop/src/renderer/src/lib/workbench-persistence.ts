@@ -21,6 +21,7 @@ import {
   type AgentWorkbenchSurface,
   type BrowserWorkbenchSurface,
   type FileWorkbenchSurface,
+  type GitDiffWorkbenchSurface,
   type LauncherWorkbenchSurface,
   type TerminalWorkbenchSurface,
   type WorkbenchSurface,
@@ -55,6 +56,7 @@ export type PersistedWorkbenchSurface =
   | AgentWorkbenchSurface
   | TerminalWorkbenchSurface
   | FileWorkbenchSurface
+  | GitDiffWorkbenchSurface
   | LauncherWorkbenchSurface
   | PersistedBrowserSurface
 
@@ -463,6 +465,8 @@ function persistedSurfaceSurvives(
       return ctx.hasTopic
     case 'file':
       return ctx.fileSurvives(surface)
+    case 'git-diff':
+      return true
     case 'browser':
       // browser 面活过重启（用户显式决定「存完整 URL、恢复到原页」，推翻了旧的「整面剥离」）。
       // 旧决定的顾虑本身是对的——硬存整个活体 `BrowserSnapshot`（navigationId/loading/driving… 全是

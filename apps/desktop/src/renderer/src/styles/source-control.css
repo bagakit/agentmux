@@ -133,3 +133,19 @@
 .pr-form__title:focus, .pr-form__body:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .pr-form__title:disabled, .pr-form__body:disabled { opacity: .55; }
 .pr-form__submit { justify-content: center; padding:var(--sp-3) var(--sp-4); }
+
+/* Comparison keeps selectors and fixed-object context above a single path-first file list. */
+.branches-scroll[hidden] { display: none; }
+.branch-comparison { min-height: 0; overflow: auto; padding: var(--sp-3); display: flex; flex: 1; flex-direction: column; gap: var(--sp-3); font-size: var(--fs-meta); }
+.branch-comparison form { display: flex; flex-direction: column; gap: var(--sp-2); }
+.branch-comparison label { display: flex; flex-direction: column; gap: var(--sp-1); color: var(--text-2); }
+.branch-comparison select { min-width: 0; width: 100%; padding: var(--sp-1); color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.branch-comparison__summary { display: flex; flex-direction: column; gap: var(--sp-1); color: var(--text-2); }
+.branch-comparison__summary span { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.branch-comparison__files { display: flex; flex-direction: column; gap: var(--sp-1); }
+.branch-comparison__file { display: flex; align-items: center; gap: var(--sp-2); text-align: left; color: var(--text); background: transparent; border: 0; border-radius: var(--radius-sm); padding: var(--sp-2); cursor: pointer; }
+.branch-comparison__file:hover { background: var(--surface-2); }
+.branch-comparison__file span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.branch-comparison__file small { color: var(--text-3); }
+.git-branch-diff__commits { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
+.git-branch-diff__commits span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

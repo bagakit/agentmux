@@ -94,6 +94,11 @@ import {
 } from '../lib/surface-memory-budget-coordinator'
 import { DESKTOP_SESSION_ATTRIBUTE } from '../../../shared/desktop-actions'
 
+const GitBranchDiffPane = lazy(async () => {
+  const module = await import('./GitBranchDiffPane')
+  return { default: module.GitBranchDiffPane }
+})
+
 const EditorPane = lazy(async () => {
   const module = await import('./EditorPane')
   return { default: module.EditorPane }
@@ -106,6 +111,8 @@ type SplitTarget = { groupId: string; direction: SplitDirection }
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
   const surface = titleWorkbenchSurface(tab)
   switch (surface.kind) {
+    case 'git-diff':
+      return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':
       return surface.path.split('/').at(-1) ?? surface.path
     case 'launcher':
@@ -524,6 +531,13 @@ function SurfaceContent({
           sessionId: surface.sessionId
         }}
       />
+    )
+  }
+  if (surface.kind === 'git-diff') {
+    return (
+      <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git diff" title="Loading diff" detail="Bringing up the fixed commit comparison." />}>
+        <GitBranchDiffPane surface={surface} released={monacoReleased} visible={surfaceVisible} />
+      </Suspense>
     )
   }
   if (surface.kind === 'file') {
