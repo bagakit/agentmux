@@ -61,6 +61,7 @@ import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { cloneSession, sameRun } from './agent-session-identity.js'
+import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
@@ -3670,7 +3671,7 @@ export class AgentMuxClient {
       ) return current
       return {
         ...current,
-        semanticStatus: structuredClone(status),
+        semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, status),
         updatedAt: Math.max(current.updatedAt, status.observedAt)
       }
     })
@@ -3771,7 +3772,7 @@ export class AgentMuxClient {
           return stored
         }
         return {
-          ...stored,
+          ...invalidateAgentIdleEvidence(stored),
           pendingInteraction: {
             request: pending.request,
             response: {
@@ -3893,6 +3894,8 @@ export class AgentMuxClient {
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      const idleEntryTime = session.semanticStatus?.state === 'done'
+        ? session.semanticStatus.stateEnteredAt : undefined
       const result = await this.kernel.input(session.run.runId, {
         ownerInstanceId: this.kernel.identity().daemonInstanceId,
         operationId: randomUUID(),
@@ -3903,6 +3906,30 @@ export class AgentMuxClient {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       this.agentInputCursors.set(session.agentSessionId, result.run.acceptedInputBytes)
+      const idleStatus = this.registry.findByRun(session.run)?.semanticStatus
+      if (idleEntryTime !== undefined && idleStatus?.state === 'done' &&
+          idleStatus.stateEnteredAt === idleEntryTime) {
+        try {
+          const next = await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
+            const invalidated = invalidateAgentIdleEvidence(current, idleEntryTime)
+            return invalidated === current ? current : {
+              ...invalidated, updatedAt: Math.max(current.updatedAt, Date.now())
+            }
+          })
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+        } catch (error) {
+          // Ctxmux already accepted the bytes. A failed state write must not turn this ACK into
+          // an input failure, clear the real cursor, or cause the caller to send those bytes again.
+          // No second idle ledger: explain that the old durable clock cannot be trusted across restart.
+          this.publisher.publish({
+            type: 'agent-error',
+            // A scoped agent-error paints a healthy Agent as failed. This is a Store advisory.
+            code: 'AGENT_STATE_ENTRY_PERSIST_FAILED',
+            message: `Input was accepted for Agent ${session.agentSessionId} (Run ${session.run.runId}), but its idle evidence could not be invalidated durably. The saved idle time is unconfirmed; later native state evidence can re-establish it. ${error instanceof Error ? error.message : String(error)}`,
+            evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
+          })
+        }
+      }
       return {
         runId: session.run.runId,
         appliedByteRange: result.appliedByteRange,
@@ -4064,7 +4091,7 @@ export class AgentMuxClient {
         hookReceipt: persistedReceipt,
         ...(normalized.semanticState === 'unknown' || !updatesSemanticStatus
           ? {}
-          : { semanticStatus: structuredClone(normalized.status) }),
+          : { semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, normalized.status) }),
         ...(stopRun
           ? {
               terminalPromptReadiness: existingReadiness ?? {

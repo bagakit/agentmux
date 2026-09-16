@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { AgentProviderRegistry } from './agent-provider.js'
 import { agentTurnCompletionIdentity, cloneSession, sameRun } from './agent-session-identity.js'
+import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import {
@@ -138,7 +139,7 @@ export class AgentPromptSubmissionCoordinator {
     const claimInput = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number, uncertainTurn: boolean): AgentMuxStoredAgentSession => {
       const completionId = agentTurnCompletionIdentity(current)
       const observedAt = Date.now()
-      return { ...current, updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
+      return { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
         submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte
       }, ...(uncertainTurn ? { terminalPromptDelivery: {
         state: 'unverified' as const, mode: 'degraded' as const, reason: 'turn-end-unconfirmed' as const,
