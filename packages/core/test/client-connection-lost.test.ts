@@ -342,7 +342,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
       retiredRuns: [],
       hookBindingId: 'binding-readiness',
       hookToken: 'token-readiness',
-      outputCursorBytes: 0,
+
       // 未就绪的观察：只有边界，没有 readyThroughByte。这正是 #628 卡住的那个状态。
       terminalPromptReadiness: {
         source: 'initial-composer',

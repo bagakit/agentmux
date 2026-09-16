@@ -38,7 +38,7 @@ function readinessEvent(id = 's'): RuntimeEvent {
       type: 'agent-session', session: {
         kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'codex',
         hostId: 'local', workspacePath: '/repo', run: session.control.run, retiredRuns: [],
-        createdAt: 1, updatedAt: 2, outputCursorBytes: 10,
+        createdAt: 1, updatedAt: 2,
         terminalPromptReadiness: {
           run: session.control.run, id: `ready-${id}`, source: 'initial-composer',
           outputCursorBytes: 0, readyThroughByte: 10

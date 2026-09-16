@@ -283,7 +283,7 @@ function screenStoredSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-screen',
     hookToken: 'token-screen',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100
   }

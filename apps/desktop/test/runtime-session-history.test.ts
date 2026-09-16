@@ -32,7 +32,7 @@ const page:AgentSessionHistoryPage={agentSessionId:control.agentSessionId,source
 async function owner(){
  const store=new AgentMuxMemoryAgentSessionStore()
  await store.compareAndSwap(null,{kind:'agent',agentSessionId:control.agentSessionId,providerId:'codex',executorId:'specific-codex',hostId:control.hostId,
- workspacePath:'/synthetic',run:control.run,retiredRuns:[],outputCursorBytes:0,hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
+ workspacePath:'/synthetic',run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
  const controller=new RuntimeController(store)
  const client={sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}

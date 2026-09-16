@@ -70,7 +70,7 @@ function snapshot(status: AgentStatus | undefined, updatedAt = status?.observedA
   return { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
     kind: 'agent', agentSessionId: session.id, providerId: session.providerId, executorId: session.executorId,
     hostId: session.hostId, workspacePath: session.workspacePath, run: { ...session.control.run },
-    retiredRuns: [], outputCursorBytes: 0, createdAt: session.createdAt, updatedAt,
+    retiredRuns: [],  createdAt: session.createdAt, updatedAt,
     ...(status ? { semanticStatus: structuredClone(status) } : {}), ...change
   } } }
 }

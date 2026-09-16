@@ -37,7 +37,7 @@ function storedSession(providerId: AgentProviderId = 'codex'): AgentMuxStoredAge
     retiredRuns: [],
     hookBindingId: 'binding-hook-after-turn'.padEnd(43, 'A'),
     hookToken: 'token-hook-after-turn'.padEnd(43, 'B'),
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId, sessionId: 'native-1' }

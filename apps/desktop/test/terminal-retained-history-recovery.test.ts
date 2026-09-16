@@ -16,6 +16,7 @@ type FixtureTerminal = BrowserTerminal & {
   dispose: ReturnType<typeof vi.fn>
   written: string[]
   writtenBytes: Uint8Array[]
+  parsedBytes: Uint8Array[]
 }
 type FixtureWebgl = {
   disposed: ReturnType<typeof vi.fn>
@@ -29,7 +30,6 @@ const fixture = vi.hoisted(() => ({
   attach: vi.fn(),
   replay: vi.fn(),
   detach: vi.fn(),
-  acknowledge: vi.fn(),
   resize: vi.fn(),
   unsubscribe: vi.fn(),
   blockFirstWrite: false,
@@ -45,6 +45,7 @@ vi.mock('@xterm/xterm', async () => {
     refresh = vi.fn()
     written: string[] = []
     writtenBytes: Uint8Array[] = []
+    parsedBytes: Uint8Array[] = []
     constructor(options: ConstructorParameters<typeof Terminal>[0]) {
       super(options)
       this.dispose = vi.fn(() => super.dispose())
@@ -53,11 +54,13 @@ vi.mock('@xterm/xterm', async () => {
     write(data: string | Uint8Array, callback?: () => void) {
       this.written.push(typeof data === 'string' ? data : new TextDecoder().decode(data))
       this.writtenBytes.push(typeof data === 'string' ? new TextEncoder().encode(data) : data.slice())
+      const parsed = typeof data === 'string' ? new TextEncoder().encode(data) : data.slice()
       super.write(data, () => {
+        const complete = (): void => { this.parsedBytes.push(parsed); callback?.() }
         if (fixture.blockFirstWrite) {
           fixture.blockFirstWrite = false
-          fixture.releaseWrite = () => callback?.()
-        } else callback?.()
+          fixture.releaseWrite = complete
+        } else complete()
       })
     }
     open(root: HTMLElement) { this.element = document.createElement('div'); root.append(this.element) }
@@ -102,7 +105,6 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
   replay: fixture.replay,
   detach: fixture.detach,
-  acknowledge: fixture.acknowledge,
   resize: fixture.resize,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
     fixture.receive = receive
@@ -151,7 +153,6 @@ beforeEach(() => {
   fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
     gap: null, replay: [{ data: 'before ', dataBytes: new TextEncoder().encode('before '), endByte: 7 }] })
   fixture.detach.mockResolvedValue(undefined)
-  fixture.acknowledge.mockResolvedValue(undefined)
   fixture.resize.mockImplementation(async (_attachment, cols, rows) => ({ cols, rows }))
   const container = document.createElement('div')
   document.body.append(container)
@@ -206,11 +207,24 @@ async function mountInitial(data = initial, block = false, overrides: Partial<Pa
   fixture.attach.mockResolvedValue({attachmentId:'attachment-retained',currentSize:{cols:80,rows:24},...replay(data,0)})
   await act(async () => root!.render(createElement(TerminalView,{session,themeId:'graphite',interactiveResize:false,visible:true,autoFocus:false,linkOrigin,...overrides})))
   expect(fixture.terminals).toHaveLength(1)
-  if (!block) await waitAcknowledged(data.length)
+  if (!block) await waitParsed(data)
   return fixture.terminals[0]!
 }
-async function waitAcknowledged(cursor: number) {
-  await act(async () => await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(control,cursor)))
+async function waitParsed(expected: string | Uint8Array) {
+  const bytes = typeof expected === 'string' ? new TextEncoder().encode(expected) : expected
+  expect(bytes.byteLength).toBeGreaterThan(0)
+  await act(async () => await vi.waitFor(() => {
+    expect(fixture.terminals[0]?.parsedBytes.length).toBeGreaterThan(0)
+    expect(Buffer.concat(fixture.terminals[0]!.parsedBytes)).toEqual(Buffer.from(bytes))
+  }))
+}
+async function waitParsedTail(expected: string) {
+  expect(expected.length).toBeGreaterThan(0)
+  await act(async () => await vi.waitFor(() => {
+    expect(fixture.terminals[0]?.parsedBytes.length).toBeGreaterThan(0)
+    expect(Buffer.concat(fixture.terminals[0]!.parsedBytes).toString()).toContain(expected)
+    expect(Buffer.concat(fixture.terminals[0]!.parsedBytes)).toEqual(Buffer.concat(fixture.terminals[0]!.writtenBytes))
+  }))
 }
 function burst(data: string, startByte: number) {
   expect(fixture.receive).not.toBeNull()
@@ -221,7 +235,7 @@ function burst(data: string, startByte: number) {
   }
 }
 
-it('recovers client live overflow through the actual lease→Core replay seam before ack, once, retaining the reading line', async () => {
+it('recovers client live overflow through the actual lease→Core replay seam before parsing live, once, retaining the reading line', async () => {
   const readRunReplay = vi.fn(async (_run,afterByte) => replay(full,afterByte))
   const {controller} = controllerFixture(readRunReplay)
   fixture.replay.mockImplementation((attachmentId,afterByte) => controller.readSessionReplay(7,attachmentId,afterByte))
@@ -229,19 +243,19 @@ it('recovers client live overflow through the actual lease→Core replay seam be
   terminal.scrollToLine(5)
   const reading=terminal.buffer.active.getLine(5)?.translateToString(true)
   await act(async () => burst(tail,initial.length))
-  await waitAcknowledged(full.length)
+  await waitParsed(full)
   expect(readRunReplay).toHaveBeenCalledExactlyOnceWith(control.run,initial.length)
   expect(terminal.written.join('')).toBe(full)
   expect(terminal.buffer.active.viewportY).toBe(5)
   expect(terminal.buffer.active.getLine(5)?.translateToString(true)).toBe(reading)
   expect(document.body.textContent).not.toContain('Earlier scrollback is unavailable')
-  expect(fixture.acknowledge.mock.calls.map(([_,cursor])=>cursor)).toEqual([initial.length,full.length])
+  expect(Buffer.concat(terminal.parsedBytes)).toEqual(Buffer.from(full))
 })
 
 it.each([
   {kind:'UTF-8',head:'中\r\n',split:1,visible:'中'},
   {kind:'ANSI',head:'\x1b[31mANSI-CONTENT\x1b[0m\r\n',split:2,visible:'ANSI-CONTENT'}
-])('continues a $kind prefix already parsed/acknowledged before overflow through raw public Core replay', async ({kind,head,split,visible})=>{
+])('continues a $kind prefix already parsed before overflow through raw public Core replay', async ({kind,head,split,visible})=>{
   const encoder=new TextEncoder()
   const headBytes=encoder.encode(head)
   const all=encoder.encode(initial+head+tail)
@@ -256,7 +270,7 @@ it.each([
       evidence:{outputByteRange:{startByte,endByte:startByte+dataBytes.byteLength}}}} as RuntimeEvent)
   }
   await act(async()=>receive(headBytes.subarray(0,split),initial.length))
-  await waitAcknowledged(initial.length+split)
+  await waitParsed(all.subarray(0, initial.length+split))
   // The parser consumed a real prefix without a completed character/control sequence.
   expect(terminal.buffer.normal.getLine(100)?.translateToString(true)).toBe('')
   expect(terminal.writtenBytes.at(-1)).toEqual(headBytes.subarray(0,split))
@@ -264,7 +278,7 @@ it.each([
     receive(headBytes.subarray(split),initial.length+split)
     burst(tail,initial.length+headBytes.byteLength)
   })
-  await waitAcknowledged(all.byteLength)
+  await waitParsed(all)
   expect(readRunReplay).toHaveBeenCalledExactlyOnceWith(control.run,initial.length+split)
   if(kind==='UTF-8') {
     // Core replay starts inside the character. Its independent semantic decoder cannot
@@ -282,7 +296,7 @@ it.each([
   expect(document.body.textContent).not.toContain('History gap')
 })
 
-it('recovers a startup prefix omitted while replay was pending without acknowledging missing bytes first', async () => {
+it('recovers a startup prefix omitted while replay was pending without advancing past missing bytes first', async () => {
   const startup = Array.from({length:300},(_,i) => `startup-${i}\r\n`).join('')
   const all=initial+startup
   const readRunReplay = vi.fn(async (_run,afterByte) => replay(all,afterByte))
@@ -291,12 +305,11 @@ it('recovers a startup prefix omitted while replay was pending without acknowled
   const terminal=await mountInitial(initial,true)
   await act(async () => await vi.waitFor(() => expect(fixture.releaseWrite).not.toBeNull()))
   await act(async () => burst(startup,initial.length))
-  expect(fixture.acknowledge).not.toHaveBeenCalled()
+  expect(terminal.parsedBytes).toEqual([])
   await act(async () => fixture.releaseWrite!())
-  await waitAcknowledged(all.length)
+  await waitParsed(all)
   expect(readRunReplay).toHaveBeenCalledExactlyOnceWith(control.run,initial.length)
   expect(terminal.written.join('')).toBe(all)
-  expect(terminal.written.join('')).not.toContain('omitted bytes were acknowledged')
 })
 
 it('applies a dropped startup owner resize before replay parses alternate rows and columns on the real synchronizer', async () => {
@@ -327,7 +340,7 @@ it('applies a dropped startup owner resize before replay parses alternate rows a
   })
   expect(ownerSize).not.toHaveBeenCalled()
   await act(async()=>fixture.releaseWrite!())
-  await waitAcknowledged(all.length)
+  await waitParsed(all)
   expect(ownerSize).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({cols:132,rows:45}))
   expect(terminal.buffer.active.type).toBe('alternate')
   expect(terminal.buffer.active.getLine(39)?.translateToString(true).slice(99)).toBe('WIDE-CONTENT')
@@ -343,7 +356,7 @@ it('keeps a genuine Runtime gap visible after successful current-screen repaint'
   fixture.replay.mockImplementation((attachmentId,afterByte) => controller.readSessionReplay(7,attachmentId,afterByte))
   const terminal=await mountInitial()
   await act(async () => burst(tail,initial.length))
-  await waitAcknowledged(full.length)
+  await waitParsed(initial+tail.slice(tail.indexOf('live-20')))
   expect(terminal.written.join('')).toBe(initial+tail.slice(tail.indexOf('live-20')))
   const fact=document.querySelector('.terminal-replay-gap--compact')
   expect(fact).not.toBeNull()
@@ -361,13 +374,13 @@ it('times out an optional read, keeps parsing later live bytes, and admits no du
   await act(async () => await vi.waitFor(() => expect(readRunReplay).toHaveBeenCalledOnce()))
   // Captured deadline is the recovery timer; it doesn't require faking the xterm parser clock.
   await act(async () => fixture.reveal!())
-  await waitAcknowledged(full.length)
+  await waitParsedTail('live-39\r\n')
   expect(document.body.textContent).toContain('earlier Runtime bytes may still exist')
   expect(document.body.textContent).toContain('Live input remains available.')
   expect(document.body.textContent).not.toContain('Runtime reported a history gap')
   const later=tail.replaceAll('live','more')
   await act(async () => burst(later,full.length))
-  await waitAcknowledged(full.length+later.length)
+  await waitParsedTail('more-39\r\n')
   expect(readRunReplay).toHaveBeenCalledOnce()
   expect(terminal.written.join('')).toContain('more-39')
   await act(async () => { settle(replay(full,initial.length)); await Promise.resolve() })
@@ -411,7 +424,7 @@ it('shows alternate semantics from the actual parser without transferring altern
   const alternate='\x1b[?1049h'+Array.from({length:40},(_,i)=>`alternate-${i}\r\n`).join('')
   fixture.replay.mockResolvedValue(replay(initial+alternate,initial.length))
   await act(async()=>burst(alternate,initial.length))
-  await waitAcknowledged(initial.length+alternate.length)
+  await waitParsed(initial+alternate)
   expect(terminal.buffer.active.type).toBe('alternate')
   expect(terminal.buffer.active.baseY).toBe(0)
   expect(terminal.buffer.normal.length).toBe(normalLength)
@@ -441,17 +454,17 @@ it('keeps a pending exact-Run read owned after the original pane lease is detach
   expect(readRunReplay).toHaveBeenCalledTimes(2)
 })
 
-it.each(['complete','partial'])('deduplicates %s overlapping Core replay before parsing or acknowledging later queued output', async (overlap) => {
+it.each(['complete','partial'])('deduplicates %s overlapping Core replay before parsing later queued output', async (overlap) => {
   const start=overlap==='complete'?0:initial.length-100
   const readRunReplay=vi.fn(async()=>replay(full,start))
   const {controller}=controllerFixture(readRunReplay)
   fixture.replay.mockImplementation((attachmentId,afterByte)=>controller.readSessionReplay(7,attachmentId,afterByte))
   const terminal=await mountInitial()
   await act(async()=>burst(tail,initial.length))
-  await waitAcknowledged(full.length)
+  await waitParsed(full)
   expect(readRunReplay).toHaveBeenCalledExactlyOnceWith(control.run,initial.length)
   expect(terminal.written.join('')).toBe(full)
-  expect(fixture.acknowledge.mock.calls.map(([_,cursor])=>cursor)).toEqual([initial.length,full.length])
+  expect(Buffer.concat(terminal.parsedBytes)).toEqual(Buffer.from(full))
 })
 
 it('treats an empty no-Gap Core read as unknown continuity, keeping live output and a truthful failure notice', async () => {
@@ -460,7 +473,7 @@ it('treats an empty no-Gap Core read as unknown continuity, keeping live output 
   fixture.replay.mockImplementation((attachmentId,afterByte)=>controller.readSessionReplay(7,attachmentId,afterByte))
   const terminal=await mountInitial()
   await act(async()=>burst(tail,initial.length))
-  await waitAcknowledged(full.length)
+  await waitParsedTail('live-39\r\n')
   expect(readRunReplay).toHaveBeenCalledExactlyOnceWith(control.run,initial.length)
   expect(terminal.written.join('')).not.toBe(full)
   expect(terminal.written.join('')).toContain('live-39')
@@ -475,7 +488,7 @@ it.each(['read-only','exited'])('does not advertise live input after a failed op
   fixture.replay.mockImplementation((attachmentId,afterByte)=>controller.readSessionReplay(7,attachmentId,afterByte))
   const terminal=await mountInitial(initial,false,mode==='read-only'?{readOnly:true}:{session:{...session,processState:'exited'}})
   await act(async()=>burst(tail,initial.length))
-  await waitAcknowledged(full.length)
+  await waitParsedTail('live-39\r\n')
   expect(terminal.written.join('')).toContain('live-39')
   expect(document.body.textContent).toContain('earlier Runtime bytes may still exist')
   expect(document.body.textContent).toContain('This terminal is not currently accepting input.')

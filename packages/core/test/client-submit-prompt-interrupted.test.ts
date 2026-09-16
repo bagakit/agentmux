@@ -44,7 +44,6 @@ function storedSession(
     retiredRuns: [],
     hookBindingId: 'binding-submit',
     hookToken: 'token-submit',
-    outputCursorBytes: 0,
     terminalPromptReadiness: readiness,
     createdAt: 100,
     updatedAt: 100

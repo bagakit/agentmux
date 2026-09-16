@@ -1058,7 +1058,7 @@ describe('Session and Launcher lifecycle ownership', () => {
           workspacePath: session.workspacePath,
           run: recovered.control.run,
           retiredRuns: [session.control.run],
-          outputCursorBytes: recovered.latestOutputBytes,
+
           createdAt: recovered.createdAt,
           updatedAt: recovered.updatedAt
         }

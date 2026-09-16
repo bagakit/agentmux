@@ -34,7 +34,7 @@ function session(capabilityHash: string): AgentMuxStoredAgentSession {
     hookBindingId: 'binding-1',
     hookToken: 'token-1',
     capabilityHash,
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

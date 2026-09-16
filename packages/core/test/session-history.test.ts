@@ -19,7 +19,7 @@ async function harness(reader?: AgentProvider['readSessionHistoryPage'], hasHand
   const store = new AgentMuxMemoryAgentSessionStore()
   const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'main-session', providerId: 'codex',
     executorId: 'codex', hostId: 'local', workspacePath: '/synthetic', run: { runId: 'same-live-run' },
-    retiredRuns: [], hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', outputCursorBytes: 123,
+    retiredRuns: [], hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
     createdAt: 1, updatedAt: 1, ...(hasHandle ? {
       nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: source.nativeSessionId,
         transcriptPath: '/synthetic/ignored-fork-locator.jsonl' }

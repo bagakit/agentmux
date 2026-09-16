@@ -27,7 +27,7 @@ const agentSession: AgentMuxAgentSession = {
   workspacePath: '/repo',
   run: { runId: 'run-1' },
   retiredRuns: [],
-  outputCursorBytes: 0,
+
   createdAt: 100,
   updatedAt: 100
 }

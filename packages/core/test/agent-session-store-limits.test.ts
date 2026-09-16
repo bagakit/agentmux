@@ -25,7 +25,7 @@ function session(index: number) {
     retiredRuns: [],
     hookBindingId: `hook-${index}`,
     hookToken: `token-${index}`,
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

@@ -169,7 +169,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 12,
+
     createdAt: 100,
     updatedAt: 200,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }

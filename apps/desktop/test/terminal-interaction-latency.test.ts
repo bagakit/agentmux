@@ -4,7 +4,6 @@ import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { SPLIT_RATIO_EPSILON, SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
 import { MIN_SPLIT_RATIO } from '@agentmux/layout'
-import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
 import { terminalStartupPhase } from '../src/renderer/src/lib/terminal-startup'
 
 describe('Terminal interaction latency owners', () => {
@@ -20,47 +19,6 @@ describe('Terminal interaction latency owners', () => {
     )
     expect(outputDrain).toContain('takeTerminalLiveOutputBatch(liveOutputQueue)')
     expect(outputDrain).toContain('await yieldTerminalWork()')
-  })
-
-  it('coalesces an acknowledgement burst and eventually sends the latest cursor', async () => {
-    let releaseFirst = () => {}
-    const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const acknowledge = vi.fn()
-      .mockImplementationOnce(async () => await firstPending)
-      .mockResolvedValue(undefined)
-    const acknowledger = new LatestTerminalOutputAcknowledger(acknowledge)
-
-    acknowledger.queue(10)
-    acknowledger.queue(20)
-    acknowledger.queue(30)
-
-    expect(acknowledge).toHaveBeenCalledTimes(1)
-    expect(acknowledge).toHaveBeenLastCalledWith(10)
-
-    releaseFirst()
-    await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledTimes(2))
-    expect(acknowledge).toHaveBeenLastCalledWith(30)
-
-    acknowledger.queue(25)
-    await Promise.resolve()
-    expect(acknowledge).toHaveBeenCalledTimes(2)
-  })
-
-  it('stops draining acknowledgements after its Terminal View is disposed', async () => {
-    let releaseFirst = () => {}
-    const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const acknowledge = vi.fn(async () => await firstPending)
-    const acknowledger = new LatestTerminalOutputAcknowledger(acknowledge)
-
-    acknowledger.queue(10)
-    acknowledger.queue(20)
-    acknowledger.dispose()
-    releaseFirst()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(acknowledge).toHaveBeenCalledTimes(1)
-    expect(acknowledge).toHaveBeenCalledWith(10)
   })
 
   it('commits one final split ratio after a pointer drag', () => {

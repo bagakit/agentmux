@@ -62,7 +62,6 @@ import {
 } from '../lib/terminal-search-count'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay, recoverTerminalRetainedOutput, terminalHistoryBoundary, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
-import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import {
   rememberTerminalViewport,
@@ -177,8 +176,7 @@ export function TerminalView({
   visible = true,
   autoFocus = true,
   readOnly = false,
-  linkOrigin,
-  onReadHistory
+  linkOrigin
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -195,11 +193,7 @@ export function TerminalView({
   autoFocus?: boolean
   readOnly?: boolean
   linkOrigin: OpenHttpLinkOrigin
-  /** The Agent pane owns the distinct native-record reading surface. */
-  onReadHistory?: (control: SessionControl) => boolean
 }) {
-  const onReadHistoryRef = useRef(onReadHistory)
-  onReadHistoryRef.current = onReadHistory
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
   const readOnlyRef = useRef(readOnly)
@@ -665,19 +659,6 @@ export function TerminalView({
       }
     }
     observationReaderRef.current = readObservation
-    // Continue reading at the local history boundary without encoding input or changing VT state.
-    // xterm still owns every gesture outside this explicit transition to the Agent pane's reader.
-    terminal.attachCustomWheelEventHandler((event) => {
-      const buffer = terminal.buffer.active
-      if (disposed || terminalRef.current !== terminal || !readyForLiveOutput || !visibleRef.current ||
-          buffer.type !== 'normal' || terminal.modes.mouseTrackingMode !== 'none' || buffer.viewportY !== 0 ||
-          !Number.isFinite(event.deltaY) || event.deltaY >= 0 || event.deltaX !== 0 || event.deltaZ !== 0 ||
-          event.ctrlKey || event.shiftKey || event.altKey || event.metaKey ||
-          !onReadHistoryRef.current?.(session.control)) return true
-      event.preventDefault()
-      event.stopPropagation()
-      return false
-    })
     let cursor = 0
     let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
@@ -738,10 +719,6 @@ export function TerminalView({
       viewport.observeViewport()
     })
 
-    const acknowledger = new LatestTerminalOutputAcknowledger(
-      async (throughByte) => await api.sessions.acknowledge(session.control, throughByte)
-    )
-
     const observeOutput = (): void => {
       if (disposed || observedOutput) return
       observedOutput = true
@@ -765,7 +742,6 @@ export function TerminalView({
         })
         if (disposed) return
         cursor = recovered.cursor
-        acknowledger.queue(cursor)
         if (recovered.incomplete) setHistoryReadFailure(true)
         if (recovered.gap) {
           setRuntimeHistoryGap(true)
@@ -815,7 +791,6 @@ export function TerminalView({
         const nextCursor = composed.cursor
         await writeOutput(data)
         cursor = nextCursor
-        acknowledger.queue(cursor)
         if (liveOutputQueue.length > 0) await yieldTerminalWork()
       }
       // The bounded startup queue can retain only geometry after dropping its byte prefix.
@@ -1043,7 +1018,6 @@ export function TerminalView({
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
             if (!disposed) setLiveOutputReady(true)
-            if (cursor > 0) acknowledger.queue(cursor)
             if (droppedPendingSize) scheduleLiveOutputDrain({ size: droppedPendingSize })
             for (const event of pending.splice(0)) accept(event)
             // Even a queue consisting only of later size observations can have omitted output.
@@ -1096,7 +1070,6 @@ export function TerminalView({
         linkRequestRef.current = next
         return next
       })
-      acknowledger.dispose()
       if (terminalRef.current === terminal) terminalRef.current = null
       if (viewportRef.current === viewport) viewportRef.current = null
       if (searchAddonRef.current === search) searchAddonRef.current = null

@@ -58,7 +58,7 @@ async function consumerFixture(memoryStore = false) {
     kind: 'agent', agentSessionId: 'reader-one', providerId: 'traex', executorId: 'traex',
     hostId: 'local', workspacePath: root, run: { runId: 'reader-run-one' }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-hook-token',
-    capabilityHash: hashAgentCapability(capability), outputCursorBytes: 0, createdAt: 100, updatedAt: 100
+    capabilityHash: hashAgentCapability(capability),  createdAt: 100, updatedAt: 100
   }
   await store.compareAndSwap(null, current)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'global-messages.ndjson'))

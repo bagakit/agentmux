@@ -32,7 +32,7 @@ function session(nativeHandle: unknown) {
     retiredRuns: [],
     hookBindingId: 'hook-locator-test',
     hookToken: 'token-locator-test',
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle

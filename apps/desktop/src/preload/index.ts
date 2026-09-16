@@ -225,8 +225,6 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:setPosture', session, modeId),
     resume: (session: AgentSessionControl, prompt: string, operationId: string) =>
       ipcRenderer.invoke('sessions:resume', session, prompt, operationId),
-    acknowledge: (session: SessionControl, sequence: number) =>
-      ipcRenderer.invoke('sessions:acknowledge', session, sequence),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),

@@ -90,7 +90,7 @@ input.on('line', line => {
   const path = join(home, 'agent-sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
   await store.compareAndSwap(null, { kind:'agent',agentSessionId:'main-session',providerId:'codex',executorId:'codex',
-    hostId:'local',workspacePath:workspace,run:{runId:'original-run'},retiredRuns:[],outputCursorBytes:100,
+    hostId:'local',workspacePath:workspace,run:{runId:'original-run'},retiredRuns:[],
     hookBindingId:'synthetic-binding',hookToken:'synthetic-token',createdAt:1,updatedAt:1,
     nativeHandle:{kind:'provider',providerId:'codex',sessionId:nativeId,
       transcriptPath:'/synthetic/untrusted-child-path-is-ignored.jsonl'} })

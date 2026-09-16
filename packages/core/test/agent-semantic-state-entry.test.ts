@@ -22,7 +22,7 @@ function session(status?: AgentStatus): AgentMuxStoredAgentSession {
   return {
     kind: 'agent', agentSessionId: 'entry-agent', providerId: 'codex', executorId: 'codex',
     hostId: 'local', workspacePath: '/repo', run: { runId: 'entry-run' }, retiredRuns: [],
-    hookBindingId: 'entry-binding', hookToken: 'entry-token', outputCursorBytes: 0,
+    hookBindingId: 'entry-binding', hookToken: 'entry-token',
     createdAt: 1, updatedAt: Math.max(1, status?.observedAt ?? 0), ...(status ? { semanticStatus: status } : {})
   }
 }

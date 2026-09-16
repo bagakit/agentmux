@@ -35,7 +35,7 @@ function session(agentSessionId: string, runId: string): AgentMuxStoredAgentSess
     retiredRuns: [],
     hookBindingId: `hook-${agentSessionId}`,
     hookToken: `token-${agentSessionId}`,
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

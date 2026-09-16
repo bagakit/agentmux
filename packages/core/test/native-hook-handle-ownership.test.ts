@@ -44,7 +44,7 @@ async function withSession(
     kind: 'agent', agentSessionId, providerId, executorId: providerId,
     hostId: 'local', workspacePath: '/synthetic', run: { runId }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 1,
+     createdAt: 1, updatedAt: 1,
     ...(hasMainHandle ? {
       nativeHandle: { kind: 'provider' as const, providerId, sessionId: mainNativeId, transcriptPath: mainPath }
     } : {})

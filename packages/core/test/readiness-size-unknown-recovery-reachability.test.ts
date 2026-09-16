@@ -49,7 +49,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     hookBindingId: 'binding-size-unknown-recovery'.padEnd(43, 'A'),
     hookToken: 'token-size-unknown-recovery'.padEnd(43, 'B'),
     // 非 0：重挂时必须沿用这个**真实持久值**。若这里是 0，「沿用」与「编造 0」两个世界不可区分。
-    outputCursorBytes: 512,
+
     createdAt: 1,
     updatedAt: 10,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },

@@ -153,7 +153,7 @@ const runtimeFixture = vi.hoisted(() => {
       workspacePath: '/repo',
       run: { runId: 'run-1' },
       retiredRuns: [],
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: 2
     }))
@@ -349,7 +349,7 @@ function agentStatusFixture() {
       workspacePath: '/repo',
       run: { runId: run.runId },
       retiredRuns: [],
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: 2
     },
@@ -881,7 +881,7 @@ describe('RuntimeController configuration transaction', () => {
     const original: AgentMuxStoredAgentSession = {
       kind: 'agent', agentSessionId: 'agent-1', providerId: 'codex', executorId: 'review',
       hostId: 'local', workspacePath: '/repo', run: { runId: 'run-1' }, retiredRuns: [],
-      hookBindingId: 'race-binding', hookToken: 'race-token', outputCursorBytes: 0,
+      hookBindingId: 'race-binding', hookToken: 'race-token',
       createdAt: 1, updatedAt: 1
     }
     await privateStore.compareAndSwap(null, original)
@@ -2003,7 +2003,7 @@ describe('RuntimeController configuration transaction', () => {
         workspacePath: '/repo',
         run: { runId: 'run-1' },
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: 1,
         updatedAt: 1
       }

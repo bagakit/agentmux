@@ -808,7 +808,7 @@ describe('File Store multi-process authority', () => {
       retiredRuns: [],
       hookBindingId: 'timeline-binding',
       hookToken: 'timeline-token',
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: 1
     }))

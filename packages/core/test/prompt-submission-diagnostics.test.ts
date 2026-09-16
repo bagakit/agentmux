@@ -24,7 +24,7 @@ function session(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     terminalPromptReadiness: {

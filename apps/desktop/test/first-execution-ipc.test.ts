@@ -39,7 +39,7 @@ async function owningBridge() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
   const durable = { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'codex', executorId: 'private',
     hostId: 'local', workspacePath: '/private/fixture', run: control.run, retiredRuns: [],
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 2 }
+     createdAt: 1, updatedAt: 2 }
   const canonical = { ...durable, run: { runId: 'canonical-run' } }
   const client = { connect: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
     agentSession: vi.fn().mockReturnValue(durable),

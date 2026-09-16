@@ -57,7 +57,7 @@ async function seed(snapshot: AgentTimelineItem[], journal: AgentTimelineMutatio
     kind: 'agent', agentSessionId: ownerId, providerId: 'codex', executorId: 'codex',
     hostId: 'local', workspacePath: '/synthetic', run: { runId: 'synthetic-run' }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+     createdAt: 1, updatedAt: 1
   }
   await store.compareAndSwap(null, session)
   const directory = join(root, 'agent-timelines')

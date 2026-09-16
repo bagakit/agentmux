@@ -33,7 +33,7 @@ function storedSession(overrides: Partial<AgentMuxStoredAgentSession> = {}): Age
     workspacePath: '/tmp/work',
     run: { runId: 'run-1' },
     retiredRuns: [],
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100,
     hookBindingId: 'hook-binding-1',

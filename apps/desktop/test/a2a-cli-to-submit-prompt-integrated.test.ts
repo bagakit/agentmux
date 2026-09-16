@@ -77,7 +77,7 @@ async function seedCoreSessionStore(path: string): Promise<{ readonly capability
   const make = (agentSessionId: string, runId: string, withCapability = false): AgentMuxStoredAgentSession => ({
     kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo',
     run: { runId }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
-    ...(withCapability ? { capabilityHash: hashAgentCapability(capability) } : {}), outputCursorBytes: 0, createdAt: now, updatedAt: now
+    ...(withCapability ? { capabilityHash: hashAgentCapability(capability) } : {}),  createdAt: now, updatedAt: now
   })
   const store = new AgentMuxFileAgentSessionStore(path)
   await store.compareAndSwap(null, make('caller-cli', 'run-caller-cli', true))

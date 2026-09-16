@@ -30,7 +30,7 @@ function storedSession() {
     retiredRuns: [] as { runId: string }[],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 12,
+
     createdAt: 100,
     updatedAt: 200,
     terminalHandshake: {
@@ -1148,7 +1148,7 @@ describe('Agent Session store corruption salvage', () => {
       retiredRuns: [],
       hookBindingId: `hook-${index}`,
       hookToken: `token-${index}`,
-      outputCursorBytes: 0,
+
       createdAt: 1,
       updatedAt: 1
     }

@@ -132,7 +132,7 @@ function agentSessionEvent(session: Extract<SessionSnapshot, { kind: 'agent' }>)
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: session.latestOutputBytes,
+
         createdAt: session.createdAt,
         updatedAt: session.updatedAt
       }
@@ -848,7 +848,7 @@ describe('Timeline convergence', () => {
           workspacePath: session.workspacePath,
           run: rebound.control.run,
           retiredRuns: [session.control.run],
-          outputCursorBytes: 0,
+
           createdAt: 1,
           updatedAt: 3
         }
@@ -882,7 +882,7 @@ describe('Timeline convergence', () => {
           workspacePath: session.workspacePath,
           run: session.control.run,
           retiredRuns: [],
-          outputCursorBytes: 0,
+
           createdAt: 1,
           updatedAt: 2
         }
@@ -902,7 +902,7 @@ describe('Timeline convergence', () => {
           workspacePath: session.workspacePath,
           run: { runId: 'run:equal-version-conflict' },
           retiredRuns: [rebound.control.run],
-          outputCursorBytes: 0,
+
           createdAt: 1,
           updatedAt: 4
         }

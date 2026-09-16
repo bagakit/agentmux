@@ -17,7 +17,7 @@ async function harness(singlePhase = false) {
   await store.compareAndSwap(null, {
     kind: 'agent', agentSessionId: 'a', providerId, executorId: providerId,
     hostId: 'local', workspacePath: '/repo', run: { runId: 'r' }, retiredRuns: [],
-    hookBindingId: 'binding', hookToken: 'token', outputCursorBytes: 100,
+    hookBindingId: 'binding', hookToken: 'token',
     createdAt: 1, updatedAt: 1
   })
   const client = new AgentMuxClient({ store, ...(singlePhase ? { providers: [generic] } : {}) })

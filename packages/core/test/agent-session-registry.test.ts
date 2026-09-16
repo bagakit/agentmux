@@ -15,7 +15,7 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100
   }
@@ -114,7 +114,7 @@ describe('semantic session registry concurrency', () => {
 
     const transition = registry.put(resumed, original.run)
     await transitionEntered
-    const staleUpdate = registry.put({ ...original, outputCursorBytes: 42 }, original.run)
+    const staleUpdate = registry.put({ ...original, updatedAt: 142 }, original.run)
     releaseTransition()
 
     await transition
@@ -163,7 +163,7 @@ describe('semantic session registry concurrency', () => {
     block = true
     const active = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      outputCursorBytes: 1
+      updatedAt: 101
     }))
     let activeSettled = false
     void active.then(
@@ -174,11 +174,11 @@ describe('semantic session registry concurrency', () => {
     const controller = new AbortController()
     const queued = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      outputCursorBytes: 2
+      updatedAt: 102
     }), controller.signal)
     const following = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      outputCursorBytes: 3
+      updatedAt: 103
     }))
     controller.abort()
 
@@ -186,10 +186,10 @@ describe('semantic session registry concurrency', () => {
     expect(activeSettled).toBe(false)
     block = false
     releaseActive()
-    await expect(active).resolves.toMatchObject({ outputCursorBytes: 1 })
-    await expect(following).resolves.toMatchObject({ outputCursorBytes: 3 })
+    await expect(active).resolves.toMatchObject({ updatedAt: 101 })
+    await expect(following).resolves.toMatchObject({ updatedAt: 103 })
     expect(compareCalls).toBe(3)
-    expect(registry.get('semantic-1').outputCursorBytes).toBe(3)
-    expect((await memory.load())[0]).toMatchObject({ outputCursorBytes: 3 })
+    expect(registry.get('semantic-1').updatedAt).toBe(103)
+    expect((await memory.load())[0]).toMatchObject({ updatedAt: 103 })
   })
 })

@@ -887,7 +887,6 @@ const mockApi: AgentMuxDesktopApi = {
       await mockApi.sessions.write(session.control, `${prompt.trim()}\r`)
       return structuredClone(session)
     },
-    acknowledge: async () => {},
     interrupt: async () => {},
     resize: async (_attachmentId, cols, rows) => ({ cols, rows }),
     refresh: async (control) => {

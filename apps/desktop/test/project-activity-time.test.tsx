@@ -89,7 +89,7 @@ it('actual menu displays Core entry ages and ctx; newer observations never resta
   const before = useAppStore.getState().sessions.find(s => s.id === 'working')!
   const event: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
     kind: 'agent', agentSessionId: before.id, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo',
-    run: before.control.run, retiredRuns: [], outputCursorBytes: 0, createdAt: 1, updatedAt: NOW,
+    run: before.control.run, retiredRuns: [],  createdAt: 1, updatedAt: NOW,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: NOW, stateEnteredAt: NOW - 240_000 },
     ...(before.kind === 'agent' ? { turnUsage: before.turnUsage } : {})
   } } }
@@ -111,7 +111,7 @@ it('live observations between menu ticks keep the known state duration visible',
     const before = useAppStore.getState().sessions.find(s => s.id === 'working')!
     const event: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
       kind: 'agent', agentSessionId: before.id, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo',
-      run: before.control.run, retiredRuns: [], outputCursorBytes: 0, createdAt: 1, updatedAt: NOW + offset,
+      run: before.control.run, retiredRuns: [],  createdAt: 1, updatedAt: NOW + offset,
       semanticStatus: { state: 'working', source: 'native-hook', observedAt: NOW + offset, stateEnteredAt: NOW - 240_000 },
       ...(before.kind === 'agent' ? { turnUsage: before.turnUsage } : {})
     } } }

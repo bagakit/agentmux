@@ -46,7 +46,7 @@ function storedSession(
     retiredRuns: [],
     hookBindingId: 'binding-ingress',
     hookToken: 'token-ingress',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100,
     ...extra

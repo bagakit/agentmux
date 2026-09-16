@@ -52,7 +52,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals() })
 async function mountReader(nextControl = control) {
-  await act(async () => root.render(<SessionHistoryView control={nextControl} label="Reader" onClose={() => {}} workspaceRoot="/synthetic" openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+  await act(async () => root.render(<SessionHistoryView control={nextControl} label="Reader" onClose={() => {}} visible themeId="graphite" fontSize={12} workspaceRoot="/synthetic" openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
 }
 function button(text: string) {
   const found=Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((candidate) => candidate.textContent?.trim()===text.trim())
@@ -83,6 +83,8 @@ it('keeps the native history entry reachable when the Agent Run is unavailable',
   fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
+  expect(fixture.historyPage).not.toHaveBeenCalled()
+  await act(async () => button('Conversation history').click())
   expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(control, undefined)
   expect(container.textContent).toContain('body latest')
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
@@ -105,6 +107,8 @@ it('keeps a missing Run readable with a direct restore action when the independe
   fixture.historyPage.mockRejectedValue(new Error('Native reader unavailable'))
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
+  expect(fixture.historyPage).not.toHaveBeenCalled()
+  await act(async () => button('Conversation history').click())
   expect(container.textContent).toContain('Idle time is unknown')
   expect(container.textContent).toContain('History read failed: Native reader unavailable')
   expect(button('Resume')).toBeDefined()

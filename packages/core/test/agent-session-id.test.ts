@@ -100,7 +100,7 @@ describe('canonical Agent Session identity', () => {
     const previous: AgentMuxStoredAgentSession = {
       kind: 'agent', agentSessionId: '765ae7ef-b886-4681-b9b5-0bbc561e8f1a', providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: '/repo', run: { runId: 'previous-run' }, retiredRuns: [],
-      hookBindingId: 'hook', hookToken: 'token', outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+      hookBindingId: 'hook', hookToken: 'token',  createdAt: 1, updatedAt: 1
     }
     await store.compareAndSwap(null, previous)
     const client = new AgentMuxClient({ store })

@@ -26,7 +26,7 @@ async function fileStore() {
   const session: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex-safe', hostId: 'local',
     workspacePath: root, run: { runId: 'run-1' }, retiredRuns: [], hookBindingId: 'hook-1',
-    hookToken: 'token-1', outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+    hookToken: 'token-1',  createdAt: 1, updatedAt: 1
   }
   await store.compareAndSwap(null, session)
   await store.applyTimelineMutation({ type: 'append', agentSessionId, item: item('seed') })

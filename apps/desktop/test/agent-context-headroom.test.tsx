@@ -80,7 +80,7 @@ function publication(id: string, usage: AgentTurnUsage | undefined, observedAt =
   return { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
     kind: 'agent', agentSessionId: id, providerId: session.providerId, executorId: session.executorId,
     hostId: session.hostId, workspacePath: session.workspacePath, run: { ...session.control.run },
-    retiredRuns: [], outputCursorBytes: 0, createdAt: 1, updatedAt: observedAt,
+    retiredRuns: [],  createdAt: 1, updatedAt: observedAt,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt },
     ...(usage === undefined ? {} : { turnUsage: usage })
   } } }

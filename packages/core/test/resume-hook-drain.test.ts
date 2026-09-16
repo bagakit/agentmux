@@ -12,7 +12,7 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     kind: 'agent', agentSessionId: 'review-agent', providerId: 'claude', executorId: 'claude',
     hostId: 'local', workspacePath: '/review-fixture', run: { runId: 'old-run' }, retiredRuns: [],
     hookBindingId: 'review-binding'.padEnd(43, 'A'), hookToken: 'review-token'.padEnd(43, 'B'),
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 1,
+     createdAt: 1, updatedAt: 1,
     promptCompletionAdmission: { submissionId: 'old-prompt',
       operationId: 'old-input', startByte: 0, endByte: 5 },
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'review-native' }

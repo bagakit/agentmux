@@ -70,6 +70,9 @@ class FakeKernel {
   private sink: ((event: KernelDataEvent) => void) | null = null
   private readonly attachments = new Map<string, { afterByte: number }>()
   earlyLive: KernelDataEvent[] = []
+  private readonly continuation = new Map<string, number>()
+  continuationByte = (runId: string) => this.continuation.get(runId) ?? 0
+  publishedThrough(runId: string, throughByte: number): void { this.continuation.set(runId, throughByte) }
   readonly attach = vi.fn(async (runId: string, afterByte: number, beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void) => {
     const spec = this.attachSpecs.get(runId)
     if (spec?.throwOnAttach) throw spec.throwOnAttach
@@ -161,7 +164,6 @@ function storedSession(overrides: Partial<AgentMuxStoredAgentSession> = {}): Age
     retiredRuns: [],
     hookBindingId: 'binding-1',
     hookToken: 'token-1',
-    outputCursorBytes: 0,
     createdAt: 100,
     updatedAt: 100,
     ...overrides
@@ -215,9 +217,10 @@ async function driveReconnect(state: Internals, events: AgentMuxClientEvent[]): 
 }
 
 describe('T-001 重连后重建实时字节泵', () => {
-  it('掉线→重连：重连之后写下的新字节到达消费者，且从该 run 自己的 outputCursorBytes 续上', async () => {
-    // outputCursorBytes 是**测试自己选**的字面量（不从被测调用推导），resume 点必须正好等于它。
-    const { events, state, kernel } = await fixture([storedSession({ outputCursorBytes: 100 })])
+  it('掉线→重连：重连之后写下的新字节到达消费者，且从该 run 自己的 published transport boundary 续上', async () => {
+    // published transport boundary 是**测试自己选**的字面量（不从被测调用推导），resume 点必须正好等于它。
+    const { events, state, kernel } = await fixture([storedSession()])
+    kernel.publishedThrough('run-1', 100)
 
     kernel.configureRuns([runningRun('run-1', { latestOutputBytes: 106 })])
     // attach 快照带回掉线期间缓冲的字节 [100,106)——这是 replay 那条，用来证「不跳过掉线期间的区段」。
@@ -237,7 +240,7 @@ describe('T-001 重连后重建实时字节泵', () => {
     expect(after.length).toBe(before + 1)
     expect(after).toContain('LIVE-AFTER-REBUILD')
 
-    // resume 点正确：attach 必须从该 run 自己的 outputCursorBytes（100）续上，不重放已消费的、不留缺口。
+    // resume 点正确：attach 必须从该 run 自己的 published transport boundary（100）续上，不重放已消费的、不留缺口。
     expect(kernel.attach).toHaveBeenCalledTimes(1)
     expect(kernel.attachedAfterByte('run-1')).toBe(100)
 
@@ -307,7 +310,8 @@ describe('T-001 重连后重建实时字节泵', () => {
     // 后到者赢，所以顺序就是这里唯一的承重物。披露被洗掉会怎样，由
     // `apps/desktop/test/output-gap-disclosure-survives.test.ts` 用真 reducer 钉住；本条只钉
     // Core 发出的顺序确实是那一个。
-    const { events, state, kernel } = await fixture([storedSession({ outputCursorBytes: 100 })])
+    const { events, state, kernel } = await fixture([storedSession()])
+    kernel.publishedThrough('run-1', 100)
 
     kernel.configureRuns([runningRun('run-1', { latestOutputBytes: 160 })])
     kernel.configureAttach('run-1', {

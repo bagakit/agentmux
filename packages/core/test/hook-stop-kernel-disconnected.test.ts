@@ -41,7 +41,6 @@ function storedSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-stop-disconnected'.padEnd(43, 'A'),
     hookToken: 'token-stop-disconnected'.padEnd(43, 'B'),
-    outputCursorBytes: 0,
     createdAt: 1,
     // 存储不变量要求 updatedAt 不早于 semanticStatus.observedAt（agent-session-store.ts:972）。
     updatedAt: 10,
@@ -91,14 +90,14 @@ type Internals = {
   acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
 }
 
-async function harness(): Promise<{
+async function harness(initial = storedSession()): Promise<{
   client: AgentMuxClient
   internals: Internals
   stored: () => Promise<AgentMuxStoredAgentSession | undefined>
   statuses: () => Extract<AgentMuxClientEvent, { type: 'agent-status' }>[]
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, storedSession())
+  await store.compareAndSwap(null, initial)
   const client = new AgentMuxClient({ store })
   const internals = client as unknown as Internals
   await internals.registry.load('local')
@@ -188,6 +187,24 @@ describe('Stop 落 done 不得依赖活着的内核', () => {
     } finally {
       await client.dispose()
     }
+  })
+
+  it('断线 Stop 不从旧已消耗 epoch 或通用读游标伪造下一次可提交边界', async () => {
+    const initial = { ...storedSession(), terminalPromptReadiness: {
+      id: 'previous-turn', source: 'native-stop' as const, run: { runId: 'run-1' },
+      outputCursorBytes: 128, readyThroughByte: 160, consumedBySubmissionId: 'previous-intent'
+    } }
+    const { client, internals, stored } = await harness(initial)
+    try {
+      disconnectKernel(internals)
+      await internals.acceptHookEvent(stopHook('receipt-next-turn-unknown'), AbortSignal.timeout(5_000))
+      const actual = await stored()
+      expect(actual?.semanticStatus?.state).toBe('done')
+      expect(actual?.hookReceipt).toMatchObject({ id: 'receipt-next-turn-unknown', eventName: 'Stop' })
+      expect(actual?.hookReceipt?.outputCursorBytes).toBeUndefined()
+      expect(actual?.terminalPromptReadiness).toBeUndefined()
+      expect(actual).not.toHaveProperty('outputCursorBytes')
+    } finally { await client.dispose() }
   })
 
   /**

@@ -47,7 +47,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-empty-input'.padEnd(43, 'A'),
     hookToken: 'token-empty-input'.padEnd(43, 'B'),
-    outputCursorBytes: 256,
+
     createdAt: 1,
     updatedAt: 10,
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-1' }

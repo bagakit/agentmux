@@ -26,7 +26,10 @@ const critical = [
   ...['main.cjs', 'entry.tsx', 'index.html'].map(name => path.join(fixture, name)),
   path.join(desktop, 'src/renderer/src/components/TerminalView.tsx'), path.join(desktop, 'src/renderer/src/components/SessionPane.tsx'),
   path.join(desktop, 'src/renderer/src/components/SessionHistoryView.tsx'), path.join(desktop, 'src/renderer/src/store.ts'),
-  path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/preload/index.ts'), productPreload,
+  path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/renderer/src/lib/session-events.ts'),
+  path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
+  path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/session-history.css'),
+  path.join(desktop, 'src/preload/index.ts'), path.join(desktop, 'src/shared/contracts.ts'), productPreload,
   core, ...['providers/codex.js', 'providers/codex-native-history.js', 'providers/codex-native-read.js', 'session-history.js', 'errors.js']
     .map(name => path.join(root, 'packages/core/dist', name)),
   ...['providers/codex.ts', 'providers/codex-native-history.ts', 'providers/codex-native-read.ts', 'session-history.ts', 'types.ts']
@@ -82,10 +85,11 @@ lines.on('close',()=>{record({kind:'eof'});process.exit(0)})
 `
 const result = { schema: 'agentmux.terminal-live-scroll-delivery.v1', passed: false,
   sourceAndPackageBefore: null, sourceAndPackageAfter: null, distributionArtifacts: null,
-  nativeFixture: null, browser: null, exit: null,
+  nativeFixture: null, browser: null, exit: null, processRuns: [],
   cleanup: { remaining: null, rootRemoved: false, errors: [] }, physicalDeviceTested: false, userRunTouched: false,
-  boundary: 'One private actual Electron sendInputEvent path, real SessionPane/Store/preload/xterm and Core Provider read parsing/lifetime over synthetic native protocol. No Core connect/create, Agent Run, model or user home access.' }
+  boundary: 'Two private actual Electron processes with CDP trusted input, product Store durable workbench initialization, SessionPane/preload/xterm and Core Provider reading over a synthetic native protocol. No Core connect/create, Agent Run, model or user home access; active missing VT state is not restored.' }
 let child, timer
+const childPids = []
 try {
   result.sourceAndPackageBefore = await hashes(critical)
   await fs.mkdir(path.join(privateRoot, 'codex-home'), { mode: 0o700 })
@@ -93,7 +97,7 @@ try {
     turnId: `private-native-turn-${i}`, startedAtMs: 1000 + i, completedAtMs: 1001 + i,
     item: { id: `private-native-item-${i}`, type: i % 2 ? 'userMessage' : 'agentMessage',
       ...(i % 2 ? { content: [{ type: 'text', text: `Private persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }] }
-        : { text: `Private persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }) }
+        : { text: `${i === 62 ? '**Private**' : 'Private'} persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }) }
   }))
   await fs.writeFile(path.join(privateRoot, 'native-items.json'), JSON.stringify(items), { mode: 0o600 })
   await fs.writeFile(path.join(privateRoot, 'native-reader.mjs'), readerSource, { mode: 0o600 })
@@ -115,35 +119,48 @@ try {
   result.distributionArtifacts = await hashes(artifacts)
   const env = { ...process.env, CODEX_HOME: path.join(privateRoot, 'codex-home') }
   delete env.ELECTRON_RUN_AS_NODE
-  child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, core, productPreload],
-    { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
-  result.pid = child.pid
-  child.stderr.on('data', () => {})
-  const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })) })
-  result.exit = await Promise.race([exited, new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('Private live-reader browser deadline exceeded')), 45000)
-  })])
-  clearTimeout(timer)
-  result.browser = JSON.parse(await fs.readFile(path.join(privateRoot, 'browser.json'), 'utf8'))
-  assert.equal(result.exit.code, 0, result.browser.failure)
-  assert.equal(result.browser.passed, true, result.browser.failure)
+  for (const phase of ['capture', 'restore']) {
+    child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, core, productPreload, phase],
+      { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    result.pid = child.pid; childPids.push(child.pid)
+    child.stderr.on('data', () => {})
+    const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })) })
+    result.exit = await Promise.race([exited, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Private live-reader browser deadline exceeded')), 45000)
+    })])
+    clearTimeout(timer)
+    const browser = JSON.parse(await fs.readFile(path.join(privateRoot, `browser-${phase}.json`), 'utf8'))
+    result.browser = browser
+    result.processRuns.push({ phase, pid: child.pid, exit: result.exit, browser })
+    assert.equal(result.exit.code, 0, browser.failure)
+    assert.equal(browser.passed, true, browser.failure)
+    await stopProbeProcesses(child.pid, privateRoot)
+    assert.deepEqual(await listProbeProcesses(child.pid, privateRoot), [], 'Private process must exit before the next process starts')
+  }
   const trace = (await fs.readFile(path.join(privateRoot, 'reader.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-  assert.equal(trace.filter(entry => entry.kind === 'start').length, 1)
-  assert.equal(trace.filter(entry => entry.kind === 'eof').length, 1)
+  assert.equal(trace.filter(entry => entry.kind === 'start').length, 2)
+  assert.equal(trace.filter(entry => entry.kind === 'eof').length, 2)
   assert.deepEqual(trace.filter(entry => entry.kind === 'method').map(entry => entry.method),
-    ['initialize', 'initialized', 'thread/read', 'thread/items/list'])
+    ['initialize', 'initialized', 'thread/read', 'thread/items/list', 'initialize', 'initialized', 'thread/read', 'thread/items/list'])
   result.nativeReaderTrace = trace
   result.sourceAndPackageAfter = await hashes(critical)
   assert.deepEqual(result.sourceAndPackageAfter, result.sourceAndPackageBefore, 'Selected actual source/dependency inputs changed during proof')
   assert.deepEqual(await hashes(Object.keys(result.nativeFixture)), result.nativeFixture, 'Private native records/helper changed while being read')
   result.passed = true
-} catch (error) { result.failure = error.stack }
+} catch (error) {
+  result.failure = error.stack
+  result.stages = {}
+  for (const phase of ['capture', 'restore']) {
+    try { result.stages[phase] = JSON.parse(await fs.readFile(path.join(privateRoot, `stage-${phase}.json`), 'utf8')) } catch {}
+  }
+}
 finally {
   clearTimeout(timer)
-  if (child?.pid) {
-    try { await stopProbeProcesses(child.pid, privateRoot) } catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
-    try { result.cleanup.remaining = await listProbeProcesses(child.pid, privateRoot) } catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
-  } else result.cleanup.remaining = []
+  for (const pid of childPids) {
+    try { await stopProbeProcesses(pid, privateRoot) } catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
+  }
+  try { result.cleanup.remaining = await listProbeProcesses(-1, privateRoot) }
+  catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
   if (result.cleanup.remaining?.length === 0 && result.cleanup.errors.length === 0) {
     try { await fs.rm(privateRoot, { recursive: true, force: true }); result.cleanup.rootRemoved = true }
     catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }

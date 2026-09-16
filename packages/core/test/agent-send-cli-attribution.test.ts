@@ -22,7 +22,7 @@ async function seedSessions(path: string, ids: readonly string[], capability?: s
       kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo',
       run: { runId: `run-${agentSessionId}` }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
       ...(capability && agentSessionId === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}),
-      outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+       createdAt: 1, updatedAt: 1
     }
     await store.compareAndSwap(null, session)
   }

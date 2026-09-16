@@ -79,7 +79,7 @@ beforeEach(async () => {
   const durable: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: ID, providerId: 'codex', executorId: 'codex', hostId: 'local',
     workspacePath: '/private/explicit-steer', run: { runId: RUN }, retiredRuns: [],
-    hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', outputCursorBytes: 100,
+    hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
     createdAt: 1, updatedAt: 1, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
   }
   await store.compareAndSwap(null, durable)

@@ -62,7 +62,7 @@ function session(): AgentMuxAgentSession {
     workspacePath: '/repo',
     run: { runId: 'run-1' },
     retiredRuns: [],
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1
   }

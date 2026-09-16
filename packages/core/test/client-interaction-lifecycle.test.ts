@@ -40,7 +40,7 @@ function storedSession(pending?: AgentMuxInteractionRequest): AgentMuxStoredAgen
     retiredRuns: [],
     hookBindingId: 'binding-lifecycle',
     hookToken: 'token-lifecycle',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100,
     ...(pending ? { pendingInteraction: { request: pending } } : {})

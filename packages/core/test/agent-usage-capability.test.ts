@@ -119,7 +119,7 @@ function storedClaudeSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-usage',
     hookToken: 'token-usage',
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'claude-native' }

@@ -19,7 +19,7 @@ function stored(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding',
     hookToken: 'token',
-    outputCursorBytes: 0,
+
     terminalPromptReadiness: {
       source: 'initial-composer',
       id: 'pending-epoch',

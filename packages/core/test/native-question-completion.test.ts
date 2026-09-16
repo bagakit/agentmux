@@ -27,7 +27,7 @@ const questionInput = { questions: [{ question: 'Synthetic choice?', options: [{
 function seed(providerId: string): AgentMuxStoredAgentSession {
   return { kind: 'agent', agentSessionId, providerId, executorId: providerId, hostId: 'local',
     workspacePath: '/synthetic', run: { runId }, retiredRuns: [],
-    hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), outputCursorBytes: 0, createdAt: 1, updatedAt: 1 }
+    hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43),  createdAt: 1, updatedAt: 1 }
 }
 
 async function harness(providerId: string, provider?: AgentProvider) {

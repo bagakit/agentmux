@@ -54,7 +54,7 @@ it('projects live Core delivery notices and clears them on the next verified upd
   const core: AgentMuxAgentSession = {
     kind: 'agent', agentSessionId: 'agent', providerId: 'codex', executorId: 'codex',
     hostId: 'local', workspacePath: '/repo', createdAt: 1, updatedAt: 2,
-    run: { runId: 'run-1' }, retiredRuns: [], outputCursorBytes: 0,
+    run: { runId: 'run-1' }, retiredRuns: [],
     terminalPromptDelivery: (session() as Extract<SessionSnapshot, { kind: 'agent' }>).terminalPromptDelivery!
   }
   const degraded = projectRuntimeEvent(state, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: core } }).state

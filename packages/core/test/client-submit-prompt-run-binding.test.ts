@@ -47,7 +47,7 @@ async function fixture(singlePhase = false) {
   const initial: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'bound-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: '/repo', run: { runId: 'original-run' }, retiredRuns: [],
-    hookBindingId: 'bound-binding', hookToken: 'bound-token', outputCursorBytes: 0,
+    hookBindingId: 'bound-binding', hookToken: 'bound-token',
     createdAt: 1, updatedAt: 100,
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: 100, stateEnteredAt: 100 }
   }

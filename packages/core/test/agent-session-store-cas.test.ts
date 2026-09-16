@@ -13,7 +13,7 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
  *
  * 为什么单独一族：这道门是 Agent Session 落盘的**唯一**并发保护。上层 registry 的 `put` / `update` /
  * `delete` 各自还有一道 `sameRun` 检查，但那道只看 run 引用变没变——一个只改了 `updatedAt`、
- * `outputCursorBytes` 或 `terminalHandshake` 的并发写，run 完全没动，registry 那道门放行，最后拦它的
+ * `hookToken` 或 `terminalHandshake` 的并发写，run 完全没动，registry 那道门放行，最后拦它的
  * 只有 store 里的 `sameSession`。
  *
  * 为什么必须有人钉：实测把 `sameSession` 改成 `return true`（即彻底关掉冲突检测），store 那四个测试
@@ -39,7 +39,7 @@ function storedSession(
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 12,
+
     createdAt: 100,
     updatedAt: 200,
     ...overrides
@@ -105,14 +105,14 @@ for (const variant of stores) {
 
     it('expected 与已落盘那份只差一个字段时也拒写，不只比 run', async () => {
       // 单独一条，因为上一条改的是 updatedAt——一个「时间戳」字段，容易让人以为实现是按时间戳单调性
-      // 判的。这里改 outputCursorBytes（读到哪个字节了），证明判据是**整份内容相等**，而不是某几个
+      // 判的。这里改 hookToken（Hook 身份凭证），证明判据是**整份内容相等**，而不是某几个
       // 被挑出来的字段。若实现退化成只比 run/updatedAt，这一条红。
       await withStore(async (store) => {
         const first = storedSession()
         await store.compareAndSwap(null, first)
-        await store.compareAndSwap(first, storedSession({ outputCursorBytes: 99 }))
+        await store.compareAndSwap(first, storedSession({ hookToken: 'next-token' }))
         await expect(
-          store.compareAndSwap(first, storedSession({ outputCursorBytes: 120 }))
+          store.compareAndSwap(first, storedSession({ hookToken: 'another-token' }))
         ).rejects.toMatchObject(STALE)
       })
     })

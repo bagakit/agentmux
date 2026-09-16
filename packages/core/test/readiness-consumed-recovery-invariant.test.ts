@@ -45,7 +45,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     // `current.outputCursorBytes` 与字面量 `0` 两个世界不可区分，断言就成了恒真
     // （期望值不能由被测对象算出）。编造 0 会让 screenEvidence 从头扫、把上一轮
     // 的提示符认成这一轮的，正是 client.ts:3659 拒绝的那件事。
-    outputCursorBytes: 512,
+
     createdAt: 1,
     updatedAt: 10,
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-1' },

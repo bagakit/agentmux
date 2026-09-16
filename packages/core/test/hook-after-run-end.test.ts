@@ -37,7 +37,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-hook-after-end'.padEnd(43, 'A'),
     hookToken: 'token-hook-after-end'.padEnd(43, 'B'),
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }

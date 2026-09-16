@@ -18,7 +18,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     }
     const provider = new AgentProviderRegistry().get(providerId)
     const old: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'mail-agent', providerId, executorId: providerId,
-      hostId: 'local', workspacePath: '/repo', run: { runId: 'old-run' }, retiredRuns: [], outputCursorBytes: 0,
+      hostId: 'local', workspacePath: '/repo', run: { runId: 'old-run' }, retiredRuns: [],
       createdAt: 1, updatedAt: 1, hookBindingId: 'binding-old', hookToken: 'token-old', nativeHandle: { kind: 'provider', providerId, sessionId: 'native' } }
     if (operation !== 'create') await store.compareAndSwap(null, { ...old, capabilityHash: hashAgentCapability('valid-capability') })
     await internals.registry.load('local')

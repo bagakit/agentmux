@@ -8,7 +8,7 @@ it('Core status observes the ended Run instead of reusing a stale working hook',
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'status-agent', providerId: 'claude', executorId: 'claude',
     hostId: 'local', workspacePath: '/fixture', run: { runId: 'status-run' }, retiredRuns: [],
-    hookBindingId: 'binding', hookToken: 'token', outputCursorBytes: 0, createdAt: 1, updatedAt: 1,
+    hookBindingId: 'binding', hookToken: 'token',  createdAt: 1, updatedAt: 1,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
   }
   const run: CtxmuxAdapterRun = {

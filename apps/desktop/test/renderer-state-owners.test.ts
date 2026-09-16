@@ -211,7 +211,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: '/repo',
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: 1,
         updatedAt: 4,
         semanticStatus: {
@@ -257,7 +257,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 6,
         // 陈旧的 working——observedAt 不比当前的 3 新，不许把圈重新转起来。
@@ -296,7 +296,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 7,
         semanticStatus: { state: 'working', source: 'native-hook', observedAt: 9 }
@@ -333,7 +333,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 4,
         terminalCapability: capability
@@ -352,7 +352,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 5,
       }
@@ -385,7 +385,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 4,
         turnUsage: usage
@@ -406,7 +406,7 @@ describe('Renderer resource state owners', () => {
         workspacePath: session.workspacePath,
         run: session.control.run,
         retiredRuns: [],
-        outputCursorBytes: 0,
+
         createdAt: session.createdAt,
         updatedAt: 5
       }
