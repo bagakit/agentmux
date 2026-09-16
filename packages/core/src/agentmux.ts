@@ -67,6 +67,8 @@ const CLI_ERROR_CODES = [
   'DUPLICATE_AGENT_SESSION',
   'INVALID_AGENT_TIMELINE_STORE',
   'MESSAGE_ACK_GENERATION_STALE',
+  'AGENT_DELIVERY_GENERATION_STALE',
+  'MESSAGE_BATCH_LIMIT_INVALID',
   'MESSAGE_ID_CONFLICT',
   'MESSAGE_ID_REQUEST_ID_COLLISION',
   'MESSAGE_NOT_FOUND',
@@ -634,6 +636,31 @@ async function handoffCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
+async function deliveriesCommand(args: readonly string[]): Promise<number> {
+  const verb = args[0]
+  if (verb !== 'check' && verb !== 'ack') throw cliError('deliveries requires check or ack.')
+  const flags = parseFlags(args.slice(1), verb === 'check'
+    ? { '--limit': 'value' } : { '--generation': 'value', '--reader-run': 'value' })
+  const caller = managedCaller()
+  const capability = process.env.AGENTMUX_AGENT_CAPABILITY?.trim()
+  if (!capability) throw new AgentMuxError('This command requires an AgentMux-managed Agent capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
+  if (verb === 'check') {
+    const limit = Number(requiredData(flags, '--limit', 'Message batch limit'))
+    const result = await withClient(async (client) => await client.checkDeliveries({
+      capability, callerAgentSessionId: caller.agentSessionId, limit
+    }))
+    printSuccess('deliveries.check', result)
+  } else {
+    const generation = Number(requiredData(flags, '--generation', 'Message generation'))
+    const readerRun = { runId: identifier(flags.values.get('--reader-run'), 'Reader Run id') }
+    const result = await withClient(async (client) => await client.ackDeliveryBatch({
+      capability, callerAgentSessionId: caller.agentSessionId, readerRun, generation
+    }))
+    printSuccess('deliveries.ack', result)
+  }
+  return 0
+}
+
 async function sendCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'data', '--to-region': 'value', '--to-tab': 'value', '--text': 'data', '--message-id': 'value', '--thread': 'value', '--correlation': 'value', '--reply-to': 'value' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
@@ -934,7 +961,7 @@ function operationPath(args: readonly string[]): string | null {
   // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
   // 不写死 'run' 是因为将来若有第二个 browser 子命令，漏改这里会让它的 --help 静默落到 'browser'
   // 那条上（拿到一份讲别的命令的帮助，而不是一句"没这个命令"）。
-  if (args[0] === 'browser' && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
+  if ((args[0] === 'browser' || args[0] === 'deliveries') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
     return `${args[0]}.${args[1]}`
   }
   return args[0] ?? null
@@ -1041,6 +1068,7 @@ async function main(): Promise<number> {
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'browser') return await browserCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
+  if (args[0] === 'deliveries') return await deliveriesCommand(args.slice(1))
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
   if (args[0] === 'handoff') return await handoffCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))

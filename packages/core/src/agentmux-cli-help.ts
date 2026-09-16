@@ -52,6 +52,7 @@ Intents:
   open        Open typed content at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
+  deliveries  Explicitly check and acknowledge your durable incoming message batch.
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
   handoff     Hand a task and its ownership to another Agent Session in one atomic act.
   focus       Focus one exact Tab or Region.
@@ -145,6 +146,31 @@ The response is bounded, versioned JSON. Projects, active Agents, Sessions, and 
 come from their existing owners and retain unknown/error facts instead of guessing. Topic
 discovery stays filesystem-scoped; an unavailable scope is returned as a typed observation,
 not an empty claim that no Topics exist (\`TOPIC_FILESYSTEM_SCOPE_REQUIRED\`).`],
+  ['deliveries', `Explicitly consume your durable incoming messages
+
+Usage:
+  agentmux deliveries check --limit <1..100>
+  agentmux deliveries ack --generation <generation> --reader-run <Run from check>
+
+Requires your current managed Agent capability. Check is recipient-scoped and repeats
+exactly the same batch until you explicitly acknowledge it. It never sends or resumes.
+A replacement Run takes over unread IDs with a new generation; an old Run cannot ack it.
+Acknowledgement advances only your consumption cursor, not delivery, human reading,
+Agent acceptance, Dispatch waiting or task completion.`],
+  ['deliveries.check', `Check your exact durable incoming batch
+
+Usage: agentmux deliveries check --limit <1..100>
+
+Returns your authenticated Session, readerRun, generation and messages. Repeating before
+ack returns the same exact IDs even when the limit or new arrivals change. Each message
+keeps its actual delivery facts; queued or failed does not mean input was accepted.`],
+  ['deliveries.ack', `Acknowledge exactly the checked batch
+
+Usage: agentmux deliveries ack --generation <generation> --reader-run <Run from check>
+
+The capability, current Session binding and stored readerRun/generation must match.
+Returns exact acknowledged IDs and the next generation. Wrong/empty/stale batches fail;
+no message body, delivery fact, other recipient cursor or Agent lifecycle is changed.`],
   ['open', `Open typed content at one exact destination
 
 Usage:
