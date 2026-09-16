@@ -105,7 +105,7 @@ describe('fan-out group projection', () => {
     expect(second!.attention).toBe('needs-you')
   })
 
-  it('points at the lane that most wants the user, longest wait first', () => {
+  it('points at the lane that most wants the user, earliest observation first', () => {
     const groups = fanOutGroups({
       workspaces: [worktree('x-1'), worktree('x-2'), worktree('x-3')],
       sessions: [
@@ -116,7 +116,7 @@ describe('fan-out group projection', () => {
     })
 
     // needs-you outranks error; inside that class the earliest observedAt wins, matching the attention
-    // bar's "jump to the one waiting longest" so a group and the bar never disagree.
+    // bar's "jump to the earliest observed request" so a group and the bar never disagree.
     expect(groupLaneNeedingYou(groups[0]!)?.branch).toBe('x-3')
   })
 
@@ -266,7 +266,7 @@ describe('fan-out group projection', () => {
     }))).toBe('')
   })
 
-  it('offers a jump to the lane waiting longest, naming it for a reader', () => {
+  it('offers a jump to the earliest observed pending lane, naming it for a reader', () => {
     const markup = renderToStaticMarkup(createElement(FanOutStrip, {
       workspaces: [worktree('x-1'), worktree('x-2')],
       sessions: [agent('x-1', 'working'), agent('x-2', 'blocked', 5)],
@@ -274,7 +274,8 @@ describe('fan-out group projection', () => {
     }))
 
     expect(markup).toContain('Answer x-2')
-    expect(markup).toContain('the lane waiting longest')
+    expect(markup).toContain('aria-label="Go to x-2, the earliest observed pending lane"')
+    expect(markup).toContain('title="Go to the earliest observed pending lane"')
   })
 
   it('shows a lane whose Agent never launched, but not as something to open', () => {

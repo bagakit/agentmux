@@ -7,12 +7,14 @@ import { projectActivityRow } from '../src/renderer/src/lib/project-activity-row
 // 一个「卡在你身上」的行与一个「安静干活」的行必须形状不同（不同的 attention 分级 + 不同的尾随事实），
 // 缺时间轴的行仍要产出一句人话，缺 turnUsage 时绝不显示 0%。now 作形参传入，测试不依赖真实时钟。
 
-const NOW = 1_000_000
+const NOW = 100_000_000
 
 function agent(spec: {
   state?: AgentDisplayState
   detail?: string
   observedAt?: number
+  enteredAt?: number
+  unknownStart?: boolean
   context?: { usedTokens: number; capacityTokens: number }
   pending?: unknown
 } = {}): SessionSnapshot {
@@ -32,6 +34,10 @@ function agent(spec: {
       source: 'native-hook',
       observedAt: spec.observedAt ?? NOW,
       ...(spec.detail ? { detail: spec.detail } : {})
+    },
+    semanticStatus: {
+      state: spec.state ?? 'working', source: 'native-hook', observedAt: spec.observedAt ?? NOW,
+      ...(!spec.unknownStart ? { stateEnteredAt: spec.enteredAt ?? spec.observedAt ?? NOW - 10_000 } : {})
     },
     latestOutputBytes: 0,
     ...(spec.pending ? { pendingInteraction: spec.pending } : {}),
@@ -59,38 +65,37 @@ describe('projectActivityRow — 分级：blocked 与 working 的行形状不同
     expect(row.meta).toBe('waiting 5s')
   })
 
-  it('working（安静干活）：不描色（attention=null），尾随的是它在忙什么的次要事实，不是等待时长', () => {
+  it('working（安静干活）：不描色（attention=null），尾随真实工作时长，仍不是等待时长', () => {
     const row = projectActivityRow(agent({ state: 'working', observedAt: NOW - 90_000 }), [], NOW)
     // 关键对比：与上面 needs-you 那两行**形状不同**——中性色，且尾随绝不是 "waiting …"。
     expect(row.attention).toBeNull()
-    expect(row.meta).toBe('active now')
+    expect(row.meta).toBe('working 1m')
     expect(row.meta).not.toContain('waiting')
   })
 
-  it('error：red 描色，尾随「多久以前」，不是 " idle"（它不是闲着，是坏了）', () => {
-    const row = projectActivityRow(agent({ state: 'error', observedAt: NOW - 3_600_000 }), [], NOW)
+  it('error：red 描色，尾随「持续错误多久」，不是 " idle"（它不是闲着，是坏了）', () => {
+    const row = projectActivityRow(agent({ state: 'error', enteredAt: NOW - 3_600_000 }), [], NOW)
     expect(row.attention).toBe('error')
-    expect(row.meta).toBe('1h ago')
+    expect(row.meta).toBe('error for 1h')
     expect(row.meta).not.toContain('idle')
   })
 })
 
 describe('projectActivityRow — working 行的上下文压力（turnUsage 三态，绝不塌成 0）', () => {
-  it('报了用量：尾随 ctx N%', () => {
+  it('报了用量：工作时长与 ctx N% 同时可读', () => {
     const row = projectActivityRow(agent({ state: 'working', context: { usedTokens: 30, capacityTokens: 100 } }), [], NOW)
-    expect(row.meta).toBe('ctx 30%')
+    expect(row.meta).toBe('working 10s · ctx 30%')
   })
 
-  it('没有 turnUsage：显示 active now，绝不显示 ctx 0%', () => {
+  it('没有 turnUsage：显示工作时长，绝不显示 ctx 0%', () => {
     const row = projectActivityRow(agent({ state: 'working' }), [], NOW)
-    expect(row.meta).toBe('active now')
+    expect(row.meta).toBe('working 10s')
     expect(row.meta).not.toContain('%')
-    expect(row.meta).not.toContain('0')
   })
 
-  it('容量为 0（不可算）：退回 active now，不编一个 0%', () => {
+  it('容量为 0（不可算）：保留工作时长，不编一个 0%', () => {
     const row = projectActivityRow(agent({ state: 'working', context: { usedTokens: 10, capacityTokens: 0 } }), [], NOW)
-    expect(row.meta).toBe('active now')
+    expect(row.meta).toBe('working 10s')
   })
 })
 
@@ -110,8 +115,8 @@ describe('projectActivityRow — 主句与降级行（原则 11 class 3）', () 
     expect(row.meta).not.toBeNull()
   })
 
-  it('idle/done 类：尾随空闲时长', () => {
-    const row = projectActivityRow(agent({ state: 'done', observedAt: NOW - 120_000 }), [], NOW)
+  it('done：尾随已知完成状态时长', () => {
+    const row = projectActivityRow(agent({ state: 'done', enteredAt: NOW - 120_000 }), [], NOW)
     expect(row.attention).toBeNull()
     expect(row.meta).toBe('2m idle')
   })

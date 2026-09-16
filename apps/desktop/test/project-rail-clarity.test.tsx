@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (value: typeof state) => unknown) => select(state) }))
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
 
-it('hover explains which Agent needs a reply, selection navigates exactly there, and resolution removes the marker', async () => {
+it('hover explains which Agent needs a reply, selection navigates exactly there, and resolution replaces the needs-you marker with neutral completion', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
@@ -45,7 +45,10 @@ it('hover explains which Agent needs a reply, selection navigates exactly there,
     expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('a')
     const { pendingInteraction: _resolved, ...resolvedSession } = session
     await act(async () => root.render(<ProjectActivity sessions={[{ ...resolvedSession, status: { ...session.status, state: 'done' } }]} />))
-    expect(container.querySelector('button')).toBeNull()
+    const completed = container.querySelector<HTMLButtonElement>('.project-activity')!
+    expect(completed.getAttribute('aria-label')).toContain('1 Completed')
+    expect(completed.getAttribute('aria-label')).not.toContain('Needs you')
+    expect(completed.dataset.category).toBe('active')
   } finally { await act(async () => root.unmount()); container.remove() }
 })
 

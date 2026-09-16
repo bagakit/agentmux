@@ -83,18 +83,18 @@ describe('projectActivityRow — 陈旧的 working 不再谎称 active now', () 
     expect(row.meta).toMatch(/last active \d+[smh]/)
   })
 
-  it('刚差 1ms 到窗口：仍算新鲜，照旧 active now（边界不早退一格）', () => {
+  it('刚差 1ms 到窗口：仍算新鲜，但没有状态起点就诚实未知（边界不早退一格）', () => {
     const row = projectActivityRow(
       agent({ state: DECAYED_STATE, observedAt: NOW - (STALE_WINDOW - 1) }),
       NO_TIMELINE,
       NOW
     )
-    expect(row.meta).toBe('active now')
+    expect(row.meta).toBe('start time unknown')
   })
 
-  it('新鲜的 working 不受影响：报不出用量仍 active now', () => {
+  it('新鲜的 working 不受影响：缺状态起点就显示未知', () => {
     const row = projectActivityRow(agent({ state: 'working', observedAt: NOW - 90_000 }), NO_TIMELINE, NOW)
-    expect(row.meta).toBe('active now')
+    expect(row.meta).toBe('start time unknown')
   })
 
   it('新鲜且报了用量：仍尾随 ctx N%，新鲜度不吃掉上下文压力', () => {
@@ -103,7 +103,7 @@ describe('projectActivityRow — 陈旧的 working 不再谎称 active now', () 
       NO_TIMELINE,
       NOW
     )
-    expect(row.meta).toBe('ctx 30%')
+    expect(row.meta).toBe('start time unknown · ctx 30%')
   })
 
   it('陈旧压过用量：一条 15 分钟没人听到的 Agent，即便还挂着旧用量也不谎称 ctx N%', () => {

@@ -271,9 +271,9 @@ describe('AgentStatusBar', () => {
     // the label itself or a screen-reader user loses it. Singular and plural both carry the count.
     fixture.state.sessions = [agent('w', 'waiting', 10), agent('e', 'error', 20)]
     const single = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')
-    expect(single?.['aria-label']).toBe('1 agent needs you. Jump to the one waiting longest.')
+    expect(single?.['aria-label']).toBe('1 agent needs you. Jump to the earliest observed request.')
     const singleError = findByAttention(AgentStatusBar() as ReactElement, 'error')
-    expect(singleError?.['aria-label']).toBe('1 agent in error. Jump to the earliest.')
+    expect(singleError?.['aria-label']).toBe('1 agent in error. Jump to the earliest observed error.')
 
     fixture.state.sessions = [
       agent('w1', 'waiting', 10),
@@ -282,9 +282,9 @@ describe('AgentStatusBar', () => {
       agent('e2', 'error', 25)
     ]
     const many = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')
-    expect(many?.['aria-label']).toBe('2 agents need you. Jump to the one waiting longest.')
+    expect(many?.['aria-label']).toBe('2 agents need you. Jump to the earliest observed request.')
     const manyError = findByAttention(AgentStatusBar() as ReactElement, 'error')
-    expect(manyError?.['aria-label']).toBe('2 agents in error. Jump to the earliest.')
+    expect(manyError?.['aria-label']).toBe('2 agents in error. Jump to the earliest observed error.')
   })
 
   it('按 Provider 显示活跃数与总数，图标复用 AgentProviderIcon', () => {

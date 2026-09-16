@@ -120,7 +120,7 @@ describe('agent roster', () => {
     expect(rows.map((row) => row.sessionId)).toEqual(['waiting', 'error', 'working', 'idle'])
   })
 
-  it('puts the longest wait first inside one attention class', () => {
+  it('puts the earliest observation first inside one attention class', () => {
     // Matches the attention bar's "jump to the earliest" contract, so list order and bar target agree.
     const rows = buildAgentRoster({
       sessions: [

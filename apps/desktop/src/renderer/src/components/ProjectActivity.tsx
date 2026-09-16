@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { sessionRecentActivity } from '../lib/session-recency'
 import { activityGlyphFor } from '../lib/attention-event'
@@ -95,27 +95,50 @@ export function ProjectActivity({
   const config = useAppStore((state) => state.config)
   const timelines = useAppStore((state) => state.timelines)
   const agentNames = useAppStore((state) => state.agentNames)
+  const [open, setOpen] = useState(false)
+  const [, setNow] = useState(Date.now)
+  // A new observation can arrive between ticks. Sample once per actual render;
+  // the visible timer only requests another render when the menu is silent.
+  const now = Date.now()
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
   const working = producingAgentCount(sessions)
   const idle = idleAgentCount(sessions)
   const error = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'error').length
+  const done = sessions.filter((session) => session.kind === 'agent' && session.status.state === 'done').length
   const needsYou = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'needs-you').length
   const metrics = [
     { key: 'needs-you', count: needsYou, icon: 'message-queue' as const, label: 'Needs you' },
     { key: 'error', count: error, icon: 'failed' as const, label: 'Error' },
     { key: 'working', count: working, icon: 'working' as const, label: 'Working' },
-    { key: 'idle', count: idle, icon: 'running' as const, label: 'Idle' }
+    { key: 'idle', count: idle, icon: 'running' as const, label: 'Idle' },
+    { key: 'done', count: done, icon: 'completed' as const, label: 'Completed' }
   ].filter((metric) => metric.count > 0)
-  if (metrics.length === 0) return null
-  // 一次渲染取一次时钟，供各行算 elapsed——与旧 quietDuration 在渲染时读 Date.now() 同口径。
-  const now = Date.now()
+  const hasActivity = metrics.length > 0
+  useEffect(() => {
+    if (!open || !hasActivity) return
+    let timer: ReturnType<typeof setInterval> | undefined
+    const updateVisibility = () => {
+      if (timer !== undefined) clearInterval(timer)
+      timer = undefined
+      if (document.visibilityState !== 'visible') return
+      setNow(Date.now())
+      timer = setInterval(() => setNow(Date.now()), 1000)
+    }
+    updateVisibility()
+    document.addEventListener('visibilitychange', updateVisibility)
+    return () => {
+      if (timer !== undefined) clearInterval(timer)
+      document.removeEventListener('visibilitychange', updateVisibility)
+    }
+  }, [open, hasActivity])
+  if (!hasActivity) return null
   // 视觉槽只保留语义图标和数字，完整状态名称与数量由外层 aria-label/title 提供；这样四种状态
   // 共享同一列宽和基线，又不会让窄栏被长文案撑开。
   const groups = buildActivityGroups(sessions, contexts)
   const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
   const metricLabel = metrics.map((metric) => `${metric.count} ${metric.label}`).join(' · ')
-  return <DropdownMenu.Root>
+  return <DropdownMenu.Root onOpenChange={setOpen}>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={`${metricLabel} · ${details}`} aria-label={`${metricLabel}. ${details}`}>
       <span className="project-activity__metrics" aria-hidden="true">
         {metrics.map((metric) => (
@@ -139,7 +162,9 @@ export function ProjectActivity({
         const canExpand = group.sessions.length > 1 || Boolean((first.kind === 'agent' && first.pendingInteraction) || first.status.detail)
         const meta = contextMeta(group)
         const summary = groupSummary(group, timelines, config ?? null)
-        const state = groupState(group)
+        const state = group.sessions.length === 1
+          ? projectActivityRow(first, timelines[first.id]?.items ?? NO_TIMELINE, now, workspaceRootForPath(config ?? null, first)).meta
+          : groupState(group)
         return <div key={group.key} className={`project-activity-group${expanded ? ' project-activity-group--expanded' : ''}`}>
           <div className="project-activity-group__header">
             <DropdownMenu.Item className="project-activity-group__summary"

@@ -144,8 +144,8 @@ function GroupRow({
         <button
           className="fanout-group__jump"
           type="button"
-          aria-label={`Go to ${needsYou.branch}, the lane waiting longest`}
-          title="Go to the lane waiting longest"
+          aria-label={`Go to ${needsYou.branch}, the earliest observed pending lane`}
+          title="Go to the earliest observed pending lane"
           onClick={() => onSelect(needsYou.session!.id)}
         >
           Answer {needsYou.branch}
