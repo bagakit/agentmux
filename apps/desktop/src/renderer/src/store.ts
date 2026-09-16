@@ -298,7 +298,7 @@ export type ErrorNoticeContext = {
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const EXECUTION_NOT_REQUESTED = 'AGENT_EXECUTION_NOT_REQUESTED'
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
-const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean }>()
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string> }>()
 
 
 export type AgentSteerQueueEntry = {
@@ -801,8 +801,7 @@ type AppState = {
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
-  continueQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
-  flushAgentSteerQueue(sessionId: string, continueOperationId?: string): Promise<void>
+  flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
@@ -1896,6 +1895,34 @@ function restoredWorkspaceTool(candidate: unknown): WorkspaceTool {
 
 function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
+}
+
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): string | false {
+  if (!text.trim()) return false
+  const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
+  if (!session || session.kind !== 'agent') return false
+  if ((useAppStore.getState().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
+    return false
+  }
+  // Core measures trimmed content. Admission must reject permanent size errors before taking
+  // ownership of the draft; retrying an identical oversized head would block every later entry.
+  if (agentPromptExceedsBudget(text.trim())) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error(
+      `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
+    ))
+    return false
+  }
+  const entry: AgentSteerQueueEntry = {
+    operationId: crypto.randomUUID(),
+    enqueuedAt: Date.now(),
+    ...(session.processState === 'running' && session.status.state !== 'disconnected'
+      ? { runId: session.control.run.runId } : {}),
+    text: text.trim(),
+    status: 'queued'
+  }
+  useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
+  return entry.operationId
 }
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
@@ -5462,31 +5489,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   enqueueAgentSteer(sessionId, text, onRejected) {
-    if (!text.trim()) return false
-    const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return false
-    if ((get().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
-      (onRejected ?? get().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
-      return false
-    }
-    // Core measures trimmed content. Admission must reject permanent size errors before taking
-    // ownership of the draft; retrying an identical oversized head would block every later entry.
-    if (agentPromptExceedsBudget(text.trim())) {
-      (onRejected ?? get().reportError)(new Error(
-        `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
-      ))
-      return false
-    }
-    const entry: AgentSteerQueueEntry = {
-      operationId: crypto.randomUUID(),
-      enqueuedAt: Date.now(),
-      ...(session.processState === 'running' && session.status.state !== 'disconnected'
-        ? { runId: session.control.run.runId } : {}),
-      text: text.trim(),
-      status: 'queued'
-    }
-    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
-    return true
+    return admitAgentSteer(sessionId, text, onRejected) !== false
   },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
@@ -5500,6 +5503,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       else delete agentSteerQueues[sessionId]
       return { agentSteerQueues }
     })
+    agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
     void get().flushAgentSteerQueue(sessionId)
   },
   moveAgentSteer(sessionId, operationId, direction) {
@@ -5533,23 +5537,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
       }) } }))
     // Manual retry uses the same ordered consumer and the entry's original operation identity.
-    await get().flushAgentSteerQueue(sessionId)
-  },
-  async continueQueuedAgentSteer(sessionId, operationId) {
-    const session = get().sessions.find((item) => item.id === sessionId)
-    if (session?.kind !== 'agent') return
-    const head = get().agentSteerQueues[sessionId]?.find((item) => steerEntryTargetsRun(item, session.control.run.runId))
-    if (head?.operationId !== operationId || head.errorCode !== 'AGENT_TURN_END_UNCONFIRMED') return
     await get().flushAgentSteerQueue(sessionId, operationId)
   },
-  flushAgentSteerQueue(sessionId, continueOperationId) {
+  flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
+    const requested = explicitOperationId !== undefined &&
+      get().agentSteerQueues[sessionId]?.some(entry => entry.operationId === explicitOperationId)
+      ? explicitOperationId : undefined
     const active = agentSteerDrains.get(sessionId)
     if (active) {
+      if (requested !== undefined) active.explicitSteers.add(requested)
       active.wake = true
       return active.promise
     }
-    const drain = { promise: Promise.resolve(), wake: false }
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>(requested ? [requested] : []) }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -5559,12 +5560,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           let session = state.sessions.find((item) => item.id === sessionId)
           if (session?.kind !== 'agent') return
           const currentRunId = session.control.run.runId
-          const entry = state.agentSteerQueues[sessionId]?.find(item =>
+          const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
             item.errorCode !== EXECUTION_NOT_REQUESTED &&
             (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
+          // Explicit steer selects its exact intent, leaving queue-only work untouched. Multiple
+          // explicit requests retain their author order in this one queue, including across awaits.
+          const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ?? pendingEntries?.[0]
           if (!entry) return
           if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
+          let explicitAttempt = false
           try {
             if (entry.runId === undefined) {
               set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
@@ -5613,8 +5618,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
               'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
             if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
+            // Consume only the authorization actually handed to Core. A request arriving while
+            // an unchosen attempt is in flight remains available if that attempt is refused.
+            explicitAttempt = drain.explicitSteers.delete(entry.operationId)
             await api.sessions.submitPrompt(session.control, entry.text, entry.operationId, undefined,
-              continueOperationId === entry.operationId ? { allowUncertainTurn: true } : undefined)
+              explicitAttempt ? { allowUncertainTurn: true } : undefined)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }
@@ -5622,8 +5630,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               else delete agentSteerQueues[sessionId]
               return { agentSteerQueues }
             })
-            // One explicit choice authorizes one message; the next queued turn waits for its own boundary.
-            if (continueOperationId !== undefined) return
+            drain.explicitSteers.delete(entry.operationId)
+            // A steer grants no background tail permission. Other explicit requests still run.
+            if (explicitAttempt && !get().agentSteerQueues[sessionId]?.some(item =>
+              drain.explicitSteers.has(item.operationId))) return
           } catch (error) {
             const message = presentError(error)
             const turnEndUnconfirmed = typeof error === 'object' && error !== null &&
@@ -5647,17 +5657,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             })
             // A readiness/reconnect wake arriving during the attempt must not be lost.
             const stillPending = get().agentSteerQueues[sessionId]?.some((item) => item.operationId === entry.operationId)
-            if (continueOperationId !== undefined || stillPending && !drain.wake) return
-          } finally {
-            set((current) => {
-              const agentSteerInFlight = { ...current.agentSteerInFlight }
-              delete agentSteerInFlight[sessionId]
-              return { agentSteerInFlight }
-            })
+            const fresh = get()
+            const freshSession = fresh.sessions.find(item => item.id === sessionId)
+            const explicitPending = freshSession?.kind === 'agent' && fresh.agentSteerQueues[sessionId]?.some(item =>
+              drain.explicitSteers.has(item.operationId) && item.errorCode !== EXECUTION_NOT_REQUESTED &&
+              (item.runId === undefined || steerEntryTargetsRun(item, freshSession.control.run.runId)))
+            if (!explicitPending && (explicitAttempt || stillPending && !drain.wake)) return
           }
         }
       } finally {
-        agentSteerDrains.delete(sessionId)
+        // Release this owner before notifying subscribers that its attempt has ended. A new
+        // explicit send during that synchronous notification must get its own live drain.
+        if (agentSteerDrains.get(sessionId) === drain) agentSteerDrains.delete(sessionId)
+        set((current) => {
+          const agentSteerInFlight = { ...current.agentSteerInFlight }
+          delete agentSteerInFlight[sessionId]
+          return { agentSteerInFlight }
+        })
       }
     })
     agentSteerDrains.set(sessionId, drain)
@@ -5665,8 +5681,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   send(sessionId, text, onRejected) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    if (!get().enqueueAgentSteer(sessionId, text, onRejected)) return false
-    void get().flushAgentSteerQueue(sessionId)
+    const operationId = admitAgentSteer(sessionId, text, onRejected)
+    if (operationId === false) return false
+    void get().flushAgentSteerQueue(sessionId, operationId)
     return true
   },
   async respondInteraction(sessionId, response) {

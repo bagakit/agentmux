@@ -74,7 +74,6 @@ export function AgentSessionComposer({
   const removeAgentSteer = useAppStore((state) => state.removeAgentSteer)
   const moveAgentSteer = useAppStore((state) => state.moveAgentSteer)
   const sendQueuedAgentSteer = useAppStore((state) => state.sendQueuedAgentSteer)
-  const continueQueuedAgentSteer = useAppStore((state) => state.continueQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
   // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
@@ -266,12 +265,10 @@ export function AgentSessionComposer({
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
-          ...(entry.errorCode === 'AGENT_TURN_END_UNCONFIRMED' ? { turnEndUnconfirmed: true } : {})
         }))}
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
-        onContinueQueued={(operationId) => { void feedback.run(() => continueQueuedAgentSteer(sessionId, operationId)) }}
         onCopyQueued={(text) => { void feedback.run(async () => { await copyTextToClipboard(text, feedback.report) }) }}
       />}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
