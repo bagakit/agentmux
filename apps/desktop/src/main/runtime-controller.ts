@@ -5,12 +5,12 @@ import {
   connectLocalAgentMux,
   connectSshAgentMux,
   endpointDirectoryUsage,
+  loadAgentSessions,
   type AgentCapabilities,
   type AgentCatalogEntry,
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
-  type AgentSessionHistoryPageOptions,
   type AgentMuxClient,
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
@@ -41,6 +41,7 @@ import type {
   SessionControl,
   SessionRecoveryResult,
   SessionSnapshot,
+  SessionHistoryPageOptions,
   TerminalLaunchInput
 } from '../shared/contracts.js'
 import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
@@ -718,7 +719,8 @@ export class RuntimeController {
 
   async sessionHistoryPage(
     control: Extract<SessionControl, { kind: 'agent' }>,
-    options?: AgentSessionHistoryPageOptions
+    options: SessionHistoryPageOptions | undefined,
+    config: AppConfig
   ): Promise<AgentSessionHistoryPage> {
     if (control.kind !== 'agent') throw new Error('Conversation history requires an Agent Session.')
     if (this.hostReconfigurationReservations.has(control.hostId)) {
@@ -726,7 +728,16 @@ export class RuntimeController {
     }
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const page = await host.client.sessionHistoryPage(control.agentSessionId, options)
+    const session = (await loadAgentSessions(this.agentSessionStore)).find((entry) => (
+      entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId
+    ))
+    if (!session) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
+    const executor = requireSessionExecutor(config, session)
+    const page = await host.client.sessionHistoryPage(control.agentSessionId, {
+      ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+      ...(options?.limit === undefined ? {} : { limit: options.limit }),
+      commandOverride: executor.command, args: executor.args, env: executor.env
+    })
     if (this.hosts.get(control.hostId) !== host) {
       throw new Error('History host configuration changed while reading. Reopen conversation history.')
     }

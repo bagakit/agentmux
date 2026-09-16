@@ -112,8 +112,8 @@ function resumeRefusalDetail(
     .join(' ')
 }
 
-function executable(commandOverride: string | undefined, fallback: string): string {
-  const command = commandOverride?.trim() || fallback
+export function resolveAgentExecutable(commandOverride: string | undefined, defaultCommand: string): string {
+  const command = commandOverride?.trim() || defaultCommand
   if (!command) throw new AgentMuxError('Agent command cannot be empty.', 'INVALID_AGENT_COMMAND')
   return command
 }
@@ -204,7 +204,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     async probeCapabilities(probe, commandOverride) {
-      const command = executable(commandOverride, catalog.executable)
+      const command = resolveAgentExecutable(commandOverride, catalog.executable)
       return {
         providerId: catalog.id,
         executable: command,
@@ -227,7 +227,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         )
       }
       return {
-        command: executable(context.commandOverride, catalog.executable),
+        command: resolveAgentExecutable(context.commandOverride, catalog.executable),
         args: definition.buildArgs(prompt, context.args),
         env: { ...context.env }
       }
@@ -273,7 +273,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         )
       }
       return {
-        command: executable(context.commandOverride, catalog.executable),
+        command: resolveAgentExecutable(context.commandOverride, catalog.executable),
         args: definition.buildResumeArgs(
           handle.sessionId,
           handle.transcriptPath,

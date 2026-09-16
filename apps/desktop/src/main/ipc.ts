@@ -66,7 +66,8 @@ import type {
   GitPushOptions,
   GitRemoteOptions
 } from '../shared/git-contracts.js'
-import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse, AgentSessionHistoryPageOptions } from '@agentmux/core'
+import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { SessionHistoryPageOptions } from '../shared/contracts.js'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
@@ -652,8 +653,8 @@ export async function registerIpc(args: {
   })
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
   handle('sessions:timeline', async (session: AgentSessionControl) => await args.runtime.sessionTimeline(session))
-  handle('sessions:historyPage', async (session: AgentSessionControl, options?: AgentSessionHistoryPageOptions) => (
-    args.runtime.sessionHistoryPage(session, options)
+  handle('sessions:historyPage', async (session: AgentSessionControl, options?: SessionHistoryPageOptions) => (
+    args.runtime.sessionHistoryPage(session, options, config)
   ))
   handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
     const result = await args.runtime.attachSession(event.sender.id, session, afterSequence, config)

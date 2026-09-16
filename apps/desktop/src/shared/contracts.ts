@@ -63,6 +63,9 @@ import type {
 } from './notification-presentation'
 
 export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
+
+/** Renderer can request a page; native invocation belongs to the trusted host. */
+export type SessionHistoryPageOptions = Pick<AgentSessionHistoryPageOptions, 'cursor' | 'limit'>
 export type { RunUsage, UsageSnapshot } from './process-usage'
 export type { ScratchTopicSnapshot } from './scratch-topics'
 // Only the two names product code imports through the contracts path are re-exported here; the rest of
@@ -1391,7 +1394,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
-    historyPage(session: AgentSessionControl, options?: AgentSessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
+    historyPage(session: AgentSessionControl, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>

@@ -1,6 +1,4 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import WebSocket from 'ws'
+import { spawn } from 'node:child_process'
 import { AgentMuxError } from '../errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from '../session-history.js'
 import type {
@@ -78,92 +76,106 @@ function itemEntry(value: unknown): AgentSessionHistoryItem {
     ...(completedAt === undefined ? {} : { completedAt }) }
 }
 
-/** Uses only existing native read RPCs. The socket never starts, resumes or controls an Agent. */
+/** Owns one bounded native read helper; it never starts, resumes or controls an Agent thread. */
 export async function readCodexSessionHistoryPage(
   context: AgentProviderSessionHistoryContext
 ): Promise<AgentProviderSessionHistoryPage> {
   context.signal.throwIfAborted()
-  const home = process.env.CODEX_HOME || join(homedir(), '.codex')
-  const socketPath = join(home, 'app-server-control', 'app-server-control.sock')
-  const socket = new WebSocket(`ws+unix:${socketPath}:/`, {
-    perMessageDeflate: false,
-    maxPayload: SESSION_HISTORY_MAX_PAGE_BYTES,
-    handshakeTimeout: SESSION_HISTORY_TIMEOUT_MS
+  const env = { ...process.env }
+  for (const [name, value] of Object.entries(context.env)) {
+    if (value === undefined) delete env[name]
+    else env[name] = value
+  }
+  const child = spawn(context.command, [
+    ...context.args, '-s', 'read-only', '-a', 'never', 'app-server', '--stdio'
+  ], {
+    cwd: context.workspacePath, env, detached: true, stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: unknown): void }>()
   let nextId = 0
   let receivedBytes = 0
   let failure: unknown
-  let rejectOpen!: (error: unknown) => void
+  let carry = ''
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined
+  const closed = new Promise<void>((resolve) => child.once('close', (code, signal) => {
+    exit = { code, signal }
+    if (pending.size) fail(new AgentMuxError(
+      'The native history helper closed before the page completed.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
+    ))
+    resolve()
+  }))
   const fail = (error: unknown): void => {
     failure ??= error
-    rejectOpen(error)
     for (const request of pending.values()) request.reject(error)
     pending.clear()
-    socket.terminate()
   }
-  const opened = new Promise<void>((resolve, reject) => {
-    rejectOpen = reject
-    socket.once('open', resolve)
-  })
   const abort = (): void => fail(context.signal.reason)
   context.signal.addEventListener('abort', abort, { once: true })
   const timer = setTimeout(() => fail(new AgentMuxError(
     'Native history page timed out.', 'AGENT_SESSION_HISTORY_TIMEOUT'
   )), SESSION_HISTORY_TIMEOUT_MS)
-  socket.on('error', (error: Error & { code?: string }) => fail(new AgentMuxError(
-    error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
-      ? 'Native history response exceeds its byte budget.'
-      : 'The existing native history endpoint is unavailable.',
-    error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' ? 'AGENT_SESSION_HISTORY_TOO_LARGE' : 'AGENT_SESSION_HISTORY_UNAVAILABLE'
+  child.once('error', () => fail(new AgentMuxError(
+    'The configured native history helper could not start.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
   )))
-  socket.on('close', () => {
-    if (pending.size || socket.readyState !== WebSocket.CLOSED) fail(new AgentMuxError(
-      'The native history endpoint closed before the page completed.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
-    ))
-  })
-  socket.on('message', (raw, binary) => {
+  child.stdin.on('error', () => fail(new AgentMuxError(
+    'Native history request could not be sent.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
+  )))
+  const acceptBytes = (chunk: Buffer): boolean => {
+    receivedBytes += chunk.byteLength
+    if (receivedBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) return failure === undefined
+    fail(new AgentMuxError('Native history response exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE'))
+    return false
+  }
+  // Count and drain stderr without retaining native diagnostics or user content.
+  child.stderr.on('data', (chunk: Buffer) => { acceptBytes(chunk) })
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  child.stdout.on('data', (chunk: Buffer) => {
+    if (!acceptBytes(chunk)) return
     try {
-      if (binary) throw protocolError()
-      const bytes = Array.isArray(raw) ? Buffer.concat(raw) : Buffer.from(raw as ArrayBuffer)
-      receivedBytes += bytes.byteLength
-      if (receivedBytes > SESSION_HISTORY_MAX_PAGE_BYTES) throw new AgentMuxError(
-        'Native history response exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE'
-      )
-      const message = object(JSON.parse(bytes.toString('utf8')))
-      if (!Object.hasOwn(message, 'id')) return // Native notifications do not satisfy a read request.
-      const request = pending.get(message.id as number)
-      if (!request || Object.hasOwn(message, 'method')) throw protocolError()
-      pending.delete(message.id as number)
-      if (Object.hasOwn(message, 'error')) {
-        const error = object(message.error)
-        request.reject(new AgentMuxError('Native history read request failed.',
-          error.code === -32601 ? 'AGENT_SESSION_HISTORY_UNSUPPORTED' : 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
-      } else if (Object.hasOwn(message, 'result')) request.resolve(message.result)
-      else {
-        request.reject(protocolError())
+      carry += decoder.decode(chunk, { stream: true })
+      for (let newline; (newline = carry.indexOf('\n')) !== -1;) {
+        const line = carry.slice(0, newline)
+        carry = carry.slice(newline + 1)
+        if (!line.trim()) continue
+        const message = object(JSON.parse(line))
+        if (!Object.hasOwn(message, 'id')) continue // Notifications never satisfy a read.
+        const request = pending.get(message.id as number)
+        if (!request || Object.hasOwn(message, 'method')) throw protocolError()
+        pending.delete(message.id as number)
+        if (Object.hasOwn(message, 'error')) {
+          const error = object(message.error)
+          request.reject(new AgentMuxError('Native history read request failed.',
+            error.code === -32601 ? 'AGENT_SESSION_HISTORY_UNSUPPORTED' : 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+        } else if (Object.hasOwn(message, 'result')) request.resolve(message.result)
+        else request.reject(protocolError())
       }
     } catch (error) {
       fail(error instanceof AgentMuxError ? error : protocolError())
     }
   })
+  child.stdout.once('end', () => {
+    if (failure !== undefined) return
+    try {
+      carry += decoder.decode()
+      if (carry.trim()) throw protocolError()
+    } catch (error) {
+      fail(error instanceof AgentMuxError ? error : protocolError())
+    }
+  })
   const request = (method: 'initialize' | 'thread/read' | 'thread/items/list', params: unknown): Promise<unknown> => {
-    if (failure) return Promise.reject(failure)
+    if (failure !== undefined) return Promise.reject(failure)
     const id = ++nextId
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject })
-      socket.send(JSON.stringify({ id, method, params }), (error) => { if (error) fail(new AgentMuxError(
-        'Native history request could not be sent.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
-      )) })
+      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
     })
   }
   try {
-    await opened
     await request('initialize', {
       clientInfo: { name: 'agentmux_history', title: 'AgentMux native history', version: '0.1.0' },
       capabilities: { experimentalApi: true }
     })
-    socket.send(JSON.stringify({ method: 'initialized' }))
+    child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`)
     const metadata = object(object(await request('thread/read', {
       threadId: context.source.nativeSessionId, includeTurns: false
     })).thread)
@@ -184,12 +196,29 @@ export async function readCodexSessionHistoryPage(
   } finally {
     clearTimeout(timer)
     context.signal.removeEventListener('abort', abort)
-    // Terminate only this read connection. This cannot terminate the native service or its Agents.
-    if (socket.readyState !== WebSocket.CLOSED) {
-      await new Promise<void>((resolve) => {
-        socket.once('close', () => resolve())
-        socket.terminate()
-      })
+    // EOF first. A wrapper/native child shares this helper's fresh process group, never an Agent Run.
+    child.stdin.end()
+    const waitForClose = async (ms: number): Promise<void> => {
+      if (exit) return
+      let timeout: NodeJS.Timeout | undefined
+      await Promise.race([closed, new Promise<void>((resolve) => { timeout = setTimeout(resolve, ms) })])
+      if (timeout) clearTimeout(timeout)
+    }
+    const stopOwnedGroup = (signal: NodeJS.Signals): void => {
+      if (!child.pid) return
+      try { process.kill(-child.pid, signal) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+    await waitForClose(1_500)
+    if (!exit) { stopOwnedGroup('SIGTERM'); await waitForClose(1_000) }
+    if (!exit) { stopOwnedGroup('SIGKILL'); await waitForClose(1_000) }
+    if (!exit) throw new AgentMuxError('Native history helper could not be reaped.', 'AGENT_SESSION_HISTORY_UNAVAILABLE')
+    // A native wrapper can exit while a helper-owned subprocess has already closed its stdio.
+    stopOwnedGroup('SIGKILL')
+    if (failure !== undefined) throw failure
+    if (exit.code !== 0 || exit.signal !== null) {
+      throw new AgentMuxError('Native history helper exited unsuccessfully.', 'AGENT_SESSION_HISTORY_UNAVAILABLE')
     }
   }
 }
