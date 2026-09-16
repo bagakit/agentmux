@@ -60,6 +60,21 @@ describe('public native Session history pages', () => {
     expect(await store.load()).toEqual([session])
   })
 
+  it('uses the existing executable resolver and forwards configured invocation at the durable workspace', async () => {
+    const reader = vi.fn(async (_context: AgentProviderSessionHistoryContext) => page())
+    const { client } = await harness(reader)
+    await client.sessionHistoryPage('main-session', {
+      commandOverride: '  /synthetic/configured-codex  ', args: ['--config', 'model="synthetic"'],
+      env: { CODEX_HOME: '/synthetic/executor-home', REMOVE_ME: undefined }
+    })
+    expect(reader.mock.calls).toHaveLength(1)
+    expect(reader.mock.calls[0]![0]).toMatchObject({ command: '/synthetic/configured-codex',
+      args: ['--config', 'model="synthetic"'], env: { CODEX_HOME: '/synthetic/executor-home', REMOVE_ME: undefined },
+      workspacePath: '/synthetic', source, limit: 30 })
+    await client.sessionHistoryPage('main-session')
+    expect(reader.mock.calls[1]![0]).toMatchObject({ command: 'codex', args: [], env: {}, workspacePath: '/synthetic' })
+  })
+
   it('keeps an empty page continuation opaque and lets the next page continue', async () => {
     const reader = vi.fn(async (context: AgentProviderSessionHistoryContext) => context.cursor === undefined
       ? { source, items: [], nextCursor: 'same-native-empty-page-cursor' }

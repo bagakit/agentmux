@@ -20,7 +20,7 @@ const fixture = vi.hoisted(() => ({
   terminals: [] as FixtureTerminal[],
   webgl: [] as FixtureWebgl[],
   receive: null as ((event: RuntimeEvent) => void) | null,
-  attach: vi.fn(), historyPage: vi.fn(), write: vi.fn(), resize: vi.fn(),
+  attach: vi.fn(), replay: vi.fn(), historyPage: vi.fn(), write: vi.fn(), resize: vi.fn(), redraw: vi.fn(),
   detach: vi.fn(),
   acknowledge: vi.fn(),
   unsubscribe: vi.fn(),
@@ -89,7 +89,7 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
   loseContext() { this.contextLoss?.() }
 } }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
-  attach: fixture.attach, historyPage: fixture.historyPage, write: fixture.write, resize: fixture.resize,
+  attach: fixture.attach, replay: fixture.replay, historyPage: fixture.historyPage, write: fixture.write, resize: fixture.resize,
   detach: fixture.detach,
   acknowledge: fixture.acknowledge,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
@@ -112,6 +112,7 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
     setVisible() {}
     observeViewport() {}
     async startLiveSynchronization() {}
+    async requestContentRedraw() { return await fixture.redraw() }
     dispose() {}
   }
 }))
@@ -136,10 +137,77 @@ beforeEach(() => {
   fixture.historyPage.mockResolvedValue({agentSessionId:session.id,source:{providerId:'codex',nativeSessionId:'native-main'},
     items:[{id:'history-entry',kind:'assistant-message',contentParts:[{kind:'text',text:'Persisted conversation entry'}]}],nextCursor:null})
   fixture.acknowledge.mockResolvedValue(undefined);fixture.detach.mockResolvedValue(undefined);fixture.write.mockResolvedValue(undefined)
+  fixture.redraw.mockResolvedValue(true)
   const container=document.createElement('div');document.body.append(container);root=createRoot(container)
 })
 afterEach(async()=>{await act(async()=>root.unmount());document.body.replaceChildren();vi.restoreAllMocks();vi.unstubAllGlobals()})
 function action(text:string){const found=Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(item=>item.textContent?.trim()===text);expect(found).toBeDefined();return found!}
+function historyEntries() {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('button')).filter(item => item.textContent?.trim() === 'Conversation history')
+}
+
+it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line boundary'] as const)(
+  'keeps one real Session-owned history entry through the %s terminal state', async (state) => {
+    const output = state === 'alternate' ? '\x1b[?1049hPrivate full-screen fixture'
+      : state === 'line boundary' ? 'line\r\n'.repeat(5_030) : 'Private terminal fixture'
+    const dataBytes = new TextEncoder().encode(output)
+    const startByte = state === 'Runtime gap' ? 17 : 0
+    fixture.attach.mockResolvedValue({ attachmentId: 'retained-attachment', currentSize: { cols: 80, rows: 24 },
+      gap: state === 'Runtime gap' ? { requestedAfterByte: 0, firstAvailableByte: startByte } : null,
+      replay: [{ startByte, endByte: startByte + dataBytes.length, data: output, dataBytes }] })
+    await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible
+      linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />))
+    await act(async () => await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, startByte + dataBytes.length)))
+    expect(fixture.terminals).toHaveLength(1)
+    const terminal = fixture.terminals[0]!
+    expect(historyEntries()).toHaveLength(1)
+    expect(historyEntries()[0]?.classList.contains('terminal-history-action')).toBe(true)
+    if (state === 'retained read failure') {
+      fixture.replay.mockResolvedValue({ run: session.control.run, replay: [], gap: null })
+      const later = new TextEncoder().encode('Later live output')
+      const startByte = dataBytes.length + 10, endByte = startByte + later.length
+      await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
+        data: 'Later live output', dataBytes: later, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+          outputByteRange: { startByte, endByte } } } }))
+      await act(async () => await vi.waitFor(() => expect(fixture.replay).toHaveBeenCalledExactlyOnceWith('retained-attachment', dataBytes.length)))
+      await act(async () => await vi.waitFor(() => expect(document.body.textContent).toContain('Retained history could not be read')))
+      expect(document.body.textContent).toContain('Live input remains available')
+    } else if (state === 'alternate') {
+      expect(terminal.buffer.active.type).toBe('alternate')
+      expect(document.querySelector('.terminal-replay-gap--compact')?.textContent).toContain('Full-screen history')
+    } else if (state === 'line boundary') {
+      expect(terminal.buffer.active.length).toBe(terminal.rows + terminal.options.scrollback!)
+      expect(document.querySelector('.terminal-replay-gap--compact')?.textContent).toContain('History line limit')
+    } else if (state === 'Runtime gap') {
+      expect(document.querySelector('.terminal-replay-gap')?.textContent).toContain('Earlier scrollback is unavailable')
+      const redraw = document.querySelector<HTMLButtonElement>('[aria-label="Redraw current terminal screen"]')
+      expect(redraw).not.toBeNull()
+      const before = fixture.redraw.mock.calls.length
+      await act(async () => redraw!.click())
+      expect(fixture.redraw).toHaveBeenCalledTimes(before + 1)
+      expect(document.querySelector('.terminal-replay-gap')?.getAttribute('title')).toContain('missing history')
+    } else {
+      expect(document.querySelector('.terminal-replay-gap')).toBeNull()
+    }
+    expect(historyEntries()).toHaveLength(1)
+    expect(historyEntries()[0]?.classList.contains('terminal-history-action')).toBe(true)
+    expect(fixture.historyPage).not.toHaveBeenCalled()
+    fixture.write.mockClear(); fixture.resize.mockClear(); fixture.detach.mockClear()
+    await act(async () => historyEntries()[0]!.click())
+    expect(historyEntries()).toEqual([])
+    expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(session.control, undefined)
+    expect(document.body.textContent).toContain('Persisted conversation entry')
+    expect(fixture.terminals).toEqual([terminal])
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(fixture.write).not.toHaveBeenCalled(); expect(fixture.resize).not.toHaveBeenCalled(); expect(fixture.detach).not.toHaveBeenCalled()
+    await act(async () => action('Terminal').click())
+    expect(historyEntries()).toHaveLength(1)
+    expect(document.querySelector('[aria-label="Conversation history"]')).toBeNull()
+    expect(fixture.terminals).toEqual([terminal])
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(fixture.attach).toHaveBeenCalledOnce()
+  }
+)
 
 it('history open/live output/return keeps the actual xterm parser, Session and healthy input',async()=>{
   await act(async()=>root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}}/>))

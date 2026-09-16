@@ -1,24 +1,25 @@
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { prepareNativeFixture } from './native-history-fixture.mjs'
 
-// This probe uses the real Desktop, IPC, Core and existing native read endpoint. Its live PTY is an
-// explicitly synthetic shell owned by a private Runtime, never the user's Agent. Only its isolated
-// canonical fixture record points at the requested read-only native source. No native start/resume
-// or turn RPC is issued. Conversation bodies never enter the receipt.
+// Real Desktop/IPC/Core read a private, native-materialized paginated fixture. Fixture preparation
+// uses native writer resume without any turn/model request; production readers use only read RPCs.
+// The healthy PTY is an explicitly synthetic shell, independently owned by a private Runtime.
+// Its configured history Executor invokes the real native CLI with that private CODEX_HOME.
 const desktopRoot = resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
 const execFileAsync = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const nativeSessionId = process.env.AGENTMUX_HISTORY_NATIVE_SESSION_ID
-if (!nativeSessionId) throw new Error('Set AGENTMUX_HISTORY_NATIVE_SESSION_ID to the exact authorized native Session; the probe will not guess or enumerate history.')
+let nativeSessionId
+let nativeFixture
 const temporaryRoot = await mkdtemp('/tmp/amx-native-history-')
 const userData = join(temporaryRoot, 'user-data')
 const runtimeDirectory = join(temporaryRoot, 'runtime')
@@ -29,6 +30,10 @@ const children = new Set()
 let client
 let session
 let result
+let failure
+const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
+let phase = 'prepare'
+let candidateBefore
 const deadline = Date.now() + 90_000
 
 async function waitFor(label, read, budget = 20_000) {
@@ -141,9 +146,10 @@ async function seedWorkbench(seed) {
 
 async function readSurface(processProbe) {
   const { cdp } = processProbe
-  await waitFor('restored Region and history entry', () => cdp.evaluate(`(() => {
+  await waitFor('restored full-screen Region and history entry', () => cdp.evaluate(`(() => {
     const region = document.querySelector('[data-workbench-region-id="${regionId}"]')
-    return Boolean(region?.querySelector('.terminal-history-action'))
+    return Boolean(region?.querySelector('.terminal-history-action')) &&
+      [...region.querySelectorAll('.terminal-replay-gap')].some(node => node.title.startsWith('The full-screen'))
   })()`))
   const before = await cdp.evaluate(`(() => {
     const region = document.querySelector('[data-workbench-region-id="${regionId}"]')
@@ -151,9 +157,11 @@ async function readSurface(processProbe) {
     const state = JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state
     return { tabs: Object.keys(state.restoredWorkbench.tabs), workbench: state.restoredWorkbench,
       focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
-      terminalPresent: Boolean(window.__historyProbeTerminal) }
+      terminalPresent: Boolean(window.__historyProbeTerminal),
+      historyEntryCount: [...region.querySelectorAll('button')].filter(button => button.textContent.trim() === 'Conversation history').length }
   })()`)
   assert.equal(before.terminalPresent, true)
+  assert.equal(before.historyEntryCount, 1, 'The real Agent Region must have exactly one history action')
   assert.deepEqual(before.tabs, [tabId])
   assert.deepEqual(before.workbench.layouts, expectedWorkbench.layouts)
   assert.deepEqual(before.workbench.tabs[tabId].layout, expectedWorkbench.tabs[tabId].layout)
@@ -183,6 +191,7 @@ async function readSurface(processProbe) {
   })
   assert.equal(initial.source, `codex · ${nativeSessionId}`)
   assert.equal(initial.terminalSame, true)
+  assert.deepEqual(initial.ids, Array.from({ length: 30 }, (_, index) => `synthetic-agent-${index + 32}`))
   const initialIds = new Set(initial.ids)
   let older
   let wheels = 0
@@ -200,9 +209,23 @@ async function readSurface(processProbe) {
   assert.ok(older, 'A real Chromium wheel must reach a distinct older native page')
   assert.equal(older.terminalSame, true)
   assert.equal(older.source, initial.source)
-  assert.ok(older.ids.length > 0)
+  assert.deepEqual(older.ids, Array.from({ length: 60 }, (_, index) => `synthetic-agent-${index + 2}`))
+  client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
+  assert.equal(client.agentSession(session.agentSessionId).run.runId, session.run.runId)
+  const during = (await client.listRuns()).find(value => value.runId === session.run.runId)
+  assert.equal(during?.state, 'running')
+  await client.writeTerminal(session.run, { ownerInstanceId: client.runtimeIdentity().instanceId,
+    operationId: randomUUID(), expectedByte: during.acceptedInputBytes,
+    data: 'private-input-during-history\r' })
+  await waitFor('original private Run accepts input while history is open', async () => {
+    const next = (await client.listRuns()).find(value => value.runId === session.run.runId)
+    return next?.acceptedInputBytes > during.acceptedInputBytes
+  })
+  assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.session-history'))`), true)
   await cdp.evaluate(`document.querySelector('.session-history__toolbar button').click()`)
   assert.equal(await cdp.evaluate(`!document.querySelector('.session-history') && window.__historyProbeTerminal === document.querySelector('[data-workbench-region-id="${regionId}"] .xterm')`), true)
+  assert.equal(await cdp.evaluate(`(() => { const region = document.querySelector('[data-workbench-region-id="${regionId}"]');
+    return [...region.querySelectorAll('button')].filter(button => button.textContent.trim() === 'Conversation history').length })()`), 1)
   const after = await cdp.evaluate(`(() => { const s = JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;
     return { workbench: s.restoredWorkbench, focus: s.agentFocus, draft: s.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}] } })()`)
   assert.deepEqual(after.workbench, before.workbench)
@@ -210,15 +233,40 @@ async function readSurface(processProbe) {
   return { pid: processProbe.child.pid, workbenchDigest: hash(JSON.stringify(after.workbench)),
     focus: after.focus.execution.sessionId, draftDigest: hash(after.draft),
     nativeSource: initial.source, initialItemIds: initial.ids, olderItemIds: older.ids, wheels,
+    historyEntryCount: before.historyEntryCount,
+    originalRunAcceptedInputWhileReading: true,
     sameMountedTerminal: older.terminalSame }
 }
 
+async function compiledCandidate() {
+  const coreFiles = ['client.js', 'agent-provider.js', 'session-history.js', 'providers/codex-native-history.js']
+  const core = Object.fromEntries(await Promise.all(coreFiles.map(async (file) => [file,
+    hash(await readFile(resolve(desktopRoot, '../../packages/core/dist', file)))])))
+  const assetRoot = join(desktopRoot, 'out/renderer/assets')
+  const scripts = (await readdir(assetRoot)).filter((file) => file.endsWith('.js')).sort()
+  assert.ok(scripts.length > 0, 'Bind the actual nonempty compiled Renderer assets')
+  const rendererScripts = Object.fromEntries(await Promise.all(scripts.map(async (file) => [file,
+    hash(await readFile(join(assetRoot, file)))])))
+  return { core, main: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
+    rendererHtml: hash(await readFile(join(desktopRoot, 'out/renderer/index.html'))), rendererScripts }
+}
+
 try {
+  candidateBefore = await compiledCandidate()
   process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
   await mkdir(userData, { recursive: true })
   await mkdir(workspacePath, { recursive: true })
+  const located = await execFileAsync('which', [process.env.AGENTMUX_HISTORY_NATIVE_COMMAND ?? 'codex'], { timeout: 10_000 })
+  const nativeCommand = located.stdout.trim()
+  assert.ok(nativeCommand.startsWith('/'), 'Pin the actual native executable, without an external control endpoint')
+  const nativeVersion = await execFileAsync(nativeCommand, ['--version'], { timeout: 10_000 })
+  nativeFixture = await prepareNativeFixture({ root: temporaryRoot, nativeCommand })
+  nativeSessionId = nativeFixture.threadId
+  nativeFixture.commandSha256 = hash(await readFile(nativeCommand))
+  nativeFixture.version = nativeVersion.stdout.trim()
+  const fixtureDigest = hash(await readFile(new URL('./native-history-fixture.mjs', import.meta.url)))
   const executable = join(workspacePath, 'synthetic-pty.sh')
-  await writeFile(executable, '#!/bin/sh\nprintf "Isolated native-history probe PTY\\n"\nexec /bin/cat\n', { mode: 0o700 })
+  await writeFile(executable, '#!/bin/sh\nprintf "\\033[?1049hIsolated full-screen native-history probe PTY\\n"\nexec /bin/cat\n', { mode: 0o700 })
   const store = new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json'))
   client = await connectLocalAgentMux({ store })
   session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'probe', providerId: 'codex',
@@ -229,7 +277,8 @@ try {
   assert.ok(stored)
   await store.compareAndSwap(stored, { ...stored, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeSessionId } })
   const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private probe' }],
-    executors: { probe: { label: 'Synthetic PTY', providerId: 'codex', command: executable, args: [], env: {}, injectAgentMuxGuide: false } },
+    executors: { probe: { label: 'Private native history', providerId: 'codex', command: nativeCommand, args: [],
+      env: { CODEX_HOME: nativeFixture.home }, injectAgentMuxGuide: false } },
     workspaces: [{ id: workspaceId, name: 'History probe', hostId: 'local', path: workspacePath, kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region remains visible\n')
@@ -249,17 +298,21 @@ try {
       }
     } } }
   expectedWorkbench = seed.state.restoredWorkbench
+  phase = 'seed-workbench'
   await seedWorkbench(seed)
+  phase = 'first-desktop'
   const firstProcess = await launch('first')
   const first = await readSurface(firstProcess)
   first.cleanup = await firstProcess.interrupt()
+  phase = 'second-desktop'
   const secondProcess = await launch('second')
   const second = await readSurface(secondProcess)
   second.cleanup = await secondProcess.interrupt()
   assert.notEqual(first.pid, second.pid)
   assert.equal(first.workbenchDigest, second.workbenchDigest)
   assert.equal(first.draftDigest, second.draftDigest)
-  client = await connectLocalAgentMux({ store })
+  phase = 'final-run-input'
+  client ??= await connectLocalAgentMux({ store })
   assert.equal(client.agentSession(session.agentSessionId).run.runId, session.run.runId)
   const run = (await client.listRuns()).find((value) => value.runId === session.run.runId)
   assert.equal(run?.state, 'running')
@@ -270,28 +323,55 @@ try {
     return next?.acceptedInputBytes > run.acceptedInputBytes
   })
   const git = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: resolve(desktopRoot, '../..') })
+  const candidateAfter = await compiledCandidate()
+  assert.deepEqual(candidateAfter, candidateBefore, 'All three private Desktop processes and Core must use the same compiled candidate')
   result = { schema: 'agentmux.native-history-delivery.v1', sourceCommit: git.stdout.trim(), probeDigest,
     inputDigest: hash(JSON.stringify({ nativeSessionId, seed })),
     coreDigest: hash(await readFile(resolve(desktopRoot, '../../packages/core/dist/index.js'))),
     desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
+    compiledCandidate: candidateBefore,
+    nativeInvocation: { command: nativeCommand, commandSha256: nativeFixture.commandSha256,
+      version: nativeFixture.version, isolatedHome: true, fixtureDigest,
+      fixture: nativeFixture.fixture, preparation: nativeFixture.preparation },
     nativeSource: { providerId: 'codex', nativeSessionId }, fixture: { syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId },
     first, second, sameRunStillRunning: true, privateInputAccepted: true,
-    limitations: ['No discarded terminal bytes or unknown TUI mode recovery is claimed.', 'The user Agent was read only; live input proof belongs to the private synthetic PTY.', 'Installation identity is a separate packaging receipt.'] }
+    limitations: ['No discarded terminal bytes or complete TUI continuation is claimed.',
+      'Native reading uses actual CLI/private materialized synthetic items; live input proof belongs to a separate private synthetic PTY.',
+      'No user native history or user Agent is accessed. Fixture preparation uses native resume; history readers do not.',
+      'Installation identity is a separate packaging receipt.'] }
+} catch (error) {
+  failure = error
 } finally {
+  for (const child of children) {
+    try { process.kill(-child.pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') failure ??= error }
+  }
   try {
-    for (const child of children) {
-      try { process.kill(-child.pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') throw error }
-    }
     if (!client && session) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
-    if (client) {
-      try { if (session) await client.stopAgent(session.agentSessionId, session.run) } finally { await client.dispose() }
-    }
+    if (client && session) await client.stopAgent(session.agentSessionId, session.run)
+  } catch (error) { failure ??= error }
+  try { await client?.dispose() } catch (error) { failure ??= error }
+  try {
     await stopProbeProcesses(process.pid + 1_000_000_000, temporaryRoot)
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, temporaryRoot), [])
+    cleanup.privateProcessesReaped = true
+  } catch (error) { failure ??= error }
+  try {
+    assert.equal(cleanup.privateProcessesReaped, true, 'Keep fixture artifacts if owned processes cannot be reaped')
     await rm(temporaryRoot, { recursive: true, force: true })
+    cleanup.temporaryRootRemoved = true
+  } catch (error) {
+    failure ??= error
   } finally {
     if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
     else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
   }
 }
-process.stdout.write(`${JSON.stringify({ ...result, cleanup: { privateProcessesReaped: true, temporaryRootRemoved: true } })}\n`)
+const receipt = { schema: 'agentmux.native-history-delivery.v1', ...result, phase,
+  compiledCandidate: candidateBefore, fixturePreparation: nativeFixture?.preparation, passed: !failure,
+  failure: failure ? { name: failure.name, message: failure.message } : null,
+  cleanup }
+// Tracker does not retain failed command stdout; preserve the same bounded diagnostic receipt.
+await mkdir(resolve(desktopRoot, '../../.tmp'), { recursive: true })
+await writeFile(resolve(desktopRoot, '../../.tmp/native-history-last-delivery.json'), `${JSON.stringify(receipt)}\n`)
+process.stdout.write(`${JSON.stringify(receipt)}\n`)
+if (failure) process.exitCode = 1

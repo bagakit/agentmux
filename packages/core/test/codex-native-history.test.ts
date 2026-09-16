@@ -1,10 +1,9 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { WebSocketServer, type WebSocket } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
+import type { AgentSessionHistoryPageOptions } from '../src/types.js'
 
 type Request = { id?: number; method: string; params?: Record<string, unknown> }
 const nativeId = 'main-native-id'
@@ -22,178 +21,215 @@ const entries = [
   ] } }
 ]
 
+
+type Helper = { pid: number; args: string[]; cwd: string; home: string; deletedEnv: boolean; descendantPid?: number }
 async function fixture(
-  verify: (owner: { client: AgentMuxClient; store: AgentMuxFileAgentSessionStore; requests: Request[]; sockets: WebSocketServer; socketPath: string }) => Promise<void>,
-  override?: (request: Request, socket: WebSocket) => boolean
+  verify: (owner: { client: AgentMuxClient; store: AgentMuxFileAgentSessionStore;
+    read(options?: AgentSessionHistoryPageOptions): ReturnType<AgentMuxClient['sessionHistoryPage']>;
+    requests(): Promise<Request[]>; helpers(): Promise<Helper[]>; home: string }) => Promise<void>,
+  mode = 'normal'
 ): Promise<void> {
-  // macOS Unix socket paths are limited to 104 bytes; this is a synthetic owner.
-  const home = await mkdtemp('/tmp/amxh-')
-  const directory = join(home, 'app-server-control')
-  const socketPath = join(directory, 'app-server-control.sock')
-  await mkdir(directory)
-  const http = createServer()
-  const sockets = new WebSocketServer({ server: http, perMessageDeflate: false })
-  const requests: Request[] = []
-  sockets.on('connection', (socket) => socket.on('message', (bytes) => {
-    const request = JSON.parse(bytes.toString()) as Request
-    requests.push(request)
-    if (override?.(request, socket)) return
-    const respond = (result: unknown) => socket.send(JSON.stringify({ id: request.id, result }))
-    if (request.method === 'initialize') respond({ userAgent: 'synthetic-native-server' })
-    else if (request.method === 'thread/read') respond({ thread: { id: nativeId, historyMode: 'paginated', turns: [] } })
-    else if (request.method === 'thread/items/list') {
-      if (request.params?.cursor === 'foreign-source-cursor') {
-        socket.send(JSON.stringify({ id: request.id, error: { code: -32602, message: 'Cursor belongs to another thread' } }))
-      } else if (request.params?.cursor === 'native-opaque-next') {
-        respond({ data: [{ turnId: 'turn-0', item: { type: 'userMessage', id: 'oldest-user',
-          content: [{ type: 'text', text: 'earlier complete conversation' }] } }], nextCursor: null })
-      } else respond({ data: entries, nextCursor: 'native-opaque-next' })
+  const home = await mkdtemp('/tmp/amx-native-stdio-test-')
+  const workspace = join(home, 'workspace')
+  await mkdir(workspace)
+  const script = join(home, 'native-fixture.mjs')
+  const requestFile = join(home, 'requests.jsonl')
+  const helperFile = join(home, 'helpers.jsonl')
+  await writeFile(script, `
+import { appendFileSync } from 'node:fs'
+import { createInterface } from 'node:readline'
+import { spawn } from 'node:child_process'
+const entries = ${JSON.stringify(entries)}
+const nativeId = ${JSON.stringify(nativeId)}
+const mode = process.env.AMX_NATIVE_MODE
+const descendant=mode==='orphan-descendant'?spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{stdio:'ignore'}):null
+descendant?.unref()
+appendFileSync(process.env.AMX_HELPER_FILE, JSON.stringify({pid:process.pid,args:process.argv.slice(2),
+  cwd:process.cwd(),home:process.env.CODEX_HOME,deletedEnv:!Object.hasOwn(process.env,'AMX_DELETE_ME'),
+  ...(descendant?{descendantPid:descendant.pid}:{})})+'\\n')
+const input = createInterface({input:process.stdin})
+if(mode==='ignore-eof-and-term') { setInterval(()=>{},60000); process.on('SIGTERM',()=>{}) }
+input.on('line', line => {
+  const request = JSON.parse(line)
+  appendFileSync(process.env.AMX_REQUEST_FILE,JSON.stringify(request)+'\\n')
+  const send = result => {
+    const bytes = Buffer.from(JSON.stringify({id:request.id,result})+'\\n')
+    if(mode==='split-unicode') {
+      const mid=bytes.indexOf(Buffer.from('中'))+1
+      if(mid>0) { process.stdout.write(bytes.subarray(0,mid)); setTimeout(()=>process.stdout.write(bytes.subarray(mid)),1); return }
     }
-  }))
-  await new Promise<void>((resolve, reject) => {
-    http.once('error', reject)
-    http.listen(socketPath, () => resolve())
-  })
-  const oldHome = process.env.CODEX_HOME
-  process.env.CODEX_HOME = home
+    process.stdout.write(bytes)
+  }
+  if(request.method==='initialize') send({userAgent:'synthetic-native-server'})
+  else if(request.method==='thread/read') {
+    if(mode==='wrong-request-id') { process.stdout.write(JSON.stringify({id:999,result:{thread:{id:nativeId,historyMode:'paginated'}}})+'\\n'); return }
+    send({thread:{id:mode==='wrong-identity'?'fork-child-id':nativeId,
+      historyMode:mode==='legacy-mode'?'legacy':'paginated',turns:[]}})
+  } else if(request.method==='thread/items/list') {
+    if(mode==='pending' || mode==='ignore-eof-and-term') return
+    if(mode==='early-eof') { process.exit(0); return }
+    if(mode==='invalid-utf8') { process.stdout.write(Buffer.from([0xff,10])); return }
+    if(mode==='large-stdout') { send({data:[{turnId:'large',item:{type:'agentMessage',id:'large',text:'x'.repeat(4*1024*1024)}}],nextCursor:null}); return }
+    if(mode==='large-stderr') { process.stderr.write('x'.repeat(4*1024*1024)); send({data:[],nextCursor:null}); return }
+    if(mode==='notification-flood') { for(let i=0;i<2;i++) process.stdout.write(JSON.stringify({method:'synthetic/notice',params:{text:'x'.repeat(2200000)}})+'\\n'); return }
+    if(request.params.cursor==='foreign-source-cursor') { process.stdout.write(JSON.stringify({id:request.id,error:{code:-32602,message:'foreign cursor'}})+'\\n'); return }
+    if(request.params.cursor==='empty-window') send({data:[],nextCursor:'native-opaque-next'})
+    else if(request.params.cursor==='native-opaque-next') send({data:[{turnId:'turn-0',item:{type:'userMessage',id:'oldest-user',content:[{type:'text',text:'earlier complete conversation'}]}}],nextCursor:null})
+    else {
+      send({data:entries,nextCursor:'native-opaque-next'})
+      if(mode==='trailing-malformed') process.stdout.write('{broken JSON\\n')
+      if(mode==='trailing-partial') process.stdout.write('{broken JSON')
+    }
+  }
+})
+`)
+  const requests = async (): Promise<Request[]> => readFile(requestFile, 'utf8')
+    .then(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)), () => [])
+  const helpers = async (): Promise<Helper[]> => readFile(helperFile, 'utf8')
+    .then(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)), () => [])
   const path = join(home, 'agent-sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
-  await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'main-session', providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: '/synthetic', run: { runId: 'original-run' }, retiredRuns: [],
-    outputCursorBytes: 100, hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', createdAt: 1, updatedAt: 1,
-    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeId,
-      transcriptPath: '/synthetic/untrusted-child-path-is-ignored.jsonl' } })
-  const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(path) })
+  await store.compareAndSwap(null, { kind:'agent',agentSessionId:'main-session',providerId:'codex',executorId:'codex',
+    hostId:'local',workspacePath:workspace,run:{runId:'original-run'},retiredRuns:[],outputCursorBytes:100,
+    hookBindingId:'synthetic-binding',hookToken:'synthetic-token',createdAt:1,updatedAt:1,
+    nativeHandle:{kind:'provider',providerId:'codex',sessionId:nativeId,
+      transcriptPath:'/synthetic/untrusted-child-path-is-ignored.jsonl'} })
+  const client = new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(path)})
+  const invocation: AgentSessionHistoryPageOptions = {commandOverride:process.execPath,
+    args:[script,'configured-argument'],env:{CODEX_HOME:home,AMX_NATIVE_MODE:mode,
+      AMX_REQUEST_FILE:requestFile,AMX_HELPER_FILE:helperFile,AMX_DELETE_ME:undefined}}
   try {
-    await verify({ client, store, requests, sockets, socketPath })
-    await vi.waitFor(() => expect(sockets.clients.size).toBe(0), { timeout: 1_000, interval: 5 })
+    await verify({client,store,home,requests,helpers,
+      read:options=>client.sessionHistoryPage('main-session',{...invocation,...options})})
+    for (const helper of await helpers()) {
+      expect(() => process.kill(helper.pid,0)).toThrowError(/ESRCH/)
+      if (helper.descendantPid !== undefined) {
+        await vi.waitFor(()=>expect(()=>process.kill(helper.descendantPid!,0)).toThrowError(/ESRCH/),{timeout:1000,interval:10})
+      }
+    }
   } finally {
     await client.dispose()
-    if (oldHome === undefined) delete process.env.CODEX_HOME
-    else process.env.CODEX_HOME = oldHome
-    for (const socket of sockets.clients) socket.terminate()
-    await new Promise<void>((resolve) => sockets.close(() => resolve()))
-    await new Promise<void>((resolve) => http.close(() => resolve()))
-    await rm(home, { recursive: true, force: true })
+    for (const helper of await helpers()) {
+      try { process.kill(-helper.pid,'SIGKILL') } catch(error) { if((error as NodeJS.ErrnoException).code!=='ESRCH') throw error }
+    }
+    await rm(home,{recursive:true,force:true})
   }
 }
 
-describe('actual public Client to native Unix WebSocket read protocol', () => {
-  it('reads exact metadata and two indexed pages with text/resource fidelity and chronological items', async () => {
-    await fixture(async ({ client, store, requests }) => {
-      const first = await client.sessionHistoryPage('main-session', { limit: 3 })
-      expect(first.source).toEqual({ providerId: 'codex', nativeSessionId: nativeId })
-      expect(first.items.map((item) => item.id)).toEqual(['user-older', 'unknown-activity', 'assistant-latest'])
+describe('actual public Client to owned native stdio read protocol', () => {
+  it('reads exact metadata and two indexed pages with text/resource fidelity and chronological items',async()=>{
+    await fixture(async({read,store,requests,helpers,home})=>{
+      const first=await read({limit:3})
+      expect(first.source).toEqual({providerId:'codex',nativeSessionId:nativeId})
+      expect(first.items.map(item=>item.id)).toEqual(['user-older','unknown-activity','assistant-latest'])
       expect(first.items[0]!.contentParts).toEqual([
-        { kind: 'text', text: '\n  exact user 中\n' },
-        { kind: 'resource', resourceType: 'image', reference: 'https://synthetic.invalid/image.png' },
-        { kind: 'text', text: 'after image ' },
-        { kind: 'resource', resourceType: 'image', reference: 'native-image-file-id' },
-        { kind: 'resource', resourceType: 'image', reference: '/synthetic/local.png' },
-        { kind: 'resource', resourceType: 'audio', reference: 'native:audio' },
-        { kind: 'resource', resourceType: 'audio', reference: '/synthetic/local.wav' },
-        { kind: 'resource', resourceType: 'file', reference: '/synthetic/SKILL.md', label: 'skill' },
-        { kind: 'resource', resourceType: 'file', reference: '/synthetic/file.ts', label: 'file' }
+        {kind:'text',text:'\n  exact user 中\n'},
+        {kind:'resource',resourceType:'image',reference:'https://synthetic.invalid/image.png'},
+        {kind:'text',text:'after image '},
+        {kind:'resource',resourceType:'image',reference:'native-image-file-id'},
+        {kind:'resource',resourceType:'image',reference:'/synthetic/local.png'},
+        {kind:'resource',resourceType:'audio',reference:'native:audio'},
+        {kind:'resource',resourceType:'audio',reference:'/synthetic/local.wav'},
+        {kind:'resource',resourceType:'file',reference:'/synthetic/SKILL.md',label:'skill'},
+        {kind:'resource',resourceType:'file',reference:'/synthetic/file.ts',label:'file'}
       ])
-      expect(first.items[1]).toEqual({ id: 'unknown-activity', turnId: 'turn-2', kind: 'activity', title: 'futureActivity',
-        contentParts: [{ kind: 'text', text: JSON.stringify(entries[1]!.item, null, 2) }] })
-      expect(first.items[2]).toMatchObject({ kind: 'assistant-message', startedAt: 100, completedAt: 200,
-        contentParts: [{ kind: 'text', text: '\n  exact assistant 中\n' }] })
+      expect(first.items[1]).toEqual({id:'unknown-activity',turnId:'turn-2',kind:'activity',title:'futureActivity',
+        contentParts:[{kind:'text',text:JSON.stringify(entries[1]!.item,null,2)}]})
+      expect(first.items[2]).toMatchObject({kind:'assistant-message',startedAt:100,completedAt:200,
+        contentParts:[{kind:'text',text:'\n  exact assistant 中\n'}]})
+      const older=await read({limit:3,cursor:first.nextCursor!})
       expect(first.nextCursor).toBe('native-opaque-next')
-      const older = await client.sessionHistoryPage('main-session', { limit: 3, cursor: first.nextCursor! })
-      expect(older.items.map((item) => item.id)).toEqual(['oldest-user'])
+      expect(older.items.map(item=>item.id)).toEqual(['oldest-user'])
       expect(older.nextCursor).toBeNull()
-      expect(requests.map((request) => request.method)).toEqual([
-        'initialize', 'initialized', 'thread/read', 'thread/items/list',
-        'initialize', 'initialized', 'thread/read', 'thread/items/list'
+      const calls=await requests()
+      expect(calls.map(request=>request.method)).toEqual([
+        'initialize','initialized','thread/read','thread/items/list',
+        'initialize','initialized','thread/read','thread/items/list'
       ])
-      expect(requests[2]!.params).toEqual({ threadId: nativeId, includeTurns: false })
-      expect(requests[7]!.params).toEqual({ threadId: nativeId, limit: 3, sortDirection: 'desc', cursor: 'native-opaque-next' })
-      expect((await loadAgentSessions(store)).map((session) => session.run)).toEqual([{ runId: 'original-run' }])
+      expect(calls[2]!.params).toEqual({threadId:nativeId,includeTurns:false})
+      expect(calls[7]!.params).toEqual({threadId:nativeId,limit:3,sortDirection:'desc',cursor:'native-opaque-next'})
+      const owners=await helpers()
+      expect(owners).toHaveLength(2)
+      expect(owners[0]).toMatchObject({home,cwd:join(home,'workspace'),deletedEnv:true,
+        args:['configured-argument','-s','read-only','-a','never','app-server','--stdio']})
+      expect(owners[0]!.pid).not.toBe(owners[1]!.pid)
+      expect((await loadAgentSessions(store)).map(session=>session.run)).toEqual([{runId:'original-run'}])
     })
   })
-
-  it.each(['wrong-identity', 'legacy-mode'] as const)('rejects %s metadata before any item read and closes the connection', async (reason) => {
-    await fixture(async ({ client, requests }) => {
-      await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({
-        code: reason === 'wrong-identity' ? 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' : 'AGENT_SESSION_HISTORY_UNSUPPORTED'
-      })
-      expect(requests.map((request) => request.method)).toEqual(['initialize', 'initialized', 'thread/read'])
-    }, (request, socket) => {
-      if (request.method !== 'thread/read') return false
-      socket.send(JSON.stringify({ id: request.id, result: { thread: {
-        id: reason === 'wrong-identity' ? 'fork-child-id' : nativeId,
-        historyMode: reason === 'legacy-mode' ? 'legacy' : 'paginated'
-      } } }))
-      return true
+  it.each(['wrong-identity','legacy-mode'])('rejects %s metadata before any item read and reaps the helper',async reason=>{
+    await fixture(async({read,requests})=>{
+      await expect(read()).rejects.toMatchObject({code:reason==='wrong-identity'?'AGENT_SESSION_HISTORY_SOURCE_CHANGED':'AGENT_SESSION_HISTORY_UNSUPPORTED'})
+      expect((await requests()).map(request=>request.method)).toEqual(['initialize','initialized','thread/read'])
+    },reason)
+  })
+  it('preserves empty continuation and delegates foreign cursor scope refusal to the native owner',async()=>{
+    await fixture(async({read})=>{
+      expect(await read({cursor:'empty-window'})).toEqual({agentSessionId:'main-session',
+        source:{providerId:'codex',nativeSessionId:nativeId},items:[],nextCursor:'native-opaque-next'})
+      await expect(read({cursor:'foreign-source-cursor'})).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_UNAVAILABLE'})
     })
   })
-
-  it('preserves empty continuation and delegates foreign cursor scope refusal to the native owner', async () => {
-    await fixture(async ({ client }) => {
-      expect(await client.sessionHistoryPage('main-session', { cursor: 'empty-window' })).toEqual({
-        agentSessionId: 'main-session', source: { providerId: 'codex', nativeSessionId: nativeId },
-        items: [], nextCursor: 'native-opaque-next'
-      })
-      await expect(client.sessionHistoryPage('main-session', { cursor: 'foreign-source-cursor' })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_UNAVAILABLE' })
-    }, (request, socket) => {
-      if (request.method !== 'thread/items/list' || request.params?.cursor !== 'empty-window') return false
-      socket.send(JSON.stringify({ id: request.id, result: { data: [], nextCursor: 'native-opaque-next' } }))
-      return true
+  it('binds responses to the exact request ID instead of accepting a different read result',async()=>{
+    await fixture(async({read})=>{await expect(read()).rejects.toMatchObject({code:'INVALID_AGENT_SESSION_HISTORY_PAGE'})},'wrong-request-id')
+  })
+  it.each(['large-stdout','large-stderr','notification-flood'])('bounds aggregate actual %s bytes and reaps the helper',async mode=>{
+    await fixture(async({read})=>{await expect(read()).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_TOO_LARGE'})},mode)
+  })
+  it('decodes UTF-8 carried across native stdout chunks without changing text',async()=>{
+    await fixture(async({read})=>{expect((await read()).items[2]!.contentParts).toEqual([{kind:'text',text:'\n  exact assistant 中\n'}])},'split-unicode')
+  })
+  it('rejects malformed native UTF-8 rather than silently replacing characters',async()=>{
+    await fixture(async({read})=>{await expect(read()).rejects.toMatchObject({code:'INVALID_AGENT_SESSION_HISTORY_PAGE'})},'invalid-utf8')
+  })
+  it.each(['trailing-malformed','trailing-partial'])('rejects a valid last page followed by %s native output before EOF',async mode=>{
+    await fixture(async({read})=>{await expect(read()).rejects.toMatchObject({code:'INVALID_AGENT_SESSION_HISTORY_PAGE'})},mode)
+  })
+  it('reaps a helper-owned descendant after its successful parent has already exited on EOF',async()=>{
+    await fixture(async({read,helpers})=>{
+      expect((await read()).items.map(item=>item.id)).toEqual(['user-older','unknown-activity','assistant-latest'])
+      const owners=await helpers()
+      expect(owners).toHaveLength(1)
+      expect(owners[0]!.descendantPid).toBeGreaterThan(0)
+    },'orphan-descendant')
+  })
+  it('reports EOF with an outstanding request as a reading failure and keeps the same Session',async()=>{
+    await fixture(async({read,store})=>{
+      await expect(read()).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_UNAVAILABLE'})
+      expect((await loadAgentSessions(store)).map(session=>session.run)).toEqual([{runId:'original-run'}])
+    },'early-eof')
+  })
+  it('reports a missing configured command without requiring a connected Run',async()=>{
+    await fixture(async({read,store,requests})=>{
+      await expect(read({commandOverride:'/missing/agentmux-native-helper'})).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_UNAVAILABLE'})
+      expect(await requests()).toEqual([])
+      expect((await loadAgentSessions(store)).map(session=>session.run)).toEqual([{runId:'original-run'}])
     })
   })
-
-  it('binds responses to the exact request ID instead of accepting a different read result', async () => {
-    await fixture(async ({ client }) => {
-      await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_HISTORY_PAGE' })
-    }, (request, socket) => {
-      if (request.method !== 'thread/read') return false
-      socket.send(JSON.stringify({ id: 999, result: { thread: { id: nativeId, historyMode: 'paginated' } } }))
-      return true
-    })
-  })
-
-  it('bounds actual WebSocket payload bytes and closes an oversized response', async () => {
-    await fixture(async ({ client }) => {
-      await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
-    }, (request, socket) => {
-      if (request.method !== 'thread/items/list') return false
-      socket.send(JSON.stringify({ id: request.id, result: { data: [{ turnId: 'large-turn', item: {
-        type: 'agentMessage', id: 'large', text: 'x'.repeat(4 * 1024 * 1024)
-      } }], nextCursor: null } }))
-      return true
-    })
-  })
-
-  it('bounds the whole read connection even when each native notification fits one message', async () => {
-    await fixture(async ({ client }) => {
-      await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
-    }, (request, socket) => {
-      if (request.method !== 'thread/items/list') return false
-      const notification = JSON.stringify({ method: 'synthetic/notice', params: { text: 'x'.repeat(2_200_000) } })
-      socket.send(notification)
-      socket.send(notification)
-      socket.send(JSON.stringify({ id: request.id, result: { data: [], nextCursor: null } }))
-      return true
-    })
-  })
-
-  it('disposal aborts the real outstanding read socket while the same Session remains intact', async () => {
-    await fixture(async ({ client, store, requests }) => {
-      const reading = client.sessionHistoryPage('main-session')
-      const rejection = expect(reading).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_CANCELLED' })
-      await vi.waitFor(() => expect(requests.at(-1)?.method).toBe('thread/items/list'), { timeout: 1_000, interval: 5 })
+  it.each(['pending','ignore-eof-and-term'])('disposal aborts and physically reaps a %s helper while keeping the Session',async mode=>{
+    await fixture(async({read,client,store,requests,helpers})=>{
+      const reading=read()
+      const rejection=expect(reading).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_CANCELLED'})
+      await vi.waitFor(async()=>expect((await requests()).at(-1)?.method).toBe('thread/items/list'),{timeout:1000,interval:5})
+      const owners=await helpers()
+      expect(owners).toHaveLength(1)
       await client.dispose()
       await rejection
-      expect((await loadAgentSessions(store)).map((session) => session.nativeHandle?.sessionId)).toEqual([nativeId])
-    }, (request) => request.method === 'thread/items/list')
+      // The Client settles cancellation promptly, but keeps physical capacity until Provider cleanup finishes.
+      await vi.waitFor(()=>expect(()=>process.kill(owners[0]!.pid,0)).toThrowError(/ESRCH/),{timeout:4000,interval:10})
+      expect((await loadAgentSessions(store)).map(session=>session.nativeHandle?.sessionId)).toEqual([nativeId])
+    },mode)
   })
-
-  it('reports a missing endpoint as an explicit reading failure without requiring a connected Run', async () => {
-    await fixture(async ({ client, store, socketPath }) => {
-      await rm(socketPath)
-      await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_UNAVAILABLE' })
-      expect((await loadAgentSessions(store)).map((session) => session.run)).toEqual([{ runId: 'original-run' }])
+  it('keeps two same-Provider configured native homes isolated on consecutive reads',async()=>{
+    await fixture(async({read,helpers,home})=>{
+      const other=join(home,'other-native-home')
+      await read()
+      const first=(await helpers())[0]!
+      const env={CODEX_HOME:other,AMX_NATIVE_MODE:'normal',AMX_HELPER_FILE:join(home,'helpers.jsonl'),AMX_REQUEST_FILE:join(home,'requests.jsonl')}
+      await read({env})
+      const owners=await helpers()
+      expect(owners).toHaveLength(2)
+      expect(owners.map(owner=>owner.home)).toEqual([home,other])
+      expect(owners[0]!.pid).toBe(first.pid)
     })
   })
 })

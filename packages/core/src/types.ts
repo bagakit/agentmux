@@ -493,10 +493,21 @@ export type AgentSessionHistoryPage = {
   nextCursor: string | null
 }
 
-export type AgentSessionHistoryPageOptions = { cursor?: string; limit?: number }
+export type AgentSessionHistoryPageOptions = {
+  cursor?: string
+  limit?: number
+  /** The host supplies its configured Executor invocation, as for create/resume. */
+  commandOverride?: string
+  args?: readonly string[]
+  env?: Readonly<Record<string, string | undefined>>
+}
 
 export type AgentProviderSessionHistoryContext = {
   source: AgentSessionHistorySource
+  command: string
+  args: readonly string[]
+  env: Readonly<Record<string, string | undefined>>
+  workspacePath: string
   cursor?: string
   limit: number
   signal: AbortSignal
