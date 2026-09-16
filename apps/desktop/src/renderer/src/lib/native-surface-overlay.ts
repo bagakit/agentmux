@@ -72,9 +72,9 @@ export function openOverlayCount(body: Pick<Element, 'children'>): number {
  * 为什么是 MutationObserver 而不是让每个浮层自己上报：这正是覆盖率那一半。上报要靠 21 个
  * 调用点各自记得写，而观察 DOM 只需要写一次，且对第 22 个浮层自动成立。
  *
- * `subtree: true` 是必需的，不是保险：`data-state` 挂在 Portal 容器**里面**的 Content 上，
- * Radix 先插入空容器、再往里挂内容。只看直接子节点的增删会错过第二步——容器插入那一刻
- * 里面还什么都没有，数出来是 0。
+ * body 只观察直接成员。`subtree: true` 仅用于应用根之外的子树：`data-state` 挂在 Portal
+ * 容器里面，先插空容器再挂内容也必须能听见。终端和编辑器正文不参与浮层判定，不观察 #root。
+ * 成员变化时重绑当前范围，让移除的 portal 自然退出观察，继续复用同一个 observer。
  *
  * 返回取消订阅函数。进程里只有一个消费者（App），所以不做多播、不做引用计数——那是没人要的复杂度。
  */
@@ -92,8 +92,19 @@ export function observeOverlays(
     last = count
     report(count)
   }
-  const observer = new ObserverCtor(publish)
-  observer.observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] })
+  const observer = new ObserverCtor((records) => {
+    if (records.some((record) => record.type === 'childList' && record.target === body)) bindScope()
+    publish()
+  })
+  const bindScope = (): void => {
+    observer.disconnect()
+    observer.observe(body, { childList: true })
+    for (const child of body.children) {
+      if (child.id === APP_ROOT_ID) continue
+      observer.observe(child, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] })
+    }
+  }
+  bindScope()
   publish()
   return () => observer.disconnect()
 }
