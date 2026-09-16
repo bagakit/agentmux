@@ -173,6 +173,7 @@ export function WorkspaceTopicsPanel({
                   case 'terminal': return 'Terminal'
                   case 'browser': return 'Browser'
                   case 'file': return 'File'
+                  case 'git-diff': return 'Git diff'
                   case 'launcher': return 'Launcher'
                   default: return assertUnreachableSurface(surface)
                 }

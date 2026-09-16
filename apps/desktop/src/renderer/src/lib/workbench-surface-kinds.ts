@@ -26,6 +26,7 @@ export const WORKBENCH_SURFACE_KINDS = [
   'agent',
   'terminal',
   'file',
+  'git-diff',
   'launcher',
   'browser'
 ] as const
@@ -78,6 +79,7 @@ export function isSessionSurface(
     case 'terminal':
       return true
     case 'file':
+    case 'git-diff':
     case 'launcher':
     case 'browser':
       return false
@@ -103,6 +105,7 @@ export function isAgentOrLauncherSurface(
       return true
     case 'terminal':
     case 'file':
+    case 'git-diff':
     case 'browser':
       return false
     default:
@@ -142,6 +145,7 @@ export function surfaceCloseObligations(surface: WorkbenchSurface): SurfaceClose
       // larger teardown in `workbench-view-close`, which is why there is nothing to release here.
       return { browserViewId: null, releasesDocument: false }
     case 'launcher':
+    case 'git-diff':
       return { browserViewId: null, releasesDocument: false }
     default:
       return assertUnreachableSurface(surface)

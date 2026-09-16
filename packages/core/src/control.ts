@@ -99,7 +99,9 @@ export type AgentMuxTerminalRegion = AgentMuxRegionBase & { kind: 'terminal'; ru
 export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string }
 export type AgentMuxFileRegion = AgentMuxRegionBase & { kind: 'file'; path: string }
 export type AgentMuxLauncherRegion = AgentMuxRegionBase & { kind: 'launcher' }
-export type AgentMuxRegion = AgentMuxAgentRegion | AgentMuxTerminalRegion | AgentMuxBrowserRegion | AgentMuxFileRegion | AgentMuxLauncherRegion
+/** An addressable read-only surface; its domain data belongs to the host client. */
+export type AgentMuxViewRegion = AgentMuxRegionBase & { kind: 'view' }
+export type AgentMuxRegion = AgentMuxAgentRegion | AgentMuxTerminalRegion | AgentMuxBrowserRegion | AgentMuxFileRegion | AgentMuxLauncherRegion | AgentMuxViewRegion
 
 export type AgentMuxRegionTarget =
   | { kind: 'region'; regionId: string }

@@ -22,6 +22,7 @@ export type WorkbenchTabMark =
   | { kind: 'agent'; providerId: string; status: SessionStatus; sessionId?: string; executorId?: string; appearance?: AgentAvatarAppearance; regionId: string }
   | { kind: 'terminal'; regionId: string }
   | { kind: 'file'; regionId: string }
+  | { kind: 'git-diff'; regionId: string }
   | { kind: 'launcher'; regionId: string }
   | { kind: 'browser'; driving: boolean; regionId: string }
 
@@ -182,6 +183,8 @@ function surfaceMark(
       return { kind: 'terminal', regionId: surface.regionId }
     case 'file':
       return { kind: 'file', regionId: surface.regionId }
+    case 'git-diff':
+      return { kind: 'git-diff', regionId: surface.regionId }
     case 'launcher':
       return { kind: 'launcher', regionId: surface.regionId }
     case 'browser':
@@ -241,6 +244,8 @@ function markLabel(mark: WorkbenchTabMark): string {
       return 'Terminal'
     case 'file':
       return 'File'
+    case 'git-diff':
+      return 'Git diff'
     case 'launcher':
       return 'New tab'
     case 'browser':
