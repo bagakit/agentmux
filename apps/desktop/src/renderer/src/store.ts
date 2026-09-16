@@ -5568,8 +5568,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ?? pendingEntries?.[0]
           if (!entry) return
           if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
+          // Recovery and binding are part of this one attempt. Consume its grant before any
+          // failure or await; a new grant arriving during the attempt remains in the set.
+          const explicitAttempt = drain.explicitSteers.delete(entry.operationId)
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
-          let explicitAttempt = false
           try {
             if (entry.runId === undefined) {
               set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
@@ -5618,9 +5620,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
               'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
             if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
-            // Consume only the authorization actually handed to Core. A request arriving while
-            // an unchosen attempt is in flight remains available if that attempt is refused.
-            explicitAttempt = drain.explicitSteers.delete(entry.operationId)
             await api.sessions.submitPrompt(session.control, entry.text, entry.operationId, undefined,
               explicitAttempt ? { allowUncertainTurn: true } : undefined)
             set((current) => {

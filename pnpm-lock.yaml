@@ -7,6 +7,9 @@ settings:
 overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
 
+patchedDependencies:
+  '@xterm/xterm@6.1.0-beta.303': 4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667
+
 importers:
 
   .:
@@ -64,25 +67,25 @@ importers:
         version: 3.31.3
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
-        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))
       '@xterm/addon-search':
         specifier: 0.17.0-beta.300
-        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))
       '@xterm/addon-web-links':
         specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.299
-        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303)
+        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))
       '@xterm/headless':
         specifier: ^5.5.0
         version: 5.5.0
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303
+        version: 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.8)
@@ -2679,29 +2682,29 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
-  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
+  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
 
-  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
+  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
 
-  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
+  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
 
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
+  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
 
-  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303)':
+  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)
 
   '@xterm/headless@5.5.0': {}
 
-  '@xterm/xterm@6.1.0-beta.303': {}
+  '@xterm/xterm@6.1.0-beta.303(patch_hash=4724c70e1cbe6a00fdf5857be9e81dcb01e298ca7e07849911d035ec3c64f667)': {}
 
   aria-hidden@1.2.6:
     dependencies:
