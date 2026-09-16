@@ -5,6 +5,7 @@ import {
 } from '../../../shared/notification-presentation'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
+import { summarizeAgentAttention } from '../lib/agent-attention'
 import { visibleSessionIdsForState } from '../lib/session-visibility'
 import { useAppStore } from '../store'
 
@@ -33,6 +34,34 @@ export function useAgentAttentionNotifications(): void {
     // Seed from whatever is already projected, WITHOUT notifying: Agents that finished before this window
     // opened are not news, and announcing them would train the user to ignore the channel.
     notifier.seed(useAppStore.getState().sessions)
+
+    // The Store owns attention facts. These values only track the one native side effect, so repeated
+    // status observations don't repeat IPC and a failed setter never masquerades as a delivered badge.
+    let disposed = false
+    let badgeCount: number | undefined
+    let publishingBadge = false
+    const publishBadge = async (): Promise<void> => {
+      if (disposed || publishingBadge) return
+      const count = summarizeAgentAttention(useAppStore.getState().sessions).needsYou
+      if (count === badgeCount) return
+      publishingBadge = true
+      try {
+        // false explicitly means this platform has no Dock; it is handled without inventing delivery.
+        await api.ui.setAgentAttentionCount(count)
+        if (!disposed) badgeCount = count
+      } catch (error) {
+        if (!disposed) reportError(new Error(
+          'Updating the Dock badge did not complete. Agent attention remains visible in this window; the next Agent status update will retry.',
+          { cause: error }
+        ))
+      } finally {
+        publishingBadge = false
+      }
+      // A status may change while IPC is pending. Read its existing owner, not a second pending queue.
+      // Do not automatically repeat a failed same-value request: the next relevant update retries it.
+      if (!disposed && summarizeAgentAttention(useAppStore.getState().sessions).needsYou !== count) void publishBadge()
+    }
+    void publishBadge()
 
     let windowFocused = document.hasFocus()
     const onFocus = (): void => { windowFocused = true }
@@ -73,10 +102,12 @@ export function useAgentAttentionNotifications(): void {
     // to that slice rather than firing on every store write.
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (state.sessions === previous.sessions) return
+      void publishBadge()
       reconcile()
     })
 
     return () => {
+      disposed = true
       unsubscribe()
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('blur', onBlur)

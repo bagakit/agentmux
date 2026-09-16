@@ -38,6 +38,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:savePastedImage': 'pasted image',
   'ui:revealCrashLog': 'crash log',
   'ui:notifyAgentAttention': 'notification',
+  'ui:setAgentAttentionCount': 'Dock badge',
   'browser:switchProfile': 'Browser Profile',
   'browser:listProfiles': 'Browser Profile',
   'browser:createProfile': 'Browser Profile',
