@@ -1707,6 +1707,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - AgentMux Hook 的安装、读取、更新和卸载必须只作用于 AgentMux 自己的受管配置作用域；Provider 的共享配置文件仍保留用户和项目已有条目，不能把 AgentMux Hook 当成共享默认值。
 - Hook 事件必须携带并校验 AgentMux Session/Run 关联身份。没有该关联、关联不匹配或无法确认来源的 Provider 事件不得触发 AgentMux ingress；应记录可诊断的降级事实，不影响外部 Provider 会话继续工作。
 - Hook 探测、合并或安装失败属于流程问题时，健康 Agent 继续可用；服务窗说明哪一步未完成、当前按什么能力运行和恢复动作。只有 Agent/进程本身明确终止才允许阻断。
+- Doctor 必须逐 Provider 如实报告 Hook 安装策略，包括不受管与无 Hook 的情况；Runtime 不可达也不能把这些策略改成全局默认值。策略声明不代表磁盘配置已安装，实际磁盘安装状态是另一项事实，不能混在同一字段中。
 
 ### A2A 身份信封与持久化全局消息队列
 

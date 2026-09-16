@@ -197,6 +197,15 @@ describe('AgentMux doctor', () => {
       client: client({ connect: vi.fn(async () => { throw new Error('owner receipt mismatch') }) })
     })
 
+    // Runtime failure cannot change a Provider's installation policy into a shared default.
+    const policies = Object.fromEntries(report.agents.map((agent) => [
+      agent.id, agent.hook.kind === 'none' ? 'none' : agent.hook.installation
+    ]))
+    expect(Object.keys(policies).sort()).toEqual(Object.keys(HOOK_INSTALLATION_BY_PROVIDER).sort())
+    expect(policies).toEqual({ ...HOOK_INSTALLATION_BY_PROVIDER })
+    expect(policies.kimi).toBe('unmanaged')
+    expect(policies.traex).toBe('none')
+
     expect(report).toMatchObject({
       ok: false,
       host: {
