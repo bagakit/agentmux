@@ -497,6 +497,9 @@ function semanticStatus(value: unknown): AgentStatus {
     state: source.state as AgentStatus['state'],
     source: source.source,
     observedAt: timestamp(source.observedAt, 'semanticStatus.observedAt'),
+    ...(source.stateEnteredAt === undefined ? {} : {
+      stateEnteredAt: timestamp(source.stateEnteredAt, 'semanticStatus.stateEnteredAt')
+    }),
     ...(detail ? { detail } : {})
   }
 }

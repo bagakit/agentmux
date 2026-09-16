@@ -951,6 +951,8 @@ export type AgentStatus = {
   state: AgentDisplayState
   source: AgentMuxEvidenceSource
   observedAt: number
+  /** Proven entry time for this semantic state; absence is unknown, never inferred from observations. */
+  stateEnteredAt?: number
   detail?: string
   exitCode?: number
 }
