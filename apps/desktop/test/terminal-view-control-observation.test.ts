@@ -56,7 +56,6 @@ let attach: MockInstance<typeof api.sessions.attach>
 let write: MockInstance<typeof api.sessions.write>
 let recover: MockInstance<typeof api.sessions.recover>
 let resize: MockInstance<typeof api.sessions.resize>
-let acknowledge: MockInstance<typeof api.sessions.acknowledge>
 
 function surfaceState(current: SessionSnapshot = session, regionId = origin.regionId) {
   const tab = createWorkbenchTab(origin.tabId, { regionId, kind: current.kind, phase: 'attached', workspaceId: origin.workspaceId, sessionId: current.id })
@@ -82,7 +81,7 @@ async function render(current: SessionSnapshot = session, props: { visible?: boo
 async function ready(data: string) {
   attach.mockResolvedValue(replay(data))
   await render()
-  await act(async () => await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledWith(session.control, data.length)))
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })?.liveReady).toBe(true)))
   expect(fixture.terminals).toHaveLength(1)
   return fixture.terminals[0]!
 }
@@ -96,7 +95,6 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   fixture.terminals.length = 0; fixture.receive = null; releases = []
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
-  acknowledge = vi.spyOn(api.sessions, 'acknowledge').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
   write = vi.spyOn(api.sessions, 'write').mockResolvedValue(undefined)
@@ -162,7 +160,7 @@ it('reports not-live readiness before attach settles and never guesses success',
   await render()
   expect((await inspect()).terminalView).toMatchObject({ liveReady: false, acceptsInput: false })
   await act(async () => release(replay(lines)))
-  await act(async () => await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledWith(session.control, lines.length)))
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })?.liveReady).toBe(true)))
   expect((await inspect()).terminalView).toMatchObject({ liveReady: true, acceptsInput: true })
 })
 

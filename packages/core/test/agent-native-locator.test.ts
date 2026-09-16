@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import {
   MAX_NATIVE_SESSION_ID_BYTES,
@@ -28,12 +28,12 @@ function session(nativeHandle: unknown) {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-locator-test' },
     retiredRuns: [],
     hookBindingId: 'hook-locator-test',
     hookToken: 'token-locator-test',
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle
@@ -58,11 +58,11 @@ describe('native resume locator contract', () => {
     // edge the mutation moves. String#trim() does not strip DEL, so a survivor returns the raw
     // string rather than undefined. Blind spot: this pins only 0x7f, not the rest of the C0/C1 range.
     expect(normalizeNativeSessionId('native' + DEL + 'session')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session") + DEL + '.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session") + DEL + '.jsonl')).toBeUndefined()
     // Presence self-check: the same locators WITHOUT the DEL byte normalize, so the rejection above
     // is the control byte itself and not the surrounding shape -- otherwise both halves are vacuous.
     expect(normalizeNativeSessionId('nativesession')).toBe('nativesession')
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session.jsonl"))).toBe(upstreamFixturePath("tmp/session.jsonl"))
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session.jsonl"))).toBe(fixturePath("tmp/session.jsonl"))
   })
 
   it('rejects a US (0x1f) control byte at the top of the C0 range', () => {
@@ -74,19 +74,19 @@ describe('native resume locator contract', () => {
     // the raw string rather than undefined. A gate has two sides; DEL (0x7f) pins the upper C1 side,
     // this pins the C0 side. Blind spot: this pins only the 0x1f edge, not the interior of the range.
     expect(normalizeNativeSessionId('native' + US + 'session')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session") + US + '.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session") + US + '.jsonl')).toBeUndefined()
     // Presence self-check: the same locators without US normalize, so the rejection is the 0x1f byte
     // itself and not the surrounding shape -- otherwise both assertions are vacuous.
     expect(normalizeNativeSessionId('nativesession')).toBe('nativesession')
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session.jsonl"))).toBe(upstreamFixturePath("tmp/session.jsonl"))
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session.jsonl"))).toBe(fixturePath("tmp/session.jsonl"))
   })
 
   it('normalizes only absolute, bounded transcript paths', () => {
-    expect(normalizeNativeTranscriptPath((" " + (upstreamFixturePath("tmp/session.jsonl")) + " "))).toBe(upstreamFixturePath("tmp/session.jsonl"))
+    expect(normalizeNativeTranscriptPath((" " + (fixturePath("tmp/session.jsonl")) + " "))).toBe(fixturePath("tmp/session.jsonl"))
     expect(normalizeNativeTranscriptPath('relative/session.jsonl')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath(TAB + upstreamFixturePath("tmp/session.jsonl"))).toBeUndefined()
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session") + TAB + '.jsonl')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath(upstreamFixturePath("tmp/session") + C1_HIGH + '.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(TAB + fixturePath("tmp/session.jsonl"))).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session") + TAB + '.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(fixturePath("tmp/session") + C1_HIGH + '.jsonl')).toBeUndefined()
     expect(normalizeNativeTranscriptPath('x'.repeat(MAX_NATIVE_TRANSCRIPT_PATH_BYTES + 1))).toBeUndefined()
   })
 
@@ -95,7 +95,7 @@ describe('native resume locator contract', () => {
       { kind: 'provider', providerId: 'codex', sessionId: '-looks-like-a-flag' },
       { kind: 'provider', providerId: 'codex', sessionId: 'native' + ESC + 'session' },
       { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: 'relative/session.jsonl' },
-      { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: upstreamFixturePath("tmp/session") + TAB + '.jsonl' },
+      { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: fixturePath("tmp/session") + TAB + '.jsonl' },
       { kind: 'acp', adapterId: '-adapter', sessionId: 'acp-1' }
     ]) {
       expect(() => normalizeStoredAgentSession(session(nativeHandle)))
@@ -152,13 +152,13 @@ describe('native resume locator contract', () => {
       kind: 'provider',
       providerId: ' codex ',
       sessionId: ' native-1 ',
-      transcriptPath: (" " + (upstreamFixturePath("tmp/session.jsonl")) + " ")
+      transcriptPath: (" " + (fixturePath("tmp/session.jsonl")) + " ")
     }))
     expect(normalized.nativeHandle).toEqual({
       kind: 'provider',
       providerId: 'codex',
       sessionId: 'native-1',
-      transcriptPath: upstreamFixturePath("tmp/session.jsonl")
+      transcriptPath: fixturePath("tmp/session.jsonl")
     })
   })
 })

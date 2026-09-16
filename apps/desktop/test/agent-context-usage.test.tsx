@@ -125,7 +125,7 @@ function observe(used: number, capacity: unknown = 1000) {
   return normalizeStoredAgentSession({ kind: 'agent', agentSessionId: 'context-test',
     providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("tmp/test"),
     run: { runId: 'run-test' }, retiredRuns: [], hookBindingId: 'test-binding', hookToken: 'test-token',
-    outputCursorBytes: 0, createdAt: 0, updatedAt: 1000, turnUsage: usage
+     createdAt: 0, updatedAt: 1000, turnUsage: usage
   }).turnUsage!
 }
 

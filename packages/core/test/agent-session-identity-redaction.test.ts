@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { cloneSession } from '../src/agent-session-identity.js'
@@ -31,10 +31,10 @@ function storedSession(overrides: Partial<AgentMuxStoredAgentSession> = {}): Age
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: 'run-1' },
     retiredRuns: [],
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100,
     hookBindingId: 'hook-binding-1',

@@ -2,7 +2,6 @@ import { AlertTriangle, CircleStop, History, LoaderCircle, RefreshCw, RotateCcw,
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
-import type { SessionControl } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
   dismissOpenDestinationRequest,
@@ -98,14 +97,6 @@ export function SessionPane({
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const [historyOpen, setHistoryOpen] = useState(false)
   useEffect(() => { setHistoryOpen(false) }, [sessionId, viewMode])
-  const readHistory = useCallback((control: SessionControl): boolean => {
-    const current = useAppStore.getState().sessions.find((item) => item.id === sessionId)
-    if (!visible || historyOpen || current?.kind !== 'agent' || control.kind !== 'agent' ||
-        current.control.hostId !== control.hostId || current.control.agentSessionId !== control.agentSessionId ||
-        current.control.run.runId !== control.run.runId) return false
-    setHistoryOpen(true)
-    return true
-  }, [sessionId, visible, historyOpen])
   const closeHistory = (): void => {
     setHistoryOpen(false)
     if (linkOrigin.tabId && linkOrigin.regionId) {
@@ -113,9 +104,14 @@ export function SessionPane({
     }
   }
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
-  useEffect(() => {
-    if (pendingAgentRestore && visible) setHistoryOpen(true)
-  }, [sessionId, pendingAgentRestore, visible])
+  const startupDecision = session?.kind === 'agent' ? agentStartupRecoveryDecision({
+    runState: session.processState,
+    ...(session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
+    canonical: !(runtimeOwnershipWarnings ?? []).includes(session.hostId),
+    now: Date.now()
+  }) : undefined
+  const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
+    startupDecision.reason === 'idle-over-hour'
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
@@ -324,14 +320,9 @@ export function SessionPane({
       <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>
   )
-  const pendingRestoreDetail = pendingAgentRestore ? continuityNotice?.reason ?? (recoveryCandidate
+  const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
     ? session.status.detail
-    : agentStartupRecoveryDetail(agentStartupRecoveryDecision({
-      runState: session.processState,
-      ...(session.kind === 'agent' && session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
-      canonical: !(runtimeOwnershipWarnings ?? []).includes(session.hostId),
-      now: Date.now()
-    }))) : undefined
+    : agentStartupRecoveryDetail(startupDecision)) : undefined
 
   return (
     <section
@@ -341,7 +332,7 @@ export function SessionPane({
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
           <div className="agent-terminal-stage">
-            {pendingAgentRestore ? (
+            {pendingAgentRestore ? (inlineHistory ? null :
               <div className="terminal-cold-parked" role="status">
                 <strong>Ready to restore</strong>
                 <span>Existing history and your draft are kept. Send your next request or use Resume.</span>
@@ -358,17 +349,19 @@ export function SessionPane({
                 fontSize={terminalFontSize}
                 interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
                 visible={visible && !historyOpen}
-                {...(session.kind === 'agent' ? { onReadHistory: readHistory } : {})}
                 readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
               />
             )}
-            {session.kind === 'agent' && !historyOpen ? <button type="button" className="small-button terminal-history-action" onClick={() => setHistoryOpen(true)}><History size={12} /> Conversation history</button> : null}
-            {historyOpen && session.kind === 'agent' ? <SessionHistoryView
+            {session.kind === 'agent' && !historyOpen && !inlineHistory ? <button type="button" className="small-button terminal-history-action" onClick={() => setHistoryOpen(true)}><History size={12} /> Conversation history</button> : null}
+            {(historyOpen || inlineHistory) && session.kind === 'agent' ? <SessionHistoryView
               key={`${session.control.hostId}:${session.id}:${session.control.run.runId}`}
               control={session.control}
               label={agentInputIdentity ?? session.label}
-              onClose={closeHistory}
+              {...(!inlineHistory ? { onClose: closeHistory } : {})}
+              visible={visible}
+              themeId={terminalThemeId}
+              fontSize={terminalFontSize}
               workspaceRoot={activeWorkspaceRoot}
               openWorkspaceFile={openWorkspaceFile}
               openHttpLink={onProseLinkClick}
@@ -377,7 +370,7 @@ export function SessionPane({
                 serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
               } : {})}
             /> : null}
-            {(disconnected || missing || exited) && !(pendingAgentRestore && historyOpen) ? (
+            {(disconnected || missing || exited) && !(pendingAgentRestore && (historyOpen || inlineHistory)) ? (
               <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
                   {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}

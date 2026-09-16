@@ -199,7 +199,7 @@ function storedSession() {
     retiredRuns: [],
     hookBindingId: 'binding',
     hookToken: 'token',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100
   }

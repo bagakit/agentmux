@@ -117,7 +117,7 @@ beforeEach(async () => {
     kind: 'agent', agentSessionId: AGENT_ID, providerId: 'claude', executorId: 'claude', hostId: 'local',
     workspacePath: _hygiene_fixturePath("synthetic"), run: { runId: RUN_ID }, retiredRuns: [],
     hookBindingId: 'consumer-binding'.padEnd(43, 'A'), hookToken: 'consumer-token'.padEnd(43, 'B'),
-    outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+     createdAt: 1, updatedAt: 1
   }
   await store.compareAndSwap(null, stored)
   client = new AgentMuxClient({ store })

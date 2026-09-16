@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { rawEventNamesForLifecycle } from '../src/agent-hook-event.js'
 import { normalizeStoredAgentSession } from '../src/agent-session-store.js'
@@ -30,12 +30,12 @@ function sessionWithReceipt(eventName: string, withCursor: boolean): unknown {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 12,
+
     createdAt: 100,
     updatedAt: 200,
     hookReceipt: {

@@ -498,11 +498,13 @@ for (const publication of await Promise.all(codexTimelinePublicationSnapshots)) 
   assert.equal(publication.snapshot.agentSessionId, publication.event.agentSessionId)
   assert.ok(publication.snapshot.revision >= publication.event.revision)
 }
-const acknowledgedThroughByte = (await codexFirst.statusAgent(codex.agentSessionId)).run.latestOutputBytes
-assert.ok(acknowledgedThroughByte > 0)
-await codexFirst.acknowledgeAgentOutput(codex.agentSessionId, acknowledgedThroughByte)
-await codexFirst.acknowledgeAgentOutput(codex.agentSessionId, acknowledgedThroughByte - 1)
-assert.equal(codexFirst.agentSession(codex.agentSessionId).outputCursorBytes, acknowledgedThroughByte)
+const outputThroughByte = (await codexFirst.statusAgent(codex.agentSessionId)).run.latestOutputBytes
+assert.ok(outputThroughByte > 0)
+const freshViewReplay = await codexFirst.readRunReplay(codex.run, 0)
+assert.ok(freshViewReplay.replay.length > 0)
+assert.ok(freshViewReplay.replay[0].startByte < outputThroughByte)
+assert.ok(freshViewReplay.replay.at(-1).endByte >= outputThroughByte)
+assert.equal(Object.hasOwn(codexFirst.agentSession(codex.agentSessionId), 'outputCursorBytes'), false)
 assert.equal(codexFirst.resolveAgentSession({ kind: 'run', run: codex.run }).agentSessionId, codex.agentSessionId)
 assert.equal(codexFirst.resolveAgentSession({
   kind: 'provider-native',
@@ -1860,7 +1862,6 @@ const acpSession = {
   retiredRuns: [],
   hookBindingId: 'acp-synthetic-binding',
   hookToken: 'acp-synthetic-token',
-  outputCursorBytes: 0,
   createdAt: Date.now(),
   updatedAt: Date.now(),
   nativeHandle: { kind: 'acp', adapterId: 'packed-acp', sessionId: 'packed-native' }
@@ -1956,7 +1957,7 @@ process.stdout.write(`${JSON.stringify({
   replayStartByte: suffix.replay[0]?.startByte,
   sharedReplayWhileAttached: true,
   agentSharedReplayWhileAttached: true,
-  multiViewAcknowledgementMonotonic: true,
+  freshViewReplayIndependentOfDurableSession: true,
   resize: '101x37',
   interruptStillLive: true,
   dedupOccurrences,

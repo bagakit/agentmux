@@ -80,7 +80,7 @@ function storedSession(
     retiredRuns: [],
     hookBindingId: 'binding-resize',
     hookToken: 'token-resize',
-    outputCursorBytes: 0,
+
     terminalPromptReadiness: readiness,
     createdAt: 100,
     updatedAt: 100

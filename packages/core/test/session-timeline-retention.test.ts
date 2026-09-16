@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,14 +20,14 @@ function items(prefix: string, count: number, kind: AgentTimelineItem['kind'] = 
   return Array.from({ length: count }, (_, index) => item(`${prefix}-${index}`, kind))
 }
 async function fileStore() {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-retention-"))
+  const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-retention-"))
   roots.push(root)
   const path = join(root, 'agent-sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
   const session: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex-safe', hostId: 'local',
     workspacePath: root, run: { runId: 'run-1' }, retiredRuns: [], hookBindingId: 'hook-1',
-    hookToken: 'token-1', outputCursorBytes: 0, createdAt: 1, updatedAt: 1
+    hookToken: 'token-1',  createdAt: 1, updatedAt: 1
   }
   await store.compareAndSwap(null, session)
   await store.applyTimelineMutation({ type: 'append', agentSessionId, item: item('seed') })

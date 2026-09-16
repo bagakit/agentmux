@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -32,12 +32,12 @@ function storedSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 200,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }
@@ -94,8 +94,8 @@ describe('cross-process Agent Session store path', () => {
 // RETURNS, or the divergence returns silently.
 describe('the Client tells spawned processes where its store lives', () => {
   it('emits the store path under AGENTMUX_AGENT_SESSION_STORE when given one', () => {
-    const env = terminalEnvironment({}, upstreamFixturePath("durable/userData/agent-sessions.json"))
-    expect(env.AGENTMUX_AGENT_SESSION_STORE).toBe(upstreamFixturePath("durable/userData/agent-sessions.json"))
+    const env = terminalEnvironment({}, fixturePath("durable/userData/agent-sessions.json"))
+    expect(env.AGENTMUX_AGENT_SESSION_STORE).toBe(fixturePath("durable/userData/agent-sessions.json"))
     // The managed CLI hop still has to work, so its two companions must ride along in the same environment.
     expect(env.AGENTMUX_ENV).toBe('1')
     expect(env.AGENTMUX_CLI).toMatch(/\/bin\/agentmux$/u)

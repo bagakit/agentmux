@@ -30,7 +30,7 @@ function session(providerId = 'codex'): AgentMuxAgentSession {
     workspacePath: upstreamFixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId, sessionId: 'native-1' }
@@ -313,7 +313,7 @@ function continuityStoredSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-continuity'.padEnd(43, 'A'),
     hookToken: 'token-continuity'.padEnd(43, 'B'),
-    outputCursorBytes: 0,
+
     createdAt: 1,
     updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }
@@ -659,7 +659,7 @@ function promptStoredSession(): AgentMuxStoredAgentSession {
     retiredRuns: [],
     hookBindingId: 'binding-prompt',
     hookToken: 'token-prompt',
-    outputCursorBytes: 0,
+
     createdAt: 100,
     updatedAt: 100,
     terminalPromptReadiness: {

@@ -118,7 +118,6 @@ import type {
   AgentMuxRunInputAck,
   AgentMuxRunInputData,
   AgentMuxRunInputOperation,
-  AgentMuxRunOutputAck,
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentMuxRuntimeDiagnostics,
@@ -777,7 +776,7 @@ export class AgentMuxClient {
       // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
       this.connectionHealthySince = Date.now()
     } catch (error) {
-      this.kernel.disconnect()
+      this.kernel.resetConnection()
       await this.hookServer.stop()
       throw error
     }
@@ -927,7 +926,7 @@ export class AgentMuxClient {
       // 掉线时 markConnectionLost 拆掉了每个 run 的字节泵（attachment.close + attachments.clear）；open()
       // 只重挂了 kernel 事件订阅，没重建泵。少了这一步，重连后一屏 Agent 拿到的是「进程活着、状态又被
       // republish 成 running、恢复横幅消失，可屏幕永远沉默」的终端——本任务的核心缺陷。这里为每个仍在跑、
-      // 且有 Agent Session 的 run 重建 attachment，从该 Session 自己的 outputCursorBytes 续上。
+      // 且有 Agent Session 的 run 重建 attachment，从这个进程已发布的精确 Run 边界续上。
       if (run.state.type === 'running' && agentSession && !this.kernel.hasAttachment(run.runId)) {
         // 重建失败时**不再** republish 成 running。上面那条 agent-error 刚把这个 Session 标成 error，
         // 紧跟一条 running 会把它洗回去：两条事件的 observedAt 都来自同一次 Date.now()，而渲染端
@@ -979,10 +978,10 @@ export class AgentMuxClient {
   /**
    * 重连后为一个 Agent Run 重建实时字节泵，并把掉线期间的输出补齐。走的是 {@link reattachAgent} 的
    * 同一个共享核心 {@link attachAgentRun}（身份校验、回滚、pid/输入游标记账），从 Session 自己的
-   * `outputCursorBytes` 续上。
+   * 进程内 Attachment 已发布的字节位置续上。
    *
    * 三件不能少的事：
-   * - **补发 replay**：掉线期间 daemon 仍在缓冲，`[outputCursorBytes, latest)` 这段随 attach 快照回到
+   * - **补发 replay**：掉线期间 daemon 仍在缓冲，`[publishedThroughByte, latest)` 随 attach 快照回到
    *   `attached.replay`。渲染端不会自己重 attach（run 没变，attach effect 不重跑），所以这段必须由我们
    *   补发成 terminal-output 事件接上它上次看到的位置——否则就是「跳过的区段」。attach 之后的新字节由
    *   重建出来的实时泵经 acceptKernelEvent 自动送达（那正是缺陷要修的「新字节到不了」）。
@@ -1001,7 +1000,7 @@ export class AgentMuxClient {
   private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | 'truncated'> {
     let attached: CtxmuxAdapterAttachment
     try {
-      ;({ attached } = await this.attachAgentRun(agentSessionId, undefined, (snapshot, current) => {
+      ;({ attached } = await this.attachAgentRun(agentSessionId, this.kernel.continuationByte(this.requireAgentSession(agentSessionId).run.runId), (snapshot, current) => {
         if (snapshot.run.cols !== null && snapshot.run.rows !== null) {
           this.acceptKernelEvent({
             type: 'resized', runId: snapshot.run.runId, cols: snapshot.run.cols, rows: snapshot.run.rows
@@ -1637,15 +1636,6 @@ export class AgentMuxClient {
     return { runId: ref.runId, cols: applied.cols, rows: applied.rows }
   }
 
-  async acknowledgeTerminalOutput(ref: AgentMuxRunRef, throughByte: number): Promise<AgentMuxRunOutputAck> {
-    this.requireConnected()
-    const run = await this.kernel.status(ref.runId)
-    if (!Number.isSafeInteger(throughByte) || throughByte < 0 || throughByte > run.latestOutputBytes) {
-      throw new AgentMuxError('Output acknowledgement exceeds the authoritative CtxMux cursor.', 'INVALID_OUTPUT_CURSOR')
-    }
-    return { runId: ref.runId, acknowledgedThroughByte: throughByte }
-  }
-
   async signalTerminal(ref: AgentMuxRunRef, signal: string): Promise<void> {
     this.requireConnected()
     if (signal !== 'SIGINT') {
@@ -1996,7 +1986,6 @@ export class AgentMuxClient {
         hookToken: hookBinding.endpoint.token,
         // 只存 hash：raw 凭证已随 env 进了受管进程，Core 这边不再留明文。
         capabilityHash: hashAgentCapability(invocationCapability),
-        outputCursorBytes: 0,
         createdAt: now,
         updatedAt: now,
         ...(launchOptions ? { launchOptions } : {})
@@ -2171,12 +2160,12 @@ export class AgentMuxClient {
    *
    * 只做重建与记账，**不**发 process-state、也**不**把 replay 交出去：两个调用方对这两件事的处置不同
    * （reattachAgent 把 replay 回给调用者、由渲染端应用；republish 没有调用者，得把 replay 当事件补发），
-   * 所以留给调用方。默认 afterByte 是该 Session 自己的 `outputCursorBytes`——从已消费的下一个字节续上，
-   * 不重放已消费的，也不跳过掉线期间产出的（那段在返回的 replay 里）。
+   * 所以留给调用方。新消费者默认从保留输出起点读取；同进程重连显式传入 Attachment 已发布的边界。
+   * 该位置不是 Renderer 已绘制的确认，也不是完整的 VT checkpoint。
    */
   private async attachAgentRun(
     agentSessionId: string,
-    afterByte?: number,
+    afterByte = 0,
     beforeLive?: (snapshot: CtxmuxAdapterAttachment, session: AgentMuxStoredAgentSession) => void
   ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
@@ -2188,7 +2177,7 @@ export class AgentMuxClient {
       }
       this.assertAgentRun(session, snapshot.run)
     }
-    const attached = await this.kernel.attach(session.run.runId, afterByte ?? session.outputCursorBytes,
+    const attached = await this.kernel.attach(session.run.runId, afterByte,
       beforeLive ? (snapshot) => { validate(snapshot); beforeLive(snapshot, session) } : undefined)
     try {
       validate(attached)
@@ -2370,7 +2359,6 @@ export class AgentMuxClient {
         hookToken: hookBinding.endpoint.token,
         // 新 Run 换新凭证：旧 Run 的那枚从此认不出来，无法再以此 Agent 名义说话。
         capabilityHash: hashAgentCapability(invocationCapability),
-        outputCursorBytes: 0,
         updatedAt: Date.now(),
         nativeHandle: structuredClone(current.nativeHandle)
       }
@@ -2801,19 +2789,6 @@ export class AgentMuxClient {
   async signalAgent(agentSessionId: string, signal: string): Promise<void> {
     this.requireConnected()
     await this.signalTerminal(this.requireAgentSession(agentSessionId).run, signal)
-  }
-
-  async acknowledgeAgentOutput(agentSessionId: string, throughByte: number): Promise<void> {
-    this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
-    await this.acknowledgeTerminalOutput(session.run, throughByte)
-    await this.registry.update(
-      agentSessionId,
-      session.run,
-      (current) => throughByte <= current.outputCursorBytes
-        ? current
-        : { ...current, outputCursorBytes: throughByte, updatedAt: Date.now() }
-    )
   }
 
   async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<void> {
@@ -4195,6 +4170,10 @@ export class AgentMuxClient {
         ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
         : receipt
       const { turnUsage: _staleTurnUsage, ...currentBase } = current
+      if (normalized.lifecycleEvent === 'turn-end' && !stopRun &&
+        currentBase.terminalPromptReadiness?.consumedBySubmissionId !== undefined) {
+        delete currentBase.terminalPromptReadiness
+      }
       const next: AgentMuxStoredAgentSession = {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
@@ -4211,33 +4190,7 @@ export class AgentMuxClient {
                 outputCursorBytes: stopRun.latestOutputBytes
               }
             }
-          : normalized.lifecycleEvent === 'turn-end' &&
-              current.terminalPromptReadiness?.consumedBySubmissionId !== undefined
-            ? {
-                // 判据显式带 `lifecycleEvent === 'turn-end'`：`stopRun` 为 null 有**两个**来源——断线的
-                // turn-end（该重铸）与任何非 turn-end 的 mid-turn hook（tool-use-start 等）。只判
-                // consumedBySubmissionId 会让 turn 中途每条 hook 都把已消费纪元重铸成未消费，等于在 Agent
-                // 还没交还控制权时解锁发送面（生成中放行 prompt 会打断当轮）。turn-end 才是「交还控制权」
-                // 的唯一信号；健康臂（stopRun truthy）本就只在 turn-end 为真，这里把断线臂对齐到同一判据。
-                //
-                // 断线拿不到光标（stopRun 为 null），但一条 turn-end 落在一个上一轮 epoch 已被永久消费的
-                // 会话上。什么都不写会把那枚 `consumedBySubmissionId` 原样留下——此后每条 prompt 永久撞
-                // AGENT_PROMPT_READINESS_CONSUMED，而 Agent 进程还活着（它刚发出这条 hook）、PTY 仍收字节。
-                // 这是把第 2 类（我们取光标那一步坏了）误写成第 1 类（Agent 死了）的红线反例 1。
-                //
-                // **只**在有已消费纪元可解锁时才重铸：断线且无旧纪元可救时光标是真丢了，缺席保持缺席
-                // （编造起点会让 screenEvidence 从头扫、把上一轮提示符认成这一轮——正是 :3659 与
-                // hook-stop-kernel-disconnected.test.ts:177 拒绝的那件事）。重铸的光标退回本会话最后一次权威
-                // `outputCursorBytes`——真实持久值，非编造 0。`readyThroughByte` 缺席，交给下面 turn-end
-                // 触发的 observeReadiness 用屏幕证据补齐；重连后新帧到达即自愈。
-                terminalPromptReadiness: {
-                  source: 'native-stop' as const,
-                  id: receipt.id,
-                  run: { ...current.run },
-                  outputCursorBytes: current.outputCursorBytes
-                }
-              }
-            : {}),
+          : {}),
         ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {}),
         // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
         // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -15,12 +15,12 @@ function stored(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: RUN_ID },
     retiredRuns: [],
     hookBindingId: 'binding',
     hookToken: 'token',
-    outputCursorBytes: 0,
+
     terminalPromptReadiness: {
       source: 'initial-composer',
       id: 'pending-epoch',

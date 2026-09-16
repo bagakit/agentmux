@@ -1077,12 +1077,6 @@ export class RuntimeController {
     })
   }
 
-  async acknowledge(control: SessionControl, throughByte: number): Promise<void> {
-    const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.acknowledgeAgentOutput(control.agentSessionId, throughByte)
-    else await client.acknowledgeTerminalOutput(control.run, throughByte)
-  }
-
   async interrupt(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, 'SIGINT')
