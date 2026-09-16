@@ -198,6 +198,8 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 }
 
 export type AgentMuxAgentPromptInput = {
+  /** Conditional target for a Run-bound intent; absence deliberately selects the current Session Run. */
+  expectedRun?: AgentMuxRunRef
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
@@ -2545,12 +2547,15 @@ export class AgentMuxClient {
     // 这里，**那个 run 之后的每一条 prompt 都被永久挡住**。栅栏起点由 daemon 的权威
     // acceptedInputBytes 兜底（submitInputPlan 本来就这么取），不依赖握手是否完成。
     const session = this.requireAgentSession(input.agentSessionId)
+    if (input.expectedRun !== undefined && !sameRun(session.run, input.expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
+    }
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     await this.serializeAgentInput(session, async (current, run) => {
       await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal, input.allowUncertainTurn)
     })
     await this.recordPromptAfterSideEffect(
-      this.requireAgentSession(input.agentSessionId),
+      session,
       `prompt:${operationId}`,
       'Prompt',
       outbound,

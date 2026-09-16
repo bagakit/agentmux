@@ -336,8 +336,8 @@ export function removeSessionProjection(
  * 还在，只是要重连」，这与启动那侧的判据逐字对齐。
  *
  * 而正因为一个候选的含义是「还在，只是要重连」，**被点名为候选的那个 agent 自己必须免于删除**。
- * 一个 run 退出后 Core 不再把它当投影主体（`listRuns` 只列活着的 run），于是它从 `sessions` 里消失、
- * 只出现在 `recoveryCandidates` 里。若只拿 `sessions` 建 canonical 集合，这个**恰恰可以恢复**的
+ * Runtime 保留的已结束 Run 仍可出现在 `sessions`；Run 已缺失但 durable Session 还在时，
+ * Session 则只出现在 `recoveryCandidates`。若只拿 `sessions` 建 canonical 集合，这个**恰恰可以恢复**的
  * agent 会在下一次成员对齐里被连 tab 带 layout 摘掉，而 partialize 随后把删剩的投影落盘——不可逆，
  * 且没有任何理由显示。那正是这个 Feature 要消灭的失败本身（用户原话：「有些 Region 会消失」）。
  * 启动那侧对同一个候选是「保留 + 恢复」，两侧必须对同一个 Core 概念给出同一个语义。

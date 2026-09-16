@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -38,11 +38,13 @@ function readingAnchor(viewport: HTMLElement): ReadingAnchor | null {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, label, onClose, workspaceRoot, openWorkspaceFile, openHttpLink
+  control, label, onClose, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice
 }: {
   control: AgentSessionControl
   label: string
   onClose(): void
+  returnLabel?: string
+  serviceNotice?: ReactNode
   workspaceRoot: string
   openWorkspaceFile: OpenWorkspaceFile
   openHttpLink(url: string, event: LinkClickModifiers): void
@@ -152,10 +154,11 @@ export function SessionHistoryView({
     else anchorRef.current = null
   }}>
     <div className="session-history__toolbar">
-      <button ref={returnRef} type="button" className="small-button" onClick={onClose}><ArrowLeft size={12} /> Terminal</button>
+      <button ref={returnRef} type="button" className="small-button" onClick={onClose}><ArrowLeft size={12} /> {returnLabel}</button>
       <span><History size={12} /> Conversation history</span>
       <button type="button" className="small-button" disabled={reading.loading} onClick={() => void readPage('latest')}><ArrowDown size={12} /> Latest</button>
     </div>
+    {serviceNotice ? <div className="session-history__notice" role="status">{serviceNotice}</div> : null}
     <div className="session-history__source" title={reading.source ? `${reading.source.providerId} · ${reading.source.nativeSessionId}` : undefined}>
       {reading.source ? 'Persisted native conversation · separate from terminal replay' : 'Reading persisted native conversation'}
     </div>

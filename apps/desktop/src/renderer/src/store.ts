@@ -60,6 +60,7 @@ import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../.
 import { api } from './lib/api'
 import { errorIdentity, presentError } from './lib/error-presentation'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
+import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
@@ -285,15 +286,16 @@ export type HostCheckState = {
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
 // a semantic resume from silently consuming messages addressed to its predecessor.
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
+const EXECUTION_NOT_REQUESTED = 'AGENT_EXECUTION_NOT_REQUESTED'
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean }>()
 
 
 export type AgentSteerQueueEntry = {
   operationId: string
-  runId: string
+  runId?: string
   text: string
-  status: 'queued' | 'deferred' | 'failed'
+  status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
 }
@@ -790,7 +792,7 @@ type AppState = {
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<void>
-  recoverSession(sessionId: string): Promise<void>
+  recoverSession(sessionId: string, operationId?: string): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string): Promise<void>
@@ -1010,7 +1012,7 @@ function continuityStatusFields(
 }
 
 /**
- * Project a Core recovery failure into the Session snapshot the surface renders.
+ * Keep a known durable candidate readable before restoration or after a Core recovery refusal.
  *
  * Exported for assertion: the reason Core gave is the whole payload of this projection, and a test
  * that seeds `continuityReason` into a fixture proves nothing about whether this function ever wrote
@@ -1018,7 +1020,7 @@ function continuityStatusFields(
  */
 export function recoveryCandidateSession(
   candidate: AgentSessionRecoveryCandidate,
-  recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
+  recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }> | { kind: 'pending'; detail: string }
 ): SessionSnapshot {
   return {
     id: candidate.agentSessionId,
@@ -1026,6 +1028,7 @@ export function recoveryCandidateSession(
     providerId: candidate.providerId,
     executorId: candidate.executorId,
     capabilities: candidate.capabilities,
+    ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }
       : {}),
@@ -1036,11 +1039,11 @@ export function recoveryCandidateSession(
     updatedAt: Math.max(candidate.updatedAt, Date.now()),
     processState: 'interrupted',
     status: {
-      state: 'error',
+      state: recovery.kind === 'pending' ? 'disconnected' : 'error',
       source: 'run-process',
       observedAt: Date.now(),
       // 两条路共用同一处产出，见 continuityStatusFields 的说明：这些字段各写一遍必然 drift。
-      ...continuityStatusFields(recovery)
+      ...(recovery.kind === 'pending' ? { detail: recovery.detail } : continuityStatusFields(recovery))
     },
     latestOutputBytes: 0,
     control: {
@@ -1981,6 +1984,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
+      // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
+      set((state) => state.loading ? ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues)
+        .map(([sessionId, entries]) => [sessionId, entries.map(entry => ({ ...entry,
+          status: entry.status === 'restoring' ? 'restoring' as const : 'deferred' as const,
+          error: 'Queued before restart. Choose Send to execute this message.',
+          errorCode: EXECUTION_NOT_REQUESTED
+        }))])) }) : state)
       set({ startupProgress: { step: 'runtime' } })
       // Keep the write fence closed until the restored Workbench has been projected into the live
       // store below. Opening it immediately after hydration allows startup observers (and React's
@@ -2077,11 +2087,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         )
       }
       const recoveryFailures: SessionSnapshot[] = []
+      const retiredAgentIds = new Set<string>()
       let recovered = false
-      const recoveryCandidates = (snapshotVerified ? snapshot.recoveryCandidates : [])
-        .filter((candidate) => persistedSessionIds.has(candidate.agentSessionId))
+      // Both retained ended Runs and absent Runs keep durable Session identity. Only fresh native
+      // idle evidence authorizes cold-start resume; healthy Runs are left to ordinary attachment.
+      const projectedAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
+      const startupSessionsById = new Map(snapshot.sessions.map((session) => [session.id, session]))
+      const recoveryCandidates: AgentSessionRecoveryCandidate[] = (snapshotVerified ? [
+        ...snapshot.recoveryCandidates,
+        ...projectedAgents.map((session) => ({ ...session, agentSessionId: session.id, run: session.control.run }))
+      ] : []).filter((candidate) => persistedSessionIds.has(candidate.agentSessionId))
       for (const [index, candidate] of recoveryCandidates.entries()) {
         set({ startupProgress: { step: 'sessions', current: index + 1, total: recoveryCandidates.length } })
+        const projected = startupSessionsById.get(candidate.agentSessionId)
+        const decision = agentStartupRecoveryDecision({
+          runState: projected?.processState ?? 'missing',
+          ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
+          canonical: snapshotVerified && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+          now: Date.now()
+        })
+        if (decision.kind !== 'resume') {
+          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, { kind: 'pending', detail: agentStartupRecoveryDetail(decision) }))
+          continue
+        }
         try {
           const recovery = await api.sessions.recover({
             kind: 'agent',
@@ -2092,8 +2120,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
             recovered = true
           } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
-            recoveryFailures.push(recoveryCandidateSession(candidate, recovery))
+            recoveryFailures.push(projected ? {
+              ...projected,
+              status: { ...projected.status, state: 'error', ...continuityStatusFields(recovery) }
+            } : recoveryCandidateSession(candidate, recovery))
           } else if (recovery.kind === 'retired') {
+            retiredAgentIds.add(candidate.agentSessionId)
             // Retired means an actor deliberately ended this Agent, so the Region must NOT be retained
             // — the same judgement the manual path makes (`recoverSession` removes the projection on
             // `retired`), and the reason the empty-snapshot guard above names "an explicit retirement"
@@ -2113,6 +2145,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           snapshotVerified = false
           retainUnknownSessionViews = true
           recoveryWorkflowFailed = true
+          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, {
+            kind: 'pending', detail: 'Automatic recovery did not complete. Existing history and your draft are kept; retry Resume.'
+          }))
           startupWarnings.push(startupWorkflowWarning(
             'Automatic Agent recovery',
             error,
@@ -2143,16 +2178,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
       set({ startupProgress: { step: 'layout' } })
-      const visibleSessions = [
+      const visibleSessions = [...new Map([
         ...snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id)),
-        ...recoveryFailures
-      ]
+        ...recoveryFailures.filter((pending) => !snapshot.sessions.some((current) => (
+          current.id === pending.id && (current.processState === 'running' || !sessionOwnsControl(current, pending.control))
+        )))
+      ].filter((session) => !retiredAgentIds.has(session.id)).map((session) => [session.id, session])).values()]
       const persistedState = get()
-      const restoredAgentFocus = sanitizeAgentFocus(
-        restoreAgentFocus(persistedState.agentFocus),
-        visibleSessions,
-        (session) => focusLaneForSession(topicIdForSession(config, session), PMO_TEAMS_TOPIC_ID)
-      )
       const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,
@@ -2161,6 +2193,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createTabGroupId: newTabGroupId,
         preserveUnknownSessionViews: retainUnknownSessionViews
       })
+      const restoredAgentFocus = sanitizeAgentFocus(
+        restoreAgentFocus(persistedState.agentFocus),
+        visibleSessions,
+        (session) => focusLaneForSession(topicIdForSession(config, session), PMO_TEAMS_TOPIC_ID),
+        retainUnknownSessionViews ? new Set([...persistedSessionIds].filter((id) => (
+          !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
+        ))) : undefined
+      )
       // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
       const repairNotice = describePersistedTabRepairs(workbench.repairs)
       const startupError = [
@@ -5366,7 +5406,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const entry: AgentSteerQueueEntry = {
       operationId: crypto.randomUUID(),
-      runId: session.control.run.runId,
+      ...(session.processState === 'running' && session.status.state !== 'disconnected'
+        ? { runId: session.control.run.runId } : {}),
       text: text.trim(),
       status: 'queued'
     }
@@ -5390,7 +5431,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
     const session = get().sessions.find((item) => item.id === sessionId)
-    if (!entry || session?.kind !== 'agent' || !steerEntryTargetsRun(entry, session.control.run.runId)) return
+    if (!entry || session?.kind !== 'agent' || entry.runId !== undefined &&
+      !steerEntryTargetsRun(entry, session.control.run.runId)) return
+    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
+      [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
+        if (item.operationId !== operationId || item.errorCode !== EXECUTION_NOT_REQUESTED) return item
+        const { error: _error, errorCode: _code, ...pending } = item
+        return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
+      }) } }))
     // Manual retry uses the same ordered consumer and the entry's original operation identity.
     await get().flushAgentSteerQueue(sessionId)
   },
@@ -5415,12 +5463,63 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           drain.wake = false
           // Every await can change the queue, Run, connection or interaction. Never retain a tail.
           const state = get()
-          const session = state.sessions.find((item) => item.id === sessionId)
-          if (session?.kind !== 'agent' || !steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
-          const entry = state.agentSteerQueues[sessionId]?.find((item) => steerEntryTargetsRun(item, session.control.run.runId))
+          let session = state.sessions.find((item) => item.id === sessionId)
+          if (session?.kind !== 'agent') return
+          const currentRunId = session.control.run.runId
+          const entry = state.agentSteerQueues[sessionId]?.find(item =>
+            item.errorCode !== EXECUTION_NOT_REQUESTED &&
+            (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
           if (!entry) return
+          if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
           try {
+            if (entry.runId === undefined) {
+              set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: current.agentSteerQueues[sessionId]!.map(item => {
+                  if (item.operationId !== entry.operationId) return item
+                  const { error: _error, errorCode: _code, ...pending } = item
+                  return { ...pending, status: 'restoring' }
+                }) } }))
+              const recovered = await get().recoverSession(sessionId, entry.operationId)
+              if (!recovered || recovered.kind !== 'agent' || recovered.processState !== 'running') {
+                throw new Error(get().sessions.find(item => item.id === sessionId)?.status.detail ??
+                  'Session restoration did not produce a running Agent. Your message is kept.')
+              }
+              session = recovered
+              set((current) => {
+                const entries = current.agentSteerQueues[sessionId]
+                if (!entries?.some(item => item.operationId === entry.operationId)) return current
+                return { agentSteerQueues: { ...current.agentSteerQueues,
+                  [sessionId]: entries.map(item =>
+                    item.operationId === entry.operationId && item.runId === undefined
+                      ? { ...item, runId: recovered.control.run.runId } : item) } }
+              })
+            }
+            let pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
+            if (!pending) return
+            if (pending.status === 'restoring') {
+              if (!workbenchWriteFence.isOpen()) throw new Error(
+                'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
+              persistentWorkbenchStorage.flush()
+              await api.ui.requestStorageFlush()
+              // The exact binding precedes dispatch. Electron's void flush request is not fsync.
+              set((current) => {
+                const entries = current.agentSteerQueues[sessionId]
+                if (!entries?.some(item => item.operationId === entry.operationId)) return current
+                return { agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: entries.map(item => {
+                  if (item.operationId !== entry.operationId) return item
+                  const { error: _error, errorCode: _code, ...bound } = item
+                  return { ...bound, status: 'queued' }
+                }) } }
+              })
+            }
+            pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
+            session = get().sessions.find(item => item.id === sessionId)
+            if (!pending || session?.kind !== 'agent') return
+            if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
+              'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
+            if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
             await api.sessions.submitPrompt(session.control, entry.text, entry.operationId, undefined,
               continueOperationId === entry.operationId ? { allowUncertainTurn: true } : undefined)
             set((current) => {
@@ -5447,7 +5546,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   [sessionId]: pending.map((item) => {
                     if (item.operationId !== entry.operationId) return item
                     const { errorCode: _oldCode, ...retained } = item
-                    return { ...retained, status: 'deferred', error: message,
+                    return { ...retained, status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
                       ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' } : {}) }
                   })
                 }
@@ -5524,13 +5623,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
     }
   },
-  async recoverSession(sessionId) {
+  async recoverSession(sessionId, operationId) {
     const before = get()
     if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
     const current = before.sessions.find((item) => item.id === sessionId)
     if (!current) return
     try {
-      const recovery = await api.sessions.recover(current.control, current.workspacePath)
+      let recovery: SessionRecoveryResult
+      try {
+        recovery = await api.sessions.recover(current.control, current.workspacePath, operationId)
+      } catch (error) {
+        // A lost continuity reply is not permission to launch again. First read canonical facts.
+        if (!operationId || current.kind !== 'agent') throw error
+        const canonical = await api.sessions.refresh(current.control)
+        if (canonical.kind !== 'agent' || canonical.id !== sessionId || canonical.processState !== 'running') throw error
+        recovery = { kind: 'reattachable', session: canonical }
+      }
       if (recovery.kind === 'retired') {
         set((state) => removeSessionProjection(state, sessionId))
         return
@@ -5568,10 +5676,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ownerStillCurrent
       ) {
         set((state) => projectRecoveredSession(state, sessionId, session))
-        void get().flushAgentSteerQueue(sessionId)
-        return
+        return session
       }
-      if (session.control.run.runId === current.control.run.runId) return
+      // Agent continuity belongs to its durable Core Session. A closed view does not own or
+      // authorize stopping a canonical Run, including one recovered before a lost IPC reply.
+      if (session.kind === 'agent' || session.control.run.runId === current.control.run.runId) return
       try {
         await api.sessions.stop(session.control)
       } catch (cleanupError) {
@@ -5583,6 +5692,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         )
       }
     } catch (error) {
+      if (operationId) throw error
       get().reportError(error)
     }
   },
@@ -5652,6 +5762,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await entry.promise
   },
   applyEvent(event) {
+    const core = event.event
+    // Membership buffering only owns Session projections, not a host-wide diagnostic notice.
+    // Keep the notice visible without painting a healthy Agent failed or gating its input.
+    if (core.type === 'agent-error' && core.agentSessionId === undefined) get().reportError(core.message)
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
@@ -5662,7 +5776,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       enqueueSessionMembershipEvent(sessionMembershipResync, event)
       return
     }
-    const core = event.event
     const previous = core.type === 'agent-session' || core.type === 'agent-status'
       ? get().sessions.find((session) => session.id === (core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId)) : undefined
     const interactionCleared = core.type === 'agent-session' && !core.session.pendingInteraction &&

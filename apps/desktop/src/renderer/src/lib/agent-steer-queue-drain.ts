@@ -20,6 +20,6 @@ export function steerQueueCanDrainNow(
 
 // Semantic resume preserves Session identity but replaces the Run. Retain old messages for
 // copying/removal; never silently replay their intent into the new Run.
-export function steerEntryTargetsRun(entry: { runId: string }, runId: string): boolean {
+export function steerEntryTargetsRun(entry: { runId?: string }, runId: string): boolean {
   return entry.runId === runId
 }
