@@ -1,7 +1,7 @@
 import type { TopicRegionCell } from '../lib/scratch-topic-layout'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, FileCode2, Globe2, PanelTop, Sparkles, SquareTerminal } from 'lucide-react'
+import { Bot, FileCode2, GitCompareArrows, Globe2, PanelTop, Sparkles, SquareTerminal } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { getWindowOverlayHost } from './WindowOverlayHost'
@@ -108,6 +108,7 @@ function TopicRegionMark({ region }: { region: TopicRegionDetail }) {
     case 'terminal': return <SquareTerminal size={14} aria-hidden="true" />
     case 'browser': return <Globe2 size={14} aria-hidden="true" />
     case 'file': return <FileCode2 size={14} aria-hidden="true" />
+    case 'git-diff': return <GitCompareArrows size={14} aria-hidden="true" />
     case 'launcher': return <Sparkles size={14} aria-hidden="true" />
     case 'agent': return <Bot size={14} aria-hidden="true" />
     default: return <PanelTop size={14} aria-hidden="true" />

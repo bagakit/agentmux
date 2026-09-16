@@ -42,6 +42,13 @@ function candidateForSurface(
       // Terminal has its own replay/attachment contract (see surface-memory-budget.ts); agent/launcher
       // carry no releasable native owner in this budget. All three are intentionally not candidates.
       return null
+    case 'git-diff':
+      return {
+        id: surface.regionId, kind: 'monaco', visible,
+        navigationContextActive: navigation.navigationContextActive,
+        hiddenSinceMs: null, lastActivatedSeq: 0,
+        ownerPresent: true, canRebuild: true, protected: false
+      }
     case 'file': {
       const key = documentKey(surface.workspaceId, surface.path)
       const documentPresent = Object.hasOwn(input.documents, key)

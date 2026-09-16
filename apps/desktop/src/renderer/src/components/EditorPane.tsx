@@ -1,11 +1,11 @@
 import '../monaco'
-import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react'
+import Editor, { type OnMount } from '@monaco-editor/react'
 import { AlertTriangle, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
-import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
+import { wordWrapOption } from '../lib/editor-diff'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import {
@@ -17,11 +17,12 @@ import {
 } from '../lib/editor-copy-actions'
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
-import { monacoThemeForAppAppearance, type MonacoThemeId } from '../lib/monaco-theme'
+import { useMonacoTheme } from '../hooks/useMonacoTheme'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
-import { useAppStore, type EditorRegionDiffState } from '../store'
+import { useAppStore } from '../store'
+import { GitDiffCanvas } from './GitDiffCanvas'
 import { EditorReleasedState } from './EditorReleasedState'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
@@ -71,82 +72,6 @@ export async function revealFileInFileManager(
   }
 }
 
-// The HEAD-vs-worktree diff view of a file Region. Kept a separate component from EditorPane's edit
-// path so the two Monaco components (`Editor` and `DiffEditor`) never share a mount, and so the diff's
-// loading / error / binary / no-changes states are assertable without a document behind them.
-//
-// The two sides come from the store's already-loaded git:diff payload (HEAD blob vs worktree file) via
-// the diffEditorSides seam — this component never re-derives directionality. Monaco's own DiffEditor
-// handles large-diff degradation (it caps side-by-side rendering and falls back to inline) internally;
-// we do not reimplement that. A binary file has no text to diff, so it shows a placeholder rather than
-// feeding two empty strings to the diff (which reads as "no changes").
-function EditorDiffCanvas({
-  diff,
-  wordWrap,
-  language,
-  theme
-}: {
-  diff: EditorRegionDiffState | undefined
-  wordWrap: boolean
-  language: string
-  theme: MonacoThemeId
-}) {
-  if (!diff || (diff.loading && !diff.diff)) {
-    return (
-      <FullPageLoadingSurface
-        scope="region"
-        phase="loading"
-        eyebrow="File diff"
-        title="Loading diff"
-        detail="Reading the HEAD blob and the worktree file."
-      />
-    )
-  }
-  if (diff.error && !diff.diff) {
-    return (
-      <section className="pane-state pane-state--error">
-        <AlertTriangle size={14} />
-        <strong>Could not load diff</strong>
-        <span>{diff.error}</span>
-      </section>
-    )
-  }
-  if (!diff.diff) {
-    return (
-      <section className="pane-state">
-        <span>No diff available.</span>
-      </section>
-    )
-  }
-  if (diff.diff.binary) {
-    return (
-      <section className="pane-state">
-        <span>Binary file — no textual diff to show.</span>
-      </section>
-    )
-  }
-  const sides = diffEditorSides(diff.diff)
-  return (
-    <DiffEditor
-      original={sides.original}
-      modified={sides.modified}
-      language={language}
-      theme={theme}
-      options={{
-        readOnly: true,
-        // Monaco decides side-by-side vs inline from width; leaving renderSideBySide default lets its own
-        // large-diff degradation stand. We only assert the sides are fed correctly, not how it lays out.
-        minimap: { enabled: false },
-        fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
-        fontSize: 14,
-        lineHeight: 21,
-        scrollBeyondLastLine: false,
-        automaticLayout: true,
-        wordWrap: wordWrapOption(wordWrap)
-      }}
-    />
-  )
-}
 
 export function EditorPane({
   tabId,
@@ -198,23 +123,13 @@ export function EditorPane({
   const regionDiff = useAppStore((state) => state.editorRegionDiffs[surface.regionId])
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
-  const appAppearance = useAppStore((state) => state.config?.appearance?.appAppearance)
-  const [monacoTheme, setMonacoTheme] = useState<MonacoThemeId>(() => monacoThemeForAppAppearance(
-    appAppearance,
-    typeof window === 'undefined' ? true : window.matchMedia('(prefers-color-scheme: dark)').matches
-  ))
+  const monacoTheme = useMonacoTheme()
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
 
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const update = () => setMonacoTheme(monacoThemeForAppAppearance(appAppearance, media.matches))
-    update()
-    media.addEventListener?.('change', update)
-    return () => media.removeEventListener?.('change', update)
-  }, [appAppearance])
+
 
   // A file Region restored from persistence arrives with no document behind it: the surface is only
   // {regionId,kind,workspaceId,path}, and every other way a file Region appears loads its document as
@@ -484,7 +399,7 @@ export function EditorPane({
       ) : null}
       <div className="editor-canvas">
         {regionMode === 'diff' ? (
-          <EditorDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
+          <GitDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
         ) : (
           <Editor
             path={`${surface.workspaceId}:${document.path}`}

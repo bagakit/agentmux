@@ -520,7 +520,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
   const declFile = path.join(LIB_DIR, 'workbench-tabs.ts')
   const surfaceType = resolveSurfaceType(program, checker, declFile)
 
-  it('self-check 1: the WorkbenchSurface union anchor resolves to its five members', () => {
+  it('self-check 1: the WorkbenchSurface union anchor resolves to its six members', () => {
     // Without this the whole guard could pass by resolving `null`/`any` and matching nothing. Pinning
     // the member count also means a 6th arm added to the union is a deliberate, visible event here.
     expect(surfaceType).not.toBeNull()
@@ -532,9 +532,9 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       const kindType = checker.getTypeOfSymbolAtLocation(kindProp, program.getSourceFile(declFile)!)
       if (kindType.isStringLiteral()) kinds.add(kindType.value)
     }
-    expect([...kinds].sort()).toEqual(['agent', 'browser', 'file', 'launcher', 'terminal'])
+    expect([...kinds].sort()).toEqual(['agent', 'browser', 'file', 'git-diff', 'launcher', 'terminal'])
 
-    // The kind union the classifier's ORIGIN-4 test compares against must be the same five, derived
+    // The kind union the classifier's ORIGIN-4 test compares against must be the same six, derived
     // from this same anchor. If this route ever returns undefined, origin 4 silently stops looking —
     // the classifier would keep passing while one whole bypass reopened.
     const kindUnion = checker.getTypeOfPropertyOfType(surfaceType!, 'kind')
@@ -542,7 +542,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     const unionMembers = kindUnion!.isUnion() ? kindUnion!.types : [kindUnion!]
     expect(
       unionMembers.map((t) => (t.isStringLiteral() ? t.value : '?')).sort()
-    ).toEqual(['agent', 'browser', 'file', 'launcher', 'terminal'])
+    ).toEqual(['agent', 'browser', 'file', 'git-diff', 'launcher', 'terminal'])
   })
 
   it('self-check 2: the classifier flags an unanchored enumerator of every origin shape', () => {

@@ -591,7 +591,7 @@ function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentM
         ? { ...base, kind: source.kind, browserId: id(source.browserId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') }
         : source.kind === 'file'
           ? { ...base, kind: source.kind, path: text(source.path, 'File path', 'CONTROL_PROTOCOL_ERROR') }
-          : source.kind === 'launcher'
+          : source.kind === 'launcher' || source.kind === 'view'
             ? { ...base, kind: source.kind }
             : (() => { throw new AgentMuxError('Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   if (!inspected) return region

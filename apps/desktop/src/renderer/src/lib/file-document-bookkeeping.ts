@@ -155,4 +155,4 @@ export function advanceDocumentLifetime(key: string): number {
 
 // Monotonic per-Region request id so a slow diff cannot overwrite a newer one (the same request-id
 // discipline useGitStatus uses). Keyed by regionId — a Region shows exactly one file at a time.
-export const regionDiffRequestIds = new Map<string, number>()
+export const regionDiffRequestIds = new Map<string, symbol>()

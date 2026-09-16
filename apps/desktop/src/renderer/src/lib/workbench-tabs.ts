@@ -1,3 +1,4 @@
+import type { GitBranchDiffDescriptor } from '../../../shared/git-contracts'
 import type {
   AppConfig,
   BrowserSnapshot,
@@ -54,6 +55,13 @@ export type FileWorkbenchSurface = {
   path: string
 }
 
+export type GitDiffWorkbenchSurface = {
+  regionId: string
+  kind: 'git-diff'
+  workspaceId: string
+  comparison: GitBranchDiffDescriptor
+}
+
 export type LauncherWorkbenchSurface = {
   regionId: string
   kind: 'launcher'
@@ -80,6 +88,7 @@ export type WorkbenchSurface =
   | AgentWorkbenchSurface
   | TerminalWorkbenchSurface
   | FileWorkbenchSurface
+  | GitDiffWorkbenchSurface
   | LauncherWorkbenchSurface
   | BrowserWorkbenchSurface
 
@@ -340,6 +349,15 @@ export function sessionTabId(sessionId: string): string {
 
 export function fileTabId(workspaceId: string, path: string): string {
   return `file:${workspaceId}:${path}`
+}
+
+/** Fixed Git object coordinates form the identity, independently of the current disk document. */
+export function gitDiffIdentity(workspaceId: string, comparison: GitBranchDiffDescriptor): string {
+  const { snapshot, file } = comparison
+  return `git-diff:${JSON.stringify([
+    workspaceId, snapshot.hostId, snapshot.repoPath, snapshot.mode,
+    snapshot.baseOid, snapshot.targetOid, snapshot.comparisonBaseOid, file.path, file.origPath
+  ])}`
 }
 
 export function documentKey(workspaceId: string, path: string): string {

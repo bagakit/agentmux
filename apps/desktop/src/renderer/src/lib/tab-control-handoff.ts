@@ -22,6 +22,7 @@ export function addressableAgentSessionId(surface: WorkbenchSurface): string | n
       return surface.sessionId
     case 'terminal':
     case 'file':
+    case 'git-diff':
     case 'launcher':
     case 'browser':
       return null

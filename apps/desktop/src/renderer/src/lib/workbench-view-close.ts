@@ -3,6 +3,7 @@ import { activeTopicIdFromLayout, tabEligibilityForActiveTopic } from './scratch
 import { removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   removeWorkbenchRegion,
+  gitDiffIdentity,
   tabStillOpen,
   workbenchSurfaces,
   type WorkbenchSurface,
@@ -47,6 +48,7 @@ export type WorkbenchViewCloseSurfaceOwner =
   | { regionId: string; kind: 'browser'; browserId: string }
   | { regionId: string; kind: 'file'; path: string }
   | { regionId: string; kind: 'launcher' }
+  | { regionId: string; kind: 'git-diff'; identity: string }
 
 export type WorkbenchViewCloseReceipt = {
   key: WorkbenchViewCloseResource['key']
@@ -329,6 +331,8 @@ function surfaceOwner(
       return { regionId: surface.regionId, kind: surface.kind, browserId: surface.browserId }
     case 'file':
       return { regionId: surface.regionId, kind: surface.kind, path: surface.path }
+    case 'git-diff':
+      return { regionId: surface.regionId, kind: surface.kind, identity: gitDiffIdentity(surface.workspaceId, surface.comparison) }
     case 'launcher':
       return { regionId: surface.regionId, kind: surface.kind }
     default:
@@ -359,6 +363,8 @@ function sameSurfaceOwner(
       return right.kind === 'browser' && left.browserId === right.browserId
     case 'file':
       return right.kind === 'file' && left.path === right.path
+    case 'git-diff':
+      return right.kind === 'git-diff' && gitDiffIdentity(left.workspaceId, left.comparison) === right.identity
     case 'launcher':
       return right.kind === 'launcher'
     default:

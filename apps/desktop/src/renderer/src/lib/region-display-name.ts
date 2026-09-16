@@ -16,6 +16,8 @@ export function regionSurfaceLabel(
   sessions: readonly SessionSnapshot[]
 ): string {
   switch (surface.kind) {
+    case 'git-diff':
+      return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':
       return surface.path.split('/').at(-1) ?? surface.path
     case 'launcher':
