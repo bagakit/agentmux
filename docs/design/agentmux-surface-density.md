@@ -282,6 +282,8 @@
 | Tooltip / Context Menu | Session ID、Host、开始/活动时间 | 常驻占用内容高度 |
 | Activity View | 最近消息和结构化事件 | Terminal 上方的重复摘要 |
 
+macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；使用平台原生样式，不增加窗口内第二个同义控件。事实与更新行为归交互合同《Agents / Session / Board 与注意力闭环》。
+
 消息与 Agent 地址的具体可读性约束见交互合同《A2A 消息要让人一眼看懂》；本层只要求工作面优先显示紧凑地址，不常驻铺开机器回执或完整 ID。
 
 ## 顶行与 Tabbar
