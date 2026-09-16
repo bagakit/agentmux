@@ -133,7 +133,18 @@ it('reads real alternate+vt200/normal transitions and current hidden/readOnly/pe
   const terminal = await ready(lines + '\x1b[?1049h\x1b[?1000h\x1b[?1006h')
   expect((await inspect()).terminalView).toMatchObject({ buffer: { type: 'alternate', baseY: 0, viewportY: 0 }, mouseTrackingMode: 'vt200' })
   await render(session, { visible: false, readOnly: true })
+  expect(api.sessions.onEvent).toHaveBeenCalledExactlyOnceWith(expect.any(Function), session.control)
   expect((await inspect()).terminalView).toMatchObject({ visible: false, readOnly: true, acceptsInput: false, liveReady: true })
+  const hiddenData = '\x1b[1;1Hprivate-hidden-live-output'
+  const hiddenBytes = new TextEncoder().encode(hiddenData)
+  const replayLength = lines.length + '\x1b[?1049h\x1b[?1000h\x1b[?1006h'.length
+  await act(async () => {
+    fixture.receive!({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output',
+      run: { ...session.control.run }, data: hiddenData, dataBytes: hiddenBytes,
+      evidence: { source: 'terminal-output', observedAt: 2, run: { ...session.control.run },
+        outputByteRange: { startByte: replayLength, endByte: replayLength + hiddenBytes.length } } } })
+    await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('private-hidden-live-output'))
+  })
   const pending: typeof session = { ...session, pendingInteraction: { id: 'private-request', kind: 'permission', agentSessionId: session.id,
     title: 'Private synthetic permission', options: [], evidence: { source: 'native-hook', observedAt: 1 } } }
   surfaceState(pending); await render(pending)

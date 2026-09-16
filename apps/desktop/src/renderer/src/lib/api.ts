@@ -24,6 +24,7 @@ import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmu
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
+import { createRendererSessionEvents } from './session-events'
 import {
   DEFAULT_TOPIC_WIKI,
   SCRATCH_TOPIC_WIKI_PATH,
@@ -288,6 +289,10 @@ let mockSnapshot: RuntimeSnapshot = {
   recoveryCandidates: []
 }
 const sessionListeners = new Set<(event: RuntimeEvent) => void>()
+const mockSessionEvents = createRendererSessionEvents((listener) => {
+  sessionListeners.add(listener)
+  return () => { sessionListeners.delete(listener) }
+})
 const browserListeners = new Set<(event: BrowserEvent) => void>()
 const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
 const mockBrowsers = new Map<string, BrowserSnapshot>()
@@ -954,10 +959,7 @@ const mockApi: AgentMuxDesktopApi = {
         }
       }))
     },
-    onEvent(listener) {
-      sessionListeners.add(listener)
-      return () => sessionListeners.delete(listener)
-    }
+    onEvent: mockSessionEvents
   },
   resourceUsage: {
     // Web 预览没有真实进程可采。返回一个不做任何事的退订函数，面板因此渲染"不可用"
@@ -1151,7 +1153,11 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
-    control: createRendererControlApi(preload.control)
+    control: createRendererControlApi(preload.control),
+    sessions: {
+      ...preload.sessions,
+      onEvent: createRendererSessionEvents(preload.sessions.onEvent)
+    }
   }
 }
 
