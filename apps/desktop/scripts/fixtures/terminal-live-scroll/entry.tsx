@@ -9,6 +9,7 @@ import '../../../src/renderer/src/styles/index.css'
 type FixtureWindow = Window & {
   terminals: Terminal[]
   fixtureErrors: string[]
+  wheelObservations: Array<{ event: WheelEvent; targetHistory: boolean; targetTerminal: boolean; hitHistory: boolean }>
   ready: boolean
   scrollInfo(): unknown
   finishScroll(): void
@@ -16,6 +17,15 @@ type FixtureWindow = Window & {
 const w = window as unknown as FixtureWindow
 w.terminals = []
 w.fixtureErrors = []
+w.wheelObservations = []
+document.addEventListener('wheel', (event) => {
+  const target = event.target instanceof Element ? event.target : null
+  const hit = document.elementFromPoint(event.clientX, event.clientY)
+  w.wheelObservations.push({ event,
+    targetHistory: Boolean(target?.closest('.session-history__viewport')),
+    targetTerminal: Boolean(target?.closest('.xterm')), hitHistory: Boolean(hit?.closest('.session-history__viewport'))
+  })
+}, { capture: true, passive: true })
 window.addEventListener('error', (event) => w.fixtureErrors.push(event.message))
 window.addEventListener('unhandledrejection', (event) => w.fixtureErrors.push(String(event.reason)))
 const { useAppStore } = await import('../../../src/renderer/src/store')
@@ -63,7 +73,11 @@ w.scrollInfo = () => {
       source: document.querySelector('.session-history__source')?.textContent,
       scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight,
       point: point(viewport), returnPoint: point(document.querySelector('.session-history__toolbar button')) },
-    errors: [...w.fixtureErrors], focusInTerminal: Boolean(document.activeElement?.closest('.xterm'))
+    errors: [...w.fixtureErrors], wheels: w.wheelObservations.map(({ event, ...target }) => ({ ...target,
+      deltaY: event.deltaY, isTrusted: event.isTrusted, cancelable: event.cancelable,
+      // scrollInfo is read in a new task, after native dispatch has completed.
+      defaultPrevented: event.defaultPrevented
+    })), focusInTerminal: Boolean(document.activeElement?.closest('.xterm'))
   }
 }
 w.finishScroll = () => root.unmount()
