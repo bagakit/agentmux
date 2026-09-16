@@ -2,7 +2,8 @@ import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
+import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   type AgentMuxArrangeMode,
@@ -1691,13 +1692,81 @@ export function restorePersistedUiState(
   }
 }
 
-const nonBrowserWorkbenchStorage: StateStorage = {
+// The durable-input whitelist lives here once. Runtime semantic changes retain these immutable
+// references, so they can reuse the projection without visiting unrelated workbench / file content.
+function selectPersistedInputs(state: AppState) {
+  return {
+    agentComposerDrafts: state.agentComposerDrafts,
+    // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
+    // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
+    // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
+    // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
+    agentSteerQueues: state.agentSteerQueues,
+    documents: state.documents,
+    dirtyDocuments: state.dirtyDocuments,
+    tabs: state.tabs,
+    layouts: state.layouts,
+    unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
+    // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
+    scratchTopicOrder: state.scratchTopicOrder,
+    // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
+    // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
+    agentNames: state.agentNames,
+    noticeReadReceipts: state.noticeReadReceipts,
+    displacedAgentSessionIds: state.displacedAgentSessionIds,
+    // These are Renderer presentation facts. They are deliberately persisted beside Workbench
+    // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
+    activeWorkspaceId: state.activeWorkspaceId,
+    mainSurface: state.mainSurface,
+    agentFocus: state.agentFocus,
+    selectedDemandId: state.selectedDemandId,
+    demandArrangement: state.demandArrangement,
+    demandPmoTabIds: state.demandPmoTabIds,
+    projectRailOpen: state.projectRailOpen,
+    // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
+    // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
+    collapsedProjectGroups: state.collapsedProjectGroups,
+    // Explorer 折叠是用户意图，重开要还在。存的是显式覆盖（true/false 都进），缺席在读回侧另有含义。
+    explorerCollapsed: state.explorerCollapsed,
+    // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
+    // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
+    pinnedItems: state.pinnedItems,
+    toolsOpen: state.toolsOpen,
+    workspaceTool: state.workspaceTool,
+    projectRailWidth: state.projectRailWidth,
+    toolDockWidth: state.toolDockWidth,
+    // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
+    editorWordWrap: state.editorWordWrap
+  }
+}
+
+let previousPersistedInputs: ReturnType<typeof selectPersistedInputs> | null = null
+let previousPersistedProjection: PersistedAppState | null = null
+
+function partializeAppState(state: AppState): PersistedAppState {
+  const inputs = selectPersistedInputs(state)
+  if (previousPersistedInputs && previousPersistedProjection && shallow(previousPersistedInputs, inputs)) {
+    return previousPersistedProjection
+  }
+  const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
+  const projection: PersistedAppState = {
+    ...presentation,
+    documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
+    dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
+    restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
+  }
+  previousPersistedInputs = inputs
+  previousPersistedProjection = projection
+  return projection
+}
+
+const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   getItem: () => null,
   setItem: () => undefined,
   removeItem: () => undefined
 }
 
-function workbenchStorage(): StateStorage {
+function workbenchStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
   return typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
 }
 
@@ -1709,24 +1778,20 @@ function workbenchStorage(): StateStorage {
 // 闸本身住在 lib 里（`createWriteFencedStorage`）：留在这个模块里时它是一个 `let` 加一行 `if`，
 // 于是「闸关着时写入真的被拦了吗」在测试里不可观测，只能靠扫源码文本判断那个名字还在——实测把
 // 那行 `if` 删掉，五个持久化测试文件 62 条全绿。这里剩下的只有转发，没有可以被掏空的判断。
-const workbenchWriteFence = createWriteFencedStorage({
+const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedAppState>({
   getItem: (name) => workbenchStorage().getItem(name),
   setItem: (name, value) => workbenchStorage().setItem(name, value),
   removeItem: (name) => workbenchStorage().removeItem(name)
 })
-const guardedWorkbenchStorage: StateStorage = workbenchWriteFence.storage
+const workbenchWriteFence = createWriteFencedStorage(persistentWorkbenchStorage.storage)
 
 /** 放行持久化写入。启动路径上的两个开启点都只走这一处。 */
 function openPersistWrites(): void {
   workbenchWriteFence.openWrites()
+  // Startup installed the restored state while writes were fenced. Admit that state now, rather than
+  // retaining an earlier default write until the fence opens or relying on a later Runtime event.
+  useAppStore.setState(useAppStore.getState())
 }
-
-// A layout gesture (dock drag, split-ratio, tab reorder) produces many state changes per second.
-// Debounce the durable writes so the newest value lands once after the gesture settles instead of
-// synchronously on every frame; the trailing flush closes the in-memory window a hard shutdown would
-// otherwise lose. Only layout presentation facts reach here — `partialize` already excludes PTY,
-// scrollback, PID and Provider transcript state, so nothing runtime-owned is ever written.
-const persistentWorkbenchStorage = createDebouncedPersistentStorage(guardedWorkbenchStorage)
 
 // Renderer-side trailing flush on unload: force any debounced layout write to disk now so a quit or
 // navigation mid-drag still keeps the last layout change. This complements the main process's
@@ -5694,7 +5759,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
 }), {
   name: 'agentmux-workbench-v1',
   version: 1,
-  storage: createJSONStorage(() => persistentWorkbenchStorage.storage),
+  storage: workbenchWriteFence.storage,
   /**
    * 版本前进时把上一版的记录原样带过来，一个字段都不重置。
    *
@@ -5732,48 +5797,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   onRehydrateStorage: () => (_state, error) => {
     if (error) persistHydrationError = error
   },
-  partialize: (state) => ({
-    agentComposerDrafts: state.agentComposerDrafts,
-    // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
-    // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
-    // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
-    // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
-    agentSteerQueues: state.agentSteerQueues,
-    documents: Object.fromEntries(Object.entries(state.documents).filter(([key]) => state.dirtyDocuments[key])),
-    dirtyDocuments: Object.fromEntries(Object.entries(state.dirtyDocuments).filter(([, dirty]) => dirty)),
-    restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
-    unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
-    // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
-    scratchTopicOrder: state.scratchTopicOrder,
-    // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
-    // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
-    agentNames: state.agentNames,
-    noticeReadReceipts: state.noticeReadReceipts,
-    displacedAgentSessionIds: state.displacedAgentSessionIds,
-    // These are Renderer presentation facts. They are deliberately persisted beside Workbench
-    // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
-    activeWorkspaceId: state.activeWorkspaceId,
-    mainSurface: state.mainSurface,
-    agentFocus: state.agentFocus,
-    selectedDemandId: state.selectedDemandId,
-    demandArrangement: state.demandArrangement,
-    demandPmoTabIds: state.demandPmoTabIds,
-    projectRailOpen: state.projectRailOpen,
-    // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
-    // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
-    collapsedProjectGroups: state.collapsedProjectGroups,
-    // Explorer 折叠是用户意图，重开要还在。存的是显式覆盖（true/false 都进），缺席在读回侧另有含义。
-    explorerCollapsed: state.explorerCollapsed,
-    // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
-    // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
-    pinnedItems: state.pinnedItems,
-    toolsOpen: state.toolsOpen,
-    workspaceTool: state.workspaceTool,
-    projectRailWidth: state.projectRailWidth,
-    toolDockWidth: state.toolDockWidth,
-    // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
-    editorWordWrap: state.editorWordWrap
-  })
+  partialize: partializeAppState
 }))
 
 /** A controlled UI update flushes draft and layout state before unloading. */
