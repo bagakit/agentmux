@@ -51,6 +51,7 @@ vi.mock('@xterm/xterm', async () => {
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
+    attachCustomWheelEventHandler() {}
   } }
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {

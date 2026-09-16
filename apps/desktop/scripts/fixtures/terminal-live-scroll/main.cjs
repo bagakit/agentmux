@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const assert = require('node:assert/strict')
+const { createHash } = require('node:crypto')
 const fs = require('node:fs'), path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const [html, privateRoot, coreFile, productPreload] = process.argv.slice(2)
@@ -25,6 +26,12 @@ async function waitFor(read, predicate, message) {
     await delay(25)
   }
   throw new Error(message)
+}
+async function renderedFrame() {
+  await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  const image = await win.webContents.capturePage()
+  assert.equal(image.isEmpty(), false, 'The actual compositor must provide a rendered frame')
+  return { size: image.getSize(), sha256: createHash('sha256').update(image.toPNG()).digest('hex') }
 }
 function wheel(point, deltaY) {
   assert.ok(point, 'The actual target must have positive visible geometry')
@@ -90,6 +97,7 @@ app.whenReady().then(async () => {
     assert.equal(stable, 3); assert.equal(before.mouse, 'none'); assert.equal(before.buffer.length, before.grid.rows)
     assert.equal(before.history, null); assert.deepEqual(before.errors, [])
     const beforeCounts = { ...counts }; result.before = { snapshot: before, counts: beforeCounts }
+    result.terminalFrame = await renderedFrame()
     wheel(before.terminalPoint, -180); await delay(100)
     assert.equal((await info()).history, null, 'Downward input stays on the existing xterm path')
     assert.equal(counts.history, 0)
@@ -97,6 +105,8 @@ app.whenReady().then(async () => {
     const opened = await waitFor(info, x => x.history?.itemIds.length === 30 && !x.history.source?.startsWith('Reading') &&
       x.history.scrollHeight > x.history.clientHeight && x.history.scrollTop > 0,
       'One real upward wheel did not enter nonempty Provider history')
+    result.historyFrame = await renderedFrame()
+    assert.notEqual(result.historyFrame.sha256, result.terminalFrame.sha256, 'History must be present in the actual rendered surface before its next gesture')
     result.opened = { snapshot: opened, counts: { ...counts } }
     assert.match(opened.history.source, /Persisted native conversation/)
     assert.equal(counts.history, 1, 'One upward gesture invokes the existing reader once')
@@ -110,6 +120,11 @@ app.whenReady().then(async () => {
     wheel(up.history.point, -120)
     const down = await waitFor(info, x => x.history?.scrollTop > up.history.scrollTop, 'Actual history viewport did not scroll downward')
     assert.equal(counts.history, 1, 'Reading nearby visible rows does not create another helper')
+    const nativeHistoryWheels = down.wheels.filter(event => event.deltaY !== 0 && event.targetHistory)
+    assert.deepEqual(nativeHistoryWheels.map(event => ({ deltaY: event.deltaY, trusted: event.isTrusted, prevented: event.defaultPrevented, hitHistory: event.hitHistory })), [
+      { deltaY: -240, trusted: true, prevented: false, hitHistory: true },
+      { deltaY: 120, trusted: true, prevented: false, hitHistory: true }
+    ], 'Both actual history gestures must target its rendered scroll owner and retain native default scrolling')
     assert.equal(counts.resize, beforeCounts.resize, 'Scrolling history must not resize the retained terminal')
     result.reading = { up, down, counts: { ...counts } }
     click(down.history.returnPoint)
