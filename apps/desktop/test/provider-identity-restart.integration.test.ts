@@ -240,6 +240,7 @@ describe('空快照与流程故障不清工作面（T-005 性质 1）', () => {
       timelines: {},
       recoveryCandidates: [{
         agentSessionId: sessionId,
+        semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() },
         hostId: 'local',
         workspacePath: _hygiene_fixturePath("repo/a"),
         providerId: 'codex',

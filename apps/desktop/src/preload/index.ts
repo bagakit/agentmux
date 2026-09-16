@@ -143,6 +143,7 @@ const api: AgentMuxPreloadApi = {
     decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
   },
   ui: {
+    requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
@@ -223,8 +224,8 @@ const api: AgentMuxPreloadApi = {
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
-    recover: (session: SessionControl, workspacePath?: string) =>
-      ipcRenderer.invoke('sessions:recover', session, workspacePath),
+    recover: (session: SessionControl, workspacePath?: string, operationId?: string) =>
+      ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId),
     // 唯一带超时的那条：等 Runtime 收尾必须有上限，否则一次没回执的握手会把关闭按钮永久锁死。
     // 理由与取值见 shared/session-stop-timeout.ts。
     stop: (session: SessionControl) => withStopTimeout(ipcRenderer.invoke('sessions:stop', session)),
