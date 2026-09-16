@@ -11,8 +11,8 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 
 // The roster behind the attention bar's total.
 //
-// The bar states HOW MANY Agents the window holds and routes to the single one that has waited
-// longest. This is the other half: the enumerable list, so several Agents in flight can be scanned and
+// The bar states HOW MANY Agents the window holds and routes to the one with the earliest
+// observation. This is the other half: the enumerable list, so several Agents in flight can be scanned and
 // reached without walking panes. It hangs off the total segment because that segment already owns
 // "how many Agents exist" — one identity, one place.
 //
@@ -204,7 +204,7 @@ export function AgentRoster({ total }: { total: number }) {
 // there is one row definition, not a second one that could drift.
 //
 // It is a SEPARATE control from the count button on purpose. needs-you/error already jump on click to
-// the Agent that has waited longest; that one-click jump is a capability the user has today and
+// the Agent with the earliest observation; that one-click jump is a capability the user has today and
 // principle 11 forbids removing it silently. So disclosure is added alongside the jump, never in place
 // of it — a distinct focusable chevron, which also keeps the tree keyboard-reachable (Radix gives Enter/
 // Space/Arrow for free on its trigger).

@@ -96,8 +96,8 @@ export function AgentStatusBar() {
             className="agent-status-bar__segment agent-status-bar__segment--action"
             type="button"
             data-attention="needs-you"
-            aria-label={`${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent needs' : 'agents need'} you. Jump to the one waiting longest.`}
-            title="Jump to the agent that has been waiting longest"
+            aria-label={`${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent needs' : 'agents need'} you. Jump to the earliest observed request.`}
+            title="Jump to the earliest observed request"
             onClick={() => selectSession(rollup.needsYouSessionId!)}
           >
             <StatusCount state="waiting" count={rollup.needsYou} label="needs you" />
@@ -119,8 +119,8 @@ export function AgentStatusBar() {
             className="agent-status-bar__segment agent-status-bar__segment--action"
             type="button"
             data-attention="error"
-            aria-label={`${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error. Jump to the earliest.`}
-            title="Jump to the earliest agent in error"
+            aria-label={`${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error. Jump to the earliest observed error.`}
+            title="Jump to the earliest observed error"
             onClick={() => selectSession(rollup.errorSessionId!)}
           >
             <StatusCount state="error" count={rollup.error} label="error" />
