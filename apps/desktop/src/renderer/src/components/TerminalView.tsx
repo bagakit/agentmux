@@ -1,3 +1,5 @@
+import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
+import { registerTerminalViewObservation } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -199,6 +201,7 @@ export function TerminalView({
   readOnlyRef.current = readOnly
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
   const webglVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
   const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
@@ -635,6 +638,28 @@ export function TerminalView({
     let observedOutput = false
     let attachmentId: string | null = null
     let readyForLiveOutput = false
+    const acceptsCurrentInput = (): boolean =>
+      !readOnlyRef.current && terminalAcceptsInput({
+        canControlRun: canControlRunRef.current,
+        acceptsInput: acceptsInputRef.current,
+        liveReady: readyForLiveOutput
+      })
+    const readObservation = (): AgentMuxTerminalViewObservation | undefined => {
+      if (disposed || terminalRef.current !== terminal) return undefined
+      const buffer = terminal.buffer.active
+      return {
+        runId: session.control.run.runId,
+        sampledAt: Date.now(),
+        visible: visibleRef.current,
+        readOnly: readOnlyRef.current,
+        liveReady: readyForLiveOutput,
+        acceptsInput: acceptsCurrentInput(),
+        viewGrid: { cols: terminal.cols, rows: terminal.rows },
+        buffer: { type: buffer.type, baseY: buffer.baseY, viewportY: buffer.viewportY, length: buffer.length },
+        mouseTrackingMode: terminal.modes.mouseTrackingMode
+      }
+    }
+    observationReaderRef.current = readObservation
     let cursor = 0
     let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
@@ -862,12 +887,7 @@ export function TerminalView({
      * Uint8Array 身份透传，否则 SDK 的 UTF-8 编码会把 0x80 拆成 0xC2 0x80、坐标毁掉。
      */
     const sendInput = terminalInputSender({
-      accepts: () =>
-        !readOnlyRef.current && terminalAcceptsInput({
-          canControlRun: canControlRunRef.current,
-          acceptsInput: acceptsInputRef.current,
-          liveReady: readyForLiveOutput
-        }),
+      accepts: acceptsCurrentInput,
       write: (data) => {
         if (!readOnlyRef.current) void api.sessions.write(session.control, data)
       }
@@ -1050,6 +1070,7 @@ export function TerminalView({
     if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       clearTimeout(revealDeadline)
       setLinkPreview(null)
       setLinkRequest((current) => {
@@ -1082,6 +1103,17 @@ export function TerminalView({
       resourceOwners.release()
     }
   }, [session.control.run.runId, session.id, themeId])
+
+  // Address changes replace only the observation callback, never the terminal/attachment.
+  useEffect(() => {
+    const regionId = linkOrigin.regionId
+    if (!regionId) return
+    return registerTerminalViewObservation({
+      regionId,
+      sessionId: session.id,
+      runId: session.control.run.runId
+    }, () => observationReaderRef.current?.())
+  }, [linkOrigin.regionId, session.id, session.control.run.runId])
 
   async function redrawCurrentScreen(): Promise<boolean> {
     const viewport = viewportRef.current
