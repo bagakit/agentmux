@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process'
+import { withCodexNativeRead } from './codex-native-read.js'
 import { AgentMuxError } from '../errors.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from '../session-history.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
@@ -76,106 +75,11 @@ function itemEntry(value: unknown): AgentSessionHistoryItem {
     ...(completedAt === undefined ? {} : { completedAt }) }
 }
 
-/** Owns one bounded native read helper; it never starts, resumes or controls an Agent thread. */
+/** History metadata and indexed items remain owned by this Provider reader. */
 export async function readCodexSessionHistoryPage(
   context: AgentProviderSessionHistoryContext
 ): Promise<AgentProviderSessionHistoryPage> {
-  context.signal.throwIfAborted()
-  const env = { ...process.env }
-  for (const [name, value] of Object.entries(context.env)) {
-    if (value === undefined) delete env[name]
-    else env[name] = value
-  }
-  const child = spawn(context.command, [
-    ...context.args, '-s', 'read-only', '-a', 'never', 'app-server', '--stdio'
-  ], {
-    cwd: context.workspacePath, env, detached: true, stdio: ['pipe', 'pipe', 'pipe']
-  })
-  const pending = new Map<number, { resolve(value: unknown): void; reject(error: unknown): void }>()
-  let nextId = 0
-  let receivedBytes = 0
-  let failure: unknown
-  let carry = ''
-  let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined
-  const closed = new Promise<void>((resolve) => child.once('close', (code, signal) => {
-    exit = { code, signal }
-    if (pending.size) fail(new AgentMuxError(
-      'The native history helper closed before the page completed.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
-    ))
-    resolve()
-  }))
-  const fail = (error: unknown): void => {
-    failure ??= error
-    for (const request of pending.values()) request.reject(error)
-    pending.clear()
-  }
-  const abort = (): void => fail(context.signal.reason)
-  context.signal.addEventListener('abort', abort, { once: true })
-  const timer = setTimeout(() => fail(new AgentMuxError(
-    'Native history page timed out.', 'AGENT_SESSION_HISTORY_TIMEOUT'
-  )), SESSION_HISTORY_TIMEOUT_MS)
-  child.once('error', () => fail(new AgentMuxError(
-    'The configured native history helper could not start.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
-  )))
-  child.stdin.on('error', () => fail(new AgentMuxError(
-    'Native history request could not be sent.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'
-  )))
-  const acceptBytes = (chunk: Buffer): boolean => {
-    receivedBytes += chunk.byteLength
-    if (receivedBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) return failure === undefined
-    fail(new AgentMuxError('Native history response exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE'))
-    return false
-  }
-  // Count and drain stderr without retaining native diagnostics or user content.
-  child.stderr.on('data', (chunk: Buffer) => { acceptBytes(chunk) })
-  const decoder = new TextDecoder('utf-8', { fatal: true })
-  child.stdout.on('data', (chunk: Buffer) => {
-    if (!acceptBytes(chunk)) return
-    try {
-      carry += decoder.decode(chunk, { stream: true })
-      for (let newline; (newline = carry.indexOf('\n')) !== -1;) {
-        const line = carry.slice(0, newline)
-        carry = carry.slice(newline + 1)
-        if (!line.trim()) continue
-        const message = object(JSON.parse(line))
-        if (!Object.hasOwn(message, 'id')) continue // Notifications never satisfy a read.
-        const request = pending.get(message.id as number)
-        if (!request || Object.hasOwn(message, 'method')) throw protocolError()
-        pending.delete(message.id as number)
-        if (Object.hasOwn(message, 'error')) {
-          const error = object(message.error)
-          request.reject(new AgentMuxError('Native history read request failed.',
-            error.code === -32601 ? 'AGENT_SESSION_HISTORY_UNSUPPORTED' : 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
-        } else if (Object.hasOwn(message, 'result')) request.resolve(message.result)
-        else request.reject(protocolError())
-      }
-    } catch (error) {
-      fail(error instanceof AgentMuxError ? error : protocolError())
-    }
-  })
-  child.stdout.once('end', () => {
-    if (failure !== undefined) return
-    try {
-      carry += decoder.decode()
-      if (carry.trim()) throw protocolError()
-    } catch (error) {
-      fail(error instanceof AgentMuxError ? error : protocolError())
-    }
-  })
-  const request = (method: 'initialize' | 'thread/read' | 'thread/items/list', params: unknown): Promise<unknown> => {
-    if (failure !== undefined) return Promise.reject(failure)
-    const id = ++nextId
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject })
-      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-    })
-  }
-  try {
-    await request('initialize', {
-      clientInfo: { name: 'agentmux_history', title: 'AgentMux native history', version: '0.1.0' },
-      capabilities: { experimentalApi: true }
-    })
-    child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`)
+  return await withCodexNativeRead(context, 'history', async request => {
     const metadata = object(object(await request('thread/read', {
       threadId: context.source.nativeSessionId, includeTurns: false
     })).thread)
@@ -193,32 +97,5 @@ export async function readCodexSessionHistoryPage(
     if (result.nextCursor !== null && typeof result.nextCursor !== 'string') throw protocolError()
     return { source: { ...context.source }, items: result.data.map(itemEntry).reverse(),
       nextCursor: result.nextCursor as string | null }
-  } finally {
-    clearTimeout(timer)
-    context.signal.removeEventListener('abort', abort)
-    // EOF first. A wrapper/native child shares this helper's fresh process group, never an Agent Run.
-    child.stdin.end()
-    const waitForClose = async (ms: number): Promise<void> => {
-      if (exit) return
-      let timeout: NodeJS.Timeout | undefined
-      await Promise.race([closed, new Promise<void>((resolve) => { timeout = setTimeout(resolve, ms) })])
-      if (timeout) clearTimeout(timeout)
-    }
-    const stopOwnedGroup = (signal: NodeJS.Signals): void => {
-      if (!child.pid) return
-      try { process.kill(-child.pid, signal) } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-      }
-    }
-    await waitForClose(1_500)
-    if (!exit) { stopOwnedGroup('SIGTERM'); await waitForClose(1_000) }
-    if (!exit) { stopOwnedGroup('SIGKILL'); await waitForClose(1_000) }
-    if (!exit) throw new AgentMuxError('Native history helper could not be reaped.', 'AGENT_SESSION_HISTORY_UNAVAILABLE')
-    // A native wrapper can exit while a helper-owned subprocess has already closed its stdio.
-    stopOwnedGroup('SIGKILL')
-    if (failure !== undefined) throw failure
-    if (exit.code !== 0 || exit.signal !== null) {
-      throw new AgentMuxError('Native history helper exited unsuccessfully.', 'AGENT_SESSION_HISTORY_UNAVAILABLE')
-    }
-  }
+  })
 }

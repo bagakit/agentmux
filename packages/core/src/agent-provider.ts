@@ -42,6 +42,17 @@ export type AgentExecutableProbe = {
   hasExecutable(executable: string): Promise<boolean>
 }
 
+export type AgentProviderHookActivationContext = {
+  plan: AgentManagedHookPlan
+  workspacePath: string
+  command: string
+  args: readonly string[]
+  env: Readonly<Record<string, string | undefined>>
+  signal: AbortSignal
+}
+
+export type AgentProviderHookActivation = { active: boolean; code: string; action: string | null }
+
 export type AgentProvider = {
   readonly id: AgentProviderId
   readonly label: string
@@ -58,6 +69,7 @@ export type AgentProvider = {
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
+  inspectHookActivation?(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation>
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
@@ -81,6 +93,7 @@ export type AgentProviderDefinition = {
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
+  inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
@@ -203,6 +216,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
+    ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = resolveAgentExecutable(commandOverride, catalog.executable)
       return {

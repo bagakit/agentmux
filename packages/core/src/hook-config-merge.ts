@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { isMap, isSeq, parseDocument, YAMLMap, YAMLSeq } from 'yaml'
 import { AgentMuxError } from './errors.js'
 
@@ -319,4 +320,66 @@ export function renderMergedHookContent(
     case 'json-managed-approvals':
       return applyManagedApprovals(current, owned, strategy.marker)
   }
+}
+
+/** Read ownership through the same markers and keys used by installation, ignoring foreign facts. */
+export function inspectManagedHookContent(
+  current: string,
+  ownedContent: string,
+  strategy: AgentHookMergeStrategy
+): { present: boolean; current: boolean } {
+  const owned = parseOwnedObject(ownedContent)
+  let actual: unknown
+  let expected: unknown
+  switch (strategy.kind) {
+    case 'json-owned-key': {
+      const parsed = parseCurrentObject(current)
+      if (!Object.hasOwn(owned, strategy.key)) throw new AgentMuxError('Managed Hook owned key is absent.', 'INVALID_HOOK_PLAN')
+      return { present: Object.hasOwn(parsed, strategy.key), current: isDeepStrictEqual(parsed[strategy.key], owned[strategy.key]) }
+    }
+    case 'yaml-managed-events': {
+      const doc = parseDocument(current.trim() ? current : '{}')
+      if (doc.errors.length || !isMap(doc.contents)) throw new AgentMuxError('Managed Hook target is not a YAML mapping.', 'HOOK_TARGET_UNPARSEABLE')
+      const hooks = doc.get('hooks', true)
+      if (hooks !== undefined && !isMap(hooks)) throw new AgentMuxError('Managed Hook target hooks must be a YAML mapping.', 'HOOK_TARGET_UNPARSEABLE')
+      actual = isMap(hooks) ? Object.fromEntries(hooks.items.flatMap(pair => {
+        const definitions = isSeq(pair.value) ? pair.value.items.filter(node => yamlDefinitionOwnsMarker(node, strategy.marker)) : []
+        return definitions.length ? [[String(pair.key), definitions.map(node => isMap(node) ? node.toJSON() : null)]] : []
+      })) : {}
+      expected = managedEvents(owned.hooks, strategy.marker)
+      break
+    }
+    case 'json-managed-approvals': {
+      const parsed = parseCurrentObject(current)
+      if (parsed.approvals !== undefined && !Array.isArray(parsed.approvals)) throw new AgentMuxError('Managed Hook target approvals must be an array.', 'HOOK_TARGET_UNPARSEABLE')
+      expected = Array.isArray(owned.approvals) ? owned.approvals : []
+      const declarations = expected as JsonObject[]
+      actual = Array.isArray(parsed.approvals) ? parsed.approvals.filter(entry => definitionOwnsMarker(entry, strategy.marker))
+        .map(entry => Object.fromEntries(Object.keys(declarations[0] ?? {}).map(key => [key, (entry as JsonObject)[key]]))) : []
+      break
+    }
+    case 'json-managed-events': {
+      const hooks = parseCurrentObject(current).hooks
+      if (hooks !== undefined && (!hooks || typeof hooks !== 'object' || Array.isArray(hooks))) {
+        throw new AgentMuxError('Managed Hook target hooks must be a JSON object.', 'HOOK_TARGET_UNPARSEABLE')
+      }
+      actual = managedEvents(hooks, strategy.marker)
+      expected = managedEvents(owned.hooks, strategy.marker)
+      break
+    }
+    case 'json-root-managed-events':
+      actual = managedEvents(parseCurrentObject(current), strategy.marker)
+      expected = managedEvents(owned, strategy.marker)
+      break
+  }
+  if (Object.keys(expected as object).length === 0) throw new AgentMuxError('Managed Hook plan declares no owned entries.', 'INVALID_HOOK_PLAN')
+  return { present: Object.keys(actual as object).length > 0, current: isDeepStrictEqual(actual, expected) }
+}
+
+function managedEvents(value: unknown, marker: string): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([event, definitions]) => {
+    const managed = Array.isArray(definitions) ? definitions.filter(definition => definitionOwnsMarker(definition, marker)) : []
+    return managed.length ? [[event, managed]] : []
+  }))
 }

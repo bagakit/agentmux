@@ -1,3 +1,5 @@
+import { readManagedHookTarget } from '../managed-hook-installer.js'
+import type { AgentProviderHookActivation, AgentProviderHookActivationContext } from '../agent-provider.js'
 import { existsSync } from 'node:fs'
 import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -194,3 +196,20 @@ export const HOOK_INSTALLATION_BY_PROVIDER = {
 export type ProviderRequiringManagedHookResolver = {
   [K in BuiltInAgentProviderId]: (typeof HOOK_INSTALLATION_BY_PROVIDER)[K] extends 'explicit-managed' ? K : never
 }[BuiltInAgentProviderId]
+/** The Provider declares its actual native key; the shared reader owns bounded file access. */
+export async function inspectHookDisableSetting(
+  context: AgentProviderHookActivationContext,
+  nativeKey: string
+): Promise<AgentProviderHookActivation> {
+  const target = context.plan.mutations[0]
+  if (!target) throw new Error('The managed Hook plan is empty.')
+  const file = await readManagedHookTarget(target.path)
+  if (!file) return { active: false, code: 'HOOK_CONFIGURATION_CHANGED', action: 'The Hook configuration changed during inspection. Inspect this scope again.' }
+  const config = JSON.parse(file.content.toString('utf8')) as Record<string, unknown>
+  if (Object.hasOwn(config, nativeKey) && typeof config[nativeKey] !== 'boolean') {
+    throw new AgentMuxError('Native Hook disable setting is not a boolean.', 'HOOK_TARGET_UNPARSEABLE')
+  }
+  if (config[nativeKey] === true) return { active: false, code: 'HOOK_CONFIGURATION_DISABLED',
+    action: 'Managed Hooks are present but disabled in this configuration. Review the Provider setting, then inspect again.' }
+  return { active: true, code: 'MANAGED_HOOK_CURRENT', action: null }
+}

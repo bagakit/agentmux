@@ -35,6 +35,7 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
   const catalog = new AgentProviderRegistry().catalog()
   return {
     catalog: () => catalog,
+    inspectManagedHooks: vi.fn(async (providerId: AgentProviderId) => ({ providerId, workspacePath: null, checkedAt: Date.now(), status: 'skipped', code: 'HOOK_WORKSPACE_REQUIRED', action: 'Provide the exact workspace.', targets: [] })),
     connect: vi.fn(async () => {}),
     runtimeIdentity: () => ({
       hostId: 'local',
