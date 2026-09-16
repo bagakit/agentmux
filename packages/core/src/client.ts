@@ -35,11 +35,10 @@ import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbou
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import {
-  ackDeliveryBatch,
-  checkDeliveries,
-  type DeliveryBatch,
-  type DeliveryQueue
-} from './agent-delivery-queue.js'
+  DurableAgentMuxMessageQueue,
+  type AgentMuxDeliveryBatch,
+  type AgentMuxDeliveryAcknowledgement
+} from './agent-global-message-queue.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
   AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
@@ -95,7 +94,7 @@ import {
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller, type AgentManagedHookInspection } from './managed-hook-installer.js'
-import { defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
+import { defaultAgentMuxMessageQueuePath, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
   type AgentMuxRuntimeProjection,
@@ -393,9 +392,11 @@ export function terminalEnvironment(
     // resolves sessions out of the SAME file this Client writes — not the temp default it would otherwise
     // reach. The path's authority is whoever constructed the store (the desktop points it at userData).
     ...(agentSessionStorePath ? {
-      AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath,
-      AGENTMUX_MESSAGE_QUEUE_PATH: join(dirname(agentSessionStorePath), 'global-messages.ndjson')
-    } : {})
+      AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath
+    } : {}),
+    AGENTMUX_MESSAGE_QUEUE_PATH: defaultAgentMuxMessageQueuePath(
+      agentSessionStorePath ?? null, environment.AGENTMUX_MESSAGE_QUEUE_PATH ?? process.env.AGENTMUX_MESSAGE_QUEUE_PATH
+    )
   }
   // `environment` is the last merge before the PTY boundary. A desktop process can carry
   // NO_COLOR/CLICOLOR=0 from the shell that launched it, and passing those values through here makes
@@ -513,6 +514,7 @@ export class AgentMuxClient {
   private readonly kernel: CtxmuxRunAdapter
   private readonly registry: AgentMuxAgentSessionRegistry
   private readonly store: AgentMuxAgentSessionStore
+  private readonly messageQueue: DurableAgentMuxMessageQueue
   private readonly publisher = new AgentMuxClientEventPublisher()
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
@@ -597,6 +599,11 @@ export class AgentMuxClient {
       ? new AgentProviderRegistry(options.providers)
       : createDefaultAgentMuxPluginRegistry(options.plugins).providers
     this.store = options.store ?? new AgentMuxFileAgentSessionStore()
+    // An implicit Session store is Runtime-local, not the durable message queue authority.
+    const adoptedFileStore = this.store instanceof AgentMuxFileAgentSessionStore &&
+      (options.store !== undefined || Boolean(process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()))
+      ? this.store.path : null
+    this.messageQueue = new DurableAgentMuxMessageQueue(defaultAgentMuxMessageQueuePath(adoptedFileStore))
     this.registry = new AgentMuxAgentSessionRegistry(this.store)
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
@@ -1562,7 +1569,7 @@ export class AgentMuxClient {
       program: input.command ?? process.env.SHELL ?? '/bin/sh',
       args: input.args ?? [],
       cwd: input.workspacePath,
-      env: terminalEnvironment(input.env ?? {}, this.agentSessionStorePath()),
+      env: terminalEnvironment({ ...input.env, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
       ...(input.cols === undefined ? {} : { cols: input.cols }),
       ...(input.rows === undefined ? {} : { rows: input.rows })
     })
@@ -1690,8 +1697,10 @@ export class AgentMuxClient {
    * 每个通信动作都先过这里：author 由 Core 从凭证解析，调用方声称的身份不作数。
    * 抽成一处，是为了让"新增一个动作"不必重新想一遍怎么验身份——漏验一次就是一个冒充口子。
    */
-  private resolveMessageAuthor(capability: string, callerAgentSessionId: string): string {
-    const caller = this.registry.get(callerAgentSessionId)
+  private resolveMessageAuthor(
+    capability: string, callerAgentSessionId: string,
+    caller = this.registry.get(callerAgentSessionId)
+  ): string {
     return resolveCapabilityAuthor(capability, {
       agentSessionId: caller.agentSessionId,
       workspacePath: caller.workspacePath,
@@ -1729,26 +1738,51 @@ export class AgentMuxClient {
     }
   }
 
-  /** 取最旧的一批未确认投递。Ack 之前重复调用重放同一批——崩溃重连才不会丢消息。 */
-  checkDeliveries(input: {
+  /** Explicit consumption is durable and recipient-scoped, independent of input or human reading. */
+  async checkDeliveries(input: {
     capability: string
     callerAgentSessionId: string
-    queue: DeliveryQueue
     limit: number
-  }): DeliveryBatch {
-    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
-    return checkDeliveries(input.queue, consumerId, input.limit)
+  }): Promise<AgentMuxDeliveryBatch> {
+    this.requireConnected()
+    const reader = await this.currentMessageReader(input.callerAgentSessionId)
+    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
+    return await this.messageQueue.check({ consumerId, readerRun: reader.run, limit: input.limit },
+      async () => { await this.assertCurrentMessageReader(input.capability, consumerId, reader.run) })
   }
 
-  /** 确认一批。只推进这个 consumer 的游标，不改变消息本身的状态。 */
-  ackDeliveryBatch(input: {
+  /** Ack advances only this exact reader's pinned batch; it does not mean accepted or replied. */
+  async ackDeliveryBatch(input: {
     capability: string
     callerAgentSessionId: string
-    queue: DeliveryQueue
+    readerRun: AgentMuxRunRef
     generation: number
-  }): DeliveryQueue {
-    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
-    return ackDeliveryBatch(input.queue, consumerId, input.generation)
+  }): Promise<AgentMuxDeliveryAcknowledgement> {
+    this.requireConnected()
+    const reader = await this.currentMessageReader(input.callerAgentSessionId)
+    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
+    if (!sameRun(reader.run, input.readerRun)) {
+      throw new AgentMuxError('The delivery reader Run changed.', 'MESSAGE_ACK_GENERATION_STALE')
+    }
+    return await this.messageQueue.ack({ consumerId, readerRun: input.readerRun, generation: input.generation },
+      async () => { await this.assertCurrentMessageReader(input.capability, consumerId, input.readerRun) })
+  }
+
+  private async currentMessageReader(agentSessionId: string): Promise<AgentMuxStoredAgentSession> {
+    // Do not mutate/reload the active registry or trust a connect-time capability cache. Session
+    // persistence is read under the queue's admission callback; no Session write/Provider probe.
+    const session = (await loadAgentSessions(this.store)).find((candidate) =>
+      candidate.agentSessionId === agentSessionId && candidate.hostId === 'local')
+    if (!session) throw new AgentMuxError('Message reader Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    return session
+  }
+
+  private async assertCurrentMessageReader(capability: string, consumerId: string, expectedRun: AgentMuxRunRef): Promise<void> {
+    const current = await this.currentMessageReader(consumerId)
+    this.resolveMessageAuthor(capability, consumerId, current)
+    if (!sameRun(current.run, expectedRun)) {
+      throw new AgentMuxError('The delivery reader Run changed before mutation.', 'MESSAGE_ACK_GENERATION_STALE')
+    }
   }
 
   /** 回答一个问题。相同回答幂等，不同回答冲突。 */
@@ -3096,7 +3130,7 @@ export class AgentMuxClient {
     // 未声明 usage 的 Provider 不注入这个变量，hook 进程因此对它们连一次尾部读都不做。
     const usage = this.providers.get(providerId).catalog.capabilities.usage
     return {
-      ...terminalEnvironment(environment, this.agentSessionStorePath()),
+      ...terminalEnvironment({ ...environment, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
       AGENTMUX_HOOK_URL: binding.endpoint.url,
       AGENTMUX_HOOK_TOKEN: binding.endpoint.token,
       AGENTMUX_AGENT_SESSION_ID: agentSessionId,

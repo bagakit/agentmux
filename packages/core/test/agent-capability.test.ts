@@ -76,8 +76,13 @@ describe('每个通信动作都验凭证', () => {
       'checkDeliveries', 'ackDeliveryBatch', 'answerAsk',
       'cancelAsk', 'handOff', 'openDispatch', 'recordDispatchEvent'
     ]) {
-      const body = source.slice(source.indexOf(`  ${action}(input: {`))
-      expect(body.slice(0, body.indexOf('\n  }\n'))).toContain('this.resolveMessageAuthor(')
+      const anchor = new RegExp(`\\n  (?:async )?${action}\\(input: \\{`).exec(source)
+      expect(anchor?.index).toBeGreaterThan(-1)
+      const start = anchor!.index
+      const end = source.indexOf('\n  }\n', start)
+      expect(end).toBeGreaterThan(start)
+      const body = source.slice(start, end)
+      expect(body).toContain('this.resolveMessageAuthor(')
     }
   })
 

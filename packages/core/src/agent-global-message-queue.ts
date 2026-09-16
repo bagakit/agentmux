@@ -7,6 +7,7 @@ import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQu
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
 import type { AgentMuxMessageTarget } from './control.js'
 import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
+import type { AgentMuxRunRef } from './types.js'
 
 export type AgentMuxMessageIdentity =
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
@@ -49,6 +50,26 @@ export type DurableAgentMuxMessage = {
   readonly delivery: AgentMuxMessageDeliveryState
 }
 
+export type AgentMuxDeliveryReader = {
+  readonly consumerId: string
+  readonly readerRun: AgentMuxRunRef
+}
+
+export type AgentMuxDeliveryBatch = AgentMuxDeliveryReader & {
+  readonly generation: number
+  readonly messages: readonly DurableAgentMuxMessage[]
+}
+
+export type AgentMuxDeliveryAcknowledgement = AgentMuxDeliveryReader & {
+  readonly acknowledgedMessageIds: readonly string[]
+  readonly nextGeneration: number
+}
+
+type DurableConsumerCursor = Pick<ConsumerCursor, 'acked' | 'generation'> & {
+  readonly readerRun: AgentMuxRunRef
+  readonly deliveryIds: readonly string[]
+}
+
 export type AgentMuxMessageReceipt = {
   readonly queueId: string
   readonly receiptId: string
@@ -81,8 +102,8 @@ const processQueueTails = new Map<string, Promise<void>>()
 export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
-  | { readonly kind: 'consumer-check'; readonly sequence: number; readonly consumerId: string; readonly generation: number; readonly deliveryIds: readonly string[] }
-  | { readonly kind: 'consumer-ack'; readonly sequence: number; readonly consumerId: string; readonly generation: number; readonly deliveryIds: readonly string[] }
+  | { readonly kind: 'consumer-check'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
+  | { readonly kind: 'consumer-ack'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
 type JournalMessage = Extract<AgentMuxMessageJournalRecord, { kind: 'message' }>
 type JournalDelivery = Extract<AgentMuxMessageJournalRecord, { kind: 'delivery' }>
 type JournalCheck = Extract<AgentMuxMessageJournalRecord, { kind: 'consumer-check' }>
@@ -162,10 +183,39 @@ function queueIdFor(path: string): string {
   return `queue:${createHash('sha256').update(path).digest('hex').slice(0, 24)}`
 }
 
-function deliveryQueue(messages: ReadonlyMap<string, DurableAgentMuxMessage>, consumers: ReadonlyMap<string, ConsumerCursor>): DeliveryQueue {
+function addressedTo(message: DurableAgentMuxMessage, consumerId: string): boolean {
+  return message.envelope.recipient.kind === 'agent-session' &&
+    message.envelope.recipient.agentSessionId === consumerId &&
+    message.envelope.recipientSessionId === consumerId
+}
+
+function deliveryQueue(
+  messages: ReadonlyMap<string, DurableAgentMuxMessage>,
+  consumers: ReadonlyMap<string, DurableConsumerCursor>,
+  consumerId: string
+): DeliveryQueue {
   return {
-    pending: [...messages.values()].sort((left, right) => left.sequence - right.sequence).map((item) => item.envelope.messageId),
-    consumers: Object.fromEntries(consumers.entries())
+    // Delivery is mutable; filtering on it would make an acknowledged numeric position skip mail.
+    pending: [...messages.values()].filter((item) => addressedTo(item, consumerId))
+      .sort((left, right) => left.sequence - right.sequence).map((item) => item.envelope.messageId),
+    consumers: Object.fromEntries([...consumers].map(([id, cursor]) => [id, {
+      acked: cursor.acked, generation: cursor.generation, inFlight: cursor.deliveryIds.length
+    }]))
+  }
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+function reader(value: AgentMuxDeliveryReader): AgentMuxDeliveryReader {
+  return { consumerId: nonEmpty(value.consumerId, 'Consumer id'),
+    readerRun: { runId: nonEmpty(value.readerRun?.runId ?? '', 'Reader Run') } }
+}
+
+function assertGeneration(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new AgentMuxError('Message consumer generation is invalid.', 'MESSAGE_ACK_GENERATION_STALE')
   }
 }
 
@@ -176,7 +226,7 @@ export class DurableAgentMuxMessageQueue {
   private nextSequence = 1
   private readonly messages = new Map<string, DurableAgentMuxMessage>()
   private readonly operations = new Map<string, string>()
-  private readonly consumers = new Map<string, ConsumerCursor>()
+  private readonly consumers = new Map<string, DurableConsumerCursor>()
   private readonly journal: JournalRecord[] = []
   private tail: Promise<unknown> = Promise.resolve()
 
@@ -276,13 +326,52 @@ export class DurableAgentMuxMessageQueue {
       this.messages.set(record.messageId, { ...current, delivery: { ...delivery, ...(record.reason === undefined ? {} : { reason: record.reason }) } })
       return
     }
-    const cursor = this.consumers.get(record.consumerId) ?? { acked: 0, generation: 1, inFlight: 0 }
-    if (record.kind === 'consumer-check') this.consumers.set(record.consumerId, { ...cursor, generation: record.generation, inFlight: record.deliveryIds.length })
-    else this.consumers.set(record.consumerId, { acked: cursor.acked + record.deliveryIds.length, generation: record.generation + 1, inFlight: 0 })
+    if (record.kind !== 'consumer-check' && record.kind !== 'consumer-ack') {
+      throw new AgentMuxError('Message queue journal record is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
+    const identity = reader(record)
+    assertGeneration(record.generation)
+    if (!Array.isArray(record.deliveryIds) || record.deliveryIds.some((id) => typeof id !== 'string') ||
+      new Set(record.deliveryIds).size !== record.deliveryIds.length) {
+      throw new AgentMuxError('Message consumer batch is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
+    const previous = this.consumers.get(identity.consumerId)
+    const arithmetic = deliveryQueue(this.messages, this.consumers, identity.consumerId)
+    const exact = arithmetic.pending.slice(previous?.acked ?? 0, (previous?.acked ?? 0) + record.deliveryIds.length)
+    if (!sameIds(record.deliveryIds, exact)) {
+      throw new AgentMuxError('Message consumer batch is not in its recipient domain.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
+    if (record.kind === 'consumer-check') {
+      const replacement = previous !== undefined && previous.readerRun.runId !== identity.readerRun.runId
+      const expectedGeneration = previous ? previous.generation + (replacement ? 1 : 0) : 1
+      if (record.generation !== expectedGeneration ||
+        (previous && previous.deliveryIds.length > 0 && !sameIds(previous.deliveryIds, record.deliveryIds))) {
+        throw new AgentMuxError('Message consumer check is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      }
+      this.consumers.set(identity.consumerId, { acked: previous?.acked ?? 0,
+        generation: record.generation, readerRun: identity.readerRun, deliveryIds: [...record.deliveryIds] })
+    } else {
+      this.consumers.set(identity.consumerId, this.cursorAfterAck(record))
+    }
+  }
+
+  private cursorAfterAck(record: JournalAck): DurableConsumerCursor {
+    const current = this.consumers.get(record.consumerId)
+    if (!current || current.readerRun.runId !== record.readerRun.runId ||
+      !sameIds(current.deliveryIds, record.deliveryIds)) {
+      throw new AgentMuxError('Message consumer reader is stale.', 'MESSAGE_ACK_GENERATION_STALE')
+    }
+    const next = ackDeliveryBatch(deliveryQueue(this.messages, this.consumers, record.consumerId),
+      record.consumerId, record.generation).consumers[record.consumerId]!
+    return { acked: next.acked, generation: next.generation,
+      readerRun: { ...current.readerRun }, deliveryIds: [] }
   }
 
   private async appendRecord(record: JournalRecord): Promise<void> {
     const line = `${JSON.stringify(record)}\n`
+    if (this.bytes + Buffer.byteLength(line) > (this.options.maxBytes ?? DEFAULT_MAX_BYTES)) {
+      throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
+    }
     const handle = await open(this.path, 'a', 0o600)
     try { await handle.write(line); await handle.sync() } finally { await handle.close() }
     this.bytes += Buffer.byteLength(line)
@@ -341,30 +430,46 @@ export class DurableAgentMuxMessageQueue {
     })
   }
 
-  async check(consumerId: string, limit: number): Promise<{ readonly generation: number; readonly messages: readonly DurableAgentMuxMessage[] }> {
+  async check(
+    input: AgentMuxDeliveryReader & { readonly limit: number },
+    reauthorize: () => Promise<void>
+  ): Promise<AgentMuxDeliveryBatch> {
+    const identity = reader(input)
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new AgentMuxError('Message batch limit must be an integer from 1 to 100.', 'MESSAGE_BATCH_LIMIT_INVALID')
+    }
     return this.withLock(async () => {
-      await this.ensureLoaded()
-      const id = nonEmpty(consumerId, 'Consumer id')
-      const batch = checkDeliveries(deliveryQueue(this.messages, this.consumers), id, limit)
-      const cursor = batch.queue.consumers[id]!
-      if (cursor.inFlight === 0) return { generation: cursor.generation, messages: [] }
-      if ((this.consumers.get(id)?.inFlight ?? 0) === 0) {
-        await this.appendRecord({ kind: 'consumer-check', sequence: this.nextSequence, consumerId: id, generation: batch.generation, deliveryIds: batch.deliveryIds })
+      await reauthorize()
+      const previous = this.consumers.get(identity.consumerId)
+      const replacement = previous !== undefined && previous.readerRun.runId !== identity.readerRun.runId
+      const queue = deliveryQueue(this.messages, this.consumers, identity.consumerId)
+      const arithmetic = replacement ? { ...queue, consumers: { ...queue.consumers,
+        [identity.consumerId]: { ...queue.consumers[identity.consumerId]!, generation: previous.generation + 1 } } } : queue
+      const batch = checkDeliveries(arithmetic, identity.consumerId, input.limit)
+      const changed = replacement || (previous?.deliveryIds.length ?? 0) === 0 && batch.deliveryIds.length > 0
+      if (changed) {
+        await this.appendRecord({ kind: 'consumer-check', sequence: this.nextSequence,
+          ...identity, generation: batch.generation, deliveryIds: batch.deliveryIds })
       }
-      return { generation: cursor.generation, messages: batch.deliveryIds.map((messageId) => structuredClone(this.messages.get(messageId)!)) }
+      return { ...identity, generation: batch.generation,
+        messages: batch.deliveryIds.map((messageId) => structuredClone(this.messages.get(messageId)!)) }
     })
   }
 
-  async ack(consumerId: string, generation: number): Promise<void> {
+  async ack(
+    input: AgentMuxDeliveryReader & { readonly generation: number },
+    reauthorize: () => Promise<void>
+  ): Promise<AgentMuxDeliveryAcknowledgement> {
+    const identity = reader(input)
+    assertGeneration(input.generation)
     return this.withLock(async () => {
-      await this.ensureLoaded()
-      const id = nonEmpty(consumerId, 'Consumer id')
-      const queue = deliveryQueue(this.messages, this.consumers)
-      const cursor = queue.consumers[id]
-      if (!cursor || cursor.inFlight === 0 || cursor.generation !== generation) throw new AgentMuxError('Message consumer generation is stale.', 'MESSAGE_ACK_GENERATION_STALE')
-      const next = ackDeliveryBatch(queue, id, generation)
-      await this.appendRecord({ kind: 'consumer-ack', sequence: this.nextSequence, consumerId: id, generation, deliveryIds: queue.pending.slice(cursor.acked, cursor.acked + cursor.inFlight) })
-      this.consumers.set(id, next.consumers[id]!)
+      await reauthorize()
+      const current = this.consumers.get(identity.consumerId)
+      const record: JournalAck = { kind: 'consumer-ack', sequence: this.nextSequence,
+        ...identity, generation: input.generation, deliveryIds: current?.deliveryIds ?? [] }
+      const next = this.cursorAfterAck(record) // Validate before writing, including the pure generation fence.
+      await this.appendRecord(record)
+      return { ...identity, acknowledgedMessageIds: [...record.deliveryIds], nextGeneration: next.generation }
     })
   }
 

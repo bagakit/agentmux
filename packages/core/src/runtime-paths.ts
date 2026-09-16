@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // SSOT for the pinned CtxMux artifact's manifest digest. `ctxmux-run-adapter.ts`
@@ -43,11 +43,18 @@ export function defaultAgentMuxControlSocketPath(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'control.sock')
 }
 
-export function defaultAgentMuxMessageQueuePath(): string {
-  const override = process.env.AGENTMUX_MESSAGE_QUEUE_PATH?.trim()
+export function defaultAgentMuxMessageQueuePath(
+  adoptedFileStorePath: string | null = process.env.AGENTMUX_AGENT_SESSION_STORE?.trim() || null,
+  queueAuthority = process.env.AGENTMUX_MESSAGE_QUEUE_PATH
+): string {
+  const override = queueAuthority?.trim()
   if (override) {
     if (!isAbsolute(override)) throw new Error('AGENTMUX_MESSAGE_QUEUE_PATH must be an absolute path.')
     return resolve(override)
+  }
+  if (adoptedFileStorePath !== null) {
+    if (!isAbsolute(adoptedFileStorePath)) throw new Error('Agent Session store context must be an absolute path.')
+    return join(dirname(resolve(adoptedFileStorePath)), 'global-messages.ndjson')
   }
   return join(homedir(), '.agentmux', 'state', 'global-messages.ndjson')
 }
