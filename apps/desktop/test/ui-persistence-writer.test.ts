@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import type { StateStorage } from 'zustand/middleware'
+import type { StorageValue } from 'zustand/middleware'
 import {
   createDebouncedPersistentStorage,
   createWriteFencedStorage,
@@ -12,8 +12,8 @@ import {
 /**
  * The renderer-side debounced layout writer. A layout gesture (dock drag, split-ratio, tab reorder)
  * fires many state changes per second; writing localStorage synchronously on each one is what this
- * coalesces into one trailing write. The flush closes the in-memory window a hard shutdown would lose,
- * and is what the unload handler calls.
+ * coalesces into one trailing write. Equal input keeps the durable deadline. Unload flush saves the
+ * remaining pending value on ordinary shutdown; abrupt shutdown does not run that handler.
  *
  * Mutation intent:
  *  - removing the debounce (writing straight through) fails 'coalesces a burst into a single write'.
@@ -25,7 +25,7 @@ function recordingStorage() {
   const writes: Array<{ name: string; value: string }> = []
   const removes: string[] = []
   const backing = new Map<string, string>()
-  const storage: StateStorage = {
+  const storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
     getItem: (name) => backing.get(name) ?? null,
     setItem: (name, value) => {
       writes.push({ name, value })
@@ -39,65 +39,203 @@ function recordingStorage() {
   return { storage, writes, removes }
 }
 
+type TestState = { value: string }
+const persisted = (value: string): StorageValue<TestState> => ({ state: { value }, version: 1 })
+const encoded = (value: string): string => JSON.stringify(persisted(value))
+
 describe('createDebouncedPersistentStorage', () => {
   beforeEach(() => vi.useFakeTimers())
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
   it('reads pass straight through to the base storage', () => {
     const base = recordingStorage()
-    base.storage.setItem('k', 'seed')
-    const { storage } = createDebouncedPersistentStorage(base.storage, 400)
-    expect(storage.getItem('k')).toBe('seed')
+    base.storage.setItem('k', encoded('seed'))
+    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    expect(storage.getItem('k')).toEqual(persisted('seed'))
   })
 
   it('coalesces a burst of writes into a single trailing write of the newest value', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage(base.storage, 400)
+    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
 
-    storage.setItem('layout', 'a')
-    storage.setItem('layout', 'b')
-    storage.setItem('layout', 'c')
+    storage.setItem('layout', persisted('a'))
+    storage.setItem('layout', persisted('b'))
+    storage.setItem('layout', persisted('c'))
     // Nothing lands during the gesture — the whole point of the debounce.
     expect(base.writes).toEqual([])
 
     vi.advanceTimersByTime(400)
     // Exactly one durable write, carrying the last value, not one per change.
-    expect(base.writes).toEqual([{ name: 'layout', value: 'c' }])
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('c') }])
   })
 
   it('flush lands the pending value immediately without waiting for the timer', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage(base.storage, 400)
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
 
-    storage.setItem('layout', 'pending')
+    storage.setItem('layout', persisted('pending'))
     expect(base.writes).toEqual([])
 
     flush()
-    expect(base.writes).toEqual([{ name: 'layout', value: 'pending' }])
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('pending') }])
 
     // The flush also cancels the timer, so it does not double-write when the timer would have fired.
     vi.advanceTimersByTime(400)
-    expect(base.writes).toEqual([{ name: 'layout', value: 'pending' }])
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('pending') }])
   })
 
   it('flush is a no-op when nothing is pending', () => {
     const base = recordingStorage()
-    const { flush } = createDebouncedPersistentStorage(base.storage, 400)
+    const { flush } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
     flush()
     expect(base.writes).toEqual([])
   })
 
   it('a remove cancels a pending write for that key and removes from the base', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage(base.storage, 400)
+    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
 
-    storage.setItem('layout', 'stale')
+    storage.setItem('layout', persisted('stale'))
     storage.removeItem('layout')
     vi.advanceTimersByTime(400)
 
     // The debounced value must not resurrect a key the store just deleted.
     expect(base.writes).toEqual([])
     expect(base.removes).toEqual(['layout'])
+  })
+
+  it('equal pending content keeps the first durable deadline while updates continue', () => {
+    const base = recordingStorage()
+    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage)
+    storage.setItem('layout', persisted('new draft'))
+    for (let tick = 0; tick < 20; tick += 1) {
+      vi.advanceTimersByTime(100)
+      // Different projected objects with equal serialized content must also keep the deadline.
+      storage.setItem('layout', persisted('new draft'))
+    }
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('new draft') }])
+  })
+
+  it('a genuinely changed pending value starts a new trailing deadline', () => {
+    const base = recordingStorage()
+    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage)
+    storage.setItem('layout', persisted('first'))
+    vi.advanceTimersByTime(300)
+    storage.setItem('layout', persisted('newest'))
+    vi.advanceTimersByTime(399)
+    expect(base.writes).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('newest') }])
+  })
+
+  it('an already durable value does not start another write or resurrect a reverted edit', () => {
+    const base = recordingStorage()
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    storage.setItem('layout', persisted('saved'))
+    flush()
+    storage.setItem('layout', persisted('temporary'))
+    storage.setItem('layout', persisted('saved'))
+    vi.advanceTimersByTime(400)
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('saved') }])
+    expect(storage.getItem('layout')).toEqual(persisted('saved'))
+  })
+
+  it('unchanged projected identity skips JSON encoding and storage reads', () => {
+    const base = recordingStorage()
+    const read = vi.spyOn(base.storage, 'getItem')
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const input = persisted('same projection')
+    storage.setItem('layout', input)
+    flush()
+    const stringify = vi.spyOn(JSON, 'stringify')
+    read.mockClear()
+    storage.setItem('layout', { ...input })
+    vi.advanceTimersByTime(400)
+    expect(stringify).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+    expect(base.writes).toHaveLength(1)
+    stringify.mockRestore()
+  })
+
+  it('clear invalidates the identity cache so the same projection can be saved again', () => {
+    const base = recordingStorage()
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const input = persisted('same projection')
+    storage.setItem('layout', input)
+    flush()
+    storage.removeItem('layout')
+    expect(storage.getItem('layout')).toBeNull()
+    storage.setItem('layout', input)
+    flush()
+    expect(base.writes).toEqual([
+      { name: 'layout', value: encoded('same projection') },
+      { name: 'layout', value: encoded('same projection') }
+    ])
+  })
+
+  it('rehydrate invalidates the input cache and rereads the durable authority', () => {
+    const base = recordingStorage()
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const input = persisted('old projection')
+    storage.setItem('layout', input)
+    flush()
+    base.storage.setItem('layout', encoded('other durable value'))
+    expect(storage.getItem('layout')).toEqual(persisted('other durable value'))
+    storage.setItem('layout', input)
+    flush()
+    expect(base.writes.at(-1)).toEqual({ name: 'layout', value: encoded('old projection') })
+  })
+
+  it('a storage version change is a real write even when projected identity is unchanged', () => {
+    const base = recordingStorage()
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const input = persisted('same projection')
+    storage.setItem('layout', input)
+    flush()
+    storage.setItem('layout', { state: input.state, version: 2 })
+    flush()
+    expect(base.writes).toEqual([
+      { name: 'layout', value: encoded('same projection') },
+      { name: 'layout', value: JSON.stringify({ state: input.state, version: 2 }) }
+    ])
+  })
+
+  it('a synchronous failed write remains pending for a flush retry', () => {
+    const base = recordingStorage()
+    const write = vi.spyOn(base.storage, 'setItem').mockImplementationOnce(() => { throw new Error('disk unavailable') })
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    storage.setItem('layout', persisted('keep this draft'))
+    expect(() => flush()).toThrow('disk unavailable')
+    expect(base.writes).toEqual([])
+    flush()
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('keep this draft') }])
+    expect(write).toHaveBeenCalledTimes(2)
+  })
+
+  it('the same projected input retries after a failed write without needing another durable change', () => {
+    const base = recordingStorage()
+    vi.spyOn(base.storage, 'setItem').mockImplementationOnce(() => { throw new Error('disk unavailable') })
+    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const input = persisted('keep this draft')
+    storage.setItem('layout', input)
+    expect(() => flush()).toThrow('disk unavailable')
+    storage.setItem('layout', input)
+    vi.advanceTimersByTime(400)
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('keep this draft') }])
+  })
+
+  it('the outer startup fence rejects writes before queueing, then admits the same restored input', () => {
+    const base = recordingStorage()
+    const writer = createDebouncedPersistentStorage<TestState>(base.storage)
+    const fence = createWriteFencedStorage(writer.storage)
+    const input = persisted('restored layout')
+    fence.storage.setItem('layout', input)
+    fence.openWrites()
+    writer.flush()
+    expect(base.writes).toEqual([])
+    fence.storage.setItem('layout', input)
+    writer.flush()
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('restored layout') }])
   })
 })
 
@@ -203,11 +341,9 @@ describe('createWriteFencedStorage', () => {
 })
 
 describe('store.ts wiring: the persist layer uses the debounced writer with an unload flush', () => {
-  // The store module runs its top-level persist setup on import, and localStorage/window are absent in
-  // this node env, so the wiring cannot be exercised behaviorally here — the debounce and flush units
-  // above cover behavior. This scans the source for the load-bearing wiring, the same technique
-  // main-window-setup.test.ts uses for index.ts. Comments are stripped so a comment cannot supply a
-  // match.
+  // Actual Store behavior is covered by workbench-persistence-relevance.test.ts with private browser
+  // storage. These small source guards additionally pin the fence/queue ownership and unload wiring;
+  // they are not substitutes for the actual Store tests. Comments cannot supply a match.
   const here = dirname(fileURLToPath(import.meta.url))
   const storePath = join(here, '../src/renderer/src/store.ts')
 
@@ -219,11 +355,11 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
 
   it('feeds the debounced writer as the persist storage, not the raw synchronous one', async () => {
     const source = stripComments(await readFile(storePath, 'utf8'))
-    expect(source).toContain('createDebouncedPersistentStorage(guardedWorkbenchStorage)')
+    expect(source).toContain('createDebouncedPersistentStorage<PersistedAppState>(')
     // The persist config must consume the debounced storage; reverting it to the raw guarded storage
     // (a synchronous write per layout change) is the regression this guards.
-    expect(source).toContain('createJSONStorage(() => persistentWorkbenchStorage.storage)')
-    expect(source).not.toMatch(/createJSONStorage\(\(\)\s*=>\s*guardedWorkbenchStorage\)/)
+    expect(source).toContain('storage: workbenchWriteFence.storage')
+    expect(source).toContain('createWriteFencedStorage(persistentWorkbenchStorage.storage)')
   })
 
   it('registers the unload trailing flush so a shutdown mid-drag keeps the last layout write', async () => {
@@ -233,14 +369,14 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
 
   it('persist 写入真的穿过那道写闸，且闸没有第二份手写实现', async () => {
     // 上面那五条行为断言证的是「闸自己拦得住」，这一条证的是「persist 确实从它后面写」。两者必须分开：
-    // 闸的单元测试全绿，而 store 里把 `guardedWorkbenchStorage` 改回裸的 `workbenchStorage()` 转发，
+    // 闸的单元测试全绿，而 store 里把 `workbenchWriteFence.storage` 改回裸的 writer，
     // 那些行为断言一条都不会红——闸变成一个没人经过的正确实现（本仓「抽进 lib 只解决一半」那一族）。
     const source = stripComments(await readFile(storePath, 'utf8'))
 
-    // 闸必须在场，且 persist 消费的那条链是 fence → debounce → createJSONStorage。
+    // 闸必须在场，且 persist 消费的那条链是 persist → fence → typed debounce → JSON。
     expect(source).toContain('createWriteFencedStorage(')
-    expect(source).toContain('workbenchWriteFence.storage')
-    expect(source).toContain('createDebouncedPersistentStorage(guardedWorkbenchStorage)')
+    expect(source).toContain('storage: workbenchWriteFence.storage')
+    expect(source).toContain('createDebouncedPersistentStorage<PersistedAppState>(')
 
     // 闸的判断必须只有 lib 里那一份。这个模块里若又出现一个「按标志决定要不要写」的分支，就是第二份
     // 手抄——而它会与 lib 那份独立漂移（漏改一处不会红，正是这个缺陷此前的形状）。

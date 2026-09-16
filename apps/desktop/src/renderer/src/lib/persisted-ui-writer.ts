@@ -1,36 +1,42 @@
-import type { StateStorage } from 'zustand/middleware'
+import { createJSONStorage, type PersistStorage, type StorageValue } from 'zustand/middleware'
 
 // A layout drag (dock resize, split-ratio, tab reorder) fires many state changes per second, and the
 // old storage wrote localStorage synchronously on every one. Coalesce them: the newest value per key
-// lands once, this long after activity settles. The window it opens — a change living only in memory —
-// is closed by `flush`, which an unload handler calls so a hard shutdown mid-drag still keeps it.
+// lands once, this long after durable activity settles. Equal values do not extend that deadline.
+// Unload flush closes the remaining in-memory window on an ordinary quit; abrupt exit cannot flush.
 const DEFAULT_DEBOUNCE_MS = 400
 
-type FlushablePersistentStorage = {
-  storage: StateStorage
+type SynchronousStateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+type FlushablePersistentStorage<State> = {
+  storage: PersistStorage<State>
   /** Write any debounced value to the base storage now. A no-op when nothing is pending. */
   flush: () => void
 }
 
 /**
- * Wrap a base StateStorage so writes are trailing-debounced instead of synchronous per change. Reads
- * and removes pass straight through — only writes are deferred, because only writes are the frequent,
- * coalescable operation. The base is still the authority on whether a write actually lands (the write
- * fence lives there); this layer only decides *when* the base is asked.
+ * Own the JSON boundary and the pending writes for synchronous browser storage. Unchanged projected
+ * state is rejected before JSON encoding; newly projected equal content keeps the existing deadline.
+ * The startup fence must wrap this storage, so a rejected startup write cannot enter this queue.
  */
-export function createDebouncedPersistentStorage(
-  base: StateStorage,
+export function createDebouncedPersistentStorage<State>(
+  base: SynchronousStateStorage,
   delayMs: number = DEFAULT_DEBOUNCE_MS
-): FlushablePersistentStorage {
+): FlushablePersistentStorage<State> {
   // Keyed by storage name: a later setItem for a key overwrites its pending value rather than queuing
   // a second write, and a removeItem drops any pending value so it cannot resurrect after deletion.
   const pending = new Map<string, string>()
+  // This is an input identity cache, not a claim that the input has reached durable storage.
+  const inputs = new Map<string, StorageValue<State>>()
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const writePending = (): void => {
     timer = null
-    for (const [name, value] of pending) base.setItem(name, value)
-    pending.clear()
+    for (const [name, value] of pending) {
+      base.setItem(name, value)
+      // A synchronous storage failure leaves this value pending for a later flush / same-value retry.
+      pending.delete(name)
+    }
   }
 
   const flush = (): void => {
@@ -41,19 +47,56 @@ export function createDebouncedPersistentStorage(
     writePending()
   }
 
-  const storage: StateStorage = {
+  const schedule = (): void => {
+    if (timer !== null) clearTimeout(timer)
+    timer = setTimeout(writePending, delayMs)
+  }
+
+  const jsonStorage = createJSONStorage<State>(() => ({
     getItem: (name) => base.getItem(name),
     setItem: (name, value) => {
+      if (pending.get(name) === value) {
+        if (timer === null) schedule()
+        return
+      }
+      if (base.getItem(name) === value) {
+        pending.delete(name)
+        if (pending.size === 0 && timer !== null) {
+          clearTimeout(timer)
+          timer = null
+        }
+        return
+      }
       pending.set(name, value)
-      // Trailing debounce: reset the clock on each change so the write lands after the gesture ends,
-      // not once per frame during it.
-      if (timer !== null) clearTimeout(timer)
-      timer = setTimeout(writePending, delayMs)
+      schedule()
     },
     removeItem: (name) => {
       pending.delete(name)
+      inputs.delete(name)
+      if (pending.size === 0 && timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
       base.removeItem(name)
     }
+  }))!
+
+  const storage: PersistStorage<State> = {
+    getItem: (name) => {
+      // An explicit rehydrate rereads the authority; the next input must be compared with that value.
+      inputs.delete(name)
+      return jsonStorage.getItem(name)
+    },
+    setItem: (name, value) => {
+      const previous = inputs.get(name)
+      if (previous?.state === value.state && previous.version === value.version) {
+        if (pending.has(name) && timer === null) schedule()
+        return
+      }
+      jsonStorage.setItem(name, value)
+      inputs.set(name, value)
+    },
+    removeItem: (name) => jsonStorage.removeItem(name)
   }
 
   return { storage, flush }
@@ -76,8 +119,14 @@ export function registerUnloadFlush(flush: () => void): () => void {
   }
 }
 
-type WriteFencedStorage = {
-  storage: StateStorage
+type PersistentStorage<Value> = {
+  getItem: (name: string) => Value | null | Promise<Value | null>
+  setItem: (name: string, value: Value) => unknown
+  removeItem: (name: string) => unknown
+}
+
+type WriteFencedStorage<Value> = {
+  storage: PersistentStorage<Value>
   /** Let writes through from here on. Idempotent; there is no way back — see the doc comment. */
   openWrites: () => void
 }
@@ -99,7 +148,7 @@ type WriteFencedStorage = {
  * 只提供「开」而不提供「关」：闸的语义是一次性的启动放行，不是可反复开合的开关。给出关闭入口就等于
  * 造出「运行期把闸关上导致此后用户改动永不落盘」这条新的静默丢失路径。
  */
-export function createWriteFencedStorage(base: StateStorage): WriteFencedStorage {
+export function createWriteFencedStorage<Value>(base: PersistentStorage<Value>): WriteFencedStorage<Value> {
   let writesEnabled = false
   return {
     storage: {
