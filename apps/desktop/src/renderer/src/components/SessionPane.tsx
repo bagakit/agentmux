@@ -2,6 +2,7 @@ import { AlertTriangle, CircleStop, History, LoaderCircle, RefreshCw, RotateCcw,
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
+import type { SessionControl } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
   dismissOpenDestinationRequest,
@@ -97,6 +98,20 @@ export function SessionPane({
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const [historyOpen, setHistoryOpen] = useState(false)
   useEffect(() => { setHistoryOpen(false) }, [sessionId, viewMode])
+  const readHistory = useCallback((control: SessionControl): boolean => {
+    const current = useAppStore.getState().sessions.find((item) => item.id === sessionId)
+    if (!visible || historyOpen || current?.kind !== 'agent' || control.kind !== 'agent' ||
+        current.control.hostId !== control.hostId || current.control.agentSessionId !== control.agentSessionId ||
+        current.control.run.runId !== control.run.runId) return false
+    setHistoryOpen(true)
+    return true
+  }, [sessionId, visible, historyOpen])
+  const closeHistory = (): void => {
+    setHistoryOpen(false)
+    if (linkOrigin.tabId && linkOrigin.regionId) {
+      useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'keyboard')
+    }
+  }
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   useEffect(() => {
     if (pendingAgentRestore && visible) setHistoryOpen(true)
@@ -342,7 +357,8 @@ export function SessionPane({
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
                 interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
-                visible={visible}
+                visible={visible && !historyOpen}
+                {...(session.kind === 'agent' ? { onReadHistory: readHistory } : {})}
                 readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
               />
@@ -352,7 +368,7 @@ export function SessionPane({
               key={`${session.control.hostId}:${session.id}:${session.control.run.runId}`}
               control={session.control}
               label={agentInputIdentity ?? session.label}
-              onClose={() => setHistoryOpen(false)}
+              onClose={closeHistory}
               workspaceRoot={activeWorkspaceRoot}
               openWorkspaceFile={openWorkspaceFile}
               openHttpLink={onProseLinkClick}
