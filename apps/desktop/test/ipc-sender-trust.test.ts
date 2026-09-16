@@ -50,6 +50,7 @@ const THROWING_CHANNEL_MESSAGES: ReadonlyArray<readonly [PrivilegedChannel, stri
   ['ui:writeClipboardImage', 'Untrusted clipboard image sender'],
   ['ui:savePastedImage', 'Untrusted pasted image sender'],
   ['ui:notifyAgentAttention', 'Untrusted notification sender'],
+  ['ui:setAgentAttentionCount', 'Untrusted Dock badge sender'],
   ['browser:switchProfile', 'Untrusted Browser Profile sender'],
   ['browser:listProfiles', 'Untrusted Browser Profile sender'],
   ['browser:createProfile', 'Untrusted Browser Profile sender'],
