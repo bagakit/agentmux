@@ -42,7 +42,8 @@ import {
   type AgentMuxRegionNeighbor,
   type AgentMuxRegionNeighbors,
   type AgentMuxTabAnchor,
-  type AgentMuxTerminalRegion
+  type AgentMuxTerminalRegion,
+  type AgentMuxTerminalViewObservation
 } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -574,6 +575,34 @@ function parseNeighbors(value: unknown): AgentMuxRegionNeighbors {
   return neighbors
 }
 
+function parseTerminalView(value: unknown): AgentMuxTerminalViewObservation {
+  const message = 'Control terminal view observation is invalid.'
+  const source = object(value, message, 'CONTROL_PROTOCOL_ERROR')
+  const grid = object(source.viewGrid, message, 'CONTROL_PROTOCOL_ERROR')
+  const rawBuffer = object(source.buffer, message, 'CONTROL_PROTOCOL_ERROR')
+  const sampledAt = finiteNumber(source.sampledAt, message)
+  const viewGrid = { cols: finiteNumber(grid.cols, message), rows: finiteNumber(grid.rows, message) }
+  const bufferType = rawBuffer.type
+  const mouseTrackingMode = source.mouseTrackingMode
+  const buffer = { baseY: finiteNumber(rawBuffer.baseY, message), viewportY: finiteNumber(rawBuffer.viewportY, message), length: finiteNumber(rawBuffer.length, message) }
+  if (sampledAt < 0 ||
+    !Number.isSafeInteger(viewGrid.cols) || viewGrid.cols <= 0 ||
+    !Number.isSafeInteger(viewGrid.rows) || viewGrid.rows <= 0 ||
+    !Number.isSafeInteger(buffer.baseY) || buffer.baseY < 0 ||
+    !Number.isSafeInteger(buffer.viewportY) || buffer.viewportY < 0 ||
+    !Number.isSafeInteger(buffer.length) || buffer.length <= 0 ||
+    buffer.viewportY > buffer.baseY || buffer.baseY >= buffer.length ||
+    (bufferType !== 'normal' && bufferType !== 'alternate') ||
+    (mouseTrackingMode !== 'none' && mouseTrackingMode !== 'x10' && mouseTrackingMode !== 'vt200' && mouseTrackingMode !== 'drag' && mouseTrackingMode !== 'any') ||
+    typeof source.visible !== 'boolean' || typeof source.readOnly !== 'boolean' ||
+    typeof source.liveReady !== 'boolean' || typeof source.acceptsInput !== 'boolean') {
+    throw new AgentMuxError(message, 'CONTROL_PROTOCOL_ERROR')
+  }
+  return { runId: id(source.runId, message, 'CONTROL_PROTOCOL_ERROR'), sampledAt,
+    visible: source.visible, readOnly: source.readOnly, liveReady: source.liveReady,
+    acceptsInput: source.acceptsInput, viewGrid, buffer: { type: bufferType, ...buffer }, mouseTrackingMode }
+}
+
 function parseRegion(value: unknown, inspected: true): AgentMuxInspectedRegion
 function parseRegion(value: unknown, inspected?: false): AgentMuxRegion
 function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentMuxInspectedRegion {
@@ -595,10 +624,16 @@ function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentM
             ? { ...base, kind: source.kind }
             : (() => { throw new AgentMuxError('Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   if (!inspected) return region
+  let terminalView: AgentMuxTerminalViewObservation | undefined
+  if (source.terminalView !== undefined) {
+    if (region.kind !== 'agent' && region.kind !== 'terminal') throw new AgentMuxError('Only Agent or Terminal Regions can carry a terminal view.', 'CONTROL_PROTOCOL_ERROR')
+    terminalView = parseTerminalView(source.terminalView)
+    if (region.kind === 'terminal' && terminalView.runId !== region.runId) throw new AgentMuxError('Terminal view Run does not match the Region.', 'CONTROL_PROTOCOL_ERROR')
+  }
   const rawBounds = object(source.bounds, 'Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
   const bounds = { x: normalized(rawBounds.x), y: normalized(rawBounds.y), width: normalized(rawBounds.width), height: normalized(rawBounds.height) }
   if (bounds.width === 0 || bounds.height === 0 || bounds.x + bounds.width > 1 + Number.EPSILON || bounds.y + bounds.height > 1 + Number.EPSILON) throw new AgentMuxError('Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...region, bounds, neighbors: parseNeighbors(source.neighbors) }
+  return { ...region, bounds, neighbors: parseNeighbors(source.neighbors), ...(terminalView === undefined ? {} : { terminalView }) }
 }
 
 function parseAgentRegion(value: unknown): AgentMuxAgentRegion {

@@ -1,3 +1,4 @@
+import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
@@ -2634,7 +2635,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'inspect.region') {
       const region = resolveWorkbenchControlRegion(input(), request.target, request.caller)
-      return { operation: request.operation, region: inspectWorkbenchControlRegion(input(), region) }
+      const inspected = inspectWorkbenchControlRegion(input(), region)
+      const currentSession = () => {
+        const state = get()
+        const surface = state.tabs[region.tabId]?.regions[region.regionId]
+        if ((region.kind !== 'agent' && region.kind !== 'terminal') ||
+            surface?.kind !== region.kind || surface.phase !== 'attached') return undefined
+        const session = state.sessions.find(item => item.id === surface.sessionId && item.kind === region.kind)
+        if (!session || (region.kind === 'agent' && session.id !== region.agentSessionId) ||
+            (region.kind === 'terminal' && session.control.run.runId !== region.runId)) return undefined
+        return session
+      }
+      const session = currentSession()
+      const terminalView = session && readTerminalViewObservation({
+        regionId: region.regionId, sessionId: session.id, runId: session.control.run.runId
+      })
+      // The getter is synchronous, but a client callback may still re-enter the Store.
+      const fresh = currentSession()
+      return { operation: request.operation, region: {
+        ...inspected,
+        ...(terminalView && fresh?.id === session?.id && fresh?.control.run.runId === terminalView.runId
+          ? { terminalView } : {})
+      } }
     }
     if (request.operation === 'list.agents') {
       const state = get()
