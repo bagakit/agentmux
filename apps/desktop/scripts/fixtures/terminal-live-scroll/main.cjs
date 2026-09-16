@@ -98,7 +98,9 @@ app.whenReady().then(async () => {
     handle('ui:requestStorageFlush', async () => { await win.webContents.session.flushStorageData() })
     handle('ui:setAgentAttentionCount', () => false)
     win = new BrowserWindow({ width: 1560, height: 780, show: false,
-      webPreferences: { preload: productPreload, nodeIntegration: false, contextIsolation: true, sandbox: false } })
+      webPreferences: { preload: productPreload, nodeIntegration: false, contextIsolation: true, sandbox: false,
+        // The private probe has no OS focus. Keep its real compositor/input tasks scheduled.
+        backgroundThrottling: false } })
     stage('loading')
     await win.loadFile(html, { query: { phase } }); win.showInactive()
     stage('loaded')
