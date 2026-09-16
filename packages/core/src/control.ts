@@ -107,7 +107,23 @@ export type AgentMuxRegionTarget =
   | { kind: 'region'; regionId: string }
   | { kind: 'agent-session'; agentSessionId: string }
 
-export type AgentMuxInspectedRegion = AgentMuxRegion & { bounds: AgentMuxRegionBounds; neighbors: AgentMuxRegionNeighbors }
+/** A client-owned terminal projection sampled on inspection, without output content. */
+export type AgentMuxTerminalViewObservation = {
+  runId: string
+  sampledAt: number
+  visible: boolean
+  readOnly: boolean
+  liveReady: boolean
+  acceptsInput: boolean
+  viewGrid: { cols: number; rows: number }
+  buffer: { type: 'normal' | 'alternate'; baseY: number; viewportY: number; length: number }
+  mouseTrackingMode: 'none' | 'x10' | 'vt200' | 'drag' | 'any'
+}
+export type AgentMuxInspectedRegion = AgentMuxRegion & {
+  bounds: AgentMuxRegionBounds
+  neighbors: AgentMuxRegionNeighbors
+  terminalView?: AgentMuxTerminalViewObservation
+}
 export type AgentMuxInspectedTab = { tabId: string; workspaceId: string; regions: AgentMuxInspectedRegion[] }
 
 export type AgentMuxControlExecutor = {
