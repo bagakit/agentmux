@@ -25,8 +25,9 @@ describe('Focus scroll and right workspace geometry ownership', () => {
   })
 
   it('allows the complete status matrix to be reached at narrow widths', () => {
-    expect(declarations('.focus-project-lanes__track')).toMatchObject({ 'overflow-x': 'auto' })
-    expect(declarations('.focus-project-lanes__groups')['grid-template-columns']).toBe('repeat(4, minmax(130px, 1fr))')
+    expect(declarations('.focus-project-lanes__track')).toMatchObject({ overflow: 'hidden' })
+    expect(declarations('.focus-project-lanes__groups').display).toBe('block')
+    expect(declarations('.focus-project-lanes__row')['grid-template-columns']).toBe('minmax(0, 1fr)')
   })
 
   it('keeps empty portal registry shells outside the input hit tree', () => {
@@ -35,8 +36,8 @@ describe('Focus scroll and right workspace geometry ownership', () => {
     expect(declarations('.workspace-workbench-slot:not(.workspace-workbench-slot--parked)')).toMatchObject({ 'pointer-events': 'auto' })
   })
 
-  it('assigns the full Focus content row after hiding its Tab chrome', () => {
-    expect(declarations('.focused-tab-workspace .workspace-workbench--focus-only .pane-group')).toMatchObject({ 'grid-template-rows': 'minmax(0, 1fr)' })
-    expect(declarations('.focused-tab-workspace .workspace-workbench--focus-only .pane-tabbar')).toMatchObject({ display: 'none' })
+  it('the retained Focus host occupies the complete Region area', () => {
+    expect(declarations('.retained-workbench-view')).toMatchObject({ height: '100%', 'min-height': '0' })
+    expect(declarations('.workspace-workbench-slot.workspace-workbench-slot--focus-source')).toMatchObject({ visibility: 'hidden', 'pointer-events': 'none' })
   })
 })

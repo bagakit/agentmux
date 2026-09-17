@@ -73,7 +73,7 @@ describe('Global Agents card board', () => {
     useAppStore.setState({ sessions: [agent('done', 'done', 3), agent('needs-you', 'waiting', 1), agent('working', 'working', 2)], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const groups = [...container.querySelectorAll<HTMLElement>('.global-agents-group')]
-    expect(groups.map((group) => group.dataset.bucket)).toEqual(['needs-you', 'working', 'done', 'error'])
+    expect(groups.map((group) => group.dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle'])
     expect(container.querySelector('[data-session-id="needs-you"]')).toBeTruthy()
   })
 
