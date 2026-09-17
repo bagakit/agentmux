@@ -23,10 +23,18 @@ const FEATURE_ANCHORS = [
   },
   {
     id: 'window-agent-status-and-resources',
-    source: 'apps/desktop/src/renderer/src/components/AgentStatusBar.tsx',
-    symbol: 'AgentStatusBar',
+    source: 'apps/desktop/src/renderer/src/components/FocusNavigationButton.tsx',
+    formerSources: ['apps/desktop/src/renderer/src/components/AgentStatusBar.tsx'],
+    symbol: 'FocusNavigationButton',
+    callers: ['apps/desktop/src/renderer/src/components/TopRowChrome.tsx'],
+    tests: ['apps/desktop/test/navigation-status-presentation.test.tsx', 'apps/desktop/test/footer-navigation-density.test.ts']
+  },
+  {
+    id: 'window-resource-observation',
+    source: 'apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx',
+    symbol: 'ResourceUsagePanel',
     callers: ['apps/desktop/src/renderer/src/App.tsx'],
-    tests: ['apps/desktop/test/agent-status-bar.test.tsx', 'apps/desktop/test/agent-roster-surface.test.tsx']
+    tests: ['apps/desktop/test/resource-usage-observability.test.tsx', 'apps/desktop/test/resource-usage-collapsed.test.tsx']
   },
   {
     id: 'workspace-path-rebind',
@@ -104,7 +112,7 @@ for (const anchor of FEATURE_ANCHORS) {
 }
 
 const history = deletedHistory().map((record) => {
-  const anchor = FEATURE_ANCHORS.find((candidate) => candidate.source === record.path)
+  const anchor = FEATURE_ANCHORS.find((candidate) => candidate.source === record.path || candidate.formerSources?.includes(record.path))
   return {
     ...record,
     anchorId: anchor?.id ?? null,

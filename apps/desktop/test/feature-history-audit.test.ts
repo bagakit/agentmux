@@ -16,6 +16,10 @@ describe('feature history audit', () => {
       anchor.ok && anchor.productionCallerCount > 0 && anchor.testHitCount > 0
     ))).toBe(true)
     expect(report.deletedHistory.length).toBeGreaterThan(0)
+    const retiredStatusBar = report.deletedHistory.filter((entry: { path: string }) => entry.path.endsWith('/AgentStatusBar.tsx'))
+    expect(retiredStatusBar.length).toBeGreaterThan(0)
+    expect(retiredStatusBar.every((entry: { anchorId: string; replacementPresent: boolean }) => entry.anchorId === 'window-agent-status-and-resources' && entry.replacementPresent)).toBe(true)
+    expect(report.anchors.find((entry: { id: string }) => entry.id === 'window-resource-observation')?.ok).toBe(true)
     expect(report.repositoryRoot).toBe(repositoryRoot.replace(/\/$/, ''))
   })
 })
