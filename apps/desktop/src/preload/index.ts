@@ -129,6 +129,8 @@ const api: AgentMuxPreloadApi = {
     listTopics: (workspaceId: string) => ipcRenderer.invoke('scratch:listTopics', workspaceId),
     readTopic: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:readTopic', workspaceId, topicId),
+    ensureMote: (workspaceId: string, topicId: string) =>
+      ipcRenderer.invoke('scratch:ensureMote', workspaceId, topicId),
     ensureTopic: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:ensureTopic', workspaceId, topicId),
     renameTitle: (workspaceId: string, topicId: string, title: string) =>

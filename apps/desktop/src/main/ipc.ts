@@ -511,6 +511,9 @@ export async function registerIpc(args: {
   handle('scratch:ensureTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensure(workspace(config, workspaceId), topicId)
   )
+  handle('scratch:ensureMote', async (workspaceId: string, topicId: string) =>
+    await args.scratchTopics.ensureMote(workspace(config, workspaceId), topicId)
+  )
   handle('scratch:renameTitle', async (workspaceId: string, topicId: string, title: string) =>
     await args.scratchTopics.renameTitle(workspace(config, workspaceId), topicId, title)
   )
