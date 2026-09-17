@@ -5,7 +5,7 @@
 用户确认：「把这一排页签切换的按钮改成这个顺序，然后把它们放到最左下角」。窗口只有一组主导航，固定顺序为 **PMO Teams、Space、Focus、Goals、Survey**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。
 
 - **PMO Teams** 是协调入口：打开或收起同一 PMO 浮窗，保留当前主工作面的选中状态和执行焦点。PMO 排第一不意味着启动默认进入 PMO；启动仍恢复用户上一次工作面。
-- **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space，Workspace 继续表达底层工作区对象。
+- **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space。Space 作为更外层产品对象及其 Folder/Topic 两类定义见《Space、Folder 与 Topic》；Workspace 继续表达底层工作区对象。
 - **Focus** 查看执行状态、最近上下文与需要用户处理的事项；进入已有 Session 时继续复用原 Tab/Region。
 - **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；待澄清的想法可以先作为 Goal 记录，再由 PMO 补齐目标与完成标准。Demand 仍是持久化实体与控制协议身份，Goal 状态与执行 Session 状态独立。
 - **Survey** 用于浏览与查证，打开网页后进入 Space 的既有 Browser 工作面。
@@ -40,6 +40,14 @@
 - 已有该 Topic 工作面的点击仍只聚焦并复用原 Tab、Region 和 Session，不重复启动 Terminal；后台准备的固定 Topic 仍可显式要求不抢当前工作面。
 - Terminal 启动过程沿用统一的 launching/loading 反馈；启动失败必须保留 Topic 的可见工作面并显示原因与可重试动作，不能留下空白 Region。
 - Topic 列表行和 Board 行的标题、摘要与主要内容区都必须可点击，并走同一条 Scratch Topic 导航；只有复制、定位、头像和右键菜单等独立动作阻止事件冒泡，不能让用户必须命中一个隐藏或孤立的小图标。
+
+### Scratch 的交互与组织
+
+用户确认：「每件事情自成 wiki 并记录 agent 铭牌，能力非常强大，但是当前的交互和组织，还是多少有点混乱」。Scratch 必须保留每件事情独立的 Wiki、资料、产出与 Agent 铭牌；改进交互和组织时不能丢失这套耐久上下文。
+
+用户必须能清楚辨认当前在处理哪件事情、在哪里继续工作，以及资料、产出和参与 Agent 的归属。事情的存在与参与者铭牌不能依赖 Tab 是否打开；铭牌表达参与身份与耐久记忆，当前运行状态仍消费 Core 的权威事实。
+
+Scratch 不再承担与其他工作上下文分离的一套产品组织方式。用户从「Scratch 放进 Projects 作为默认 Project」进一步提出更外层的 Space 抽象，当前产品对象方向见《Space、Folder 与 Topic》。
 
 ### Agent 输入行与视图切换
 
@@ -123,6 +131,36 @@
 
 ## 产品对象
 
+### Space、Folder 与 Topic
+
+用户提出：「沿用 Space 的定义的话，那么这里我们可以拓展为两类 Space 定义，一类就是 Project（或者就叫 Folder），另一类就是 Topic，他们的特点不一样」，并确认这里要表达「一个更外层的抽象概念：space」。Space 是 Folder/Project 与 Topic 共用的外层产品概念；两类 Space 的组织特点必须可辨认，不能因为共用入口而抹平差异。Folder/Project 的最终显示名称尚未确定。
+
+- Folder/Project 类围绕已有目录组织工作。Project 可以由普通目录承载，Git 能力按真实仓库事实提供；不因采用 Space 概念就要求目录使用 Topic 的 Wiki 脚手架。
+- Topic 类围绕一件事情组织工作，保留独立 Wiki、资料、产出与 Agent 铭牌。Topic 的存在与耐久内容不依赖 Agent 或 Tab 是否仍打开。
+- 两类 Space 共用既有 Agent、Terminal、Browser、文件与 Tab/Region 工作能力，遵守同一重启恢复与健康 Session 保留合同。Space 不复制 Core 的 Session/Agent 状态或 ctxmux 的 Run 事实，启动继续恢复用户上次工作面。
+
+用户进一步要求：「在 space 树里他们显示不太一样，比如 topic 会自动根据规则去读 topic.md 来显示，且 topic 会自动识别和显示，不用手动绑定」，树上的 `+` 提供 `Open Folder As a Project` 与 `Create Another Topic` 两类入口。
+
+- Space 树对 Folder/Project 与 Topic 使用各自适合的内容来源。Folder/Project 表达打开的目录与实际项目事实；Topic 按识别规则自动发现，从该目录的 `topic.md` 读取人类可读标题、摘要等显示信息。Topic 不要求用户手动注册或绑定，发现与显示不依赖当前 Tab、Region 或 Session。
+- 树上的 `+` 必须明确区分打开已有目录与创建新 Topic。打开目录进入 Folder/Project；创建 Topic 形成独立的持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后自动可见可进入。
+- 显示信息读取失败属于流程状态：保留已有 Space 与工作面，在对应条目或服务窗明确说明问题。一个 Topic 的读取失败不能隐藏其他健康 Topic，也不能清空其已有 Tab/Region 或停止健康 Agent。
+
+用户进一步提出把 PMO Agent 这样的特殊 Topic 赋予特定类型，体验参考 muse 或 OpenAI dot，并明确：「这种 Agent 其实非常类似 Topic 的逻辑，和普通 folder 共享一套 space 管理逻辑，但是有自己的特殊预制」。
+
+- PMO 等特殊 Agent 以带预制的 Topic 组织，复用 Topic 的耐久目录、Wiki、资料、产出与铭牌，以及 Folder/Topic 共用的 Space 管理能力。预制负责特殊身份、默认上下文与产品入口，不建立另一套 Space、Topic、Agent 或 Run 生命周期。
+- 特殊 Agent 的入口、Space 树条目与已有工作面必须指向同一个持久 Space；打开、收起、恢复或切换入口不创建第二个 Topic 或 Session。现有 PMO 的身份、职责和执行焦点约束继续见《PMO teams topic 名称与职责》与《执行 Agent 焦点历史与 PMO 上下文隔离》。
+- 普通 Topic 不继承特殊预制的角色。特殊身份属于产品预制，与执行它的 Provider/Executor 区分；实际 Agent Session 仍通过 Core 的公开能力启动与恢复。
+
+用户进一步明确：「就像 topic 创建时会带有知识管理结构，这种 agent 创建的时候可以带有 soul，甚至可以是 topic 的超集（当前 PMO Team 其实就是这么设计）」，随后澄清：「我说的 soul 是类似 openclaw 和 hermes 的 SOUL.md」。Agent Space 可以作为 Topic 的超集：保留 Topic 的知识管理与协作者结构，创建时额外带有具体可读、可编辑的 `SOUL.md` 等特殊预制。`SOUL.md` 表达这位 Agent 的持久人格、价值取向、沟通方式与行为边界，和当前执行它的 Session、Run、Provider/Executor 身份区分；更换或恢复执行会话不能把这些耐久内容丢掉，也不能用模板覆盖用户已经编辑的内容。
+
+`SOUL.md` 与 Topic Wiki、协作规则、长期记忆和 Agent 铭牌保持各自职责：人格与表达设定由 `SOUL.md` 承载；事情的目标、知识与结果仍归 Topic；项目和协作流程仍归既有规则文件；学到的事实与协作者身份、交接记录仍归各自已有内容。此次确认不要求额外复制一套记忆文件或运行状态。
+
+PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Topic、Wiki、角色说明与工作面。`SOUL.md` 属于耐久上下文，不能覆盖用户当前指令、既有授权与 Core/ctxmux 的权威事实，也不能把设定了长期职责伪装成已经启动或完成了后台执行。文件存在与执行会话实际加载是两件事：启动、恢复和文件编辑后的生效情况必须按真实执行能力表达，不能仅因预制了文件就声称已加载，也不能为一个 Space 修改其他 Agent 的全局人格。具体模板、加载方式与更新时机留在提案中收敛。
+
+用户要求：「创建一个 feature-tracker 专门来做这个迭代吧，包括现在左下角的 PMO Teams 头像的交互，也可以借这次想的更加明白一些」。本轮迭代覆盖 Space 的统一组织、Topic 自动发现与创建、带 `SOUL.md` 的特殊预制，以及左下角 PMO Teams 头像与同一 Space 的交互关系。头像快捷入口、Space 树条目和完整工作面必须指向同一持久对象；讨论要明确点击、展开、收起、切换与原工作面焦点的关系。默认点击行为、浮窗最终形态和人格编辑入口尚未定案，不能把参考方案直接写成已确认行为。现行 PMO 的身份、职责、焦点隔离与恢复约束在明确替代前继续成立。
+
+用户进一步要求：「这个 Agent 在我们项目里最好有个不容易重复的名字」，并强调「Agent 毕竟太通用了」。带持久人格与特殊预制的产品对象需要独立、容易辨认的类型名称，与现有通用 Agent、Session、Provider/Executor 名称区分。最终名称在 Space 树、创建入口和 PMO 相关表面使用同一含义；PMO Teams 等实例的名字与这个类型名称分开。Muse、Dot 是命名方式的参考，不是本项目已经选定的名字，具体候选留在提案中比较。
+
 ### Agents / Session / Board 与注意力闭环
 
 - 主导航的入口、顺序、位置和名称见《左下角导航、Space 与 Goals》；顶行不重复平级导航，Session 表示工作面中的 Agent/Terminal 生命周期。
@@ -135,7 +173,7 @@
 
 ### Project 与 Workspace
 
-- Project Rail 只负责选择 Project/Scratch、显示紧凑状态和进入 Settings/Hosts。
+- 导航围绕 Space 的工作上下文组织；Folder/Project 与 Topic 两类的产品归属见《Space、Folder 与 Topic》。当前 Project Rail 负责选择工作上下文、显示紧凑状态和进入 Settings/Hosts。
 - Project Rail 的 `Projects` 只是分组标签，不是页面标题：它必须使用低于项目行标题的元信息层级，弱化字重与字距，不抢项目名称的注意力。
 - **选中和运行是两件独立的事实**。选中项目只用中性的整行 Surface 与 `aria-current` 表达；项目下存在处于 Board `working` 列（`starting`/`running`/`working`）的 Agent 时，在该行的独立尾部状态槽显示运行标记。这个标记对所有有运行中 Agent 的项目都显示，不能因为项目未选中而隐藏，也不能因为项目选中而变亮。运行标记必须复用 `sessionBoardColumn` 的判定，不维护第二份 Session 状态。
 - **“活着”和“正在产出”分开说**。`running` 表示进程可用但当前回合安静，只在 Project/Scratch 行显示为 muted 的 `idle` 数量；`starting`/`working` 才进入行内的 `Agent is working` 文案。独立的运行标记仍覆盖整个 Board working 列，让健康但安静的 Session 可被找到，却不能让同一 Agent 同时读成 working 和 idle。
@@ -1822,7 +1860,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 终端重新附着时，只有连续字节或可信的运行时状态才能支持屏幕和输入模式的恢复。完整 TUI 续接状态由 ctxmux 持有，并与原始输出字节和确认尺寸按同一权威顺序交付；Core 只公开投影，Desktop 只消费，不能各自补一份模式或解析器真相。屏幕导出、会话消息历史与完整解析续接是不同能力，来源缺失时继续按未知说明。从中途保留的字节开始解析，不能把解析器的默认模式当作原应用的当前模式，也不能按 Provider 名称猜测并强行开启鼠标或 alternate buffer。模式无法确认时明确说明，保留原 Session、输入和工作面。 续接能力按实际支持的终端协议声明范围：正常回滚、全屏应用的原生滚轮、真实鼠标编码和字节／尺寸顺序必须完整验收；未支持的扩展状态如实说明。局部扩展缺口不能阻断已验证的基础输入与阅读，也不能把基础画面导出称为完整协议续接。滚动交付必须绑定实际界面的缓冲区、真实滚轮事件和阅读到的历史范围；纯解析器与直接调用滚动方法的测试不能替代它。
 
-终端快照的局部存储失败或告警通道关闭，不能拖死共享持久化线程、阻断其他终端创建，或拿走健康 Run 的输入。快照是否可信仍由 Runtime 的字节边界、存储与交接事实判定；告警写入成功与否不能改变这个事实，也不能代替真实的数据错误结果。此前可用的工作面和 Run 保留，缺失的续接能力按本节的服务窗边界表达。
+终端快照的局部存储失败或告警通道关闭，不能拖死共享持久化线程、阻断其他终端创建，或拿走健康 Run 的输入。后台启动、运行和原地交接的正常提示与可恢复告警同样不能因日志接收端已经关闭而终止 daemon、删除原 endpoint 或中断健康 Run；日志不是生命周期判据。快照是否可信仍由 Runtime 的字节边界、存储与交接事实判定；告警写入成功与否不能改变这个事实，也不能代替真实的数据错误结果。此前可用的工作面和 Run 保留，缺失的续接能力按本节的服务窗边界表达。
 
 重连后的终端仍留在原工作面，按 Runtime 的同来源快照恢复真实画面，再继续接收实况。不能把最后一次尺寸伪装成中途某个字节位置发生过的 resize，也不能把一段原始字节存在等同于其间尺寸历史已知。只有字节来源的消费者继续拿到原始字节；缺失的历史尺寸明确按未知说明，不捏造丢字节或尺寸边界。重新绘制已活着的终端不得禁用健康 Agent 的输入；快照种子不算原始输出、ACK、新帧证据或 PTY 输入，历史回放也不得重复触发通知、剪贴板或终端查询回复等副作用。重连快照的来源未知或暂不可用时，保留已有画面与健康输入，持续说明“断连期间终端状态未能续接，显示可能不完整，会话仍在运行”；缺少尺寸顺序的历史尾段不绘入旧网格，不伪造完整恢复。Runtime 快照确认的输出边界和当前尺寸可用于继续接收其后的新输出；跳过无法证明尺寸顺序的历史范围不能算已阅读、已消费或已确认的字节，也不能引发原始字节回补后冒充画面恢复。只有取得可信续接状态才能消除这个未知。
 
