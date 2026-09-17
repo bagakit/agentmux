@@ -10,7 +10,7 @@ export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
 export type FocusContext = {
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
-  workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
+  hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null }
 export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean): FocusBucket {
@@ -40,7 +40,7 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
   else if (state === 'done') detail = 'Ready for another prompt · No result observed'
   return { id: session.id, name, detail, state, stateLabel, bucket, kind: session.kind, providerId: session.providerId,
-    workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
+    hostId: session.hostId, topicId: topicIdForSession(config, session), workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
