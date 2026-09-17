@@ -50,8 +50,8 @@ describe('mounted existing Tab Focus projection', () => {
     await act(async () => mount())
     expect(target!.querySelector('[data-workbench-region-id="selected-region"]')).toBeTruthy()
     expect(target!.querySelector('[data-session-projection="session-codex"]')?.getAttribute('data-owner-group')).toBe('durable-group')
-    expect(target!.querySelector('[data-workbench-region-id="sibling-region"]')).toBeTruthy()
-    expect(target!.querySelector('[data-workbench-region-id="sibling-region"]')?.closest('[data-active]')?.getAttribute('data-active')).toBe('false')
+    expect(home.querySelector('[data-workbench-region-id="sibling-region"]')).toBeTruthy()
+    expect(home.querySelector('[data-workbench-region-id="sibling-region"]')?.closest('[data-active]')?.getAttribute('data-active')).toBe('false')
     expect(useAppStore.getState().layouts['workspace-demo']!.groups[0]!.tabOrder).toEqual(['selected-tab', 'sibling-tab'])
     const originalRun = useAppStore.getState().sessions.find(session => session.id === 'session-codex')!.control.run.runId
     await act(async () => (target!.querySelector('[data-workbench-region-id="selected-region"]') as HTMLElement).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
@@ -79,7 +79,7 @@ describe('mounted existing Tab Focus projection', () => {
   it('waits for a delayed portal target then stops observing unrelated DOM output', async () => {
     const lookup = vi.spyOn(document, 'getElementById')
     await act(async () => mount())
-    expect(home.querySelector('[data-session-projection]')).toBeNull()
+    expect(home.querySelector('[data-session-projection="session-codex"]')).toBeTruthy()
     await act(async () => { addTarget(); await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(target!.querySelector('[data-session-projection="session-codex"]')).toBeTruthy()
     const lookupsAfterAttachment = lookup.mock.calls.length
