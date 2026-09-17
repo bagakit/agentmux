@@ -1,4 +1,6 @@
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
+import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
+import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -60,7 +62,7 @@ import {
   TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
   subscribeTerminalSearchCount
 } from '../lib/terminal-search-count'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay, recoverTerminalRetainedOutput, terminalHistoryBoundary, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork } from '../lib/terminal-replay'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay, recoverTerminalRetainedOutput, restoreTerminalCheckpoint, terminalContinuationOutcome, terminalHistoryBoundary, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork, type TerminalContinuationAbsence } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import {
@@ -70,6 +72,7 @@ import {
 } from '../lib/terminal-viewport-memory'
 import {
   admitTerminalLiveOutput,
+  admitTerminalLiveSnapshot,
   composeTerminalLiveOutputWrite,
   takeTerminalLiveOutputBatch,
   type TerminalLiveItem
@@ -266,6 +269,7 @@ export function TerminalView({
   const [historyReadFailure, setHistoryReadFailure] = useState(false)
   const [historyBoundary, setHistoryBoundary] = useState<string | null>(null)
   const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
+  const [continuationAbsence, setContinuationAbsence] = useState<TerminalContinuationAbsence | null>(null)
   const [viewportSyncFailed, setViewportSyncFailed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -419,6 +423,7 @@ export function TerminalView({
     setHistoryReadFailure(false)
     setHistoryBoundary(null)
     setReplaySizeUnknown(false)
+    setContinuationAbsence(null)
     setViewportSyncFailed(false)
     setPathActions(null)
     rememberedSelectionRef.current = ''
@@ -638,6 +643,7 @@ export function TerminalView({
     let observedOutput = false
     let attachmentId: string | null = null
     let readyForLiveOutput = false
+    let replayingContinuation = true
     const acceptsCurrentInput = (): boolean =>
       !readOnlyRef.current && terminalAcceptsInput({
         canControlRun: canControlRunRef.current,
@@ -661,6 +667,7 @@ export function TerminalView({
     }
     observationReaderRef.current = readObservation
     let cursor = 0
+    let resizeRevision = 0
     let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
     const liveOutputQueue: TerminalLiveItem[] = []
@@ -668,7 +675,7 @@ export function TerminalView({
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
-    let droppedPendingSize: { cols: number; rows: number } | null = null
+    let droppedPendingResize: AgentMuxTerminalResize | null = null
     // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
     let kittyKeyboard = initialKittyKeyboardState()
     // Semantic inspection only. xterm receives the original bytes and owns UTF-8/ANSI parsing;
@@ -757,6 +764,47 @@ export function TerminalView({
       }
     }
 
+    // Initial attach and reconnect consume the same authoritative ordering. Synthetic bytes
+    // bypass original-output inspectors, while input readiness keeps its existing live owner.
+    const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }): Promise<void> => {
+      // Exhaust the same ordering iterator before changing the canvas. Steps hold byte views,
+      // not copied payload; an invalid tail or revision cannot leave a partially restored seed.
+      const steps = [...terminalContinuationSteps(snapshot)]
+      replayingContinuation = true
+      try {
+        for (const step of steps) {
+          if (disposed) return
+          if (step.type === 'restore') {
+            viewport.acceptOwnerSize(step.checkpoint.size)
+            await restoreTerminalCheckpoint(step.restoreBytes, async (data) => {
+              if (!disposed) await terminalWrite(terminal, data)
+            })
+            cursor = step.checkpoint.throughByte
+            resizeRevision = step.checkpoint.resizeRevision
+          } else if (step.type === 'resized') {
+            viewport.acceptOwnerSize(step.size)
+            resizeRevision = step.resizeRevision
+          } else {
+            cursor = await hydrateTerminalReplay([step], writeOutput) ?? cursor
+          }
+        }
+        resizeRevision = snapshot.resizeRevision
+      } finally {
+        replayingContinuation = !readyForLiveOutput
+      }
+    }
+
+    const acceptUncontinuedSnapshot = (snapshot: AgentMuxRunAttachment, absence: TerminalContinuationAbsence): void => {
+      // This is the snapshot processing fence, never an ACK or proof that old bytes were read.
+      cursor = Math.max(cursor, snapshot.run.latestOutputBytes)
+      resizeRevision = snapshot.resizeRevision
+      if (snapshot.run.cols !== null && snapshot.run.rows !== null) {
+        viewport.acceptOwnerSize({ cols: snapshot.run.cols, rows: snapshot.run.rows })
+      }
+      liveGapRedrawPending = false
+      setContinuationAbsence({ ...absence, duringReconnect: true })
+    }
+
     const drainLiveOutput = async (): Promise<void> => {
       // Let same-turn IPC events accumulate so xterm sees one visual write instead of one write
       // per RuntimeEvent. The loop remains bounded and yields between batches when output is large.
@@ -764,8 +812,46 @@ export function TerminalView({
       while (!disposed && liveOutputQueue.length > 0) {
         const taken = takeTerminalLiveOutputBatch(liveOutputQueue)
         liveOutputQueue.splice(0, liveOutputQueue.length, ...taken.rest)
-        if (taken.size) {
-          viewport.acceptOwnerSize(taken.size)
+        if (taken.snapshot) {
+          const { snapshot } = taken.snapshot
+          if (snapshot.terminal.type === 'basic-vt') {
+            const previousCursor = cursor
+            viewport.beginReplay()
+            try {
+              await applyContinuation(snapshot)
+              if (disposed) return
+              setContinuationAbsence(null)
+              setReplaySizeUnknown(false)
+              setReplayGap(false)
+              setRuntimeHistoryGap(false)
+              liveGapRedrawPending = false
+              setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+            } catch (error) {
+              cursor = previousCursor
+              acceptUncontinuedSnapshot(snapshot, { type: 'unavailable', reason: 'invalid_checkpoint' })
+              console.warn('[terminal] reconnect state could not be continued', error)
+            } finally {
+              viewport.endReplay(true)
+            }
+          } else if (snapshot.terminal.type === 'unknown' || snapshot.terminal.type === 'unavailable') {
+            // A raw suffix cannot prove the missing historical geometry. Preserve the canvas
+            // and healthy input; later live output starts after the actual snapshot cut.
+            acceptUncontinuedSnapshot(snapshot, snapshot.terminal)
+          }
+          continue
+        }
+        if (taken.resize) {
+          const resize = taken.resize
+          if (resize.resizeRevision <= resizeRevision) continue
+          if (resize.throughByte > cursor) await backfillRetainedOutput(resize.throughByte)
+          if (disposed) return
+          if (resize.resizeRevision !== resizeRevision + 1 || resize.throughByte !== cursor) {
+            // Original byte backfill cannot reconstruct a lost resize. Keep the current grid
+            // usable while stating that the earlier terminal state is no longer proven.
+            setContinuationAbsence({ type: 'unavailable', reason: 'source_gap' })
+          }
+          viewport.acceptOwnerSize(resize.size)
+          resizeRevision = resize.resizeRevision
           continue
         }
         // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
@@ -826,18 +912,28 @@ export function TerminalView({
         liveDrain = null
         // A late event can arrive in the same turn the drain observes an empty queue. Keep the
         // queue live without turning it into a second output owner.
-        if (!disposed && liveOutputQueue.length > 0) scheduleLiveOutputDrain(liveOutputQueue.shift()!)
+        if (!disposed && liveOutputQueue.length > 0) scheduleLiveOutputDrain()
       }).catch(() => {})
     }
 
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       const core = event.event
-      const size = event.hostId === session.hostId && core.type === 'terminal-resized' &&
-        core.run.runId === session.control.run.runId ? { cols: core.cols, rows: core.rows } : null
-      if (!output && !size) return
+      const snapshot = event.hostId === session.hostId && core.type === 'terminal-snapshot' &&
+        core.run.runId === session.control.run.runId ? core : null
+      const resize = event.hostId === session.hostId && core.type === 'terminal-resized' &&
+        core.run.runId === session.control.run.runId ? {
+          size: { cols: core.cols, rows: core.rows },
+          throughByte: core.throughByte,
+          resizeRevision: core.resizeRevision
+        } : null
+      if (!output && !resize && !snapshot) return
       if (output && output.dataBytes.byteLength > 0) observeOutput()
       if (!readyForLiveOutput) {
+        if (snapshot) {
+          liveOutputQueue.splice(0, liveOutputQueue.length, ...admitTerminalLiveSnapshot(liveOutputQueue, snapshot))
+          return
+        }
         pending.push(event)
         pendingBytes += output ? output.endByte - output.startByte : 0
         while (
@@ -846,7 +942,11 @@ export function TerminalView({
         ) {
           const dropped = pending.shift()
           if (!dropped) break
-          if (dropped.event.type === 'terminal-resized') droppedPendingSize = dropped.event
+          if (dropped.event.type === 'terminal-resized') droppedPendingResize = {
+            size: { cols: dropped.event.cols, rows: dropped.event.rows },
+            throughByte: dropped.event.throughByte,
+            resizeRevision: dropped.event.resizeRevision
+          }
           const droppedOutput = outputForSession(dropped, session)
           if (!droppedOutput) continue
           pendingBytes -= droppedOutput.endByte - droppedOutput.startByte
@@ -854,7 +954,12 @@ export function TerminalView({
         }
         return
       }
-      if (size) scheduleLiveOutputDrain({ size })
+      if (snapshot) {
+        liveOutputQueue.splice(0, liveOutputQueue.length, ...admitTerminalLiveSnapshot(liveOutputQueue, snapshot))
+        scheduleLiveOutputDrain()
+      } else if (resize) {
+        if (resize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(resize)
+      }
       else if (output) scheduleLiveOutputDrain({
         dataBytes: output.dataBytes,
         startByte: output.startByte,
@@ -904,7 +1009,7 @@ export function TerminalView({
       setHasSelection(text.length > 0)
     })
     const oscHandlers = installTerminalOscHandlers(terminal, {
-      isReplaying: () => !readyForLiveOutput,
+      isReplaying: () => replayingContinuation,
       respondFromRenderer: session.kind === 'terminal',
       sendInput,
       // PTY 里的 TUI（nvim / fzf / lazygit）用 OSC 52 往剪贴板写。走的是和 Cmd+C 同一个出口，
@@ -998,21 +1103,24 @@ export function TerminalView({
           return
         }
         attachmentId = result.attachmentId
-        if (result.currentSize) terminal.resize(result.currentSize.cols, result.currentSize.rows)
-        const hasReplay = result.replay.some((chunk) => chunk.dataBytes.byteLength > 0)
-        setReplaySizeUnknown(hasReplay && result.currentSize === null)
-        if (result.gap) {
+        if (result.terminal.type === 'not-requested') throw new Error('The Runtime did not provide the requested terminal representation.')
+        const restored = result.terminal.type === 'basic-vt'
+        const hasReplay = restored || result.replay.some((chunk) => chunk.dataBytes.byteLength > 0)
+        if (!restored && result.currentSize) viewport.acceptOwnerSize(result.currentSize)
+        setReplaySizeUnknown(hasReplay && !restored && result.currentSize === null)
+        if (result.terminal.type === 'unknown' || result.terminal.type === 'unavailable') setContinuationAbsence(result.terminal)
+        if (result.gap && !restored) {
           setReplayGap(true)
           setRuntimeHistoryGap(true)
           cursor = result.gap.firstAvailableByte
         }
         if (hasReplay) observeOutput()
-        cursor = await hydrateTerminalReplay(
-          result.replay,
-          async (data) => {
-            await writeOutput(data)
-          }
-        ) ?? cursor
+        await applyContinuation({
+          run: { ...session.control.run, latestOutputBytes: result.session.latestOutputBytes },
+          terminal: result.terminal, replay: result.replay, resizeRevision: result.resizeRevision
+        })
+        if (disposed) return
+        setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
         // Only the first hidden frame belongs to initial positioning. The reveal deadline may
         // already have made this buffer readable; a late replay must preserve the user's scroll.
         if (!revealed && visibleRef.current) restoreRememberedViewport(terminal)
@@ -1023,17 +1131,18 @@ export function TerminalView({
         reveal()
         if (autoFocusRef.current) terminal.focus()
         await finishTerminalReplayRecovery({
-          gap: Boolean(result.gap) || (hasReplay && result.currentSize === null),
+          gap: !restored && (Boolean(result.gap) || (hasReplay && result.currentSize === null)),
           canControlRun: canControlRunRef.current,
           startLiveSynchronization: async () => await viewport.startLiveSynchronization(),
           finishReplay: () => viewport.endReplay(hasReplay),
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
+            replayingContinuation = false
             if (!disposed) setLiveOutputReady(true)
-            if (droppedPendingSize) scheduleLiveOutputDrain({ size: droppedPendingSize })
+            if (droppedPendingResize && droppedPendingResize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(droppedPendingResize)
             for (const event of pending.splice(0)) accept(event)
             // Even a queue consisting only of later size observations can have omitted output.
-            if (droppedPendingThrough > cursor) scheduleLiveOutputDrain()
+            if (liveOutputQueue.length > 0 || droppedPendingThrough > cursor) scheduleLiveOutputDrain()
             await outputTail
           },
           redrawCurrentScreen: async () => {
@@ -1264,6 +1373,9 @@ export function TerminalView({
   const viewportSyncNotice = serviceNoticeToRender(classifyServiceNotice(
     terminalViewportSyncOutcome(viewportSyncFailed, session.processState)
   ))
+  const continuationNotice = serviceNoticeToRender(classifyServiceNotice(
+    terminalContinuationOutcome(continuationAbsence, session.processState)
+  ))
 
   return (
     <Fragment>
@@ -1383,11 +1495,12 @@ export function TerminalView({
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
-          {revealNotice || replayGeometryNotice || viewportSyncNotice ? (
+          {revealNotice || replayGeometryNotice || viewportSyncNotice || continuationNotice ? (
             <div className="terminal-service-window">
               <ServiceWindowNotice notice={revealNotice} />
               <ServiceWindowNotice notice={replayGeometryNotice} />
               <ServiceWindowNotice notice={viewportSyncNotice} />
+              <ServiceWindowNotice notice={continuationNotice} />
             </div>
           ) : null}
           {!hydrating && !historyReadFailure && (replayGap || runtimeHistoryGap) ? (

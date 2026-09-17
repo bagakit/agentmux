@@ -7,7 +7,7 @@ import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 const fixture = vi.hoisted(() => ({ storage: vi.fn() }))
 vi.mock('@agentmux/core', async (original) => ({
   ...await original<typeof import('@agentmux/core')>(),
-  endpointDirectoryUsage: fixture.storage
+  runtimeStorageUsage: fixture.storage
 }))
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
@@ -19,9 +19,8 @@ const resources: AgentMuxRuntimeResourceSnapshot = {
 const runtimeRow: RuntimeUsage = {
   hostId: 'local', resources, unavailable: null,
   process: { cpuPercent: null, rssKib: null, unavailable: 'ctxmux does not publish its daemon PID' },
-  endpointStorage: [{ path: _hygiene_fixturePath("fixture/current"), bytes: 7890, current: true }],
-  endpointStorageUnavailable: null,
-  endpointReclaim: { reclaimed: [], skippedLive: [_hygiene_fixturePath("fixture/preserved")], failed: [] }
+  runtimeStorage: { path: _hygiene_fixturePath("fixture/current"), bytes: 7890 },
+  runtimeStorageUnavailable: null
 }
 
 function metric(pid: number, type: Electron.ProcessMetric['type'], cpu: number, rss: number, creationTime = 1): Electron.ProcessMetric {
@@ -224,11 +223,10 @@ describe('product resource subscription', () => {
 })
 
 describe('existing RuntimeController resource observation owner', () => {
-  it('uses public connected snapshots, observes storage once, and keeps startup directory cleanup distinct', async () => {
-    fixture.storage.mockResolvedValue(runtimeRow.endpointStorage)
+  it('uses public connected snapshots and measures only the selected Runtime storage once', async () => {
+    fixture.storage.mockResolvedValue(runtimeRow.runtimeStorage)
     const client = {
       runtimeResourceSnapshot: vi.fn(async () => resources),
-      endpointReclaim: vi.fn(() => runtimeRow.endpointReclaim),
       connect: vi.fn(() => { throw new Error('resource observation must not activate Runtime') }),
       stopTerminal: vi.fn(), remove: vi.fn()
     }
@@ -240,6 +238,7 @@ describe('existing RuntimeController resource observation owner', () => {
     const rows = await controller.resourceUsageObservation()
     expect(rows).toEqual([{ ...runtimeRow, hostId: 'local' }, { ...runtimeRow, hostId: 'other-local' }])
     expect(fixture.storage).toHaveBeenCalledOnce()
+    expect(fixture.storage).toHaveBeenCalledWith()
     expect(client.runtimeResourceSnapshot).toHaveBeenCalledTimes(2)
     expect(client.connect).not.toHaveBeenCalled()
     expect(client.stopTerminal).not.toHaveBeenCalled()
@@ -248,8 +247,8 @@ describe('existing RuntimeController resource observation owner', () => {
 
   it('a per-host Runtime failure and storage error leave the other host inventory intact', async () => {
     fixture.storage.mockRejectedValue(new Error('directory observation failed'))
-    const good = { runtimeResourceSnapshot: async () => resources, endpointReclaim: () => null }
-    const bad = { runtimeResourceSnapshot: async () => { throw new Error('disconnected') }, endpointReclaim: () => null }
+    const good = { runtimeResourceSnapshot: async () => resources }
+    const bad = { runtimeResourceSnapshot: async () => { throw new Error('disconnected') } }
     const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
     Object.assign(controller, { hosts: new Map([
       ['working', { executionHost: { kind: 'local' }, client: good }],
@@ -258,9 +257,10 @@ describe('existing RuntimeController resource observation owner', () => {
     const rows = await controller.resourceUsageObservation()
     expect(rows).toHaveLength(2)
     expect(rows[0]).toMatchObject({ hostId: 'working', resources, unavailable: null,
-      endpointStorage: null, endpointStorageUnavailable: 'directory observation failed' })
+      runtimeStorage: null, runtimeStorageUnavailable: 'directory observation failed' })
     expect(rows[1]).toMatchObject({ hostId: 'failed', resources: null, unavailable: 'disconnected',
-      endpointStorage: null, endpointStorageUnavailable: 'directory observation failed' })
+      runtimeStorage: null, runtimeStorageUnavailable: 'directory observation failed' })
     expect(fixture.storage).toHaveBeenCalledOnce()
+    expect(fixture.storage).toHaveBeenCalledWith()
   })
 })

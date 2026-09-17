@@ -4,20 +4,12 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// SSOT for the pinned CtxMux artifact's manifest digest. `ctxmux-run-adapter.ts`
-// imports it to verify the packed manifest bytes and the owner receipt; the
-// endpoint id below derives from it so each artifact version claims its own
-// socket/state root.
-export const CTXMUX_MANIFEST_SHA256 = 'ccf0a9bbc9e3db468459b81d011e40e90599ba43873bc795a1c6fc9dd668ce45'
+// Artifact identity only. The adapter verifies the packed manifest and owner receipt
+// with this digest; changing an artifact must not change the Runtime's address.
+export const CTXMUX_MANIFEST_SHA256 = '73368b461e715727730a952fa0dd4158ccbee5c6dcab4cd917f52cbd730f03a8'
 
-// Derive the endpoint identity from the pinned manifest so an artifact upgrade
-// lands on a fresh socket/state root instead of colliding with a stale detached
-// daemon from the previous version. A collision would let the old daemon pass the
-// build/protocol handshake but fail owner-receipt verification, throwing
-// CTXMUX_OWNER_IDENTITY_UNPROVEN with no reap and taking the whole app down via
-// app.exit(1). In-flight sessions do not transfer across an artifact version.
-// Historical Runtime namespace remains the original release identity.
-// Normalized manifest bytes change the verification checksum, not this address.
+// The already deployed host namespace is durable, independent of artifact identity.
+// Keep the existing address so upgrades reach the same listener, state and healthy Runs.
 const CTXMUX_RUNTIME_ID = '1e19b1caf5c6ddd1aa8b5cac'
 
 export function defaultAgentMuxRuntimeDirectory(): string {

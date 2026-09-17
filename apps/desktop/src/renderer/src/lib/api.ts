@@ -800,6 +800,8 @@ const mockApi: AgentMuxDesktopApi = {
         attachmentId,
         session: structuredClone(session),
         currentSize: null,
+        terminal: { type: 'unknown', reason: 'origin_unknown' },
+        resizeRevision: 0,
         ...mockRetainedReplay(control, afterByte)
       }
     },

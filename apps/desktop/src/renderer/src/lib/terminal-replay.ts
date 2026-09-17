@@ -1,8 +1,32 @@
-import type { AgentMuxRunState } from '@agentmux/core'
+import type { AgentMuxRunState, AgentMuxTerminalContinuation } from '@agentmux/core'
 import type { SessionReplayResult } from '../../../shared/contracts'
 import { TERMINAL_REVEAL_DEADLINE_MS } from './terminal-reveal'
 import { composeTerminalLiveOutputWrite } from './terminal-live-output'
 import { agentViabilityFromProcessState, type StepOutcome } from './service-window-notice'
+
+export type TerminalContinuationAbsence = Extract<AgentMuxTerminalContinuation, { type: 'unknown' | 'unavailable' }> & { duringReconnect?: boolean }
+
+export function terminalContinuationOutcome(absence: TerminalContinuationAbsence | null, processState: AgentMuxRunState): StepOutcome {
+  if (!absence) return { completed: true }
+  const reasons: Record<TerminalContinuationAbsence['reason'], string> = {
+    origin_unknown: 'The Runtime did not observe this terminal from its origin.',
+    source_gap: 'The Runtime cannot prove continuous terminal state across a source gap.',
+    tail_evicted: 'The bytes needed after the checkpoint are no longer retained.',
+    checkpoint_too_large: 'The terminal checkpoint exceeds the Runtime size limit.',
+    invalid_checkpoint: 'The Runtime could not validate the terminal checkpoint.'
+  }
+  return {
+    completed: false,
+    agentViability: agentViabilityFromProcessState(processState),
+    step: {
+      label: 'Restoring terminal state',
+      degradedMode: absence.duringReconnect
+        ? `${reasons[absence.reason]} Terminal state could not be continued across the disconnection. The existing display may be incomplete; live input remains available while the Run is healthy.`
+        : `${reasons[absence.reason]} Retained bytes remain readable, but earlier history and input modes cannot be confirmed. Live input remains available while the Run is healthy.`,
+      restore: 'Reopening retries the Runtime checkpoint. Lost origin or evicted bytes cannot be reconstructed from a later repaint.'
+    }
+  }
+}
 
 export function terminalReplayGeometryOutcome(unknown: boolean, processState: AgentMuxRunState): StepOutcome {
   if (!unknown) return { completed: true }
@@ -49,12 +73,12 @@ export function yieldTerminalWork(): Promise<void> {
 }
 
 /** Restores retained terminal bytes without turning a large replay into one uninterruptible write. */
-export async function hydrateTerminalReplay(
-  chunks: readonly TerminalReplayChunk[],
+async function writeTerminalBytes(
+  chunks: readonly { dataBytes: Uint8Array }[],
   write: (data: Uint8Array) => Promise<void>,
   yieldWork: () => Promise<void> = yieldTerminalWork
-): Promise<number | null> {
-  if (chunks.length === 0) return null
+): Promise<void> {
+  if (chunks.length === 0) return
   let batch = new Uint8Array(TERMINAL_REPLAY_BATCH_BYTES)
   let length = 0
   const flush = async (): Promise<void> => {
@@ -80,6 +104,25 @@ export async function hydrateTerminalReplay(
     }
   }
   await flush()
+}
+
+/** A synthetic seed has no raw byte range and must not pass through output inspectors. */
+export async function restoreTerminalCheckpoint(
+  restoreBytes: Uint8Array,
+  write: (data: Uint8Array) => Promise<void>,
+  yieldWork: () => Promise<void> = yieldTerminalWork
+): Promise<void> {
+  await writeTerminalBytes([{ dataBytes: restoreBytes }], write, yieldWork)
+}
+
+/** Restores original output, returning its raw byte cursor rather than the parser write size. */
+export async function hydrateTerminalReplay(
+  chunks: readonly TerminalReplayChunk[],
+  write: (data: Uint8Array) => Promise<void>,
+  yieldWork: () => Promise<void> = yieldTerminalWork
+): Promise<number | null> {
+  if (chunks.length === 0) return null
+  await writeTerminalBytes(chunks, write, yieldWork)
   return chunks.at(-1)!.endByte
 }
 
