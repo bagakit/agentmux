@@ -364,7 +364,11 @@ try {
  second=await launch('second')
  const restored=await waitFor('same durable workface after actual second process',async()=>{const state=await localState(second.cdp);return state?.restoredWorkbench?.tabs?.[normal.region.tabId]?state.restoredWorkbench:null})
  assert.deepEqual(restored,durable)
- assert.equal(client.runtimeIdentity().instanceId,native.instanceId)
+ // The long-lived parent's runtimeIdentity is handshake-cached. Bind this restart
+ // to a new public Core handshake instead of treating that cached value as fresh.
+ const verifier=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
+ try {receipt.runtimeAfter=verifier.runtimeIdentity();assert.equal(receipt.runtimeAfter.instanceId,native.instanceId);assert.equal(receipt.runtimeAfter.protocolVersion,18)}
+ finally {await verifier.dispose()}
  for(const item of runs)await waitFor('restored same Run input ready',async()=>{const region=await inspected(item.region.regionId);assert.equal(region.runId,item.region.runId);return region.terminalView?.liveReady&&region.terminalView.acceptsInput?region:null})
  await verifyNormal(second,normal);await verifyAlternate(second,alternate)
  receipt.after=await identity();assert.deepEqual(receipt.after,receipt.before)
