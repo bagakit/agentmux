@@ -14,7 +14,6 @@ import { promisify } from 'node:util'
 const repositoryRoot = resolve(process.env.AGENTMUX_VERIFY_REPOSITORY_ROOT ?? resolve(import.meta.dirname, '../../..'))
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
-const coreRequire = createRequire(join(repositoryRoot, 'packages/core/package.json'))
 const ts = require('typescript')
 const { requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
@@ -310,11 +309,14 @@ async function identity() {
  'packages/core/src/ctxmux-run-adapter.ts','packages/core/src/terminal-continuation.ts','packages/core/src/types.ts','packages/core/src/client.ts',
  'apps/desktop/scripts/verify-terminal-checkpoint-continuation.mjs','apps/desktop/scripts/probe-process.mjs']
  const hashes=Object.fromEntries(await Promise.all(files.map(async name=>{const bytes=await readFile(join(repositoryRoot,name));assert.ok(bytes.length>0,name);return [name,digest(bytes)]})))
- const sdkPath=coreRequire.resolve('@ctxmux/sdk'),sdkBytes=await readFile(sdkPath);assert.ok(sdkBytes.length>0)
- const sdk=await import(pathToFileURL(sdkPath));assert.equal(sdk.PROTOCOL_VERSION,18,'The actual Core SDK must be protocol18')
+ // Resolve with Node's real ESM import conditions from the Core package owner.
+ // The SDK deliberately exposes import only; CJS require.resolve is a different contract.
+ const {stdout:sdkUrl}=await exec(process.execPath,['--input-type=module','-e',"process.stdout.write(import.meta.resolve('@ctxmux/sdk'))"],{cwd:join(repositoryRoot,'packages/core'),timeout:5000,maxBuffer:4096})
+ const sdkPath=new URL(sdkUrl),sdkBytes=await readFile(sdkPath);assert.ok(sdkBytes.length>0)
+ const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,18,'The actual Core SDK must be protocol18')
  for(const binary of manifest.binaries)assert.equal(hashes[vendor+'/'+binary.path],binary.sha256)
  assert.equal(hashes[vendor+'/'+manifest.sdk.archive.path],manifest.sdk.archive.sha256)
- return {manifest:manifest.product,hashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{path:sdkPath,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
+ return {nodeVersion:process.version,manifest:manifest.product,hashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{url:sdkPath.href,protocolVersion:sdk.PROTOCOL_VERSION,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
 }
 try {
  receipt.before=await identity()
