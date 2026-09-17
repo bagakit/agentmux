@@ -1653,27 +1653,21 @@ Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体�
 
 PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic 导航使用。PMO 打开、恢复、提交消息和切换 PMO Tab 都更新 PMO 焦点；关闭 PMO 后回到之前的执行 Agent 上下文。执行 Agent 历史和 PMO 历史不合并，两个身份在 UI、持久化和提供给 Agent 的上下文中都必须可区分。
 
-### Focus 主表面与执行上下文历史
+### Focus 执行上下文、项目泳道与底部时间音轨
 
-顶部或底部的 Agents 产品入口统一命名为 **Focus**。Focus 代表“当前正在观察和工作的执行上下文”，不只代表 Agent 类型；Agent Session 和 Terminal Session 都可以成为当前执行上下文。PMO Teams 保持独立，不出现在 Focus 历史里。
+用户确认「按你说的改一版」，并要求「时间音轨参考一些视频编辑软件的样式，且放在最下面」。Focus 保留项目泳道、Recent Focus 与右侧完整原工作面；时间音轨位于整个 Focus 内容底部、全局状态栏上方，项目扫描与继续工作占据上方主区。PMO Teams 不混入执行上下文或其历史。
 
-用户在 Space 中点击、键盘切换或进入某个 Agent/Terminal Region 时，必须立即把该 Session 写入同一份 execution focus history；从 Focus、Board、Quick Switcher 或 Topic 进入同一 Session 也复用同一个写入入口。同一个 Session 只保留一个最近位置，最近一次聚焦提升到当前项。切换 Activity/Terminal 视图不创建新的 Session，也不产生第二份历史。
+用户进一步指出「每一个砖块上的信息，什么都看不出来，而且利用率很低」。条目首屏必须能区分同一项目、同一模型的多个 Agent：名称遵循既有显示名优先级，最近动作来自已有可观察事件；项目归属在泳道头表达，完整路径和完整身份按需查看，不在每块重复消耗首屏。事实不足时如实说明，不编造任务、进度或正在执行的动作。
 
-Focus 表面左侧提供一个独立的“最近上下文”列表，作为可点击的导航入口。列表每项表达 Session 身份、Agent 或 Terminal 类型、工作区和最近聚焦时间；当前项有明确的选中状态。主区展示按状态分组的可观察执行 Session，右侧保留当前 Session 的观察工作面。历史为空时显示短空态，不用空白面板或伪造 Agent。
+项目是纵向分组，宽屏支持状态组横向比较；左侧收窄时按状态分组纵向排列，所有 Context 和状态仍可到达。需要用户处理的事项优先可见；空分组不占大块空态。Working 只接收权威状态确认为运行/工作中的上下文，disconnected、stopped、idle、未知或待恢复状态保持原义，不伪装成 Working、完成结果或进程失败。项目计数区分活跃 Run 与全部上下文。
 
-Focus 是主表面命名和导航语义，不改变底层 `agentFocus.execution` 与 `agentFocus.pmo` 的持久化分层。跨表面切换只投影同一 execution Session，不创建第二个工作面、Run 或 Region；重启恢复时先恢复历史和当前 Session，再尝试恢复其原有 Tab/Region。
+Recent Focus 只读取同一份持久化 execution focus history，点击片段回到对应已有 Session；当前焦点和最近历史可扫描，完整轨道可以展开与收起，轨道内容独立滚动。时间位置取自真实 focusedAt 事件；片段终点只使用已知的下一次聚焦事件，未知终点明确保持开放，不补造未来十五分钟或精确运行时长。播放头仅表达当前聚焦事件，悬停预览不修改焦点；没有自动播放或持续计时动画。
 
-### Focus 项目泳道、Recent Focus 音轨与可调整工作面
+Focus、Space、Goals 共享同一执行上下文。切换表面、选择泳道条目、调整比例、收起音轨时，原 Tab、Region、Session、Run 与健康工作面保持；Focus 与 Space 之间不能因 portal 目的地变化重挂载已存在的终端、Browser 或编辑器。分割树与原组地址仍归 durable Workbench，Focus 只改变投影。目标暂未出现或恢复事实未就绪时保留原内容与可见说明，自动尝试接管，不以空白或删除身份代替恢复；每条正常分割分组及其非选中 Tab 都必须保持可恢复。
 
-Focus 的项目不能作为与内容平行的独立左栏。项目是工作面纵轴：每个有活跃 Agent 的项目占一条横向泳道，项目名称、路径和活跃数量固定在该泳道的轴头，属于这一项目的 Agent/Terminal Context 在同一条泳道内排列；没有活跃 Agent 的项目不生成泳道。点击泳道只改变现有 Focus 投影，不创建第二份 Session 或历史。
+执行 Agent 在 Space 中点击或键盘进入 Region、从 Focus/Goals/Quick Switcher/Topic 定位时，复用同一 execution focus 写入入口。同一 Session 只保留一个最近位置；切 Activity/Terminal 不创建第二份历史。重启先恢复历史、当前 Session 和原 Tab/Region，再尝试续接。
 
-左侧 Recent contexts 改名为 **Recent Focus**，不再使用纵向列表。它位于 Focus 内容顶部，表现为视频编辑器式的时间音轨：每个已聚焦的对话是一条可点击的短轨，轨道位置由持久化 `focusedAt` 事件和下一次聚焦事件推导，当前焦点有播放头/高亮，时间刻度和起止时间可读。该音轨表达导航事实和聚焦时序，不伪造未持久化的精确停留时长。
-
-选中 Context 后，右侧完整 Tab 工作面必须从首帧开始保留输入和 Region 交互；Tab Portal 目标暂时不可见时要继续观察 DOM 并自动接管，不能把"标题已经加载、内容空白"当成成功。左侧 Focus 投影与右侧 Tab 之间保留可操作的垂直拖拽把手；拖拽只改变 Focus 分栏比例，不能重建 Session、Run 或 Region，键盘也能调整并读出当前比例。
-
-**泳道容器必须能垂直滚动**：项目数量超过 Focus 面高度时，泳道容器要能上下滚动到看不见的泳道；当前项目泳道不得被上方 header 或下方边缘遮盖。这条属于容器几何约束，实现上意味着泳道列表容器需要在弹性布局里明确占据剩余高度（`flex: 1 1 auto` + `min-height: 0`），而不是自然撑开高度到父容器外；仅设 `overflow: auto` 而不接受剩余高度是缺陷（用户  报"泳道无法上下滚动"，commit f904eefa 修，缺一条 `flex: 1 1 auto` 即无效）。
-
-用户反馈「Focus 几乎不可用：滚动有问题，右边加载也有问题」。Recent Focus 与项目泳道必须各自拥有可到达末尾的滚动区域；历史数量增加不能挤掉泳道，窄宽度下四个状态组也不能静默被裁掉。Focus 右侧借用原 Tab 的工作面时，留在 Space registry 的空壳不得遮住 Focus 左侧或截走指针、点击和滚轮。右侧必须展示完整的原 Tab/Region 内容，重复聚焦同一上下文或切换工作面不能因为我们的投影流程重新加载健康 Session；加载失败要保留身份和恢复入口，不得清除 Session、Run、Tab 或 Region。
+主区、音轨与工作面各自拥有明确滚动边界；增长的历史不能挤掉主区，空 registry 壳不能截走点击、滚轮或输入。右侧减少重复标题，恢复/未知/真实失败显示既有服务窗语义并保留输入能力。涉及这些热路径时，正常活跃终端连续向上阅读与工作量边界同时按《Terminal 连续向上阅读历史》验收。视觉尺寸、密度与控件语言只定义在 surface-density 的同名章节。
 
 ### 全局工作面顶栏与名称
 
