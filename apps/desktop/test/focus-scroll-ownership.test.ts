@@ -26,7 +26,7 @@ describe('Focus scroll and right workspace geometry ownership', () => {
 
   it('allows the complete status matrix to be reached at narrow widths', () => {
     expect(declarations('.focus-project-lanes__track')).toMatchObject({ overflow: 'hidden' })
-    expect(declarations('.focus-project-lanes__groups').display).toBe('block')
+    expect(declarations('.focus-context-group')['flex-basis']).toBe('100%')
     expect(declarations('.focus-project-lanes__row')['grid-template-columns']).toBe('minmax(0, 1fr)')
   })
 

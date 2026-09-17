@@ -31,7 +31,7 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? 'Stopped' : state === 'starting' ? 'Starting' : 'Working'
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const workspace = workspaceForSession(config, session)
-  let detail = stateLabel
+  let detail = 'No activity details observed'
   if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
   else if (pending) detail = session.pendingInteraction!.kind === 'permission' ? 'Review permission request' : 'Review request in context'
   else if (latest?.kind === 'tool_call') detail = stepSummary(latest.toolName, latest.toolInput, 140, session.workspacePath) ?? latest.title

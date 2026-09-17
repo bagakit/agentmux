@@ -6,7 +6,7 @@
 .focus-filters { display: flex; flex: none; align-items: center; min-width: 0; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
 .focus-filters .global-board-toolbar__controls { display: flex; width: 100%; min-width: 0; gap: var(--sp-2); }
 .focus-filters .global-board-search { flex: 1 1 auto; min-width: 0; width: auto; }
-.focus-filters .global-board-select { flex: none; font-size: var(--fs-micro); }
+.focus-filters .global-board-select { flex: 0 1 auto; min-width: 0; font-size: var(--fs-micro); }
 .focus-project-lanes { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .focus-project-lanes__row { display: grid; grid-template-columns: 112px minmax(0, 1fr); border-top: 1px solid var(--line-soft); }
@@ -17,7 +17,6 @@
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
 .focus-project-lanes__groups { min-width: 0; display: flex; flex-wrap: wrap; align-content: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
 .focus-context-group { flex: 1 1 180px; min-width: 0; }
-.focus-context-group[data-empty='true'] { flex: 0 1 auto; }
 .focus-context-group__header { min-height: 28px; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-group__header strong { font-weight: 500; }
 .focus-context-group__header span { font-variant-numeric: tabular-nums; }
@@ -38,8 +37,8 @@
 @container (max-width: 620px) {
   .focus-project-lanes__row { grid-template-columns: minmax(0, 1fr); }
   .focus-project-lanes__axis { flex-direction: row; align-items: center; justify-content: space-between; padding-bottom: 0; }
-  .focus-project-lanes__groups { display: block; }
-  .focus-context-group[data-empty='true'] { display: inline-block; }
+  .focus-project-lanes__groups { display: flex; }
+  .focus-context-group { flex-basis: 100%; }
 }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .focus-workspace-resize-handle { position: relative; z-index: 3; flex: 0 0 6px; min-width: 6px; cursor: col-resize; background: var(--surface-0); touch-action: none; }
@@ -86,3 +85,8 @@
 .recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 
 .focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
+
+.focus-filters--mac { padding-left: 80px; min-height: 36px; -webkit-app-region: drag; }
+.focus-filters .global-board-toolbar__controls { -webkit-app-region: no-drag; }
+
+.focus-filters .global-board-select select { max-width: 130px; min-width: 0; }
