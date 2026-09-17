@@ -1,4 +1,3 @@
-import type { SessionSnapshot } from '../../../shared/contracts'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import { documentKey, type WorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
@@ -12,7 +11,6 @@ type Documents = Readonly<Record<string, unknown>>
 export type SurfaceMemoryCollectionInput = {
   tabs: Tabs
   layouts: Layouts
-  sessions: readonly SessionSnapshot[]
   documents: Documents
   dirtyDocuments: Readonly<Record<string, boolean>>
   savingDocuments: Readonly<Record<string, boolean>>
@@ -24,7 +22,6 @@ function candidateForSurface(
   tab: WorkbenchTab,
   surface: WorkbenchSurface,
   input: SurfaceMemoryCollectionInput,
-  sessionsById: ReadonlyMap<string, SessionSnapshot>,
   navigation: { navigationContextActive: boolean; tabVisible: boolean }
 ): SurfaceMemoryCandidate | null {
   const visible = navigation.tabVisible
@@ -67,11 +64,6 @@ function candidateForSurface(
       }
     }
     case 'browser': {
-      const session = sessionsById.get(surface.browserId)
-      // A Browser has no Core Session; the snapshot itself plus URL/Profile is the Main-owned rebuild
-      // proof. `session` is intentionally unused, but reading the map here documents that Browser ids
-      // are not Session ids and prevents a future implementation from borrowing terminal state.
-      void session
       return {
         id: surface.regionId,
         kind: 'browser',
@@ -97,14 +89,13 @@ function candidateForSurface(
 export function collectSurfaceMemoryCandidates(
   input: SurfaceMemoryCollectionInput
 ): SurfaceMemoryCandidate[] {
-  const sessionsById = new Map(input.sessions.map((session) => [session.id, session]))
   const candidates: SurfaceMemoryCandidate[] = []
   for (const tab of Object.values(input.tabs)) {
     const layout = input.layouts[tab.workspaceId]
     if (!layout) continue
     const navigation = surfaceNavigationVisibility(tab, layout, input.tabs, input)
     for (const surface of Object.values(tab.regions)) {
-      const candidate = candidateForSurface(tab, surface, input, sessionsById, navigation)
+      const candidate = candidateForSurface(tab, surface, input, navigation)
       if (candidate) candidates.push(candidate)
     }
   }
