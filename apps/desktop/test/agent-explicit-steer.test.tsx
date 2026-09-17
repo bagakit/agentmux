@@ -3,7 +3,8 @@ import { EventEmitter } from 'node:events'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore,
+  type AgentMuxControlRequest, type AgentMuxMessageEnvelope, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
@@ -322,4 +323,62 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
   expect(submits.map(call => [call[3], call[5]])).toEqual([
     [entry.operationId, undefined], [entry.operationId, { allowUncertainTurn: true }]
   ])
+})
+
+it('Control send steers its exact message through registered Main and public Core without a turn completion', async () => {
+  await draft('first accepted prompt'); await enter('metaKey'); await settled()
+  expect(writes).toEqual(['first accepted prompt', '\r'])
+  expect(client.agentSession(ID).semanticStatus?.state).toBe('working')
+  const message: AgentMuxMessageEnvelope = {
+    schema: 'agentmux.a2a.v1', messageId: 'control-exact-message', operationId: 'control-first-request',
+    createdAt: 1, sender: { kind: 'agent-session', agentSessionId: ID },
+    recipient: { kind: 'agent-session', agentSessionId: ID }, threadId: 'control-thread',
+    correlationId: 'control-correlation', replyTo: null, workspaceId: 'private',
+    senderSessionId: ID, senderRunId: RUN, recipientSessionId: ID, recipientRunId: RUN,
+    body: 'continue this exact work\nkeep the second line'
+  }
+  const request: AgentMuxControlRequest = {
+    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-first-request', operation: 'send',
+    target: { kind: 'agent-session', agentSessionId: ID }, text: message.body,
+    caller: { agentSessionId: ID }, message
+  }
+  // This begins after the existing Control author validation. No submit method is mocked:
+  // Store -> product preload -> registered IPC -> RuntimeController -> public Core all execute.
+  const prompt = `[Message from Agent ${ID}]\n${message.body}`
+  await act(async () => {
+    await expect(useAppStore.getState().executeControl(request)).resolves.toEqual({ operation: 'send', agentSessionId: ID })
+  })
+  const accepted = ['first accepted prompt', '\r', `\x1b[200~${prompt}\x1b[201~`, '\r']
+  expect(writes).toEqual(accepted)
+  const session = useAppStore.getState().sessions.find(session => session.id === ID)
+  if (session?.kind !== 'agent') throw new Error('The fixture Agent is missing')
+  const control = session.control
+  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt' && call[3] === message.messageId)
+  expect(calls).toEqual([['sessions:submitPrompt', control, prompt, message.messageId, ID, { allowUncertainTurn: true }]])
+  expect(client.agentSession(ID).terminalPromptDelivery).toMatchObject({
+    reason: 'turn-end-unconfirmed', submissionId: message.messageId
+  })
+  expect((await client.sessionTimeline(ID)).items.find(item => item.id === `prompt:${message.messageId}`)).toMatchObject({
+    content: prompt, authorAgentSessionId: ID, status: 'complete'
+  })
+
+  await act(async () => {
+    await expect(useAppStore.getState().executeControl({ ...request, requestId: 'control-replayed-request' })).resolves.toEqual({
+      operation: 'send', agentSessionId: ID
+    })
+  })
+  expect(writes).toEqual(accepted)
+  await act(async () => {
+    await expect(useAppStore.getState().executeControl({ ...request, requestId: 'control-conflicting-request',
+      text: 'changed body', message: { ...message, body: 'changed body' }
+    })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  })
+  expect(writes).toEqual(accepted)
+  await expect(runtime.submitPrompt(control, 'default is still gated', 'control-default'))
+    .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+  await expect(runtime.submitPrompt(control, 'automatic is still gated', 'control-auto',
+    { completionId: 'not-an-observed-completion', isCurrent: () => true, signal: new AbortController().signal },
+    undefined, { allowUncertainTurn: true }))
+    .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(writes).toEqual(accepted)
 })

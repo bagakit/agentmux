@@ -223,7 +223,7 @@ describe('Desktop Control owner', () => {
     await useAppStore.getState().executeControl(request({
       operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', caller: { agentSessionId: 'caller' }
     }))
-    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String), 'caller')
+    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String), 'caller', { allowUncertainTurn: true })
 
     tab = addWorkbenchRegion(tab, 'region-caller-2', 'down', {
       regionId: 'region-reviewer', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'reviewer'
@@ -256,7 +256,7 @@ describe('Desktop Control owner', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
       target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message
     })
-    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1', 'caller')
+    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1', 'caller', { allowUncertainTurn: true })
     expect(submit.mock.calls[0]?.[1]).toContain('keep this exact body')
   })
 
