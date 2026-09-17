@@ -18,7 +18,10 @@ describe('Focus Tab projection', () => {
     const selected = tabForFocusedSession(restored, 'session-2')
     expect(selected?.id).toBe('second')
     expect(Object.keys(selected?.regions ?? {})).toEqual(['second:region', 'second:terminal'])
-    expect(focusLayoutForTab(selected!).groups[0]?.tabOrder).toEqual(['second'])
+    const durable = { root: { type: 'leaf' as const, groupId: 'original-group' }, groups: [{ id: 'original-group', activeTabId: 'first', tabOrder: ['first', 'second'], recentTabIds: ['first', 'second'] }], activeGroupId: 'original-group' }
+    expect(focusLayoutForTab(selected!, durable)?.groups[0]).toEqual({ ...durable.groups[0], activeTabId: 'second', tabOrder: ['second'] })
+    expect(focusLayoutForTab(selected!, durable)?.activeGroupId).toBe('original-group')
+    expect(durable.groups[0]?.tabOrder).toEqual(['first', 'second'])
     expect(tabForFocusedSession(restored, null)).toBeNull()
   })
 
@@ -26,6 +29,7 @@ describe('Focus Tab projection', () => {
     expect(workbenchSource).toContain('const bodyTabs =')
     expect(workbenchSource).toContain('{bodyTabs.length > 0 ? bodyTabs.map')
     expect(workbenchSource).toContain('return focusPortalTarget ? createPortal(workbench, focusPortalTarget) : null')
-    expect(workbenchSource).toContain('const observer = new MutationObserver(resolveTarget)')
+    expect(workbenchSource).toContain('const observer = new MutationObserver(() => {')
+    expect(workbenchSource).toContain('observer.disconnect()')
   })
 })

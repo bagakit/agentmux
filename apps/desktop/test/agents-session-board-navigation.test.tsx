@@ -105,7 +105,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     expect(buttons[3]!.getAttribute('aria-label')).toBe('Survey: browse and verify information')
     expect(settings.getAttribute('aria-label')).toBe('Settings')
     expect(settings.hasAttribute('aria-current')).toBe(false)
-    expect(settings.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(settings.classList.contains('selected')).toBe(false)
     await act(async () => settings.click())
     expect(openSettings).toHaveBeenCalledExactlyOnceWith('workspaces')
     expect(useAppStore.getState().mainSurface).toBe('board')
