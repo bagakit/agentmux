@@ -343,7 +343,7 @@ try {
  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
  await writeFile(join(root,'terminal-program.py'),python,{mode:0o700})
  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private Runtime'}],executors:{},
- workspaces:[{id:'checkpoint-fixture',name:'Private checkpoint fixture',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{toolbar:{}}}))
+ workspaces:[{id:'checkpoint-fixture',name:'Private checkpoint fixture',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}}}))
  first=await launch('first')
  client=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
  await click(first.cdp,'[data-workspace-id="checkpoint-fixture"]')
