@@ -229,7 +229,6 @@ export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: Se
             className="surface-navigation__slot surface-navigation__settings"
             aria-label="Settings"
             title="Settings"
-            aria-haspopup="dialog"
             data-settings-section="workspaces"
             onClick={() => onOpenSettings('workspaces')}
           >

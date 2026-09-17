@@ -19,10 +19,12 @@ export function tabForFocusedSession(
 }
 
 /** Render the selected Tab through the normal Workbench tree without creating a second Run owner. */
-export function focusLayoutForTab(tab: WorkbenchTab): WorkspaceLayout {
+export function focusLayoutForTab(tab: WorkbenchTab, layout: WorkspaceLayout): WorkspaceLayout | null {
+  const owner = layout.groups.find((group) => group.tabOrder.includes(tab.id))
+  if (!owner) return null
   return {
-    root: { type: 'leaf', groupId: `focus:${tab.id}` },
-    groups: [{ id: `focus:${tab.id}`, activeTabId: tab.id, tabOrder: [tab.id], recentTabIds: [tab.id] }],
-    activeGroupId: `focus:${tab.id}`
+    root: { type: 'leaf', groupId: owner.id },
+    groups: [{ ...owner, activeTabId: tab.id, tabOrder: [tab.id] }],
+    activeGroupId: owner.id
   }
 }
