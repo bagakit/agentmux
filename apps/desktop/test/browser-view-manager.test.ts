@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -31,7 +31,7 @@ const fakeElectron = vi.hoisted(() => {
       this.deviceEmulation = parameters
     })
     readonly openDevTools = vi.fn()
-    executeJavaScriptInIsolatedWorldImpl = async (_worldId: number, scripts: Array<{ code: string }>) =>
+    executeJavaScriptInIsolatedWorldImpl = async (_worldId: number, scripts: Array<{ code: string }>): Promise<unknown> =>
       scripts[0]?.code.includes('Select an element') ? null : true
     readonly executeJavaScriptInIsolatedWorld = vi.fn(async (
       worldId: number,
@@ -188,11 +188,16 @@ const profiles: BrowserProfileResolver = {
   }
 }
 
+const privateLedgerRoots: string[] = []
+afterEach(() => { for (const path of privateLedgerRoots.splice(0)) rmSync(path, { recursive: true, force: true }) })
+
 function browserManager(window: ReturnType<typeof fakeWindow>['window']): BrowserViewManager {
   // ref 账本指向一个临时路径：本文件判的是 view 生命周期，不判持久化。给真路径会让这些用例
   // 往用户的 userData 里写文件。
+  const root = mkdtempSync(join(tmpdir(), 'agentmux-bvm-'))
+  privateLedgerRoots.push(root)
   return new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(
-    join(mkdtempSync(join(tmpdir(), 'agentmux-bvm-')), 'ref-ledger.json')
+    join(root, 'ref-ledger.json')
   ), appLinkHost())
 }
 
@@ -239,6 +244,93 @@ function fakeWindow() {
 }
 
 describe('BrowserViewManager', () => {
+  it('ensures an existing identity without navigating or replacing its Profile, including released owners', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    try {
+      await manager.create('browser-ensure', 'https://initial.example/')
+      await manager.switchProfile('browser-ensure', 'work')
+      const current = await manager.navigate('browser-ensure', 'https://current.example/page')
+      const view = fixture.children[0]!
+      const load = vi.spyOn(view.webContents, 'loadURL')
+      const ensured = await manager.create('browser-ensure', 'https://stale.example/').catch(() => null)
+      expect(ensured).toMatchObject({
+        id: 'browser-ensure', profileId: 'work', url: 'https://current.example/page', navigationId: current.navigationId
+      })
+      expect(fixture.children).toEqual([view])
+      expect(load).not.toHaveBeenCalled()
+      await manager.release('browser-ensure')
+      const restored = await manager.create('browser-ensure', 'https://stale.example/')
+      expect(restored).toMatchObject({ id: 'browser-ensure', profileId: 'work', url: 'https://current.example/page' })
+      expect(fixture.children).toHaveLength(1)
+      expect(fixture.children[0]).not.toBe(view)
+      expect(view.webContents.isDestroyed()).toBe(true)
+    } finally { manager.dispose() }
+  })
+
+  it('disposes active and released native owners without deleting the actual Store workbench; explicit close still removes only its Region', async () => {
+    const { useAppStore } = await import('../src/renderer/src/store.js')
+    const { createWorkbenchTab, addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+    const { createWorkspaceLayout } = await import('@agentmux/layout')
+    const original = useAppStore.getState()
+    const fixture = fakeWindow()
+    const sent = fixture.window.webContents.send
+    fixture.window.webContents.send = (channel, value) => {
+      sent(channel, value)
+      useAppStore.getState().applyBrowserEvent(value as import('../src/shared/contracts.js').BrowserEvent)
+    }
+    const manager = browserManager(fixture.window)
+    try {
+      const active = await manager.create('browser-active', 'https://active.example/')
+      const released = await manager.create('browser-released', 'https://released.example/')
+      let tab = createWorkbenchTab('browser-durable-tab', {
+        ...active, kind: 'browser', regionId: 'browser-active-region', browserId: active.id, workspaceId: 'workspace-a'
+      })
+      tab = addWorkbenchRegion(tab, 'browser-active-region', 'right', {
+        ...released, kind: 'browser', regionId: 'browser-released-region', browserId: released.id, workspaceId: 'workspace-a'
+      })
+      tab = addWorkbenchRegion(tab, 'browser-released-region', 'down', {
+        kind: 'file', regionId: 'dirty-sibling', workspaceId: 'workspace-a', path: 'draft.md'
+      })
+      useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { 'workspace-a': createWorkspaceLayout('group-a', [tab.id]) } })
+      const before = useAppStore.getState()
+      const persistedBefore = useAppStore.persist.getOptions().partialize!(before)
+      expect(Object.keys(before.tabs[tab.id]!.regions)).toEqual(['browser-active-region', 'browser-released-region', 'dirty-sibling'])
+      await manager.release('browser-released')
+      expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 1 })
+      fixture.sent.length = 0
+      manager.dispose()
+      expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
+      expect(fixture.children).toEqual([])
+      expect(fixture.sent).toEqual([])
+      expect(useAppStore.getState().tabs).toBe(before.tabs)
+      expect(useAppStore.getState().layouts).toBe(before.layouts)
+      expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState())).toEqual(persistedBefore)
+      await manager.create(active.id, active.url)
+      manager.close(active.id)
+      expect(fixture.sent.at(-1)).toEqual({ type: 'closed', id: active.id })
+      expect(Object.keys(useAppStore.getState().tabs[tab.id]!.regions)).toEqual(['browser-released-region', 'dirty-sibling'])
+    } finally {
+      manager.dispose()
+      useAppStore.setState(original, true)
+    }
+  })
+
+  it('disposes an owned native page even after the parent Window has already been destroyed', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-window-gone', 'https://private.example/')
+    const view = fixture.children[0]!
+    vi.spyOn(fixture.window, 'isDestroyed').mockReturnValue(true)
+    const remove = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(() => { throw new Error('Destroyed Window') })
+    fixture.sent.length = 0
+    expect(() => manager.dispose()).not.toThrow()
+    expect(view.webContents.isDestroyed()).toBe(true)
+    expect(remove).not.toHaveBeenCalled()
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
+    expect(fixture.sent).toEqual([])
+  })
+
   it('reports native Browser owners and actual frame OS PIDs without counting shared or detached processes twice', async () => {
     const { window } = fakeWindow()
     const manager = browserManager(window)
@@ -690,7 +782,7 @@ describe('BrowserViewManager', () => {
 
     deferNextCandidate()
     const closeSwitch = manager.switchProfile('browser-profile-cancel', 'work')
-    const closeRejection = expect(closeSwitch).rejects.toThrow('closed during profile switch')
+    const closeRejection = expect(closeSwitch).rejects.toThrow('owner released during profile switch')
     const closeCandidate = fixture.children[1]!
     manager.close('browser-profile-cancel')
     await closeRejection
@@ -839,18 +931,47 @@ describe('BrowserViewManager', () => {
     })
   })
 
-  it('releases an externally destroyed WebContentsView before publishing closed', async () => {
+  it('keeps an unexpectedly destroyed native owner recoverable through the actual Store and the same Browser identity', async () => {
+    const { useAppStore } = await import('../src/renderer/src/store.js')
+    const { createWorkbenchTab, addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+    const { createWorkspaceLayout } = await import('@agentmux/layout')
+    const original = useAppStore.getState()
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
-    await manager.create('browser-destroyed', 'https://example.com')
-    const view = fixture.children[0]!
-    fixture.sent.length = 0
-
-    view.webContents.close()
-
-    expect(fixture.children).toHaveLength(0)
-    expect(fixture.sent).toEqual([{ type: 'closed', id: 'browser-destroyed' }])
-    expect(() => manager.setBounds('browser-destroyed', null)).not.toThrow()
+    const send = fixture.window.webContents.send
+    fixture.window.webContents.send = (channel, event) => {
+      send(channel, event)
+      useAppStore.getState().applyBrowserEvent(event as import('../src/shared/contracts.js').BrowserEvent)
+    }
+    try {
+      await manager.create('browser-destroyed', 'https://initial.example/')
+      const current = await manager.switchProfile('browser-destroyed', 'work')
+      const view = fixture.children[0]!
+      let tab = createWorkbenchTab('owner-loss-tab', {
+        ...current, kind: 'browser', browserId: current.id, regionId: 'owner-loss-region', workspaceId: 'workspace-a'
+      })
+      tab = addWorkbenchRegion(tab, 'owner-loss-region', 'right', { kind: 'file', regionId: 'owner-loss-sibling', workspaceId: 'workspace-a', path: 'draft.md' })
+      useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { 'workspace-a': createWorkspaceLayout('owner-loss-group', [tab.id]) } })
+      const before = useAppStore.getState()
+      // A destroyed WebContents has no readable live navigation/title/history; the handler must use
+      // only its existing retained owner descriptor, never a fabricated complete snapshot.
+      vi.spyOn(view.webContents, 'getURL').mockImplementation(() => { throw new Error('Destroyed getURL') })
+      vi.spyOn(view.webContents, 'getTitle').mockImplementation(() => { throw new Error('Destroyed getTitle') })
+      fixture.sent.length = 0
+      view.webContents.close()
+      expect(fixture.children).toEqual([])
+      expect(fixture.sent).toEqual([{ type: 'unavailable', id: current.id, error: 'Browser native page was destroyed. Retry to reopen this page.' }])
+      const after = useAppStore.getState()
+      expect(Object.keys(after.tabs[tab.id]!.regions)).toEqual(['owner-loss-region', 'owner-loss-sibling'])
+      expect(after.tabs[tab.id]!.layout).toBe(before.tabs[tab.id]!.layout)
+      expect(after.layouts).toBe(before.layouts)
+      expect(after.tabs[tab.id]!.regions['owner-loss-sibling']).toBe(before.tabs[tab.id]!.regions['owner-loss-sibling'])
+      expect(after.tabs[tab.id]!.regions['owner-loss-region']).toMatchObject({ error: expect.stringContaining('Retry'), url: current.url, profileId: 'work' })
+      expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
+      expect(await manager.create(current.id, 'https://stale.example/')).toMatchObject({ id: current.id, url: current.url, profileId: 'work', error: null })
+      expect(fixture.children).toHaveLength(1)
+      expect(useAppStore.getState().tabs[tab.id]!.regions['owner-loss-region']).toMatchObject({ error: null })
+    } finally { manager.dispose(); useAppStore.setState(original, true) }
   })
 
   it('rejects a screenshot that completes after the page navigation changes', async () => {

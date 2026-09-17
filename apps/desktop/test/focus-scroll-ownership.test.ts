@@ -19,7 +19,7 @@ function declarations(selector: string): Record<string, string> {
 
 describe('Focus scroll and right workspace geometry ownership', () => {
   it('bounds recent tracks while giving lanes the remaining scrollable height', () => {
-    expect(declarations('.recent-focus__viewport')).toMatchObject({ 'max-height': '64px', overflow: 'auto', 'overscroll-behavior': 'contain' })
+    expect(declarations('.recent-focus__viewport')).toMatchObject({ flex: '1', 'min-height': '0', overflow: 'auto', 'overscroll-behavior': 'contain' })
     expect(declarations('.focus-project-lanes__rows')).toMatchObject({ flex: '1 1 auto', 'min-height': '0', overflow: 'auto' })
     expect(declarations('.global-focus-surface .global-focus-main .global-board-columns')).toMatchObject({ 'min-height': '0', flex: '1 1 auto' })
   })

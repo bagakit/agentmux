@@ -357,7 +357,10 @@ export class BrowserViewManager {
 
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
-    if (this.entries.has(id) || this.releasedEntries.has(id)) throw new Error(`Browser already exists: ${id}`)
+    // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
+    const existing = this.entries.get(id)
+    if (existing) return this.snapshot(existing)
+    if (this.releasedEntries.has(id)) return await this.restore(id)
     const url = normalizeBrowserUrl(rawUrl)
     const profileId = this.profiles.defaultProfileId()
     return await this.createEntry(id, url, profileId)
@@ -1387,13 +1390,14 @@ export class BrowserViewManager {
   }
 
   close(id: string): void {
+    if (this.destroyOwner(id)) this.send({ type: 'closed', id })
+  }
+
+  /** Native teardown has no authority to retire the Renderer Region. */
+  private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
-    if (!entry) {
-      if (!this.releasedEntries.delete(id)) return
-      this.send({ type: 'closed', id })
-      return
-    }
-    this.cancelPendingSwitch(entry, new Error('Browser closed during profile switch'))
+    if (!entry) return this.releasedEntries.delete(id)
+    this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
       const selectionRevision = ++entry.selectionRevision
@@ -1408,14 +1412,16 @@ export class BrowserViewManager {
       ).catch(() => {})
     }
     this.entries.delete(id)
-    this.window.contentView.removeChildView(entry.view)
+    if (!this.window.isDestroyed()) {
+      try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
+    }
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close()
-    this.send({ type: 'closed', id })
+    return true
   }
 
   dispose(): void {
-    for (const id of [...this.entries.keys()]) this.close(id)
-    for (const id of [...this.releasedEntries.keys()]) this.close(id)
+    for (const id of [...this.entries.keys()]) this.destroyOwner(id)
+    for (const id of [...this.releasedEntries.keys()]) this.destroyOwner(id)
   }
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
@@ -1534,11 +1540,14 @@ export class BrowserViewManager {
         return
       }
       if (!this.owns(entry, view)) return
-      this.cancelPendingSwitch(entry, new Error('Browser closed during profile switch'))
+      this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch'))
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
+      this.releasedEntries.set(entry.id, {
+        id: entry.id, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
+      })
       if (!this.window.isDestroyed()) this.window.contentView.removeChildView(view)
-      this.send({ type: 'closed', id: entry.id })
+      this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' })
     })
   }
 
