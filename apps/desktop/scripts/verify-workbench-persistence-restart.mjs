@@ -82,7 +82,12 @@ async function launch(label) {
   // Only the private fixture gets focus emulation: an occluded native window otherwise pauses
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
+  try {
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]') && document.querySelector('[data-workbench-region-id="${fileRegionId}"]'))`))
+  } catch (error) {
+    const observed = await cdp.evaluate(`({text:document.body.innerText.slice(0,2000),regions:[...document.querySelectorAll('[data-workbench-region-id]')].map(n=>n.dataset.workbenchRegionId),errors:[...document.querySelectorAll('[role=alert]')].map(n=>n.textContent)})`).catch(cause => ({diagnosticError:cause.message}))
+    throw new Error(`${error.message}; observed=${JSON.stringify(observed)}`)
+  }
   const origin = await cdp.evaluate('({url:location.href,origin:location.origin})'); return { child, cdp, origin }
 }
 
@@ -250,7 +255,7 @@ try {
   // Keyboard activation exercises actual native popover and React buttons without changing Agent
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
   await activateButton(first.cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer__mailbox')`)
-  await waitFor('actual mailbox visible', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length > 0"))
+  await waitFor('actual mailbox visible', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length > 0 && document.querySelector('.composer-mailbox').dataset.state === 'open'"))
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox [role=tab][id$=\"-outbox-tab\"]')")
   // Native key dispatch returns before React has necessarily projected the selected tab.
   // Wait for the actual seeded rows, then assert exact content/timestamps below. Empty never passes.
