@@ -2906,8 +2906,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         session = agentSession({ kind: 'agent-session', agentSessionId: candidates[0]!.agentSessionId })
       }
       requireActive()
-      // One-shot manual submit: the id is born and dies with this single call. There is no store-held
-      // retry here (unlike the steer queue), so a fresh id per invocation is the correct lifetime.
+      // This validated command explicitly steers one message. Its envelope keeps the same
+      // operation on replay; a command without an envelope gets a new one-shot identity.
       const prompt = request.message
         ? renderAgentMuxMessageEnvelope(request.message)
         : request.text
@@ -2923,7 +2923,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Run is not the resolved Run.')
         }
       }
-      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? crypto.randomUUID(), request.caller?.agentSessionId)
+      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? crypto.randomUUID(),
+        request.caller?.agentSessionId, { allowUncertainTurn: true })
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
