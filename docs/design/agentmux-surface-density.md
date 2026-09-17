@@ -345,7 +345,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Tool Dock Header | 30–34px；10px 左缩进；24px 图标按钮 | 各工具坞标题共享同一左缘。分屏时上下堆叠的标题必须对齐，近似对齐比不对齐更伤观感 |
 | Agent Attention Bar | 24px 高；横跨整宽；12px 横向 Padding；12px 段间距；11px tabular-nums | 窗口底部唯一的跨会话注意力汇总。`surface-1` 填充 + 顶部高光 + 一条 hairline 顶边界定它，不使用描边。复用共享状态点语汇，计数为零保持中性灰；栏存在时把折叠的 Rail 角标抬高让位，纯 CSS `:has()`，不耦合 JS |
 | Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher。**「不扩大」是容器自己的约束，不是"卡片少所以碰巧没长"**：容器必须带有界高度与独立 `overflow`，Agent 装多少都不得把下方的 prompt 推下去。这条由 `apps/desktop/test/surface-scale-contract.test.ts` 守住——它判 `.agent-catalog` 的规则体里 `max-height` 与 `overflow` 同时在场（先断言确实扫到了这条规则）。守的是"有界"这件事而不是 268 这个数：把数字抄进测试等于同一个值住两处，改一处就漂 |
-| Settings Pane | 辅助界面采用平铺、轻分隔的内容组；只有真实编辑器、创建表单和主题/通知预览适度抬起，取 `--surface-1/2` 与 `--hl`，不把所有设置装进等重卡片。标题走 `--fs-title`，正文 `--fs-body`，从属说明 `--fs-meta`。主区居中，与标题对齐，原 status bar 常驻 | 品牌来自真实 BrandIcon、简洁产品语言与完成度。侧栏选中＝`--surface-2` + `--hl`，绿落在该项身份图标，不画竖条或整圈描边。品牌声明不占装饰性 hero 卡；入场仅 `--dur-enter`/`--ease-enter` 淡入，遵守 reduced-motion。具体约束归「Settings 控制工作面」。 |
+| Settings Pane | 两层容器，不是一层：**可操作/主内容**卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；**信息/次级**块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片/区块标题走 `--fs-title`(14)，说明降到 `--fs-meta`/`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 此前一条规则把合成器、只读说明、执行器分组、工作区列表压成同一个平面，于是整屏一样重、读不出主次——两层的"抬起 vs 平铺"对比**就是**这次重做。**装饰性 hero 说明卡已退役**（见控件语言"装饰性强调图标格"）：绿只留给状态与唯一主操作。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，**不画整圈描边**——侧栏本身是 `--surface-1`，往选中态填 `--surface-1` 等于没填，会让 hover 反而比选中更"实"。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`/`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随——那类破坏工具身份 |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
 | Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
@@ -658,7 +658,8 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 ### Project Rail 与 Topic 行密度
 
-- Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达，不为 Scratch 单独保留一块固定表面。产品对象归属只定义在交互 SSOT《Space、Folder 与 Topic》。
+- Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属只定义在交互 SSOT《Space、Folder 与 Topic》。
+- 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。树的子项与总览列表使用各自适合的密度，树整合不能把总览缩成只有一列名称；两处都消费同一事实和既有控件能力。特殊图标用于 Topics 父节点，列表行首图标继续遵守《控件语言》中同图标不重复占位的规则。
 - Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头的 `+` 打开紧凑动作菜单；入口含义与 Topic 的自动识别规则只定义在交互 SSOT《Space、Folder 与 Topic》。
 - 带特殊预制的 Topic 使用该预制的可辨认身份与名称，共用 Space 行的密度、选择、焦点与状态语言。PMO 等特殊身份与 Provider/Executor 身份各有含义，不能让预制头像冒充底层执行者或运行状态；具体 PMO 入口与浮窗密度继续复用对应章节。
 - Project Rail 的所有树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。Pinned child 的标题比普通项目小一档，hover 只使用下划线，不使用项目行的 Surface 填充；它和所属 Project 之间用一条低对比、断续的连接线表达层级关系。连接线是结构提示，不得复用选中、running、needs-you 或 error 的颜色与动效。
