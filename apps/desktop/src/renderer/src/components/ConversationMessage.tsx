@@ -1,4 +1,4 @@
-import type { AgentProviderId, AgentTimelineItemStatus } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionHistoryContentPart, AgentTimelineItemStatus } from '@agentmux/core'
 import { Copy } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
@@ -12,13 +12,13 @@ import { SemanticIcon } from './semantic-icons'
 
 export type ConversationMessageProps = {
   messageId?: string
-  speaker: ConversationSpeaker
+  speaker?: ConversationSpeaker
   name?: string
   providerId?: AgentProviderId
-  content: string
-  status: AgentTimelineItemStatus
-  createdAt: number
-  origin: number
+  content: string | readonly AgentSessionHistoryContentPart[]
+  status?: AgentTimelineItemStatus
+  createdAt?: number
+  origin?: number
   workspaceRoot?: string
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
@@ -35,18 +35,26 @@ export type ConversationAnnotation = {
   note: string
 }
 
-/** A readable message, shared by the live Activity feed and Gallery. The host owns identity
+/** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   speaker, name, providerId, content, status, createdAt, origin, workspaceRoot = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onAnnotate
 }: ConversationMessageProps) {
-  const displayName = name ?? (speaker.role === 'human' ? 'You' : 'Assistant')
+  const parts: readonly AgentSessionHistoryContentPart[] = typeof content === 'string'
+    ? [{ kind: 'text', text: content }]
+    : content
+  const hasContent = parts.some((part) => part.kind === 'resource' || part.text.length > 0)
+  const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker ? 'Assistant' : 'Activity')
+  // Native parts have no annotation offset contract. Live string annotations retain their original
+  // source offsets; read-only callers do not collect selection state.
+  const canAnnotate = onAnnotate !== undefined && typeof content === 'string'
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [selection, setSelection] = useState<{ quote: string; start: number; end: number } | null>(null)
   const [note, setNote] = useState('')
   function captureSelection(): void {
+    if (!canAnnotate || typeof content !== 'string') return
     const current = window.getSelection()
     if (!current || current.isCollapsed || !bodyRef.current || !current.rangeCount) return
     const range = current.getRangeAt(0)
@@ -57,7 +65,9 @@ export function ConversationMessage({
     setSelection({ quote, start: Math.max(0, start), end: Math.max(0, start) + quote.length })
   }
   async function copyMessage(): Promise<void> {
-    const accepted = await copyTextToClipboard(content, () => setCopyState('failed'))
+    const text = parts.map((part) => part.kind === 'text' ? part.text
+      : part.label === undefined ? part.reference : `${part.label}\n${part.reference}`).join('\n')
+    const accepted = await copyTextToClipboard(text, () => setCopyState('failed'))
     setCopyState(accepted ? 'copied' : 'failed')
     if (accepted) window.setTimeout(() => setCopyState('idle'), 1600)
   }
@@ -69,14 +79,14 @@ export function ConversationMessage({
     window.getSelection()?.removeAllRanges()
   }
   return (
-    <div className="log-turn" data-speaker-role={speaker.role} data-status={status}>
+    <div className="log-turn" data-speaker-role={speaker?.role} data-status={status}>
       <span className="log-turn__node" aria-hidden="true">
-        <ConversationSpeakerAvatar
+        {speaker ? <ConversationSpeakerAvatar
           speaker={speaker}
           name={displayName}
           size={20}
           {...(providerId === undefined ? {} : { providerId })}
-        />
+        /> : <SemanticIcon name="neutral" size={12} />}
       </span>
       <div className="log-turn__head">
         <span className="log-turn__who">{displayName}</span>
@@ -86,24 +96,31 @@ export function ConversationMessage({
         {status === 'failed' ? (
           <span className="log-row__chip log-row__chip--failed" role="status"><SemanticIcon name="failed" size={12} />Failed</span>
         ) : null}
-        <span className="log-turn__time" title={`${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
+        {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
+          ? formatClock(createdAt) : `${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {formatClock(createdAt)}
-        </span>
-        {content ? <span className="log-turn__actions">
+        </span>}
+        {hasContent ? <span className="log-turn__actions">
           <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}
           </button>
         </span> : null}
       </div>
-      {content ? (
-        <div ref={bodyRef} className="log-turn__body" onMouseUp={captureSelection} onKeyUp={captureSelection}>
-          <AgentMarkdown
-            content={content}
+      {hasContent ? (
+        <div ref={bodyRef} className="log-turn__body"
+          onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
+          {parts.map((part, index) => part.kind === 'text' ? <AgentMarkdown
+            key={index}
+            content={part.text}
             workspaceRoot={workspaceRoot}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
             {...(readPastedImage ? { readPastedImage } : {})}
             {...(openHttpLink ? { openHttpLink } : {})}
-          />
+          /> : <div key={index} className="log-turn__resource">
+            <span>{part.label ?? `${part.resourceType} resource`}</span>
+            <code>{part.reference}</code>
+            <small>Resource reference; preview is not available here.</small>
+          </div>)}
         </div>
       ) : null}
       {selection && onAnnotate ? <div className="log-turn__annotation" role="dialog" aria-label="Annotate selected text">

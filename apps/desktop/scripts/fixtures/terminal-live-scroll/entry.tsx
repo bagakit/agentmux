@@ -97,7 +97,7 @@ w.scrollInfo = () => {
       buttonLabels: Array.from(viewport.closest('section')!.querySelectorAll('button'), button => button.textContent?.trim()),
       appearance: (() => { const s = getComputedStyle(viewport.closest('section')!); return {
         background: s.backgroundColor, foreground: s.color, fontFamily: s.fontFamily, fontSize: s.fontSize, lineHeight: s.lineHeight } })(),
-      bodyAppearance: (() => { const body = viewport.querySelector('.md'); if (!body) return null; const s = getComputedStyle(body); return {
+      bodyAppearance: (() => { const body = viewport.querySelector('.log-turn__body'); if (!body?.textContent?.trim()) return null; const s = getComputedStyle(body); return {
         fontFamily: s.fontFamily, fontSize: s.fontSize, lineHeight: s.lineHeight, foreground: s.color } })() },
     terminalAppearance: terminal && { fontFamily: terminal.options.fontFamily, fontSize: terminal.options.fontSize,
       lineHeight: terminal.options.lineHeight, theme: terminal.options.theme },

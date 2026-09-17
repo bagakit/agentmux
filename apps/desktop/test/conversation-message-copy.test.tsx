@@ -7,7 +7,7 @@ const styles = allStyles()
 
 describe('conversation message copy contract', () => {
   it('copies the complete message through the shared clipboard outlet', () => {
-    expect(source).toContain('copyTextToClipboard(content')
+    expect(source).toContain('copyTextToClipboard(text')
     expect(source).toContain('title="Copy message"')
     expect(source).toContain("copyState === 'copied'")
   })

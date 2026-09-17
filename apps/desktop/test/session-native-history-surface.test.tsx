@@ -8,14 +8,17 @@ import { SessionHistoryView } from '../src/renderer/src/components/SessionHistor
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 
 const fixture = vi.hoisted(() => ({
-  historyPage: vi.fn(), write: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
+  historyPage: vi.fn(), write: vi.fn(), clipboard: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
   resizeObservers: [] as Array<() => void>,
   state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
     timelines: {}, agentNames: {}, viewModes: {}, regionCaretFocus: null,
     clearRegionCaretFocus: vi.fn(), focusRegion: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
 }))
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: { historyPage: fixture.historyPage, write: fixture.write } } }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: {
+  sessions: { historyPage: fixture.historyPage, write: fixture.write },
+  ui: { writeClipboardText: fixture.clipboard }
+} }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign(
   (select: (state: typeof fixture.state) => unknown) => select(fixture.state), { getState: () => fixture.state }
 ) }))
@@ -48,9 +51,10 @@ beforeEach(() => {
   fixture.state.sessions = [session]
   fixture.state.recoveryCandidates = []
   fixture.historyPage.mockResolvedValue(page('latest','older-1'))
+  fixture.clipboard.mockResolvedValue(undefined)
   container = document.createElement('div'); document.body.append(container); root=createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.useRealTimers(); vi.unstubAllGlobals() })
 async function mountReader(nextControl = control) {
   await act(async () => root.render(<SessionHistoryView control={nextControl} label="Reader" onClose={() => {}} visible themeId="graphite" fontSize={12} workspaceRoot="/synthetic" openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
 }
@@ -157,6 +161,57 @@ it('real upward wheel pages once while pending, keeps ordered resources, and doe
   expect(fixture.historyPage).toHaveBeenLastCalledWith(control,{cursor:'opaque-2'})
   expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'),(row) => row.dataset.historyItemId)).toEqual(['oldest','mixed'])
   expect(container.textContent).toContain('Beginning of the available native history')
+})
+
+it('uses the shared message owner for ordered native parts, exact copy and host links without invented metadata', async () => {
+  const parts = [
+    { kind: 'text' as const, text: 'before' },
+    { kind: 'resource' as const, resourceType: 'image' as const, reference: 'opaque-image-reference', label: 'Screenshot' },
+    { kind: 'text' as const, text: '[guide](src/guide.ts:4) and [web](https://docs.example.test/read)' },
+    { kind: 'resource' as const, resourceType: 'audio' as const, reference: '/synthetic/audio.wav' }
+  ]
+  fixture.historyPage.mockResolvedValue(page('unused', null, { items: [
+    { id: 'native-user', kind: 'user-message', contentParts: parts, completedAt: 500 },
+    { id: 'native-assistant', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'known zero clock' }], startedAt: 0 },
+    { id: 'native-activity', kind: 'activity', title: 'Tool observation', contentParts: [{ kind: 'text', text: 'native tool facts' }] }
+  ] }))
+  const openWorkspaceFile = vi.fn(), openHttpLink = vi.fn()
+  await act(async () => root.render(<SessionHistoryView control={control} label="Reader" visible themeId="graphite" fontSize={17}
+    workspaceRoot="/synthetic" openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />))
+  const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'))
+  expect(rows.map(row => row.dataset.historyItemId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
+  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['human', 'agent', null])
+  expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['You', 'Reader', 'Tool observation'])
+  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-status'))).toEqual([null, null, null])
+  expect(rows.map(row => row.querySelector('.log-turn__time')?.textContent ?? null)).toEqual([null, new Date(0).toTimeString().slice(0, 8), null])
+  const body = rows[0]!.querySelector('.log-turn__body')!
+  expect(Array.from(body.children, node => node.matches('.log-turn__resource')
+    ? ['resource', node.querySelector('span')?.textContent, node.querySelector('code')?.textContent]
+    : ['text', node.textContent])).toEqual([
+      ['text', 'before'], ['resource', 'Screenshot', 'opaque-image-reference'],
+      ['text', 'guide and web'], ['resource', 'audio resource', '/synthetic/audio.wav']
+    ])
+  expect(Array.from(body.querySelectorAll('.log-turn__resource code'), node => node.textContent)).toEqual(['opaque-image-reference', '/synthetic/audio.wav'])
+  expect(body.querySelector('img')).toBeNull()
+  expect(container.querySelector('.log-turn__annotation')).toBeNull()
+  const file = body.querySelector<HTMLButtonElement>('.md-link--file')!
+  expect(file).not.toBeNull()
+  await act(async () => file.click())
+  expect(openWorkspaceFile).toHaveBeenCalledExactlyOnceWith('src/guide.ts', { line: 4 })
+  const web = Array.from(body.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent === 'web')!
+  expect(web).toBeDefined()
+  await act(async () => web.click())
+  expect(openHttpLink).toHaveBeenCalledExactlyOnceWith('https://docs.example.test/read', expect.objectContaining({ metaKey: false, ctrlKey: false }))
+  const copy = rows[0]!.querySelector<HTMLButtonElement>('[title="Copy message"]')!
+  expect(copy).not.toBeNull()
+  vi.useFakeTimers()
+  await act(async () => copy.click())
+  expect(fixture.clipboard).toHaveBeenCalledExactlyOnceWith('before\nScreenshot\nopaque-image-reference\n[guide](src/guide.ts:4) and [web](https://docs.example.test/read)\n/synthetic/audio.wav')
+  await act(async () => { await vi.runOnlyPendingTimersAsync() })
+  expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(control, undefined)
+  expect(fixture.write).not.toHaveBeenCalled()
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
 })
 
 it('retains a stable visible item pixel anchor through prepend and later content reflow', async () => {
