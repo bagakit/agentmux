@@ -27,6 +27,7 @@ window.previewGeometry = () => {
   const tooltip = document.querySelector('#surface-navigation-tooltip-focus')
   return { width: innerWidth, height: innerHeight, footer: rect(document.querySelector('.window-status-bar')),
     button: rect(document.querySelector('.surface-navigation__focus')), tooltip: tooltip ? rect(tooltip) : null,
+    content: tooltip ? rect(tooltip.querySelector('.focus-navigation-preview')) : null,
     rows: [...(tooltip?.querySelectorAll('[data-preview-session]') ?? [])].map(node => node.dataset.previewSession),
     counts: Object.fromEntries([...(tooltip?.querySelectorAll('[data-preview-count]') ?? [])].map(node => [node.dataset.previewCount, node.textContent])),
     text: tooltip?.textContent, interactive: tooltip?.querySelectorAll('button, input, [tabindex]').length,

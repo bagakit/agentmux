@@ -31,6 +31,7 @@ app.whenReady().then(async () => {
       assert.ok(geometry.tooltip.x >= 8)
       assert.ok(geometry.tooltip.y >= 8)
       assert.ok(geometry.tooltip.right <= geometry.width - 8)
+      assert.ok(geometry.content.right <= geometry.tooltip.right)
       assert.ok(geometry.tooltip.bottom <= geometry.footer.y)
       assert.deepEqual(geometry.rows, ['idle', 'attention', 'working'])
       assert.equal(geometry.interactive, 0)
