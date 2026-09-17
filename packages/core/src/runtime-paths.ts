@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 // Artifact identity only. The adapter verifies the packed manifest and owner receipt
 // with this digest; changing an artifact must not change the Runtime's address.
-export const CTXMUX_MANIFEST_SHA256 = '4fdb3a10ca812b0a40bedada1b8933d322119f3dd9323ad8eb9326ca1a3b16eb'
+export const CTXMUX_MANIFEST_SHA256 = '473cd3ed4bf42e3b636f1ae59d5ef1c3a005c81aa97beaca6287ed038ba99874'
 
 // The already deployed host namespace is durable, independent of artifact identity.
 // Keep the existing address so upgrades reach the same listener, state and healthy Runs.
