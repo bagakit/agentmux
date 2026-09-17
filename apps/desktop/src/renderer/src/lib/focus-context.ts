@@ -13,14 +13,19 @@ export type FocusContext = {
   workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null }
+export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean): FocusBucket {
+  const state = session.status.state
+  if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
+  if (turnWorking(state)) return 'working'
+  if (hasCurrentResult && (state === 'done' || state === 'running')) return 'results'
+  return 'idle'
+}
 function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, config: AppConfig | null): FocusContext {
   const state = session.status.state, items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const result = latest?.kind === 'assistant_message' && latest.status === 'complete' && latest.content?.trim() ? latest : null
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
-  const bucket: FocusBucket = pending || isNeedsYouState(state) || state === 'error' ? 'attention'
-    : turnWorking(state) ? 'working'
-    : result && (state === 'done' || state === 'running') ? 'results' : 'idle'
+  const bucket = focusBucketForSession(session, Boolean(result))
   const stateLabel = state === 'error' ? 'Failed' : pending ? 'Request pending' : isNeedsYouState(state) ? (state === 'blocked' ? 'Blocked' : 'Needs reply')
     : state === 'done' ? 'Idle' : state === 'running' ? (session.kind === 'agent' ? 'Status unknown' : 'Shell open')
     : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? 'Stopped' : state === 'starting' ? 'Starting' : 'Working'

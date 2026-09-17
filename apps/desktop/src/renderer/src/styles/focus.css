@@ -84,3 +84,5 @@
 .recent-focus__segment:hover, .recent-focus__segment:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 1; background: var(--green); pointer-events: none; }
 .recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+
+.focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
