@@ -77,12 +77,15 @@ async function connectCdp(url) {
 async function launch(label) {
   phase = `launch-${label}`
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, `Ordinary launch inherited ${name}`)
+  for(const name of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','AGENTMUX_DESKTOP_FILE_EDITING_REPORT','AGENTMUX_DESKTOP_RESOURCE_REPORT'])assert.equal(process.env[name],undefined,`Production launch inherited ${name}`)
   const readyFile = join(root, `ready-${label}.json`)
   const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
   children.add(child)
+  const launchRecord={pid:child.pid,readyFile,startedAt:Date.now()}
+  ;(receipt.launches??={})[label]=launchRecord
   let diagnostics = '', mainUrl, rendererUrl, spawnError
   child.on('error', error => { spawnError = error })
   assert.ok(child.pid > 1)
@@ -118,7 +121,21 @@ async function launch(label) {
   assert.equal(home, privateHome, 'Home must be private before the home-dependent constant is evaluated')
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
   await main.call('Debugger.resume')
-  const ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } })
+  let ready
+  try { ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }) }
+  catch(error){
+    Object.assign(launchRecord,{phase,elapsedMs:Date.now()-launchRecord.startedAt,exitCode:child.exitCode,signalCode:child.signalCode,stderrTail:diagnostics,
+      queuedDebuggerPauses:main.pauses.map(pause=>({reason:pause.reason,hitBreakpoints:pause.hitBreakpoints,callFrames:pause.callFrames.slice(0,4).map(frame=>({url:frame.url,functionName:frame.functionName,lineNumber:frame.location.lineNumber,columnNumber:frame.location.columnNumber}))}))})
+    const diagnostic=async work=>{
+      let timer
+      try{return await Promise.race([work(),new Promise(resolve=>{timer=setTimeout(()=>resolve({unavailable:'bounded diagnostic deadline'}),2000)})])}
+      catch(error){return {unavailable:error.message}}
+      finally{clearTimeout(timer)}
+    }
+    launchRecord.birth=await diagnostic(async()=>({birth:(await exec('/bin/ps',['-p',String(child.pid),'-o','pid=,uid=,lstart='],{timeout:2000,maxBuffer:4096})).stdout.trim()}))
+    launchRecord.main=await diagnostic(()=>main.evaluate(`(() => {const e=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return {ready:e.app.isReady(),home:e.app.getPath('home'),userData:e.app.getPath('userData'),windows:e.BrowserWindow.getAllWindows().map(w=>({id:w.id,destroyed:w.isDestroyed(),loading:w.webContents.isLoading(),url:w.webContents.getURL()}))}})()`))
+    throw error
+  }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl); await cdp.call('Runtime.enable')
@@ -134,9 +151,11 @@ async function normalQuit(probe) {
  let inspectorReplyFailure
  try { await probe.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app.quit()`) }
  catch(error){inspectorReplyFailure=error.message}
+ // Node's inspector can keep a quitting Main alive until the debugger disconnects.
+ probe.cdp.close();probe.main.close()
  await waitFor('ordinary first Desktop exit',()=>probe.child.exitCode!==null||probe.child.signalCode!==null)
  assert.equal(probe.child.exitCode,0);assert.equal(probe.child.signalCode,null)
- probe.cdp.close();probe.main.close();children.delete(probe.child)
+ children.delete(probe.child)
  return {exitCode:0,signal:null,inspectorReplyFailure:inspectorReplyFailure??null}
 }
 async function control(operation, fields={}) {
