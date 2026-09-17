@@ -1,4 +1,5 @@
 import { inspectHookDisableSetting } from './shared.js'
+import { readClaudeSessionHistoryPage } from './claude-native-history.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -106,6 +107,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
 
 export function createClaudeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    readSessionHistoryPage: readClaudeSessionHistoryPage,
     catalog: catalog({
       composer: {"skillRoots": [".claude/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/cost", "description": "Session usage"}, {"text": "/context", "description": "Context usage"}]},
       id: 'claude', label: 'Claude', executable: 'claude', expectedProcess: 'claude',
