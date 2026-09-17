@@ -38,7 +38,9 @@ describe('public native Session history pages', () => {
   it('derives capability from the optional Provider contribution', () => {
     const providers = new AgentProviderRegistry()
     expect(providers.get('codex').readSessionHistoryPage).toBeTypeOf('function')
-    expect(providers.get('claude').readSessionHistoryPage).toBeUndefined()
+    expect(providers.get('claude').readSessionHistoryPage).toBeTypeOf('function')
+    expect(providers.get('pi').readSessionHistoryPage).toBeTypeOf('function')
+    expect(providers.get('traex').readSessionHistoryPage).toBeUndefined()
   })
 
   it('returns exact bodies and resource order using native identity, without Run controls', async () => {

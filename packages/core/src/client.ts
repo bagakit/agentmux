@@ -1330,6 +1330,7 @@ export class AgentMuxClient {
         source, limit, signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable),
         args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
+        ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
         ...(options.cursor === undefined ? {} : { cursor: options.cursor })
       }))
       controller.signal.throwIfAborted()
@@ -1337,7 +1338,8 @@ export class AgentMuxClient {
         .find((entry) => entry.agentSessionId === agentSessionId)
       controller.signal.throwIfAborted()
       if (!current || current.providerId !== source.providerId || current.nativeHandle?.kind !== 'provider' ||
-        current.nativeHandle.providerId !== source.providerId || current.nativeHandle.sessionId !== source.nativeSessionId) {
+        current.nativeHandle.providerId !== source.providerId || current.nativeHandle.sessionId !== source.nativeSessionId ||
+        current.nativeHandle.transcriptPath !== handle.transcriptPath) {
         throw new AgentMuxError('Native history identity changed while reading; reopen its newest page.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       }
       return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }

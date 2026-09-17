@@ -5,13 +5,14 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog } from './shared.js'
+import { readPiSessionHistoryPage } from './pi-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
 /**
  * Pi 扩展订阅的事件名。
  *
- * 证据是**上游自己的源码**（`home/proj/github/pi`，即 `earendil-works/pi`，本机可读），
+ * 证据是**上游自己的源码**（`home//proj/github/pi`，即 `earendil-works/pi`，本机可读），
  * 不是任何第三方项目的转述：每个名字都是 `ExtensionAPI.on()` 的一个重载签名，逐字取自
  * `packages/coding-agent/src/core/extensions/types.ts:1282-1298`。
  *
@@ -245,6 +246,7 @@ export function createPiManagedHookPlan(env?: Readonly<Record<string, string>>):
 
 export function createPiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    readSessionHistoryPage: readPiSessionHistoryPage,
     catalog: catalog({
       composer: {"skillRoots": [".pi/agent/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}]},
       id: 'pi', label: 'Pi', executable: 'pi', expectedProcess: 'pi', promptDelivery: 'positional-argv',

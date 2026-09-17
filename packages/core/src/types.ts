@@ -500,6 +500,8 @@ export type AgentSessionHistoryPageOptions = {
 
 export type AgentProviderSessionHistoryContext = {
   source: AgentSessionHistorySource
+  /** Exact locator captured from this Session's durable native handle; never guessed from a home directory. */
+  transcriptPath?: string
   command: string
   args: readonly string[]
   env: Readonly<Record<string, string | undefined>>
