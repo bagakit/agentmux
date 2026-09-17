@@ -5,7 +5,9 @@ import type { AgentSessionControl, TerminalThemeId } from '../../../shared/contr
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
+import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
+import { ConversationMessage } from './ConversationMessage'
+import { HUMAN_SPEAKER_ID } from '../lib/conversation-speaker'
 
 type ReadingAnchor = { id: string; offset: number }
 type ReadingState = {
@@ -203,12 +205,19 @@ export function SessionHistoryView({
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
         {items.map((item) => <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
-          <header><strong>{item.kind === 'user-message' ? 'You' : item.kind === 'assistant-message' ? label : item.title ?? 'Activity'}</strong>
-            {item.startedAt === undefined ? null : <time dateTime={new Date(item.startedAt).toISOString()}>{new Date(item.startedAt).toLocaleTimeString()}</time>}
-          </header>
-          {item.contentParts.map((part, index) => part.kind === 'text'
-            ? <AgentMarkdown key={index} content={part.text} workspaceRoot={workspaceRoot} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />
-            : <div key={index} className="session-history__resource"><span>{part.label ?? `${part.resourceType} resource`}</span><code>{part.reference}</code><small>Resource reference; preview is not available here.</small></div>)}
+          <ConversationMessage
+            messageId={item.id}
+            {...(item.kind === 'activity' ? {} : { speaker: item.kind === 'user-message'
+              ? { role: 'human' as const, id: HUMAN_SPEAKER_ID }
+              : { role: 'agent' as const, id: control.agentSessionId } })}
+            name={item.kind === 'user-message' ? 'You' : item.kind === 'assistant-message' ? label : item.title ?? 'Activity'}
+            {...(reading.source ? { providerId: reading.source.providerId } : {})}
+            content={item.contentParts}
+            {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
+            workspaceRoot={workspaceRoot}
+            openWorkspaceFile={openWorkspaceFile}
+            openHttpLink={openHttpLink}
+          />
         </article>)}
         {!reading.loading && reading.source && items.length === 0 ? <p className="session-history__empty">No records in this page.{reading.nextCursor !== null ? ' Earlier records can still be read.' : ''}</p> : null}
         {reading.newerOutsideWindow ? <div className="session-history__boundary" role="status">Newer records are outside this three-page reading window. <button type="button" className="small-button" disabled={reading.loading} onClick={() => void readPage('latest')}>Return to latest</button></div> : null}

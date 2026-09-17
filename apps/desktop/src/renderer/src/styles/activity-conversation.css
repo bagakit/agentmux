@@ -71,6 +71,9 @@
   overflow-wrap: anywhere;
 }
 .log-turn__body > .md { min-width: 0; }
+.log-turn__resource { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; font-size: var(--fs-meta); }
+.log-turn__resource code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-turn__resource small { color: var(--text-3); font-size: var(--fs-micro); }
 .log-turn__annotation { grid-column: 2; grid-row: 3; display: grid; gap: var(--sp-2); max-width: min(460px, 100%); margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-1); }
 .log-turn__annotation-quote { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
 .log-turn__annotation textarea { min-height: 58px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-meta); }
