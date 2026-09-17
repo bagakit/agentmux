@@ -809,6 +809,9 @@ const mockApi: AgentMuxDesktopApi = {
       return mockRetainedReplay(control, afterByte)
     },
     detach: async (attachmentId) => { mockAttachmentControls.delete(attachmentId) },
+    paste: async (control, _text, terminalData) => {
+      await mockApi.sessions.write(control, terminalData)
+    },
     write: async (control, input) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)

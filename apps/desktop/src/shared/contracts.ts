@@ -1409,6 +1409,7 @@ export type AgentMuxDesktopApi = {
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: AgentMuxRunInputData): Promise<void>
+    paste(session: SessionControl, text: string, terminalData: string): Promise<void>
     // `operationId` is the caller's correlation key for ONE submission attempt. A retry of the same
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint

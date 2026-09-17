@@ -942,6 +942,16 @@ export class RuntimeController {
     else await this.writeTerminalInput(client, control, data)
   }
 
+  async paste(control: SessionControl, text: string, terminalData: string): Promise<void> {
+    const client = await this.connectedClient(control.hostId)
+    if (control.kind === 'agent') {
+      await client.pasteAgent({ agentSessionId: control.agentSessionId,
+        expectedRun: control.run, text, terminalData })
+    } else {
+      await this.writeTerminalInput(client, control, terminalData)
+    }
+  }
+
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,
