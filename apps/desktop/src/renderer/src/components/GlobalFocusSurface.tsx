@@ -11,8 +11,6 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
-import { topicIdForSession } from '../lib/workbench-tabs'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 export function GlobalFocusSurface() {
@@ -21,7 +19,6 @@ export function GlobalFocusSurface() {
   const sessions = useAppStore((state) => state.sessions)
   const config = useAppStore((state) => state.config)
   const tabs = useAppStore((state) => state.tabs)
-  const names = useMemo(() => Object.fromEntries(executionRows.map(row => [row.id, row.name])), [executionRows])
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const executionHistory = useAppStore((state) => executionFocusHistory(state.agentFocus))
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
@@ -73,7 +70,6 @@ export function GlobalFocusSurface() {
           <label className="global-board-select">Project<select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
       </header>
-      <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} sessions={sessions.filter((session) => topicIdForSession(config, session) !== PMO_TEAMS_TOPIC_ID)} config={config} names={names} onSelect={focusExecutionSession} />
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <FocusProjectLanes lanes={focusProjectLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} />
       </div>}
@@ -107,6 +103,7 @@ export function GlobalFocusSurface() {
         : <><AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} onSelect={focusExecutionSession} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={focusExecutionSession} /> : null}
   </section>
 }

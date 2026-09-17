@@ -1,79 +1,54 @@
-import { History, Play } from 'lucide-react'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import { memo, useMemo, useState, type CSSProperties } from 'react'
+import { ChevronDown, ChevronUp, History, Minus, Plus, SquareTerminal } from 'lucide-react'
 import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
-import { workspaceForSession } from '../lib/workbench-tabs'
+import type { FocusContext } from '../lib/focus-context'
 import { AgentAvatar } from './AgentAvatar'
 
-type TimelineEntry = AgentFocusHistoryEntry & { session: SessionSnapshot; label: string }
-
-function clock(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function timelineEntries(
-  entries: readonly AgentFocusHistoryEntry[],
-  sessions: readonly SessionSnapshot[],
-  names: Readonly<Record<string, string>>
-): TimelineEntry[] {
-  const byId = new Map(sessions.map((session) => [session.id, session]))
-  return entries.flatMap((entry) => {
-    const session = byId.get(entry.sessionId)
-    return session ? [{ ...entry, session, label: names[session.id] ?? (session.kind === 'terminal' ? 'Terminal' : session.label) }] : []
-  })
-}
-
-export function RecentFocusTimeline({
-  entries,
-  currentSessionId,
-  sessions,
-  config,
-  names,
-  onSelect
-}: {
-  entries: readonly AgentFocusHistoryEntry[]
-  currentSessionId: string | null
-  sessions: readonly SessionSnapshot[]
-  config: Parameters<typeof workspaceForSession>[0]
-  names: Readonly<Record<string, string>>
-  onSelect(sessionId: string): void
+function clock(timestamp: number): string { return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, onSelect }: {
+  entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]; onSelect(sessionId: string): void
 }) {
-  const items = timelineEntries(entries, sessions, names)
-  const ordered = [...items].sort((a, b) => a.focusedAt - b.focusedAt)
-  const start = ordered[0]?.focusedAt ?? 0
-  const end = Math.max(
-    ordered.at(-1)?.focusedAt ?? 0,
-    (ordered.at(-1)?.focusedAt ?? 0) + 15 * 60 * 1000
-  )
-  const span = Math.max(1, end - start)
-  return <section className="recent-focus" aria-label="Recent Focus">
+  const [mode, setMode] = useState<'compact' | 'expanded' | 'collapsed'>('compact')
+  const [zoom, setZoom] = useState(1)
+  const ordered = useMemo(() => {
+    const byId = new Map(contexts.map(context => [context.id, context]))
+    return entries.flatMap(entry => { const context = byId.get(entry.sessionId); return context ? [{ ...entry, context }] : [] }).sort((a, b) => a.focusedAt - b.focusedAt)
+  }, [contexts, entries])
+  const start = ordered[0]?.focusedAt ?? 0, end = ordered.at(-1)?.focusedAt ?? start, span = Math.max(1, end - start)
+  const current = ordered.find(item => item.sessionId === currentSessionId)
+  const tickTimes = start === end ? [start] : Array.from({ length: 5 }, (_, i) => start + (end - start) * i / 4)
+  return <section className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-empty={ordered.length === 0 ? 'true' : undefined}>
     <header className="recent-focus__header">
-      <span className="recent-focus__title"><History size={13} /><strong>Recent Focus</strong><small>Focus timeline</small></span>
-      <span className="recent-focus__range">{items.length > 0 ? `${clock(start)} — ${clock(end)}` : 'No focus history'}</span>
+      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range">{ordered.length ? (start === end ? clock(start) : `${clock(start)} — ${clock(end)}`) : ''}</span></span>
+      <span className="recent-focus__controls">
+        <button type="button" className="icon-button" aria-label="Zoom out focus history" disabled={zoom === 1} onClick={() => setZoom(Math.max(1, zoom - 1))}><Minus size={12} /></button>
+        <span aria-label="Timeline zoom">{zoom}×</span>
+        <button type="button" className="icon-button" aria-label="Zoom in focus history" disabled={zoom === 4} onClick={() => setZoom(Math.min(4, zoom + 1))}><Plus size={12} /></button>
+        <button type="button" className="icon-button" aria-label={mode === 'expanded' ? 'Compact focus history' : 'Expand focus history'} onClick={() => setMode(mode === 'expanded' ? 'compact' : 'expanded')}><ChevronUp size={12} /></button>
+        <button type="button" className="icon-button" aria-label={mode === 'collapsed' ? 'Show focus history' : 'Collapse focus history'} aria-expanded={mode !== 'collapsed'} onClick={() => setMode(mode === 'collapsed' ? 'compact' : 'collapsed')}><ChevronDown size={12} /></button>
+      </span>
     </header>
-    {items.length === 0 ? <p className="recent-focus__empty">Focus an Agent or Terminal to build your timeline.</p> : <div className="recent-focus__body">
-      <div className="recent-focus__ruler" aria-hidden="true"><span>{clock(start)}</span><span>{clock(start + span / 2)}</span><span>{clock(end)}</span></div>
-      <div className="recent-focus__tracks">
-        {ordered.map((item, index) => {
-          const next = ordered[index + 1]?.focusedAt ?? Math.min(end, item.focusedAt + 15 * 60 * 1000)
-          const left = ((item.focusedAt - start) / span) * 100
-          const width = Math.max(3.5, ((Math.max(item.focusedAt + 30 * 1000, next) - item.focusedAt) / span) * 100)
-          const workspace = workspaceForSession(config, item.session)
-          const current = item.session.id === currentSessionId
-          return <div className="recent-focus__track" data-focus-timeline-id={item.session.id} key={`${item.session.id}-${item.focusedAt}`}>
-            <button
-              type="button"
-              className={`recent-focus__segment${current ? ' is-current' : ''}`}
-              style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
-              aria-current={current ? 'true' : undefined}
-              title={`${item.label} · ${workspace?.name ?? item.session.workspacePath} · ${clock(item.focusedAt)}`}
-              onClick={() => onSelect(item.session.id)}
-            >
-              {item.session.kind === 'agent' ? <AgentAvatar sessionId={item.session.id} label={item.label} state={item.session.status.state} providerId={item.session.providerId ?? undefined} size={16} /> : <Play size={12} />}
-              <span>{item.label}</span><time>{clock(item.focusedAt)}</time>
-            </button>
-          </div>
-        })}
+    {mode !== 'collapsed' && (ordered.length === 0 ? <p className="recent-focus__empty">Select a context to start your history.</p> : <div className="recent-focus__viewport">
+      <div className="recent-focus__canvas" style={{ '--timeline-zoom': zoom } as CSSProperties}>
+        <div className="recent-focus__ruler" aria-hidden="true"><span className="recent-focus__gutter">Context</span><div className="recent-focus__time-scale">{tickTimes.map((time, i) => <time key={i} style={{ left: `${((time - start) / span) * 100}%` }}>{clock(time)}</time>)}</div></div>
+        <div className="recent-focus__tracks">
+          {ordered.map((item, index) => {
+            const next = ordered[index + 1]?.focusedAt, left = (item.focusedAt - start) / span * 100, selected = item.sessionId === currentSessionId
+            return <div className="recent-focus__track" data-focus-timeline-id={item.sessionId} key={item.sessionId}>
+              <span className="recent-focus__gutter" title={`${item.context.name} · ${item.context.workspaceName}`}>{item.context.kind === 'agent' ? <AgentAvatar sessionId={item.sessionId} label={item.context.name} providerId={item.context.providerId ?? undefined} state={item.context.state} size={14} /> : <SquareTerminal size={13} />}<span>{item.context.name}</span></span>
+              <div className="recent-focus__lane">
+                {current ? <span className="recent-focus__playhead" style={{ left: `${(current.focusedAt - start) / span * 100}%` }} aria-hidden="true" /> : null}
+                <button type="button" className={`recent-focus__segment${selected ? ' is-current' : ''}${next === undefined ? ' is-open' : ''}`}
+                  style={{ left: `${left}%`, width: next === undefined ? undefined : `${(next - item.focusedAt) / span * 100}%` }}
+                  data-focused-at={item.focusedAt} data-known-end={next} aria-current={selected ? 'true' : undefined}
+                  aria-label={`Return to ${item.context.name}, focused at ${clock(item.focusedAt)}${next === undefined ? ', next focus not recorded' : ''}`}
+                  title={`${item.context.name} · ${item.context.workspaceName} · Focused ${clock(item.focusedAt)}${next === undefined ? ' · Next focus not recorded' : ''}`}
+                  onClick={() => onSelect(item.sessionId)}><span>{clock(item.focusedAt)}</span></button>
+              </div>
+            </div>
+          })}
+        </div>
       </div>
-    </div>}
+    </div>)}
   </section>
-}
+})

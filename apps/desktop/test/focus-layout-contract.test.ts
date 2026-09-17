@@ -11,7 +11,7 @@ const surface = readFileSync(new URL('../src/renderer/src/components/GlobalFocus
 describe('Focus layout contract', () => {
   it('contains a non-empty fixed split and a non-animated workspace projection', () => {
     expect(source).toContain('.global-focus-surface.global-board-surface--session-open')
-    expect(source).toContain('minmax(0, .382fr) minmax(0, .618fr)')
+    expect(source).toContain('--focus-workspace-width, calc(61.8% - 6px)')
     expect(source).toContain('.global-focus-surface .global-session-workspace')
     expect(source).toContain('animation: none')
     expect(source).toContain('.focused-tab-workspace')

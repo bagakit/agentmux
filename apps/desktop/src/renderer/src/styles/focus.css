@@ -51,21 +51,36 @@
 .global-focus-surface .global-session-workspace__identity strong { font-size: var(--fs-meta); }
 .global-focus-surface .global-session-workspace__identity small { flex: none; font-size: var(--fs-micro); }
 .focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; }
-/* Recent Focus is a compact time track, not a second navigation list. */
-.recent-focus { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--line-soft); background: var(--surface-0); }
-.recent-focus__header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 24px; }
-.recent-focus__title { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
-.recent-focus__title svg { color: var(--green); }
-.recent-focus__title strong { color: var(--text); font-size: var(--fs-meta); font-weight: 650; }
-.recent-focus__title small, .recent-focus__range { color: var(--text-3); font-size: var(--fs-micro); }
-.recent-focus__range { font-variant-numeric: tabular-nums; }
-.recent-focus__body { min-width: 0; margin-top: var(--sp-1); }
-.recent-focus__ruler { display: flex; justify-content: space-between; padding-left: 116px; color: var(--text-3); font-size: 9px; font-variant-numeric: tabular-nums; }
-.recent-focus__tracks { display: grid; gap: 2px; min-height: 34px; max-height: 64px; overflow-y: auto; overscroll-behavior: contain; }
-.recent-focus__track { position: relative; min-width: 0; height: 28px; border-radius: 3px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--line) 58%, transparent) 0, color-mix(in srgb, var(--line) 58%, transparent) 1px, transparent 1px, transparent 12.5%); }
-.recent-focus__segment { position: absolute; top: 2px; bottom: 2px; display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 42px; overflow: hidden; padding: 0 var(--sp-2); border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line)); border-radius: 3px; background: color-mix(in srgb, var(--green) 16%, var(--surface-2)); color: var(--text-2); font: inherit; font-size: var(--fs-micro); text-align: left; white-space: nowrap; cursor: pointer; }
-.recent-focus__segment:hover, .recent-focus__segment:focus-visible { border-color: var(--green); background: color-mix(in srgb, var(--green) 25%, var(--surface-2)); color: var(--text); outline: none; }
-.recent-focus__segment.is-current { border-color: var(--green-2); background: color-mix(in srgb, var(--green) 35%, var(--surface-2)); box-shadow: inset 2px 0 var(--green-2); }
-.recent-focus__segment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.recent-focus__segment time { margin-left: auto; color: var(--text-3); font-size: 9px; font-variant-numeric: tabular-nums; }
-.recent-focus__empty { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); }
+/* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */
+.recent-focus { flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
+.recent-focus[data-mode='expanded'] { height: 168px; }
+.recent-focus[data-mode='collapsed'] { height: 28px; }
+.recent-focus[data-empty='true']:not([data-mode='collapsed']) { height: 54px; }
+.recent-focus__header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--sp-2); height: 28px; padding: 0 var(--sp-2); }
+.recent-focus__title, .recent-focus__controls { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus__title { min-width: 0; }
+.recent-focus__title strong { font-weight: 500; color: var(--text-2); white-space: nowrap; }
+.recent-focus__range { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.recent-focus__controls { flex: none; gap: 2px; }
+.recent-focus__controls .icon-button { width: 22px; height: 22px; }
+.recent-focus__controls button:disabled { opacity: .35; cursor: default; }
+.recent-focus__viewport { flex: 1; min-height: 0; max-height: 64px; overflow: auto; overscroll-behavior: contain; }
+.recent-focus[data-mode='expanded'] .recent-focus__viewport { max-height: 140px; }
+.recent-focus__canvas { min-width: 100%; width: calc(100% * var(--timeline-zoom)); padding-right: 8px; }
+.recent-focus__ruler, .recent-focus__track { display: grid; grid-template-columns: 112px minmax(0, 1fr); min-width: 0; }
+.recent-focus__ruler { position: sticky; top: 0; z-index: 3; height: 18px; color: var(--text-3); background: var(--surface-1); font-size: 9px; font-variant-numeric: tabular-nums; }
+.recent-focus__gutter { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); min-width: 0; border-right: 1px solid var(--line); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus__gutter span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-focus__gutter .agent-avatar, .recent-focus__gutter svg { flex: none; }
+.recent-focus__time-scale { position: relative; margin: 0 8px; }
+.recent-focus__time-scale time { position: absolute; top: 1px; transform: translateX(-50%); }
+.recent-focus__time-scale time:first-child { transform: none; }
+.recent-focus__time-scale time:last-child { transform: translateX(-100%); }
+.recent-focus__track { height: 24px; }
+.recent-focus__lane { position: relative; min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line-soft); background: repeating-linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 1px, transparent 1px, transparent 25%); }
+.recent-focus__segment { position: absolute; top: 3px; bottom: 3px; min-width: 8px; padding: 0 4px; overflow: hidden; border: 0; border-radius: 2px; background: var(--surface-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
+.recent-focus__segment.is-open { width: 8px; transform: translateX(-8px); border-right: 1px dashed var(--text-3); }
+.recent-focus__segment.is-current { background: color-mix(in srgb, var(--green) 22%, var(--surface-3)); color: var(--text); }
+.recent-focus__segment:hover, .recent-focus__segment:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+.recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 1; background: var(--green); pointer-events: none; }
+.recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
