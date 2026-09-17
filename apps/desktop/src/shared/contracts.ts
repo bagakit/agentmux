@@ -1321,6 +1321,7 @@ export type AgentMuxDesktopApi = {
     listTopics(workspaceId: string): Promise<ScratchTopicSnapshot[]>
     readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
+    ensureMote(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
     renameTitle(workspaceId: string, topicId: string, title: string): Promise<ScratchTopicSnapshot>
     setWikiEnabled(workspaceId: string, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot>
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>

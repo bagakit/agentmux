@@ -27,6 +27,8 @@ import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
 import {
   DEFAULT_TOPIC_WIKI,
+  MOTE_SOUL_PATH,
+  DEFAULT_MOTE_SOUL,
   SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   scratchTopicDirectoryName,
@@ -580,6 +582,9 @@ const mockApi: AgentMuxDesktopApi = {
         topicPath,
         title,
         summary,
+        ...(mockFiles.has(`${directoryPath}/${MOTE_SOUL_PATH}`) ? {
+          soul: { path: `${directoryPath}/${MOTE_SOUL_PATH}`, content: mockFiles.get(`${directoryPath}/${MOTE_SOUL_PATH}`)!, version: 'mock-soul' }
+        } : {}),
         collaborators: [...mockFiles.keys()].flatMap((path) => {
           const prefix = `${directoryPath}/.agents/`
           if (!path.startsWith(prefix)) return []
@@ -596,6 +601,12 @@ const mockApi: AgentMuxDesktopApi = {
           updatedAt: null
         }
       }
+    },
+    ensureMote: async (workspaceId, topicId) => {
+      const snapshot = await mockApi.scratch.ensureTopic(workspaceId, topicId)
+      const path = `${snapshot.directoryPath}/${MOTE_SOUL_PATH}`
+      if (!mockFiles.has(path)) mockFiles.set(path, DEFAULT_MOTE_SOUL)
+      return (await mockApi.scratch.readTopic(workspaceId, topicId))!
     },
     ensureTopic: async (workspaceId, topicId) => {
       const directoryPath = scratchTopicDirectoryName(topicId)

@@ -5,6 +5,8 @@ import type { AgentProviderId } from '@agentmux/core'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import {
   SCRATCH_WORKSPACE_ID,
+  MOTE_SOUL_PATH,
+  DEFAULT_MOTE_SOUL,
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_WIKI_STATE_PATH,
@@ -245,6 +247,13 @@ export class ScratchTopics {
     if (!resolved.startsWith(`${root}${sep}`)) throw new Error('Scratch Topic escapes its workspace')
     const content = await readRegularFile(join(resolved, 'topic.md'))
     const agentFiles = await readdir(join(resolved, '.agents'))
+    let soul: ScratchTopicSnapshot['soul']
+    try {
+      const content = await readRegularFile(join(resolved, MOTE_SOUL_PATH))
+      soul = { path: `${directoryName}/${MOTE_SOUL_PATH}`, content, version: wikiVersion(content) }
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error
+    }
     const copy = topicCopy(content)
     const defaultWiki = topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI
     const wiki = await readOptionalWiki(
@@ -257,6 +266,7 @@ export class ScratchTopics {
       directoryPath: directoryName,
       topicPath: `${directoryName}/topic.md`,
       ...copy,
+      ...(soul ? { soul } : {}),
       collaborators: agentFiles.flatMap((fileName) => collaborator(fileName) ?? []),
       wiki: {
         path: `${directoryName}/${SCRATCH_TOPIC_WIKI_PATH}`,
@@ -281,9 +291,17 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agents')),
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
-    await ensureRegularFile(join(absolutePath, 'topic.md'), TOPIC_TEMPLATE)
+    await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : TOPIC_TEMPLATE)
+    if (topicId === PMO_TEAMS_TOPIC_ID) await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
+    return (await this.read(workspace, topicId))!
+  }
+
+  async ensureMote(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
+    const snapshot = await this.ensure(workspace, topicId)
+    const directory = join(await realpath(workspace.path), snapshot.directoryPath)
+    await ensureRegularFile(join(directory, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
     return (await this.read(workspace, topicId))!
   }
 
