@@ -20,6 +20,7 @@ import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
 import { SpaceTopicsTree } from './SpaceTopicsTree'
+import { SpaceCreateMenu } from './SpaceCreateMenu'
 import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
@@ -93,17 +94,7 @@ export function WorkspaceSidebar() {
     ? workspaceProjectId(activeWorkspace)
     : null
 
-  async function chooseFolder(): Promise<void> {
-    const workspace = await api.workspaces.chooseLocalFolder()
-    if (!workspace || !config) return
-    // chooseLocalFolder now returns the existing record when the folder is already registered (a no-op
-    // with feedback rather than a zod-dump error), so append only when it is actually new — otherwise
-    // just focus what is already there.
-    if (!config.workspaces.some((item) => item.id === workspace.id)) {
-      setConfig({ ...config, workspaces: [...config.workspaces, workspace] })
-    }
-    await selectWorkspace(workspace.id)
-  }
+  const chooseFolder = useAppStore((state) => state.openProjectFolder)
 
   async function confirmRemoveProject(): Promise<void> {
     if (!removeRequest || !config || removing) return
@@ -274,9 +265,8 @@ export function WorkspaceSidebar() {
       <header className="project-rail-titlebar">
         <SidebarToggleChrome />
       </header>
-      {scratch ? <SpaceTopicsTree workspace={scratch} /> : null}
       <div className="sidebar__section-heading">
-        <span>Projects</span>
+        <span>Spaces</span>
         <div className="sidebar__heading-actions">
           {/* 密度就地切换：可见常驻控件，不进设置页——用户要在看着树的同时调（DEN
               「Project Rail 与 Topic 行密度」）。三档轮换，不是无级滑块。 */}
@@ -287,9 +277,10 @@ export function WorkspaceSidebar() {
             aria-pressed={railDensity !== 'default'}
             title={densityTitle}
           >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
-          <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
+          <SpaceCreateMenu onOpenFolder={chooseFolder} />
         </div>
       </div>
+      {scratch ? <SpaceTopicsTree workspace={scratch} /> : null}
       <nav className="project-list" aria-label="Projects">
         {projectRailTree(projects).map((group) => {
           const key = projectGroupKey(group)
