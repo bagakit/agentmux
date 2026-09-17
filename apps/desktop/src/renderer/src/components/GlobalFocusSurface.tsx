@@ -15,6 +15,7 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { topicIdForSession } from '../lib/workbench-tabs'
 import { focusBucketForSession } from '../lib/focus-context'
+import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 export function GlobalFocusSurface() {
@@ -30,6 +31,7 @@ export function GlobalFocusSurface() {
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
+  const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const focusLayoutRef = useRef<HTMLDivElement | null>(null)
@@ -48,7 +50,8 @@ export function GlobalFocusSurface() {
     window.addEventListener('blur', stop)
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('blur', stop) }
   }, [])
-  const filtered = executionRows.filter(row => (project === 'all' || row.workspaceId === project) && `${row.name} ${row.detail} ${row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const matching = executionRows.filter(row => (project === 'all' || row.workspaceId === project) && `${row.name} ${row.detail} ${row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === selectedId)
   const focusProjectLanes = useMemo(() => deriveFocusProjectLanes(executionRows).filter(lane => project === 'all' || lane.workspaceId === project), [executionRows, project])
   const rowsByProject = new Map<string, typeof filtered>()
@@ -60,6 +63,7 @@ export function GlobalFocusSurface() {
     return <div className="focus-project-lanes__groups">
       {(Object.keys(bucketMeta) as FocusBucket[]).map(bucket => {
         const meta = bucketMeta[bucket], Icon = meta.icon, grouped = rows.filter(row => row.bucket === bucket)
+        if (grouped.length === 0) return null
         return <section className="focus-context-group global-agents-group" data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} key={bucket}>
           <header className="focus-context-group__header"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></header>
           {grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}
@@ -70,10 +74,11 @@ export function GlobalFocusSurface() {
   return <section className={`global-board-surface global-focus-surface ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Focus">
     <div ref={focusLayoutRef} className="global-focus-layout" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
       <div className="global-board-main global-focus-main">
-      <header className="focus-filters">
+      <header className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><Search size={13} /><input aria-label="Search contexts" placeholder="Search contexts" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <label className="global-board-select">Project<select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label className="global-board-select"><select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusBucket | 'all')}><option value="all">All states</option>{(Object.keys(bucketMeta) as FocusBucket[]).map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => row.bucket === bucket).length}</option>)}</select></label>
         </div>
       </header>
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!.id; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>PMO Teams · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}

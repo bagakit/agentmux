@@ -125,7 +125,26 @@
 @media (max-width: 760px) {
   .window-status-bar { gap: var(--sp-2); }
   .window-status-bar .agent-input-stack { min-width: 0; background: transparent; }
+  .surface-navigation { gap: var(--sp-1); }
 }
+@media (max-width: 560px) {
+  .window-status-bar { padding: 0 var(--sp-2); gap: var(--sp-1); }
+  .window-status-bar__right { gap: var(--sp-1); }
+  .window-status-bar__utilities { padding-left: var(--sp-1); }
+  .window-status-bar__surface-switch { padding-left: 40px; }
+  .surface-navigation__surfaces { gap: 1px; }
+  .surface-navigation__slot { width: 26px; height: 24px; flex-basis: 26px; }
+  .surface-navigation__slot--launcher { width: 34px; height: 34px; flex-basis: 34px; }
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher,
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 34px; height: 34px; }
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 26px; height: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface-navigation__icon,
+  .surface-navigation__tooltip,
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { transition: none; }
+}
+.agent-input-stack { min-width: 0; background: transparent; }
 .agent-input-stack[data-input-surface='terminal'] {
   padding: 0 var(--sp-3) var(--sp-2);
   border-top: 1px solid var(--line-soft);
