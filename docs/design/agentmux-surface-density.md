@@ -655,6 +655,9 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 ### Project Rail 与 Topic 行密度
 
+- Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达，不为 Scratch 单独保留一块固定表面。产品对象归属只定义在交互 SSOT《Space、Folder 与 Topic》。
+- Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头的 `+` 打开紧凑动作菜单；入口含义与 Topic 的自动识别规则只定义在交互 SSOT《Space、Folder 与 Topic》。
+- 带特殊预制的 Topic 使用该预制的可辨认身份与名称，共用 Space 行的密度、选择、焦点与状态语言。PMO 等特殊身份与 Provider/Executor 身份各有含义，不能让预制头像冒充底层执行者或运行状态；具体 PMO 入口与浮窗密度继续复用对应章节。
 - Project Rail 的所有树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。Pinned child 的标题比普通项目小一档，hover 只使用下划线，不使用项目行的 Surface 填充；它和所属 Project 之间用一条低对比、断续的连接线表达层级关系。连接线是结构提示，不得复用选中、running、needs-you 或 error 的颜色与动效。
 - 用户原话：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。
   三项各自独立可调：**每层缩进**、**行图标尺寸**、**行高**。默认档必须比  之前更紧（当时是每层 16px 缩进 / 20px 图标框 / 28px 行高），且三者必须**同一个密度档一起变**，不允许出现「行变矮了但缩进照旧」的半档。
@@ -996,6 +999,8 @@ Demand 详情是连续的右侧 surface：标题和状态在短 header 中，属
 Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两块表面。打开 Topic 后，右侧必须保留普通 Workbench 的 Tab bar、Region 和 Terminal/Agent 内容；不得把 Scratch 从 Workbench registry 排除而只留下全幅空底。
 
 ### PMO 浮窗与 Board 工具栏的紧凑度
+
+本轮 Space 迭代同时重新审视左下角 PMO Teams 头像的交互与表面，范围和命名约束见 interaction《Space、Folder 与 Topic》。头像、Space 树条目与完整工作面使用可辨认的一致身份语言；实例名称、产品类型、运行状态与展开状态各自清楚，不让一个装饰效果代替这些不同事实。具体入口形态和控件方案尚未定案；新的明确决策落入本 SSOT 前，现行密度与减少动态效果约束继续有效。
 
 PMO 展开面使用一体式短标题行：标题字号服从正文元信息档，头像与标题行接合，边框和阴影清楚但不靠高大的留白制造层级。标题行高度不应成为对话首屏的主要占用；完整名称放在 tooltip/无障碍名称中。Board 工具栏采用单行、单网格负责人布局；Project Rail 被遮挡时不保留 180px 的空 chrome，也不让侧栏按钮与 Board 图标落在同一格互相覆盖。
 

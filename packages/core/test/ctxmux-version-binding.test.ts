@@ -132,9 +132,9 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
  * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
  */
 const IDENTITY_HASHES = [
-  'd5b6c14ac3275c16a0a42befe98fc91bb54351af',
-  '3cdbea382e689c63698a1da3b78e14f1ef01e8c0',
-  'a4e7e1d062c3c2259031ede777d5d1371553f5beef02a0e99e9726d157569b6a'
+  '2e28efe33fd9104dcca6ca5e6a0292590a3ddd53',
+  '81003f8494b6f47c7879e673a404e428d8ebb652',
+  '290a566301ba942e123e2a1791ed869b0dd10e55a651871a2108d6c501ae04b5'
 ] as const
 
 /**
@@ -150,7 +150,7 @@ const IDENTITY_VERSION_STRING_PATTERNS = [
   'CtxMux [0-9]+\\.[0-9]+\\.[0-9]+ · protocol [0-9]+'
 ] as const
 
-/** 扫描面：tracked 的这三类文件，排除产物/依赖/原件目录。写全相对 pathspec（裸词会失效）。 */
+/** 扫描面：tracked 的这三类文件，排除产物/依赖/原件及不可改写的历史证据。 */
 const SCAN_PATHSPECS = [
   '*.ts',
   '*.mjs',
@@ -158,6 +158,7 @@ const SCAN_PATHSPECS = [
   ':!**/dist/**',
   ':!**/node_modules/**',
   ':!**/vendor/**',
+  ':!docs/reviews/evidence/**',
   ':!.tmp/**',
   ':!.bagakit/**'
 ] as const
