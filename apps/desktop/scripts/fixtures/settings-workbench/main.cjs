@@ -58,8 +58,10 @@ app.whenReady().then(async () => {
           result.frames.push({width,theme,pane,file,geometry})
           if (pane === 'Agents' && theme === 'dark') {
             await click('document.querySelector("[data-settings-pane=agents] .agent-settings-card > summary")')
-            await until('!!document.querySelector("[data-settings-pane=agents] .agent-settings-card[open]")')
-            const expanded = await read(`(() => { const pane=document.querySelector('[data-settings-pane=agents]'); const bar=pane.querySelector('.settings-pane-actions').getBoundingClientRect(); const fields=pane.querySelector('.agent-settings-fields'); return {overflow:pane.scrollWidth-pane.clientWidth,fieldsOverflow:fields.scrollWidth-fields.clientWidth,saveBottom:bar.bottom,footerTop:document.querySelector('.window-status-bar').getBoundingClientRect().top}; })()`)
+            await until('document.querySelector("[data-settings-pane=agents] .agent-settings-card[open] .agent-settings-fields")?.getBoundingClientRect().height > 100')
+            await new Promise(resolve => setTimeout(resolve, 120))
+            const expanded = await read(`(() => { const pane=document.querySelector('[data-settings-pane=agents]'); const bar=pane.querySelector('.settings-pane-actions').getBoundingClientRect(); const fields=pane.querySelector('.agent-settings-fields'); return {overflow:pane.scrollWidth-pane.clientWidth,fieldsHeight:fields.getBoundingClientRect().height,fieldsWidth:fields.getBoundingClientRect().width,fieldsOverflow:fields.scrollWidth-fields.clientWidth,saveBottom:bar.bottom,footerTop:document.querySelector('.window-status-bar').getBoundingClientRect().top}; })()`)
+            assert.ok(expanded.fieldsHeight > 100 && expanded.fieldsWidth > 100)
             assert.ok(expanded.overflow <= 1 && expanded.fieldsOverflow <= 1)
             assert.ok(expanded.saveBottom <= expanded.footerTop + 1)
             fs.writeFileSync(path.join(evidence, `${width}-dark-agents-expanded.png`), (await win.webContents.capturePage()).toPNG())
