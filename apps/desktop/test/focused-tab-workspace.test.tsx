@@ -28,8 +28,10 @@ describe('Focus Tab projection', () => {
   it('keeps the normal interactive Region tree as the only Focus owner', () => {
     expect(workbenchSource).toContain('const bodyTabs =')
     expect(workbenchSource).toContain('{bodyTabs.length > 0 ? bodyTabs.map')
-    expect(workbenchSource).toContain('return focusPortalTarget ? createPortal(workbench, focusPortalTarget) : null')
-    expect(workbenchSource).toContain('const observer = new MutationObserver(() => {')
-    expect(workbenchSource).toContain('observer.disconnect()')
+    expect(workbenchSource).toContain('<StableWorkbenchView key={tab.id}')
+    const view = readFileSync(new URL('../src/renderer/src/components/StableWorkbenchView.tsx', import.meta.url), 'utf8')
+    expect(view).toContain('createPortal(children, host)')
+    expect(view).toContain('destination.append(host)')
+    expect(view).toContain('observer.disconnect()')
   })
 })
