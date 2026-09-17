@@ -45,3 +45,11 @@ it('does not redraw neighbouring task rows when one Session receives facts', asy
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, b: timeline('b', [event('3', 'user_message', 'Measure frame latency'), event('5', 'tool_call', 'Read profile')]) } })))
   expect(draws.counts).toEqual({ ...counts, b: counts.b! + 1 }); expect(row('b').textContent).toContain('Read profile')
 })
+
+it('keeps empty categories discoverable in the shared filter without repeating project empties', async () => {
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="Focus state filter"]')!
+  expect([...select.options].map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle'])
+  await act(async () => { select.value = 'results'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(context => context.dataset.sessionId)).toEqual(['a'])
+  expect(container.querySelector('.focus-context-group[data-empty="true"]')).toBeNull()
+})

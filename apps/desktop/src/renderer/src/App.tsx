@@ -144,7 +144,7 @@ function DesktopApp() {
   const renderedToolDockWidth = getRenderedToolDockWidth(toolDockWidth, projectRailOpen)
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
-  const mergedTopRow = mainSurface === 'workbench' && Boolean(workspace)
+  const mergedTopRow = mainSurface === 'agents' || (mainSurface === 'workbench' && Boolean(workspace))
   const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')

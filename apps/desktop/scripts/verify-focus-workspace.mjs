@@ -27,6 +27,7 @@ try {
     const stderr = []
     const exit = await runProbeProcess(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, phase, expectation], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 20000, onLine: line => stderr.push(line.slice(0, 1000)) })
     result.phases.push({ exit, stderr })
+    await fs.copyFile(path.join(privateRoot, `${phase}-focus.png`), path.join(root, '.tmp', `focus-workspace-${phase}.png`)).catch(() => {})
     const native = JSON.parse(await fs.readFile(path.join(privateRoot, `${phase}-result.json`), 'utf8'))
     result.phases.at(-1).native = native
     assert.equal(exit.timedOut, false)
