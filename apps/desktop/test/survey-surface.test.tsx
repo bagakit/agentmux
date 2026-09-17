@@ -8,7 +8,7 @@ const SOURCE = readFile(
 )
 
 describe('Survey browser-first surface', () => {
-  it('keeps the first interaction browser-like and delegates page ownership to Workspaces', async () => {
+  it('keeps the first interaction browser-like and delegates page ownership to Space', async () => {
     const source = await SOURCE
     expect(source).toContain('Search or enter a web address')
     expect(source).toContain('autoFocus')
@@ -21,7 +21,7 @@ describe('Survey browser-first surface', () => {
 
   it('rejects non-address input with a recoverable inline message', async () => {
     const source = await SOURCE
-    expect(source).toContain("setMessage('Enter a web address to open in Workspaces.')")
+    expect(source).toContain("setMessage('Enter a web address to open in Space.')")
     expect(source).toContain('role="status"')
   })
 })

@@ -7,9 +7,9 @@ const chromeSource = readFileSync(
   new URL('../src/renderer/src/components/TopRowChrome.tsx', import.meta.url),
   'utf8'
 )
-// Peer extracted the surface-switch plugins (Work/Focus/Workspaces...) out of TopRowChrome into
+// Peer extracted the surface-switch plugins (Work/Focus/Space...) out of TopRowChrome into
 // a shared SurfaceNavigation component; the `setMainSurface('board')` route now lives there as
-// data (`{ surface: 'board', title: 'Work — ...' }`), invoked via a generic
+// data (`{ surface: 'board', title: 'Goals — ...' }`), invoked via a generic
 // `onClick={() => setMainSurface(plugin.surface)}` in the shared component. The intent this
 // test guards ("Work maps to the board route") is preserved but split across two files.
 const surfaceNavigationSource = readFileSync(
@@ -36,8 +36,8 @@ describe('global surface titlebar inset', () => {
     expect(declarationsFor('.top-row-leading-chrome--global-inset')).toMatch(/padding-left\s*:\s*80px/)
   })
 
-  it('uses Work as the visible request surface name without changing the board route', () => {
-    expect(chromeSource).toContain('<strong>Work</strong>')
+  it('uses Goals as the visible goal surface name without changing the board route', () => {
+    expect(chromeSource).toContain('<strong>Goals</strong>')
     // The click that navigates to board is now `onClick={() => setMainSurface(plugin.surface)}`
     // in TopRowChrome's shared plugin loop, dispatched by a `{ surface: 'board', title: 'Work
     // — ...' }` entry defined in SurfaceNavigation. Both anchors have to be true — a generic
@@ -45,6 +45,6 @@ describe('global surface titlebar inset', () => {
     // That is the exact acceptance: the visible name is "Work" but the route it takes is 'board'.
     expect(chromeSource).toContain('setMainSurface(plugin.surface)')
     expect(surfaceNavigationSource).toContain("surface: 'board'")
-    expect(surfaceNavigationSource).toContain("title: 'Work — ")
+    expect(surfaceNavigationSource).toContain("title: 'Goals — ")
   })
 })

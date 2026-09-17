@@ -1,5 +1,15 @@
 # AgentMux Surface 与密度合同
 
+## 左下角导航与右下角工具组
+
+全局导航以窗口左下角为稳定锚点。入口顺序、Space/Goals 命名、PMO 浮窗和焦点语义只定义在交互 SSOT《左下角导航、Space 与 Goals》。
+
+- PMO 头像使用独立、大一档的圆角按钮，和后面的紧凑工作面切换组留出明确间距；不能再被压进与普通图标等大的中间格。
+- Space、Focus、Goals、Survey 共用一致的图标命中区、基线和单一选中 Surface。名称通过同一 tooltip 与可访问名称可达；PMO 的展开状态不冒充主工作面选中状态。
+- 右下角的快捷键与设置组成独立、低强调的小工具组，状态摘要位于其前。左侧导航与右侧工具之间接受剩余宽度，不能通过绝对居中让两边控件覆盖。
+- PMO 的尺寸强调保持局部，底栏仍紧凑；它的圆角轮廓、头像和焦点环表达身份与可操作性，避免持续的装饰性闪烁。打开面板的反馈保持短促并尊重减少动态效果。
+- 窄窗口保留五个入口和两项工具，优先收紧间距与次级状态文字。PMO 的相对尺寸、完整命中区、选中信号和键盘焦点不能消失；hover 放大不引起相邻控件移位。
+
 > 产品交互与 Owner 边界见
 > [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；导航与会话栏需求见
 > [`agentmux-project-rail-navigation.md`](../plans/agentmux-project-rail-navigation.md)。
@@ -235,7 +245,7 @@
 
 ### 三工作面与注意力密度
 
-- 底部中央只保留一组 `Agents / Session / Board` 切换，使用紧凑文字和单一选中 Surface；顶行不重复同一组三项。
+- 窗口只保留一组主导航，位置与分组见《左下角导航与右下角工具组》；顶行不重复主导航。
 - Agents 收件箱按注意力排序，Needs you 使用现有琥珀语义，working 使用现有绿色/蓝色语义，结果审查入口使用低对比度次级动作；不为同一状态增加第二枚常驻徽章。
 - Board 卡片先读 Task 身份，再读 Project 和状态；Session 名称、Provider 与执行状态进入次级元信息，不抢 Task 标题层级。
 - 没有选中 Task 时主区占满可用宽度；不画空右栏、不画占位边框、不使用“从右到左”的方向性动画。只有多个 Region 真实存在时才显示 arrangement 控件。
@@ -849,7 +859,7 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 
 ### Agents、Session 与 Board 的切换
 
-底部中央使用一组低高度的 segmented switcher，只有 `Agents`、`Session`、`Board` 三个平级项；当前项用单一底色／下划线和焦点环表达。顶部右侧保留搜索、筛选和当前工作面的动作，不重复放三项导航。 Session 顶栏也遵循此规则；删除重复导航后不保留空的右侧占位容器。
+主工作面切换使用低高度的 segmented switcher，当前项用单一选中 Surface 和焦点环表达；入口分组与位置归《左下角导航与右下角工具组》。顶部右侧保留搜索、筛选和当前工作面的动作，不重复主导航。 Session 顶栏也遵循此规则；删除重复导航后不保留空的右侧占位容器。
 
 三种工作面有清晰的第一层信息：Agents 先读 Executor/Agent 状态，Session 先读 Session/Topic/Workspace，Board 先读 Demand/Project/状态。Board 的需求列不混入以 Session 为主身份的卡片；需要看执行 Session 时进入右侧 Region 工作区。
 
@@ -962,9 +972,9 @@ PMO 团队的浮窗标题、入口 tooltip 和无障碍名称统一使用 `PMO t
 
 PMO Teams 展开使用短促的位移、缩放与淡入，起点对齐触发头像，结束时头像与面板接合；不要从无关的屏幕角落弹出。标题栏只保留一个收起动作；浮动／紧凑形态切换和“收起到下方”由底部入口承载，不再显示右上角三个点。按钮语义见交互 SSOT「PMO Teams 从入口展开」。
 
-### Workspaces 与 Agents 全局工作面
+### Space 与 Focus 全局工作面
 
-底部三项切换器使用 `Agents`、`Workspaces`、`Board`。`Workspaces` 只表达工作台集合，不把 Session 生命周期误当作顶级导航。Agents 和 Board 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。
+顶级入口的名称和职责见交互合同《左下角导航、Space 与 Goals》。Space 表达工作现场，不把 Session 生命周期误当作顶级导航。Focus 和 Goals 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。
 
 ### Demand 卡片与详情密度
 
@@ -987,7 +997,7 @@ Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两
 
 PMO 展开面使用一体式短标题行：标题字号服从正文元信息档，头像与标题行接合，边框和阴影清楚但不靠高大的留白制造层级。标题行高度不应成为对话首屏的主要占用；完整名称放在 tooltip/无障碍名称中。Board 工具栏采用单行、单网格负责人布局；Project Rail 被遮挡时不保留 180px 的空 chrome，也不让侧栏按钮与 Board 图标落在同一格互相覆盖。
 
-PMO Teams 的入口固定在底部中央，页面内不再保留独立浮动头像。展开面板继续使用已保存的几何位置和尺寸，入口与面板通过清晰的边界接合；打开动画只使用短促的 opacity、边界高光和信号扫描层，不缩放面板内容。扫描层必须在 200ms 级别内完成并在静止后移除，避免持续闪烁。龙头像眼睛的粒子仅作很轻的在线反馈，不能把聊天内容压暗或制造大面积发光。
+PMO Teams 的入口位置与独立尺寸见《左下角导航与右下角工具组》，页面内不再保留第二个浮动头像。展开面板继续使用已保存的几何位置和尺寸，入口与面板通过清晰的边界接合；打开动画只使用短促的 opacity、边界高光和信号扫描层，不缩放面板内容。扫描层必须在 200ms 级别内完成并在静止后移除，避免持续闪烁。龙头像眼睛的粒子仅作很轻的在线反馈，不能把聊天内容压暗或制造大面积发光。
 
 眼睛反馈采用两束短烟火，每束最多 6 枚 2px 级粒子，局部、短促、低对比度；粒子通过有限的 CSS keyframes 或同等轻量实现，不引入全局粒子运行时。粒子不改变入口尺寸、不推动底部布局，关闭或 `prefers-reduced-motion` 时立即停用。
 
@@ -1013,7 +1023,7 @@ Topic 行的 topology 收起态是一排紧凑 Tab 图标位；每枚只表达�
 
 ### 跨视图 Session 定位与 Agent Input 宽度
 
-Agents、Workspaces、Board 共用一个选中 Session 上下文。切换器只换主表面投影；Workspaces 展开已有 Region，Agents 保留右侧观察面，Board 高亮对应执行事实。不要为跨视图连续性新增重复卡片、隐藏 Session 或第二套选中状态。
+Focus、Space、Goals 共用一个选中 Session 上下文。切换器只换主表面投影；Space 展开已有 Region，Focus 保留右侧观察面，Goals 高亮对应执行事实。不要为跨视图连续性新增重复卡片、隐藏 Session 或第二套选中状态。
 
 Agent Input 的 collapsed composer 采用“左右有界控件 + 中间弹性编辑区”的密度：编辑区占据全部剩余宽度，工具和会话动作只占自身命中区。长消息可以换行，身份 rail 单独承担 Agent 名称、Executor 和 Session 摘要；不能用固定中间列、居中窄框或重复身份文字降低可输入面积。
 
@@ -1047,11 +1057,11 @@ Focus 的项目采用横向泳道、纵向轴头结构：项目标签在每条�
 
 Focus 左侧投影与右侧 Tab 工作面之间使用 6px 级别的垂直 resize handle，默认右侧约占 61.8%，拖拽范围保持在 38–76% 之间。TUI/Browser 的内容必须设置 `min-width: 0` 和溢出约束，拖拽中不触发进入动画或 Session 重挂载；无选中 Tab 时不显示把手。
 
-### 全局工作面标题栏留白与 Work 标签
+### 全局工作面标题栏留白与名称
 
-Focus 与 Work 在 Project Rail 缺席时，顶栏标题从系统窗口控制区右侧开始；macOS 的三色按钮和文字不能叠放。让位属于顶栏 chrome，使用与已有窗口按钮留白相同的几何来源，不在 Focus、Work 各自的内容面板里另加一份边距。非 macOS 不因 macOS 按钮预留无意义的空白，窄窗中次级面包屑可截断，主名称仍可读。
+Focus 与 Goals 在 Project Rail 缺席时，顶栏标题从系统窗口控制区右侧开始；macOS 的三色按钮和文字不能叠放。让位属于顶栏 chrome，使用与已有窗口按钮留白相同的几何来源，不在各自的内容面板里另加一份边距。非 macOS 不因 macOS 按钮预留无意义的空白，窄窗中次级面包屑可截断，主名称仍可读。
 
-底部导航、面包屑与工作面工具栏统一显示 `Work`；其上下文副标题使用 `Requests & ideas`，让用户知道这里承接的是自己的诉求和想法。Demand 卡片、详情和操作可以继续用 Demand 指代持久化对象，但面向用户的创建、搜索和统计文案使用 request/idea 语言。`Goal` 表达单条 Work 想达成的结果，属于对象语义，不承担全局入口名称。行为约束见交互合同“全局工作面顶栏与 Work 命名”。
+底部导航、面包屑、工作面工具栏和单项操作使用一致的用户可见名称，具体语义归交互合同《左下角导航、Space 与 Goals》；不在不同 chrome 中保留旧称。
 
 ### Browser 与身份浮层的空间层级
 

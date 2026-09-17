@@ -24,7 +24,7 @@
 .pmo-teams-topic-compact-launcher__firework { position: absolute; top: 14px; width: 2px; height: 2px; }
 .pmo-teams-topic-compact-launcher__firework--left { left: 10px; }
 .pmo-teams-topic-compact-launcher__firework--right { right: 10px; }
-.pmo-teams-topic-compact-launcher__firework i { position: absolute; display: block; width: 2px; height: 2px; border-radius: 50%; background: color-mix(in srgb, white 86%, var(--green)); box-shadow: 0 0 4px color-mix(in srgb, var(--green) 80%, transparent); opacity: 0; animation-duration: 2.8s; animation-timing-function: cubic-bezier(.16, .8, .32, 1); animation-iteration-count: infinite; }
+.pmo-teams-topic-compact-launcher__firework i { position: absolute; display: block; width: 2px; height: 2px; border-radius: 50%; background: color-mix(in srgb, white 86%, var(--green)); box-shadow: 0 0 4px color-mix(in srgb, var(--green) 80%, transparent); opacity: 0; animation-duration: .18s; animation-timing-function: cubic-bezier(.16, .8, .32, 1); animation-iteration-count: 1; }
 .pmo-teams-topic-compact-launcher__firework--left i { animation-name: pmo-teams-topic-firework-left; }
 .pmo-teams-topic-compact-launcher__firework--right i { animation-name: pmo-teams-topic-firework-right; }
 .pmo-teams-topic-compact-launcher__firework i:nth-child(1) { --dx: -5px; --dy: -5px; animation-delay: 0ms; }
