@@ -24,6 +24,31 @@ export type TerminalPasteTarget = { paste(text: string): void }
 /** 只用到这两个方法，同上。 */
 export type TerminalPasteHost = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
 
+/** Retain the origin of exactly one public xterm.paste onData event, never a later key. */
+export function createTerminalPasteInput(
+  terminal: TerminalPasteTarget,
+  send: (text: string, terminalData: string) => void
+): TerminalPasteTarget & { consume(data: string | Uint8Array): boolean } {
+  let current: { text: string; consumed: boolean } | null = null
+  return {
+    paste(text) {
+      const previous = current
+      current = { text, consumed: false }
+      try { terminal.paste(text) }
+      finally { current = previous }
+    },
+    consume(data) {
+      if (typeof data !== 'string' || !current || current.consumed) return false
+      const text = current.text
+      // A write callback can synchronously reenter. Consume before dispatch, and restore
+      // the enclosing paste in finally; nested pastes keep their own original text.
+      current.consumed = true
+      send(text, data)
+      return true
+    }
+  }
+}
+
 /** 粘贴一段文本进终端。两条入口都必须经这里，才不会各自决定 ESC 怎么办。 */
 export function pasteIntoTerminal(terminal: TerminalPasteTarget, text: string): void {
   terminal.paste(sanitizeBracketedPasteText(text))

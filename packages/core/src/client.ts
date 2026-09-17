@@ -107,6 +107,7 @@ import type {
   AgentCatalogEntry,
   AgentExecutorId,
   AgentProviderId,
+  AgentMuxAgentPasteInput,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
   AgentMuxInteractionRequest,
@@ -2633,6 +2634,18 @@ export class AgentMuxClient {
   async writeAgent(agentSessionId: string, data: AgentMuxRunInputData): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
     return await this.writeAgentInput(this.requireAgentSession(agentSessionId), data)
+  }
+
+  async pasteAgent(input: AgentMuxAgentPasteInput): Promise<AgentMuxRunInputAck> {
+    this.requireConnected()
+    const session = this.requireAgentSession(input.agentSessionId)
+    if (!sameRun(session.run, input.expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before paste.', 'STALE_AGENT_SESSION')
+    }
+    const plan = this.providers.get(session.providerId).planPromptInput(input.text)
+    return await this.writeAgentInput(session, plan.kind === 'render-then-submit'
+      ? plan.payload
+      : input.terminalData)
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
