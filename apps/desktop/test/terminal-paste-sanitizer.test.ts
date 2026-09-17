@@ -181,9 +181,13 @@ describe('TerminalView 接线：装在 terminal.element 上，且两条入口共
     expect(fromElement, `宿主实参是 ${host}，它不来自 terminal.element`).toBe(true)
   })
 
-  it('第二个实参是那个终端本身', () => {
+  it('第二个实参是由真实终端创建的粘贴来源路由', () => {
     const [install] = callsTo(view, 'installTerminalPasteSanitizer')
-    expect(argumentText(install!, 1)).toBe('terminal')
+    expect(argumentText(install!, 1)).toBe('pasteInput')
+    const [create] = callsTo(view, 'createTerminalPasteInput')
+    expect(callsTo(view, 'createTerminalPasteInput')).toHaveLength(1)
+    expect(argumentText(create!, 0)).toBe('terminal')
+    expect(declaredFrom(view, 'pasteInput')).toBe(create!.getText())
   })
 
   it('拆卸时调用了 disposer——否则每次重建终端都多挂一个监听', () => {

@@ -32,7 +32,7 @@ import {
   type TerminalPathLink
 } from '../lib/terminal-path-link'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
-import { installTerminalPasteSanitizer, pasteIntoTerminal } from '../lib/terminal-paste'
+import { createTerminalPasteInput, installTerminalPasteSanitizer, pasteIntoTerminal, type TerminalPasteTarget } from '../lib/terminal-paste'
 import {
   terminalCopyOutcome,
   terminalScrollbackText,
@@ -232,6 +232,7 @@ export function TerminalView({
   const acceptsInputRef = useRef(acceptsInput)
   acceptsInputRef.current = acceptsInput
   const searchAddonRef = useRef<SearchAddon | null>(null)
+  const pasteTargetRef = useRef<TerminalPasteTarget | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const rememberedSelectionRef = useRef('')
   const [hasSelection, setHasSelection] = useState(false)
@@ -885,7 +886,18 @@ export function TerminalView({
         if (!readOnlyRef.current) void api.sessions.write(session.control, data)
       }
     })
-    const input = subscribeTerminalInput(terminal, sendInput)
+    const pasteInput = createTerminalPasteInput(terminal, (text, terminalData) => {
+      terminalInputSender({
+        accepts: acceptsCurrentInput,
+        write: () => {
+          if (!readOnlyRef.current) void api.sessions.paste(session.control, text, terminalData)
+        }
+      })(terminalData)
+    })
+    pasteTargetRef.current = pasteInput
+    const input = subscribeTerminalInput(terminal, (data) => {
+      if (!pasteInput.consume(data)) sendInput(data)
+    })
     const selection = terminal.onSelectionChange(() => {
       const text = terminal.getSelection()
       if (text) rememberedSelectionRef.current = text
@@ -913,7 +925,7 @@ export function TerminalView({
     if (!pasteHost) {
       console.warn('[terminal] xterm element missing after open(); native paste will not be sanitized')
     }
-    const pasteSanitizer = pasteHost ? installTerminalPasteSanitizer(pasteHost, terminal) : () => {}
+    const pasteSanitizer = pasteHost ? installTerminalPasteSanitizer(pasteHost, pasteInput) : () => {}
     // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），命中之后做什么由
     // terminalShortcutHandlers 提供——那一层是纯的，能被直接调用并断言后果。此前这些分支内联在
     // 这里，运行期够不着：把任一分支的体掏空，整族测试照旧全绿而那个键对用户彻底失效。
@@ -1090,6 +1102,7 @@ export function TerminalView({
           console.warn('[terminal] Attachment release was not acknowledged', error)
         })
       }
+      if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
       terminal.dispose()
       resourceOwners.release()
     }
@@ -1178,12 +1191,12 @@ export function TerminalView({
   }
 
   function pasteClipboard(): void {
-    const terminal = terminalRef.current
-    if (!terminal) return
+    const target = pasteTargetRef.current
+    if (!target) return
     void api.ui.readClipboardText().then((text) => {
       // 走 pasteIntoTerminal 而不是 terminal.paste：ESC 怎么办由 Core 那一个函数说了算，
       // 与原生 Cmd+V 那条路（installTerminalPasteSanitizer）以及 provider 投递 prompt 同源。
-      if (terminalRef.current === terminal && text) pasteIntoTerminal(terminal, text)
+      if (pasteTargetRef.current === target && text) pasteIntoTerminal(target, text)
     })
   }
 

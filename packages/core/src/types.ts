@@ -174,6 +174,16 @@ export type AgentMuxRunAttachment = {
  */
 export type AgentMuxRunInputData = string | Uint8Array
 
+/** A terminal paste edits the current Run's draft without submitting a prompt. */
+export type AgentMuxAgentPasteInput = {
+  agentSessionId: string
+  expectedRun: AgentMuxRunRef
+  /** Clipboard text, preserving whitespace and line endings. */
+  text: string
+  /** Actual encoding emitted by this terminal client's paste operation. */
+  terminalData: string
+}
+
 export type AgentMuxRunInputOperation = {
   ownerInstanceId: string
   operationId: string
