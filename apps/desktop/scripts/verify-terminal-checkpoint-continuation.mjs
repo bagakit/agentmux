@@ -165,7 +165,7 @@ async function control(operation, fields={}) {
 async function inspected(regionId){return (await control('inspect.region',{target:{kind:'region',regionId}})).region}
 async function localState(cdp){return cdp.evaluate(`(() => {const record=localStorage.getItem('agentmux-workbench-v1');return record?JSON.parse(record).state:null})()`)}
 async function click(cdp, selector) {
- const point=await waitFor('visible private control',()=>cdp.evaluate(`(() => {const items=Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e=>e.getClientRects().length);if(items.length!==1)return null;const r=items[0].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`))
+ const point=await waitFor('visible private control',()=>cdp.evaluate(`(() => {const items=Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'&&!e.closest('[inert]')&&!e.disabled);if(items.length!==1)return null;const r=items[0].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`))
  await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
  await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point})
 }
@@ -346,7 +346,12 @@ try {
  workspaces:[{id:'checkpoint-fixture',name:'Private checkpoint fixture',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}}}))
  first=await launch('first')
  client=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
+ phase='select-private-workspace'
  await click(first.cdp,'[data-workspace-id="checkpoint-fixture"]')
+ // Project selection deliberately keeps the global Board open. Use the real
+ // primary Space navigation before requesting its visible tabbar action.
+ await click(first.cdp,'button[aria-label="Space: show terminal and file workbench"]')
+ phase='create-private-launcher'
  await click(first.cdp,'button[title="New tab"]')
  const launcher=await waitFor('actual new workspace launcher',()=>first.cdp.evaluate("document.querySelector('[data-workbench-region-id]:has(.launch-surface)')?.dataset.workbenchRegionId ?? null"))
  const normal=await opened(first.cdp,'normal',{kind:'launcher',regionId:launcher})
