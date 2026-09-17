@@ -115,7 +115,7 @@ let container: HTMLElement
 let disconnect: (() => void) | undefined
 
 function renderWorkbench(visible = true): ReactNode {
-  return <><WorkspaceWorkbench workspaceId="workspace-hover" visible={visible} /><SurfaceSwitch /></>
+  return <><WorkspaceWorkbench workspaceId="workspace-hover" visible={visible} /><SurfaceSwitch onOpenSettings={() => {}} /></>
 }
 function observeTerminalViewport(terminal: FixtureTerminal): void {
   const target = terminal.element!.parentElement!

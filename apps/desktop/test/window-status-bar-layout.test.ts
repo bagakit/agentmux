@@ -11,7 +11,7 @@ describe('window utility status bar layout', () => {
     const app = await appSource
     const rail = await railSource
     const styles = await stylesSource
-    expect(app).toContain('<WindowUtilityBar onOpenSettings={openSettings} />')
+    expect(app).toContain('<WindowUtilityBar />')
     expect(app).toContain('className="window-status-bar__status"')
     expect(app).toContain('className="window-status-bar__right"')
     expect(app).not.toContain('ProjectRailToolbar')
@@ -24,7 +24,7 @@ describe('window utility status bar layout', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const footer = app.slice(start, end)
-    expect(footer).toContain('<SurfaceSwitch />')
+    expect(footer).toContain('<SurfaceSwitch onOpenSettings={openSettings} />')
     const navigation = footer.indexOf('window-status-bar__surface-switch')
     const status = footer.indexOf('window-status-bar__status')
     const right = footer.indexOf('window-status-bar__right')
