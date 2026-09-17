@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
-import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts.js'
 import { producingAgentCount, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
@@ -12,7 +12,14 @@ vi.hoisted(() => {
 })
 
 const fixture = vi.hoisted(() => ({
+  topics: [] as ScratchTopicSnapshot[],
   state: {
+    layouts: {},
+    tabs: {},
+    scratchTopicOrder: [],
+    workspaceFileRevisions: {},
+    openScratchTopic: vi.fn(async () => {}),
+    reportError: vi.fn(),
     config: null as AppConfig | null,
     sessions: [] as SessionSnapshot[],
     // 真 store 里 timelines 恒为一个对象（初值 `{}`，且不进 partialize，故重启后仍是 `{}`）。
@@ -25,7 +32,7 @@ const fixture = vi.hoisted(() => ({
     // 栈读起来像组件回归——而组件没坏，是这份替身少了一个键。
     agentNames: {} as Record<string, string>,
     providerCatalog: [] as unknown[],
-    activeWorkspaceId: 'project-a',
+    activeWorkspaceId: 'project-a' as string | null,
     mainSurface: 'workbench' as const,
     projectRailOpen: true,
     collapsedProjectGroups: {} as Record<string, true>,
@@ -36,6 +43,7 @@ const fixture = vi.hoisted(() => ({
     setConfig: vi.fn(),
     toggleProjectRail: vi.fn(),
     toggleProjectGroup: vi.fn(),
+    setWorkspaceTool: vi.fn(),
     toggleTools: vi.fn()
   }
 }))
@@ -49,6 +57,10 @@ vi.mock('../src/renderer/src/store.js', () => ({
 
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: { workspaces: { chooseLocalFolder: vi.fn(async () => null) } }
+}))
+
+vi.mock('../src/renderer/src/hooks/useScratchTopics.js', () => ({
+  useScratchTopics: () => ({ topics: fixture.topics, error: null })
 }))
 
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar.js'
@@ -86,7 +98,7 @@ function session(
       processState: 'running',
       status: { state, source: 'run-process', observedAt: 1 },
       latestOutputBytes: 0,
-      control: { kind: 'terminal', hostId: 'local', run: { runId: `run-${id}` } }
+      control: { kind: 'terminal', hostId: 'local', runId: `run-${id}`, run: { runId: `run-${id}` } }
     }
   }
   return {
@@ -137,6 +149,7 @@ afterEach(() => {
   fixture.state.activeWorkspaceId = 'project-a'
   fixture.state.collapsedProjectGroups = {}
   fixture.state.pinnedItems = {}
+  fixture.topics = []
 })
 
 describe('workingAgentCount', () => {
@@ -238,17 +251,17 @@ describe('Project Rail selection and running signals', () => {
     expect(idle).toBe('1')
   })
 
-  it('removes the repeated project icon while retaining Scratch identity', () => {
+  it('shares the row icon slot while giving Topics its own identity', () => {
     fixture.state.config = structuredClone(config)
     const markup = renderRail()
     const projectRows = [...markup.matchAll(/<button[^>]+class="project-rail-row(?:"| )[^>]*>[\s\S]*?<\/button>/g)]
       .map((match) => match[0])
       .filter((row) => row.includes('project-rail-row__identity'))
-    expect(projectRows).toHaveLength(4)
-    const regularRows = projectRows.filter((row) => !row.includes('scratch-workspace-row'))
+    expect(projectRows).toHaveLength(5)
+    const regularRows = projectRows.filter((row) => !row.includes('aria-label="Topics overview"') && !row.includes('space-mote-row'))
     expect(regularRows).toHaveLength(3)
     expect(regularRows.every((row) => row.includes('project-rail-row__icon'))).toBe(true)
-    expect(markup).toContain('scratch-workspace-row__icon')
+    expect(rowFor(markup, 'Topics overview')).toContain('lucide-notebook-text')
   })
 
   it('counts running Agents in the badge, not worktrees', () => {
@@ -301,7 +314,7 @@ describe('Project Rail selection and running signals', () => {
   it('gives Host a slot only when it is not this machine', () => {
     // `This Mac` 在每一行上逐字相同——它不区分任何东西，只占掉标题的宽度。
     fixture.state.config = structuredClone(config)
-    fixture.state.config!.hosts.push({ id: 'studio', kind: 'ssh', label: 'Studio', address: 'studio' })
+    fixture.state.config!.hosts.push({ id: 'studio', kind: 'ssh', label: 'Studio', hostname: 'studio' })
     fixture.state.config!.workspaces.push(
       { id: 'project-d', name: 'Delta', hostId: 'studio', path: '/delta', kind: 'folder' }
     )
@@ -325,13 +338,11 @@ describe('Project Rail selection and running signals', () => {
     expect(identity).not.toContain('flex-direction: column')
   })
 
-  it('uses the app icon for Scratch rather than a decorative glyph', () => {
-    // 用户："Scratch 前面的图标有点难看, 是不是换成项目 icon, 现在项目 ICON 哪里都没有"。
-    // 用的是已存在的 BrandIcon（resources/icon-128.png），不新造 per-project 图标体系。
+  it('uses the special Topics icon in the unified Space tree', () => {
     fixture.state.config = structuredClone(config)
-    const scratch = rowFor(renderRail(), 'Scratch')
-    expect(scratch).toContain('brand-icon')
-    expect(scratch).not.toContain('lucide-sparkles')
+    const topics = rowFor(renderRail(), 'Topics overview')
+    expect(topics).toContain('lucide-notebook-text')
+    expect(topics).not.toContain('brand-icon')
   })
 
   it('removes a whole Project view without touching Scratch or unrelated registrations', () => {
@@ -631,8 +642,8 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     fixture.state.pinnedItems = {}
     const markup = renderRail()
     expect(markup).not.toContain('project-rail-row--pinned-child')
-    // 基线：Scratch 槽 1 个 entry + 三个项目行各 1 个 = 4。空容器变异会让它变多。
-    expect((markup.match(/class="project-rail-entry"/g) ?? []).length).toBe(4)
+    // Topics 的一级入口有独立 nav；三条普通项目各自占一个 entry。
+    expect((markup.match(/class="project-rail-entry"/g) ?? []).length).toBe(3)
   })
 
   it('把 pinned Branch 挂在它自己的 Project 下，而不是 Scratch 或别的项目', () => {
@@ -669,33 +680,33 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     expect(markup).toContain('project-rail-entry--pinned')
   })
 
-  it('把 pinned Topic 挂在 Scratch 下；快照缺失时回落到 id 而不是消失', () => {
-    // 需求：pinned Topic 从 pin 列表单独就能渲染——快照没加载（SSR 下 useScratchTopics 恒返回
-    // topics=null）时用 id 兜底，绝不因为「查不到标题」而让这一行消失。
+  it('projects pinned Topics from the same filesystem collection under Topics', () => {
     fixture.state.config = structuredClone(config)
+    fixture.topics = [{ id: 'view:launcher-abc', title: 'Pinned Topic', summary: 'Shared goal',
+      directoryPath: '/scratch/topic--view--launcher-abc',
+      topicPath: '/scratch/topic--view--launcher-abc/topic.md', collaborators: [] }]
     fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
     const markup = renderRail()
-    const child = pinnedChildFor(markup, 'view:launcher-abc')
+    const child = rowFor(markup, 'Open Pinned Topic')
     expect(depthOf(child)).toBe(1)
-    // 挂在 Scratch 下：它出现在 Scratch 行之后、Projects 段第一行（Alpha）之前。
-    const scratchAt = markup.indexOf('aria-label="Scratch"')
-    const topicAt = markup.indexOf('aria-label="view:launcher-abc"')
+    expect(child).toContain('lucide-pin')
+    const topicsAt = markup.indexOf('aria-label="Topics overview"')
+    const topicAt = markup.indexOf('aria-label="Open Pinned Topic"')
     const alphaAt = markup.indexOf('aria-label="Alpha"')
-    expect(scratchAt).toBeLessThan(topicAt)
-    expect(topicAt).toBeLessThan(alphaAt)
-    expect(markup).toContain('project-rail-entry--pinned')
+    expect(topicsAt).toBeGreaterThan(-1)
+    expect(topicAt).toBeGreaterThan(topicsAt)
+    expect(alphaAt).toBeGreaterThan(topicAt)
+    expect(child).not.toContain('project-rail-row--pinned-child')
   })
 
-  it('不与 Scratch 行的静态 <Pin> 徽章相混——那是「此 workspace 被 pin」的另一个概念', () => {
-    // 两个陷阱之一（见 review §2.7 / 任务）：Scratch 行本来就有一枚 <Pin> 徽章，含义是
-    // 「这个 workspace 被 pin 了」。pinned Topic 子节点不能借用那套呈现读成同一个东西——它们走
-    // --pinned-child + 更小字号，与 scratch-workspace-row__meta 里的徽章是不同的 DOM。
+  it('does not invent a Topic from a stale pin when its filesystem snapshot is absent', () => {
     fixture.state.config = structuredClone(config)
-    fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
+    fixture.topics = []
+    fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:missing'] }
     const markup = renderRail()
-    const child = pinnedChildFor(markup, 'view:launcher-abc')
-    expect(child).not.toContain('scratch-workspace-row__meta')
-    expect(child).not.toContain('lucide-pin')
+    expect(rowFor(markup, 'Topics overview')).toContain('Topics')
+    expect(markup).not.toContain('aria-label="Open view:missing"')
+    expect(markup).not.toContain('space-topic-row')
   })
 
   it('折叠的分组不泄漏成员的 pinned 子节点', () => {

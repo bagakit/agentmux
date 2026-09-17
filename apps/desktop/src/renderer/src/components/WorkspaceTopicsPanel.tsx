@@ -5,7 +5,7 @@ import {
   Pin,
   Plus
 } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
@@ -17,6 +17,8 @@ import { resolveAgentName } from '../lib/display-name'
 import { firstPromptFromTimeline, tabDisplayName } from '../lib/workbench-tabs'
 import { assertUnreachableSurface } from '../lib/workbench-surface-kinds'
 import { api } from '../lib/api'
+import { useScratchTopics } from '../hooks/useScratchTopics'
+import { bumpWorkspaceFileRevision } from '../lib/file-workbench-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
@@ -35,7 +37,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, partitionPinned, reorderTopics } from '../lib/topic-order'
-import { openTopicRegionMosaics, openTopicWorkSurfaces } from '../lib/scratch-topic-layout'
+import { activeTopicIdFromLayout, openTopicRegionMosaics, openTopicWorkSurfaces } from '../lib/scratch-topic-layout'
 import { sessionRecentActivity } from '../lib/session-recency'
 import { presentError } from '../lib/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
@@ -63,10 +65,8 @@ export function WorkspaceTopicsPanel({
   onRevealDirectory(path: string): void
 }) {
   const layout = useAppStore((state) => state.layouts[workspace.id])
-  const activeTabId = layout?.groups.find((group) => group.id === layout.activeGroupId)?.activeTabId
-  const topicId = useAppStore((state) => activeTabId ? state.tabs[activeTabId]?.topicId : undefined)
   const tabs = useAppStore((state) => state.tabs)
-  const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
+  const topicId = layout ? activeTopicIdFromLayout(layout, tabs) : null
   const sessions = useAppStore((state) => state.sessions)
   const config = useAppStore((state) => state.config)
   // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
@@ -84,7 +84,7 @@ export function WorkspaceTopicsPanel({
   const reportError = useAppStore((state) => state.reportError)
   const localHome = useAppStore((state) => state.localHome)
   const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
-  const [topics, setTopics] = useState<ScratchTopicSnapshot[] | null>(null)
+  const { topics, error: readError } = useScratchTopics(workspace.id)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -101,13 +101,13 @@ export function WorkspaceTopicsPanel({
   // Topic pin 与 Branch pin 是同一个概念的两次实例化——一个 scope 内的一组 id。scope key 从
   // SCRATCH_WORKSPACE_ID **派生**、绝不在这里手写字面量：Topic id 只在唯一那个 Scratch workspace
   // 内唯一，所以这就是它的 scope（见 store.ts pinnedItems 的注释）。左栏那些 pinned 子行读的也是
-  // 这一桶，投影与它必须同源，否则「列表里靠前」和「挂在 Scratch 下」会各说各话。
+  // 这一桶，投影与它必须同源，否则「列表里靠前」和「挂在 Topics 下」会各说各话。
   const pinnedTopics = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID] ?? NO_PINNED_TOPICS)
   const togglePinnedItem = useAppStore((state) => state.togglePinnedItem)
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
   // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
-  const userTopics = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID) ?? null
+  const userTopics = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && !topic.soul) ?? null
   const projected = userTopics
     ? (() => {
         const withAgents = topicsWithAgents(userTopics, sessions, workspace)
@@ -206,29 +206,12 @@ export function WorkspaceTopicsPanel({
     topicTabDetails.set(openTopicId, details)
   }
 
-  useEffect(() => {
-    let active = true
-    setError(null)
-    void api.scratch.listTopics(workspace.id).then((snapshots) => {
-      if (active) setTopics(snapshots)
-    }).catch((cause) => {
-      if (active) setError(presentError(cause))
-    })
-    return () => { active = false }
-  }, [fileRevision, workspace.id])
-
   async function createTopic(): Promise<void> {
     if (pending) return
     setPending('create')
     setError(null)
     try {
-      const created = await createScratchTopic()
-      setTopics((current) => {
-        const next = [...(current ?? []).filter((topic) => topic.id !== created.id), created]
-        return next.sort((left, right) =>
-          left.directoryPath < right.directoryPath ? -1 : left.directoryPath > right.directoryPath ? 1 : 0
-        )
-      })
+      await createScratchTopic()
     } catch (cause) {
       setError(presentError(cause))
     } finally {
@@ -283,7 +266,7 @@ export function WorkspaceTopicsPanel({
     const title = editTitle.trim()
     if (pending) return
     if (!title) {
-      setError('Scratch Topic title cannot be empty')
+      setError('Topic title cannot be empty')
       return
     }
     if (title === topic.title) {
@@ -294,8 +277,7 @@ export function WorkspaceTopicsPanel({
     setPending(pendingId)
     setError(null)
     try {
-      const renamed = await renameScratchTopic(topic.id, title)
-      setTopics((current) => current?.map((entry) => entry.id === renamed.id ? renamed : entry) ?? null)
+      await renameScratchTopic(topic.id, title)
       cancelRename()
     } catch (cause) {
       setError(presentError(cause))
@@ -304,13 +286,19 @@ export function WorkspaceTopicsPanel({
     }
   }
 
+  function invalidateTopics(): void {
+    useAppStore.setState((current) => ({
+      workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id)
+    }))
+  }
+
   async function setTopicWikiEnabled(topic: ScratchTopicSnapshot, enabled: boolean): Promise<void> {
     if (pending) return
     setPending(`wiki:${topic.id}`)
     setError(null)
     try {
-      const updated = await api.scratch.setWikiEnabled(workspace.id, topic.id, enabled)
-      setTopics((current) => current?.map((entry) => entry.id === updated.id ? updated : entry) ?? null)
+      await api.scratch.setWikiEnabled(workspace.id, topic.id, enabled)
+      invalidateTopics()
     } catch (cause) {
       setError(presentError(cause))
     } finally {
@@ -323,8 +311,8 @@ export function WorkspaceTopicsPanel({
     setPending(`wiki-reset:${topic.id}`)
     setError(null)
     try {
-      const updated = await api.scratch.resetWiki(workspace.id, topic.id)
-      setTopics((current) => current?.map((entry) => entry.id === updated.id ? updated : entry) ?? null)
+      await api.scratch.resetWiki(workspace.id, topic.id)
+      invalidateTopics()
     } catch (cause) {
       setError(presentError(cause))
     } finally {
@@ -356,7 +344,7 @@ export function WorkspaceTopicsPanel({
       {topics === null ? (
         <div className="workspace-topic-state" role="status">
           <LoaderCircle className="spin" size={16} aria-hidden="true" />
-          <span><strong>Loading Topics</strong><small>Reading the Scratch workspace index…</small></span>
+          <span><strong>Loading Topics</strong><small>Reading the Topics directory…</small></span>
         </div>
       ) : projected?.length === 0 ? (
         <div className="workspace-topic-state workspace-topic-state--empty">
@@ -382,7 +370,7 @@ export function WorkspaceTopicsPanel({
           items={projected.map((entry) => entry.id)}
           strategy={verticalListSortingStrategy}
         >
-        <div className="workspace-topic-list" aria-label="Scratch Topics">
+        <div className="workspace-topic-list" aria-label="Topics list">
           {projected.map((topic) => {
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
@@ -497,6 +485,7 @@ export function WorkspaceTopicsPanel({
                     <Crosshair size={13} />
                   </button>
                 </span>
+                {topic.readError ? <div className="new-tab-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
               </SortableTopicItem>
             )
           })}
@@ -504,6 +493,7 @@ export function WorkspaceTopicsPanel({
         </SortableContext>
         </DndContext>
       ) : null}
+      {readError ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
     </section>
   )

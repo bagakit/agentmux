@@ -22,6 +22,10 @@ vi.hoisted(() => {
 
 const fixture = vi.hoisted(() => ({
   state: {
+    layouts: {},
+    tabs: {},
+    scratchTopicOrder: [],
+    workspaceFileRevisions: {},
     config: null as AppConfig | null,
     sessions: [] as unknown[],
     timelines: {} as Record<string, unknown>,
@@ -40,6 +44,7 @@ const fixture = vi.hoisted(() => ({
     reportError: vi.fn(),
     toggleProjectRail: vi.fn(),
     toggleProjectGroup: vi.fn(),
+    setWorkspaceTool: vi.fn(),
     toggleTools: vi.fn()
   }
 }))
@@ -157,13 +162,14 @@ describe('Project Rail density is one tier across three dials', () => {
 })
 
 describe('Project Rail density control lives next to the Plus button', () => {
-  it('renders a persistent density control in the Projects heading, not a settings entry', () => {
+  it('renders a persistent density control in the Spaces heading', () => {
     fixture.state.config = { ...structuredClone(config), projectRailDensity: 'default' }
     const markup = renderRail()
     // 加号旁的那簇动作里有两枚按钮：密度切换与添加项目。
     const actions = markup.match(/<div class="sidebar__heading-actions">([\s\S]*?)<\/div>/)?.[1] ?? ''
     expect(actions, 'sidebar__heading-actions 没渲染出来').not.toBe('')
-    expect(actions).toContain('Add project folder')
+    expect(markup).toContain('<span>Spaces</span>')
+    expect(actions).toContain('Add Space')
     expect(actions).toMatch(/aria-label="Use compact project spacing"/)
   })
 
