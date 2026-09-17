@@ -15,7 +15,7 @@ export type TerminalLiveSnapshot = {
 export type TerminalLiveItem = TerminalLiveOutputChunk | AgentMuxTerminalResize | TerminalLiveSnapshot
 
 /** Replace only queued work covered by the new authoritative cut; in-flight work settles first. */
-export function admitTerminalLiveSnapshot(
+function admitTerminalLiveSnapshot(
   chunks: readonly TerminalLiveItem[],
   snapshot: AgentMuxRunAttachment
 ): TerminalLiveItem[] {
@@ -54,45 +54,143 @@ function chunkBytes(chunk: TerminalLiveItem): number {
   return Math.max(0, chunk.endByte - chunk.startByte)
 }
 
-/**
- * 收下一块新产出，并把未消费的积压压回上限之内。
- *
- * 丢弃只从队头发生，所以留下的那截**始终内部连续**：于是无论这一次丢了多少块、连着丢了多少次，
- * drain 那边看到的都只是「队头这块的 startByte 对不上 cursor」这**一处**不连续，也就只发一条省略
- * 告示。这条性质是「恰好一条告示」的来源，不是巧合——测试里钉着它。
- *
- * cursor 的推进不在这里做：drain 逐块把 `nextCursor` 推到 `output.endByte`，所以被丢掉的那段字节
- * 必须先通过 Runtime retained replay 回补，不能把客户端裁剪当成 Runtime 淘汰。
- */
-export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
-  chunks: readonly T[],
-  incoming: T,
-  maxBytes = TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES
-): { queue: T[]; droppedBytes: number } {
-  const limit = Math.max(1, Math.floor(maxBytes))
-  const queue = [...chunks]
-  queue.push(incoming)
-  let bytes = queue.reduce((total, chunk) => total + chunkBytes(chunk), 0)
-  let droppedBytes = 0
-  let ordinaryCount = queue.filter(item => !('snapshot' in item)).length
-  let droppedGeometry: { item: T; afterSnapshot: T | undefined } | undefined
-  // Synthetic seeds have their own Runtime bound. Raw backlog trimming cannot discard a seed.
-  while (ordinaryCount > 1 && (bytes > limit || ordinaryCount > 4096)) {
-    const index = queue.findIndex(item => !('snapshot' in item))
-    const afterSnapshot = queue.slice(0, index).filter(item => 'snapshot' in item).at(-1)
-    const dropped = queue.splice(index, 1)[0]!
-    ordinaryCount -= 1
-    if ('size' in dropped) droppedGeometry = { item: dropped, afterSnapshot }
-    const size = chunkBytes(dropped)
-    bytes -= size
-    droppedBytes += size
+type LiveNode = {
+  item: TerminalLiveItem
+  bytes: number
+  previous: LiveNode | null
+  next: LiveNode | null
+  afterSnapshot: LiveNode | null
+  queued: boolean
+}
+
+/** One pending queue. Admission/removal work follows newly added/removed items, not backlog size. */
+export class TerminalLiveOutputQueue implements Iterable<TerminalLiveItem> {
+  private head: LiveNode | null = null
+  private tail: LiveNode | null = null
+  private firstOrdinary: LiveNode | null = null
+  private lastSnapshot: LiveNode | null = null
+  private bytes = 0
+  private ordinaryCount = 0
+  private count = 0
+  private readonly limit: number
+
+  constructor(maxBytes = TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES) {
+    this.limit = Math.max(1, Math.floor(maxBytes))
   }
-  const first = queue.findIndex(item => !('snapshot' in item))
-  if (droppedGeometry && first >= 0 && !('size' in queue[first]!) &&
-    queue.slice(0, first).filter(item => 'snapshot' in item).at(-1) === droppedGeometry.afterSnapshot) {
-    queue.splice(first, 0, droppedGeometry.item)
+
+  get length(): number { return this.count }
+
+  *[Symbol.iterator](): Iterator<TerminalLiveItem> {
+    for (let node = this.head; node; node = node.next) yield node.item
   }
-  return { queue, droppedBytes }
+
+  private append(item: TerminalLiveItem): LiveNode {
+    const node: LiveNode = { item, bytes: chunkBytes(item), previous: this.tail,
+      next: null, afterSnapshot: this.lastSnapshot, queued: true }
+    if (this.tail) this.tail.next = node
+    else this.head = node
+    this.tail = node
+    this.count += 1
+    this.bytes += node.bytes
+    if ('snapshot' in item) this.lastSnapshot = node
+    else {
+      this.ordinaryCount += 1
+      this.firstOrdinary ??= node
+    }
+    return node
+  }
+
+  private remove(node: LiveNode): void {
+    if (node.previous) node.previous.next = node.next
+    else this.head = node.next
+    if (node.next) node.next.previous = node.previous
+    else this.tail = node.previous
+    node.queued = false
+    this.count -= 1
+    this.bytes -= node.bytes
+    if (this.lastSnapshot === node) this.lastSnapshot = null
+    if (!('snapshot' in node.item)) {
+      this.ordinaryCount -= 1
+      if (this.firstOrdinary === node) {
+        this.firstOrdinary = node.next
+        while (this.firstOrdinary && 'snapshot' in this.firstOrdinary.item) {
+          this.firstOrdinary = this.firstOrdinary.next
+        }
+      }
+    }
+    node.previous = node.next = null
+  }
+
+  private sameSnapshotSegment(left: LiveNode, right: LiveNode): boolean {
+    const before = (node: LiveNode) => node.afterSnapshot?.queued ? node.afterSnapshot : null
+    return before(left) === before(right)
+  }
+
+  /** Keep the newest ordinary item; Runtime replay, not client trimming, owns missing history. */
+  admit(item: TerminalLiveItem): number {
+    this.append(item)
+    let droppedBytes = 0
+    let droppedGeometry: LiveNode | null = null
+    // Synthetic seeds have their own Runtime bound and are never raw-backlog victims.
+    while (this.ordinaryCount > 1 && (this.bytes > this.limit || this.ordinaryCount > 4096)) {
+      const dropped = this.firstOrdinary!
+      this.remove(dropped)
+      droppedBytes += dropped.bytes
+      if ('size' in dropped.item) droppedGeometry = dropped
+    }
+    let first = this.firstOrdinary
+    if (droppedGeometry && first && !('size' in first.item) &&
+      this.sameSnapshotSegment(droppedGeometry, first) && this.ordinaryCount === 4096) {
+      // Reserving the required geometry must not grow the ordinary-item ceiling by one.
+      this.remove(first)
+      droppedBytes += first.bytes
+      first = this.firstOrdinary
+    }
+    if (droppedGeometry && first && !('size' in first.item) &&
+      this.sameSnapshotSegment(droppedGeometry, first)) {
+      // Retained raw bytes still require the last geometry from their own snapshot segment.
+      const node = droppedGeometry
+      node.previous = first.previous
+      node.next = first
+      node.queued = true
+      if (first.previous) first.previous.next = node
+      else this.head = node
+      first.previous = node
+      this.firstOrdinary = node
+      this.count += 1
+      this.ordinaryCount += 1
+    }
+    return droppedBytes
+  }
+
+  /** Snapshot cuts inspect pending work once; they do not add a second queue owner. */
+  admitSnapshot(snapshot: AgentMuxRunAttachment): void {
+    const retained = admitTerminalLiveSnapshot([...this], snapshot)
+    this.head = this.tail = this.firstOrdinary = this.lastSnapshot = null
+    this.bytes = this.ordinaryCount = this.count = 0
+    for (const item of retained) this.append(item)
+  }
+
+  /** Consume the largest original-byte prefix within the visual batch budget. */
+  take(maxBytes = TERMINAL_LIVE_OUTPUT_BATCH_BYTES): {
+    batch: TerminalLiveOutputChunk[]; resize?: AgentMuxTerminalResize; snapshot?: TerminalLiveSnapshot
+  } {
+    const first = this.head
+    if (!first) return { batch: [] }
+    if ('snapshot' in first.item) { this.remove(first); return { batch: [], snapshot: first.item } }
+    if ('size' in first.item) { this.remove(first); return { batch: [], resize: first.item } }
+    const limit = Math.max(1, Math.floor(maxBytes))
+    const batch: TerminalLiveOutputChunk[] = []
+    let bytes = 0
+    while (this.head && !('size' in this.head.item) && !('snapshot' in this.head.item)) {
+      const node = this.head
+      if (batch.length > 0 && bytes + node.bytes > limit) break
+      bytes += node.bytes
+      batch.push(node.item as TerminalLiveOutputChunk)
+      this.remove(node)
+    }
+    return { batch }
+  }
 }
 
 /**
@@ -146,28 +244,3 @@ export function composeTerminalLiveOutputWrite(
   return { dataBytes, cursor: nextCursor, gap }
 }
 
-/** Takes the largest ordered prefix that fits the visual batch budget. */
-export function takeTerminalLiveOutputBatch<T extends TerminalLiveItem>(
-  chunks: readonly T[],
-  maxBytes = TERMINAL_LIVE_OUTPUT_BATCH_BYTES
-): { batch: TerminalLiveOutputChunk[]; rest: T[]; resize?: AgentMuxTerminalResize; snapshot?: TerminalLiveSnapshot } {
-  if (chunks.length === 0) return { batch: [], rest: [] }
-  const first = chunks[0]!
-  if ('snapshot' in first) return { batch: [], rest: chunks.slice(1), snapshot: first }
-  if ('size' in first) return { batch: [], rest: chunks.slice(1), resize: first }
-  const limit = Math.max(1, Math.floor(maxBytes))
-  let bytes = 0
-  let count = 0
-  while (count < chunks.length) {
-    const chunk = chunks[count]
-    if (!chunk || 'size' in chunk || 'snapshot' in chunk) break
-    const size = chunkBytes(chunk)
-    if (count > 0 && bytes + size > limit) break
-    bytes += size
-    count += 1
-  }
-  return {
-    batch: chunks.slice(0, count) as TerminalLiveOutputChunk[],
-    rest: chunks.slice(count)
-  }
-}
