@@ -16,11 +16,11 @@ const daemon18 = join(supplied, 'bin/ctxmuxd')
 const sdk18 = join(supplied, 'ctxmux-sdk-0.0.0.tgz')
 const oldManifest = JSON.parse(await readFile(join(oldArtifacts, 'manifest.json')))
 const candidateManifest = JSON.parse(await readFile(join(supplied, 'manifest.json')))
-assert.equal(oldManifest.product.protocol, 17); assert.equal(candidateManifest.product.protocol, 18)
+assert.ok([17, 18].includes(oldManifest.product.protocol)); assert.equal(candidateManifest.product.protocol, 18)
 await mkdir(out, { recursive: true })
 const sha = async (p) => createHash('sha256').update(await readFile(p)).digest('hex')
 const critical = [join(oldArtifacts, 'manifest.json'), join(oldArtifacts, 'bin/ctxmuxd'), join(oldArtifacts, 'ctxmux-sdk-0.0.0.tgz'),
-  daemon18, sdk18, join(base, 'apps/desktop/scripts/package-runtime-upgrade.mjs'),
+  daemon18, sdk18, new URL(import.meta.url).pathname, join(base, 'apps/desktop/scripts/package-runtime-upgrade.mjs'),
   join(base, 'apps/desktop/scripts/package-macos.mjs'), join(base, 'packages/core/src/runtime-paths.ts'),
   'packages/core/dist/runtime-paths.js']
 const inputsBefore = Object.fromEntries(await Promise.all(critical.map(async (p) => [p, await sha(p)])))
@@ -117,6 +117,8 @@ async function scenario(name) {
     plan = await prepareRuntimeUpgrade(current, next)
     assert.equal(plan.owner.pid, daemon.pid); assert.equal(plan.before.running.length, 1)
     const oldKernelPath = plan.owner.executable
+    // Match the product lifetime: the parent diagnostic receiver closes after readiness.
+    if (name === 'closed-diagnostics-success') daemon.stderr.destroy()
     await rename(current, backup); await rename(next, current)
     if (name === 'before-extract-refusal') await chmod(state, 0o500)
     outcome = await finishRuntimeUpgrade(plan, current)
@@ -137,7 +139,7 @@ async function scenario(name) {
       const { CtxmuxClient } = await import(pathToFileURL(plan.newSdk).href)
       activeClient = new CtxmuxClient({ socketPath: socket })
       const attachment = await activeClient.attachTerminal(run.id, before.latest_output_bytes)
-      assert.equal(attachment.snapshot.terminal.type, 'unknown'); attachment.close()
+      assert.equal(attachment.snapshot.terminal.type, oldManifest.product.protocol === 17 ? 'unknown' : 'basic_vt'); attachment.close()
       const saved = JSON.parse(await readFile(receiptPath))
       assert.equal(saved.daemonSha256, await sha(daemon18)); assert.equal(saved.daemonInstanceId, identity.daemonInstanceId)
     }
@@ -148,7 +150,9 @@ async function scenario(name) {
     const input = await wait(() => activeClient.status(run.id), (value) => value.applied_input_bytes === 1 && value.latest_output_bytes > kept.latest_output_bytes, 'original PTY input')
     records.push({ name, passed: true, outcome, daemonPid: daemon.pid, childPid, runId,
       sameRuntimeAndIncarnation: true, sameDaemonAndChild: true, sameGrid: true, originalInputBytes: input.applied_input_bytes,
-      oldKernelPath, actualAppDirectoryRename: true, beforeExtractObservedInPrivateStderr: name === 'before-extract-refusal' })
+      oldKernelPath, actualAppDirectoryRename: true, closedDiagnosticReceiver: name === 'closed-diagnostics-success',
+      previousProtocol: oldManifest.product.protocol, candidateProtocol: candidateManifest.product.protocol,
+      beforeExtractObservedInPrivateStderr: name === 'before-extract-refusal' })
     await activeClient.input(run.id, 'q')
     await wait(() => activeClient.status(run.id), (value) => value.state.type === 'exited', 'private child exit')
   } catch (error) {
@@ -170,8 +174,8 @@ async function scenario(name) {
   }
 }
 const selectedCase = process.argv.find((entry) => entry.startsWith('--case='))?.slice('--case='.length)
-const cases = selectedCase ? [selectedCase] : ['no-listener', 'unproven-owner', 'deleted-image', 'success', 'before-extract-refusal']
-assert.ok(cases.length > 0 && cases.every((name) => ['no-listener', 'unproven-owner', 'deleted-image', 'success', 'before-extract-refusal'].includes(name)))
+const cases = selectedCase ? [selectedCase] : ['no-listener', 'unproven-owner', 'deleted-image', 'success', 'closed-diagnostics-success', 'before-extract-refusal']
+assert.ok(cases.length > 0 && cases.every((name) => ['no-listener', 'unproven-owner', 'deleted-image', 'success', 'closed-diagnostics-success', 'before-extract-refusal'].includes(name)))
 try {
   for (const name of cases) await scenario(name)
 } catch (error) { failure = { name: error.name, message: error.message, stack: error.stack } }
