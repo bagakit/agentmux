@@ -39,6 +39,7 @@
 .focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; }
 .focused-tab-workspace .workspace-workbench, .focused-tab-workspace .pane-group, .focused-tab-workspace .pane-body { width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .focused-tab-workspace .workspace-workbench--focus-only .pane-tabbar { display: none; }
+.focused-tab-workspace .workspace-workbench--focus-only .pane-group { grid-template-rows: minmax(0, 1fr); }
 
 /* Focus v2: project lanes are the vertical axis; the selected Tab is a resizable right work surface. */
 .global-focus-surface { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -53,7 +54,7 @@
 .focus-project-lanes__all { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .focus-project-lanes__all span { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
 .focus-project-lanes__all:hover, .focus-project-lanes__all.is-selected { border-color: var(--line); background: var(--surface-3); color: var(--text); }
-.focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .focus-project-lanes__row { display: grid; grid-template-columns: clamp(150px, 15vw, 220px) minmax(0, 1fr); min-height: 132px; border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface-1) 38%, transparent); }
 .focus-project-lanes__row.is-selected { background: color-mix(in srgb, var(--green) 4%, var(--surface-1)); }
 .focus-project-lanes__axis { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
@@ -62,7 +63,7 @@
 .focus-project-lanes__axis strong { font-size: var(--fs-body); font-weight: 650; }
 .focus-project-lanes__axis small { color: var(--text-3); font-size: var(--fs-micro); }
 .focus-project-lanes__axis span { display: inline-flex; align-items: center; gap: 3px; color: var(--green); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.focus-project-lanes__track { min-width: 0; overflow: hidden; padding: var(--sp-2); }
+.focus-project-lanes__track { min-width: 0; overflow-x: auto; padding: var(--sp-2); }
 .focus-project-lanes__groups { min-width: 0; height: 100%; display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 1px; background: var(--line-soft); }
 .focus-project-lanes__groups .global-board-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
 .focus-project-lanes__groups .global-board-column__header { min-height: 25px; padding: 0 var(--sp-2); }
@@ -84,7 +85,7 @@
 .recent-focus__range { font-variant-numeric: tabular-nums; }
 .recent-focus__body { min-width: 0; margin-top: var(--sp-1); }
 .recent-focus__ruler { display: flex; justify-content: space-between; padding-left: 116px; color: var(--text-3); font-size: 9px; font-variant-numeric: tabular-nums; }
-.recent-focus__tracks { display: grid; gap: 2px; min-height: 34px; }
+.recent-focus__tracks { display: grid; gap: 2px; min-height: 34px; max-height: 64px; overflow-y: auto; overscroll-behavior: contain; }
 .recent-focus__track { position: relative; min-width: 0; height: 28px; border-radius: 3px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--line) 58%, transparent) 0, color-mix(in srgb, var(--line) 58%, transparent) 1px, transparent 1px, transparent 12.5%); }
 .recent-focus__segment { position: absolute; top: 2px; bottom: 2px; display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 42px; overflow: hidden; padding: 0 var(--sp-2); border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line)); border-radius: 3px; background: color-mix(in srgb, var(--green) 16%, var(--surface-2)); color: var(--text-2); font: inherit; font-size: var(--fs-micro); text-align: left; white-space: nowrap; cursor: pointer; }
 .recent-focus__segment:hover, .recent-focus__segment:focus-visible { border-color: var(--green); background: color-mix(in srgb, var(--green) 25%, var(--surface-2)); color: var(--text); outline: none; }

@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+import { createRequire } from 'node:module'
+import { allStyleRules } from './helpers/styles'
+
+const require = createRequire(import.meta.url)
+const postcss = createRequire(require.resolve('vite'))('postcss') as { parse(css: string): { walkRules(fn: (rule: { selectors: string[]; walkDecls(fn: (declaration: { prop: string; value: string }) => void): void }) => void): void } }
+const rules = postcss.parse(allStyleRules())
+function declarations(selector: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  let found = 0
+  rules.walkRules(rule => {
+    if (!rule.selectors.includes(selector)) return
+    found++
+    rule.walkDecls(declaration => { result[declaration.prop] = declaration.value })
+  })
+  expect(found, `A stylesheet must actually define ${selector}`).toBeGreaterThan(0)
+  return result
+}
+
+describe('Focus scroll and right workspace geometry ownership', () => {
+  it('bounds recent tracks while giving lanes the remaining scrollable height', () => {
+    expect(declarations('.recent-focus__tracks')).toMatchObject({ 'max-height': '64px', 'overflow-y': 'auto', 'overscroll-behavior': 'contain' })
+    expect(declarations('.focus-project-lanes__rows')).toMatchObject({ flex: '1 1 auto', 'min-height': '0', overflow: 'auto' })
+    expect(declarations('.global-focus-surface .global-focus-main .global-board-columns')).toMatchObject({ 'min-height': '0', flex: '1 1 auto' })
+  })
+
+  it('allows the complete status matrix to be reached at narrow widths', () => {
+    expect(declarations('.focus-project-lanes__track')).toMatchObject({ 'overflow-x': 'auto' })
+    expect(declarations('.focus-project-lanes__groups')['grid-template-columns']).toBe('repeat(4, minmax(130px, 1fr))')
+  })
+
+  it('keeps empty portal registry shells outside the input hit tree', () => {
+    expect(declarations('.workspace-workbench-registry')).toMatchObject({ 'pointer-events': 'none' })
+    expect(declarations('.workspace-workbench-slot:not(.workspace-workbench-slot--parked):empty')).toMatchObject({ 'pointer-events': 'none' })
+    expect(declarations('.workspace-workbench-slot:not(.workspace-workbench-slot--parked)')).toMatchObject({ 'pointer-events': 'auto' })
+  })
+
+  it('assigns the full Focus content row after hiding its Tab chrome', () => {
+    expect(declarations('.focused-tab-workspace .workspace-workbench--focus-only .pane-group')).toMatchObject({ 'grid-template-rows': 'minmax(0, 1fr)' })
+    expect(declarations('.focused-tab-workspace .workspace-workbench--focus-only .pane-tabbar')).toMatchObject({ display: 'none' })
+  })
+})

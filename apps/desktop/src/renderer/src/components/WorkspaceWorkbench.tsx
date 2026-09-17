@@ -25,6 +25,9 @@ import {
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useShallow } from 'zustand/react/shallow'
+import { sessionPresentationById } from '../lib/session-presentation'
+import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -158,9 +161,9 @@ function makeAgentFactsFor(
 }
 
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
-  const sessions = useAppStore((state) => state.sessions)
-  const agentNames = useAppStore((state) => state.agentNames)
-  const timelines = useAppStore((state) => state.timelines)
+  const sessions = useWorkbenchTabSessions(tab)
+  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
+  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const label = tabDisplayName({
     tab,
     fallback: tabSurfaceFallback(tab, sessions),
@@ -183,9 +186,9 @@ function SortableWorkbenchTab({
   group: TabGroup
   workspaceId: string
 }) {
-  const sessions = useAppStore((state) => state.sessions)
-  const agentNames = useAppStore((state) => state.agentNames)
-  const timelines = useAppStore((state) => state.timelines)
+  const sessions = useWorkbenchTabSessions(tab)
+  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
+  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const tabsById = useAppStore((state) => state.tabs)
   const activateTab = useAppStore((state) => state.activateTab)
@@ -639,7 +642,7 @@ function WorkbenchRegionLeaf({
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const swapRegions = useAppStore((state) => state.swapRegions)
   const promoteRegionToTab = useAppStore((state) => state.promoteRegionToTab)
-  const sessions = useAppStore((state) => state.sessions)
+  const sessions = useWorkbenchTabSessions(tab)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
@@ -890,7 +893,6 @@ function PaneGroup({
   showWindowChrome?: boolean
 }) {
   const tabsById = useAppStore((state) => state.tabs)
-  const sessions = useAppStore((state) => state.sessions)
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
@@ -927,12 +929,12 @@ function PaneGroup({
   // rejected nullable Surface variants. Guard widened in the same commit; this call site is the
   // first-listed offender it caught. A sixth session-bearing kind now fails at
   // `isSessionSurface`'s exhaustive switch instead of silently being excluded here.
-  const activeRuntimeSession = activeSurface && isSessionSurface(activeSurface)
-    ? sessions.find((session) => session.id === activeSurface.sessionId)
-    : null
-  const pendingStopSession = pendingStopSessionId
-    ? sessions.find((session) => session.id === pendingStopSessionId) ?? null
-    : null
+  const activeRuntimeSession = useAppStore((state) => activeSurface && isSessionSurface(activeSurface)
+    ? sessionPresentationById(state.sessions).get(activeSurface.sessionId) ?? null
+    : null)
+  const pendingStopSession = useAppStore((state) => pendingStopSessionId
+    ? sessionPresentationById(state.sessions).get(pendingStopSessionId) ?? null
+    : null)
 
   async function confirmStop(): Promise<void> {
     if (!pendingStopSessionId || stopping) return
@@ -1249,7 +1251,7 @@ export function WorkspaceWorkbench({
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const focusTab = focusTabId ? tabs[focusTabId] : null
-  const focusLayout = focusTab ? focusLayoutForTab(focusTab) : null
+  const focusLayout = useMemo(() => focusTab && storedLayout ? focusLayoutForTab(focusTab, storedLayout) : null, [focusTab, storedLayout])
   const layout = useMemo(
     () => focusLayout ?? (storedLayout
       ? layoutForActiveTopic(storedLayout, tabs, topicId ?? activeTopicIdFromLayout(storedLayout, tabs), topicIsolation !== 'bound-only')
@@ -1272,9 +1274,18 @@ export function WorkspaceWorkbench({
       setFocusPortalTarget(null)
       return
     }
-    const resolveTarget = () => setFocusPortalTarget(document.getElementById(focusPortalTargetId))
-    resolveTarget()
-    const observer = new MutationObserver(resolveTarget)
+    const target = document.getElementById(focusPortalTargetId)
+    if (target) {
+      setFocusPortalTarget(target)
+      return
+    }
+    setFocusPortalTarget(null)
+    const observer = new MutationObserver(() => {
+      const target = document.getElementById(focusPortalTargetId)
+      if (!target) return
+      observer.disconnect()
+      setFocusPortalTarget(target)
+    })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [focusPortalTargetId])
@@ -1327,6 +1338,9 @@ export function WorkspaceWorkbench({
     moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, visibleTargetIndex)
   }
 
+  if (focusTab && !focusLayout) {
+    return focusPortalTarget ? createPortal(<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />, focusPortalTarget) : null
+  }
   if (!layout) return null
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
