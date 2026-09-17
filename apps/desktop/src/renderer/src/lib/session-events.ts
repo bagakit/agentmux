@@ -14,7 +14,7 @@ export function createRendererSessionEvents(
 
   const dispatch = (event: RuntimeEvent): void => {
     const core = event.event
-    const registrations = core.type === 'terminal-output' || core.type === 'terminal-resized'
+    const registrations = core.type === 'terminal-output' || core.type === 'terminal-resized' || core.type === 'terminal-snapshot'
       ? hosts.get(event.hostId)?.get(core.run.runId)
       : semantic
     if (!registrations) return

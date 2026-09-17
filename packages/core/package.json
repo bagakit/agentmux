@@ -64,6 +64,10 @@
       "types": "./dist/agent-run-status.d.ts",
       "import": "./dist/agent-run-status.js"
     },
+    "./terminal-continuation": {
+      "types": "./dist/terminal-continuation.d.ts",
+      "import": "./dist/terminal-continuation.js"
+    },
     "./agent-prompt-budget": {
       "types": "./dist/agent-prompt-budget.d.ts",
       "import": "./dist/agent-prompt-budget.js"

@@ -23,6 +23,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 import { classifyApplicationProcesses } from './package-process-scope.mjs'
+import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade } from './package-runtime-upgrade.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -934,19 +935,18 @@ async function relaunchInstalledApplication(appPath) {
 async function installApplication(appPath) {
   const currentPath = canonicalInstallPath(homedir())
   let runtimeReviewPath
+  let runtimeChanged = false
   if (await pathExists(currentPath)) {
     const runtimeRelative = 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux'
     const [currentRuntime, candidateRuntime] = await Promise.all([
       hashTree(currentPath, [runtimeRelative]), hashTree(appPath, [runtimeRelative])
     ])
     if (updateRoute({ shell: '', ctxmux: currentRuntime }, { shell: '', ctxmux: candidateRuntime }) === 'runtime-review') {
-      // Runtime 变了：新 artifact 派生出新的 endpoint，旧 daemon 上的 Run 不会被接管。这一步要求
-      // 先把它们盘清楚——哪些能自己 resume、哪些不能——并把结论落到磁盘上。
-      //
-      // 判据是**那份记录读得到且非空**，不是"命令行上打了个开关"。裸 `--force` 只证明有人想跳过
-      // 检查；一份读得出内容的 review 记录才证明检查真的做了，而且装完之后还能回去看。
+      runtimeChanged = true
+      // Review records the release boundary. Actual same-Runtime planned-exec
+      // confirmation below is required before the new GUI can start.
       assert(runtimeReviewArgument,
-        'CtxMux runtime differs; the Runs on the running daemon will not carry over. Record which Runs can resume on their own, then pass --runtime-reviewed=<path to that record>. No running application was changed.')
+        'CtxMux runtime differs; record its same-Runtime planned-exec review and pass --runtime-reviewed=<path>. No running application was changed.')
       runtimeReviewPath = runtimeReviewArgument.slice('--runtime-reviewed='.length)
       assert(runtimeReviewPath, '--runtime-reviewed= needs the path to the Run/resume review, not an empty value.')
       const review = await readFile(runtimeReviewPath, 'utf8').catch(() => null)
@@ -963,44 +963,74 @@ async function installApplication(appPath) {
   await rm(next, { recursive: true, force: true })
   await run('ditto', [appPath, next], { capture: true })
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
-  // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
-  // 不该白关掉用户正在用的窗口。
-  const previouslyInstalled = await pathExists(destination)
-  const quitOutcome = previouslyInstalled
-    ? await quitInstalledApplication(destination)
-    : { wasRunning: false, pids: [] }
-  let previousInstall
-  if (previouslyInstalled) {
-    await mkdir(trashRoot, { recursive: true })
-    const trashName = `${PRODUCT_NAME}-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}.app`
-    previousInstall = join(trashRoot, trashName)
-    await rename(destination, previousInstall)
-  }
+  let runtimeUpgrade = runtimeChanged ? await prepareRuntimeUpgrade(currentPath, next) : null
   try {
-    await rename(next, destination)
-  } catch (error) {
-    // The old installation must remain the active one if the final cutover fails. Restore it
-    // from Trash before surfacing the failure; user data is never part of this rollback.
-    if (previousInstall && await pathExists(previousInstall)) {
-      await rename(previousInstall, destination).catch((restoreError) => {
-        throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
-      })
+    // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
+    // 不该白关掉用户正在用的窗口。
+    const previouslyInstalled = await pathExists(destination)
+    const quitOutcome = previouslyInstalled
+      ? await quitInstalledApplication(destination)
+      : { wasRunning: false, pids: [] }
+    // A pending action in the old GUI could have started a Runtime after the
+    // first absent-listener observation. Recheck that same owner after GUI exit.
+    if (runtimeChanged && !runtimeUpgrade) {
+      try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next) }
+      catch (error) {
+        if (quitOutcome.wasRunning) await relaunchInstalledApplication(destination)
+        throw error
+      }
     }
-    throw error
+    let previousInstall
+    if (previouslyInstalled) {
+      await mkdir(trashRoot, { recursive: true })
+      const trashName = `${PRODUCT_NAME}-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}.app`
+      previousInstall = join(trashRoot, trashName)
+      await rename(destination, previousInstall)
+    }
+    try {
+      await rename(next, destination)
+    } catch (error) {
+      // The old installation must remain the active one if the final cutover fails. Restore it
+      // from Trash before surfacing the failure; user data is never part of this rollback.
+      if (previousInstall && await pathExists(previousInstall)) {
+        await rename(previousInstall, destination).catch((restoreError) => {
+          throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
+        })
+      }
+      throw error
+    }
+    if (runtimeUpgrade) {
+      const handoff = await finishRuntimeUpgrade(runtimeUpgrade, destination)
+      process.stdout.write(`runtime_handoff=${JSON.stringify(handoff)}\n`)
+      if (handoff.status === 'old-confirmed') {
+        // The original protocol and exact owner/Run facts are positively confirmed.
+        // Keep the candidate in next; restore the old client for that live service.
+        assert(previousInstall, 'The original application is unavailable for the confirmed old Runtime.')
+        await rename(destination, next)
+        await rename(previousInstall, destination)
+        await relaunchInstalledApplication(destination)
+        throw new Error(`Runtime upgrade failed; the original application and healthy Runtime are restored: ${handoff.error}`)
+      }
+      assert(handoff.status === 'upgraded',
+        `Runtime handoff is unknown; candidate and previous application are retained. No new GUI was started: ${handoff.error}`)
+      if (handoff.ownerReceiptError) process.stderr.write(`Runtime upgraded; ownership receipt could not be saved: ${handoff.ownerReceiptError}\n`)
+    }
+    process.stdout.write(`installed_app=${destination}\n`)
+    if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
+    if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
+    process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
+    const relaunched = await relaunchInstalledApplication(destination)
+    process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
+    // 交付判据：装完之后，跑在已装路径上的每一个进程都必须是**这次**拉起的。留下任何一个更早的
+    // 进程，就意味着"用户点的那个窗口"可能仍在服务上一份包——那正是这段代码存在的原因。
+    const survivors = (await processIdsForApplication(destination)).filter((pid) => !relaunched.includes(pid))
+    assert(
+      survivors.length === 0,
+      `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
+    )
+  } finally {
+    await closeRuntimeUpgrade(runtimeUpgrade)
   }
-  process.stdout.write(`installed_app=${destination}\n`)
-  if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
-  if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
-  process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
-  const relaunched = await relaunchInstalledApplication(destination)
-  process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
-  // 交付判据：装完之后，跑在已装路径上的每一个进程都必须是**这次**拉起的。留下任何一个更早的
-  // 进程，就意味着"用户点的那个窗口"可能仍在服务上一份包——那正是这段代码存在的原因。
-  const survivors = (await processIdsForApplication(destination)).filter((pid) => !relaunched.includes(pid))
-  assert(
-    survivors.length === 0,
-    `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
-  )
 }
 
 async function main() {

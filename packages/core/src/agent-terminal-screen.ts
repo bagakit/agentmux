@@ -4,6 +4,7 @@ import {
   AGENT_SCREEN_SCROLLBACK_ROWS
 } from './agent-prompt-budget.js'
 import { AgentMuxError } from './errors.js'
+import type { AgentMuxTerminalCheckpoint } from './types.js'
 
 const { Terminal } = headless
 
@@ -30,10 +31,12 @@ export class AgentTerminalScreen {
   private readonly terminal: HeadlessTerminal
   private nextByte = 0
   private trusted: boolean
+  private resizeRevision: number
 
-  constructor(cols: number, rows: number, initialByte = 0) {
+  constructor(cols: number, rows: number, initialByte = 0, authoritative = initialByte === 0, resizeRevision = 0) {
     this.nextByte = initialByte
-    this.trusted = initialByte === 0
+    this.trusted = authoritative
+    this.resizeRevision = resizeRevision
     this.terminal = new Terminal({
       cols,
       rows,
@@ -54,6 +57,23 @@ export class AgentTerminalScreen {
 
   get throughByte(): number {
     return this.nextByte
+  }
+
+  /** Import an owner-confirmed seed without claiming that it is original PTY output. */
+  async restore(checkpoint: AgentMuxTerminalCheckpoint, restoreBytes: Uint8Array): Promise<void> {
+    this.terminal.resize(checkpoint.size.cols, checkpoint.size.rows)
+    await new Promise<void>((resolve) => this.terminal.write(restoreBytes, resolve))
+    this.nextByte = checkpoint.throughByte
+    this.resizeRevision = checkpoint.resizeRevision
+    this.trusted = true
+  }
+
+  resize(cols: number, rows: number, throughByte: number, resizeRevision: number): void {
+    if (throughByte !== this.nextByte || resizeRevision !== this.resizeRevision + 1) {
+      throw new AgentMuxError('Terminal geometry did not follow the observed output fence.', 'TERMINAL_GEOMETRY_CHANGED')
+    }
+    this.terminal.resize(cols, rows)
+    this.resizeRevision = resizeRevision
   }
 
   async write(chunk: AgentTerminalScreenChunk): Promise<void> {
@@ -120,10 +140,11 @@ export class AgentTerminalScreen {
 export type AgentTerminalFrameMarkers = { start: string; end: string }
 
 export type AgentTerminalScreenEvidenceEvent =
+  | { type: 'restore'; checkpoint: AgentMuxTerminalCheckpoint; restoreBytes: Uint8Array }
   | { type: 'data'; startByte: number; endByte: number; dataBytes: Uint8Array }
   | { type: 'gap' }
   | { type: 'exit' }
-  | { type: 'resized'; cols: number; rows: number }
+  | { type: 'resized'; cols: number; rows: number; throughByte: number; resizeRevision: number }
   | { type: 'error'; error: Error }
 
 export type AgentTerminalScreenWait = {
@@ -141,7 +162,6 @@ export type AgentTerminalScreenWait = {
 type AgentTerminalScreenFailure =
   | { kind: 'gap' }
   | { kind: 'exit' }
-  | { kind: 'resized' }
   | { kind: 'error'; error: Error }
 
 /**
@@ -165,8 +185,9 @@ export class AgentTerminalScreenEvidence {
   private failure: AgentTerminalScreenFailure | null = null
   private disposed = false
 
-  constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null, initialByte = 0) {
-    this.screen = new AgentTerminalScreen(cols, rows, initialByte)
+  constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null, initialByte = 0,
+    authoritative = initialByte === 0, resizeRevision = 0) {
+    this.screen = new AgentTerminalScreen(cols, rows, initialByte, authoritative, resizeRevision)
     this.startMarker = frame ? Buffer.from(frame.start) : null
     this.endMarker = frame ? Buffer.from(frame.end) : null
   }
@@ -192,10 +213,23 @@ export class AgentTerminalScreenEvidence {
     if (this.disposed || this.failure) return
     if (event.type === 'gap') return this.fail({ kind: 'gap' })
     if (event.type === 'exit') return this.fail({ kind: 'exit' })
-    if (event.type === 'resized') return this.fail({ kind: 'resized' })
     if (event.type === 'error') return this.fail({ kind: 'error', error: event.error })
     this.tail = this.tail.then(async () => {
       if (this.disposed || this.failure) return
+      if (event.type === 'restore') {
+        await this.screen.restore(event.checkpoint, event.restoreBytes)
+        this.notify()
+        return
+      }
+      if (event.type === 'resized') {
+        this.screen.resize(event.cols, event.rows, event.throughByte, event.resizeRevision)
+        // A past output frame is not evidence of a new drawing at this geometry.
+        this.completeFrame = null
+        this.pendingFrameStartByte = null
+        this.frameCarry = Buffer.alloc(0)
+        this.notify()
+        return
+      }
       // 重放与在线事件可能在边界处重叠：完全落在已消费游标之前的块直接跳过；
       // 部分重叠仍由 AgentTerminalScreen 的连续性断言 fail-closed。
       if (event.endByte <= this.screen.throughByte) return
@@ -281,12 +315,6 @@ export class AgentTerminalScreenEvidence {
       return new AgentMuxError(
         'Terminal screen evidence was evicted from CtxMux replay.',
         'OUTPUT_GAP'
-      )
-    }
-    if (failure.kind === 'resized') {
-      return new AgentMuxError(
-        'Terminal screen geometry changed; rebuild from the owner-confirmed size.',
-        'TERMINAL_GEOMETRY_CHANGED'
       )
     }
     if (failure.kind === 'exit') {

@@ -77,7 +77,6 @@ import {
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
 import { mintAgentSessionId } from './agent-session-id.js'
-import type { EndpointReclaimOutcome } from './runtime-endpoint-reclaim.js'
 import {
   AgentMuxFileAgentSessionStore,
   loadAgentSessions,
@@ -115,6 +114,7 @@ import type {
   AgentMuxRun,
   AgentMuxRunAppliedSize,
   AgentMuxRunAttachment,
+  AgentMuxRunAttachmentView,
   AgentMuxRunDataEvent,
   AgentMuxRunInputAck,
   AgentMuxRunInputData,
@@ -985,10 +985,9 @@ export class AgentMuxClient {
    * 进程内 Attachment 已发布的字节位置续上。
    *
    * 三件不能少的事：
-   * - **补发 replay**：掉线期间 daemon 仍在缓冲，`[publishedThroughByte, latest)` 随 attach 快照回到
-   *   `attached.replay`。渲染端不会自己重 attach（run 没变，attach effect 不重跑），所以这段必须由我们
-   *   补发成 terminal-output 事件接上它上次看到的位置——否则就是「跳过的区段」。attach 之后的新字节由
-   *   重建出来的实时泵经 acceptKernelEvent 自动送达（那正是缺陷要修的「新字节到不了」）。
+   * - **保留表示意图**：terminal 表示发布真实 fresh snapshot，消费者从 checkpoint source grid 导入
+   *   seed 与 ordered tail，再接 live。raw 表示补发原字节，但不提供断连期间的历史 geometry；当前尺寸
+   *   不能伪装成发生在 latestOutputBytes 的 resize。snapshot 与 live 由同一个 Attachment owner 排序。
    * - **失败隔离且可见**：一个 run 重建失败绝不连累后面的 run（否则一个坏 run 静默拖死其余全部），但也
    *   不静默吞掉——发一条 agent-error，让「全失败」不与「全成功」同形。
    * - **截断可见**：daemon 已把游标处的字节逐出（first_available_byte > cursor）时如实报 gap。
@@ -1004,14 +1003,22 @@ export class AgentMuxClient {
   private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | 'truncated'> {
     let attached: CtxmuxAdapterAttachment
     try {
-      ;({ attached } = await this.attachAgentRun(agentSessionId, this.kernel.continuationByte(this.requireAgentSession(agentSessionId).run.runId), (snapshot, current) => {
-        if (snapshot.run.cols !== null && snapshot.run.rows !== null) {
-          this.acceptKernelEvent({
-            type: 'resized', runId: snapshot.run.runId, cols: snapshot.run.cols, rows: snapshot.run.rows
+      const runId = this.requireAgentSession(agentSessionId).run.runId
+      const view = this.kernel.continuationView(runId)
+      const afterByte = this.kernel.continuationByte(runId)
+      ;({ attached } = await this.attachAgentRun(agentSessionId, afterByte, (snapshot, current) => {
+        if (view === 'terminal') {
+          this.publisher.publish({
+            ...snapshot,
+            type: 'terminal-snapshot',
+            agentSessionId: current.agentSessionId,
+            afterByte,
+            run: this.projectRun(snapshot.run, current)
           })
+        } else {
+          for (const event of snapshot.replay) this.publisher.publishRunEvent(event, current)
         }
-        for (const event of snapshot.replay) this.publisher.publishRunEvent(event, current)
-      }))
+      }, view))
     } catch (error) {
       this.publisher.publish({
         type: 'agent-error',
@@ -1436,16 +1443,6 @@ export class AgentMuxClient {
     }
   }
 
-  /**
-   * 本次连接顺带做的孤儿 endpoint 目录回收结果；未连接过时为 null。
-   *
-   * 回收本身是启动路径上的自愈动作，成功不打扰任何人。但失败必须能被看见——否则一个每次都删不掉的
-   * 目录会无声堆积，直到磁盘告警才浮出来。诊断经这里读取。
-   */
-  endpointReclaim(): EndpointReclaimOutcome | null {
-    return this.kernel.lastEndpointReclaim
-  }
-
   /** Retained Run/output/attachment facts from ctxmux's public paged inventory, without lifecycle changes. */
   async runtimeResourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
     this.requireConnected()
@@ -1587,9 +1584,9 @@ export class AgentMuxClient {
     return projected
   }
 
-  async attachTerminal(runId: string, afterByte = 0): Promise<AgentMuxRunAttachment> {
+  async attachTerminal(runId: string, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {
     this.requireConnected()
-    const attached = await this.kernel.attach(runId, afterByte)
+    const attached = await this.kernel.attach(runId, afterByte, undefined, view)
     if (this.registry.findByRun(runRef(runId))) {
       await this.kernel.detach(runId)
       throw new AgentMuxError('Requested Run belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
@@ -1597,23 +1594,22 @@ export class AgentMuxClient {
     this.runPids.set(runId, attached.run.pid)
     const run = this.projectRun(attached.run)
     this.publisher.publishRunState(run)
-    return { run, replay: attached.replay, gap: attached.gap }
+    return { ...attached, run }
   }
 
-  async readRunReplay(ref: AgentMuxRunRef, afterByte = 0): Promise<AgentMuxRunAttachment> {
+  async readRunReplay(ref: AgentMuxRunRef, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {
     this.requireConnected()
     if (this.registry.isRetiredRun(ref)) {
       throw new AgentMuxError('Retired Agent Run replay is unavailable.', 'STALE_AGENT_SESSION_BINDING')
     }
-    const replay = await this.kernel.replay(ref.runId, afterByte)
+    const replay = await this.kernel.replay(ref.runId, afterByte, view)
     if (this.registry.isRetiredRun(ref)) {
       throw new AgentMuxError('Agent Run retired while its replay was being read.', 'STALE_AGENT_SESSION_BINDING')
     }
     this.runPids.set(ref.runId, replay.run.pid)
     return {
+      ...replay,
       run: this.projectRun(replay.run, this.registry.findByRun(ref)),
-      replay: replay.replay,
-      gap: replay.gap
     }
   }
 
@@ -2148,15 +2144,14 @@ export class AgentMuxClient {
     }
   }
 
-  async reattachAgent(agentSessionId: string, afterByte?: number): Promise<AgentMuxAgentAttachment> {
-    const { session, attached } = await this.attachAgentRun(agentSessionId, afterByte)
+  async reattachAgent(agentSessionId: string, afterByte?: number, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxAgentAttachment> {
+    const { session, attached } = await this.attachAgentRun(agentSessionId, afterByte, undefined, view)
     this.publisher.publishRunState(this.projectRun(attached.run, session), agentSessionId)
     return {
       session: cloneSession(session),
       attachment: {
+        ...attached,
         run: this.projectRun(attached.run, session),
-        replay: attached.replay,
-        gap: attached.gap
       }
     }
   }
@@ -2175,7 +2170,8 @@ export class AgentMuxClient {
   private async attachAgentRun(
     agentSessionId: string,
     afterByte = 0,
-    beforeLive?: (snapshot: CtxmuxAdapterAttachment, session: AgentMuxStoredAgentSession) => void
+    beforeLive?: (snapshot: CtxmuxAdapterAttachment, session: AgentMuxStoredAgentSession) => void,
+    view: AgentMuxRunAttachmentView = 'raw'
   ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
@@ -2187,7 +2183,7 @@ export class AgentMuxClient {
       this.assertAgentRun(session, snapshot.run)
     }
     const attached = await this.kernel.attach(session.run.runId, afterByte,
-      beforeLive ? (snapshot) => { validate(snapshot); beforeLive(snapshot, session) } : undefined)
+      beforeLive ? (snapshot) => { validate(snapshot); beforeLive(snapshot, session) } : undefined, view)
     try {
       validate(attached)
     } catch (error) {
@@ -4428,7 +4424,9 @@ export class AgentMuxClient {
         ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
         run: runRef(event.runId),
         cols: event.cols,
-        rows: event.rows
+        rows: event.rows,
+        throughByte: event.throughByte,
+        resizeRevision: event.resizeRevision
       })
       return
     }
