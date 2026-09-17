@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, NotebookText, Pin } from 'lucide-react'
+import { ChevronDown, ChevronRight, NotebookText, Pin, Sparkles, NotebookPen } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
+import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
@@ -20,10 +21,12 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openTopic = useAppStore((state) => state.openScratchTopic)
   const reportError = useAppStore((state) => state.reportError)
+  const openFile = useAppStore((state) => state.openFile)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const current = layout ? activeTopicIdFromLayout(layout, tabs) : undefined
-  const entries = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID) ?? []
+  const entries = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && !topic.soul) ?? []
   const orderedIds = partitionPinned(orderTopics(entries.map((topic) => topic.id), order), pinned ?? [])
+  const motes = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && topic.soul) ?? []
   const byId = new Map(entries.map((topic) => [topic.id, topic]))
 
   async function openOverview(): Promise<void> {
@@ -33,8 +36,27 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
     } catch (cause) { reportError(cause) }
   }
 
+  async function openMote(id: string, edit = false): Promise<void> {
+    try {
+      await api.scratch.ensureMote(workspace.id, id)
+      await openTopic(id, workspace.id)
+      if (edit) await openFile(`${scratchTopicDirectoryName(id)}/${MOTE_SOUL_PATH}`, undefined, undefined, workspace.id)
+    } catch (cause) { reportError(cause) }
+  }
+
   return (
     <nav className="space-topics-tree" aria-label="Topics">
+      {[{ id: PMO_TEAMS_TOPIC_ID, title: 'Mote' }, ...motes].map((mote) => (
+        <div key={mote.id} className="project-rail-row-shell">
+          <button type="button" className={`project-rail-row space-mote-row${activeWorkspaceId === workspace.id && current === mote.id ? ' project-rail-row--active' : ''}`}
+            aria-label={`Open ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : `Mote · ${mote.title}`}`} onClick={() => void openMote(mote.id)}>
+            <span className="project-rail-row__icon"><Sparkles size={14} /></span>
+            <span className="project-rail-row__identity"><strong>{mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : mote.title}</strong></span>
+          </button>
+          <button type="button" className="icon-button" aria-label={`Edit ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : mote.title} SOUL.md`}
+            title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(mote.id, true)}><NotebookPen size={12} /></button>
+        </div>
+      ))}
       <div className="project-rail-row-shell">
         <button type="button" className="project-rail-row__collapse"
           aria-label={`${collapsed ? 'Expand' : 'Collapse'} Topics`} aria-expanded={!collapsed}

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X, Maximize2 } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -81,10 +81,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   useEffect(() => {
     if (!floating.open || !scratch) return
     void api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
-      .then(async (snapshot) => {
-        if (snapshot.title !== PMO_TEAMS_TOPIC_TITLE) {
-          await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE)
-        }
+      .then(async () => {
         await openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
           reveal: false,
           ...(floating.targetTabId ? { tabId: floating.targetTabId } : {})
@@ -333,9 +330,14 @@ const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
           >
             <span className="pmo-teams-topic-floating__identity">
               <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" />
-              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>PMO teams</strong>
+              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>Mote</strong>
             </span>
             <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
+              <button type="button" aria-label="Open Mote Space" title="Open Mote Space" onClick={() => {
+                // Close first so return focus never overrides the explicit full-Space navigation.
+                requestPmoTeamsTopicFloatingClose()
+                void useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID).catch(useAppStore.getState().reportError)
+              }}><Maximize2 size={13} /></button>
               <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={onClose}><X size={13} /></button>
             </div>
           </div>

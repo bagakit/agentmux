@@ -22,7 +22,7 @@ it('opens a plain Folder through the Space menu without a Topic or duplicate reg
   expect(trigger).not.toBeNull()
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
   const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-  expect(items.map((item) => item.textContent)).toEqual(['Open Folder As a Project', 'Create Another Topic'])
+  expect(items.map((item) => item.textContent)).toEqual(['Open Folder As a Project', 'Create Another Topic', 'Create Mote'])
   await act(async () => items[0]!.click())
   expect(api.workspaces.chooseLocalFolder).toHaveBeenCalledOnce()
   expect(select).toHaveBeenCalledWith('folder')

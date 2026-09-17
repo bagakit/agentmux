@@ -2,7 +2,27 @@ export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Topics'
 /** Product-owned Topic used by the PMO teams topic launcher. It is never the user's active Scratch Topic. */
 export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
-export const PMO_TEAMS_TOPIC_TITLE = 'PMO teams topic'
+export const PMO_TEAMS_TOPIC_TITLE = 'Mote'
+export const MOTE_TYPE_NAME = 'Mote'
+export const MOTE_SOUL_PATH = 'SOUL.md'
+export const DEFAULT_MOTE_SOUL = `# SOUL
+
+You are a Mote: a persistent collaborator with your own identity, independent of any execution Session or Provider.
+
+## Default role: PMO
+
+You can coordinate globally across Projects and Topics. Clarify outcomes, organize authorized work, and follow through on evidence and delivery. Your home directory does not restrict the Projects you can help with.
+
+## Working with the user
+
+Be candid, practical and concise. Carry forward the user's explicit instructions and authorization. Ask only for missing decisions that change the work. Keep healthy execution Agents and existing work surfaces available.
+
+## Knowledge
+
+Choose how to organize your knowledge and durable working notes. Preserve existing files, references, outcomes and collaborator plaques. Read topic.md for your current context.
+
+This file describes persistent identity and behavior. It is not authoritative Runtime, Session, process or permission state. Current user instructions and actual capabilities take precedence.
+`
 export const SCRATCH_TOPIC_TITLE_MAX_LENGTH = 120
 export const SCRATCH_TOPIC_WIKI_PATH = '.agentmux/topic-wiki.md'
 export const SCRATCH_TOPIC_WIKI_STATE_PATH = '.agentmux/topic-wiki.json'
@@ -55,6 +75,7 @@ export type ScratchTopicSnapshot = {
   topicPath: string
   title: string
   summary: string
+  soul?: { path: string; content: string; version: string }
   readError?: string
   collaborators: ScratchTopicCollaborator[]
   wiki?: TopicWikiSnapshot

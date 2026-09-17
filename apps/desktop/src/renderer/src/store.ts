@@ -694,7 +694,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
-  createScratchTopic(): Promise<ScratchTopicSnapshot>
+  createScratchTopic(preset?: 'mote'): Promise<ScratchTopicSnapshot>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   /**
@@ -4416,7 +4416,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : current)
     await get().selectWorkspace(workspace.id)
   },
-  async createScratchTopic() {
+  async createScratchTopic(preset) {
     const state = get()
     const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
     if (!workspace) throw new Error('Topics workspace is unavailable')
@@ -4425,7 +4425,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // not the identity from which the Topic is derived.
     const topicId = `launcher:${crypto.randomUUID()}`
     const targetTab = newLauncherTab(workspace.id, topicId)
-    const snapshot = await api.scratch.ensureTopic(workspace.id, topicId)
+    const snapshot = preset === 'mote'
+      ? await api.scratch.ensureMote(workspace.id, topicId)
+      : await api.scratch.ensureTopic(workspace.id, topicId)
     let placementFailed = false
     set((current) => {
       const currentLayout = current.layouts[workspace.id] ?? layout
@@ -4545,7 +4547,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         titleWorkbenchSurface(tab).kind === 'launcher'
       ))
       : undefined
-    if (createdLauncher && reveal && liveLayout) {
+    if (createdLauncher && reveal && liveLayout && !snapshot.soul) {
       await get().launchTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
         tabId: createdLauncher.id,
         regionId: createdLauncher.layout.activeRegionId
