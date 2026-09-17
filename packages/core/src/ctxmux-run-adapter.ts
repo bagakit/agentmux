@@ -46,8 +46,8 @@ import {
 // literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
 // vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
 // runtime with no compile error. Binding two consumers to this one validated source is the fix.
-export const CTXMUX_COMMIT = '3de504794bb2b8ce801f8faac592d977ae824fa2'
-const CTXMUX_TREE = '716c52d9788601f727311dbc30ade56b56372d24'
+export const CTXMUX_COMMIT = 'd5b6c14ac3275c16a0a42befe98fc91bb54351af'
+const CTXMUX_TREE = '3cdbea382e689c63698a1da3b78e14f1ef01e8c0'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
