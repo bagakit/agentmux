@@ -810,7 +810,10 @@ export function BrowserPane({
             <AlertTriangle size={20} />
             <strong>Page could not be loaded</strong>
             <span>{tab.error}</span>
-            <button className="small-button" type="button" onClick={() => void run(() => api.browser.reload(tab.browserId))}><RefreshCw size={12} /> Retry</button>
+            <button className="small-button" type="button" onClick={() => void run(async () => {
+              const browser = await api.browser.create(tab.browserId, tab.url)
+              return browser.error ? await api.browser.reload(tab.browserId) : browser
+            })}><RefreshCw size={12} /> Retry</button>
           </div>
         ) : tab.url === 'about:blank' ? (
           <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Enter an address above. Electron Main will mount a native WebContentsView.</span></div>

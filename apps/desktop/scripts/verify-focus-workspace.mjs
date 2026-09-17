@@ -15,7 +15,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = require('electron')
 const expectation = process.argv.includes('--baseline') ? 'baseline' : 'fixed'
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-focus-probe-'))
-const inputs = [fileURLToPath(import.meta.url), ...['main.cjs', 'entry.mjs', 'index.html'].map(name => path.join(fixture, name)), ...['components/GlobalFocusSurface.tsx', 'components/WorkspaceWorkbench.tsx', 'components/SessionPane.tsx', 'lib/focus-tab-projection.ts', 'styles/focus.css', 'styles/workbench.css'].map(file => path.join(desktop, 'src/renderer/src', file))]
+const inputs = [fileURLToPath(import.meta.url), ...['main.cjs', 'entry.mjs', 'index.html'].map(name => path.join(fixture, name)), ...['components/GlobalFocusSurface.tsx', 'components/FocusToolbar.tsx', 'components/FocusProjectLanes.tsx', 'components/FocusRecoveryGroup.tsx', 'components/RecentFocusTimeline.tsx', 'lib/focus-project-lanes.ts', 'lib/use-focus-hierarchy.ts', 'lib/focus-timeline-height.ts', 'store.ts', 'components/WorkspaceWorkbench.tsx', 'components/SessionPane.tsx', 'lib/focus-tab-projection.ts', 'styles/focus.css', 'styles/workbench.css'].map(file => path.join(desktop, 'src/renderer/src', file))]
 const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [path.relative(root, file), createHash('sha256').update(await fs.readFile(file)).digest('hex')])))
 const result = { passed: false, expectation, inputs: null, phases: [], cleanup: null }
 try {
