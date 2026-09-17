@@ -19,11 +19,11 @@ export function FocusNavigationPreview() {
   const contexts = useAppStore(useShallow(selectContexts))
   const selectedId = useAppStore(state => state.agentFocus.execution.sessionId)
   const disconnected = contexts.filter(context => context.state === 'disconnected').length
-  const visible = contexts.filter(context => context.state !== 'disconnected' || context.id === selectedId)
+  const visible = contexts.filter(context => context.state !== 'disconnected')
     .sort((a, b) => Number(b.id === selectedId) - Number(a.id === selectedId) || priority[a.bucket] - priority[b.bucket])
     .slice(0, 3)
   return <div className="focus-navigation-preview">
-    <div className="focus-navigation-preview__header"><strong>Focus</strong><small>{contexts.length} contexts</small></div>
+    <div className="focus-navigation-preview__header"><strong>Focus</strong><small>{contexts.length} {contexts.length === 1 ? 'context' : 'contexts'}</small></div>
     <div className="focus-navigation-preview__counts" aria-label="Execution status counts">
       {groups.map(({ bucket, label, icon: Icon }) => {
         const count = contexts.filter(context => context.bucket === bucket && context.state !== 'disconnected').length
