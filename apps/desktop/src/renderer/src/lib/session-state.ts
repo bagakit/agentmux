@@ -555,33 +555,26 @@ export function projectRuntimeEvent(
     } }
   }
   if (core.type === 'agent-status') {
-    return { state: {
-      ...state,
-      // `disconnected` 不许被一条 agent-status 洗掉。掉线时 Agent 的子进程还活着、hook HTTP 服务器
-      // 也没停（只在 open() 失败与 dispose() 才 stop），于是它照旧经 loopback POST 生命周期 hook，而
-      // acceptHookEvent 没有连接闸门、hook 的 observedAt 是 hook-normalizer 里的 `Date.now()`
-      // （经 publishHook 原样转成证据，故严格新于掉线那一刻的 observedAt）——
-      // 一条迟到的 hook 会把 disconnected 翻成 working，恢复横幅消失、composer 重新可写，用户往一条
-      // 字节泵已被拆掉的通道里打字。字节通道的真相只由 process-state 给（见下面那条 arm）：唯一合法的
-      // 「解掉线」是 republishLiveRunState 在重建完泵之后补发的 running，它先把 disconnected 清掉，此后
-      // hook 才照常流动。所以 hook 永远不该是清 disconnected 的那一手。unrecoverable 那格尤其致命：
-      // give-up 之后没有重连循环，而「使用 Resume」这个唯一出路只挂在 disconnected 的 detail 上。
-      sessions: state.sessions.map((item) => item.id === core.agentSessionId &&
-        acceptsAgentEvidence(item, core.evidence) &&
-        core.evidence.observedAt >= item.status.observedAt &&
-        item.status.state !== 'disconnected'
-        ? {
-            ...item,
-            updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
-            status: {
-              state: agentDisplayState(core.state),
-              source: core.evidence.source,
-              observedAt: core.evidence.observedAt,
-              ...(core.detail === undefined ? {} : { detail: core.detail })
-            }
-          }
-        : item)
-    } }
+    const item = existingEventSession
+    // Hook observations cannot restore a disconnected byte channel. Only the Run's
+    // process-state publication after rebuilding that channel can clear disconnected.
+    if (!item || !acceptsAgentEvidence(item, core.evidence) ||
+      core.evidence.observedAt < item.status.observedAt || item.status.state === 'disconnected') return { state }
+    const updatedAt = Math.max(item.updatedAt, core.evidence.observedAt)
+    const status: SessionSnapshot['status'] = {
+      state: agentDisplayState(core.state),
+      source: core.evidence.source,
+      observedAt: core.evidence.observedAt,
+      ...(core.detail === undefined ? {} : { detail: core.detail })
+    }
+    // Compare the actual projection, including removed optional facts, before replacing
+    // its collection. A rejected or repeated observation must not wake unrelated consumers.
+    const statusKeys = Object.keys(status) as (keyof typeof status)[]
+    if (updatedAt === item.updatedAt && Object.keys(item.status).length === statusKeys.length &&
+      statusKeys.every((key) => Object.is(item.status[key], status[key]))) return { state }
+    const sessions = state.sessions.slice()
+    sessions[state.sessions.indexOf(item)] = { ...item, updatedAt, status }
+    return { state: { ...state, sessions } }
   }
   if (core.type === 'agent-session') {
     return { state: {
