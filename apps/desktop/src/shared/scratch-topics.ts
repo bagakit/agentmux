@@ -1,5 +1,5 @@
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
-export const SCRATCH_WORKSPACE_NAME = 'Scratch'
+export const SCRATCH_WORKSPACE_NAME = 'Topics'
 /** Product-owned Topic used by the PMO teams topic launcher. It is never the user's active Scratch Topic. */
 export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
 export const PMO_TEAMS_TOPIC_TITLE = 'PMO teams topic'
@@ -55,6 +55,7 @@ export type ScratchTopicSnapshot = {
   topicPath: string
   title: string
   summary: string
+  readError?: string
   collaborators: ScratchTopicCollaborator[]
   wiki?: TopicWikiSnapshot
 }
