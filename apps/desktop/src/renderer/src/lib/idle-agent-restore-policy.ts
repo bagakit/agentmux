@@ -4,7 +4,7 @@ import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 export type AgentStartupRecoveryDecision =
   | { kind: 'reattach' }
   | { kind: 'resume' }
-  | { kind: 'pending'; reason: 'runtime-unverified' | 'idle-unknown' | 'not-idle' | 'idle-over-hour' }
+  | { kind: 'pending'; reason: 'runtime-unverified' | 'idle-unknown' | 'not-idle' | 'idle-over-day' }
 
 /** Desktop's fixed cold-start policy; timestamps and process facts remain Core-owned. */
 export function agentStartupRecoveryDecision(input: {
@@ -23,8 +23,8 @@ export function agentStartupRecoveryDecision(input: {
   if (enteredAt === undefined || !Number.isFinite(enteredAt) || enteredAt < 0 || !Number.isFinite(input.now) || enteredAt > input.now) {
     return { kind: 'pending', reason: 'idle-unknown' }
   }
-  return input.now - enteredAt > 60 * 60 * 1000
-    ? { kind: 'pending', reason: 'idle-over-hour' }
+  return input.now - enteredAt > 24 * 60 * 60 * 1000
+    ? { kind: 'pending', reason: 'idle-over-day' }
     : { kind: 'resume' }
 }
 
@@ -32,7 +32,7 @@ export function agentStartupRecoveryDetail(decision: AgentStartupRecoveryDecisio
   if (decision.kind !== 'pending') return 'The Agent is not running. Send your next request or use Resume to restore it.'
   switch (decision.reason) {
     case 'runtime-unverified': return 'Runtime identity is unverified. The original Session is kept; check the host before restoring.'
-    case 'idle-over-hour': return 'Idle for over an hour. Reading and drafting keep it stopped; your next request restores it.'
+    case 'idle-over-day': return 'Idle for over a day. Reading and drafting keep it stopped; your next request restores it.'
     case 'not-idle': return 'No idle completion was confirmed. Reading and drafting keep it stopped; your next request restores it.'
     case 'idle-unknown': return 'Idle time is unknown. Reading and drafting keep it stopped; your next request restores it.'
   }

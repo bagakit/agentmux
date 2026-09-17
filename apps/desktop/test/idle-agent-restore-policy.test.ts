@@ -5,7 +5,7 @@ import { agentStartupRecoveryDecision } from '../src/renderer/src/lib/idle-agent
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
-const now = 20_000_000
+const now = 200_000_000
 const done = (stateEnteredAt: number): AgentStatus => ({ state: 'done', source: 'native-hook', observedAt: now, stateEnteredAt })
 const config: AppConfig = {
   version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private policy fixture' }], executors: {},
@@ -25,9 +25,11 @@ function projected(id: string, processState: SessionSnapshot['processState'], se
 }
 
 describe('fixed Desktop startup policy', () => {
-  it.each(['exited', 'interrupted', 'missing'] as const)('applies the exact one-hour boundary to %s', (runState) => {
-    expect(agentStartupRecoveryDecision({ runState, semanticStatus: done(now - 3_600_000), canonical: true, now })).toEqual({ kind: 'resume' })
-    expect(agentStartupRecoveryDecision({ runState, semanticStatus: done(now - 3_600_001), canonical: true, now })).toEqual({ kind: 'pending', reason: 'idle-over-hour' })
+  it.each(['exited', 'interrupted', 'missing'] as const)('applies the exact one-day boundary to %s', (runState) => {
+    for (const age of [3_600_001, 7_200_000, 86_399_999, 86_400_000]) {
+      expect(agentStartupRecoveryDecision({ runState, semanticStatus: done(now - age), canonical: true, now })).toEqual({ kind: 'resume' })
+    }
+    expect(agentStartupRecoveryDecision({ runState, semanticStatus: done(now - 86_400_001), canonical: true, now })).toEqual({ kind: 'pending', reason: 'idle-over-day' })
   })
   it.each([undefined, done(now + 1), done(NaN), done(Infinity), done(-1),
     { state: 'done', source: 'native-hook', observedAt: now },
@@ -92,14 +94,14 @@ describe('actual Store cold start', () => {
     await initialize(); assertWorkbench(original)
     expect(store.getState().sessions.map(value => value.id)).toEqual(ids)
     expect(store.getState().sessions.find(value => value.id === 'healthy')).toEqual(healthy)
-    expect(store.getState().sessions.find(value => value.id === 'missing-old')?.status.detail).toContain('Idle for over an hour')
+    expect(store.getState().sessions.find(value => value.id === 'missing-old')?.status.detail).toContain('Idle for over a day')
     store.getState().setAgentComposerDraft('missing-old', 'Drafting never resumes')
     expect(store.getState().agentComposerDrafts['missing-old']).toBe('Drafting never resumes')
     expect(recover).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   })
   it('consumes the native epoch through both ended and missing recovery paths', async () => {
     const ids = ['ended-recent', 'missing-recent']; const original = seed(ids)
-    let snapshot: RuntimeSnapshot = { sessions: [projected(ids[0]!, 'exited', done(now - 3_600_000))], timelines: {}, recoveryCandidates: [candidate(ids[1]!, done(now - 1))] }
+    let snapshot: RuntimeSnapshot = { sessions: [projected(ids[0]!, 'exited', done(now - 86_400_000))], timelines: {}, recoveryCandidates: [candidate(ids[1]!, done(now - 7_200_000))] }
     vi.spyOn(api.sessions, 'snapshot').mockImplementation(async () => snapshot)
     const recover = vi.spyOn(api.sessions, 'recover').mockImplementation(async control => {
       const session = projected(control.kind === 'agent' ? control.agentSessionId : '', 'running')

@@ -111,7 +111,7 @@ export function SessionPane({
     now: Date.now()
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
-    startupDecision.reason === 'idle-over-hour'
+    startupDecision.reason === 'idle-over-day'
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,

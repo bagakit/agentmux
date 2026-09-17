@@ -57,7 +57,8 @@ app.whenReady().then(async () => {
       // Pure absolute-position repaint: no LF/SU/alternate history fabrication.
       const data = Array.from({ length: 24 }, (_, row) => `\x1b[${row + 1};1Hprivate-live-screen-${row}\x1b[K`).join('')
       const dataBytes = new TextEncoder().encode(data)
-      return { attachmentId: 'private-attachment', currentSize: { cols: 160, rows: 40 }, gap: null,
+      return { attachmentId: 'private-attachment', session: fixtureSession, currentSize: { cols: 160, rows: 40 }, gap: null,
+        terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
         replay: [{ startByte: 0, endByte: dataBytes.length, dataBytes, data }] }
     })
     handle('sessions:resize', (_event, id, cols, rows) => {
@@ -80,7 +81,7 @@ app.whenReady().then(async () => {
       historyPages.push({ source: page.source, itemIds: page.items.map(item => item.id), nextCursor: page.nextCursor })
       return { agentSessionId: control.agentSessionId, ...page }
     })
-    const semantic = { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() - 3601000 }
+    const semantic = { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() - 86401000 }
     const fixtureSession = { id: control.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: '/private-synthetic', label: 'Private native records', createdAt: 1, updatedAt: 1,
       processState: phase === 'restore' ? 'exited' : 'running', latestOutputBytes: 0,

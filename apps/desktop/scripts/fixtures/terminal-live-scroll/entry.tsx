@@ -66,7 +66,7 @@ const root = createRoot(document.getElementById('container')!)
 root.render(<SessionPane sessionId={sessionId} surfaceKind="agent" interactiveResize={false} visible
   linkOrigin={{ workspaceId: 'private', tabGroupId: 'private-group', tabId, regionId }} />)
 w.showCold = () => {
-  const done = { state: 'done' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: Date.now() - 3601000 }
+  const done = { state: 'done' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: Date.now() - 86401000 }
   useAppStore.setState({ sessions: [{ ...session, processState: 'exited', status: done, semanticStatus: done }] })
   useAppStore.getState().setAgentComposerDraft(sessionId, 'Private inline draft survives process restart')
 }

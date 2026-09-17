@@ -85,7 +85,7 @@ function state(current: SessionSnapshot = session) {
     pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [], viewModes: {}, agentNames: {} })
 }
 function replay(data: string, current: SessionSnapshot = session): SessionAttachResult {
-  return { attachmentId: 'wheel-attachment', session: current, currentSize: { cols: 80, rows: 24 }, gap: null,
+  return { attachmentId: 'wheel-attachment', session: current, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: current.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
 function page(id: string, nextCursor: string | null): AgentSessionHistoryPage {
@@ -184,7 +184,7 @@ it('keeps readOnly and pending-interaction active views in Terminal while replay
 })
 
 function cold(): typeof session {
-  const enteredAt = Date.now() - 3600001
+  const enteredAt = Date.now() - 86400001
   return { ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: Date.now() },
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: enteredAt } }
 }
@@ -195,7 +195,7 @@ it('uses the proven long-idle nonrunning policy for inline records with shared t
   const reader = container.querySelector<HTMLElement>('[aria-label="Conversation history"]')!
   expect(reader).not.toBeNull(); expect(reader.classList.contains('session-history--inline')).toBe(true)
   expect(history).toHaveBeenCalledExactlyOnceWith(dormant.control, undefined)
-  expect(container.textContent).toContain('Private record latest'); expect(container.textContent).toContain('Idle for over an hour')
+  expect(container.textContent).toContain('Private record latest'); expect(container.textContent).toContain('Idle for over a day')
   expect(container.querySelector('[aria-label="Private composer"]')).not.toBeNull()
   expect(Array.from(container.querySelectorAll('button'), b => b.textContent?.trim())).not.toContain('Session')
   expect(fixture.terminals).toEqual([]); expect(attach).not.toHaveBeenCalled(); noExecution()
@@ -244,7 +244,7 @@ it('does not call unknown, unverified, recent or non-done state long idle', asyn
   const inputs: Array<{ current: typeof session; warning?: boolean }> = [
     { current: unknown },
     { current: dormant, warning: true },
-    { current: { ...dormant, semanticStatus: { ...dormant.semanticStatus!, stateEnteredAt: now - 3600000 } } },
+    { current: { ...dormant, semanticStatus: { ...dormant.semanticStatus!, stateEnteredAt: now - 7200000 } } },
     { current: { ...dormant, semanticStatus: { ...dormant.semanticStatus!, stateEnteredAt: Date.now() + 3600000 } } },
     { current: { ...dormant, semanticStatus: { ...dormant.semanticStatus!, state: 'working' } } }
   ]
