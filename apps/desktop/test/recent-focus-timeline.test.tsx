@@ -2,6 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createFocusContextSelector } from '../src/renderer/src/lib/focus-context'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import { RecentFocusTimeline } from '../src/renderer/src/components/RecentFocusTimeline.js'
 
@@ -24,7 +25,7 @@ describe('Recent Focus timeline', () => {
     const onSelect = vi.fn()
     await act(async () => root.render(createElement(RecentFocusTimeline, {
       entries: [{ sessionId: 'one', focusedAt: 1_000 }, { sessionId: 'two', focusedAt: 61_000 }],
-      currentSessionId: 'two', sessions: [terminal('one'), terminal('two')], config: null, names: {}, onSelect
+      currentSessionId: 'two', contexts: createFocusContextSelector()({ sessions: [terminal('one'), terminal('two')], config: null, timelines: {}, agentNames: {} }), onSelect
     })))
     expect(container.querySelector('.recent-focus__title')?.textContent).toContain('Recent Focus')
     expect(container.querySelectorAll('[data-focus-timeline-id]').length).toBe(2)

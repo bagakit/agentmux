@@ -126,7 +126,7 @@ describe('Global Agents card board', () => {
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     expect(container.querySelector('.recent-focus')).toBeTruthy()
     expect(container.querySelector('[data-focus-timeline-id="terminal-1"]')).toBeTruthy()
-    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .recent-focus__segment svg')).toBeTruthy()
+    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .recent-focus__gutter svg')).toBeTruthy()
     expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .agent-avatar')).toBeNull()
   })
 })
