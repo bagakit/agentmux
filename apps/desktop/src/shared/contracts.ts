@@ -1232,6 +1232,7 @@ export type BrowserPageFrameFailure = {
 
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
+  | { type: 'unavailable'; id: string; error: string }
   | { type: 'closed'; id: string }
 
 export type BrowserBounds = {
@@ -1455,6 +1456,7 @@ export type AgentMuxDesktopApi = {
     subscribe(listener: (snapshot: UsageSnapshot) => void): () => void
   }
   browser: {
+    /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
     create(id: string, url: string): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>
     back(id: string): Promise<BrowserSnapshot>

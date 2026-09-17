@@ -1,3 +1,4 @@
+import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
@@ -409,6 +410,8 @@ type AppState = {
   demandPmoTabIds: Record<string, string>
   /** Global navigation context. Execution and PMO focus are separate lanes and never overwrite one another. */
   agentFocus: AgentFocusContext
+  focusTimelineHeight: number
+  setFocusTimelineHeight(height: number): void
   focusExecutionSession(id: string | null): void
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
@@ -1599,6 +1602,7 @@ type PersistedAppState = {
   agentNames?: Record<string, string>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
+  focusTimelineHeight?: number
   agentFocus?: AgentFocusContext
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
@@ -1626,6 +1630,7 @@ export type RestoredUiState = Pick<
   | 'workspaceTool'
   | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTimelineHeight'
   | 'editorWordWrap'
 >
 
@@ -1697,10 +1702,12 @@ export function restorePersistedUiState(
     | 'workspaceTool'
     | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTimelineHeight'
     | 'editorWordWrap'
   >
 ): RestoredUiState {
   return {
+    focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
@@ -1746,6 +1753,7 @@ function selectPersistedInputs(state: AppState) {
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
     agentFocus: state.agentFocus,
+    focusTimelineHeight: state.focusTimelineHeight,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
     demandPmoTabIds: state.demandPmoTabIds,
@@ -1971,6 +1979,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
+  focusTimelineHeight: FOCUS_TIMELINE_HEIGHT_DEFAULT,
+  setFocusTimelineHeight(height) { set({ focusTimelineHeight: clampFocusTimelineHeight(height) }) },
   selectedDemandId: null,
   demandArrangement: 'columns',
   projectRailOpen: true,
@@ -2344,17 +2354,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const browser = await api.browser.create(surface.browserId, surface.url)
             get().applyBrowserEvent({ type: 'updated', browser })
           } catch (error) {
-            // A browser that cannot be recreated must NOT ship as a dead shell (the old decision's real
-            // concern). Remove its Region through the ordinary `closed` reducer — it collapses the split
-            // or drops a solo browser tab, exactly as a live close would — and tell the user why.
-            get().applyBrowserEvent({ type: 'closed', id: surface.browserId })
+            // Failure to acquire a native owner is not a user close. Keep the current durable Region
+            // and give its existing Retry a visible failure; never resurrect one closed while awaiting.
+            set((state) => {
+              const currentTab = state.tabs[tab.id]
+              if (!currentTab) return state
+              const currentSurface = currentTab.regions[surface.regionId]
+              if (currentSurface?.kind !== 'browser' || currentSurface.browserId !== surface.browserId) return state
+              return { tabs: { ...state.tabs, [tab.id]: { ...currentTab, regions: {
+                ...currentTab.regions,
+                [surface.regionId]: {
+                  ...currentSurface,
+                  loading: false,
+                  error: `Browser recovery failed: ${presentError(error)}. Retry to reopen this page.`
+                }
+              } } } }
+            })
             browserRebuildFailures.push(`${surface.title || surface.url} (${presentError(error)})`)
           }
         }
       }
       if (browserRebuildFailures.length > 0) {
         get().reportError(new Error(
-          `Some saved browser panes could not be reopened and were closed: ${browserRebuildFailures.join('; ')}.`
+          `Some saved browser panes could not be reopened. Their Regions were retained; use Retry on the page: ${browserRebuildFailures.join('; ')}.`
         ))
       }
       // A rejected initial snapshot used the saved Workbench as a temporary projection. Retry one

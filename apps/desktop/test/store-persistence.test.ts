@@ -219,6 +219,7 @@ describe('Renderer persistence boundary', () => {
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440,
+      focusTimelineHeight: 96,
       editorWordWrap: false
     })
   })

@@ -4,6 +4,7 @@ import {
   tabGroupForTab,
   removeWorkbenchRegion,
   workbenchSurfaces,
+  type BrowserWorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
 
@@ -16,6 +17,17 @@ export function reduceBrowserEvent(
   state: BrowserProjectionState,
   event: BrowserEvent
 ): BrowserProjectionState {
+  if (event.type === 'unavailable') {
+    let tabs = state.tabs
+    for (const tab of Object.values(state.tabs)) {
+      const affected = workbenchSurfaces(tab).filter((surface): surface is BrowserWorkbenchSurface => surface.kind === 'browser' && surface.browserId === event.id)
+      if (affected.length === 0) continue
+      const regions = { ...tab.regions }
+      for (const surface of affected) regions[surface.regionId] = { ...surface, loading: false, error: event.error }
+      tabs = { ...tabs, [tab.id]: { ...tab, regions } }
+    }
+    return tabs === state.tabs ? state : { ...state, tabs }
+  }
   if (event.type === 'updated') {
     return {
       ...state,

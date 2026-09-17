@@ -4,6 +4,7 @@ import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalF
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
+import { restorePersistedUiState } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
@@ -12,11 +13,19 @@ const snapshot = await api.sessions.snapshot()
 const selected = snapshot.sessions.find(session => session.id === 'session-codex')
 const workspaceId = 'workspace-demo'
 const projects = Array.from({ length: 24 }, (_, index) => ({ id: `project-${index}`, name: `Project ${index}`, path: `/fixture/project-${index}`, hostId: 'local', kind: 'folder' }))
-config.workspaces.push(...projects)
-const sessions = [selected, ...projects.map((workspace, index) => ({ ...selected, id: `context-${index}`, label: `Context ${index}`, workspacePath: workspace.path }))]
+const scratch = { id: '__scratch__', name: 'Scratch', path: '/fixture/scratch', hostId: 'local', kind: 'folder' }
+const topics = ['Planning', 'Focus design', 'Runtime recovery'].map((title, index) => ({ id: `launcher:topic${index}`, title, directoryPath: `${scratch.path}/topic--launcher--topic${index}`, topicPath: '', summary: '', collaborators: [] }))
+config.workspaces.push(...projects, scratch)
+api.scratch.listTopics = async () => topics
+const listBranches = api.workspaces.listBranches
+api.workspaces.listBranches = async id => projects.some(project => project.id === id)
+  ? { kind: 'not-a-git-repository', hostId: 'local', workspacePath: config.workspaces.find(workspace => workspace.id === id).path }
+  : listBranches(id)
+const recovery = topics.flatMap((topic, group) => Array.from({ length: 12 }, (_, index) => ({ ...selected, id: `recovery-${group}-${index}`, label: `Saved task ${index + 1}`, workspacePath: topic.directoryPath, processState: 'disconnected', status: { ...selected.status, state: 'disconnected' } })))
+const sessions = [selected, ...recovery, ...projects.map((workspace, index) => ({ ...selected, id: `context-${index}`, label: `Context ${index}`, workspacePath: workspace.path }))]
 const tab = createWorkbenchTab('fixture-tab', { regionId: 'fixture-region', workspaceId, kind: 'agent', phase: 'attached', sessionId: selected.id })
 const seed = {
-  config, sessions, timelines: snapshot.timelines, providerCatalog: [], agentNames: {},
+  config, sessions, focusTimelineHeight: 96, timelines: snapshot.timelines, providerCatalog: [], agentNames: {},
   tabs: { [tab.id]: tab }, layouts: { [workspaceId]: { root: { type: 'leaf', groupId: 'fixture-group' }, groups: [{ id: 'fixture-group', tabOrder: [tab.id], activeTabId: tab.id, recentTabIds: [tab.id] }], activeGroupId: 'fixture-group' } },
   mainSurface: 'agents', activeWorkspaceId: workspaceId,
   agentFocus: { execution: { sessionId: selected.id, history: sessions.map((session, index) => ({ sessionId: session.id, focusedAt: 1000 + index * 60000 })) }, pmo: { sessionId: null } }
@@ -24,11 +33,11 @@ const seed = {
 useAppStore.setState(seed)
 window.focusProbeWheels = []
 document.addEventListener('wheel', event => window.focusProbeWheels.push({ trusted: event.isTrusted, tracks: Boolean(event.target.closest('.recent-focus__viewport')), lanes: Boolean(event.target.closest('.focus-project-lanes__rows')), deltaX: event.deltaX, deltaY: event.deltaY }), true)
-window.restoreFocusProbe = state => useAppStore.setState({ ...state, config })
+window.restoreFocusProbe = state => useAppStore.setState({ ...state, config, ...restorePersistedUiState(config, state) })
 window.focusProbeInputReceipt = async () => (await api.sessions.snapshot()).timelines['session-codex'].items.at(-1)
 window.focusProbeState = () => {
-  const { tabs, layouts, agentFocus, sessions, timelines } = useAppStore.getState()
-  return { tabs, layouts, agentFocus, sessions, timelines }
+  const { tabs, layouts, agentFocus, sessions, timelines, focusTimelineHeight } = useAppStore.getState()
+  return { tabs, layouts, agentFocus, sessions, timelines, focusTimelineHeight }
 }
 function Fixture() {
   useEffect(() => { window.focusProbeReady = true }, [])
@@ -52,5 +61,5 @@ window.focusProbeGeometry = () => {
   const right = document.querySelector('#focus-workspace-slot .workbench-region')
   const rightRect = right.getBoundingClientRect()
   const rightHit = document.elementFromPoint(rightRect.left + rightRect.width / 2, rightRect.top + rightRect.height / 2)
-  return { lanes: inspect('.focus-project-lanes__rows'), tracks: inspect('.recent-focus__viewport'), track: inspect('.focus-project-lanes__track'), body: inspect('#focus-workspace-slot .workbench-region'), slot: inspect('#focus-workspace-slot'), timeline: inspect('.recent-focus'), main: inspect('.global-focus-layout'), leftHit: Boolean(hit?.closest('.focus-project-lanes')), rightHit: Boolean(rightHit?.closest('#focus-workspace-slot')), terminal: Boolean(document.querySelector('#focus-workspace-slot .xterm')), hydrating: Boolean(document.querySelector('#focus-workspace-slot .terminal-view__xterm--hydrating')), regionIds: [...document.querySelectorAll('#focus-workspace-slot [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
+  return { toolbar: inspect('.focus-toolbar'), contextHeader: inspect('.focus-toolbar__context'), laneNames: [...document.querySelectorAll('.focus-project-lanes__axis')].map(node => node.textContent), disconnectedToggles: [...document.querySelectorAll('.focus-recovery-toggle')].map(node => node.textContent), visibleRecovery: document.querySelectorAll('[data-session-id^=recovery-]').length, lanes: inspect('.focus-project-lanes__rows'), tracks: inspect('.recent-focus__viewport'), track: inspect('.focus-project-lanes__track'), body: inspect('#focus-workspace-slot .workbench-region'), slot: inspect('#focus-workspace-slot'), timeline: inspect('.recent-focus'), main: inspect('.global-focus-layout'), leftHit: Boolean(hit?.closest('.focus-project-lanes')), rightHit: Boolean(rightHit?.closest('#focus-workspace-slot')), terminal: Boolean(document.querySelector('#focus-workspace-slot .xterm')), hydrating: Boolean(document.querySelector('#focus-workspace-slot .terminal-view__xterm--hydrating')), regionIds: [...document.querySelectorAll('#focus-workspace-slot [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
 }

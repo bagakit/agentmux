@@ -18,6 +18,7 @@ const navigation = readFileSync(
   'utf8'
 )
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
+const resourceOwners = readFileSync(new URL('../src/renderer/src/components/RendererResourceOwners.tsx', import.meta.url), 'utf8')
 const workbench = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
   'utf8'
@@ -58,8 +59,10 @@ describe('Browser/Monaco surface budget wiring', () => {
   })
 
   it('has production callers for coordinator, Browser release/restore, and Monaco release state', () => {
-    expect(app).toContain('useSurfaceMemoryBudget(')
-    expect(app).toContain('<SurfaceMemoryBudgetProvider')
+    expect(resourceOwners.length).toBeGreaterThan(0)
+    expect(app).toContain('<RendererResourceOwners')
+    expect(resourceOwners).toContain('useSurfaceMemoryBudget(')
+    expect(resourceOwners).toContain('<SurfaceMemoryBudgetProvider')
     expect(workbench).toContain('useBrowserSurfaceReleased')
     expect(workbench).toContain('useMonacoSurfaceReleased')
     expect(workbench).toContain('released={browserReleased}')

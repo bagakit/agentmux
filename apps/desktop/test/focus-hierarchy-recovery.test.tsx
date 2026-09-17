@@ -6,6 +6,11 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+const draws = vi.hoisted(() => ({ lanes: 0 }))
+vi.mock('../src/renderer/src/components/FocusProjectLanes', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/renderer/src/components/FocusProjectLanes')>()
+  return { ...original, FocusProjectLanes: (props: Parameters<typeof original.FocusProjectLanes>[0]) => { draws.lanes++; return createElement(original.FocusProjectLanes, props) } }
+})
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 const baseline = useAppStore.getState()
@@ -26,6 +31,7 @@ it('shows actual named Topic and branch lanes with compact recovery in their own
   await render()
   const lanes = [...container.querySelectorAll<HTMLElement>('[data-lane-id]')]
   expect(lanes).toHaveLength(3)
+  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__heading')!.parentElement!.className)).toEqual(['focus-context-group__header', 'focus-context-group__header', 'focus-context-group__header'])
   expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__axis')!.textContent)).toEqual(['ScratchPlanning', 'ScratchBug fixes', 'Productfeature/compact'])
   expect(container.querySelectorAll('[data-session-id]')).toHaveLength(1)
   const vaults = [...container.querySelectorAll<HTMLButtonElement>('.focus-recovery-toggle')]
@@ -49,8 +55,10 @@ it('search finds a disconnected Topic context without opening every recovery vau
 it('keeps a checkout lane after removal and does not requery scopes for unrelated output bytes', async () => {
   await render()
   const branchCalls = vi.mocked(api.workspaces.listBranches).mock.calls.length
+  const laneDraws = draws.lanes
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item => ({ ...item, latestOutputBytes: 99 })) })))
   expect(api.workspaces.listBranches).toHaveBeenCalledTimes(branchCalls)
+  expect(draws.lanes).toBe(laneDraws)
   vi.mocked(api.workspaces.listBranches).mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: '/repo', branches: [{ name: 'feature/compact', worktreePath: null, workspaceId: null, isCurrent: false }] })
   await act(async () => { useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== 'branch') }, workspaceFileRevisions: { repo: 1 }, sessions: state.sessions.map(item => item.id === 'live' ? { ...item, processState: 'disconnected', status: { ...item.status, state: 'disconnected' } } : item) })); await Promise.resolve() })
   // Root is no longer represented by a Session; its cached checkout evidence still preserves independent identity.
