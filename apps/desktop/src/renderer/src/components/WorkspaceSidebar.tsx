@@ -19,11 +19,10 @@ import {
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
-import { BrandIcon } from './BrandIcon'
+import { SpaceTopicsTree } from './SpaceTopicsTree'
 import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
-import { useScratchTopics } from '../hooks/useScratchTopics'
 import { activityContextsForWorkspaces } from '../lib/activity-groups'
 
 function projectCollapseKey(id: string): string { return `project:${id}` }
@@ -38,7 +37,6 @@ export function WorkspaceSidebar() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
-  const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const setConfig = useAppStore((state) => state.setConfig)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
@@ -91,19 +89,9 @@ export function WorkspaceSidebar() {
       reportError(error)
     }
   }
-  const { topics: scratchTopics } = useScratchTopics(scratch?.id ?? null)
   const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
     ? workspaceProjectId(activeWorkspace)
     : null
-  const scratchSessionCount = scratch
-    ? sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)).length
-    : 0
-  const scratchWorkingAgentCount = scratch
-    ? producingAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
-    : 0
-  const scratchIdleAgentCount = scratch
-    ? idleAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
-    : 0
 
   async function chooseFolder(): Promise<void> {
     const workspace = await api.workspaces.chooseLocalFolder()
@@ -286,58 +274,7 @@ export function WorkspaceSidebar() {
       <header className="project-rail-titlebar">
         <SidebarToggleChrome />
       </header>
-      {scratch ? (
-        <div className="scratch-workspace-slot">
-          <WorkspaceRowContextMenu
-            path={scratch.path}
-            branch={scratch.branch ?? null}
-            isLocal={scratch.hostId === 'local'}
-            workspaceId={scratch.id}
-          >
-            <div className="project-rail-entry"><button
-            className={`project-rail-row scratch-workspace-row ${activeWorkspaceId === scratch.id ? 'project-rail-row--active' : ''}`}
-            aria-current={activeWorkspaceId === scratch.id ? 'page' : undefined}
-            aria-label={[
-              'Scratch',
-              ...(scratchWorkingAgentCount > 0
-                ? [`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} working`]
-                : []),
-              ...(scratchIdleAgentCount > 0 ? [`${scratchIdleAgentCount} idle`] : [])
-            ].join(' · ')}
-            title={scratch.path}
-            onClick={() => void selectWorkspace(scratch.id)}
-          >
-            <span className="project-rail-row__icon scratch-workspace-row__icon"><BrandIcon size={16} /></span>
-            <span className="project-rail-row__identity scratch-workspace-row__identity">
-              <strong>Scratch</strong>
-            </span>
-            <span
-              className="scratch-workspace-row__meta"
-              title={`Pinned workspace · ${scratchSessionCount} ${scratchSessionCount === 1 ? 'session' : 'sessions'}`}
-            >
-              {/* Pin is the one thing that distinguishes this row from every other — it stays.
-                  The number beside it follows the same rule as the project rows: it counts running
-                  Agents and disappears at zero, rather than showing a session total nobody asked for. */}
-              <Pin size={10} />
-
-            </span>
-          </button><ProjectActivity
-            sessions={sessions.filter((session) => workspaceOwnsSessionPath(scratch, session))}
-            contexts={activityContextsForWorkspaces([scratch], scratchTopics ?? [])}
-          /></div>
-          </WorkspaceRowContextMenu>
-          {/* Pinned Topics hang under Scratch. The pin list alone is enough to render — a Topic
-              whose snapshot has not loaded (scratchTopics null, or id not yet in it) falls back to
-              its id rather than disappearing. Clicking selects the Scratch workspace, following the
-              row above. Note: these child rows use --rail-depth + a smaller type, distinct from the
-              static <Pin> badge above (which means "this workspace is pinned"). */}
-          {pinnedChildRows(SCRATCH_WORKSPACE_ID, 1, (topicId) => ({
-            label: scratchTopics?.find((topic) => topic.id === topicId)?.title ?? topicId,
-            targetId: scratch.id,
-            onSelect: () => void openScratchTopic(topicId, SCRATCH_WORKSPACE_ID).catch(reportError)
-          }))}
-        </div>
-      ) : null}
+      {scratch ? <SpaceTopicsTree workspace={scratch} /> : null}
       <div className="sidebar__section-heading">
         <span>Projects</span>
         <div className="sidebar__heading-actions">

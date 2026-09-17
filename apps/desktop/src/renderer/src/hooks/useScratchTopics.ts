@@ -31,7 +31,16 @@ export function useScratchTopics(workspaceId: string | null): {
     let active = true
     setState((current) => ({ workspaceId, topics: current?.workspaceId === workspaceId ? current.topics : null, error: null }))
     void api.scratch.listTopics(workspaceId).then((snapshots) => {
-      if (active) setState({ workspaceId, topics: snapshots, error: null })
+      if (active) setState((current) => ({
+        workspaceId,
+        topics: snapshots.map((snapshot) => {
+          const previous = current?.workspaceId === workspaceId
+            ? current.topics?.find((topic) => topic.id === snapshot.id)
+            : undefined
+          return snapshot.readError && previous ? { ...previous, readError: snapshot.readError } : snapshot
+        }),
+        error: null
+      }))
     }).catch((cause) => {
       if (active) setState((current) => ({
         workspaceId, topics: current?.workspaceId === workspaceId ? current.topics : null, error: presentError(cause)

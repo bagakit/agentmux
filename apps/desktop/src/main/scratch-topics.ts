@@ -211,7 +211,19 @@ export class ScratchTopics {
       return topicId ? [topicId] : []
     })
     topicIds.sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
-    return await Promise.all(topicIds.map(async (topicId) => (await this.read(workspace, topicId))!))
+    const snapshots = await Promise.all(topicIds.map(async (topicId): Promise<ScratchTopicSnapshot | null> => {
+      try {
+        return await this.read(workspace, topicId)
+      } catch (error) {
+        const directoryPath = scratchTopicDirectoryName(topicId)
+        return {
+          id: topicId, directoryPath, topicPath: `${directoryPath}/topic.md`,
+          title: topicId, summary: '', collaborators: [],
+          readError: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }))
+    return snapshots.filter((snapshot): snapshot is ScratchTopicSnapshot => snapshot !== null)
   }
 
   async read(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot | null> {
