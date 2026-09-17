@@ -94,7 +94,8 @@
     "bin",
     "dist",
     "examples",
-    "vendor"
+    "vendor",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "dependencies": {
     "@xterm/headless": "5.5.0",
