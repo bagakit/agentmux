@@ -47,7 +47,9 @@ async function waitFor(label, read, accept, budget = 15_000) {
 }
 const python = `import os,termios
 settings=termios.tcgetattr(0);settings[3]&=~(termios.ICANON|termios.ECHO);settings[1]&=~termios.OPOST;termios.tcsetattr(0,termios.TCSANOW,settings)
-payload=b'ROW000\\r\\n'+(b'\\x1b[1;1H'+b'X'*100)*47000
+os.write(1,b'ROW000\\r\\n')
+assert os.read(0,1)==b'g'
+payload=(b'\\x1b[1;1H'+b'X'*100)*47000
 while payload:
  count=os.write(1,payload);payload=payload[count:]
 while True:
@@ -85,16 +87,17 @@ try {
       assert.ok(Number.isSafeInteger(first.pid) && first.pid > 1)
       const firstBirth = await identity(first.pid); assert.ok(firstBirth); owned.set(first.pid, firstBirth)
       row.firstRunId = first.id; row.firstPid = first.pid
-      const before = await waitFor('first output beyond retained prefix', () => client.status(first.id), run => run.latest_output_bytes === 8 + 106 * 47000)
-      assert.equal(before.state.type, 'running'); assert.equal(before.pid, first.pid)
-      assert.ok(before.first_available_byte > 0); assert.equal(before.applied_input_bytes, 0)
-      row.firstOutput = { latest: before.latest_output_bytes, head: before.first_available_byte }
-      // Pressure cutting uses a best-effort offer; explicitly re-offer through the public
-      // geometry owner once the original output is complete, rather than assume a queue slot.
+      const prefix = await waitFor('quiet durable prefix', () => client.status(first.id), run => run.latest_output_bytes === 8 && run.durable_output_bytes === 8)
+      assert.equal(prefix.state.type, 'running'); assert.equal(prefix.pid, first.pid); assert.equal(prefix.applied_input_bytes, 0)
+      row.quietPrefix = { latest: prefix.latest_output_bytes, durable: prefix.durable_output_bytes, appliedInput: prefix.applied_input_bytes }
       await client.resize(first.id, { rows: 7, cols: 40 })
-      row.checkpointTrigger = 'Public resize after the complete original payload'
-      // In the positive warning case, bind the actual failed derived write before continuing.
+      row.checkpointTrigger = 'One public resize after a quiet committed 8-byte prefix; original burst is still gated'
       if (!closePipe) await waitFor('actual checkpoint rejection', async () => diagnostics, text => text.includes('terminal checkpoint') && text.includes('was not saved'))
+      await client.input(first.id, Uint8Array.from([103]))
+      const before = await waitFor('first output beyond retained prefix', () => client.status(first.id), run => run.latest_output_bytes === 8 + 106 * 47000 && run.applied_input_bytes === 1)
+      assert.equal(before.state.type, 'running'); assert.equal(before.pid, first.pid)
+      assert.ok(before.first_available_byte > 0)
+      row.firstOutput = { latest: before.latest_output_bytes, head: before.first_available_byte, appliedInput: before.applied_input_bytes }
       await delay(150)
       let second, secondFailure
       try { second = await client.start({ ...spec, args: ['-u', join(root, 'second.py')] }, 'private-checkpoint-isolation-second') }
@@ -103,10 +106,10 @@ try {
       if (second) { const secondBirth = await identity(second.pid); assert.ok(secondBirth); owned.set(second.pid, secondBirth); row.secondRunId = second.id; row.secondPid = second.pid }
       assert.equal(row.secondAccepted, true, 'A failed checkpoint diagnostic must not stop the actor or reject the next healthy Run')
       await client.input(first.id, Uint8Array.from([122]))
-      const after = await waitFor('original PTY input and output', () => client.status(first.id), run => run.applied_input_bytes === 1 && run.latest_output_bytes === before.latest_output_bytes + 19)
+      const after = await waitFor('original PTY input and output', () => client.status(first.id), run => run.applied_input_bytes === 2 && run.latest_output_bytes === before.latest_output_bytes + 19)
       assert.equal(after.state.type, 'running'); assert.equal(after.pid, first.pid)
       assert.equal(await identity(daemon.pid), birth)
-      row.firstInput = { acceptedBytes: after.applied_input_bytes, outputIncreased: after.latest_output_bytes > before.latest_output_bytes, samePid: after.pid === first.pid }
+      row.firstInput = { acceptedBytes: after.applied_input_bytes - before.applied_input_bytes, totalAppliedBytes: after.applied_input_bytes, outputIncreased: after.latest_output_bytes > before.latest_output_bytes, samePid: after.pid === first.pid }
       row.daemonSameBirth = true
       row.warningObserved = diagnostics.includes('terminal checkpoint') && diagnostics.includes('was not saved')
     } catch (error) { caseFailure = error; row.failure = { name: error.name, message: error.message, stack: error.stack } }
