@@ -52,6 +52,32 @@ it('ignores unrelated bytes and detaches detailed preview when closed', async ()
   expect(commits.mock.calls.length).toBe(closed)
   await hover(); expect(preview()?.textContent).toContain('Changed while closed')
 })
+it('keeps selected disconnected contexts count-only without changing the original focus', async () => {
+  await act(async () => useAppStore.setState(state => ({
+    agentNames: { ...state.agentNames, offline: 'Saved offline task' },
+    timelines: { ...state.timelines, offline: items('offline', 'assistant_message', 'Offline activity detail') },
+    agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution, sessionId: 'offline' } }
+  })))
+  await hover()
+  expect([...preview()!.querySelectorAll('[data-preview-session]')].map(row => row.getAttribute('data-preview-session'))).toEqual(['attention', 'working', 'result'])
+  expect(preview()?.textContent).toContain('5 contexts')
+  expect(preview()?.textContent).toContain('1 disconnected')
+  expect(preview()?.textContent).not.toContain('Saved offline task')
+  expect(preview()?.textContent).not.toContain('Offline activity detail')
+  expect(preview()?.querySelector('.focus-navigation-preview__viewing')).toBeNull()
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
+  expect(useAppStore.getState().sessions.find(session => session.id === 'offline')?.status.state).toBe('disconnected')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id === 'offline') })))
+  expect([...preview()!.querySelectorAll('[data-preview-session]')]).toEqual([])
+  expect(preview()?.textContent).toContain('No active contexts')
+  expect(preview()?.textContent).toContain('1 context')
+  expect(preview()?.textContent).toContain('1 disconnected')
+  expect(preview()?.textContent).not.toContain('Offline activity detail')
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
+  await act(async () => focus().click())
+  expect(useAppStore.getState().mainSurface).toBe('agents')
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
+})
 it('excludes PMO from both the badge and preview, and does not keep an old result after a new prompt', async () => {
   await act(async () => useAppStore.setState(state => ({
     config: { ...state.config!, workspaces: [...state.config!.workspaces, { ...state.config!.workspaces[0]!, id: '__scratch__', name: 'Scratch', path: '/fixture/scratch' }] },
