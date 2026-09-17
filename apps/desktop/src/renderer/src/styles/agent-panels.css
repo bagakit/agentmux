@@ -141,7 +141,7 @@
 /* 状态栏计数树（.agent-tree*）：每个计数段旁边那个 chevron 点开的项目→Agent 面板。它复用花名册的
    外壳（.agent-roster——同一档浮层、同一套 Surface/圆角/elevation），只在内容上多一层「按 Project
    分组」。所以这里不重写外壳，只加分组标题与那个 chevron 触发键的规则。 */
-.agent-tree__disclose {
+.agent-tree__disclose { border: 0; padding: 0; background: transparent; font: inherit;
   display: inline-flex;
   align-items: center;
   padding:0 var(--sp-1);

@@ -11,6 +11,10 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
+import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
+import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { topicIdForSession } from '../lib/workbench-tabs'
+import { focusBucketForSession } from '../lib/focus-context'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 export function GlobalFocusSurface() {
@@ -21,6 +25,8 @@ export function GlobalFocusSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const executionHistory = useAppStore((state) => executionFocusHistory(state.agentFocus))
+  const focusPmoSession = useAppStore(state => state.focusPmoSession)
+  const pmoAttention = sessions.filter(session => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && focusBucketForSession(session, false) === 'attention')
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
@@ -70,6 +76,7 @@ export function GlobalFocusSurface() {
           <label className="global-board-select">Project<select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All</option>{config?.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
         </div>
       </header>
+      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!.id; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>PMO Teams · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <FocusProjectLanes lanes={focusProjectLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} />
       </div>}

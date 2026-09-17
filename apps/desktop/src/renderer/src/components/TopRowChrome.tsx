@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
+import { FocusNavigationButton } from './FocusNavigationButton'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import type { SettingsSectionId } from './SettingsPanel'
@@ -199,8 +200,9 @@ export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: Se
     }
     const Icon = plugin.icon
     const selected = mainSurface === plugin.surface
+    const NavigationButton = plugin.id === 'focus' ? FocusNavigationButton : 'button'
     return (
-      <button
+      <NavigationButton
         key={plugin.id}
         type="button"
         className={`surface-navigation__slot surface-navigation__slot--surface${selected ? ' selected' : ''}`}
@@ -215,7 +217,7 @@ export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: Se
         onClick={() => setMainSurface(plugin.surface)}
       >
         <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
-      </button>
+      </NavigationButton>
     )
   }
   return (

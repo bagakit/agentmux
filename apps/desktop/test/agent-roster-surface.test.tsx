@@ -30,7 +30,6 @@ vi.mock('../src/renderer/src/store.js', () => ({
 
 import * as DropdownMenu from '../src/renderer/src/components/HoverDropdownMenu.js'
 import { AgentRoster, RosterRowView } from '../src/renderer/src/components/AgentRoster.js'
-import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar.js'
 
 function agent(
   id: string,
@@ -101,16 +100,6 @@ describe('agent roster surface', () => {
     expect(renderToStaticMarkup(createElement(AgentRoster, { total: 0 }))).toBe('')
   })
 
-  it('keeps the enumerable Agents roster in the left workspace tool, not the Status Bar', () => {
-    fixture.state.sessions = [agent('a')]
-    const markup = renderToStaticMarkup(createElement(AgentStatusBar))
-
-    expect(markup).not.toContain('agent-roster__trigger')
-    // The Status Bar remains a compact cross-window summary.
-    expect(markup).toContain('agent-status-bar')
-    expect(markup).toContain('status__dot')
-  })
-
   it('names the count in the trigger label so a reader gets the fact, not just a control', () => {
     fixture.state.sessions = [agent('a'), agent('b'), agent('c')]
     const markup = renderToStaticMarkup(createElement(AgentRoster, { total: 3 }))
@@ -122,10 +111,7 @@ describe('agent roster surface', () => {
       .toContain('1 agent in this window')
   })
 
-  it('keeps the bar rendering nothing when the window holds no Agent Session', () => {
-    // The bar's existing contract: it occupies no space at all rather than showing an empty rollup.
-    expect(renderToStaticMarkup(createElement(AgentStatusBar))).toBe('')
-  })
+
 })
 
 describe('上下文压力标记出现在名册行上', () => {

@@ -29,7 +29,7 @@ const replacement = { kind: 'question', id: 'request-b', questions: [{ id: 'q', 
 
 // GlobalFocusSurface renders session cards inside project lanes derived from `config.workspaces`.
 // Without a workspace matching a session's workspacePath, deriveFocusProjectLanes returns [] and no
-// `.global-session-card` is rendered — every test below then fails at the first `.click()` with
+// `.focus-context` is rendered — every test below then fails at the first `.click()` with
 // "Cannot read properties of null (reading 'click')". Pin one workspace matching /repo.
 const testConfig = {
   version: 9,
@@ -63,7 +63,7 @@ describe('attention request resolution boundaries', () => {
     const selectSession = vi.fn()
     useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', request)], providerCatalog: [], selectSession: selectSession as never })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
-    const rows = [...container.querySelectorAll<HTMLElement>('.global-session-card')]
+    const rows = [...container.querySelectorAll<HTMLElement>('.focus-context')]
     await act(async () => rows[1]!.click())
     await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('b')
