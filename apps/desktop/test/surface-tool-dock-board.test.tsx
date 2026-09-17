@@ -153,7 +153,7 @@ describe('Board 工具面板是工作清单', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const list = dockSource.slice(start, end)
-    expect(list).toContain('No requests or ideas yet. Use PMO Teams Topic to create one.')
+    expect(list).toContain('No goals yet. Use PMO Teams to clarify your first goal.')
     expect(list).not.toContain('boardRows.rows.slice')
     expect(list).not.toContain('row.name')
   })
@@ -186,7 +186,7 @@ describe('BoardToolList 渲染', () => {
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
     expect(markup).toContain('board-tool-row')
-    expect(markup).toContain('No requests or ideas yet')
+    expect(markup).toContain('No goals yet')
     expect(markup).not.toContain('main')
   })
 
@@ -197,7 +197,7 @@ describe('BoardToolList 渲染', () => {
     const { BoardToolList } = await import('../src/renderer/src/components/SurfaceToolDock.js')
     const markup = renderToStaticMarkup(createElement(BoardToolList, { hostId: 'local' }))
     expect(markup).toContain('board-tool-list')
-    expect(markup).toContain('No requests or ideas yet')
+    expect(markup).toContain('No goals yet')
   })
 
   /**
@@ -223,6 +223,6 @@ describe('BoardToolList 渲染', () => {
     expect(rendered).toBe(BOARD_LIST_VISIBLE_ROWS)
     expect(markup).toContain(`其余 ${9 - BOARD_LIST_VISIBLE_ROWS} 条`)
     // 计数栏说的是总数，不是显示出来的条数——否则"还有 3 条"就没有出处。
-    expect(markup).toContain('9 requests')
+    expect(markup).toContain('9 goals')
   })
 })

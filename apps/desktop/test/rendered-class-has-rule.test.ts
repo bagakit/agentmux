@@ -254,7 +254,6 @@ describe('渲染出来的 class 必须有规则', () => {
   const KNOWN_UNSTYLED_MARKERS = new Set([
     'activity-log__segment', // 滚动锚点，位置由 ref/IntersectionObserver 用，从无规则
     'agent-catalog__group--unavailable', // 仅语义分组名，样式全在基类 .agent-catalog__group 上
-    'agent-status-bar__label', // 纯文本 span，视觉继承自 .agent-status-bar，从无独立规则
     'board--matrix', // 布局全在基类 .board 上，matrix 变体从无独立规则
     'launch-terminal__fallback', // 样式全在同元素的 .launch-quick-card 上，此名从无规则
     // ProjectRailToolbar 是被替换的旧组件(peer 正在做 WindowUtilityBar 替换),但被 App.tsx 与
@@ -552,4 +551,3 @@ describe('Portal 浮层必须自己声明层级', () => {
     expect([...new Set(tooLow)]).toEqual([])
   })
 })
-
