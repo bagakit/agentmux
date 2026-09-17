@@ -215,8 +215,8 @@ afterEach(async () => {
 it('hovering Goals preserves terminal pixels, parser grid, PTY size and the existing GPU owner', async () => {
   const terminal = fixture.terminals[0]!
   const pixels = terminal.element!.parentElement!.getBoundingClientRect()
-  const work = container.querySelector('button[aria-label^="Goals:"]') as HTMLButtonElement
-  expect(work).toBeTruthy()
+  const goal = container.querySelector('button[aria-label^="Goals:"]') as HTMLButtonElement
+  expect(goal).toBeTruthy()
   // A one-column cell-metric wobble at identical pixels is already rejected by the production
   // synchronizer. An unrelated tooltip must not clear that settled pixel baseline.
   fixture.proposed = { cols: 79, rows: 24 }
@@ -228,11 +228,11 @@ it('hovering Goals preserves terminal pixels, parser grid, PTY size and the exis
   terminal.scrollToLine(5)
   expect(terminal.buffer.active.baseY).toBeGreaterThan(5)
   expect(terminal.buffer.active.viewportY).toBe(5)
-  await act(async () => work.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  await act(async () => goal.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
   await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(1)) })
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Show requests and ideas')
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Organize goals and follow their progress')
   expect(surfaceVisibility()).toEqual({ browser: 'false', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
-  await act(async () => work.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
+  await act(async () => goal.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
   await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(0)) })
   await frames()
   expect(terminal.element!.parentElement!.getBoundingClientRect()).toMatchObject({
