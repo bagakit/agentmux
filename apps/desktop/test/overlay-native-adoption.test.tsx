@@ -11,6 +11,7 @@ vi.hoisted(() => {
 
 import { AgentAvatar, ExecutorIdentityContext } from '../src/renderer/src/components/AgentAvatar'
 import { TopicWorkbenchTopology } from '../src/renderer/src/components/TopicPresence'
+import { getWindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost'
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
 import { OpenDestinationPopover } from '../src/renderer/src/components/OpenDestinationBar'
 import { ShortcutsCheatSheet } from '../src/renderer/src/components/ShortcutsCheatSheet'
@@ -39,10 +40,8 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     for (const el of document.querySelectorAll('[data-overlay-host]')) el.remove()
     container = document.createElement('div')
-    host = document.createElement('div')
-    host.className = 'window-overlay-host'
-    host.dataset.overlayHost = ''
-    document.body.append(container, host)
+    host = getWindowOverlayHost() as HTMLDivElement
+    document.body.append(container)
     root = createRoot(container)
     useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
   })
@@ -70,7 +69,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     await act(async () => {
       root?.render(
-        <ExecutorIdentityContext.Provider value={{ config: null, sessions: [], onPanelVisibilityChange }}>
+        <ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
           <AgentAvatar label="Builder Agent" providerId="claude" state="running" detail="Compiling" />
         </ExecutorIdentityContext.Provider>
       )
@@ -114,7 +113,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     await act(async () => {
       root?.render(
-        <ExecutorIdentityContext.Provider value={{ config: null, sessions: [], onPanelVisibilityChange }}>
+        <ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
           <AgentAvatar label="Overlapping Agent" providerId="codex" state="running" />
         </ExecutorIdentityContext.Provider>
       )
@@ -229,7 +228,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => {
-      root?.render(createElement(SurfaceSwitch))
+      root?.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }))
     })
 
     const surveyBtn = container?.querySelector('button[aria-label^="Survey"]') as HTMLButtonElement
@@ -455,7 +454,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
   it('enforces no-fallback rule: never mounts to an unnamed host directly on document.body', async () => {
     await act(async () => {
       root?.render(
-        <ExecutorIdentityContext.Provider value={{ config: null, sessions: [] }}>
+        <ExecutorIdentityContext.Provider value={{ config: null }}>
           <AgentAvatar label="No Fallback Agent" providerId="claude" state="running" />
         </ExecutorIdentityContext.Provider>
       )

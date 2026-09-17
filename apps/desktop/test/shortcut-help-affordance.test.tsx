@@ -200,7 +200,7 @@ describe('cheat-sheet visible affordance — it renders', () => {
   // appear more than once, and this repo counts per file rather than asking "does it appear". Exactly one
   // button, exactly one accessible label.
   it('SidebarToggleChrome renders exactly one keyboard-shortcuts button with an accessible label', () => {
-    const markup = renderToStaticMarkup(createElement(WindowUtilityBar, { onOpenSettings: vi.fn() }))
+    const markup = renderToStaticMarkup(createElement(WindowUtilityBar))
     // The static render anchor (a bare marker attribute, like data-project-rail-toggle beside it).
     expect(markup.split('data-shortcut-help-open').length - 1, 'button rendered ≠ once').toBe(1)
     expect(markup.split('aria-label="Keyboard shortcuts"').length - 1, 'accessible label ≠ once').toBe(1)

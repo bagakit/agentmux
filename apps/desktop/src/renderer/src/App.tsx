@@ -356,11 +356,11 @@ function DesktopApp() {
         </div>
       </main>
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} /></div>
         <div className="window-status-bar__status"><AgentStatusBar /></div>
         <div className="window-status-bar__right">
           <GlobalSystemNotices />
-          <WindowUtilityBar onOpenSettings={openSettings} />
+          <WindowUtilityBar />
         </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

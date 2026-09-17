@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { PanelLeft, PanelsTopLeft, RadioTower } from 'lucide-react'
+import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
+import type { SettingsSectionId } from './SettingsPanel'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -136,7 +137,7 @@ export function TopBreadcrumb() {
   )
 }
 
-export function SurfaceSwitch() {
+export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: SettingsSectionId) => void }) {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
@@ -219,10 +220,21 @@ export function SurfaceSwitch() {
   }
   return (
     <>
+      {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'launcher').map(renderPlugin)}
       <nav className="surface-navigation" aria-label="Primary surfaces">
-        {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'launcher').map(renderPlugin)}
-        <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
+        <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces and settings">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface').map(renderPlugin)}
+          <button
+            type="button"
+            className="surface-navigation__slot surface-navigation__settings"
+            aria-label="Settings"
+            title="Settings"
+            aria-haspopup="dialog"
+            data-settings-section="workspaces"
+            onClick={() => onOpenSettings('workspaces')}
+          >
+            <Settings2 size={14} aria-hidden="true" />
+          </button>
         </div>
       </nav>
       {activePlugin && tooltip ? (
