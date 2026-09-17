@@ -212,10 +212,10 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-it('hovering Work preserves terminal pixels, parser grid, PTY size and the existing GPU owner', async () => {
+it('hovering Goals preserves terminal pixels, parser grid, PTY size and the existing GPU owner', async () => {
   const terminal = fixture.terminals[0]!
   const pixels = terminal.element!.parentElement!.getBoundingClientRect()
-  const work = container.querySelector('button[aria-label^="Work:"]') as HTMLButtonElement
+  const work = container.querySelector('button[aria-label^="Goals:"]') as HTMLButtonElement
   expect(work).toBeTruthy()
   // A one-column cell-metric wobble at identical pixels is already rejected by the production
   // synchronizer. An unrelated tooltip must not clear that settled pixel baseline.
