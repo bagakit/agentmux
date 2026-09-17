@@ -125,6 +125,7 @@
 @media (max-width: 760px) {
   .window-status-bar { gap: var(--sp-2); }
   .window-status-bar .agent-input-stack { min-width: 0; background: transparent; }
+}
 .agent-input-stack[data-input-surface='terminal'] {
   padding: 0 var(--sp-3) var(--sp-2);
   border-top: 1px solid var(--line-soft);
