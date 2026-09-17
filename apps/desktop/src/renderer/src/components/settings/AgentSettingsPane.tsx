@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import parseArgsStringToArgv from 'string-argv'
 import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
-import { presentError } from '../../lib/error-presentation'
+import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { withYoloArgs } from '../../lib/executors'
@@ -117,8 +117,10 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   const [drafts, setDrafts] = useState<Record<string, ExecutorDraft>>(() =>
     Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => [id, toDraft(executor, config.appearance.agentAvatars?.[id])]))
   )
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const saveState = useSettingsSave()
+  const { saving } = saveState
+  const [savedDrafts, setSavedDrafts] = useState(() => JSON.stringify(drafts))
+  const dirty = JSON.stringify(drafts) !== savedDrafts
   // Detection is a user-visible probe, not a subscription to every result update. Tying
   // this effect to the result map retries a failed probe forever (a failed native call
   // leaves one executor without a result, so every state update starts another probe).
@@ -164,11 +166,12 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
     const next = Object.fromEntries(Object.entries(drafts).map(([candidate, draft]) => [candidate,
       candidate === id ? { ...draft, args: args.join(' ') } : draft]))
     setDrafts(next)
-    await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
+    const saved = await saveState.run(() => onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
       label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
       args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
       ...(draft.avatar ? { avatar: draft.avatar } : {})
-    }])))
+    }]))))
+    if (saved) setSavedDrafts(JSON.stringify(next))
   }
 
   async function enableAllYolo(): Promise<void> {
@@ -177,11 +180,12 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
       return [candidate, args ? { ...draft, args: args.join(' ') } : draft]
     }))
     setDrafts(next)
-    await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
+    const saved = await saveState.run(() => onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
       label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
       args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
       ...(draft.avatar ? { avatar: draft.avatar } : {})
-    }])))
+    }]))))
+    if (saved) setSavedDrafts(JSON.stringify(next))
   }
 
   function addExecutor(): void {
@@ -204,9 +208,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   }
 
   async function save(): Promise<void> {
-    setSaving(true)
-    setError(null)
-    try {
+    const saved = await saveState.run(async () => {
       const executors = Object.fromEntries(Object.entries(drafts).map(([id, draft]) => {
         const existing = config.executors[id]
         assertExecutorProviderIdentity(id, existing, draft.providerId)
@@ -224,11 +226,8 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
         throw new Error('Executor names and commands cannot be empty')
       }
       await onSave(executors)
-    } catch (cause) {
-      setError(presentError(cause))
-    } finally {
-      setSaving(false)
-    }
+    })
+    if (saved) setSavedDrafts(JSON.stringify(drafts))
   }
 
   return (
@@ -296,8 +295,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
         </section>
       ) : null)}
       {executors.length === 0 ? <div className="agent-catalog__empty">No executors configured. Add one and choose its Provider.</div> : null}
-      {error ? <div className="dialog-error" role="alert">{error}</div> : null}
-      <div className="settings-pane-actions"><span>Detection uses each saved executor command on the selected host.</span><button className="primary-button" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save executors'}</button></div>
+      <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void save()} />
     </div>
   )
 }

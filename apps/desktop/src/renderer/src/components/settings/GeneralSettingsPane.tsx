@@ -22,16 +22,16 @@ export function GeneralSettingsPane() {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Runtime and transport are owned by the framework-independent Core package; there is nothing to configure here.</p>
+      <p className="settings-lead">Your workspace. Your agents. Your flow.</p>
       <section className="settings-card">
         <dl className="settings-footnote">
           <div>
-            <dt>Core-owned agent runtime</dt>
-            <dd>Provider discovery, Agent Sessions, status hooks and Run transport all live in Core.</dd>
+            <dt>Made for local work</dt>
+            <dd>Bring your projects and agent tools together in one place. AgentMux keeps your workspace configuration on this machine.</dd>
           </div>
           <div>
-            <dt>Terminal-first Runs</dt>
-            <dd>Every coding agent uses a durable Run and stays available when the desktop app closes.</dd>
+            <dt>Pick up where you left off</dt>
+            <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.</dd>
           </div>
           <div>
             <dt>System SSH</dt>

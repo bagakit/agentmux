@@ -154,15 +154,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .topbar-button { font-size: 0; gap:0; }
   .launch-surface { padding: var(--sp-8) var(--sp-6) 44px; }
 }
-@media (max-width: 900px) {
-  .settings-content__header, .settings-content__scroll { padding-right:var(--sp-7); padding-left:var(--sp-7); }
-  .host-settings-card > header { grid-template-columns: 32px minmax(0, 1fr) auto auto; }
-  .host-settings-card > header > .check-pill { grid-column: 2 / -1; grid-row: 2; width: fit-content; }
-  .host-edit-grid { grid-template-columns: 1fr 1fr; }
-  .workspace-settings-list > div { grid-template-columns: 20px minmax(0, 1fr); }
-  .workspace-settings-list em { grid-column: 2; }
-  .terminal-theme-grid { grid-template-columns: 1fr; }
-}
 @media (max-height: 720px) {
   .launch-surface { padding-top:var(--sp-7); }
 }

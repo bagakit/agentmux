@@ -194,11 +194,16 @@
 .workspace-composer > footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-5); margin-top:var(--sp-5); padding-top:var(--sp-5); border-top: 1px solid var(--line-soft); }
 .workspace-composer > footer > span { margin-right:auto; color: var(--text-3); font-size: var(--fs-micro); }
 .workspace-settings-list { display: grid; }
-.workspace-settings-list > div { min-width: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line-soft); }
+.workspace-settings-list > div { min-width: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4) 0; border-bottom: 1px solid var(--line-soft); }
 .workspace-settings-list > div:last-child { border-bottom: 0; }
-.workspace-settings-list > div > svg { color: var(--green); }
+.workspace-settings-list > div > svg { color: var(--text-3); }
 .workspace-settings-list > div > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.workspace-settings-list strong { font-size: var(--fs-meta); }
-.workspace-settings-list small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-settings-list strong { font-size: var(--fs-body); }
+.workspace-settings-list small { overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
 .workspace-settings-list em { color: var(--text-3); font-size: var(--fs-micro); font-style: normal; }
 .workspace-topic-entry__wiki { margin-left: var(--sp-3); color: var(--green-2); font-size: var(--fs-micro); }
+
+@media (max-width: 900px) {
+  .workspace-settings-list > div { grid-template-columns: 20px minmax(0, 1fr); }
+  .workspace-settings-list em { grid-column: 2; }
+}
