@@ -3,7 +3,7 @@ import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
+import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { AgentMuxClient } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller'
@@ -150,8 +150,7 @@ beforeEach(() => {
     if (delay === 6_000) fixture.reveal = callback as () => void
     return original(callback, delay, ...args)
   })
-  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [{ data: 'before ', dataBytes: new TextEncoder().encode('before '), endByte: 7 }] })
+  fixture.attach.mockResolvedValue(attachment(replay('before ',0)))
   fixture.detach.mockResolvedValue(undefined)
   fixture.resize.mockImplementation(async (_attachment, cols, rows) => ({ cols, rows }))
   const container = document.createElement('div')
@@ -168,7 +167,7 @@ afterEach(async () => {
 
 vi.mock('../src/renderer/src/lib/terminal-live-output', async (original) => {
   const actual = await original<typeof import('../src/renderer/src/lib/terminal-live-output')>()
-  return { ...actual, admitTerminalLiveOutput: (queue: Parameters<typeof actual.admitTerminalLiveOutput>[0], incoming: Parameters<typeof actual.admitTerminalLiveOutput>[1]) => actual.admitTerminalLiveOutput(queue, incoming, 80) }
+  return { ...actual, TerminalLiveOutputQueue: class extends actual.TerminalLiveOutputQueue { constructor() { super(80) } } }
 })
 
 const control = session.control
@@ -199,12 +198,17 @@ function replay(data: string | Uint8Array, afterByte: number, firstByte = 0): Se
   return { run: control.run, gap: afterByte < firstByte ? { requestedAfterByte: afterByte, firstAvailableByte: firstByte } : null,
     replay: startByte < bytes.length ? [{type:'data',runId:control.run.runId,startByte,endByte:bytes.length,data:new TextDecoder().decode(bytes.subarray(startByte)),dataBytes:bytes.subarray(startByte)}] : [] }
 }
+function attachment(source: SessionReplayResult): SessionAttachResult {
+  return {attachmentId:'attachment-retained',currentSize:{cols:80,rows:24},
+    session:{...session,latestOutputBytes:source.replay.at(-1)?.endByte ?? 0},
+    terminal:{type:'unknown',reason:'origin_unknown'},resizeRevision:0,...source}
+}
 const initial = Array.from({length:100},(_,i) => `initial-${i}\r\n`).join('')
 const tail = Array.from({length:40},(_,i) => `live-${i}\r\n`).join('')
 const full = initial + tail
 async function mountInitial(data = initial, block = false, overrides: Partial<Parameters<typeof TerminalView>[0]> = {}) {
   fixture.blockFirstWrite = block
-  fixture.attach.mockResolvedValue({attachmentId:'attachment-retained',currentSize:{cols:80,rows:24},...replay(data,0)})
+  fixture.attach.mockResolvedValue(attachment(replay(data,0)))
   await act(async () => root!.render(createElement(TerminalView,{session,themeId:'graphite',interactiveResize:false,visible:true,autoFocus:false,linkOrigin,...overrides})))
   expect(fixture.terminals).toHaveLength(1)
   if (!block) await waitParsed(data)
@@ -329,9 +333,11 @@ it('applies a dropped startup owner resize before replay parses alternate rows a
   fixture.replay.mockImplementation((attachmentId,afterByte)=>controller.readSessionReplay(7,attachmentId,afterByte))
   const terminal=await mountInitial(initial,true)
   await act(async()=>await vi.waitFor(()=>expect(fixture.releaseWrite).not.toBeNull()))
+  expect(ownerSize).toHaveBeenCalledExactlyOnceWith({cols:80,rows:24})
+  ownerSize.mockClear()
   fixture.proposedGrid={cols:132,rows:45}
   await act(async()=>{
-    fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-resized',run:control.run,cols:132,rows:45}} as RuntimeEvent)
+    fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-resized',run:control.run,cols:132,rows:45,throughByte:initial.length,resizeRevision:1}} as RuntimeEvent)
     let cursor=initial.length
     for(const data of [alternate,...padding]) {
       fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,data,dataBytes:new TextEncoder().encode(data),evidence:{outputByteRange:{startByte:cursor,endByte:cursor+data.length}}}} as RuntimeEvent)

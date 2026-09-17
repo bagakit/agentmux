@@ -17,7 +17,7 @@ describe('Terminal interaction latency owners', () => {
       source.indexOf('const drainLiveOutput = async ()'),
       source.indexOf('const disposeEvents = api.sessions.onEvent')
     )
-    expect(outputDrain).toContain('takeTerminalLiveOutputBatch(liveOutputQueue)')
+    expect(outputDrain).toContain('liveOutputQueue.take()')
     expect(outputDrain).toContain('await yieldTerminalWork()')
   })
 

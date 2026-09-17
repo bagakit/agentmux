@@ -71,10 +71,8 @@ import {
   type TerminalViewportMemory
 } from '../lib/terminal-viewport-memory'
 import {
-  admitTerminalLiveOutput,
-  admitTerminalLiveSnapshot,
+  TerminalLiveOutputQueue,
   composeTerminalLiveOutputWrite,
-  takeTerminalLiveOutputBatch,
   type TerminalLiveItem
 } from '../lib/terminal-live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
@@ -670,7 +668,7 @@ export function TerminalView({
     let resizeRevision = 0
     let liveGapRedrawPending = false
     let outputTail = Promise.resolve()
-    const liveOutputQueue: TerminalLiveItem[] = []
+    const liveOutputQueue = new TerminalLiveOutputQueue()
     let liveDrain: Promise<void> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
@@ -810,8 +808,7 @@ export function TerminalView({
       // per RuntimeEvent. The loop remains bounded and yields between batches when output is large.
       await yieldTerminalWork()
       while (!disposed && liveOutputQueue.length > 0) {
-        const taken = takeTerminalLiveOutputBatch(liveOutputQueue)
-        liveOutputQueue.splice(0, liveOutputQueue.length, ...taken.rest)
+        const taken = liveOutputQueue.take()
         if (taken.snapshot) {
           const { snapshot } = taken.snapshot
           if (snapshot.terminal.type === 'basic-vt') {
@@ -859,10 +856,12 @@ export function TerminalView({
         // A dropped startup resize is queued before the bytes it governed. Apply that owner
         // fact above before recovering those bytes: alternate buffers cannot reflow columns
         // discarded while parsing on the old grid.
-        if (droppedPendingThrough > cursor || composeTerminalLiveOutputWrite(taken.batch, cursor).gap) {
+        let composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
+        if (droppedPendingThrough > cursor || composed.gap) {
+          const beforeRecovery = cursor
           await backfillRetainedOutput(Math.max(droppedPendingThrough, taken.batch.at(-1)!.endByte))
+          if (cursor !== beforeRecovery) composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
         }
-        const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
         if (composed.gap) {
           // Recovery either confirmed a Runtime gap or could not read history. Keep that fact
           // outside the PTY screen; a repaint can repair only the current screen.
@@ -900,8 +899,7 @@ export function TerminalView({
       // （MAX_PENDING_* 那对只管 attach 前的启动缓冲）。积压超上限时从队头丢，drain 从
       // Runtime 回补仍保留的字节；只有真实 Gap 或读取失败才产生历史缺失提示。
       if (output) {
-        const admitted = admitTerminalLiveOutput(liveOutputQueue, output)
-        liveOutputQueue.splice(0, liveOutputQueue.length, ...admitted.queue)
+        liveOutputQueue.admit(output)
       }
       if (liveDrain) return
       const drain = drainLiveOutput()
@@ -931,7 +929,7 @@ export function TerminalView({
       if (output && output.dataBytes.byteLength > 0) observeOutput()
       if (!readyForLiveOutput) {
         if (snapshot) {
-          liveOutputQueue.splice(0, liveOutputQueue.length, ...admitTerminalLiveSnapshot(liveOutputQueue, snapshot))
+          liveOutputQueue.admitSnapshot(snapshot)
           return
         }
         pending.push(event)
@@ -955,7 +953,7 @@ export function TerminalView({
         return
       }
       if (snapshot) {
-        liveOutputQueue.splice(0, liveOutputQueue.length, ...admitTerminalLiveSnapshot(liveOutputQueue, snapshot))
+        liveOutputQueue.admitSnapshot(snapshot)
         scheduleLiveOutputDrain()
       } else if (resize) {
         if (resize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(resize)
