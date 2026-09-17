@@ -62,28 +62,49 @@ export class AgentScreenEvidenceStore {
       requireFrameAfterBoundary?: boolean
     }
   ): Promise<number> {
-    if (options.signal?.aborted) {
-      throw new AgentMuxError(
-        'Terminal screen observation was cancelled.',
-        'AGENT_PROMPT_READINESS_CANCELLED'
-      )
-    }
-    const evidence = await this.ensure(
-      session,
-      requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024)
-    )
-    return await evidence.wait({
-      boundaryByte: outputBoundaryByte,
-      requireOutputAfterBoundary,
-      predicate,
-      timeoutMessage: options.timeoutMessage,
-      terminalMessage: options.terminalMessage,
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.requireFrameAfterBoundary === undefined
-        ? {}
-        : { requireFrameAfterBoundary: options.requireFrameAfterBoundary })
+    const observation = new AbortController()
+    const abort = (): void => observation.abort(new AgentMuxError(
+      'Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED'
+    ))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
+    const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+      observation.abort(new AgentMuxError(options.timeoutMessage, 'AGENT_PROMPT_RENDER_TIMEOUT'))
+    }, options.timeoutMs)
+    let cancel!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(observation.signal.reason)
+      observation.signal.addEventListener('abort', cancel, { once: true })
+      if (observation.signal.aborted) cancel()
     })
+    const read = async (): Promise<number> => {
+      observation.signal.throwIfAborted()
+      const evidence = await this.ensure(
+        session,
+        requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024)
+      )
+      // A cancelled handshake may finish later; it must not install an orphan waiter.
+      observation.signal.throwIfAborted()
+      return await evidence.wait({
+        boundaryByte: outputBoundaryByte,
+        requireOutputAfterBoundary,
+        predicate,
+        timeoutMessage: options.timeoutMessage,
+        terminalMessage: options.terminalMessage,
+        signal: observation.signal,
+        ...(options.requireFrameAfterBoundary === undefined
+          ? {}
+          : { requireFrameAfterBoundary: options.requireFrameAfterBoundary })
+      })
+    }
+    try {
+      // One budget includes attachment creation and the actual screen observation.
+      return await Promise.race([read(), cancelled])
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', abort)
+      observation.signal.removeEventListener('abort', cancel)
+    }
   }
 
   private async ensure(

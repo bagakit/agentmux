@@ -107,7 +107,8 @@ export class AgentPromptSubmissionCoordinator {
     plan: AgentPromptInputPlan,
     expectedCompletionId?: string,
     signal?: AbortSignal,
-    allowUncertainTurn = false
+    allowUncertainTurn = false,
+    renderSignal?: AbortSignal
   ): Promise<void> {
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       if (current.pendingInteraction) throw new AgentMuxError(
@@ -528,7 +529,7 @@ export class AgentPromptSubmissionCoordinator {
       await applyPhase('submit', plan.submit)
       return
     }
-    await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText)
+    await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText, renderSignal)
     if (uncertainTurn) await this.publishDeliveryDegrade(session, {
       state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
       submissionId, run: { ...session.run }, observedAt: Date.now()
@@ -553,10 +554,11 @@ export class AgentPromptSubmissionCoordinator {
     session: AgentMuxAgentSession,
     submissionId: string,
     submission: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>,
-    renderedText: string
+    renderedText: string,
+    signal?: AbortSignal
   ): Promise<void> {
     try {
-      await this.waitForRender(session, submission, renderedText)
+      await this.waitForRender(session, submission, renderedText, signal)
     } catch (error) {
       if (
         !(error instanceof AgentMuxError) ||
@@ -658,7 +660,8 @@ export class AgentPromptSubmissionCoordinator {
   private async waitForRender(
     session: AgentMuxAgentSession,
     submission: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>,
-    content: string
+    content: string,
+    signal?: AbortSignal
   ): Promise<void> {
     const matcher = this.deps.providers.get(session.providerId).terminalPromptRender
     if (!matcher) {
@@ -685,7 +688,8 @@ export class AgentPromptSubmissionCoordinator {
           {
             timeoutMs: remaining,
             timeoutMessage: 'Timed out waiting for the Agent prompt to render.',
-            terminalMessage: 'Agent Run exited before the prompt was rendered.'
+            terminalMessage: 'Agent Run exited before the prompt was rendered.',
+            ...(signal ? { signal } : {})
           }
         )
         return

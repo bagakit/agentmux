@@ -8,7 +8,6 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const expectedManifestSha256 = 'ccf0a9bbc9e3db468459b81d011e40e90599ba43873bc795a1c6fc9dd668ce45'
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
-const workspaceRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
 const artifactRoot = join(
   packageRoot,
@@ -95,7 +94,7 @@ try {
     '--external:./errors.js',
     `--outfile=${bundledAdapter}`
   ], {
-    cwd: workspaceRoot,
+    cwd: packageRoot,
     maxBuffer: 4 * 1024 * 1024
   })
   await rename(bundledAdapter, join(packageRoot, 'dist/ctxmux-run-adapter.js'))
