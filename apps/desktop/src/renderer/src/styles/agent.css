@@ -76,11 +76,9 @@
   font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
 }
-.window-status-bar__utilities, .window-status-bar__status, .window-status-bar__right { min-width: 0; display: flex; align-items: center; }
+.window-status-bar__utilities, .window-status-bar__right { min-width: 0; display: flex; align-items: center; }
 .window-status-bar__utilities { flex: 0 0 auto; justify-content: flex-end; gap: 2px; padding-left: var(--sp-2); border-left: 1px solid var(--line-soft); }
-.window-status-bar__status { flex: 1 1 0; justify-content: flex-end; overflow: hidden; }
-.window-status-bar__status .agent-status-bar { flex: 0 1 auto; }
-.window-status-bar__right { flex: 0 0 auto; justify-content: flex-end; gap: var(--sp-2); }
+.window-status-bar__right { margin-left: auto; flex: 0 0 auto; justify-content: flex-end; gap: var(--sp-2); }
 .window-status-bar__utility-button { width: 26px; height: 26px; color: var(--text-3); }
 .window-status-bar__utility-button:hover { color: var(--text); background: var(--surface-2); }
 .window-status-bar__surface-switch { position: relative; padding-left: 44px; flex: 0 0 auto; display: flex; align-items: center; }
@@ -126,71 +124,7 @@
 .global-survey-hint code { color: var(--text-2); }
 @media (max-width: 760px) {
   .window-status-bar { gap: var(--sp-2); }
-  .window-status-bar .agent-status-bar { gap: var(--sp-2); }
-  .agent-status-bar__label { display: none; }
-  .surface-navigation { gap: var(--sp-1); }
-}
-@media (max-width: 560px) {
-  .window-status-bar { padding: 0 var(--sp-2); gap: var(--sp-1); }
-  .window-status-bar__right { gap: var(--sp-1); }
-  .window-status-bar__utilities { padding-left: var(--sp-1); }
-  .window-status-bar__surface-switch { padding-left: 40px; }
-  .surface-navigation__surfaces { gap: 1px; }
-  .surface-navigation__slot { width: 26px; height: 24px; flex-basis: 26px; }
-  .surface-navigation__slot--launcher { width: 34px; height: 34px; flex-basis: 34px; }
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher,
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 34px; height: 34px; }
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 26px; height: 26px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .surface-navigation__icon,
-  .surface-navigation__tooltip,
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { transition: none; }
-}
-.agent-status-bar { display: flex; align-items: center; gap: var(--sp-5); flex: 1; min-width: 0; overflow: hidden; }
-.agent-status-bar__segment {
-  display: inline-flex;
-  align-items: center;
-  gap:var(--sp-2);
-  border: 0;
-  padding:0;
-  background: transparent;
-  color: var(--text-3);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-}
-.agent-status-bar__group { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.agent-tree__disclose { width: 16px; height: 16px; flex: 0 0 auto; justify-content: center; }
-.agent-tree__disclose:hover,
-.agent-tree__disclose:focus-visible,
-.agent-tree__disclose[data-state='open'] { background: var(--surface-3); color: var(--text); }
-.agent-tree__disclose:focus-visible { outline: 1px solid var(--text-2); outline-offset: 1px; }
-.agent-status-bar__segment--action { cursor: pointer; border-radius: var(--radius-sm); }
-.agent-status-bar__segment--action:hover { color: var(--text-2); }
-
-/* 花名册（.agent-roster*）与资源面板（.resource-usage*）是 Radix Portal 浮层，已按表面拆到
-   overlays.css——它们与 context-menu/quick-switch 同属浮层层。此处只留状态栏自己的规则。 */
-.agent-status-bar__count { color: var(--text-2); }
-.agent-status-bar .status { gap:0; }
-/* 按 Provider 的活跃/待机。它靠右自成一组，与左侧的关注度汇总分开——两者回答的是不同的问题。 */
-.agent-status-bar__providers {
-  display: inline-flex;
-  align-items: center;
-  gap:var(--sp-4);
-  margin-left:auto;
-}
-.agent-status-bar__provider {
-  display: inline-flex;
-  align-items: center;
-  gap:var(--sp-2);
-  color: var(--text-3);
-}
-/* 全闲的 Provider 压到底色：它在场是为了回答"总共几个"，不该和在跑的抢注意力。 */
-.agent-status-bar__provider[data-active="false"] { opacity: .55; }
-.agent-status-bar__idle { color: var(--text-3); }
-/* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
-.agent-status-bar .status--working .status__dot { animation: none; }
-.agent-input-stack { min-width: 0; background: transparent; }
+  .window-status-bar .agent-input-stack { min-width: 0; background: transparent; }
 .agent-input-stack[data-input-surface='terminal'] {
   padding: 0 var(--sp-3) var(--sp-2);
   border-top: 1px solid var(--line-soft);
@@ -385,3 +319,8 @@
 .continuous-progress-panel__actions { display: flex; gap:var(--sp-1); }
 .continuous-progress-panel__actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
 .continuous-progress-panel__actions button:hover { color: var(--text); background: var(--surface-3); }
+
+.surface-navigation__focus { width: auto; flex-basis: auto; gap: 5px; padding: 0 6px; }
+.focus-navigation__count { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.focus-navigation__attention { color: var(--amber); }
+.focus-navigation__attention.has-error { color: var(--red); }

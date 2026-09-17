@@ -11,7 +11,7 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
-import { AgentStatusBar } from './components/AgentStatusBar'
+import { ResourceUsagePanel } from './components/ResourceUsagePanel'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -337,8 +337,8 @@ function DesktopApp() {
       </main>
       <footer className="window-status-bar">
         <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} /></div>
-        <div className="window-status-bar__status"><AgentStatusBar /></div>
         <div className="window-status-bar__right">
+          <ResourceUsagePanel />
           <GlobalSystemNotices />
           <WindowUtilityBar />
         </div>
