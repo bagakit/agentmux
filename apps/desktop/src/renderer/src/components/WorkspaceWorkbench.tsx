@@ -23,8 +23,7 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
@@ -43,7 +42,7 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
-import { focusLayoutForTab } from '../lib/focus-tab-projection'
+import { StableWorkbenchView } from './StableWorkbenchView'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -1024,17 +1023,7 @@ function PaneGroup({
             // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
             inert={tab.id !== group.activeTabId}
           >
-            <WorkbenchRegionNode
-              node={tab.layout.root}
-              nodePath=""
-              tab={tab}
-              groupId={group.id}
-              // Inactive Tabs park every surface. Renderer overlays only occlude native Browser
-              // composition; the visible DOM terminal/editor retains its geometry and resources.
-              surfaceVisible={surfaceVisible && tab.id === group.activeTabId}
-              nativeSurfacesVisible={nativeSurfacesVisible && tab.id === group.activeTabId}
-              interactiveResize={interactiveResize}
-            />
+            <div id={`workbench-tab-slot:${tab.id}`} className="workbench-tab-slot" />
           </div>
         )) : (
           <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
@@ -1247,16 +1236,18 @@ export function WorkspaceWorkbench({
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
+  const retainedLayout = useRef(storedLayout)
+  if (storedLayout) retainedLayout.current = storedLayout
+  const residentLayout = storedLayout ?? retainedLayout.current
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const focusTab = focusTabId ? tabs[focusTabId] : null
-  const focusLayout = useMemo(() => focusTab && storedLayout ? focusLayoutForTab(focusTab, storedLayout) : null, [focusTab, storedLayout])
   const layout = useMemo(
-    () => focusLayout ?? (storedLayout
-      ? layoutForActiveTopic(storedLayout, tabs, topicId ?? activeTopicIdFromLayout(storedLayout, tabs), topicIsolation !== 'bound-only')
-      : storedLayout),
-    [focusLayout, storedLayout, tabs, topicId, topicIsolation]
+    () => residentLayout
+      ? layoutForActiveTopic(residentLayout, tabs, topicId ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only')
+      : residentLayout,
+    [residentLayout, tabs, topicId, topicIsolation]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
@@ -1268,28 +1259,6 @@ export function WorkspaceWorkbench({
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
   const activeTab = activeDrag ? tabs[activeDrag.tabId] : null
-  const [focusPortalTarget, setFocusPortalTarget] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    if (!focusPortalTargetId) {
-      setFocusPortalTarget(null)
-      return
-    }
-    const target = document.getElementById(focusPortalTargetId)
-    if (target) {
-      setFocusPortalTarget(target)
-      return
-    }
-    setFocusPortalTarget(null)
-    const observer = new MutationObserver(() => {
-      const target = document.getElementById(focusPortalTargetId)
-      if (!target) return
-      observer.disconnect()
-      setFocusPortalTarget(target)
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [focusPortalTargetId])
-
   // A Workspace switch can happen while a drag is in flight (for example through a keyboard command).
   // The parked DndContext must not retain a DragOverlay or finish the gesture against a stale layout
   // when this Workbench becomes visible again.
@@ -1303,6 +1272,16 @@ export function WorkspaceWorkbench({
     () => new Map(layout?.groups.map((group) => [group.id, group]) ?? []),
     [layout?.groups]
   )
+
+  // Owner lookup grows with this workspace's actual Tab memberships, never Tabs × groups.
+  const ownerByTab = useMemo(() => {
+    const owners = new Map<string, string>()
+    for (const group of residentLayout?.groups ?? []) for (const id of group.tabOrder) owners.set(id, group.id)
+    return owners
+  }, [residentLayout?.groups])
+  const retainedOwners = useRef(new Map<string, string>())
+  for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
+  for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
 
   function onDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as DragTabData | undefined
@@ -1338,9 +1317,6 @@ export function WorkspaceWorkbench({
     moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, visibleTargetIndex)
   }
 
-  if (focusTab && !focusLayout) {
-    return focusPortalTarget ? createPortal(<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />, focusPortalTarget) : null
-  }
   if (!layout) return null
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
@@ -1357,7 +1333,7 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-only' : ''}`}>
+      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
         <SplitNode
           node={layout.root}
           nodePath=""
@@ -1365,20 +1341,31 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
-          surfaceVisible={visible}
-          nativeSurfacesVisible={visible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+          surfaceVisible={visible && !focusTab}
+          nativeSurfacesVisible={visible && !focusTab && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
         />
       </div>
+      {Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
+        const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
+        const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
+        const tabVisible = visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id)
+        return <StableWorkbenchView key={tab.id} homeId={`workbench-tab-slot:${tab.id}`} targetId={focusTab?.id === tab.id ? focusPortalTargetId : null}>
+          {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
+          {ownerId ? <WorkbenchRegionNode
+            node={tab.layout.root} nodePath="" tab={tab} groupId={ownerId}
+            surfaceVisible={tabVisible}
+            nativeSurfacesVisible={tabVisible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+            interactiveResize={interactiveResize}
+          /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
+        </StableWorkbenchView>
+      })}
       <DragOverlay dropAnimation={null}>
         {activeTab ? <DragPreview tab={activeTab} /> : null}
       </DragOverlay>
     </DndContext>
   )
-  if (focusPortalTargetId) {
-    return focusPortalTarget ? createPortal(workbench, focusPortalTarget) : null
-  }
   return workbench
 }

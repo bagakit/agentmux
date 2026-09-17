@@ -302,7 +302,7 @@ function DesktopApp() {
                     return (
                       <div
                         key={candidate.id}
-                        className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'}`}
+                        className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'} ${focusVisible ? 'workspace-workbench-slot--focus-source' : ''}`}
                         data-workspace-id={candidate.id}
                         data-visible={mounted ? 'true' : 'false'}
                         aria-hidden={!mounted}
