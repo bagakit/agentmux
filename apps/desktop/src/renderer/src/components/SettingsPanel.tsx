@@ -116,12 +116,20 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   }, [active, visibleSections])
 
   useEffect(() => {
+    const opener = document.activeElement
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus() }
+  }, [])
+
+  useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && event.target instanceof HTMLElement && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) onClose()
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (query) { setQuery(''); return }
+      if (event.target instanceof HTMLSelectElement) return
+      onClose()
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
+  }, [onClose, query])
 
   if (!config) return null
   const section = SECTIONS.find((candidate) => candidate.id === active) ?? SECTIONS[0]!

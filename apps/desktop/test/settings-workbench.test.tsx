@@ -57,11 +57,23 @@ it('searches via the real input, hides unmatched content and restores its draft 
   await dom.render(<SettingsPanel onClose={() => {}} initialSection="appearance" />)
   await input('[aria-label="Terminal font size in pixels"]', '18')
   await input('[aria-label="Search settings"]', 'zz-no-such-setting')
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('No settings match')
+  expect(dom.container.querySelector('.settings-nav-empty[role="status"]')!.textContent).toContain('No settings match')
   expect(dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!.hidden).toBe(true)
   await dom.click('[aria-label="Clear settings search"]')
   expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Terminal font size in pixels"]')!.value).toBe('18')
-  expect(dom.container.querySelector('[role="status"]')).toBeNull()
+  expect(dom.container.querySelector('.settings-nav-empty[role="status"]')).toBeNull()
+})
+
+it('clears search with Escape before closing settings, including from a focused input', async () => {
+  const close = vi.fn()
+  await dom.render(<SettingsPanel onClose={close} />)
+  await input('[aria-label="Search settings"]', 'font')
+  const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+  await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(search.value).toBe('')
+  expect(close).not.toHaveBeenCalled()
+  await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(close).toHaveBeenCalledOnce()
 })
 
 it('prioritizes existing workspaces and retains the creation draft across disclosure and section switches', async () => {

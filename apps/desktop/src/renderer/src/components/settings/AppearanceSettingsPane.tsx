@@ -1,4 +1,5 @@
-import { Palette, SquareTerminal } from 'lucide-react'
+import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   APP_APPEARANCE_IDS,
@@ -9,14 +10,13 @@ import {
   type AppAppearanceId,
   type TerminalThemeId
 } from '../../../../shared/contracts'
-import { presentError } from '../../lib/error-presentation'
 import { TERMINAL_THEME_CATALOG } from '../../lib/terminal-theme'
 
 const APP_APPEARANCE_COPY = {
-  dark: { title: 'Dark', description: 'Use dark surfaces' },
-  light: { title: 'Light', description: 'Use light surfaces' },
-  system: { title: 'Follow system', description: 'Match your operating system' }
-} satisfies Record<AppAppearanceId, { title: string; description: string }>
+  dark: { title: 'Dark', description: 'Quiet and focused', icon: Moon },
+  light: { title: 'Light', description: 'Clear and bright', icon: Sun },
+  system: { title: 'System', description: 'Follow your device', icon: Monitor }
+} satisfies Record<AppAppearanceId, { title: string; description: string; icon: typeof Moon }>
 
 export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
@@ -26,8 +26,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   const [terminalTheme, setTerminalTheme] = useState<TerminalThemeId>(appearance.terminalTheme)
   const savedFontSize = appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   const [fontSize, setFontSize] = useState<number>(savedFontSize)
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const saveState = useSettingsSave()
 
   useEffect(() => setAppAppearance(appearance.appAppearance ?? 'dark'), [appearance.appAppearance])
   useEffect(() => setTerminalTheme(appearance.terminalTheme), [appearance.terminalTheme])
@@ -36,26 +35,20 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   const dirty = appAppearance !== (appearance.appAppearance ?? 'dark') || terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize
 
   async function save(): Promise<void> {
-    setSaving(true)
-    setError(null)
-    try {
-      await onSave({ ...appearance, appAppearance, terminalTheme, terminalFontSize: fontSize })
-    } catch (cause) {
-      setError(presentError(cause))
-    } finally {
-      setSaving(false)
-    }
+    await saveState.run(() => onSave({ ...appearance, appAppearance, terminalTheme, terminalFontSize: fontSize }))
   }
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">AgentMux chrome stays quiet and consistent; the Terminal owns its palette. PTY and CtxMux transport bytes and never rewrite color.</p>
+      <p className="settings-lead">A familiar place to focus. Choose your window appearance and a palette for your terminals.</p>
       <section className="settings-group">
-        <header><span>Application appearance</span><small>Chrome</small></header>
-        <div className="terminal-theme-grid" role="radiogroup" aria-label="Application appearance">
+        <header><span>Application appearance</span><small>Window</small></header>
+        <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">
           {APP_APPEARANCE_IDS.map((mode) => (
-            <button type="button" key={mode} className={`terminal-theme-choice ${appAppearance === mode ? 'terminal-theme-choice--selected' : ''}`} role="radio" aria-checked={appAppearance === mode} onClick={() => setAppAppearance(mode)}>
-              <span className="terminal-theme-choice__copy"><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small>{APP_APPEARANCE_COPY[mode].description}</small></span>
+            <button type="button" key={mode} className={`settings-appearance-choice ${appAppearance === mode ? 'settings-appearance-choice--selected' : ''}`} role="radio" aria-checked={appAppearance === mode} onClick={() => setAppAppearance(mode)}>
+              {(() => { const Icon = APP_APPEARANCE_COPY[mode].icon; return <Icon size={20} /> })()}
+              <span><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small>{APP_APPEARANCE_COPY[mode].description}</small></span>
+              {appAppearance === mode ? <Check className="settings-appearance-choice__check" size={13} /> : null}
             </button>
           ))}
         </div>
@@ -129,13 +122,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
         </div>
         <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
       </section>
-      {error ? <p className="settings-inline-error" role="alert">{error}</p> : null}
-      <div className="settings-pane-actions">
-        <span>The preview keeps the TUI input surface distinct from its work area.</span>
-        <button className="primary-button" disabled={saving || !dirty} onClick={() => void save()}>
-          {saving ? 'Saving…' : 'Save appearance'}
-        </button>
-      </div>
+      <SettingsSaveBar save={saveState} dirty={dirty} label="Save appearance" onSave={() => void save()} />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 // 走 `/provider-id` 窄子路径而不是根 barrel：这是 renderer 里少有的对 core 的**值**导入（别处都是
 // `import type`，编译期就擦掉了）。根 barrel 会 re-export `agent-native-locator.js`，那个文件 import
@@ -7,7 +7,7 @@ import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
 import { resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
-import { presentError } from '../../lib/error-presentation'
+import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
 
@@ -25,17 +25,12 @@ export function ShortcutSettingsPane({ config, onSave }: {
   config: AppConfig
   onSave: (prompts: ComposerShortcut[]) => Promise<void>
 }) {
-  // 拷一份可变的：取值层返回 readonly（缺席时是共享冻结的那一个），而草稿要就地改。
-  // 依赖是 `config.composerShortcuts` 这个**数组引用**，不是 config：后者每次 setConfig 都是新对象，
-  // 挂在它上面会让任何一次别处的配置写入把用户正在打的草稿冲掉。
-  const saved = useMemo(() => [...resolveComposerShortcuts(config)], [config.composerShortcuts])
-  const [drafts, setDrafts] = useState<ComposerShortcut[]>(saved)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  // 盘上变了就跟着走（别的窗口保存过，或退役重置带过来了一批）。依赖是 saved 本身，不是
-  // config——后者每次 setConfig 都是新对象，会在用户打字中途把草稿冲掉。
-  useEffect(() => { setDrafts(saved) }, [saved])
+  const saved = JSON.stringify(resolveComposerShortcuts(config))
+  const [drafts, setDrafts] = useState<ComposerShortcut[]>(() => JSON.parse(saved))
+  const saveState = useSettingsSave()
+  const dirty = JSON.stringify(drafts) !== saved
+  // A config save elsewhere may replace array references without changing these prompts.
+  useEffect(() => setDrafts(JSON.parse(saved) as ComposerShortcut[]), [saved])
 
   function update(id: string, patch: Partial<ComposerShortcut>): void {
     setDrafts((current) => current.map((prompt) => prompt.id === id ? { ...prompt, ...patch } : prompt))
@@ -72,31 +67,23 @@ export function ShortcutSettingsPane({ config, onSave }: {
       : ''
 
   async function save(): Promise<void> {
-    setSaving(true)
-    setError('')
-    try {
-      await onSave(drafts.map((prompt) => ({
-        ...prompt,
-        keyword: prompt.keyword.trim(),
-        label: prompt.label.trim() || prompt.keyword.trim(),
-        body: prompt.body
-      })))
-    } catch (cause) {
-      setError(presentError(cause))
-    } finally {
-      setSaving(false)
-    }
+    await saveState.run(() => onSave(drafts.map((prompt) => ({
+      ...prompt,
+      keyword: prompt.keyword.trim(),
+      label: prompt.label.trim() || prompt.keyword.trim(),
+      body: prompt.body
+    }))))
   }
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Your own prompts, in one place. Each one’s keyword works two ways in the Agent composer: type <code>/</code> to pick it from the candidates, or just type the keyword in your message and replace it with the body. AgentMux ships two to start — edit them, or delete them and they stay gone.</p>
+      <p className="settings-lead">Keep your go-to prompts close. Type <code>/</code> to choose one in the composer, or use its keyword in your draft. You decide what to send.</p>
       <div className="settings-pane-toolbar">
         <button className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
       <div className="agent-settings-list">
         {drafts.map((prompt) => (
-          <details className="agent-settings-card" key={prompt.id}>
+          <details className="agent-settings-card prompt-settings-card" key={prompt.id}>
             <summary>
               <span><strong>{prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'}</strong><small>{prompt.keyword.trim() ? `/${prompt.keyword.trim()}` : 'No keyword yet'}{prompt.providerId ? ` · ${agentProviderLabel(prompt.providerId)} only` : ''}</small></span>
               <ChevronDown className="settings-disclosure-icon" size={14} />
@@ -123,8 +110,7 @@ export function ShortcutSettingsPane({ config, onSave }: {
       </div>
       {drafts.length === 0 ? <div className="agent-catalog__empty">No prompts. Add one, or leave this empty — the composer just won’t offer any.</div> : null}
       {problem ? <p className="settings-inline-error">{problem}</p> : null}
-      {error ? <div className="dialog-error">{error}</div> : null}
-      <div className="settings-pane-actions"><span>Prompts only fill your draft. Nothing is sent until you send it.</span><button className="primary-button" disabled={saving || problem !== ''} onClick={() => void save()}>{saving ? 'Saving…' : 'Save prompts'}</button></div>
+      <SettingsSaveBar save={saveState} dirty={dirty} disabled={problem !== ''} label="Save prompts" onSave={() => void save()} />
     </div>
   )
 }

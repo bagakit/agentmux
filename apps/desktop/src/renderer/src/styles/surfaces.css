@@ -81,7 +81,7 @@
 .welcome h1 { margin:var(--sp-4) 0 var(--sp-4); font-size: var(--fs-display); line-height: 1.08; letter-spacing: -.03em; }
 .welcome p { max-width: 420px; margin:0 0 var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 
-/* 全屏 Settings / Sidebar / Pane 内容模型。 */
+/* Settings / Sidebar / Pane 内容模型。 */
 /* Settings shares the app's content grid row. The original footer owns the other row. */
 .settings-page { position: absolute; z-index: 90; grid-column: 1 / -1; grid-row: 1 / 2; inset: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
 .settings-sidebar { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-top: 34px; border-right: 1px solid var(--line-soft); background: var(--surface-1); }
@@ -188,7 +188,7 @@
 
 /* 记住的应用链接选择。一节说明 + 一张「scheme / 当前选择 / 忘掉」的表。
    说明取 --fs-micro/--text-3 这一档（脚注），与上面 .settings-lead 的导语拉开，规则同那条注释。 */
-.settings-group-note { margin:0; padding:var(--sp-5) var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.settings-group-note { margin:0; padding:0 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .settings-group-note code,
 .app-link-scheme-list code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
 .app-link-scheme-list { display: grid; gap:var(--sp-2); margin:0; padding:var(--sp-4) var(--sp-5) var(--sp-5); list-style: none; }
@@ -250,3 +250,14 @@
   .settings-pane-actions { gap: var(--sp-3); }
   .settings-pane-actions > span { font-size: var(--fs-micro); }
 }
+
+.settings-save-feedback { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
+.settings-save-feedback.settings-inline-error { color: var(--red-text); }
+.settings-appearance-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
+.settings-appearance-choice { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); color: var(--text-2); background: var(--surface-1); text-align: left; cursor: pointer; }
+.settings-appearance-choice:hover { background: var(--surface-2); }
+.settings-appearance-choice--selected { border-color: var(--focus-line); color: var(--text); box-shadow: var(--hl); }
+.settings-appearance-choice > span { display: grid; gap: var(--sp-2); }
+.settings-appearance-choice strong { font-size: var(--fs-body); }
+.settings-appearance-choice small { color: var(--text-3); font-size: var(--fs-meta); }
+.settings-appearance-choice__check { position: absolute; right: var(--sp-3); top: var(--sp-3); color: var(--green); }

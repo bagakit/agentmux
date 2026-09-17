@@ -1,3 +1,4 @@
+import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
 import {
@@ -19,17 +20,15 @@ export function NotificationSettingsPane({ notifications, onSave }: {
   // long does it stay"; this answers "do I hear it". Either is a coherent choice at any setting of the
   // other, which is exactly why folding them into one control would force a false ordering.
   const [sound, setSound] = useState(resolveNotificationSound({ notifications }))
-  const [saving, setSaving] = useState(false)
+  const saveState = useSettingsSave()
 
-  useEffect(() => {
-    setMode(resolveNotificationModeId({ notifications }))
-    setSound(resolveNotificationSound({ notifications }))
-  }, [notifications])
+  const savedMode = resolveNotificationModeId({ notifications })
+  const savedSound = resolveNotificationSound({ notifications })
+  useEffect(() => setMode(savedMode), [savedMode])
+  useEffect(() => setSound(savedSound), [savedSound])
 
   const index = NOTIFICATION_TIERS.findIndex((tier) => tier.id === mode)
   const active = NOTIFICATION_TIERS[index] ?? NOTIFICATION_TIERS[0]!
-  const savedMode = resolveNotificationModeId({ notifications })
-  const savedSound = resolveNotificationSound({ notifications })
   // `off` raises nothing at all, so a sound choice under it has nothing to apply to. The control stays
   // visible and disabled rather than disappearing: a toggle that vanishes reads as a feature that was
   // removed, and the user needs to see that turning the slider up is what re-enables it.
@@ -49,17 +48,12 @@ export function NotificationSettingsPane({ notifications, onSave }: {
       : '0%'
 
   async function save(): Promise<void> {
-    setSaving(true)
-    try {
-      await onSave({ mode, sound })
-    } finally {
-      setSaving(false)
-    }
+    await saveState.run(() => onSave({ mode, sound }))
   }
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">When an Agent finishes, needs you, or fails while you are looking elsewhere, AgentMux raises a system notification naming the Agent, its state, and the latest exchange.</p>
+      <p className="settings-lead">Stay in flow. Get a notification when an agent finishes, needs your attention or runs into trouble while you are elsewhere.</p>
       <figure className="notification-preview" aria-label="Notification preview">
         <div className="notification-preview__chrome"><b>AgentMux</b><time>now</time></div>
         <div className="notification-preview__title">
@@ -108,16 +102,11 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           />
           <span>
             <strong>Play the system notification sound</strong>
-            <small>Off by default — a banner you can see but not hear. Turn it on when you are away from the screen and an Agent finishing or getting stuck is worth looking up for. The sound is the one your OS uses for notifications; AgentMux does not ship its own.{soundApplies ? '' : ' Unavailable while notifications are off.'}</small>
+            <small>Uses your system notification sound. Silent by default.{soundApplies ? '' : ' Unavailable while notifications are off.'}</small>
           </span>
         </label>
       </section>
-      <div className="settings-pane-actions">
-        <span>“Until I dismiss it” asks the platform to keep the notification up; where it cannot, it is shown as a normal banner and AgentMux says so.</span>
-        <button className="primary-button" disabled={saving || (mode === savedMode && sound === savedSound)} onClick={() => void save()}>
-          {saving ? 'Saving…' : 'Save notifications'}
-        </button>
-      </div>
+      <SettingsSaveBar save={saveState} dirty={mode !== savedMode || sound !== savedSound} label="Save notifications" onSave={() => void save()} />
     </div>
   )
 }
