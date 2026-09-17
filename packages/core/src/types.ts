@@ -160,10 +160,45 @@ export type AgentMuxRunReplayGap = {
   firstAvailableByte: number
 }
 
+/**
+ * Original output and terminal restoration are explicit attachment representations.
+ * Raw replay has no historical geometry: current Run size is metadata, never a resize fence.
+ */
+export type AgentMuxRunAttachmentView = 'raw' | 'terminal'
+
+export type AgentMuxTerminalResize = {
+  throughByte: number
+  resizeRevision: number
+  size: { cols: number; rows: number }
+}
+
+export type AgentMuxTerminalCheckpoint = {
+  runId: string
+  throughByte: number
+  resizeRevision: number
+  size: { cols: number; rows: number }
+}
+
+export type AgentMuxTerminalContinuation =
+  | { type: 'not-requested' }
+  | {
+      type: 'basic-vt'
+      checkpoint: AgentMuxTerminalCheckpoint
+      /** Synthetic restoration bytes: never output, input or a raw byte acknowledgement. */
+      restoreBytes: Uint8Array
+      resizes: AgentMuxTerminalResize[]
+    }
+  | {
+      type: 'unknown' | 'unavailable'
+      reason: 'origin_unknown' | 'source_gap' | 'tail_evicted' | 'checkpoint_too_large' | 'invalid_checkpoint'
+    }
+
 export type AgentMuxRunAttachment = {
   run: AgentMuxRun
   replay: AgentMuxRunDataEvent[]
   gap: AgentMuxRunReplayGap | null
+  terminal: AgentMuxTerminalContinuation
+  resizeRevision: number
 }
 
 /**
@@ -869,6 +904,13 @@ export type AgentMuxAcpEvent =
     }
 
 export type AgentMuxClientEvent =
+  | ({
+      /** Fresh authoritative representation, ordered before subsequent live events on this Run. */
+      type: 'terminal-snapshot'
+      agentSessionId?: string
+      /** Original output already published before this snapshot; replay before it is projection only. */
+      afterByte: number
+    } & AgentMuxRunAttachment)
   | {
       /** Ordered with terminal-output on the Run attachment; never a resize request. */
       type: 'terminal-resized'
@@ -876,6 +918,8 @@ export type AgentMuxClientEvent =
       run: AgentMuxRunRef
       cols: number
       rows: number
+      throughByte: number
+      resizeRevision: number
     }
   | {
       type: 'terminal-output'

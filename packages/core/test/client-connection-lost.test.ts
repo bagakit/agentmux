@@ -388,7 +388,8 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
     let openHandshakeGate: () => void = () => {}
     const handshakeGate = new Promise<void>((resolve) => { openHandshakeGate = resolve })
     const kernel = state.kernel as Record<string, unknown>
-    kernel.observeOutput = async () => {
+    kernel.observeOutput = async (_runId: string, _afterByte: number, _listener: unknown, view: string) => {
+      expect(view).toBe('terminal')
       observeCalls += 1
       await handshakeGate
       openObservations += 1
@@ -411,6 +412,10 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
         // 「屏幕永不再变」在生产上就是这个形状。
         replay: [] as CtxmuxAdapterObservationEvent[],
         gap: null,
+        terminal: { type: 'basic-vt', checkpoint: { runId: 'readiness-run', throughByte: 0,
+          resizeRevision: 0, size: { cols: 80, rows: 24 } },
+          restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
+        resizeRevision: 0,
         close: async () => {}
       }
     }

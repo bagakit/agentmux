@@ -20,7 +20,7 @@ function output(startByte = 0, runId = 'target-run', hostId = 'target-host'): Ru
       outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }
 }
 function resized(): RuntimeEvent {
-  return { type: 'core', hostId: 'target-host', event: { type: 'terminal-resized', run: { runId: 'target-run' }, cols: 90, rows: 30 } }
+  return { type: 'core', hostId: 'target-host', event: { type: 'terminal-resized', run: { runId: 'target-run' }, cols: 90, rows: 30,throughByte:90,resizeRevision:1 } }
 }
 function semantic(): RuntimeEvent {
   return { type: 'core', hostId: 'target-host', event: { type: 'process-state', run: { runId: 'target-run' }, state: 'running', pid: 123,
@@ -190,4 +190,21 @@ it('the actual Store semantic subscription consumes status but receives no termi
     expect(receive).toHaveBeenCalledTimes(1)
     expect(subscribe).toHaveBeenCalledTimes(1)
   } finally { dispose(); useAppStore.setState(initial, true) }
+})
+
+it('routes nonempty checkpoint snapshots only to matching Run views, preserving original seed and replay identity', () => {
+  const matching:RuntimeEvent[]=[], unrelated:RuntimeEvent[]=[], global:RuntimeEvent[]=[]
+  onEvent(event=>matching.push(event),control());onEvent(event=>unrelated.push(event),control('other-run'))
+  onEvent(event=>global.push(event))
+  const seed=new TextEncoder().encode('synthetic-restore')
+  const bytes=new TextEncoder().encode('original-tail')
+  const event:RuntimeEvent={type:'core',hostId:'target-host',event:{type:'terminal-snapshot',afterByte:100,
+    run:{runId:'target-run',kind:'terminal',providerId:null,executorId:null,agentSessionId:null,workspacePath:'/private',
+      pid:1,state:'running',cols:80,rows:24,observedAt:1,latestOutputBytes:100+bytes.length,acceptedInputBytes:0},
+    terminal:{type:'basic-vt',checkpoint:{runId:'target-run',throughByte:100,resizeRevision:0,size:{cols:80,rows:24}},restoreBytes:seed,resizes:[]},
+    gap:null,resizeRevision:0,replay:[{type:'data',runId:'target-run',startByte:100,endByte:100+bytes.length,dataBytes:bytes,data:'original-tail'}]}}
+  emit(event)
+  expect(matching).toEqual([event]);expect(matching[0]).toBe(event)
+  expect(unrelated).toEqual([]);expect(global).toEqual([])
+  expect(subscribe).toHaveBeenCalledTimes(1)
 })

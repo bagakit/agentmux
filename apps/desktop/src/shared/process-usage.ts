@@ -10,8 +10,7 @@
 
 import type {
   AgentMuxRuntimeResourceSnapshot,
-  EndpointDirectoryUsage,
-  EndpointReclaimOutcome
+  RuntimeStorageUsage
 } from '@agentmux/core'
 
 /** `ps -Ao pid,ppid,rss,pcpu` 的一行。rss 单位是 KiB，cpu 是百分比。 */
@@ -220,10 +219,9 @@ export type RuntimeUsage = {
   unavailable: string | null
   /** The vendored Runtime identity does not publish a daemon PID. */
   process: { cpuPercent: null; rssKib: null; unavailable: string }
-  endpointStorage: EndpointDirectoryUsage[] | null
-  endpointStorageUnavailable: string | null
-  /** Last startup directory cleanup, independent of retained Run/output inventory. */
-  endpointReclaim: EndpointReclaimOutcome | null
+  /** Disk usage of the selected Runtime only, without sibling discovery or cleanup. */
+  runtimeStorage: RuntimeStorageUsage | null
+  runtimeStorageUnavailable: string | null
 }
 
 /**

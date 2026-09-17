@@ -15,6 +15,7 @@ import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
   AgentMuxRunDataEvent,
+  AgentMuxRunAttachment,
   AgentMuxRunExitReason,
   AgentMuxRunInputData,
   AgentMuxRunRef,
@@ -966,6 +967,8 @@ export type SessionAttachResult = {
   currentSize: { cols: number; rows: number } | null
   replay: AgentMuxRunDataEvent[]
   gap: AgentMuxRunReplayGap | null
+  terminal: AgentMuxRunAttachment['terminal']
+  resizeRevision: number
 }
 
 /** Ordered retained bytes for an already-owned attachment; creates no Desktop lease. */

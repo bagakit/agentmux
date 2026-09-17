@@ -45,7 +45,6 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
       instanceId: 'daemon-fixture'
     }),
     runtimeDiagnostics: vi.fn(async () => runtime),
-    endpointReclaim: () => null,
     probeAgent: vi.fn(async (providerId: AgentProviderId) => ({
       providerId,
       executable: catalog.find((entry) => entry.id === providerId)!.executable,
@@ -66,42 +65,47 @@ const UID = typeof process.getuid === 'function' ? process.getuid() : 0
 afterEach(() => { delete process.env.AGENTMUX_RUNTIME_DIRECTORY })
 
 describe('AgentMux doctor', () => {
-  // 「让 endpoint 占用可见」这条只有真的算出体积才算数。把 runtime 目录指到一棵自造的树上，
-  // 断言报告里报出了那个已知字节数——若 endpointStorage 退化成空表或写死的 []，这条立刻变红。
-  it('reports real endpoint storage usage, not an empty placeholder', async () => {
+  it('reports real selected Runtime storage without including sibling directories', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
-    const current = join(root, `amx-${UID}-${'a'.repeat(24)}`)
-    await mkdir(current, { recursive: true })
-    await writeFile(join(current, 'state.sqlite3'), 'x'.repeat(2048))
-    process.env.AGENTMUX_RUNTIME_DIRECTORY = current
-
-    const report = await diagnoseAgentMux({ client: client() })
-
-    expect(report.endpointStorage).toEqual([{ path: current, bytes: 2048, current: true }])
-    await rm(root, { recursive: true, force: true })
+    const current = join(root, 'selected-runtime')
+    try {
+      await mkdir(current)
+      await mkdir(join(root, `amx-${UID}-${'a'.repeat(24)}`))
+      await writeFile(join(root, `amx-${UID}-${'a'.repeat(24)}`, 'old-state'), 'x'.repeat(4096))
+      await writeFile(join(current, 'state.sqlite3'), 'x'.repeat(2048))
+      process.env.AGENTMUX_RUNTIME_DIRECTORY = current
+      const report = await diagnoseAgentMux({ client: client() })
+      expect(report.runtimeStorage).toEqual({ path: current, bytes: 2048 })
+      expect(report.runtimeStorageUnavailable).toBeNull()
+      expect(report.ok).toBe(true)
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
-  // 回收失败若无处可看，「不阻断启动、只留可诊断信息」就只剩前半句：每次启动都删不掉的目录会一直
-  // 无声堆着。这条把回收结果真的从 client 端穿到报告里——把 `endpointReclaim` 写死成 null 会变红。
-  it('carries the startup reclamation outcome, failures included', async () => {
-    const outcome = {
-      reclaimed: ['/tmp/amx-501-aaaaaaaaaaaaaaaaaaaaaaaa'],
-      skippedLive: [],
-      failed: [{ path: '/tmp/amx-501-bbbbbbbbbbbbbbbbbbbbbbbb', reason: 'EACCES: permission denied' }]
-    }
-
-    const report = await diagnoseAgentMux({ client: client({ endpointReclaim: () => outcome }) })
-
-    expect(report.endpointReclaim).toEqual(outcome)
+  it('shows the disk failure without changing a healthy Runtime into blocked', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
+    try {
+      process.env.AGENTMUX_RUNTIME_DIRECTORY = join(root, 'missing')
+      const report = await diagnoseAgentMux({ client: client() })
+      expect(report.runtimeStorage).toBeNull()
+      expect(report.runtimeStorageUnavailable).toContain('ENOENT')
+      expect(report.ok).toBe(true)
+      expect(report.host.reachable).toBe(true)
+      expect(report.agents.find((agent) => agent.id === 'codex')?.probe).toBe('found')
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
-  // 没连上运行时就没跑过回收。这时必须是 null——空 outcome 会被读成「回收跑过且一切正常」。
-  it('reports no reclamation at all when the runtime is unreachable', async () => {
-    const report = await diagnoseAgentMux({
-      client: client({ connect: vi.fn(async () => { throw new Error('owner receipt mismatch') }) })
-    })
-
-    expect(report.endpointReclaim).toBeNull()
+  it('keeps disk observation distinct from an unavailable Runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
+    try {
+      await writeFile(join(root, 'state.sqlite3'), 'x'.repeat(1024))
+      process.env.AGENTMUX_RUNTIME_DIRECTORY = root
+      const report = await diagnoseAgentMux({
+        client: client({ connect: vi.fn(async () => { throw new Error('owner receipt mismatch') }) })
+      })
+      expect(report.runtimeStorage).toEqual({ path: root, bytes: 1024 })
+      expect(report.runtimeStorageUnavailable).toBeNull()
+      expect(report.host.error).toBe('owner receipt mismatch')
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('reports the exact ctxmux capability, integration, permission, and Host boundaries', async () => {

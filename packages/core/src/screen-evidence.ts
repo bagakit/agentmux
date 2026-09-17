@@ -9,6 +9,7 @@ import {
 import { CtxmuxRunAdapter } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSession } from './types.js'
+import { terminalContinuationSteps } from './terminal-continuation.js'
 
 type ScreenEvidenceDeps = {
   kernel: CtxmuxRunAdapter
@@ -150,13 +151,14 @@ export class AgentScreenEvidenceStore {
       } else if (event.type === 'gap') {
         forward({ type: 'gap' })
       } else if (event.type === 'resized') {
-        forward({ type: 'resized', cols: event.cols, rows: event.rows })
+        forward({ type: 'resized', cols: event.cols, rows: event.rows,
+          throughByte: event.throughByte, resizeRevision: event.resizeRevision })
       } else if (event.type === 'error') {
         forward({ type: 'error', error: event.error })
       } else if (event.type === 'exit') {
         forward({ type: 'exit' })
       }
-    })
+    }, 'terminal')
     // 握手期间被作废了（掉线 / Run 更换）：这条 Attachment 挂在已经死掉的连线上，登记它就是留一具
     // `failed === false` 的尸体给 `ensure()` 复用。关掉它并抛，让调用方走与「观察被取消」相同的出口。
     if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
@@ -166,7 +168,11 @@ export class AgentScreenEvidenceStore {
         'AGENT_PROMPT_READINESS_CANCELLED'
       )
     }
-    if (observation.run.cols === null || observation.run.rows === null) {
+    const continuation = observation.terminal
+    const size = continuation.type === 'basic-vt' ? continuation.checkpoint.size
+      : observation.run.cols === null || observation.run.rows === null ? null
+        : { cols: observation.run.cols, rows: observation.run.rows }
+    if (size === null) {
       await observation.close().catch(() => {})
       throw new AgentMuxError(
         'Terminal screen evidence has no owner-confirmed size.',
@@ -174,16 +180,24 @@ export class AgentScreenEvidenceStore {
       )
     }
     const built = new AgentTerminalScreenEvidence(
-      observation.run.cols,
-      observation.run.rows,
+      size.cols,
+      size.rows,
       matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null,
-      observation.gap?.firstAvailableByte ?? startByte
+      continuation.type === 'basic-vt' ? continuation.checkpoint.throughByte
+        : observation.gap?.firstAvailableByte ?? startByte,
+      false,
+      continuation.type === 'basic-vt' ? continuation.checkpoint.resizeRevision : observation.resizeRevision
     )
-    for (const event of observation.replay) built.accept(event)
-    pending.sort((left, right) => (
-      (left.type === 'data' ? left.startByte : Number.MAX_SAFE_INTEGER) -
-      (right.type === 'data' ? right.startByte : Number.MAX_SAFE_INTEGER)
-    ))
+    try {
+      for (const step of terminalContinuationSteps(observation)) {
+        if (step.type === 'resized') built.accept({ ...step, cols: step.size.cols, rows: step.size.rows })
+        else built.accept(step)
+      }
+    } catch (error) {
+      built.dispose()
+      await observation.close().catch(() => {})
+      throw error
+    }
     evidence = built
     for (const event of pending.splice(0)) built.accept(event)
     // 失效时立刻关掉 Attachment，别让一条死观察挂着资源等下一次 ensure 才回收。

@@ -61,7 +61,6 @@ function clientWithRealProbes(): AgentMuxClient {
   const surface = client as unknown as Record<string, unknown>
   surface.connect = vi.fn(async () => {})
   surface.runtimeDiagnostics = vi.fn(async () => runtime)
-  surface.endpointReclaim = () => null
   surface.runtimeIdentity = () => ({
     hostId: 'local',
     buildIdentity: 'ctxmux-fixture',

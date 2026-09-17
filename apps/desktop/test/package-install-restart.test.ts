@@ -70,10 +70,26 @@ function cutoverOffset(body: ts.Block): number {
       ts.isIdentifier(node.expression) &&
       node.expression.text === 'rename' &&
       node.arguments.length === 2 &&
-      ts.isIdentifier(node.arguments[0]) &&
-      node.arguments[0].text === 'next'
+      ts.isIdentifier(node.arguments[0]!) &&
+      node.arguments[0]!.text === 'next'
     ) {
       offset = Math.min(offset, node.getStart())
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(body)
+  return offset
+}
+
+function newInstanceLaunchOffset(body: ts.Block): number {
+  let offset = Number.POSITIVE_INFINITY
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText() === 'relaunched' && node.initializer) {
+      const value = node.initializer
+      if (ts.isAwaitExpression(value) && ts.isCallExpression(value.expression) &&
+        ts.isIdentifier(value.expression.expression) && value.expression.expression.text === 'relaunchInstalledApplication') {
+        offset = Math.min(offset, value.expression.getStart())
+      }
     }
     ts.forEachChild(node, visit)
   }
@@ -94,7 +110,7 @@ describe('installing must hand over a process running the new bundle', () => {
 
   it('relaunches after the cutover so something is serving the new bundle', () => {
     const body = functionBody(SOURCE, 'installApplication')
-    const relaunch = firstCallOffset(body, 'relaunchInstalledApplication')
+    const relaunch = newInstanceLaunchOffset(body)
     const cutover = cutoverOffset(body)
     expect(Number.isFinite(relaunch), 'installApplication 必须调用 relaunchInstalledApplication').toBe(true)
     expect(relaunch, '重新拉起必须发生在换目录之后').toBeGreaterThan(cutover)
@@ -130,7 +146,7 @@ describe('installing must hand over a process running the new bundle', () => {
     // 自检：把两次调用删掉——这**就是**这次事故的源码形状（只换磁盘，不管进程）。
     const mutated = SOURCE
       .replace(/const quitOutcome = previouslyInstalled[\s\S]*?: \{ wasRunning: false, pids: \[\] \}/, 'const quitOutcome = { wasRunning: false, pids: [] }')
-      .replace(/const relaunched = await relaunchInstalledApplication\(destination\)/, 'const relaunched = []')
+      .replace(/await relaunchInstalledApplication\(destination\)/g, '[] /* restart removed */')
     expect(mutated, '注入必须真的改动了源码').not.toBe(SOURCE)
     const body = functionBody(mutated, 'installApplication')
     expect(firstCallOffset(body, 'quitInstalledApplication')).toBe(Number.POSITIVE_INFINITY)

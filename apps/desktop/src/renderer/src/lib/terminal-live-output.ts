@@ -1,4 +1,4 @@
-import type { TerminalGridSize } from './terminal-viewport-sync'
+import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 
 export type TerminalLiveOutputChunk = {
   dataBytes: Uint8Array
@@ -6,7 +6,38 @@ export type TerminalLiveOutputChunk = {
   endByte: number
 }
 
-export type TerminalLiveItem = TerminalLiveOutputChunk | { size: TerminalGridSize }
+/** Unknown snapshots retain metadata only; their historical bytes cannot prove geometry. */
+export type TerminalLiveSnapshot = {
+  type: 'snapshot'
+  snapshot: AgentMuxRunAttachment
+}
+
+export type TerminalLiveItem = TerminalLiveOutputChunk | AgentMuxTerminalResize | TerminalLiveSnapshot
+
+/** Replace only queued work covered by the new authoritative cut; in-flight work settles first. */
+export function admitTerminalLiveSnapshot(
+  chunks: readonly TerminalLiveItem[],
+  snapshot: AgentMuxRunAttachment
+): TerminalLiveItem[] {
+  const known = snapshot.terminal.type === 'basic-vt'
+  const latest = snapshot.run.latestOutputBytes
+  // A delayed older snapshot cannot overwrite a newer pending authoritative cut.
+  if (known && chunks.some(item => 'snapshot' in item && item.snapshot.terminal.type === 'basic-vt' &&
+    item.snapshot.run.latestOutputBytes >= latest && item.snapshot.resizeRevision >= snapshot.resizeRevision)) return [...chunks]
+  const retained = chunks.filter(item => {
+    if ('snapshot' in item) {
+      if (!known) return item.snapshot.terminal.type === 'basic-vt'
+      return item.snapshot.run.latestOutputBytes > latest || item.snapshot.resizeRevision > snapshot.resizeRevision
+    }
+    if (!known) return true
+    return 'size' in item ? item.throughByte > latest || item.resizeRevision > snapshot.resizeRevision : item.endByte > latest
+  })
+  const incoming: TerminalLiveSnapshot = { type: 'snapshot',
+    snapshot: known ? snapshot : { ...snapshot, replay: [] } }
+  // Known restoration precedes uncovered newer live bytes. Unknown restoration leaves older
+  // accepted work in order and advances the authoritative snapshot boundary without claiming historical bytes were parsed.
+  return known ? [incoming, ...retained] : [...retained, incoming]
+}
 
 /** Keep one visual live-output write bounded while coalescing small RuntimeEvents. */
 export const TERMINAL_LIVE_OUTPUT_BATCH_BYTES = 64 * 1024
@@ -19,7 +50,7 @@ export const TERMINAL_LIVE_OUTPUT_BATCH_BYTES = 64 * 1024
 export const TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES = 2 * 1024 * 1024
 
 function chunkBytes(chunk: TerminalLiveItem): number {
-  if ('size' in chunk) return 0
+  if ('size' in chunk || 'snapshot' in chunk) return 0
   return Math.max(0, chunk.endByte - chunk.startByte)
 }
 
@@ -40,23 +71,27 @@ export function admitTerminalLiveOutput<T extends TerminalLiveItem>(
 ): { queue: T[]; droppedBytes: number } {
   const limit = Math.max(1, Math.floor(maxBytes))
   const queue = [...chunks]
-  // Consecutive geometry observations have no bytes between them; only the last can affect parsing.
-  if ('size' in incoming && queue.length && 'size' in queue[queue.length - 1]!) queue.pop()
   queue.push(incoming)
   let bytes = queue.reduce((total, chunk) => total + chunkBytes(chunk), 0)
   let droppedBytes = 0
-  let droppedGeometry: T | undefined
-  // 至少留一块：把队列清空会把刚收到的最新字节也丢掉，那等于这一刻的终端什么都不显示。
-  while (queue.length > 1 && (bytes > limit || queue.length > 4096)) {
-    const dropped = queue.shift()
-    if (!dropped) break
-    if ('size' in dropped) droppedGeometry = dropped
+  let ordinaryCount = queue.filter(item => !('snapshot' in item)).length
+  let droppedGeometry: { item: T; afterSnapshot: T | undefined } | undefined
+  // Synthetic seeds have their own Runtime bound. Raw backlog trimming cannot discard a seed.
+  while (ordinaryCount > 1 && (bytes > limit || ordinaryCount > 4096)) {
+    const index = queue.findIndex(item => !('snapshot' in item))
+    const afterSnapshot = queue.slice(0, index).filter(item => 'snapshot' in item).at(-1)
+    const dropped = queue.splice(index, 1)[0]!
+    ordinaryCount -= 1
+    if ('size' in dropped) droppedGeometry = { item: dropped, afterSnapshot }
     const size = chunkBytes(dropped)
     bytes -= size
     droppedBytes += size
   }
-  // Retained bytes must still parse under the last geometry preceding their prefix.
-  if (droppedGeometry && !('size' in queue[0]!)) queue.unshift(droppedGeometry)
+  const first = queue.findIndex(item => !('snapshot' in item))
+  if (droppedGeometry && first >= 0 && !('size' in queue[first]!) &&
+    queue.slice(0, first).filter(item => 'snapshot' in item).at(-1) === droppedGeometry.afterSnapshot) {
+    queue.splice(first, 0, droppedGeometry.item)
+  }
   return { queue, droppedBytes }
 }
 
@@ -115,16 +150,17 @@ export function composeTerminalLiveOutputWrite(
 export function takeTerminalLiveOutputBatch<T extends TerminalLiveItem>(
   chunks: readonly T[],
   maxBytes = TERMINAL_LIVE_OUTPUT_BATCH_BYTES
-): { batch: TerminalLiveOutputChunk[]; rest: T[]; size?: TerminalGridSize } {
+): { batch: TerminalLiveOutputChunk[]; rest: T[]; resize?: AgentMuxTerminalResize; snapshot?: TerminalLiveSnapshot } {
   if (chunks.length === 0) return { batch: [], rest: [] }
   const first = chunks[0]!
-  if ('size' in first) return { batch: [], rest: chunks.slice(1), size: first.size }
+  if ('snapshot' in first) return { batch: [], rest: chunks.slice(1), snapshot: first }
+  if ('size' in first) return { batch: [], rest: chunks.slice(1), resize: first }
   const limit = Math.max(1, Math.floor(maxBytes))
   let bytes = 0
   let count = 0
   while (count < chunks.length) {
     const chunk = chunks[count]
-    if (!chunk || 'size' in chunk) break
+    if (!chunk || 'size' in chunk || 'snapshot' in chunk) break
     const size = chunkBytes(chunk)
     if (count > 0 && bytes + size > limit) break
     bytes += size

@@ -19,6 +19,7 @@ import {
   createOperationKey,
   defineRun,
   type OutputChunk,
+  type AttachedSnapshot,
   type RecoverableStopOperation,
   type RunEvent,
   type RunInfo,
@@ -28,11 +29,8 @@ import { AgentMuxError } from './errors.js'
 import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
-import type { AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot } from './types.js'
-import {
-  reclaimOrphanEndpointDirectories,
-  type EndpointReclaimOutcome
-} from './runtime-endpoint-reclaim.js'
+import { probeSocketLiveness } from './socket-liveness.js'
+import type { AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
   defaultAgentMuxRuntimeDirectory,
@@ -48,8 +46,8 @@ import {
 // literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
 // vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
 // runtime with no compile error. Binding two consumers to this one validated source is the fix.
-export const CTXMUX_COMMIT = 'c168c0ab9cd849bfade68461b62684982c71f688'
-const CTXMUX_TREE = 'a2cc33fe7adac2b25110df58370e3dac17850e00'
+export const CTXMUX_COMMIT = '3de504794bb2b8ce801f8faac592d977ae824fa2'
+const CTXMUX_TREE = '716c52d9788601f727311dbc30ade56b56372d24'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -165,6 +163,8 @@ export type CtxmuxAdapterResizedEvent = {
   runId: string
   cols: number
   rows: number
+  throughByte: number
+  resizeRevision: number
 }
 
 export type CtxmuxAdapterEvent =
@@ -181,6 +181,8 @@ export type CtxmuxAdapterAttachment = {
   run: CtxmuxAdapterRun
   replay: CtxmuxAdapterDataEvent[]
   gap: { requestedAfterByte: number; firstAvailableByte: number } | null
+  terminal: AgentMuxTerminalContinuation
+  resizeRevision: number
 }
 
 export type CtxmuxAdapterOutputObservation = CtxmuxAdapterAttachment & {
@@ -199,6 +201,8 @@ export type CtxmuxAdapterInputOperation = {
 type LiveAttachment = {
   attachment: Attachment | null
   token: symbol
+  /** Keep the requested representation with the same exact-Run continuation owner. */
+  view: AgentMuxRunAttachmentView
   /** Last raw byte published by this process, not a Renderer parse acknowledgement. */
   publishedThroughByte: number
 }
@@ -655,14 +659,6 @@ export class CtxmuxRunAdapter {
   readonly stateDirectory = defaultCtxmuxStateDirectory()
   private client: CtxmuxClient | null = null
   private runtime: RuntimeIdentity | null = null
-  /**
-   * 本次 connect() 那趟孤儿目录回收的结果。null 表示还没连过。
-   *
-   * 回收在启动路径上自愈式地跑，成功时不该打扰任何人；但失败必须能被看见，否则一个每次都删不掉的
-   * 目录会无声地一直堆着。诊断读这里，而不是让回收自己去打日志——Core 没有日志设施，为这一个用途
-   * 造一个是没必要的熵。
-   */
-  lastEndpointReclaim: EndpointReclaimOutcome | null = null
   /** Compatibility is independent of whether this process owns daemon cleanup rights. */
   runtimeOwnership: 'owned' | 'unverified' | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
@@ -743,13 +739,6 @@ export class CtxmuxRunAdapter {
       mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
       mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
     ])
-    // 每次 artifact 升级都会派生一个新的 endpoint 目录，旧的连同它 110MB 级的 state.sqlite3 会永远
-    // 留在盘上。连接是唯一必经、且此刻我们恰好知道「当前 endpoint 是哪个」的时点，回收挂在这里。
-    // 它自己吞掉所有失败（返回 outcome、不抛），所以回收不了也绝不阻断启动。
-    //
-    // 结果留在实例上，供 `agentmux doctor` 读取：回收失败若无处可看，「不阻断启动、只留可诊断信息」
-    // 就只剩前半句——每次启动都删不掉的目录会无声地一直堆着。
-    this.lastEndpointReclaim = await reclaimOrphanEndpointDirectories(dirname(this.socketPath))
     await Promise.all([
       chmod(dirname(this.socketPath), 0o700),
       chmod(this.stateDirectory, 0o700)
@@ -771,7 +760,9 @@ export class CtxmuxRunAdapter {
       }
     } catch (error) {
       // A responding but incompatible Runtime is not an invitation to spawn a replacement.
-      if (runtime !== null) throw error
+      // Hello validation can fail before runtimeInfo returns an identity. Only a
+      // proven dead listener permits launch; a failed handshake never proves death.
+      if (runtime !== null || await probeSocketLiveness(this.socketPath) !== 'dead') throw error
       const child = spawn(artifacts.daemonPath, [
         '--socket',
         this.socketPath,
@@ -889,6 +880,10 @@ export class CtxmuxRunAdapter {
 
   continuationByte(runId: string): number {
     return this.attachments.get(runId)?.publishedThroughByte ?? 0
+  }
+
+  continuationView(runId: string): AgentMuxRunAttachmentView {
+    return this.attachments.get(runId)?.view ?? 'raw'
   }
 
   isConnected(): boolean {
@@ -1015,30 +1010,20 @@ export class CtxmuxRunAdapter {
   async attach(
     runId: string,
     afterByte: number,
-    beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void
+    beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void,
+    view: AgentMuxRunAttachmentView = 'raw'
   ): Promise<CtxmuxAdapterAttachment> {
     if (this.hasAttachment(runId)) {
       throw new AgentMuxError('This client already owns an Attachment for the Run.', 'ATTACHMENT_EXISTS')
     }
     try {
-      const attachment = await this.requireClient().attach(runId, afterByte)
+      const attachment = await this.openAttachment(runId, afterByte, view)
       const decoder = new TextDecoder()
-      const replay = attachment.snapshot.replay.chunks.map((chunk) => (
-        decodeChunk(runId, decoder, chunk)
-      ))
-      const snapshot = {
-        run: this.projectRun(attachment.snapshot.run),
-        replay,
-        gap: classifyReplayGap({
-          truncated: attachment.snapshot.replay.truncated,
-          requestedAfterByte: afterByte,
-          firstAvailableByte: attachment.snapshot.replay.first_available_byte
-        })
-      }
+      const snapshot = this.projectAttachment(attachment.snapshot, afterByte, decoder)
       // Record the offered snapshot before synchronous publication can lose the connection.
       // No second queue: the SDK attachment owns all bytes until its pump starts.
       const token = Symbol(runId)
-      this.attachments.set(runId, { attachment, token, publishedThroughByte: snapshot.run.latestOutputBytes })
+      this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
       try { beforeLive?.(snapshot) } catch (error) {
         if (this.attachments.get(runId)?.token === token) this.attachments.delete(runId)
         try { await attachment.detach() } catch (cleanupError) {
@@ -1062,22 +1047,12 @@ export class CtxmuxRunAdapter {
     return this.attachments.get(runId)?.attachment != null
   }
 
-  async replay(runId: string, afterByte: number): Promise<CtxmuxAdapterAttachment> {
+  async replay(runId: string, afterByte: number, view: AgentMuxRunAttachmentView = 'raw'): Promise<CtxmuxAdapterAttachment> {
     let attachment: Attachment | null = null
     try {
-      attachment = await this.requireClient().attach(runId, afterByte)
+      attachment = await this.openAttachment(runId, afterByte, view)
       const decoder = new TextDecoder()
-      return {
-        run: this.projectRun(attachment.snapshot.run),
-        replay: attachment.snapshot.replay.chunks.map((chunk) => (
-          decodeChunk(runId, decoder, chunk)
-        )),
-        gap: classifyReplayGap({
-          truncated: attachment.snapshot.replay.truncated,
-          requestedAfterByte: afterByte,
-          firstAvailableByte: attachment.snapshot.replay.first_available_byte
-        })
-      }
+      return this.projectAttachment(attachment.snapshot, afterByte, decoder)
     } catch (error) {
       throw translateCtxmuxError(error)
     } finally {
@@ -1107,11 +1082,12 @@ export class CtxmuxRunAdapter {
   async observeOutput(
     runId: string,
     afterByte: number,
-    listener: (event: CtxmuxAdapterObservationEvent) => void
+    listener: (event: CtxmuxAdapterObservationEvent) => void,
+    view: AgentMuxRunAttachmentView = 'raw'
   ): Promise<CtxmuxAdapterOutputObservation> {
     let attachment: Attachment | null = null
     try {
-      attachment = await this.requireClient().attach(runId, afterByte)
+      attachment = await this.openAttachment(runId, afterByte, view)
       const decoder = new TextDecoder()
       let closed = false
       const active = attachment
@@ -1127,7 +1103,7 @@ export class CtxmuxRunAdapter {
       // `for await` 一定先在迭代器的 `.next()` promise 上挂起、之后才跑循环体，所以 IIFE 之后的同步语句
       // 照样先执行完。真正的（更弱的）不变量是「replay 的 `.map` 必须是同步的，不许挪到某个 `await` 之后」
       // ——两种摆法都满足它。因此顺序无人守，不是缺口：没有能杀死它的变异。
-      const replay = snapshot.replay.chunks.map((chunk) => decodeChunk(runId, decoder, chunk))
+      const projected = this.projectAttachment(snapshot, afterByte, decoder)
       void (async () => {
         try {
           for await (const event of active.events()) {
@@ -1139,13 +1115,7 @@ export class CtxmuxRunAdapter {
         }
       })()
       return {
-        run: this.projectRun(snapshot.run),
-        replay,
-        gap: classifyReplayGap({
-          truncated: snapshot.replay.truncated,
-          requestedAfterByte: afterByte,
-          firstAvailableByte: snapshot.replay.first_available_byte
-        }),
+        ...projected,
         close: async () => {
           if (closed) return
           closed = true
@@ -1155,6 +1125,41 @@ export class CtxmuxRunAdapter {
     } catch (error) {
       if (attachment) await attachment.detach().catch(() => {})
       throw translateCtxmuxError(error)
+    }
+  }
+
+  private async openAttachment(runId: string, afterByte: number, view: AgentMuxRunAttachmentView): Promise<Attachment> {
+    const client = this.requireClient()
+    return view === 'terminal' ? await client.attachTerminal(runId, afterByte) : await client.attach(runId, afterByte)
+  }
+
+  private projectAttachment(snapshot: AttachedSnapshot, afterByte: number, decoder: TextDecoder): CtxmuxAdapterAttachment {
+    const source = snapshot.terminal
+    const terminal: AgentMuxTerminalContinuation = source.type === 'basic_vt'
+      ? {
+          type: 'basic-vt',
+          checkpoint: {
+            runId: source.checkpoint.run_id,
+            throughByte: source.checkpoint.through_byte,
+            resizeRevision: source.checkpoint.resize_revision,
+            size: source.checkpoint.size
+          },
+          restoreBytes: snapshot.terminal_restore,
+          resizes: source.resizes.map((resize) => ({
+            throughByte: resize.through_byte, resizeRevision: resize.resize_revision, size: resize.size
+          }))
+        }
+      : source.type === 'not_requested' ? { type: 'not-requested' } : source
+    return {
+      run: this.projectRun(snapshot.run),
+      replay: snapshot.replay.chunks.map((chunk) => decodeChunk(snapshot.run.id, decoder, chunk)),
+      terminal,
+      resizeRevision: snapshot.resize_revision,
+      gap: classifyReplayGap({
+        truncated: snapshot.replay.truncated,
+        requestedAfterByte: terminal.type === 'basic-vt' ? terminal.checkpoint.throughByte : afterByte,
+        firstAvailableByte: snapshot.replay.first_available_byte
+      })
     }
   }
 
@@ -1300,8 +1305,9 @@ export class CtxmuxRunAdapter {
     event: RunEvent
   ): CtxmuxAdapterObservationEvent {
     const resized = liveResizedSize(event)
-    if (resized) {
-      return { type: 'resized', runId, cols: resized.cols, rows: resized.rows }
+    if (resized && event.type === 'resized') {
+      return { type: 'resized', runId, cols: resized.cols, rows: resized.rows,
+        throughByte: event.through_byte, resizeRevision: event.resize_revision }
     }
     if (event.type === 'resized') {
       // `size` is a required field since protocol 16, so reaching here means it carried a size that is

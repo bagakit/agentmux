@@ -33,8 +33,7 @@ function UsageRow({ row }: { row: UsagePanelRow }) {
 
 function RuntimeObservation({ runtime }: { runtime: RuntimeUsage }) {
   const facts = runtime.resources
-  const storage = runtime.endpointStorage
-  const cleanup = runtime.endpointReclaim
+  const storage = runtime.runtimeStorage
   return (
     <section className="resource-usage__section" aria-label={`Runtime ${runtime.hostId}`}>
       <div className="resource-usage__row">
@@ -54,24 +53,16 @@ function RuntimeObservation({ runtime }: { runtime: RuntimeUsage }) {
         </dl>
       ) : null}
       <details className="resource-usage__details">
-        <summary>Storage & cleanup <span>{storage ? formatBytes(storage.reduce((sum, item) => sum + item.bytes, 0)) : '—'}</span></summary>
+        <summary>Runtime storage <span>{storage ? formatBytes(storage.bytes) : '—'}</span></summary>
         <p className="resource-usage__note">Retention and owners are observations, not a leak verdict.</p>
-        {runtime.endpointStorageUnavailable ? <p className="resource-usage__unavailable resource-usage__note">Storage unavailable: {runtime.endpointStorageUnavailable}</p> : null}
-        {storage?.map((item) => (
-          <div className="resource-usage__storage" key={item.path}>
-            <span title={item.path}>{item.current ? 'Current endpoint' : 'Other endpoint'}<small>{item.path}</small></span>
-            <span className="resource-usage__metric">{formatBytes(item.bytes)}</span>
+        {runtime.runtimeStorageUnavailable ? <p className="resource-usage__unavailable resource-usage__note">Storage unavailable: {runtime.runtimeStorageUnavailable}</p> : null}
+        {storage ? (
+          <div className="resource-usage__storage">
+            <span title={storage.path}>Selected Runtime<small>{storage.path}</small></span>
+            <span className="resource-usage__metric">{formatBytes(storage.bytes)}</span>
           </div>
-        ))}
-        {cleanup ? (
-          <dl className="resource-usage__facts">
-            <dt>Startup directories reclaimed</dt><dd>{cleanup.reclaimed.length}</dd>
-            <dt>Directories preserved</dt><dd>{cleanup.skippedLive.length}</dd>
-            <dt>Cleanup failures</dt><dd>{cleanup.failed.length}</dd>
-          </dl>
-        ) : <p className="resource-usage__note">No startup directory cleanup result.</p>}
-        {cleanup?.failed.map((item) => <p className="resource-usage__unavailable resource-usage__note" key={item.path} title={item.path}>{item.path}: {item.reason}</p>)}
-        <p className="resource-usage__note">Directory cleanup does not reclaim retained Runs. Unattached Runs can still hold history.</p>
+        ) : null}
+        <p className="resource-usage__note">Unattached Runs can still hold history. Disk usage does not imply a leak.</p>
       </details>
     </section>
   )

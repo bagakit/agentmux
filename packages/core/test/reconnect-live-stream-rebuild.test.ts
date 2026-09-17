@@ -35,7 +35,7 @@ type Internals = {
   connected: boolean
 }
 
-type KernelDataEvent = { type: 'resized'; runId: string; cols: number; rows: number } | {
+type KernelDataEvent = { type: 'resized'; runId: string; cols: number; rows: number; throughByte: number; resizeRevision: number } | {
   type: 'data'
   runId: string
   startByte: number
@@ -72,6 +72,7 @@ class FakeKernel {
   earlyLive: KernelDataEvent[] = []
   private readonly continuation = new Map<string, number>()
   continuationByte = (runId: string) => this.continuation.get(runId) ?? 0
+  continuationView = () => 'raw' as const
   publishedThrough(runId: string, throughByte: number): void { this.continuation.set(runId, throughByte) }
   readonly attach = vi.fn(async (runId: string, afterByte: number, beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void) => {
     const spec = this.attachSpecs.get(runId)
@@ -86,7 +87,8 @@ class FakeKernel {
       data: chunk.data,
       dataBytes: new Uint8Array(Buffer.from(chunk.data))
     }))
-    const snapshot = { run, replay, gap: spec?.gap ?? null }
+    const snapshot: CtxmuxAdapterAttachment = { run, replay, gap: spec?.gap ?? null,
+      terminal: { type: 'not-requested' }, resizeRevision: 0 }
     beforeLive?.(snapshot)
     for (const event of this.earlyLive) this.sink?.(event)
     await Promise.resolve()
@@ -426,21 +428,25 @@ describe('T-002 输出通道断了的可持久告知', () => {
 
 
 describe('owner geometry across reconnect', () => {
-  it.each([true, false])('publishes known=%s snapshot geometry and replay before early live resize/output', async (known) => {
+  it.each([true, false])('raw known=%s snapshot size is not fabricated into a historical resize', async (known) => {
     const { events, state, kernel } = await fixture([storedSession()])
     kernel.configureRuns([runningRun('run-1')])
     kernel.configureAttach('run-1', {
-      run: runningRun('run-1', { cols: known ? 132 : null, rows: known ? 45 : null }),
+      run: runningRun('run-1', { cols: known ? 132 : null, rows: known ? 45 : null, latestOutputBytes: 6 }),
       replay: [{ startByte: 0, data: 'REPLAY' }]
     })
     kernel.earlyLive = [
-      { type: 'resized', runId: 'run-1', cols: 160, rows: 50 },
+      { type: 'resized', runId: 'run-1', cols: 160, rows: 50, throughByte: 6, resizeRevision: 1 },
       { type: 'data', runId: 'run-1', data: 'LIVE', startByte: 6, endByte: 10, dataBytes: new Uint8Array(Buffer.from('LIVE')) }
     ]
     await driveReconnect(state, events)
     const geometryAndOutput = events.flatMap((event) => event.type === 'terminal-resized'
       ? [`${event.cols}x${event.rows}`] : event.type === 'terminal-output' ? [event.data] : [])
-    expect(geometryAndOutput).toEqual([...(known ? ['132x45'] : []), 'REPLAY', '160x50', 'LIVE'])
+    expect(geometryAndOutput).toEqual(['REPLAY', '160x50', 'LIVE'])
+    expect(events.filter(event => event.type === 'terminal-resized')).toEqual([
+      { type: 'terminal-resized', agentSessionId: 'agent-1', run: { runId: 'run-1' },
+        cols: 160, rows: 50, throughByte: 6, resizeRevision: 1 }
+    ])
     expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' }))
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent-error' }))
   })

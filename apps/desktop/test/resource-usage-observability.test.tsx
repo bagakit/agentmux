@@ -55,8 +55,8 @@ function snapshot(): UsageSnapshot {
     ] },
     runtime: [{ hostId: 'local', resources: { observedAt: 900, runCount: 11, runningRuns: 7, terminatedRuns: 4, terminatedUnattachedRuns: 2, attachments: 8, retainedOutputBytes: 3145728 },
       unavailable: null, process: { cpuPercent: null, rssKib: null, unavailable: 'Daemon PID is not published by Runtime; CPU and memory unavailable.' },
-      endpointStorage: [{ path: '/runtime/current', bytes: 4194304, current: true }, { path: '/runtime/old', bytes: 1024, current: false }],
-      endpointStorageUnavailable: null, endpointReclaim: { reclaimed: ['/runtime/deleted'], skippedLive: ['/runtime/current', '/runtime/unknown'], failed: [{ path: '/runtime/denied', reason: 'permission denied' }] }
+      runtimeStorage: { path: '/runtime/current', bytes: 4194304 },
+      runtimeStorageUnavailable: null
     }], runtimeUnavailable: null, mainOwners: { sessionAttachmentOwners: 3, sessionAttachmentLeases: 4, fileWatchers: 5, browserViews: 2, releasedBrowserViews: 1 }, unavailable: null
   }
 }
@@ -69,7 +69,7 @@ function fact(label: string) {
 }
 
 describe('real resource panel observation', () => {
-  it('separates app CPU, Runtime retention, directory cleanup and existing owners in the mounted product', async () => {
+  it('separates app CPU, Runtime retention, selected storage and existing owners in the mounted product', async () => {
     await open()
     expect(panel()!.textContent).toContain('Observing Runtime…')
     await push(snapshot())
@@ -85,11 +85,14 @@ describe('real resource panel observation', () => {
     expect(fact('Runs · running / ended')).toBe('11 · 7 / 4')
     expect(fact('Attachments')).toBe('8')
     expect(fact('Ended without attachments')).toBe('2')
-    expect(fact('Startup directories reclaimed')).toBe('1')
-    expect(fact('Directories preserved')).toBe('2')
-    expect(fact('Cleanup failures')).toBe('1')
-    expect(panel()!.textContent).toContain('Directory cleanup does not reclaim retained Runs')
-    expect(panel()!.textContent).toContain('permission denied')
+    const storage = panel()!.querySelector('.resource-usage__storage')!
+    expect(storage.textContent).toContain('Selected Runtime')
+    expect(storage.textContent).toContain('/runtime/current')
+    expect(storage.textContent).toContain('4.0 MiB')
+    expect(panel()!.querySelectorAll('.resource-usage__storage')).toHaveLength(1)
+    expect(panel()!.textContent).toContain('Unattached Runs can still hold history')
+    expect(panel()!.textContent).not.toContain('Startup directories')
+    expect(panel()!.textContent).not.toContain('Other endpoint')
     expect(fact('Main attachment owners / leases')).toBe('3 / 4')
     expect(fact('Terminal views / addons / listeners')).toBe('3 / 12 / 18')
     expect(fact('Editors / models / documents')).toBe('2 / 4 / 6')
@@ -112,8 +115,8 @@ describe('real resource panel observation', () => {
     data.app!.unavailable = 'metric read failed'
     data.runtime![0]!.resources = null
     data.runtime![0]!.unavailable = 'Runtime inventory timed out'
-    data.runtime![0]!.endpointStorage = null
-    data.runtime![0]!.endpointStorageUnavailable = 'directory not readable'
+    data.runtime![0]!.runtimeStorage = null
+    data.runtime![0]!.runtimeStorageUnavailable = 'directory not readable'
     data.unavailable = 'process list failed'
     await push(data)
     expect(panel()!.textContent).toContain('Application readings stale: metric read failed')

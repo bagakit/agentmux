@@ -4,7 +4,7 @@ import {
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
-  endpointDirectoryUsage,
+  runtimeStorageUsage,
   loadAgentSessions,
   type AgentCapabilities,
   type AgentCatalogEntry,
@@ -340,14 +340,14 @@ export class RuntimeController {
   async resourceUsageObservation(): Promise<RuntimeUsage[]> {
     const hosts = [...this.hosts]
     const storage = hosts.some(([, host]) => host.executionHost.kind === 'local')
-      ? endpointDirectoryUsage().then(
-        (endpointStorage) => ({ endpointStorage, endpointStorageUnavailable: null }),
+      ? runtimeStorageUsage().then(
+        (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null }),
         (error: unknown) => ({
-          endpointStorage: null,
-          endpointStorageUnavailable: error instanceof Error ? error.message : String(error)
+          runtimeStorage: null,
+          runtimeStorageUnavailable: error instanceof Error ? error.message : String(error)
         })
       )
-      : Promise.resolve({ endpointStorage: null, endpointStorageUnavailable: 'Remote endpoint storage is unavailable' })
+      : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable' })
     return await Promise.all(hosts.map(async ([hostId, { client, executionHost }]): Promise<RuntimeUsage> => {
       const [resources, endpoint] = await Promise.all([
         client.runtimeResourceSnapshot().then(
@@ -356,7 +356,7 @@ export class RuntimeController {
         ),
         executionHost.kind === 'local'
           ? storage
-          : Promise.resolve({ endpointStorage: null, endpointStorageUnavailable: 'Remote endpoint storage is unavailable' })
+          : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable' })
       ])
       return {
         hostId,
@@ -366,8 +366,7 @@ export class RuntimeController {
           cpuPercent: null,
           rssKib: null,
           unavailable: 'ctxmux does not publish its daemon PID'
-        },
-        endpointReclaim: client.endpointReclaim()
+        }
       }
     }))
   }
@@ -795,10 +794,10 @@ export class RuntimeController {
       let retainedRun: { runId: string } | null = null
       try {
         const attached = existing
-          ? await client.readRunReplay(control.run, afterByte)
+          ? await client.readRunReplay(control.run, afterByte, 'terminal')
           : control.kind === 'agent'
-            ? (await client.reattachAgent(control.agentSessionId, afterByte)).attachment
-            : await client.attachTerminal(control.runId, afterByte)
+            ? (await client.reattachAgent(control.agentSessionId, afterByte, 'terminal')).attachment
+            : await client.attachTerminal(control.runId, afterByte, 'terminal')
         if (!existing) retainedRun = attached.run
         if (attached.run.runId !== control.run.runId) {
           throw new Error('The Session control changed before its exact Run Attachment was established.')
@@ -833,7 +832,9 @@ export class RuntimeController {
             ? null
             : { cols: attached.run.cols, rows: attached.run.rows },
           replay: attached.replay,
-          gap: attached.gap
+          gap: attached.gap,
+          terminal: attached.terminal,
+          resizeRevision: attached.resizeRevision
         }
       } catch (error) {
         if (retainedRun) {
@@ -1463,24 +1464,34 @@ export class RuntimeController {
   }
 
   private publish(hostId: string, event: AgentMuxClientEvent): void {
-    if (event.type === 'terminal-output') {
+    if (event.type === 'terminal-output' || event.type === 'terminal-snapshot') {
       const queryKey = terminalInputKey(hostId, event.run.runId)
-      const scan = scanTerminalOscColorQueries(
-        event.data,
-        this.terminalColorQueryRemainders.get(queryKey) ?? '',
-        this.terminalViewColors
-      )
-      if (scan.remainder) this.terminalColorQueryRemainders.set(queryKey, scan.remainder)
-      else this.terminalColorQueryRemainders.delete(queryKey)
-      if (scan.replies.length > 0) {
-        const replies = scan.replies.join('')
-        const readyAgentSessionId = this.readyAgentColorQueryRuns.get(queryKey)
-        if (readyAgentSessionId) {
-          void this.replyToAgentColorQuery(hostId, readyAgentSessionId, event.run.runId, replies)
-        } else {
-          const pending = `${this.pendingAgentColorQueryReplies.get(queryKey) ?? ''}${replies}`
-          if (Buffer.byteLength(pending) <= 4 * 1024) {
-            this.pendingAgentColorQueryReplies.set(queryKey, pending)
+      // Only original tail bytes contain new CLI queries; restoration bytes are synthetic.
+      const decoder = new TextDecoder()
+      const outputs = event.type === 'terminal-output' ? [event.data] : event.replay
+        .filter(chunk => chunk.endByte > event.afterByte)
+        .map(chunk => {
+          const skip = Math.max(0, event.afterByte - chunk.startByte)
+          return decoder.decode(chunk.dataBytes.subarray(skip), { stream: true })
+        })
+      for (const data of outputs) {
+        const scan = scanTerminalOscColorQueries(
+          data,
+          this.terminalColorQueryRemainders.get(queryKey) ?? '',
+          this.terminalViewColors
+        )
+        if (scan.remainder) this.terminalColorQueryRemainders.set(queryKey, scan.remainder)
+        else this.terminalColorQueryRemainders.delete(queryKey)
+        if (scan.replies.length > 0) {
+          const replies = scan.replies.join('')
+          const readyAgentSessionId = this.readyAgentColorQueryRuns.get(queryKey)
+          if (readyAgentSessionId) {
+            void this.replyToAgentColorQuery(hostId, readyAgentSessionId, event.run.runId, replies)
+          } else {
+            const pending = `${this.pendingAgentColorQueryReplies.get(queryKey) ?? ''}${replies}`
+            if (Buffer.byteLength(pending) <= 4 * 1024) {
+              this.pendingAgentColorQueryReplies.set(queryKey, pending)
+            }
           }
         }
       }

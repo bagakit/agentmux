@@ -1,29 +1,7 @@
 /**
- * 「这个 unix socket 后面还有活着的监听者吗」——判据的唯一真值。
- *
- * 两个调用点各带一套后果，但问的是同一个问题：
- *
- *   - `runtime-endpoint-reclaim` 据此决定一个含 ctxmux `state.sqlite3` 的目录能不能 `rm -rf`
- *     （实测一个旧目录 110.2MB，里面是全部 Run 与回放历史，删掉不可逆）；
- *   - `control-host` 据此决定能不能接管一个 Control endpoint（抢占一个活着的 owner 会让两个进程
- *     同时认为自己拥有那条 socket）。
- *
- * **判据本身与「探不准怎么办」必须分开。** 收成一处的理由不是省代码，是这个判定只有三种答案，
- * 而第三种最容易被写没：
- *
- *   - `alive`：连上了，确实有人监听；
- *   - `dead`：`ENOENT`（socket 文件都没了）或 `ECONNREFUSED`（文件在、没人监听，daemon 死后的残骸）；
- *   - `unknown`：**其余一切**。权限不足（实测 `EACCES`）、路径上是个普通文件而不是 socket
- *     （实测 `ENOTSOCK`）、以及超时——一个忙或慢的 daemon 没在预算内应答。
- *
- * 之前这个三分法在两处各被手写成一个 `boolean`，`unknown` 被就地折进 `true`/`reject`。折进去之后
- * 「判不准」这条出口就再也不能被单独断言：把 reclaim 那侧的两个兜底各翻成 `false`，探测抖动一次就
- * 删掉一个活 daemon 的全部持久状态，而那个模块 20 条测试全绿（实测）。三态是为了让那条出口有名字、
- * 有类型、能被直接质询——`boolean` 里没有它的位置。
- *
- * 怎么处理 `unknown` 由调用方定，因为两边的代价不对称：reclaim 侧当作「活着」（宁可漏收，绝不误删），
- * control-host 侧抛 `CONTROL_UNAVAILABLE`（宁可拒绝接管，绝不与活 owner 抢同一条 socket）。所以这里
- * 只给事实，不替谁决定；而两边的取舍各自在自己那侧被断言。
+ * Whether a Unix socket has a live listener. Unknown includes permissions and timeouts,
+ * and must remain distinct from dead. Control ownership uses this to avoid taking over
+ * an endpoint whose existing owner could still be alive.
  */
 import { createConnection } from 'node:net'
 

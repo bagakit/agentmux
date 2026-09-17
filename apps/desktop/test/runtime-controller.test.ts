@@ -12,6 +12,7 @@ import type { AgentMuxStoredAgentSession } from '../../../packages/core/src/type
 import {
   AgentMuxError,
   type AgentCapabilities,
+  type AgentMuxClientEvent,
   type AgentMuxAgentSession,
   type AgentMuxAgentContinuityResult,
   type AgentMuxAgentSessionStore,
@@ -2015,6 +2016,28 @@ describe('RuntimeController configuration transaction', () => {
         '\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\'
       )
     })
+  })
+
+  it('scans only new original snapshot tail for color queries, preserving a split prefix and excluding seed or already answered bytes', async () => {
+    const controller=await configuredController()
+    controller.setTerminalViewColors({foreground:'#ffffff',background:'#000000'})
+    const client=runtimeFixture.FakeClient.instances[0]!
+    client.eventListener?.({type:'agent-session',session:{kind:'agent',agentSessionId:'agent-1',providerId:'codex',executorId:'codex',
+      hostId:'local',workspacePath:'/repo',run:{runId:'run-1'},retiredRuns:[],createdAt:1,updatedAt:1}} satisfies AgentMuxClientEvent)
+    const old='\x1b]11;?\x07ABC\x1b]10;'
+    const afterByte=100+Buffer.byteLength(old)
+    client.eventListener?.({type:'terminal-output',agentSessionId:'agent-1',run:{runId:'run-1'},data:old,dataBytes:Buffer.from(old),
+      evidence:{source:'terminal-output',observedAt:1,outputByteRange:{startByte:100,endByte:afterByte}}} satisfies AgentMuxClientEvent)
+    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith('agent-1','\x1b]11;rgb:0000/0000/0000\x1b\\'))
+    client.writeAgent.mockClear()
+    const data=old+'?\x07'
+    client.eventListener?.({type:'terminal-snapshot',agentSessionId:'agent-1',afterByte,
+      run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'codex',agentSessionId:'agent-1',workspacePath:'/repo',
+        pid:123,state:'running',cols:80,rows:24,observedAt:2,latestOutputBytes:100+Buffer.byteLength(data),acceptedInputBytes:0},
+      terminal:{type:'basic-vt',checkpoint:{runId:'run-1',throughByte:100,resizeRevision:0,size:{cols:80,rows:24}},
+        restoreBytes:Buffer.from('\x1b]10;?\x07'),resizes:[]},gap:null,resizeRevision:0,
+      replay:[{type:'data',runId:'run-1',startByte:100,endByte:100+Buffer.byteLength(data),data,dataBytes:Buffer.from(data)}]} satisfies AgentMuxClientEvent)
+    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith('agent-1','\x1b]10;rgb:ffff/ffff/ffff\x1b\\'))
   })
 
   it('shares one retained Run Attachment across concurrent Desktop View leases', async () => {
