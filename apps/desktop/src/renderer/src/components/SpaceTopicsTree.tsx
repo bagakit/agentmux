@@ -20,8 +20,7 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openTopic = useAppStore((state) => state.openScratchTopic)
   const reportError = useAppStore((state) => state.reportError)
-  const toolsOpen = useAppStore((state) => state.toolsOpen)
-  const toggleTools = useAppStore((state) => state.toggleTools)
+  const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const current = layout ? activeTopicIdFromLayout(layout, tabs) : undefined
   const entries = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID) ?? []
   const orderedIds = partitionPinned(orderTopics(entries.map((topic) => topic.id), order), pinned ?? [])
@@ -30,7 +29,7 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
   async function openOverview(): Promise<void> {
     try {
       await selectWorkspace(workspace.id)
-      if (!toolsOpen) toggleTools()
+      setWorkspaceTool('files-branches')
     } catch (cause) { reportError(cause) }
   }
 

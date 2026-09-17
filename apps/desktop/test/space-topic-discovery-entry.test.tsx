@@ -15,7 +15,7 @@ const fixture = vi.hoisted(() => ({
     layouts: {}, tabs: {}, activeWorkspaceId: 'project', scratchTopicOrder: [],
     pinnedItems: {}, collapsedProjectGroups: {}, workspaceFileRevisions: {}, toolsOpen: false,
     openScratchTopic: vi.fn(async () => {}), selectWorkspace: vi.fn(async () => {}),
-    toggleTools: vi.fn(), toggleProjectGroup: vi.fn(), reportError: vi.fn()
+    setWorkspaceTool: vi.fn(), toggleProjectGroup: vi.fn(), reportError: vi.fn()
   }
 }))
 vi.mock('../src/renderer/src/store', () => ({
@@ -62,7 +62,7 @@ it('discovers two filesystem Topics without Sessions or Tab bindings and opens t
   expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:beta', SCRATCH_WORKSPACE_ID)
   await act(async () => button('Topics overview').click())
   expect(fixture.state.selectWorkspace).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID)
-  expect(fixture.state.toggleTools).toHaveBeenCalledOnce()
+  expect(fixture.state.setWorkspaceTool).toHaveBeenCalledWith('files-branches')
   expect(button('Collapse Topics').getAttribute('aria-expanded')).toBe('true')
   await act(async () => button('Collapse Topics').click())
   expect(fixture.state.toggleProjectGroup).toHaveBeenCalledWith('space:topics')

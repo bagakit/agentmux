@@ -693,6 +693,7 @@ type AppState = {
    */
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
+  openProjectFolder(): Promise<void>
   createScratchTopic(): Promise<ScratchTopicSnapshot>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
@@ -4406,28 +4407,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { documentRevealTargets: next }
     })
   },
+  async openProjectFolder() {
+    const workspace = await api.workspaces.chooseLocalFolder()
+    if (!workspace) return
+    // Resolve config after the dialog returns; unrelated concurrent registrations stay intact.
+    set((current) => current.config && !current.config.workspaces.some((item) => item.id === workspace.id)
+      ? { config: { ...current.config, workspaces: [...current.config.workspaces, workspace] } }
+      : current)
+    await get().selectWorkspace(workspace.id)
+  },
   async createScratchTopic() {
     const state = get()
-    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
-    if (!workspace || !isScratchWorkspaceId(workspace.id)) {
-      throw new Error('Select the Scratch workspace first')
-    }
-    const layout = state.layouts[workspace.id]
-    if (!layout) throw new Error('Scratch workspace layout is unavailable')
-    const group = findGroup(layout, layout.activeGroupId)
-    const activeTab = group?.activeTabId ? state.tabs[group.activeTabId] : undefined
-    const activeSurface = activeTab ? titleWorkbenchSurface(activeTab) : undefined
-    const canOwnTopic = activeTab &&
-      !activeTab.topicId &&
-      activeSurface !== undefined && isAgentOrLauncherSurface(activeSurface) &&
-      isScratchTopicId(activeTab.id)
-    const targetTab = canOwnTopic ? activeTab : newLauncherTab(workspace.id)
-    const topicId = targetTab.topicId ?? targetTab.id
+    const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
+    if (!workspace) throw new Error('Topics workspace is unavailable')
+    const layout = state.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+    // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
+    // not the identity from which the Topic is derived.
+    const topicId = `launcher:${crypto.randomUUID()}`
+    const targetTab = newLauncherTab(workspace.id, topicId)
     const snapshot = await api.scratch.ensureTopic(workspace.id, topicId)
     let placementFailed = false
     set((current) => {
-      const currentLayout = current.layouts[workspace.id]
-      if (!currentLayout) return current
+      const currentLayout = current.layouts[workspace.id] ?? layout
       const nextTab = { ...targetTab, topicId }
       const alreadyOpen = Boolean(current.tabs[targetTab.id])
       // 已在场只需激活；新建必须真的挂上，挂不上就整笔放弃（见 addTabPlacement）。
@@ -4440,6 +4441,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return current
       }
       return {
+        activeWorkspaceId: workspace.id,
+        mainSurface: 'workbench' as const,
         tabs: { ...current.tabs, [nextTab.id]: nextTab },
         layouts: { ...current.layouts, [workspace.id]: nextLayout },
         workspaceFileRevisions: bumpWorkspaceFileRevision(
