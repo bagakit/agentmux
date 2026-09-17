@@ -1,9 +1,8 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
-import { useAgentStatusDecay } from './lib/agent-status-decay'
 import { useSidebarResize } from './hooks/useSidebarResize'
 import {
   TOOL_DOCK_MAX_WIDTH,
@@ -37,14 +36,7 @@ import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tre
 import { isMacPlatform } from './lib/host-platform'
 import { applyAppAppearance } from './lib/app-appearance'
 import { observeOverlays } from './lib/native-surface-overlay'
-import {
-  TerminalParkingProvider,
-  useTerminalColdParking
-} from './lib/terminal-cold-parking-coordinator'
-import {
-  SurfaceMemoryBudgetProvider,
-  useSurfaceMemoryBudget
-} from './lib/surface-memory-budget-coordinator'
+import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
@@ -72,7 +64,6 @@ function DesktopApp() {
   const dismissError = useAppStore((state) => state.dismissError)
   const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
-  const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
   const tabs = useAppStore((state) => state.tabs)
@@ -89,6 +80,7 @@ function DesktopApp() {
     if (visible) acquireNativeSurfaceOverlay()
     else releaseNativeSurfaceOverlay()
   }, [acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
+  const executorIdentity = useMemo(() => ({ config, onPanelVisibilityChange: onAgentPanelVisibilityChange }), [config, onAgentPanelVisibilityChange])
   // 浮层 vs 原生视图的那条**唯一**订阅点。窗口级原生视图合成在所有 renderer 像素之上，所以任何
   // 画在 DOM 里的浮层都会被它盖住——与 z-index 无关。判据取 Radix 自己的 DOM 协议（portal 到
   // React 根之外 + data-state=open），一次覆盖全仓 21 个 Root，新加的自动覆盖；判定在
@@ -156,14 +148,6 @@ function DesktopApp() {
   const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
-  const parkedTerminalRegionIds = useTerminalColdParking({
-    workbenchVisible: workbenchVisible || Boolean(focusTab),
-    measurementActive: terminalParkingMeasurement
-  })
-  const surfaceMemoryBudget = useSurfaceMemoryBudget({
-    workbenchVisible: workbenchVisible || Boolean(focusTab),
-    measurementActive: terminalParkingMeasurement
-  })
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
     isOpen: toolsVisible,
     width: toolDockWidth,
@@ -202,9 +186,6 @@ function DesktopApp() {
   // Background Agents announce themselves: a completion, a request, or a failure the user is not looking
   // at raises a native notification that routes back to that Session.
   useAgentAttentionNotifications()
-
-  // 掉了 hook 流的 `working` 会永远转圈——这个 hook 让无新证据的非终态衰减为中性态，圈就此停下。
-  useAgentStatusDecay()
 
   // The window's global keyboard router. One capture-phase keydown listener owns every window-scope
   // binding — the quick switcher and the workbench actions — so there is exactly one place the focused
@@ -248,9 +229,8 @@ function DesktopApp() {
 
   return (
     <SettingsNavigation.Provider value={{ open: openSettings }}>
-    <ExecutorIdentityContext.Provider value={{ config, sessions, onPanelVisibilityChange: onAgentPanelVisibilityChange }}>
-      <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
-      <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
+    <ExecutorIdentityContext.Provider value={executorIdentity}>
+      <RendererResourceOwners workbenchVisible={workbenchVisible || Boolean(focusTab)} measurementActive={terminalParkingMeasurement}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
@@ -372,8 +352,7 @@ function DesktopApp() {
       </div>
       <WindowOverlayHost />
       </BoardRowsProvider>
-      </SurfaceMemoryBudgetProvider>
-      </TerminalParkingProvider>
+      </RendererResourceOwners>
       {settingsRoute ? (
         <SettingsPanel
           initialSection={settingsRoute.section}

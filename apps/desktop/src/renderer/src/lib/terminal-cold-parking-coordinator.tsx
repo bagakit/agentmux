@@ -1,4 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { shallow } from 'zustand/shallow'
+import { useShallow } from 'zustand/react/shallow'
+import { sessionPresentationById } from './session-presentation'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
@@ -105,8 +108,10 @@ export function TerminalParkingProvider({
   parkedRegionIds: ReadonlySet<string>
   children: ReactNode
 }) {
+  const previousRegionIds = useRef(parkedRegionIds)
+  if (!shallow(previousRegionIds.current, parkedRegionIds)) previousRegionIds.current = parkedRegionIds
   return (
-    <TerminalParkingContext.Provider value={parkedRegionIds}>
+    <TerminalParkingContext.Provider value={previousRegionIds.current}>
       {children}
     </TerminalParkingContext.Provider>
   )
@@ -131,7 +136,17 @@ export function useTerminalColdParking({
   // observe an empty workbench rather than make the entire App render fail closed.
   const tabs = useAppStore((state) => state?.tabs) ?? EMPTY_TABS
   const layouts = useAppStore((state) => state?.layouts) ?? EMPTY_LAYOUTS
-  const sessions = useAppStore((state) => state?.sessions) ?? EMPTY_SESSIONS
+  const sessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap((tab) => (
+    Object.values(tab.regions).flatMap((surface) => isSessionSurface(surface) ? [surface.sessionId] : [])
+  )))], [tabs])
+  const sessions = useAppStore(useShallow((state) => {
+    if (sessionIds.length === 0) return EMPTY_SESSIONS
+    const byId = sessionPresentationById(state.sessions)
+    return sessionIds.flatMap((id) => {
+      const session = byId.get(id)
+      return session ? [session] : []
+    })
+  })) ?? EMPTY_SESSIONS
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const candidates = useMemo(
     () => collectTerminalColdParkCandidates({

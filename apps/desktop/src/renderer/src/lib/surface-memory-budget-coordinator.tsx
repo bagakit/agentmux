@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import {
   collectSurfaceMemoryCandidates,
@@ -16,7 +15,6 @@ type Documents = SurfaceMemoryCollectionInput['documents']
 
 const EMPTY_TABS: Tabs = Object.freeze({})
 const EMPTY_LAYOUTS: Layouts = Object.freeze({})
-const EMPTY_SESSIONS: readonly SessionSnapshot[] = Object.freeze([])
 const EMPTY_DOCUMENTS: Documents = Object.freeze({})
 const EMPTY_FLAGS: Readonly<Record<string, boolean>> = Object.freeze({})
 const EMPTY_REGION_IDS: ReadonlySet<string> = new Set()
@@ -67,7 +65,6 @@ export function useSurfaceMemoryBudget({
 }: CoordinatorOptions): SurfaceMemoryBudgetState {
   const tabs = useAppStore((state) => state?.tabs) ?? EMPTY_TABS
   const layouts = useAppStore((state) => state?.layouts) ?? EMPTY_LAYOUTS
-  const sessions = useAppStore((state) => state?.sessions) ?? EMPTY_SESSIONS
   const documents = useAppStore((state) => state?.documents) ?? EMPTY_DOCUMENTS
   const dirtyDocuments = useAppStore((state) => state?.dirtyDocuments) ?? EMPTY_FLAGS
   const savingDocuments = useAppStore((state) => state?.savingDocuments) ?? EMPTY_FLAGS
@@ -76,14 +73,13 @@ export function useSurfaceMemoryBudget({
     () => collectSurfaceMemoryCandidates({
       tabs,
       layouts,
-      sessions,
       documents,
       dirtyDocuments,
       savingDocuments,
       activeWorkspaceId,
       workbenchVisible
     }),
-    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, sessions, tabs, workbenchVisible]
+    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, tabs, workbenchVisible]
   )
   const candidateKey = useMemo(
     () => candidates.map((candidate) => [

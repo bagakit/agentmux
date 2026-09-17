@@ -152,14 +152,25 @@ export function RosterRowView({
   )
 }
 
-export function AgentRoster({ total }: { total: number }) {
+function AgentRosterContents() {
   const sessions = useAppStore((state) => state.sessions)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const selectSession = useAppStore((state) => state.selectSession)
   const reportError = useAppStore((state) => state.reportError)
   const rows = buildAgentRoster({ sessions, providerCatalog })
-  if (rows.length === 0) return null
+  return <>
+    <div className="agent-roster__heading">
+      <span>Agents in this window</span>
+      <span className="agent-roster__heading-count">{rows.length}</span>
+    </div>
+    <div className="agent-roster__list">
+      {rows.map((row) => <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />)}
+    </div>
+  </>
+}
 
+export function AgentRoster({ total }: { total: number }) {
+  if (total === 0) return null
   return (
     // DropdownMenu rather than Popover: it is already a dependency and its semantics are exactly this
     // — one trigger disclosing a list of navigable items, with roving focus and Escape for free.
@@ -182,15 +193,7 @@ export function AgentRoster({ total }: { total: number }) {
         {/* Presence-managed: any keyframe animation here must be scoped to [data-state='open'], or the
             node waits for an animationend a close never fires. See presence-exit-animation.test.ts. */}
         <DropdownMenu.Content className="agent-roster" side="top" align="start" sideOffset={6} collisionPadding={8}>
-          <div className="agent-roster__heading">
-            <span>Agents in this window</span>
-            <span className="agent-roster__heading-count">{rows.length}</span>
-          </div>
-          <div className="agent-roster__list">
-            {rows.map((row) => (
-              <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />
-            ))}
-          </div>
+          <AgentRosterContents />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -211,25 +214,42 @@ export function AgentRoster({ total }: { total: number }) {
 //
 // A class with no Agents renders NOTHING here — no chevron, no dead click into an empty popover. That is
 // the single decision for the zero case, so working/needs-you/error behave identically when empty.
-export function AgentTreePanel({
-  filter,
-  heading,
-  label
-}: {
-  filter: AgentTreeFilter
-  heading: string
-  // The chevron's accessible name: it carries the fact ("Show the 3 working agents by project"), not
-  // just "expand", so a screen-reader user hears what opens.
-  label: string
-}) {
+function AgentTreeContents({ filter, heading }: { filter: AgentTreeFilter; heading: string }) {
   const sessions = useAppStore((state) => state.sessions)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const workspaces = useAppStore((state) => state.config?.workspaces)
   const selectSession = useAppStore((state) => state.selectSession)
   const reportError = useAppStore((state) => state.reportError)
   const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter })
-  if (projects.length === 0) return null
+  return <>
+    <div className="agent-roster__heading">
+      <span>{heading}</span>
+      <span className="agent-roster__heading-count">
+        {projects.reduce((sum, project) => sum + project.rows.length, 0)}
+      </span>
+    </div>
+    {projects.map((project) => (
+      <div className="agent-tree__project" key={project.key}>
+        <div className="agent-tree__project-name">
+          {project.name}
+          {project.hostId !== 'local' ? <small>{project.hostId}</small> : null}
+        </div>
+        <div className="agent-roster__list">
+          {project.rows.map((row) => <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />)}
+        </div>
+      </div>
+    ))}
+  </>
+}
 
+export function AgentTreePanel({ filter, heading, label, count }: {
+  filter: AgentTreeFilter
+  heading: string
+  label: string
+  /** The existing status rollup owns membership; a closed disclosure needs only its count. */
+  count: number
+}) {
+  if (count === 0) return null
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -245,25 +265,7 @@ export function AgentTreePanel({
       <DropdownMenu.Portal>
         {/* Presence-managed: keyframe animation scoped to [data-state='open'] — see the roster above. */}
         <DropdownMenu.Content className="agent-roster agent-tree" side="top" align="start" sideOffset={6} collisionPadding={8}>
-          <div className="agent-roster__heading">
-            <span>{heading}</span>
-            <span className="agent-roster__heading-count">
-              {projects.reduce((sum, project) => sum + project.rows.length, 0)}
-            </span>
-          </div>
-          {projects.map((project) => (
-            <div className="agent-tree__project" key={project.key}>
-              <div className="agent-tree__project-name">
-                {project.name}
-                {project.hostId !== 'local' ? <small>{project.hostId}</small> : null}
-              </div>
-              <div className="agent-roster__list">
-                {project.rows.map((row) => (
-                  <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />
-                ))}
-              </div>
-            </div>
-          ))}
+          <AgentTreeContents filter={filter} heading={heading} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
