@@ -26,6 +26,7 @@ const critical = [
   ...['main.cjs', 'entry.tsx', 'index.html'].map(name => path.join(fixture, name)),
   path.join(desktop, 'src/renderer/src/components/TerminalView.tsx'), path.join(desktop, 'src/renderer/src/components/SessionPane.tsx'),
   path.join(desktop, 'src/renderer/src/components/SessionHistoryView.tsx'), path.join(desktop, 'src/renderer/src/store.ts'),
+  path.join(desktop, 'src/renderer/src/components/ConversationMessage.tsx'), path.join(desktop, 'src/renderer/src/styles/activity-conversation.css'),
   path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/renderer/src/lib/session-events.ts'),
   path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
   path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/session-history.css'),

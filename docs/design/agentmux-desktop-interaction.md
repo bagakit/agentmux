@@ -1,5 +1,17 @@
 # AgentMux Desktop 交互设计合同
 
+## 左下角导航、Space 与 Goals
+
+用户确认：「把这一排页签切换的按钮改成这个顺序，然后把它们放到最左下角」。窗口只有一组主导航，固定顺序为 **PMO Teams、Space、Focus、Goals、Survey**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。
+
+- **PMO Teams** 是协调入口：打开或收起同一 PMO 浮窗，保留当前主工作面的选中状态和执行焦点。PMO 排第一不意味着启动默认进入 PMO；启动仍恢复用户上一次工作面。
+- **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space，Workspace 继续表达底层工作区对象。
+- **Focus** 查看执行状态、最近上下文与需要用户处理的事项；进入已有 Session 时继续复用原 Tab/Region。
+- **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；待澄清的想法可以先作为 Goal 记录，再由 PMO 补齐目标与完成标准。Demand 仍是持久化实体与控制协议身份，Goal 状态与执行 Session 状态独立。
+- **Survey** 用于浏览与查证，打开网页后进入 Space 的既有 Browser 工作面。
+
+窗口右下角提供独立的快捷键与设置工具组，状态摘要位于其前。辅助入口不跟在左侧主导航后，也不依赖 Project Rail 是否可见。窄窗口优先保留全部导航、PMO、快捷键、设置与需要用户处理的状态；长摘要可以收紧，控件不能重叠或被裁掉。视觉尺寸、圆角、分组与响应式规则见密度 SSOT《左下角导航与右下角工具组》。
+
 ## 主题切换与样式真值
 
 - App chrome 的主题只有一个运行时入口：根文档的 `data-appearance` 属性。设置、系统偏好与启动恢复都
@@ -113,7 +125,7 @@
 
 ### Agents / Session / Board 与注意力闭环
 
-- 主工作面只有三项：Agents、Workspaces、Board。三项切换位于窗口底部中央，顶行不再放一套平级导航；Workspaces 是现有 terminal/workbench 工作面的对外名称，Session 只表示其中运行的 Agent/terminal 生命周期。
+- 主导航的入口、顺序、位置和名称见《左下角导航、Space 与 Goals》；顶行不重复平级导航，Session 表示工作面中的 Agent/Terminal 生命周期。
 - Agents 是全局注意力收件箱：先显示 Needs you，再显示工作中、已完成和错误的 Agent；卡片选中后在同屏右侧显示该 Session 的观察工作区，明确的“打开 Session”动作才导航到原工作台。Needs you 的 typed request 从同一详情区进入既有回答面板，不能在这里复制一份 Session 或 Runtime 状态。
 - Session 是具体 Agent Session 的 terminal/workbench；Agent 的请求、回复和恢复动作在同一 Session 内完成，处理后仍留在原 Session。
 - Board 的主实体是 Demand。Demand 卡片第一层显示 Demand ID、Project 和状态，关联 Session 只作为执行事实；没有选中 Demand 时不渲染 DemandWorkspace，也不保留空右栏。
@@ -1410,7 +1422,7 @@ Task 详情中的 Session 默认是观察投影：可以查看实时输出、Act
 ### Agents、Session 与 Board 的全局入口
 
 - 当前产品明确区分三种全局工作面：**Agents** 展示 Agent/Executor 的聚合与状态，**Session** 展示具体会话与它们的上下文，**Board** 展示 Demand 计划与执行关联。Demand 卡不能因为带有 Session 就改名成 Agent，Session 也不能作为 Board 的隐含主实体。
-- 三种工作面使用同一组全局切换入口，切换只改变中心工作面的投影，不改变当前 Project、Workspace 或 Session 的持久身份。底部中央是主切换位置；右上角不再放一套平级的 Agents/Session/Board 导航。 这条约束同样覆盖 Session 的单 Tab Group 标签栏与多 Tab Group 分屏顶栏，两者都不得再渲染主视图切换。
+- 三种工作面使用同一组全局切换入口，切换只改变中心工作面的投影，不改变当前 Project、Workspace 或 Session 的持久身份。主切换的位置归《左下角导航、Space 与 Goals》；右上角不再放一套平级导航。 这条约束同样覆盖 Session 的单 Tab Group 标签栏与多 Tab Group 分屏顶栏，两者都不得再渲染主视图切换。
 - Board 选中 Demand 后可以在右侧展开关联 Session Region；这只是 Demand 的执行投影。Agents 与 Session 选中对象的详情沿用同一右侧工作区语义，不能通过“把右面板搬到左面板”来表达未分屏状态。
 - 没有分屏时，左右栏只表达真实存在的内容：没有右侧详情就保持主工作面全宽，不能把右侧内容视觉上推到左侧或反向滑入，造成方向与焦点错觉。分屏布局只在存在两个可见 Region 时启用对应的 arrangement。
 - 切换入口必须可键盘操作、保留当前选中项和可恢复焦点；重启恢复后先恢复三种工作面的选择，再尝试恢复其中引用的 Session/Demand 投影。
@@ -1494,9 +1506,9 @@ Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端
 
 ### PMO Teams 入口位置与展开动效
 
-PMO Teams 不再提供独立的浮动头像形态；它只有底部中央的产品入口。打开后入口仍位于底部中央，龙头像作为入口的身份锚点，不被移到随机屏幕位置。PMO 面板的上一次位置和尺寸属于持久 UI 状态；再次打开沿用该位置，若窗口边界改变只做最小夹紧，不重置到随机位置。
+PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见《左下角导航、Space 与 Goals》。打开后龙头像仍作为同一入口的身份锚点，不被移到随机屏幕位置。PMO 面板的上一次位置和尺寸属于持久 UI 状态；再次打开沿用该位置，若窗口边界改变只做最小夹紧，不重置到随机位置。
 
-面板展开采用原位出现：不做整块缩放，不从远处飞入。允许一段很短的透明度、边界亮度和细微扫描线/信号校准动画，让用户看出面板已从中央入口接通；动画结束后保持静止，`prefers-reduced-motion` 下只保留即时出现。面板打开时龙头像的眼睛可以有低频、低对比度的粒子/扫描光，表达协调器在线，不影响可读性，也不能依赖颜色作为唯一状态。
+面板展开采用原位出现：不做整块缩放，不从远处飞入。允许一段很短的透明度、边界亮度和细微扫描线/信号校准动画，让用户看出面板已从 PMO 入口接通；动画结束后保持静止，`prefers-reduced-motion` 下只保留即时出现。头像眼睛的粒子反馈只在打开时短促出现，随后静止；展开状态由按钮轮廓与可访问状态共同表达，不能依赖颜色作为唯一状态。
 
 龙头像打开态的在线反馈使用左右两束对称的短烟火：每束从一只眼睛附近向外发散数枚小粒子，带有不同角度、距离和透明度，在短周期内完成后低频重播。粒子只覆盖眼睛周围的透明区域，不遮住龙脸和底部入口文字；它是装饰性状态提示，不能替代 `aria-expanded` 或可读状态。
 
@@ -1535,7 +1547,7 @@ PMO Teams 不再提供独立的浮动头像形态；它只有底部中央的产�
 
 ### Agents 全局层级与拓扑图
 
-Agents 与 Workspaces、Board 位于同一组全局工作面。Agents 打开时 Project Rail 被遮挡，Project 只作为 Agent 的归属事实和未来拓扑图的分组边界，不再在左侧重复出现。Agents 当前先保留可用的分组/详情表面；引力图是独立 Feature：活跃 Agent 居中，不活跃 Agent 灰度保留；同一 Project 或 Demand 的 Agent 距离更近，Project 关联范围形成多边形区域。图中的节点、边和状态必须复用现有 Session/Project/Demand 事实，不能建立第二套 Agent registry。
+Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project Rail 被遮挡，Project 只作为 Agent 的归属事实和未来拓扑图的分组边界，不再在左侧重复出现。Agents 当前先保留可用的分组/详情表面；引力图是独立 Feature：活跃 Agent 居中，不活跃 Agent 灰度保留；同一 Project 或 Demand 的 Agent 距离更近，Project 关联范围形成多边形区域。图中的节点、边和状态必须复用现有 Session/Project/Demand 事实，不能建立第二套 Agent registry。
 
 ### Demand 管理闭环
 
@@ -1592,7 +1604,7 @@ Topic 行的 Tab 收起态只占一个紧凑图标位：如果只有一个 Regio
 
 ### 跨主视图的 Session 上下文连续性
 
-用户打开或选中的 Session 是 Agents、Workspaces、Board 之间共享的导航上下文。切换到 Workspaces 时，必须显示这个 Session 已有的 Workspace、Tab 和 Region；切换到 Agents 时，继续选中同一个 Session 的观察工作区；切换到 Board 时，保留同一 Session 对应的执行行或卡片选中与可见定位。切换只改变主视图投影，不创建第二个 Session、Run 或 Region，也不改变 Agent 的工作目录。
+用户打开或选中的 Session 是 Focus、Space、Goals 之间共享的导航上下文。切换到 Space 时，必须显示这个 Session 已有的 Workspace、Tab 和 Region；切换到 Focus 时，继续选中同一个 Session 的观察工作区；切换到 Goals 时，保留同一 Session 对应的执行行或卡片选中与可见定位。切换只改变主视图投影，不创建第二个 Session、Run 或 Region，也不改变 Agent 的工作目录。
 
 如果 Session 已经结束、恢复中或暂时不可定位，切换不能清空当前工作面，也不能猜测一个新 Session；沿用现有服务窗和恢复事实说明当前状态。重新打开或从任意表面点击同一 Session，必须回到同一身份上下文。
 
@@ -1634,7 +1646,7 @@ Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体�
 
 ### 执行 Agent 焦点历史与 PMO 上下文隔离
 
-执行 Agent 与 PMO Teams Agent 属于两套不同的上下文。用户在 Workspaces、Agents、Board 之间切换时，只沿用当前执行 Agent 的身份、Workspace、Tab、Region 和焦点；打开或切换 PMO Teams 不得改写执行 Agent，也不得把 PMO Session 放进执行 Agent 的历史。
+执行 Agent 与 PMO Teams Agent 属于两套不同的上下文。用户在 Space、Focus、Goals 之间切换时，只沿用当前执行 Agent 的身份、Workspace、Tab、Region 和焦点；打开或切换 PMO Teams 不得改写执行 Agent，也不得把 PMO Session 放进执行 Agent 的历史。
 
 执行 Agent 焦点由一个明确的全局导航上下文承载：当前 Session 和有界的最近焦点历史按最近使用顺序保存，同一个 Session 只出现一次。任何执行 Agent 的打开、选中或跨表面跳转都通过这一上下文记录；切换主表面只读取它，不另猜一个“最近变化的 Session”。历史可以被 Agents 界面作为可操作的最近上下文入口，也作为只读上下文提供给 PMO Teams；PMO 只能观察这份执行上下文，不能把自己的交互写回去。
 
@@ -1644,7 +1656,7 @@ PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic
 
 顶部或底部的 Agents 产品入口统一命名为 **Focus**。Focus 代表“当前正在观察和工作的执行上下文”，不只代表 Agent 类型；Agent Session 和 Terminal Session 都可以成为当前执行上下文。PMO Teams 保持独立，不出现在 Focus 历史里。
 
-用户在 Workspaces 中点击、键盘切换或进入某个 Agent/Terminal Region 时，必须立即把该 Session 写入同一份 execution focus history；从 Focus、Board、Quick Switcher 或 Topic 进入同一 Session 也复用同一个写入入口。同一个 Session 只保留一个最近位置，最近一次聚焦提升到当前项。切换 Activity/Terminal 视图不创建新的 Session，也不产生第二份历史。
+用户在 Space 中点击、键盘切换或进入某个 Agent/Terminal Region 时，必须立即把该 Session 写入同一份 execution focus history；从 Focus、Board、Quick Switcher 或 Topic 进入同一 Session 也复用同一个写入入口。同一个 Session 只保留一个最近位置，最近一次聚焦提升到当前项。切换 Activity/Terminal 视图不创建新的 Session，也不产生第二份历史。
 
 Focus 表面左侧提供一个独立的“最近上下文”列表，作为可点击的导航入口。列表每项表达 Session 身份、Agent 或 Terminal 类型、工作区和最近聚焦时间；当前项有明确的选中状态。主区展示按状态分组的可观察执行 Session，右侧保留当前 Session 的观察工作面。历史为空时显示短空态，不用空白面板或伪造 Agent。
 
@@ -1660,11 +1672,11 @@ Focus 的项目不能作为与内容平行的独立左栏。项目是工作面�
 
 **泳道容器必须能垂直滚动**：项目数量超过 Focus 面高度时，泳道容器要能上下滚动到看不见的泳道；当前项目泳道不得被上方 header 或下方边缘遮盖。这条属于容器几何约束，实现上意味着泳道列表容器需要在弹性布局里明确占据剩余高度（`flex: 1 1 auto` + `min-height: 0`），而不是自然撑开高度到父容器外；仅设 `overflow: auto` 而不接受剩余高度是缺陷（用户  报"泳道无法上下滚动"，commit f904eefa 修，缺一条 `flex: 1 1 auto` 即无效）。
 
-### 全局工作面顶栏与 Work 命名
+### 全局工作面顶栏与名称
 
-Focus 和 Work 工作面的左上角标题必须避开 macOS 原生窗口按钮。Project Rail 在全局工作面隐藏时，不能仍按它可见来决定标题起点；切换 Focus、Workspaces 和 Work、开合工具坞或重启恢复后，系统按钮与标题都必须保持可见、可操作。
+Focus 和 Goals 工作面的左上角标题必须避开 macOS 原生窗口按钮。Project Rail 在全局工作面隐藏时，不能仍按它可见来决定标题起点；切换 Focus、Space 和 Goals、开合工具坞或重启恢复后，系统按钮与标题都必须保持可见、可操作。
 
-全局需求工作面的用户可见主名称为 **Work**，因为用户在这里承接、组织和推进自己的诉求或想法；副标题使用 **Requests & ideas**，而 `Board` 只描述一种视图排版。底部主切换、顶栏面包屑和工作面主标题使用同一主名称。单项 Work 的结果语义使用 **Goal**，但不把 Goal 当成全局工作面名称。Demand 仍是该工作面的持久化实体与控制协议身份；改主表面名称不得重建 Demand、Session 或用户已选中的工作面。
+顶级工作面和单项名称归《左下角导航、Space 与 Goals》。名称调整只改变用户可见表达，持久化 Demand、Session 和已选工作面的身份继续由原 owner 持有。
 
 ### 原生 Browser 与 Agent 身份浮层
 
@@ -1787,8 +1799,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 ### Terminal 连续向上阅读历史
 
 - 用户在新版安装后再次反馈「现在我往前滚还是不行」。必须以实际安装工作面里仍保留内容的可阅读性为结果：持续输出、重绘、布局和输入模式变化时，双指阅读仍须可用。安装成功与私有样例通过不能替代这一结果；未观察到的现场缓冲区、模式和事件路径如实保持未知，不能用保留上限解释掉显示故障。
-- 用户进一步确认双指滚动时「画面完全不动」，同时反馈「打字输入也卡」。阅读与输入应在持续输出和后台活动中保持响应；滚轮是否进入终端协议与界面线程是否繁忙分别按实际状态判断，不能把输入卡顿归结为没有历史。故障定位不得写入或重启健康 Run，处理成本只随当前视图和真正相关的变更增长。
+- 用户进一步确认双指滚动时「画面完全不动」，同时反馈「打字输入也卡」。阅读与输入应在持续输出和后台活动中保持响应；滚轮是否进入终端协议与界面线程是否繁忙分别按实际状态判断，不能把输入卡顿归结为没有历史。用户再次明确「Mac 的触控板上双指往下滑，整个 TUI 没有任何反应」：原始输出保留容量与事件接线分别验证，回滚行数为零不能证明滚轮已经到达，人工逐行输出可滚也不能替代当前 TUI 的现场验收。 用户进一步反馈「只要是 Codex 的好像就滚动不了，Claude 的没受影响」：不同 Provider 的实际终端模式、事件接收与原始输入路径应分别核对，不能把一种模式的验证推广为全部终端通过。故障定位不得写入或重启健康 Run，处理成本只随当前视图和真正相关的变更增长。
 - 用户补充「其他打开的 session 好像可以滚动，但也很卡」。跨 Session 的输入与阅读响应单独验收。全局浮层观察只应处理应用根之外的真实浮层及其加入、退出和开关变化；终端、编辑器、时间线在应用根内的正文重绘不得产生浮层观察工作。已有空容器后挂内容、嵌套浮层和退场动画仍沿同一 DOM 协议处理。
+- 用户的原始终端输入不能被可选屏幕确认占住；等待确认期间的滚轮、打字与手动 TUI 操作应及时取得原输入通道。已接受的消息仍必须按原协议完整、有序提交，不能穿插字节或破坏幂等接收；未完成的观察如实说明，不能伪装为确认成功。观察的时间与取消边界覆盖从读取服务握手到确认结束，不能在开始计时之前无限等待。
 - 对一个明确 Region 的只读检查应能取得其当前终端投影：视图网格、缓冲区类型与保留行位置、鼠标上报模式及当前输入门。投影由实际 TerminalView 的公开终端事实按需读取，不解析正文、不写输入、不触发恢复或尺寸同步；它不是 ctxmux 的权威尺寸或 VT 状态。未取得投影时明确保持未知，不猜未挂载或健康。观察只随所请求的 Region 增长，组件结束后不得残留读取其终端的引用。
 - 用户明确反馈「单纯的无法往上 scroll」，使用 Mac 触控板双指滑动。当前已有内容的滚动必须独立于历史保留边界判定：普通缓冲区的保留行应能正常向上／向下阅读；程序接管滚轮的 TUI 应收到与实际归一化滚动距离相符、保序的原生鼠标或方向键输入，不能把多行距离压成一次。标准滚动值非零时，不能被同轴为零的旧事件字段吞掉。
 - 滚动由终端库的既有缓冲、协议与事件 owner 裁决；修复保持原有方向、修饰键、精细滚动的分数累积和只读／待答交互边界。TUI 只拥有当前屏幕时，反馈沿其真实滚动行为，不伪造终端历史；滚动修复的验收必须观察固定网格下的视口移动或 TUI 实际内容变化，历史分页通过不能代替这项验收。
