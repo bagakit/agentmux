@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import headless from '@xterm/headless'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
-import { admitTerminalLiveOutput, composeTerminalLiveOutputWrite, takeTerminalLiveOutputBatch, type TerminalLiveItem } from '../src/renderer/src/lib/terminal-live-output'
+import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite, type TerminalLiveItem } from '../src/renderer/src/lib/terminal-live-output'
 
 function harness() {
   const terminal = new headless.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
@@ -41,17 +41,16 @@ describe('long-lived View follows its PTY owner', () => {
       const wide = '\x1b[40;100HWIDE_MARK'
       const input: TerminalLiveItem[] = [
         { dataBytes: new TextEncoder().encode(old), startByte: 0, endByte: old.length },
-        { size: { cols: 132, rows: 45 } },
+        { size: { cols: 132, rows: 45 }, throughByte:old.length, resizeRevision:1 },
         { dataBytes: new TextEncoder().encode(wide), startByte: old.length, endByte: old.length + wide.length }
       ]
-      let queue: TerminalLiveItem[] = []
-      for (const item of input) queue = admitTerminalLiveOutput(queue, item).queue
+      const queue = new TerminalLiveOutputQueue()
+      for (const item of input) queue.admit(item)
       let cursor = 0
       const order: string[] = []
       while (queue.length) {
-        const taken = takeTerminalLiveOutputBatch(queue)
-        queue = taken.rest
-        if (taken.size) { h.sync.acceptOwnerSize(taken.size); order.push('132x45'); continue }
+        const taken = queue.take()
+        if (taken.resize) { h.sync.acceptOwnerSize(taken.resize.size); order.push('132x45'); continue }
         const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
         await new Promise<void>((resolve) => h.terminal.write(composed.dataBytes, resolve))
         cursor = composed.cursor
@@ -99,10 +98,15 @@ describe('long-lived View follows its PTY owner', () => {
 
   it('keeps the geometry of retained bytes when bounded backlog drops an older prefix', () => {
     const old = { dataBytes: new TextEncoder().encode('old!'), startByte: 0, endByte: 4 }
-    const size = { size: { cols: 132, rows: 45 } }
+    const size = { size: { cols: 132, rows: 45 }, throughByte:0, resizeRevision:1 }
     const recent = { dataBytes: new TextEncoder().encode('new!'), startByte: 4, endByte: 8 }
-    expect(admitTerminalLiveOutput<TerminalLiveItem>([size, old], recent, 4)).toEqual({ queue: [size, recent], droppedBytes: 4 })
-    expect(admitTerminalLiveOutput<TerminalLiveItem>([size], { size: { cols: 100, rows: 30 } }).queue).toEqual([{ size: { cols: 100, rows: 30 } }])
+    const queue = new TerminalLiveOutputQueue(4)
+    queue.admit(size); queue.admit(old)
+    expect(queue.admit(recent)).toBe(4)
+    expect([...queue]).toEqual([size, recent])
+    const latest = { size:{cols:100,rows:30}, throughByte:0, resizeRevision:2 }
+    queue.take(); queue.take(); queue.admit(size); queue.admit(latest)
+    expect([...queue]).toEqual([size, latest])
   })
 
   it('the actual TerminalView accepts only its Run and Host, and consumes geometry on the output drain', () => {
@@ -114,9 +118,9 @@ describe('long-lived View follows its PTY owner', () => {
     const accept = source.slice(start, end)
     expect(accept).toContain("event.hostId === session.hostId && core.type === 'terminal-resized'")
     expect(accept).toContain('core.run.runId === session.control.run.runId')
-    expect(accept).toContain('if (size) scheduleLiveOutputDrain({ size })')
+    expect(accept).toContain('if (resize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(resize)')
     expect(source).toContain('applyOwnerGrid: ({ cols, rows }) => terminal.resize(cols, rows)')
-    expect(source).toContain('viewport.acceptOwnerSize(taken.size)')
-    expect(source).toContain('if (droppedPendingSize) scheduleLiveOutputDrain({ size: droppedPendingSize })')
+    expect(source).toContain('viewport.acceptOwnerSize(resize.size)')
+    expect(source).toContain('if (droppedPendingResize && droppedPendingResize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(droppedPendingResize)')
   })
 })

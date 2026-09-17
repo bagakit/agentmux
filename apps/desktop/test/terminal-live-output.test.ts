@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  admitTerminalLiveOutput,
+  TerminalLiveOutputQueue,
   composeTerminalLiveOutputWrite,
-  takeTerminalLiveOutputBatch,
   TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES,
   type TerminalLiveOutputChunk
 } from '../src/renderer/src/lib/terminal-live-output'
@@ -37,16 +36,14 @@ function admitAll(
   sizes: readonly number[],
   maxBytes: number
 ): { queue: TerminalLiveOutputChunk[]; droppedBytes: number } {
-  let queue: TerminalLiveOutputChunk[] = []
+  const pending = new TerminalLiveOutputQueue(maxBytes)
   let droppedBytes = 0
   let nextByte = 0
   for (const size of sizes) {
-    const admitted = admitTerminalLiveOutput(queue, chunk(nextByte, size), maxBytes)
-    queue = admitted.queue
-    droppedBytes += admitted.droppedBytes
+    droppedBytes += pending.admit(chunk(nextByte, size))
     nextByte += size
   }
-  return { queue, droppedBytes }
+  return { queue: [...pending] as TerminalLiveOutputChunk[], droppedBytes }
 }
 
 describe('live 输出积压的上界', () => {
@@ -79,9 +76,9 @@ describe('live 输出积压的上界', () => {
 
   it('永不清空：至少留住刚收到的那一块', () => {
     // 上限比单块还小的极端情形。清空等于这一刻的终端什么都不显示，且 cursor 再也追不上产出。
-    const admitted = admitTerminalLiveOutput([], chunk(0, 5_000), 100)
-    expect(admitted.queue).toHaveLength(1)
-    expect(admitted.queue[0]).toMatchObject({ startByte: 0, endByte: 5_000 })
+    const pending = new TerminalLiveOutputQueue(100)
+    pending.admit(chunk(0, 5_000))
+    expect([...pending]).toEqual([chunk(0, 5_000)])
   })
 
   it('没超上限时一块都不丢——不许平时就悄悄扔字节', () => {
@@ -98,6 +95,18 @@ describe('live 输出积压的上界', () => {
     expect(droppedBytes).toBeGreaterThan(0)
   })
 
+  it('bounds ordinary item count while preserving its required geometry and the newest raw byte', () => {
+    const queue = new TerminalLiveOutputQueue()
+    const geometry = {size:{cols:132,rows:45},throughByte:0,resizeRevision:1}
+    queue.admit(geometry)
+    for(let i=0;i<5000;i++) queue.admit(chunk(i,1))
+    const retained=[...queue]
+    expect(retained).toHaveLength(4096)
+    expect(retained[0]).toEqual(geometry)
+    expect(retained.at(-1)).toEqual(chunk(4999,1))
+    expect(retained[1]).toEqual(chunk(905,1))
+  })
+
   it('默认上限是个真数字，且远大于一屏、远小于会抖动的量级', () => {
     // 不钉死具体值（那会让调参变成改测试），只钉它落在合理区间：小于 256KiB 会在正常输出下就截断，
     // 大于 32MiB 就回到了本缺陷要治的那个量级。
@@ -108,9 +117,11 @@ describe('live 输出积压的上界', () => {
   it('裁剪不破坏取批：取出的前缀仍是原顺序', () => {
     // 两个纯函数要能串起来用。admit 之后 take 出来的第一块必须就是队头，否则终端会乱序。
     const { queue } = admitAll(Array.from({ length: 20 }, () => 300), 2_000)
-    const taken = takeTerminalLiveOutputBatch(queue, 700)
+    const pending = new TerminalLiveOutputQueue()
+    queue.forEach(item => pending.admit(item))
+    const taken = pending.take(700)
     expect(taken.batch[0]).toEqual(queue[0])
-    expect([...taken.batch, ...taken.rest]).toEqual(queue)
+    expect([...taken.batch, ...pending]).toEqual(queue)
   })
 })
 
@@ -197,8 +208,9 @@ describe('TerminalView 真的经过了这道闸', () => {
     'utf8'
   )
 
-  it('唯一的 live 入队点走 admitTerminalLiveOutput，而不是裸 push', () => {
-    expect(source).toContain('admitTerminalLiveOutput(liveOutputQueue')
+  it('唯一的 live 入队点走同一 queue owner，而不是裸 push', () => {
+    expect(source).toContain('const liveOutputQueue = new TerminalLiveOutputQueue()')
+    expect(source).toContain('liveOutputQueue.admit(output)')
     // 裸 push 一处都不许剩：留一条旁路就等于没有上界。注意 splice(…, ...admitted.queue) 是写回，
     // 不是入队，所以这条不会误伤。
     expect(source).not.toContain('liveOutputQueue.push(')
