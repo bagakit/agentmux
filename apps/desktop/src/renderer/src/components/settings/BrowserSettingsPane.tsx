@@ -1,3 +1,4 @@
+import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useEffect, useState } from 'react'
 import type { BrowserConfig } from '../../../../shared/contracts'
 
@@ -18,22 +19,17 @@ export function BrowserSettingsPane({ browser, onSave }: {
 }) {
   const saved = browser.agentAutomation === true
   const [enabled, setEnabled] = useState(saved)
-  const [saving, setSaving] = useState(false)
+  const saveState = useSettingsSave()
 
   useEffect(() => setEnabled(saved), [saved])
 
   async function save(): Promise<void> {
-    setSaving(true)
-    try {
-      await onSave({ ...browser, agentAutomation: enabled })
-    } finally {
-      setSaving(false)
-    }
+    await saveState.run(() => onSave({ ...browser, agentAutomation: enabled }))
   }
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">An Agent can drive an open Browser by running a program in it — reading the page, clicking elements by name, and reading the result. It acts on the page structure, never on screen coordinates, and never by synthesizing keystrokes.</p>
+      <p className="settings-lead">Let agents work alongside you on the web. Choose whether they can read and act on pages in your open browsers.</p>
       <section className="settings-group">
         <header><span>Agent automation</span><small>{saved ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
@@ -43,18 +39,13 @@ export function BrowserSettingsPane({ browser, onSave }: {
             onChange={(event) => setEnabled(event.target.checked)}
           />
           <span>
-            <strong>Let Agents run programs in an open Browser</strong>
-            <small>Off by default. While off, <code>agentmux browser run</code> is refused and says so rather than failing quietly. A program runs in an isolated subprocess and cannot reach your files or the rest of AgentMux, but it can do anything on the page a person could — including submitting forms and spending money on a signed-in site.</small>
+            <strong>Let agents interact with browser pages</strong>
+            <small>Off by default. When enabled, agents can read pages, follow links and submit forms using your signed-in accounts, including actions that spend money. This applies to all open browsers.</small>
           </span>
         </label>
       </section>
-      <div className="settings-pane-actions">
-        <span>Applies to every Browser in every workspace, including ones already open.</span>
-        <button className="primary-button" disabled={saving || enabled === saved} onClick={() => void save()}>
-          {saving ? 'Saving…' : 'Save browser'}
-        </button>
-      </div>
       <AppLinkSchemes browser={browser} onSave={onSave} />
+      <SettingsSaveBar save={saveState} dirty={enabled !== saved} label="Save browser" onSave={() => void save()} />
     </div>
   )
 }
@@ -75,6 +66,7 @@ function AppLinkSchemes({ browser, onSave }: {
   onSave: (browser: BrowserConfig) => Promise<void>
 }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const saveState = useSettingsSave()
   const remembered = Object.entries(browser.appLinkSchemes ?? {}).sort(([a], [b]) => a.localeCompare(b))
   if (remembered.length === 0) return null
 
@@ -89,7 +81,7 @@ function AppLinkSchemes({ browser, onSave }: {
     try {
       const next = { ...(browser.appLinkSchemes ?? {}) }
       delete next[scheme]
-      await onSave({ ...browser, appLinkSchemes: next })
+      await saveState.run(() => onSave({ ...browser, appLinkSchemes: next }))
     } finally {
       setBusy(null)
     }
@@ -97,11 +89,9 @@ function AppLinkSchemes({ browser, onSave }: {
 
   return (
     <section className="settings-group">
-      <header><span>App links you answered</span><small>{remembered.length}</small></header>
+      <header><span>Remembered app links</span><small>{remembered.length}</small></header>
       <p className="settings-group-note">
-        Remembered per scheme, not per site — custom application links behave the same wherever they
-        appear, because the question was about the app they open, not the page they came from.
-        Forget one to be asked again the next time it comes up.
+        Your choices apply to each link type across all sites. Forget a choice to be asked again next time.
       </p>
       <ul className="app-link-scheme-list">
         {remembered.map(([scheme, choice]) => (
@@ -119,6 +109,7 @@ function AppLinkSchemes({ browser, onSave }: {
           </li>
         ))}
       </ul>
+      {saveState.error ? <p className="settings-inline-error" role="alert">{saveState.error}</p> : null}
     </section>
   )
 }
