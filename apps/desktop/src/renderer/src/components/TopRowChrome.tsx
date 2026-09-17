@@ -3,6 +3,7 @@ import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
+import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import type { SettingsSectionId } from './SettingsPanel'
@@ -171,12 +172,13 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
     ? SURFACE_NAVIGATION_PLUGINS.find((plugin) => plugin.id === tooltip.id)
     : null
   const renderTooltip = (plugin: typeof SURFACE_NAVIGATION_PLUGINS[number]) => (
-    <span
+    <div
       id={`surface-navigation-tooltip-${plugin.id}`}
       className="surface-navigation__tooltip"
       role="tooltip"
       data-state="open"
       data-overlay-layer="tooltip"
+      data-focus-tooltip={plugin.id === 'focus' ? 'true' : undefined}
       style={{ left: `${tooltip?.left ?? 0}px`, top: `${tooltip?.top ?? 0}px` }}
       ref={(element) => {
         if (!element || !tooltip) return
@@ -184,8 +186,8 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
         element.style.left = `${Math.max(8, Math.min(tooltip.left, window.innerWidth - width - 8))}px`
       }}
     >
-      <strong>{plugin.label}</strong><small>{plugin.tooltip}</small>
-    </span>
+      {plugin.id === 'focus' ? <FocusNavigationPreview /> : <><strong>{plugin.label}</strong><small>{plugin.tooltip}</small></>}
+    </div>
   )
   const renderPlugin = (plugin: typeof SURFACE_NAVIGATION_PLUGINS[number]) => {
     if (plugin.kind === 'launcher') {
