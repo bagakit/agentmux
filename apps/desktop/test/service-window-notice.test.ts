@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   agentSessionServiceOutcome,
+  agentPromptDeliveryServiceOutcome,
   classifyServiceNotice,
   serviceNoticeAriaLive,
   serviceNoticeToRender
@@ -61,7 +62,7 @@ const handshakeDegraded = agentSession({
     state: 'unknown',
     mode: 'degraded',
     reason: 'handshake-timeout',
-    run: { runId: 'r', hostId: 'local' },
+    run: { runId: 'r' },
     observedAt: 10
   }
 })
@@ -426,4 +427,16 @@ describe('通报音量随存活判定分档', () => {
     expect(dead).not.toBe(degraded)
     expect(dead).not.toBe(unknown)
   })
+})
+
+
+it('shows interrupted prompt screen confirmation honestly without claiming a terminal refresh', () => {
+  const session = { ...agentSession({ state: 'working' }), terminalPromptDelivery: {
+    state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-replaced' as const,
+    submissionId: 'raw-preempted-prompt', run: { runId: 'r' }, observedAt: 30
+  } } as SessionSnapshot
+  const notice = serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))
+  expect(notice?.kind).toBe('process-degraded')
+  expect(notice?.notice.step).toContain('Screen confirmation was interrupted')
+  expect(notice?.notice.mode).toContain('Prompt input continued without full screen confirmation')
 })

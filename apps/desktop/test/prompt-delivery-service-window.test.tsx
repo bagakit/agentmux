@@ -21,7 +21,7 @@ function notice(value: SessionSnapshot | undefined) {
 describe('prompt delivery service window', () => {
   it('shows the cause, actual delivery mode, and recovery without an overlay or resend instruction', () => {
     const markup = renderToStaticMarkup(createElement(ServiceWindowNotice, { notice: notice(session()) }))
-    expect(markup).toContain('while the terminal refreshed')
+    expect(markup).toContain('Screen confirmation was interrupted')
     expect(markup).toContain('continued without full screen confirmation')
     expect(markup).toContain('review this notice in System')
     expect(markup).toContain('a verified prompt clears it')
