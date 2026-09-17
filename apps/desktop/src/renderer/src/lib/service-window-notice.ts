@@ -274,7 +274,7 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
   const steps: Record<NonNullable<typeof session.terminalPromptDelivery>['reason'], string> = {
     'screen-evidence-gap': 'Screen confirmation from retained terminal output',
     'prompt-render-timeout': 'Confirming the prompt on screen',
-    'screen-evidence-replaced': 'Confirming the prompt while the terminal refreshed',
+    'screen-evidence-replaced': 'Screen confirmation was interrupted',
     'turn-end-unconfirmed': 'Confirming the previous turn ended'
   }
   return {

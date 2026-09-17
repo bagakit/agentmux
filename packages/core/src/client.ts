@@ -536,7 +536,10 @@ export class AgentMuxClient {
   private readonly runPids = new Map<string, number | null>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
   private readonly agentInputCursors = new Map<string, number>()
-  private readonly agentInputTails = new Map<string, Promise<void>>()
+  private readonly agentInputTails = new Map<string, {
+    tail: Promise<void>
+    renderObservations: Set<{ run: AgentMuxRunRef; controller: AbortController }>
+  }>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
   private providerReadsDisposed = false
@@ -1189,6 +1192,9 @@ export class AgentMuxClient {
     this.endedRuns.clear()
     this.hookTurnPhases.clear()
     this.agentInputCursors.clear()
+    for (const lane of this.agentInputTails.values()) {
+      for (const observation of lane.renderObservations) observation.controller.abort()
+    }
     this.agentInputTails.clear()
     this.promptSubmission.cancelAllReadiness()
     this.screenEvidence.discardAll()
@@ -2644,9 +2650,10 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
+    const renderObservation = new AbortController()
     await this.serializeAgentInput(session, async (current, run) => {
-      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal, input.allowUncertainTurn)
-    })
+      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal)
+    }, renderObservation)
     await this.recordPromptAfterSideEffect(
       session,
       `prompt:${operationId}`,
@@ -3696,15 +3703,20 @@ export class AgentMuxClient {
       //
       // 注意 operation 收到的 session/run 是队列**当下**重取的，不是外面这两个快照：那正是
       // serializeAgentInput 的用处（它顺带验 run 没被换掉、进程还在跑）。所以这里用 current/live。
+      const renderObservation = new AbortController()
       await this.serializeAgentInput(session, async (current, live) => {
         await this.promptSubmission.submitInputPlan(
           current,
           live,
           `launch-prompt:${lifecycleOperationId}`,
           text,
-          provider.planPromptInput(text)
+          provider.planPromptInput(text),
+          undefined,
+          undefined,
+          false,
+          renderObservation.signal
         )
-      })
+      }, renderObservation)
       return true
     } catch (error) {
       // publish 本身若抛，异常会穿出这个方法，而调用点在 create/resume 的 try 内、且在内层 rollback
@@ -3968,6 +3980,12 @@ export class AgentMuxClient {
         }
       })
     }
+    // Raw input only cancels optional observations already admitted for this exact Run.
+    // Bytes still follow the same tail, after the prompt's contiguous payload and submit.
+    const lane = this.agentInputTails.get(requestedSession.agentSessionId)
+    for (const observation of lane?.renderObservations ?? []) {
+      if (sameRun(observation.run, requestedSession.run)) observation.controller.abort()
+    }
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       if (session.pendingInteraction) {
         throw new AgentMuxError(
@@ -4025,10 +4043,20 @@ export class AgentMuxClient {
 
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
-    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<T>
+    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<T>,
+    renderObservation?: AbortController
   ): Promise<T> {
     const agentSessionId = requestedSession.agentSessionId
-    const previous = this.agentInputTails.get(agentSessionId) ?? Promise.resolve()
+    const lane = this.agentInputTails.get(agentSessionId) ?? {
+      tail: Promise.resolve(),
+      renderObservations: new Set<{ run: AgentMuxRunRef; controller: AbortController }>()
+    }
+    const observation = renderObservation ? {
+      run: { ...requestedSession.run }, controller: renderObservation
+    } : undefined
+    // Register before queueing: raw input can arrive while this prompt awaits its predecessor.
+    if (observation) lane.renderObservations.add(observation)
+    const previous = lane.tail
     let result!: T
     const queued = previous.catch(() => {}).then(async () => {
       const session = this.requireAgentSession(agentSessionId)
@@ -4045,7 +4073,8 @@ export class AgentMuxClient {
       result = await operation(session, run)
     })
     const tail = queued.then(() => {}, () => {})
-    this.agentInputTails.set(agentSessionId, tail)
+    lane.tail = tail
+    this.agentInputTails.set(agentSessionId, lane)
     try {
       await queued
       return result
@@ -4053,7 +4082,10 @@ export class AgentMuxClient {
       this.agentInputCursors.delete(agentSessionId)
       throw error
     } finally {
-      if (this.agentInputTails.get(agentSessionId) === tail) this.agentInputTails.delete(agentSessionId)
+      if (observation) lane.renderObservations.delete(observation)
+      if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === tail) {
+        this.agentInputTails.delete(agentSessionId)
+      }
     }
   }
 
