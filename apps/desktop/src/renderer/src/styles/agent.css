@@ -64,6 +64,7 @@
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
 .window-status-bar {
+  z-index: 91;
   height: 32px;
   position: relative;
   display: flex;
