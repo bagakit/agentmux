@@ -7,15 +7,17 @@ import { join } from 'node:path'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
+import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('Survey / Workspaces / Focus / Work navigation', () => {
+describe('PMO / Space / Focus / Goals / Survey navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    localStorage.removeItem('agentmux.leader-topic-floating.v1')
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -24,25 +26,24 @@ describe('Survey / Workspaces / Focus / Work navigation', () => {
     await act(async () => root.unmount())
     container.remove()
     useAppStore.setState(baseline, true)
+    localStorage.removeItem('agentmux.leader-topic-floating.v1')
   })
 
-  it('renders five ordered entries in one integrated navigation container', async () => {
+  it('renders the confirmed five-entry order and names with one selected surface', async () => {
     useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => root.render(createElement(SurfaceSwitch)))
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons).toHaveLength(5)
-    expect(buttons.slice(0, 2).map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Survey: browse and verify information',
-      'Workspaces: show terminal and file workbench'
-    ])
-    expect(buttons.slice(3).map((button) => button.getAttribute('aria-label'))).toEqual([
+    expect(buttons[0]?.getAttribute('aria-label')).toContain('PMO teams topic')
+    expect(buttons.slice(1).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Space: show terminal and file workbench',
       'Focus: show execution contexts',
-      'Work: show requests and ideas'
+      'Goals: show goals and progress',
+      'Survey: browse and verify information'
     ])
-    expect(buttons[2]?.getAttribute('aria-label')).toContain('PMO teams topic')
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
-    expect(buttons[0]?.classList.contains('selected')).toBe(true)
-    expect(buttons[0]?.getAttribute('aria-current')).toBe('page')
+    expect(buttons[4]?.classList.contains('selected')).toBe(true)
+    expect(buttons[4]?.getAttribute('aria-current')).toBe('page')
     expect(container.querySelector('.surface-navigation')).toBeTruthy()
     expect(container.querySelectorAll('.surface-navigation__slot')).toHaveLength(5)
     // Tooltips render on hover/focus only, not up-front for all slots — peer chose to lazy-render
@@ -52,6 +53,72 @@ describe('Survey / Workspaces / Focus / Work navigation', () => {
     expect(container.querySelectorAll('.surface-navigation__tooltip')).toHaveLength(0)
     expect(container.querySelector('.surface-switch--left')).toBeNull()
     expect(container.querySelector('.surface-switch--right')).toBeNull()
+  })
+
+  it('switches each product entry to its existing main surface', async () => {
+    useAppStore.setState({ mainSurface: 'survey', sessions: [] })
+    await act(async () => root.render(createElement(SurfaceSwitch)))
+    const entries = [
+      ['Space:', 'workbench'],
+      ['Focus:', 'agents'],
+      ['Goals:', 'board'],
+      ['Survey:', 'survey']
+    ] as const
+    for (const [label, surface] of entries) {
+      const button = container.querySelector(`button[aria-label^="${label}"]`) as HTMLButtonElement
+      expect(button).toBeTruthy()
+      await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      expect(useAppStore.getState().mainSurface).toBe(surface)
+      expect(button.getAttribute('aria-current')).toBe('page')
+    }
+  })
+
+  it('keeps PMO outside the four-surface group and preserves execution focus while opening and closing it', async () => {
+    useAppStore.setState({ mainSurface: 'board' })
+    const focus = useAppStore.getState().agentFocus
+    await act(async () => root.render(createElement(SurfaceSwitch)))
+    const group = container.querySelector('[role="group"][aria-label="Work surfaces"]')
+    expect(group).toBeTruthy()
+    expect(group!.querySelectorAll('button')).toHaveLength(4)
+    const pmo = container.querySelector('button[aria-controls="pmo-teams-topic-floating-panel"]') as HTMLButtonElement
+    expect(pmo).toBeTruthy()
+    expect(group!.contains(pmo)).toBe(false)
+    for (const expanded of ['true', 'false']) {
+      await act(async () => pmo.click())
+      expect(pmo.getAttribute('aria-expanded')).toBe(expanded)
+      expect(useAppStore.getState().mainSurface).toBe('board')
+      expect(useAppStore.getState().agentFocus).toEqual(focus)
+      expect(group!.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Goals: show goals and progress')
+    }
+  })
+
+  it('keeps settings reachable after keyboard help in the global utility group', async () => {
+    const openSettings = vi.fn()
+    await act(async () => root.render(createElement(WindowUtilityBar, { onOpenSettings: openSettings })))
+    const buttons = [...container.querySelectorAll('button')]
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Keyboard shortcuts', 'Settings'])
+    await act(async () => buttons[1]!.click())
+    expect(openSettings).toHaveBeenCalledExactlyOnceWith('workspaces')
+  })
+
+  it('clamps the rendered tooltip at both window edges', async () => {
+    let anchorLeft = 4
+    const viewport = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(300)
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return { left: anchorLeft, top: 760, width: this.classList.contains('surface-navigation__tooltip') ? 180 : 36 } as DOMRect
+    })
+    try {
+      await act(async () => root.render(createElement(SurfaceSwitch)))
+      const launcher = container.querySelector('.surface-navigation__slot--launcher')!
+      for (const [left, expected] of [[4, '8px'], [280, '112px']] as const) {
+        anchorLeft = left
+        await act(async () => launcher.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+        const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]')
+        expect(tooltip).toBeTruthy()
+        expect(tooltip!.style.left).toBe(expected)
+        await act(async () => launcher.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+      }
+    } finally { geometry.mockRestore(); viewport.mockRestore() }
   })
 
   it('keeps the Project Rail out of the global Agents surface', async () => {
@@ -66,13 +133,16 @@ describe('Survey / Workspaces / Focus / Work navigation', () => {
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
 
-  it('does not create a DemandWorkspace when no request is selected', async () => {
+  it('shows Goals, creation and search without inventing a selected goal', async () => {
     useAppStore.setState({ sessions: [], demands: {}, selectedDemandId: null, mainSurface: 'board' })
     await act(async () => root.render(createElement(GlobalBoardSurface)))
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
     expect(container.querySelector('.global-demand-workspace')).toBeNull()
-    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Work')
-    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Requests & ideas')
+    expect(container.querySelector('.global-board-toolbar__scope > strong')?.textContent).toBe('Goals')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('Goals & progress')
+    expect(container.querySelector('.global-board-toolbar')?.textContent).toContain('New Goal')
+    expect(container.querySelector('input[aria-label="Search goals"]')).toBeTruthy()
+    expect(container.querySelector('.global-board-footer')?.textContent).toContain('0 of 0 goals')
     expect(container.querySelector('.global-board-toolbar')?.textContent).not.toContain('Focus')
   })
 })

@@ -23,7 +23,7 @@ export function GlobalSurveySurface() {
   async function openAddress(): Promise<void> {
     const url = addressFromInput(address)
     if (!url) {
-      setMessage('Enter a web address to open in Workspaces.')
+      setMessage('Enter a web address to open in Space.')
       return
     }
     const layout = layouts[SCRATCH_WORKSPACE_ID]
@@ -60,7 +60,7 @@ export function GlobalSurveySurface() {
             aria-label="Search or enter a web address"
             inputMode="url"
           />
-          <button type="submit" aria-label="Open address" title="Open in Workspaces"><ArrowUpRight size={16} /></button>
+          <button type="submit" aria-label="Open address" title="Open in Space"><ArrowUpRight size={16} /></button>
         </form>
         {message ? <p className="global-survey-message" role="status">{message}</p> : null}
         <p className="global-survey-hint">Use a full URL, such as <code>https://example.com</code>.</p>

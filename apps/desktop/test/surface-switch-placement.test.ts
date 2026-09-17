@@ -15,16 +15,17 @@ function sourceFiles(directory: string): string[] {
 it('renders the global switch only in the window footer, including Session layout paths', () => {
   const files = sourceFiles(renderer)
   expect(files.length).toBeGreaterThan(0)
-  const calls: { file: string; container: string | undefined }[] = []
+  const calls: { component: string; file: string; container: string | undefined }[] = []
   for (const file of files) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const visit = (node: ts.Node): void => {
-      if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === 'SurfaceSwitch') {
+      if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && ['SurfaceSwitch', 'WindowUtilityBar'].includes(node.tagName.getText(source))) {
         const parent = ts.isJsxOpeningElement(node) ? node.parent.parent : node.parent
         const className = ts.isJsxElement(parent)
           ? parent.openingElement.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'className')
           : undefined
         calls.push({
+          component: node.tagName.getText(source),
           file: relative(renderer, file),
           container: className && ts.isJsxAttribute(className) && className.initializer && ts.isStringLiteral(className.initializer)
             ? className.initializer.text : undefined
@@ -34,5 +35,8 @@ it('renders the global switch only in the window footer, including Session layou
     }
     visit(source)
   }
-  expect(calls).toEqual([{ file: 'App.tsx', container: 'window-status-bar__surface-switch' }])
+  expect(calls).toEqual([
+    { component: 'SurfaceSwitch', file: 'App.tsx', container: 'window-status-bar__surface-switch' },
+    { component: 'WindowUtilityBar', file: 'App.tsx', container: 'window-status-bar__right' }
+  ])
 })

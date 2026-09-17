@@ -64,7 +64,7 @@
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
 .window-status-bar {
-  height: 32px;
+  height: 40px;
   position: relative;
   display: flex;
   align-items: center;
@@ -77,12 +77,13 @@
   font-variant-numeric: tabular-nums;
 }
 .window-status-bar__utilities, .window-status-bar__status, .window-status-bar__right { min-width: 0; display: flex; align-items: center; }
-.window-status-bar__utilities { flex: 1 1 0; justify-content: flex-start; gap: 2px; }
+.window-status-bar__utilities { flex: 0 0 auto; justify-content: flex-end; gap: 2px; padding-left: var(--sp-2); border-left: 1px solid var(--line-soft); }
 .window-status-bar__status { flex: 1 1 0; justify-content: flex-end; overflow: hidden; }
+.window-status-bar__status .agent-status-bar { flex: 0 1 auto; }
 .window-status-bar__right { flex: 0 0 auto; justify-content: flex-end; gap: var(--sp-2); }
 .window-status-bar__utility-button { width: 26px; height: 26px; color: var(--text-3); }
 .window-status-bar__utility-button:hover { color: var(--text); background: var(--surface-2); }
-.window-status-bar__surface-switch { position: absolute; top: 50%; left: 50%; display: flex; align-items: center; transform: translate(-50%, -50%); }
+.window-status-bar__surface-switch { flex: 0 0 auto; display: flex; align-items: center; }
 .window-overlay-host { position: fixed; z-index: var(--layer-tooltip); inset: 0; pointer-events: none; isolation: isolate; }
 .window-overlay-host > * { pointer-events: auto; }
 .window-overlay-host__entry { position: absolute; inset: 0; pointer-events: none; }
@@ -92,23 +93,23 @@
 .window-overlay-host__entry[data-overlay-layer="popover"], [data-overlay-layer="popover"] { z-index: var(--layer-popover); }
 .window-overlay-host__entry[data-overlay-layer="service"], [data-overlay-layer="service"] { z-index: var(--layer-service); }
 .window-overlay-host__entry[data-overlay-layer="dialog"], [data-overlay-layer="dialog"] { z-index: var(--layer-dialog); }
-.surface-navigation { height: 30px; display: flex; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--bg); box-shadow: var(--hl); overflow: visible; -webkit-app-region: no-drag; }
+.surface-navigation { height: 36px; display: flex; align-items: center; gap: var(--sp-2); overflow: visible; -webkit-app-region: no-drag; }
+.surface-navigation__surfaces { height: 30px; display: flex; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--bg); box-shadow: var(--hl); }
 .surface-navigation__slot { width: 30px; height: 26px; position: relative; display: inline-flex; flex: 0 0 30px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; color: var(--text-3); background: transparent; font: inherit; cursor: pointer; overflow: visible; transition: color .12s ease, background .12s ease, box-shadow .12s ease; }
 .surface-navigation__slot:hover { color: var(--text-2); background: var(--surface-2); }
 .surface-navigation__slot--surface.selected { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
 .surface-navigation__slot--surface:focus-visible, .surface-navigation__slot--launcher:focus-within { outline: 2px solid color-mix(in srgb, var(--blue) 70%, transparent); outline-offset: 1px; }
 .surface-navigation__icon { transform-origin: 50% 100%; transition: transform .14s var(--ease-enter, ease-out); }
 .surface-navigation__slot:hover .surface-navigation__icon, .surface-navigation__slot:focus-visible .surface-navigation__icon { transform: translateY(-1px) scale(1.14); }
-.surface-navigation__tooltip { position: fixed; z-index: var(--layer-tooltip); left: 0; top: 0; display: grid; min-width: max-content; gap: 2px; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: 9px; color: var(--text); background: color-mix(in srgb, var(--surface-2) 78%, transparent); box-shadow: 0 10px 28px var(--scrim-2), inset 0 1px color-mix(in srgb, white 12%, transparent); backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%); opacity: 1; pointer-events: none; text-align: left; transform: translate(-50%, -100%) scale(1); transform-origin: 50% 100%; transition: opacity .12s ease, transform .14s var(--ease-enter, ease-out); }
-.surface-navigation__tooltip--inline { position: absolute; z-index: 2; left: 50%; top: auto; bottom: calc(100% + 8px); opacity: 0; transform: translate(-50%, 4px) scale(.96); }
+.surface-navigation__tooltip { position: fixed; z-index: var(--layer-tooltip); left: 0; top: 0; display: grid; width: max-content; max-width: calc(100vw - 16px); gap: 2px; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: 9px; color: var(--text); background: color-mix(in srgb, var(--surface-2) 78%, transparent); box-shadow: 0 10px 28px var(--scrim-2), inset 0 1px color-mix(in srgb, white 12%, transparent); backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%); opacity: 1; pointer-events: none; text-align: left; transform: translateY(-100%) scale(1); transform-origin: 0 100%; transition: opacity .12s ease, transform .14s var(--ease-enter, ease-out); }
 .surface-navigation__tooltip strong { color: var(--text); font-size: var(--fs-micro); font-weight: 600; line-height: 1.1; }
 .surface-navigation__tooltip small { color: var(--text-2); font-size: 10px; line-height: 1.1; }
-.surface-navigation__slot:hover .surface-navigation__tooltip--inline, .surface-navigation__slot:focus-visible .surface-navigation__tooltip--inline, .surface-navigation__slot:focus-within .surface-navigation__tooltip--inline { opacity: 1; transform: translate(-50%, 0) scale(1); }
-.surface-navigation__slot--launcher { cursor: default; }
+.surface-navigation__slot--launcher { width: 36px; height: 36px; flex-basis: 36px; cursor: default; border-radius: 10px; }
 .surface-navigation__slot--launcher:hover { background: transparent; }
-.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher { width: 30px; height: 26px; }
-.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 30px; height: 26px; border-radius: 6px; }
-.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 27px; height: 26px; transform-origin: 50% 100%; transition: transform .14s var(--ease-enter, ease-out); }
+.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher { width: 36px; height: 36px; }
+.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); box-shadow: var(--elev-1), var(--hl); }
+.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button[aria-expanded="true"] { background: color-mix(in srgb, var(--blue) 12%, var(--surface-2)); border-color: color-mix(in srgb, var(--blue) 40%, var(--line)); }
+.surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 32px; height: 32px; transform-origin: 50% 100%; transition: transform .14s var(--ease-enter, ease-out); }
 .surface-navigation__slot--launcher:hover .pmo-teams-topic-compact-launcher__button img, .surface-navigation__slot--launcher:focus-within .pmo-teams-topic-compact-launcher__button img { transform: translateY(-1px) scale(1.08); }
 .global-survey-surface { min-width: 0; min-height: 0; height: 100%; display: grid; place-items: center; overflow: auto; padding: var(--sp-page); background: radial-gradient(70% 40% at 50% 0, color-mix(in oklab, var(--blue) 8%, transparent), transparent 72%), var(--surface-0); }
 .global-survey-shell { width: min(620px, 100%); display: grid; justify-items: center; gap: var(--sp-3); text-align: center; }
@@ -126,14 +127,22 @@
 .global-survey-hint { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .global-survey-hint code { color: var(--text-2); }
 @media (max-width: 760px) {
-  .surface-navigation { gap: 0; }
+  .window-status-bar { gap: var(--sp-2); }
+  .window-status-bar .agent-status-bar { gap: var(--sp-2); }
+  .agent-status-bar__label { display: none; }
+  .surface-navigation { gap: var(--sp-1); }
 }
 @media (max-width: 560px) {
-  .surface-navigation { height: 28px; }
+  .window-status-bar { padding: 0 var(--sp-2); gap: var(--sp-1); }
+  .window-status-bar__right { gap: var(--sp-1); }
+  .window-status-bar__utilities { padding-left: var(--sp-1); }
+  .surface-navigation { height: 34px; }
+  .surface-navigation__surfaces { height: 28px; gap: 0; }
   .surface-navigation__slot { width: 28px; height: 24px; flex-basis: 28px; }
+  .surface-navigation__slot--launcher { width: 34px; height: 34px; flex-basis: 34px; }
   .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher,
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 28px; height: 24px; }
-  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 25px; height: 24px; }
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 34px; height: 34px; }
+  .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button img { width: 30px; height: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .surface-navigation__icon,

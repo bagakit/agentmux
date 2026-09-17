@@ -79,19 +79,30 @@ async function launch(label) {
   const target = await waitFor(`${label} renderer`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.call('Runtime.enable')
+  // Only the private fixture gets focus emulation: an occluded native window otherwise pauses
+  // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
+  await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]') && document.querySelector('[data-workbench-region-id="${fileRegionId}"]'))`))
   const origin = await cdp.evaluate('({url:location.href,origin:location.origin})'); return { child, cdp, origin }
 }
 
 async function seedWorkbench(seed) {
   const reportPath = join(root, 'seed-report.json')
-  const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js')], {
-    cwd: desktopRoot, detached: true, stdio: 'ignore', env: { ...process.env, ...fixtureEnvironment,
+  const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+    cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...fixtureEnvironment,
       AGENTMUX_DESKTOP_RECOVERY_REPORT: reportPath, AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed),
       AGENTMUX_DESKTOP_READY_FILE: join(root, 'seed-ready.json'), AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }
   })
   children.add(child)
-  await waitFor('seed process exit', () => child.exitCode !== null || child.signalCode !== null)
+  let debuggingUrl, diagnostics = ''
+  child.stderr.on('data', value => { diagnostics = (diagnostics + value).slice(-8192); debuggingUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1] })
+  const endpoint = new URL(await waitFor('seed debugger', () => debuggingUrl))
+  const target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
+  const cdp = await connectCdp(target.webSocketDebuggerUrl)
+  try {
+    await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await waitFor('seed process exit', () => child.exitCode !== null || child.signalCode !== null)
+  } finally { cdp.close() }
   assert.equal(child.exitCode, 0)
   const report = JSON.parse(await readFile(reportPath, 'utf8'))
   assert.deepEqual(report.workbench.tabIds, [tabId]); assert.equal(report.workbench.drafts[session.agentSessionId], oldDraft)
@@ -130,7 +141,7 @@ async function activateButton(cdp, expression) {
     button.focus()
     return document.activeElement === button
   })()`)
-  assert.equal(ready, true, 'The exact visible queue action must accept keyboard focus')
+  assert.equal(ready, true, 'The exact visible queue action must accept keyboard focus: ' + expression)
   await key(cdp, 'Enter', 'Enter')
 }
 
