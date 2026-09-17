@@ -148,10 +148,11 @@ describe('设置搜索', () => {
       .toBeGreaterThan(0)
     expect(readsOfQuery.length, [
       `\`query\` 在壳里的读取点变成了 ${readsOfQuery.length} 处（行号：${readsOfQuery.join(', ')}）。`,
-      '合法的 7 处是：`visibleSettingsSections(query)` 与 `settingsNavGroups(query)` 两句转发各占 2',
+      '合法的 9 处是：`visibleSettingsSections(query)` 与 `settingsNavGroups(query)` 两句转发各占 2',
       '（实参 + 依赖数组），搜索框的 `value={query}` 与清空按钮的条件各 1，空结果提示里回显那一句 1。',
+      'Escape 先清空搜索的条件与 effect 依赖各 1；行为由 settings-workbench 的真实键盘事件验证。',
       '多出来的读取点通常意味着壳里又判了一次「哪些 section 匹配搜索词」——那就是第二份过滤逻辑。',
       '如果这次新增是别的正当用途，把这个数字连同理由一起更新。'
-    ].join('\n')).toBe(7)
+    ].join('\n')).toBe(9)
   })
 })
