@@ -1,4 +1,4 @@
-import { FolderGit2, LoaderCircle, Play, RadioTower } from 'lucide-react'
+import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -17,6 +17,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const [executorId, setExecutorId] = useState('none')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(config.workspaces.length === 0)
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const hostChecks = useAppStore((state) => state.hostChecks)
@@ -81,8 +82,14 @@ export function WorkspaceSettingsPane({ config, onClose }: {
 
   return (
     <div className="settings-pane-stack">
+      <div className="settings-pane-toolbar">
+        <div><strong>{config.workspaces.length} {config.workspaces.length === 1 ? 'workspace' : 'workspaces'}</strong><span>Project folders and their worktrees</span></div>
+        {!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add project</button> : null}
+      </div>
+      <div className="settings-workspace-create" hidden={!adding}>
+        <div className="settings-workspace-create__header"><strong>Add project</strong><button className="icon-button" aria-label="Cancel adding project" onClick={() => setAdding(false)}><X size={15} /></button></div>
       <section className="workspace-composer">
-        <header><div><h3>Add project</h3><p>Register a project folder on a ready local or SSH host. Create worktrees later from its Branches panel.</p></div></header>
+        <header><p>Choose a folder and a host. You can start an agent now or open the project on its own.</p></header>
         <div className="workspace-composer__fields workspace-composer__fields--project">
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" /></label>
           <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => setHostId(event.target.value)}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
@@ -92,10 +99,11 @@ export function WorkspaceSettingsPane({ config, onClose }: {
         {error ? <div className="dialog-error">{error}</div> : null}
         <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>
       </section>
-      <section className="settings-group">
-        <header><span>Registered workspaces</span><small>{config.workspaces.length}</small></header>
+      </div>
+      {config.workspaces.length > 0 ? <section className="settings-group">
+        <header><span>Your workspaces</span><small>Registered on this machine</small></header>
         <div className="workspace-settings-list">{config.workspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small>{workspace.path}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
-      </section>
+      </section> : <div className="settings-workspaces-empty"><p>Your projects will appear here.</p>{!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add your first project</button> : null}</div>}
     </div>
   )
 }

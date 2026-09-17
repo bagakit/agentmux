@@ -1,8 +1,9 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import { Bell, Bot, Boxes, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import { Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
 import { AgentSettingsPane } from './settings/AgentSettingsPane'
 import { AppearanceSettingsPane } from './settings/AppearanceSettingsPane'
@@ -39,15 +40,15 @@ const GROUPS: { id: SettingsGroupId; title: string }[] = [
 const AGENT_PROVIDER_KEYWORDS = BUILT_IN_AGENT_PROVIDER_IDS.map((id) => id.toLowerCase()).join(' ')
 
 const SECTIONS = [
-  { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Project folders and registered worktrees', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
-  { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Local and SSH machines', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
-  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Executors and Providers', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
-  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
-  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts, how long they stay, and whether you hear them', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
-  { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Whether Agents may drive an open page', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
-  { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Your own prompts, their keywords, and which Agent each belongs to', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
-  { id: 'copy-paths' as const, group: 'preferences' as const, title: 'Copy Paths', description: 'Whether a copied path shows ~ or the full home path', icon: ClipboardCopy, keywords: 'copy path clipboard home directory tilde abbreviate absolute full shorten' },
-  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
+  { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Your projects, ready when you are.', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
+  { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Choose where your agents work.', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
+  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Give each agent a name, a look, and a way to work.', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
+  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Make your workspace feel like yours.', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
+  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Decide when your agents should get your attention.', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
+  { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Choose how agents interact with your pages.', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
+  { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Keep your everyday instructions close at hand.', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
+  { id: 'copy-paths' as const, group: 'preferences' as const, title: 'Copy Paths', description: 'Choose how paths look when you share them.', icon: ClipboardCopy, keywords: 'copy path clipboard home directory tilde abbreviate absolute full shorten' },
+  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'A little about your local workbench.', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
 
 /**
@@ -97,6 +98,12 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   const setConfig = useAppStore((state) => state.setConfig)
   const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const [query, setQuery] = useState('')
+  const [visited, setVisited] = useState<SettingsSectionId[]>([initialSection])
+
+  useEffect(() => setActive(initialSection), [initialSection, executorId])
+  useEffect(() => {
+    setVisited((current) => current.includes(active) ? current : [...current, active])
+  }, [active])
   const visibleSections = useMemo(() => visibleSettingsSections(query), [query])
   // 侧栏渲染用的分组列表也从纯函数来。壳里不留任何过滤，否则那一句总能被换成不读 query 的拼法
   // （实测 `[...SECTIONS].filter(…)` 绕过了按符号名计数的守卫，侧栏从此永不过滤而 4 条全绿）。
@@ -169,27 +176,25 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
       <div className="window-drag-region" />
       <aside className="settings-sidebar">
         <header>
-          <div className="settings-sidebar__brand"><Boxes size={17} /><span><strong>AgentMux</strong><small>Settings</small></span></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+          <div className="settings-sidebar__brand"><BrandIcon size={30} /><span><strong>AgentMux</strong><small>Your local agent workbench</small></span></div>
         </header>
-        <label className="settings-search"><Search size={14} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
+        <label className="settings-search"><Search size={14} /><input aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
         <div className="settings-sidebar__context">
-          <span>Control plane</span>
-          <p>Shape how AgentMux works on this machine.</p>
+          <span>Settings</span>
+          <p>A workspace that works your way.</p>
         </div>
-        <nav>
+        <nav aria-label="Settings sections">
           {navGroups.map((group) => (
             <Fragment key={group.id}>
               <p>{group.title}</p>
               {group.items.map((item) => {
                 const Icon = item.icon
-                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} title={item.description} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>
+                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} title={item.description} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
               })}
             </Fragment>
           ))}
-          {visibleSections.length === 0 ? <span className="settings-nav-empty">No settings match “{query}”.</span> : null}
         </nav>
-        <footer><span>Core API</span><code>@agentmux/core</code></footer>
+        <footer><BrandIcon size={16} /><span>Local by design.<br />Yours to shape.</span></footer>
       </aside>
       <main className="settings-content">
         <header className="settings-content__header">
@@ -206,17 +211,20 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
             <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
           </div>
         </header>
-        <div className="settings-content__scroll">
-          {active === 'general' ? <GeneralSettingsPane /> : null}
-          {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
-          {active === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
-          {active === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
-          {active === 'copy-paths' ? <CopyPathsSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
-          {active === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
-          {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}
-          {active === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
-          {active === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}
+        {visibleSections.length === 0 ? <div className="settings-nav-empty" role="status">No settings match “{query}”. Try a different word.</div> : null}
+        {visited.map((pane) => (
+        <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={active !== pane || visibleSections.length === 0} inert={active !== pane || visibleSections.length === 0}>
+          {pane === 'general' ? <GeneralSettingsPane /> : null}
+          {pane === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
+          {pane === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
+          {pane === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
+          {pane === 'copy-paths' ? <CopyPathsSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
+          {pane === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
+          {pane === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}
+          {pane === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
+          {pane === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}
         </div>
+        ))}
       </main>
     </div>
   )

@@ -234,9 +234,8 @@ function DesktopApp() {
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
-        aria-hidden={settingsRoute ? true : undefined}
-        inert={Boolean(settingsRoute)}
       >
+      <div className="app-shell__workspace" aria-hidden={settingsRoute ? true : undefined} inert={Boolean(settingsRoute)}>
       {!globalSurfaceOwnsProjectRail && projectRailOpen ? (
         <ProjectRail />
       ) : globalSurfaceOwnsProjectRail ? null : (
@@ -335,8 +334,16 @@ function DesktopApp() {
           />
         </div>
       </main>
+      </div>
+      {settingsRoute ? (
+        <SettingsPanel
+          initialSection={settingsRoute.section}
+          executorId={settingsRoute.executorId}
+          onClose={() => setSettingsRoute(null)}
+        />
+      ) : null}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} settingsOpen={Boolean(settingsRoute)} onCloseSettings={() => setSettingsRoute(null)} /></div>
         <div className="window-status-bar__right">
           <ResourceUsagePanel />
           <GlobalSystemNotices />
@@ -353,13 +360,6 @@ function DesktopApp() {
       <WindowOverlayHost />
       </BoardRowsProvider>
       </RendererResourceOwners>
-      {settingsRoute ? (
-        <SettingsPanel
-          initialSection={settingsRoute.section}
-          executorId={settingsRoute.executorId}
-          onClose={() => setSettingsRoute(null)}
-        />
-      ) : null}
     </ExecutorIdentityContext.Provider>
     </SettingsNavigation.Provider>
   )

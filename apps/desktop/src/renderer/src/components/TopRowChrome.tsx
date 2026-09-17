@@ -138,7 +138,11 @@ export function TopBreadcrumb() {
   )
 }
 
-export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: SettingsSectionId) => void }) {
+export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSettings }: {
+  onOpenSettings: (section: SettingsSectionId) => void
+  settingsOpen?: boolean
+  onCloseSettings?: () => void
+}) {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
@@ -214,7 +218,7 @@ export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: Se
         onMouseLeave={() => hideTooltip(plugin.id)}
         onFocus={(event) => showTooltip(plugin.id, event.currentTarget)}
         onBlur={() => hideTooltip(plugin.id)}
-        onClick={() => setMainSurface(plugin.surface)}
+        onClick={() => { onCloseSettings?.(); setMainSurface(plugin.surface) }}
       >
         <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
       </NavigationButton>
@@ -231,8 +235,9 @@ export function SurfaceSwitch({ onOpenSettings }: { onOpenSettings: (section: Se
             className="surface-navigation__slot surface-navigation__settings"
             aria-label="Settings"
             title="Settings"
+            aria-expanded={settingsOpen}
             data-settings-section="workspaces"
-            onClick={() => onOpenSettings('workspaces')}
+            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('workspaces')}
           >
             <Settings2 size={14} aria-hidden="true" />
           </button>

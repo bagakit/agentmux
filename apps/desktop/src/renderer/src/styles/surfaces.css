@@ -82,81 +82,78 @@
 .welcome p { max-width: 420px; margin:0 0 var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 
 /* 全屏 Settings / Sidebar / Pane 内容模型。 */
-.settings-page { position: fixed; z-index: 90; inset: 0; display: grid; grid-template-columns: 268px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
-.settings-sidebar { min-width: 0; display: flex; flex-direction: column; padding-top:34px; border-right: 1px solid var(--line); background: var(--surface-1); }
-.settings-sidebar > header { height: 60px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
-.settings-sidebar__brand { display: flex; align-items: center; gap:var(--sp-4); color: var(--green); }
-.settings-sidebar > header span { display: flex; flex-direction: column; gap:1px; color: var(--text); }
-.settings-sidebar > header strong { font-size: var(--fs-meta); }
-.settings-sidebar > header small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; text-transform: uppercase; letter-spacing: .08em; }
-.settings-search { height: 50px; position: relative; display: flex; align-items: center; padding:0 var(--sp-5); border-bottom: 1px solid var(--line-soft); }
-.settings-search > svg { position: absolute; left: 23px; color: var(--text-3); pointer-events: none; }
-.settings-search input { width: 100%; padding:var(--sp-3) 28px var(--sp-3) 30px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font-size: var(--fs-meta); }
+/* Settings shares the app's content grid row. The original footer owns the other row. */
+.settings-page { position: absolute; z-index: 90; grid-column: 1 / -1; grid-row: 1 / 2; inset: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
+.settings-sidebar { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-top: 34px; border-right: 1px solid var(--line-soft); background: var(--surface-1); }
+.settings-sidebar > header { display: flex; align-items: center; padding: var(--sp-7) var(--sp-6) var(--sp-6); }
+.settings-sidebar__brand { display: flex; align-items: center; gap: var(--sp-3); }
+.settings-sidebar__brand > span { display: grid; gap: var(--sp-1); }
+.settings-sidebar__brand strong { color: var(--text); font-size: var(--fs-title); letter-spacing: -.03em; }
+.settings-sidebar__brand small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-search { position: relative; display: flex; align-items: center; margin: 0 var(--sp-4); height: 34px; }
+.settings-search > svg { position: absolute; left: var(--sp-3); color: var(--text-3); pointer-events: none; }
+.settings-search input { width: 100%; height: 100%; padding: var(--sp-3) 28px var(--sp-3) 30px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font-size: var(--fs-body); }
 .settings-search input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
-.settings-search button { position: absolute; right: 19px; display: flex; padding:var(--sp-1); border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
-.settings-sidebar__context { display: grid; gap: var(--sp-1); padding: var(--sp-5) var(--sp-6) var(--sp-3); }
-.settings-sidebar__context > span { color: var(--green-2); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
-.settings-sidebar__context > p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
-.settings-sidebar nav { min-height: 0; flex: 1; padding:var(--sp-3) var(--sp-4) var(--sp-6); overflow: auto; }
-.settings-sidebar nav > p { margin:0 var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; text-transform: uppercase; letter-spacing: .13em; }
-.settings-sidebar nav > p:not(:first-child) { margin-top:var(--sp-6); }
-.settings-sidebar nav > button { width: 100%; min-height: 38px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; }
-.settings-sidebar nav > button:hover { color: var(--text-2); background: var(--surface-2); }
-/* 选中＝干净的 Surface 填充（与 Project Rail active 同语汇：surface-2 + 顶部高光），绿只落在图标上，
-   不画整圈描边——侧栏本身就是 surface-1，往选中态填 surface-1 等于没填，于是此前 hover 反而比选中更"实"。 */
+.settings-search button { position: absolute; right: var(--sp-3); display: flex; padding: var(--sp-1); border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
+.settings-sidebar__context { display: grid; gap: var(--sp-2); padding: var(--sp-7) var(--sp-6) var(--sp-3); }
+.settings-sidebar__context > span { color: var(--text); font-size: var(--fs-title); font-weight: 600; }
+.settings-sidebar__context > p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.settings-sidebar nav { min-height: 0; flex: 1; padding: var(--sp-4); overflow: auto; }
+.settings-sidebar nav > p { margin: var(--sp-2) var(--sp-3) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.settings-sidebar nav > p:not(:first-child) { margin-top: var(--sp-6); }
+.settings-sidebar nav > button { width: 100%; min-height: 34px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; }
+.settings-sidebar nav > button:hover { color: var(--text); background: var(--surface-2); }
 .settings-sidebar nav > button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
 .settings-sidebar nav > button.selected > svg { color: var(--green); }
-.settings-sidebar nav > button > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.settings-sidebar nav > button strong { font-size: var(--fs-body); }
-.settings-sidebar nav > button small { display: none; overflow: hidden; font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.settings-nav-empty { display: block; padding:var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
-.settings-sidebar > footer { height: 44px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-6); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
-.settings-sidebar > footer code { color: var(--green); font-size: var(--fs-micro); }
-.settings-content { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); padding-top:34px; background: var(--surface-0); }
-.settings-content__header { position: sticky; top: 34px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding:25px clamp(var(--sp-7), 5vw, 74px) var(--sp-6); border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface-0) 92%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
-.settings-content__title { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-4); }
+.settings-sidebar nav > button > span { min-width: 0; display: block; }
+.settings-sidebar nav > button strong { font-size: var(--fs-body); font-weight: 500; }
+.settings-sidebar nav > button.selected strong { font-weight: 650; }
+.settings-nav-empty { display: block; padding: var(--sp-4); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.settings-sidebar > footer { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-6); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.settings-content { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); padding-top: 34px; background: var(--surface-0); }
+.settings-content__header { position: sticky; top: 34px; z-index: 2; width: min(100%, calc(800px + var(--sp-7) * 2)); margin-inline: auto; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-7); background: var(--surface-0); }
+.settings-content__title { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-3); }
 .settings-content__icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; margin-top: var(--sp-2); color: var(--text-3); }
 .settings-content__breadcrumb { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.settings-content__breadcrumb strong { color: var(--text-2); font-weight: 600; }
-.settings-content__header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
-.settings-content__header p { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
-.settings-content__actions { display: flex; align-items: center; gap: var(--sp-4); }
+.settings-content__breadcrumb strong { font-weight: 500; }
+.settings-content__header h2 { margin: var(--sp-3) 0 var(--sp-2); font-size: var(--fs-display); letter-spacing: -.035em; }
+.settings-content__header p { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.settings-content__actions { display: flex; align-items: center; gap: var(--sp-3); }
 .settings-content__hint { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.settings-content__hint kbd { min-width: 28px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1 var(--font-mono); text-align: center; }
+.settings-content__hint kbd { min-width: 24px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); font: var(--fs-micro)/1 var(--font-mono); text-align: center; }
 .settings-content__close { flex: 0 0 auto; }
-.settings-content__scroll { min-height: 0; padding:var(--sp-7) clamp(var(--sp-7), 5vw, 74px) 50px; overflow: auto; }
-.settings-pane-stack { max-width: 900px; display: grid; gap:var(--sp-5); animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
-/* 两层容器语汇（见 docs/design/agentmux-surface-density.md《Settings Pane》）。此前一条规则把
-   可操作合成器、只读说明、执行器分组、工作区列表压成同一个平面（surface-1 + elev-1 + 描边 + radius-lg），
-   于是整屏一样重、读不出主次——这次重做的核心就是把这一个平面拆成"抬起 vs 平铺"两档：
-     · 抬起层（可操作 / 主内容）：surface-1 + elev-2 + 顶部高光，不描边——真正能改东西的面浮起来；
-     · 平铺层（信息 / 次级）：与页面同底 surface-0 + 一条 line-soft 发丝线，无阴影、不成盒——只读说明沉入底面。
-   装饰性 hero 说明卡（原 .settings-card--hero / .settings-card__icon）已退役：绿只留给状态与唯一主操作。 */
-.settings-group, .workspace-composer { border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
-.settings-card { padding:var(--sp-6) 0 0; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
-.settings-card h3, .workspace-composer h3 { margin:1px 0 var(--sp-2); font-size: var(--fs-title); }
-.settings-card p, .workspace-composer p { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
-/* 只读事实的脚注排布：术语一档、说明再降一档，整块沉在平铺卡里，不假装成可操作控件。 */
-.settings-footnote { display: grid; gap:var(--sp-4); margin:var(--sp-4) 0 0; }
-.settings-footnote > div { display: grid; gap:var(--sp-1); }
-.settings-footnote dt { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
-.settings-footnote dd { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
-.settings-pane-toolbar { min-height: 43px; display: flex; align-items: center; justify-content: space-between; gap:var(--sp-6); }
-.settings-pane-toolbar > div { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.settings-content__scroll { min-height: 0; padding: var(--sp-4) max(var(--sp-7), calc((100% - 800px) / 2)) 0; overflow: auto; }
+.settings-content__scroll[hidden] { display: none; }
+.settings-pane-stack { min-height: 100%; display: flex; flex-direction: column; gap: var(--sp-6); animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
+.settings-group { border-top: 1px solid var(--line-soft); background: transparent; }
+.workspace-composer { padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--hl); }
+.settings-card { padding: var(--sp-6) 0 0; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
+.settings-card h3, .workspace-composer h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
+.settings-card p, .workspace-composer p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }
+.settings-footnote { display: grid; gap: var(--sp-5); margin: 0; }
+.settings-footnote > div { display: grid; gap: var(--sp-2); }
+.settings-footnote dt { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.settings-footnote dd { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.55; }
+.settings-pane-toolbar { min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
+.settings-pane-toolbar > :first-child { margin-right: auto; }
+.settings-pane-toolbar > div { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .settings-pane-toolbar > div strong { font-size: var(--fs-title); }
 .settings-pane-toolbar > div span { color: var(--text-3); font-size: var(--fs-meta); }
-.settings-compact-field { display: flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
-.settings-compact-field select { min-width: 160px; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font-size: var(--fs-meta); }
-.settings-group { overflow: hidden; }
-/* 区块头用句首大写的 --text-2，不再大写字距。三层大写标签（侧栏分组标签、eyebrow、区块头）曾在
-   同一视线里叠成一摞；把这层降下来后，原先在两个面里把它掰回句首大写的覆写（appearance / notification）
-   就成了默认，随之删除。 */
-.settings-group > header { height: 35px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-title); font-weight: 620; }
-.settings-group > header small { min-width: 19px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); text-align: center; }
-.settings-disclosure-icon { color: var(--text-3); transition: transform .15s; }
-.settings-inline-error { margin:0; color: var(--red-text); font-size: var(--fs-micro); }
-.settings-pane-actions { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-5); }
-.settings-pane-actions > span { margin-right:auto; color: var(--text-3); font-size: var(--fs-micro); }
+.settings-compact-field { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); }
+.settings-compact-field select { min-width: 120px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font-size: var(--fs-body); }
+.settings-group > header { min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4) 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; }
+.settings-group > header small { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
+.settings-disclosure-icon { color: var(--text-3); transition: transform var(--dur-fast); }
+.settings-inline-error { margin: 0; color: var(--red-text); font-size: var(--fs-body); }
+.settings-pane-actions { position: sticky; z-index: 3; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-4); margin-top: auto; padding: var(--sp-4) 0; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
+.settings-pane-actions > span { margin-right: auto; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.settings-workspace-create { display: grid; gap: var(--sp-4); }
+.settings-workspace-create[hidden] { display: none; }
+.settings-workspace-create__header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.settings-workspace-create__header strong { font-size: var(--fs-title); }
+.settings-workspace-create .workspace-composer { gap: var(--sp-4); }
+.settings-workspaces-empty { display: grid; justify-items: start; gap: var(--sp-3); padding: var(--sp-5) 0; color: var(--text-2); font-size: var(--fs-body); }
+.settings-workspaces-empty p { margin: 0; }
 .notification-dwell { display: grid; gap:var(--sp-4); padding:var(--sp-5); }
 .notification-dwell__slider { width: 100%; accent-color: var(--green); cursor: pointer; }
 .notification-dwell__ticks { display: flex; justify-content: space-between; gap:var(--sp-2); margin:0; padding:0; list-style: none; }
@@ -222,29 +219,35 @@
 @keyframes notification-dwell-breath { 50% { opacity: .62; } }
 
 @media (max-width: 760px) {
-  .settings-page { grid-template-columns: 208px minmax(0, 1fr); }
-  .settings-sidebar nav > button { padding: var(--sp-3); }
-  .settings-sidebar nav > button small { display: none; }
-  .settings-content__header { padding-inline: var(--sp-6); }
+  .settings-page { grid-template-columns: 188px minmax(0, 1fr); }
+  .settings-sidebar__brand small { display: none; }
+  .settings-content__header { padding-inline: var(--sp-5); }
+  .settings-content__scroll { padding-inline: var(--sp-5); }
   .settings-content__icon { width: auto; height: auto; }
+  .settings-pane-toolbar { gap: var(--sp-2); }
 }
 
 @media (max-width: 560px) {
   .settings-page { display: flex; flex-direction: column; overflow: hidden; }
-  .settings-sidebar { flex: 0 0 auto; max-height: 168px; padding-top: 34px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .settings-sidebar > header { flex: 0 0 46px; height: 46px; }
+  .settings-sidebar { flex: 0 0 auto; padding-top: 34px; border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .settings-sidebar > header { padding: var(--sp-3) var(--sp-4); }
+  .settings-sidebar__brand .brand-icon { width: 24px; height: 24px; }
   .settings-sidebar__context { display: none; }
-  .settings-search { flex: 0 0 44px; height: 44px; }
+  .settings-search { height: 32px; }
   .settings-sidebar nav { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); overflow-x: auto; overflow-y: hidden; }
   .settings-sidebar nav > p { display: none; }
-  .settings-sidebar nav > button { flex: 0 0 auto; width: auto; min-width: 112px; grid-template-columns: 16px auto; padding: var(--sp-3); }
+  .settings-sidebar nav > button { flex: 0 0 auto; width: auto; grid-template-columns: 16px auto; padding: var(--sp-2) var(--sp-3); }
   .settings-sidebar nav > button > span { display: block; }
   .settings-sidebar nav > button strong { white-space: nowrap; }
   .settings-sidebar > footer { display: none; }
   .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
-  .settings-content__header { position: relative; top: auto; padding: var(--sp-5) var(--sp-5) var(--sp-4); }
-  .settings-content__header h2 { font-size: var(--fs-title); }
+  .settings-content__header { position: relative; top: auto; padding: var(--sp-5) var(--sp-4); }
+  .settings-content__header h2 { font-size: var(--fs-display); }
   .settings-content__icon { display: none; }
   .settings-content__hint { display: none; }
-  .settings-content__scroll { padding: var(--sp-5) var(--sp-5) 40px; }
+  .settings-content__scroll { padding: var(--sp-3) var(--sp-4) 0; }
+  .settings-pane-stack { gap: var(--sp-5); }
+  .settings-pane-actions { gap: var(--sp-3); }
+  .settings-pane-actions > span { font-size: var(--fs-micro); }
 }
+
