@@ -172,13 +172,16 @@ describe('store action 真的接上了纯判定', () => {
 
 describe('App 把衰减 hook 挂到窗口', () => {
   const appSource = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
+  const ownersSource = readFileSync(new URL('../src/renderer/src/components/RendererResourceOwners.tsx', import.meta.url), 'utf8')
   // 先剥注释——注释里描述规则的文字不是规则本身，别让它假装成挂载。
-  const code = appSource
+  const code = ownersSource
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
 
-  it('App 导入并调用了 useAgentStatusDecay——删掉这行，别处全绿这里红', () => {
-    expect(code).toMatch(/import\s*\{\s*useAgentStatusDecay\s*\}\s*from\s*'\.\/lib\/agent-status-decay'/)
+  it('App 挂载独立衰减 owner 并调用了 useAgentStatusDecay', () => {
+    expect(appSource).toMatch(/<RendererResourceOwners\s/)
+    expect(code).toMatch(/import\s*\{\s*useAgentStatusDecay\s*\}\s*from\s*'\.\.\/lib\/agent-status-decay'/)
+    expect(code).toContain('<AgentStatusDecayOwner />')
     expect(code).toMatch(/useAgentStatusDecay\(\)/)
   })
 })

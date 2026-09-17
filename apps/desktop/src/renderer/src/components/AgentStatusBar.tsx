@@ -86,6 +86,7 @@ export function AgentStatusBar() {
         </span>
         <AgentTreePanel
           filter="working"
+          count={rollup.working}
           heading="Working · by project"
           label={`Show the ${rollup.working} working ${rollup.working === 1 ? 'agent' : 'agents'} by project`}
         />
@@ -104,6 +105,7 @@ export function AgentStatusBar() {
           </button>
           <AgentTreePanel
             filter="needs-you"
+            count={rollup.needsYou}
             heading="Needs you · by project"
             label={`Show the ${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent' : 'agents'} needing you by project`}
           />
@@ -127,6 +129,7 @@ export function AgentStatusBar() {
           </button>
           <AgentTreePanel
             filter="error"
+            count={rollup.error}
             heading="Error · by project"
             label={`Show the ${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error by project`}
           />

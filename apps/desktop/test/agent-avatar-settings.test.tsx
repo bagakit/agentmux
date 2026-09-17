@@ -79,7 +79,7 @@ it('shows legacy appearance in Executor settings and makes an explicit reset win
   expect(legacy.appearance.agentAvatars?.codex).toEqual(appearances.codex)
   const config = { ...legacy, executors: savedExecutors }
   await dom.render(null)
-  await dom.render(<ExecutorIdentityContext.Provider value={{ config, sessions: [] }}>
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config }}>
     <AgentSettingsPane config={config} onSave={save} />
     <AgentAvatar executorId="codex" />
   </ExecutorIdentityContext.Provider>)
@@ -101,7 +101,7 @@ it('shows details on hover and focus, then routes the settings action to the mat
   const session = { ...composerSession(), executorId: 'review', status: { ...composerSession().status, detail: 'Stopped by user' } }
   useAppStore.setState({ config, sessions: [session] })
   const open = vi.fn()
-  await dom.render(<ExecutorIdentityContext.Provider value={{ config, sessions: [session] }}><SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider></ExecutorIdentityContext.Provider>)
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config }}><SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider></ExecutorIdentityContext.Provider>)
   expect(badges()).toEqual(['shield'])
   const identity = dom.container.querySelector<HTMLElement>('.composer-agent-identity .agent-avatar')!
   const mailbox = dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
@@ -141,7 +141,7 @@ it('holds one native-surface lease per visible avatar panel and releases it on c
     if (visible) useAppStore.getState().acquireNativeSurfaceOverlay()
     else useAppStore.getState().releaseNativeSurfaceOverlay()
   }
-  await dom.render(<ExecutorIdentityContext.Provider value={{ config: null, sessions: [], onPanelVisibilityChange }}>
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
     <AgentAvatar label="Left Agent" providerId="codex" />
     <AgentAvatar label="Second Agent" providerId="claude" />
   </ExecutorIdentityContext.Provider>)

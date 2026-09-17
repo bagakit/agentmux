@@ -201,7 +201,6 @@ describe('memory-budget consumer: a forgotten kind must not silently leak', () =
     const candidates = collectSurfaceMemoryCandidates({
       tabs: { [activeTabId]: active, bg: background },
       layouts: { ws: layout },
-      sessions: [],
       documents: {},
       dirtyDocuments: {},
       savingDocuments: {},
@@ -245,7 +244,6 @@ describe('memory-budget consumer: a forgotten kind must not silently leak', () =
       collectSurfaceMemoryCandidates({
         tabs: { [tabId]: tab },
         layouts: { ws: layout },
-        sessions: [],
         documents: {},
         dirtyDocuments: {},
         savingDocuments: {},

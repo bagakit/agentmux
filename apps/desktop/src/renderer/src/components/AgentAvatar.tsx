@@ -2,7 +2,10 @@ import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, u
 import { createPortal } from 'react-dom'
 import { Settings2 } from 'lucide-react'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
-import type { AgentAvatarAppearance, AppConfig, SessionSnapshot } from '../../../shared/contracts'
+import type { AgentAvatarAppearance, AppConfig } from '../../../shared/contracts'
+import { useShallow } from 'zustand/react/shallow'
+import { useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { attentionAccentFor } from '../lib/attention-event'
 import { PRESENCE_MARK_CORNERS } from '../lib/presence-mark-corner'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
@@ -15,9 +18,8 @@ import { getWindowOverlayHost } from './WindowOverlayHost'
 /** Desktop presentation only; Core continues to own the Session and Provider facts. */
 export const ExecutorIdentityContext = createContext<{
   config: AppConfig | null
-  sessions: readonly SessionSnapshot[]
   onPanelVisibilityChange?: (visible: boolean) => void
-}>({ config: null, sessions: [] })
+}>({ config: null })
 
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */
 export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, onPanelVisibilityChange }: {
@@ -36,18 +38,24 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
 }) {
   const identity = useContext(ExecutorIdentityContext)
   const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange
-  const session = sessionId ? identity.sessions.find((entry) => entry.id === sessionId && entry.kind === 'agent') : undefined
-  const resolvedExecutorId = executorId ?? (session?.kind === 'agent' ? session.executorId : undefined)
+  const session = useAppStore(useShallow((store) => {
+    const entry = sessionId ? sessionPresentationById(store.sessions).get(sessionId) : undefined
+    return entry?.kind === 'agent' ? {
+      executorId: entry.executorId, providerId: entry.providerId, label: entry.label,
+      state: entry.status.state, detail: entry.status.detail
+    } : null
+  }))
+  const resolvedExecutorId = executorId ?? session?.executorId
   const executor = resolvedExecutorId ? identity.config?.executors[resolvedExecutorId] : undefined
-  const provider = providerId ?? executor?.providerId ?? (session?.kind === 'agent' ? session.providerId : undefined)
+  const provider = providerId ?? executor?.providerId ?? session?.providerId
   // Keep the persisted appearance while a user has not yet opened the Executor
   // template. New edits win immediately; the old entry is read-only until then.
   const avatar = appearance ?? (resolvedExecutorId
     ? executor?.avatar ?? identity.config?.appearance.agentAvatars?.[resolvedExecutorId]
     : undefined)
-  const displayState = state ?? session?.status.state
+  const displayState = state ?? session?.state
   const name = label ?? session?.label ?? executor?.label ?? agentProviderLabel(provider ?? '')
-  const statusDetail = detail ?? session?.status.detail
+  const statusDetail = detail ?? session?.detail
   const filterId = useId().replace(/:/g, '')
   const panelId = useId()
   const navigation = useContext(SettingsNavigation)

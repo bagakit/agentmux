@@ -48,7 +48,6 @@ describe('surface memory budget coordinator', () => {
     const candidates = collectSurfaceMemoryCandidates({
       tabs: { [file.id]: file, [browser.id]: browser },
       layouts: { 'workspace-1': layout },
-      sessions: [],
       documents: { 'workspace-1\0src/file.ts': { content: 'const value = 1' } },
       dirtyDocuments: {},
       savingDocuments: {},
@@ -67,7 +66,6 @@ describe('surface memory budget coordinator', () => {
     const dirty = collectSurfaceMemoryCandidates({
       tabs: { [file.id]: file },
       layouts: { 'workspace-1': layout },
-      sessions: [],
       documents: { 'workspace-1\0src/file.ts': {} },
       dirtyDocuments: { 'workspace-1\0src/file.ts': true },
       savingDocuments: {},
@@ -77,7 +75,6 @@ describe('surface memory budget coordinator', () => {
     const hidden = collectSurfaceMemoryCandidates({
       tabs: { [file.id]: file },
       layouts: { 'workspace-1': layout },
-      sessions: [],
       documents: { 'workspace-1\0src/file.ts': {} },
       dirtyDocuments: {},
       savingDocuments: {},

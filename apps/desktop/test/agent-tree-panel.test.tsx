@@ -91,7 +91,7 @@ describe('AgentTreePanel — the project→Agent tree behind a count', () => {
     fixture.state.config = { workspaces: [workspace('w1', 'One', '/repo/one')] }
     // No working agent -> the working tree renders nothing at all (no chevron, no popover trigger).
     const markup = renderToStaticMarkup(
-      createElement(AgentTreePanel, { filter: 'working', heading: 'Working · by project', label: 'x' })
+      createElement(AgentTreePanel, { filter: 'working', heading: 'Working · by project', label: 'x', count: 0 })
     )
     expect(markup).toBe('')
   })
@@ -100,7 +100,7 @@ describe('AgentTreePanel — the project→Agent tree behind a count', () => {
     fixture.state.sessions = [agent('a', 'working')]
     fixture.state.config = { workspaces: [workspace('w1', 'One', '/repo/one')] }
     const markup = renderToStaticMarkup(
-      createElement(AgentTreePanel, { filter: 'working', heading: 'Working · by project', label: 'Show working' })
+      createElement(AgentTreePanel, { filter: 'working', heading: 'Working · by project', label: 'Show working', count: 1 })
     )
     expect(markup).toContain('agent-tree__disclose')
     expect(markup).toContain('aria-label="Show working"')

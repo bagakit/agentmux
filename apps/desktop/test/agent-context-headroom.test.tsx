@@ -96,7 +96,7 @@ function Workbench() {
   const sessions = useAppStore(state => state.sessions)
   const onOpen = useAppStore(state => state.selectSession)
   return <>
-    <AgentTreePanel filter="all" heading="Headroom Agents" label="Show headroom Agents" />
+    <AgentTreePanel count={2} filter="all" heading="Headroom Agents" label="Show headroom Agents" />
     <WorkspaceAgentsTool workspace={config.workspaces[0]!} sessions={sessions} onOpen={onOpen} />
     {IDS.map(id => <section data-composer-for={id} key={id}><AgentSessionComposer sessionId={id} /></section>)}
   </>
