@@ -1,24 +1,27 @@
 import { ArrowUpRight } from 'lucide-react'
+import { memo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import type { DemandArrangement } from '../lib/global-demand-board'
 import { workspaceForSession } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
 
 /** Observes existing Sessions; input and terminal size remain owned by their original Regions. */
-export function SessionObservationRegions({ sessionIds, contextId, arrangement = 'columns' }: {
+export const SessionObservationRegions = memo(function SessionObservationRegions({ sessionIds, contextId, arrangement = 'columns' }: {
   sessionIds: readonly string[]
   contextId: string
   arrangement?: DemandArrangement
 }) {
-  const sessions = useAppStore((state) => state.sessions)
+  const sessions = useAppStore(useShallow(state => sessionIds.map(id => sessionPresentationById(state.sessions).get(id))))
   const config = useAppStore((state) => state.config)
   const selectSession = useAppStore((state) => state.selectSession)
   return <SessionRegionHost arrangement={arrangement} className={`global-session-workspace__regions global-session-workspace__regions--${arrangement}`}>
-    {sessionIds.map((id) => {
-      const session = sessions.find((item) => item.id === id)
+    {sessionIds.map((id, index) => {
+      const session = sessions[index]
       if (!session) return <section key={id} className="global-session-workspace__empty" data-session-id={id}><strong>Session awaiting recovery</strong><span>{id}</span><span>The link is preserved. Open Session to inspect recovery.</span><button type="button" onClick={() => selectSession(id)}>Open Session</button></section>
       const workspaceId = workspaceForSession(config, session)?.id ?? SCRATCH_WORKSPACE_ID
       return <section key={id} className="global-session-region" data-session-id={id}>
@@ -27,4 +30,4 @@ export function SessionObservationRegions({ sessionIds, contextId, arrangement =
       </section>
     })}
   </SessionRegionHost>
-}
+})

@@ -1,6 +1,7 @@
 import { AlertTriangle, CircleStop, History, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
@@ -78,7 +79,7 @@ export function SessionPane({
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
-  const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
