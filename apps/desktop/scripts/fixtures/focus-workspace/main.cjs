@@ -33,12 +33,31 @@ app.whenReady().then(async () => {
       assert.ok(result.geometry.lanes.height < 1)
       assert.ok(result.geometry.body.height < 50)
     } else {
+      result.timeWindow = await win.webContents.executeJavaScript(`(() => {
+        const timeline = document.querySelector('.recent-focus'), ruler = timeline.querySelector('.recent-focus__playhead--ruler');
+        const markers = [...timeline.querySelectorAll('.recent-focus__message')].map(node => ({ id: node.dataset.messageId, context: node.closest('.recent-focus__track').dataset.focusTimelineId, at: Number(node.dataset.messageAt), left: node.style.left }));
+        return { start: Number(timeline.dataset.windowStart), end: Number(timeline.dataset.windowEnd), now: Number(ruler.dataset.now), positions: [...timeline.querySelectorAll('.recent-focus__playhead')].map(node => node.style.left), markers, clips: timeline.querySelectorAll('[data-focus-timeline-id="session-codex"] .recent-focus__segment').length };
+      })()`)
+      assert.equal(result.timeWindow.end - result.timeWindow.start, 4 * 3600000)
+      assert.equal(result.timeWindow.now - result.timeWindow.start, 3 * 3600000)
+      assert.ok(result.timeWindow.positions.length > 2)
+      assert.ok(result.timeWindow.positions.every(position => position === '75%'))
+      assert.equal(result.timeWindow.clips, 2)
+      assert.ok(result.timeWindow.markers.some(marker => marker.id === 'fixture-user-message' && marker.context === 'session-codex'))
+      const beforePreview = await win.webContents.executeJavaScript('window.focusProbeState().agentFocus')
+      await win.webContents.executeJavaScript('document.querySelector("[data-message-id=fixture-user-message]").click()')
+      await until('!!document.querySelector(".recent-focus__message-preview")')
+      assert.match(await win.webContents.executeJavaScript('document.querySelector(".recent-focus__message-preview").textContent'), /Inspect the original Context at this time/)
+      assert.deepEqual(await win.webContents.executeJavaScript('window.focusProbeState().agentFocus'), beforePreview)
+      await win.webContents.executeJavaScript('document.querySelector(".recent-focus__message-preview header button").click()')
+      await until('!document.querySelector(".recent-focus__message-preview")')
       assert.equal(result.geometry.leftHit, true)
       assert.equal(result.geometry.rightHit, true)
       assert.ok(result.geometry.lanes.height > 200)
       assert.ok(result.geometry.body.height > 600)
       assert.ok(result.geometry.tracks.height <= 220)
       assert.ok(result.geometry.tracks.scrollHeight > result.geometry.tracks.clientHeight)
+      assert.ok(result.geometry.tracks.scrollWidth <= result.geometry.tracks.clientWidth)
       assert.ok(result.geometry.track.scrollWidth <= result.geometry.track.clientWidth)
       assert.equal(result.geometry.track.overflowX, 'hidden')
       assert.ok(result.geometry.timeline.top >= result.geometry.main.top + result.geometry.main.height)
@@ -86,7 +105,7 @@ app.whenReady().then(async () => {
       win.setContentSize(1440, 868)
       await until('window.focusProbeGeometry().toolbar.width === 1440 && window.focusProbeGeometry().timeline.height === 208')
       // Show the first visible hierarchical lanes in the screenshot.
-      await win.webContents.executeJavaScript('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
+      await win.webContents.executeJavaScript('document.querySelector(".focus-project-lanes__rows").scrollTop = 0; document.querySelector(".recent-focus__viewport").scrollTop = 0')
       await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
       await win.webContents.capturePage().then(image => fs.writeFileSync(path.join(privateRoot, `${phase}-focus.png`), image.toPNG()))
       await until('!!document.querySelector("#focus-workspace-slot .xterm") && !document.querySelector("#focus-workspace-slot .terminal-view__xterm--hydrating")')

@@ -14,7 +14,7 @@ beforeEach(async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: available, width: 1200, height: available, toJSON() {} }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), { sessions } = await api.sessions.snapshot()
-  useAppStore.setState({ config, sessions, timelines: {}, tabs: {}, agentNames: {}, focusTimelineHeight: 96, agentFocus: { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: 1000 }] }, pmo: { sessionId: null } } })
+  useAppStore.setState({ config, sessions, timelines: {}, tabs: {}, agentNames: {}, focusTimelineHeight: 96, agentFocus: { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: Date.now() - 60_000 }] }, pmo: { sessionId: null } } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); available = 800 })

@@ -1,6 +1,7 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 export const MAX_EXECUTION_FOCUS_HISTORY = 12
+export const MAX_EXECUTION_FOCUS_EVENTS = 2000
 
 export type AgentFocusHistoryEntry = {
   sessionId: string
@@ -29,7 +30,12 @@ export function executionFocusSessionId(context: AgentFocusContext): string | nu
 }
 
 export function executionFocusHistory(context: AgentFocusContext): readonly AgentFocusHistoryEntry[] {
-  return context.execution.history
+  const seen = new Set<string>()
+  return context.execution.history.filter(entry => {
+    if (seen.has(entry.sessionId) || seen.size >= MAX_EXECUTION_FOCUS_HISTORY) return false
+    seen.add(entry.sessionId)
+    return true
+  })
 }
 
 export function pmoFocusSessionId(context: AgentFocusContext): string | null {
@@ -47,12 +53,12 @@ export function recordExecutionFocus(
   history: readonly AgentFocusHistoryEntry[],
   sessionId: string,
   focusedAt = Date.now(),
-  limit = MAX_EXECUTION_FOCUS_HISTORY
+  limit = MAX_EXECUTION_FOCUS_EVENTS
 ): AgentFocusHistoryEntry[] {
   if (!sessionId || limit < 1) return []
   return [
     { sessionId, focusedAt },
-    ...history.filter((entry) => entry.sessionId !== sessionId)
+    ...history
   ].slice(0, limit)
 }
 
@@ -61,6 +67,7 @@ export function focusExecution(
   sessionId: string | null,
   focusedAt = Date.now()
 ): AgentFocusContext {
+  if (sessionId === context.execution.sessionId) return context
   if (!sessionId) return {
     ...context,
     execution: { ...context.execution, sessionId: null }
@@ -94,8 +101,8 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
     ? execution.history.flatMap((entry) => {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
         const value = entry as Record<string, unknown>
-        return typeof value.sessionId === 'string' && value.sessionId.length > 0 && typeof value.focusedAt === 'number'
-          ? [{ sessionId: value.sessionId, focusedAt: value.focusedAt }]
+        return typeof value.sessionId === 'string' && value.sessionId.length > 0 && Number.isSafeInteger(value.focusedAt) && (value.focusedAt as number) >= 0
+          ? [{ sessionId: value.sessionId, focusedAt: value.focusedAt as number }]
           : []
       })
     : []
@@ -105,23 +112,10 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
   const pmoSessionId = typeof pmo.sessionId === 'string' && pmo.sessionId.length > 0
     ? pmo.sessionId
     : null
-  const uniqueHistory = history.filter((entry, index, values) => (
-    values.findIndex((candidate) => candidate.sessionId === entry.sessionId) === index
-  )).slice(0, MAX_EXECUTION_FOCUS_HISTORY)
-  if (sessionId) {
-    const currentEntry = uniqueHistory.find((entry) => entry.sessionId === sessionId)
-    if (currentEntry) {
-      uniqueHistory.splice(uniqueHistory.indexOf(currentEntry), 1)
-      uniqueHistory.unshift(currentEntry)
-    } else {
-      uniqueHistory.unshift({ sessionId, focusedAt: Date.now() })
-      uniqueHistory.splice(MAX_EXECUTION_FOCUS_HISTORY)
-    }
-  }
   return {
     execution: {
       sessionId,
-      history: uniqueHistory
+      history: history.slice(0, MAX_EXECUTION_FOCUS_EVENTS)
     },
     pmo: { sessionId: pmoSessionId }
   }
@@ -167,7 +161,7 @@ export function executionFocusContextText(
   labelForSession: (session: SessionSnapshot) => string = (session) => session.label
 ): string {
   const byId = new Map(sessions.map((session) => [session.id, session]))
-  const entries = context.execution.history.flatMap((entry) => {
+  const entries = executionFocusHistory(context).flatMap((entry) => {
     const session = byId.get(entry.sessionId)
     return session ? [`- ${context.execution.sessionId === session.id ? '[current] ' : ''}${labelForSession(session)} (${session.id}) · ${session.workspacePath} · ${session.status.state}`] : []
   })
