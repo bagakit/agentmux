@@ -46,7 +46,7 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
 
   return (
     <nav className="space-topics-tree" aria-label="Topics">
-      {[{ id: PMO_TEAMS_TOPIC_ID, title: 'Mote' }, ...motes].map((mote) => (
+      {[topics?.find((topic) => topic.id === PMO_TEAMS_TOPIC_ID) ?? { id: PMO_TEAMS_TOPIC_ID, title: 'Mote' }, ...motes].map((mote) => (
         <div key={mote.id} className="project-rail-row-shell">
           <button type="button" className={`project-rail-row space-mote-row${activeWorkspaceId === workspace.id && current === mote.id ? ' project-rail-row--active' : ''}`}
             aria-label={`Open ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : `Mote · ${mote.title}`}`} onClick={() => void openMote(mote.id)}>
@@ -55,6 +55,7 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
           </button>
           <button type="button" className="icon-button" aria-label={`Edit ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : mote.title} SOUL.md`}
             title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(mote.id, true)}><NotebookPen size={12} /></button>
+          {'readError' in mote && mote.readError ? <div className="new-tab-error" role="alert">{mote.title}: {mote.readError}. Its work surface is retained.</div> : null}
         </div>
       ))}
       <div className="project-rail-row-shell">

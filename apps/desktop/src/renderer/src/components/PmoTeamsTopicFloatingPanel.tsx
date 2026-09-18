@@ -150,7 +150,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
       opening={opening}
       visible={visible}
       onUpdate={setFloating}
-      onClose={requestPmoTeamsTopicFloatingClose}
+      onClose={() => requestPmoTeamsTopicFloatingClose()}
     >
       {workbench}
     </PmoTeamsFloatingWindow>
@@ -334,9 +334,11 @@ const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
             </span>
             <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
               <button type="button" aria-label="Open Mote Space" title="Open Mote Space" onClick={() => {
-                // Close first so return focus never overrides the explicit full-Space navigation.
-                requestPmoTeamsTopicFloatingClose()
-                void useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID).catch(useAppStore.getState().reportError)
+                const targetTabId = floating.targetTabId
+                requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+                void useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID,
+                  targetTabId ? { tabId: targetTabId } : undefined
+                ).catch(useAppStore.getState().reportError)
               }}><Maximize2 size={13} /></button>
               <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={onClose}><X size={13} /></button>
             </div>
