@@ -36,6 +36,14 @@ export function GlobalFocusSurface() {
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const closeWorkspaceReturnRef = useRef(false)
+  const closeWorkspace = () => { closeWorkspaceReturnRef.current = true; focusExecutionSession(null) }
+  useEffect(() => {
+    if (!closeWorkspaceReturnRef.current) return
+    closeWorkspaceReturnRef.current = false
+    if (selectedId === null) searchRef.current?.focus()
+  }, [selectedId])
   const focusLayoutRef = useRef<HTMLDivElement | null>(null)
   const resizingFocusRef = useRef(false)
   const adjustWorkspaceRatio = (next: number) => setWorkspaceRatio(Math.min(0.76, Math.max(0.38, next)))
@@ -79,10 +87,10 @@ export function GlobalFocusSurface() {
     </div>
   }
   return <section className={`global-board-surface global-focus-surface ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
-    <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} onReview={() => setRequestId(selectedId)}>
+    <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} onReview={() => setRequestId(selectedId)} onCloseWorkspace={closeWorkspace}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><Search size={13} /><input aria-label="Search contexts" placeholder="Search contexts" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="global-board-select"><select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{[...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()].map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
           <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusBucket | 'all')}><option value="all">All states</option>{(Object.keys(bucketMeta) as FocusBucket[]).map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => row.bucket === bucket).length}</option>)}</select></label>
         </div>
