@@ -8,6 +8,7 @@ import { homedir } from 'node:os'
 import { canonicalInstallPath } from './package-identity.mjs'
 import { pathToFileURL } from 'node:url'
 import { prepareRuntimeUpgrade, finishRuntimeUpgrade, closeRuntimeUpgrade } from './package-runtime-upgrade.mjs'
+import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
 const exec = promisify(execFile), base = resolve('.'), out = join(base, '.tmp/runtime-install-proof')
 const oldArtifacts = process.argv.find((entry) => entry.startsWith('--previous-artifacts='))?.slice('--previous-artifacts='.length) ?? join(canonicalInstallPath(homedir()), 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
@@ -20,7 +21,8 @@ assert.ok([17, 18].includes(oldManifest.product.protocol)); assert.equal(candida
 await mkdir(out, { recursive: true })
 const sha = async (p) => createHash('sha256').update(await readFile(p)).digest('hex')
 const critical = [join(oldArtifacts, 'manifest.json'), join(oldArtifacts, 'bin/ctxmuxd'), join(oldArtifacts, 'ctxmux-sdk-0.0.0.tgz'),
-  daemon18, sdk18, new URL(import.meta.url).pathname, join(base, 'apps/desktop/scripts/package-runtime-upgrade.mjs'),
+  daemon18, sdk18, new URL(import.meta.url).pathname, new URL('./package-runtime-upgrade.mjs', import.meta.url).pathname,
+  new URL('./probe-process.mjs', import.meta.url).pathname,
   join(base, 'apps/desktop/scripts/package-macos.mjs'), join(base, 'packages/core/src/runtime-paths.ts'),
   join(base, 'packages/core/dist/runtime-paths.js')]
 const inputsBefore = Object.fromEntries(await Promise.all(critical.map(async (p) => [p, await sha(p)])))
@@ -76,7 +78,8 @@ async function scenario(name) {
   }
   const daemon = spawn(launchPath, ['--socket', socket, '--state-dir', state, '--readiness-fd', '3'],
     { detached: true, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  let stderr = '', childPid, runId, plan, outcome
+  let stderr = '', childPid, runId, plan, outcome, activeClient = client17, rejection
+  daemon.on('error', (error) => { stderr += `Spawn failed: ${error.message}` })
   daemon.stderr.on('data', (data) => { if (stderr.length < 16384) stderr += data.toString().slice(0, 16384 - stderr.length) })
   try {
     await Promise.race([new Promise((done, reject) => {
@@ -84,7 +87,8 @@ async function scenario(name) {
     }), new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('private readiness timeout')), 5_000); timer.unref() })])
     const identity = await client17.runtimeInfo()
     const source = "import os,termios\na=termios.tcgetattr(0);a[3]&=~(termios.ICANON|termios.ECHO);a[1]&=~termios.OPOST;termios.tcsetattr(0,termios.TCSANOW,a)\nos.write(1,b'\\x1b[?1049h\\x1b[?1003h\\x1b[?1006hREADY')\nwhile True:\n b=os.read(0,1)\n if b==b'q':break\n os.write(1,b'PRIVATE-PTY-ACK\\n')"
-    const run = await client17.start(oldSdk.defineRun('/usr/bin/python3', { args: ['-u', '-c', source], cwd: directory, env: {}, initialSize: { rows: 4, cols: 12 } }))
+    const worker = join(directory, 'worker.py'); await writeFile(worker, source)
+    const run = await client17.start(oldSdk.defineRun('/usr/bin/python3', { args: ['-u', worker], cwd: directory, env: {}, initialSize: { rows: 4, cols: 12 } }))
     runId = run.id; childPid = run.pid
     const before = await wait(() => client17.status(run.id), (value) => value.latest_output_bytes >= 29, 'PTY initialization')
     const receiptPath = join(runtimeDir, 'owner.json')
@@ -94,13 +98,38 @@ async function scenario(name) {
       daemonPath: join(old.vendor, 'bin/ctxmuxd'), socketPath: socket, stateDirectory: state,
       daemonInstanceId: identity.daemonInstanceId, runtimeId: identity.runtimeId, runtimeBuildId: identity.buildId }), { mode: 0o600 })
     if (name === 'deleted-image') {
+      // Prove the same private SDK/owner preflight works before removing its mapped image.
+      plan = await prepareRuntimeUpgrade(current, next)
+      assert.equal(plan.owner.pid, daemon.pid); assert.equal(plan.owner.executable, launchPath)
+      await closeRuntimeUpgrade(plan); plan = undefined
       await rm(launchPath)
-      await assert.rejects(prepareRuntimeUpgrade(current, next).then((value) => { plan = value; return value }), /ENOENT|executable mapping|selected Runtime artifact/)
+      const originalKill = process.kill
+      let signals = 0
+      process.kill = (...args) => { if (args[0] === daemon.pid && args[1] !== 0) signals++; return originalKill(...args) }
+      try {
+        await assert.rejects(prepareRuntimeUpgrade(current, next).then((value) => { plan = value; return value }), (error) => {
+          rejection = { name: error.name, message: error.message, code: error.code, path: error.path,
+            signal: error.signal, killed: error.killed, stderr: error.stderr }
+          // An SDK/tar failure is a setup failure, not proof that the deleted image was rejected.
+          assert.ok((error.code === 'ENOENT' && error.path === launchPath) ||
+            error.message === 'The Runtime process has no unique ctxmuxd executable mapping.',
+          `Deleted-image preflight stopped before its owner check: ${JSON.stringify(rejection)}`)
+          return true
+        })
+      } finally { process.kill = originalKill }
+      assert.equal(plan, undefined); assert.equal(signals, 0)
+      assert.equal(await sha(join(old.vendor, 'bin/ctxmuxd')), old.manifest.binaries.find((entry) => entry.name === 'ctxmuxd').sha256)
+      assert.equal(await sha(join(next, relative, 'vendor/ctxmux/darwin-arm64/bin/ctxmuxd')), await sha(daemon18))
+      const afterIdentity = await client17.runtimeInfo()
+      assert.equal(afterIdentity.runtimeId, identity.runtimeId); assert.equal(afterIdentity.daemonInstanceId, identity.daemonInstanceId)
       const kept = await client17.status(run.id)
-      assert.equal(kept.pid, childPid); assert.equal(kept.applied_input_bytes, 0)
+      assert.equal(kept.pid, childPid); assert.equal(kept.state.type, 'running')
+      assert.deepEqual(kept.current_size, before.current_size); assert.equal(kept.applied_input_bytes, 0)
       await client17.input(run.id, 'x')
       const input = await wait(() => client17.status(run.id), (value) => value.applied_input_bytes === 1 && value.latest_output_bytes > kept.latest_output_bytes, 'deleted-image healthy input')
-      records.push({ name, passed: true, unchangedRun: true, noCutover: true, unverifiableImageRejected: true, originalInputBytes: input.applied_input_bytes })
+      records.push({ name, passed: true, daemonPid: daemon.pid, childPid, runId, unchangedRun: true,
+        noCutover: true, signals, sameRuntimeAndIncarnation: true, unverifiableImageRejected: true,
+        rejection, originalInputBytes: input.applied_input_bytes })
       await client17.input(run.id, 'q'); await wait(() => client17.status(run.id), (value) => value.state.type === 'exited', 'deleted-image exit')
       return
     }
@@ -123,7 +152,6 @@ async function scenario(name) {
     if (name === 'before-extract-refusal') await chmod(state, 0o500)
     outcome = await finishRuntimeUpgrade(plan, current)
     await chmod(state, 0o700)
-    let activeClient
     if (name === 'before-extract-refusal') {
       assert.equal(outcome.status, 'old-confirmed')
       assert.equal(outcome.signalSent, true)
@@ -156,21 +184,38 @@ async function scenario(name) {
     await activeClient.input(run.id, 'q')
     await wait(() => activeClient.status(run.id), (value) => value.state.type === 'exited', 'private child exit')
   } catch (error) {
+    if (rejection) error.preflightRejection = rejection
     error.message += `; private case=${name}, stderr=${stderr.slice(0, 2000)}`
     throw error
   } finally {
     await chmod(state, 0o700).catch((e) => cleanupErrors.push(e.message))
     await closeRuntimeUpgrade(plan).catch((e) => cleanupErrors.push(e.message))
+    // On an assertion failure the private Run may still be alive. Ask that exact
+    // Run to exit while its SDK is available, before shutting down its daemon.
+    if (runId && childPid && alive(childPid)) {
+      try {
+        const currentRun = await activeClient.status(runId)
+        assert.equal(currentRun.pid, childPid)
+        if (currentRun.state.type === 'running') await activeClient.input(runId, 'q')
+        await wait(() => alive(childPid), (value) => !value, 'private child cleanup')
+      } catch (error) { cleanupErrors.push(`Private Run cleanup: ${error.message}`) }
+    }
     if (daemon.exitCode === null && daemon.signalCode === null) {
       daemon.kill('SIGINT')
-      await Promise.race([new Promise((r) => daemon.once('exit', r)), new Promise((r) => setTimeout(r, 3_000))])
+      await wait(() => daemon.exitCode !== null || daemon.signalCode !== null, Boolean, 'private daemon exit')
+        .catch((error) => cleanupErrors.push(error.message))
     }
-    if (daemon.exitCode === null && daemon.signalCode === null) {
-      cleanupErrors.push('Private daemon did not exit gracefully'); daemon.kill('SIGKILL')
-      await new Promise((r) => daemon.once('exit', r))
+    // Reap all descendants identified by this invocation's group/path even when
+    // an earlier cleanup operation failed. Such failures still make the gate red.
+    const group = daemon.pid ?? process.pid + 1_000_000_000
+    const remaining = await listProbeProcesses(group, directory).catch((error) => { cleanupErrors.push(error.message); return null })
+    if (remaining?.length) {
+      cleanupErrors.push(`Private processes did not exit gracefully: ${remaining.join(', ')}`)
+      await stopProbeProcesses(group, directory).catch((error) => cleanupErrors.push(error.message))
     }
-    if (childPid && alive(childPid)) cleanupErrors.push(`Private child remains: ${childPid}, Run ${runId}`)
-    assert.equal(daemon.exitCode, 0)
+    if (childPid) await wait(() => alive(childPid), (value) => !value, 'private child reaped')
+      .catch(() => cleanupErrors.push(`Private child remains: ${childPid}, Run ${runId}`))
+    if (daemon.exitCode !== 0) cleanupErrors.push(`Private daemon exit: ${daemon.exitCode}, signal=${daemon.signalCode}`)
   }
 }
 const selectedCase = process.argv.find((entry) => entry.startsWith('--case='))?.slice('--case='.length)
@@ -178,7 +223,8 @@ const cases = selectedCase ? [selectedCase] : ['no-listener', 'unproven-owner', 
 assert.ok(cases.length > 0 && cases.every((name) => ['no-listener', 'unproven-owner', 'deleted-image', 'success', 'closed-diagnostics-success', 'before-extract-refusal'].includes(name)))
 try {
   for (const name of cases) await scenario(name)
-} catch (error) { failure = { name: error.name, message: error.message, stack: error.stack } }
+} catch (error) { failure = { name: error.name, message: error.message, stack: error.stack,
+  code: error.code, signal: error.signal, killed: error.killed, stderr: error.stderr, preflightRejection: error.preflightRejection } }
 finally {
   if (previousEnv === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = previousEnv
