@@ -31,6 +31,9 @@ export function PmoTeamsTopicEntry({
   )
   const className = 'pmo-teams-topic-compact-launcher'
   const openLabel = floating.open ? `Close ${PMO_TEAMS_TOPIC_TITLE}` : `Open ${PMO_TEAMS_TOPIC_TITLE}`
+  const working = sessions.some((session) => session.kind === 'agent'
+    && topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.status.state === 'working')
+  const statusText = needsAttention ? 'Needs you' : working ? 'Working' : undefined
   const defaultOpen = (): void => {
     if (floating.open) {
       requestPmoTeamsTopicFloatingClose()
@@ -52,7 +55,8 @@ export function PmoTeamsTopicEntry({
         type="button"
         className={`${className}__button`}
         aria-label={openLabel}
-        title={openLabel}
+        title={statusText ? `${openLabel} · ${statusText}` : openLabel}
+        aria-describedby={statusText ? 'mote-shortcut-status' : undefined}
         aria-expanded={floating.open}
         aria-controls="pmo-teams-topic-floating-panel"
       >
@@ -68,6 +72,7 @@ export function PmoTeamsTopicEntry({
           </span>
         ) : null}
         {needsAttention ? <span className={`${className}__attention`} aria-hidden="true" /> : null}
+        {statusText ? <span hidden id="mote-shortcut-status">{statusText}</span> : null}
       </button>
     </div>
   )
