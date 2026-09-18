@@ -8,7 +8,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, ExternalLink, FileCode, History, LoaderCircle, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -24,8 +24,7 @@ import { useAppStore } from '../store'
 import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
 import {
   isTerminalLinkClick,
-  terminalLinkModifierOpensSystemBrowser,
-  terminalLinkPreviewAnchor
+  terminalLinkModifierOpensSystemBrowser
 } from '../lib/terminal-link-gesture'
 import {
   detectTerminalPathLinks,
@@ -122,6 +121,10 @@ const SEARCH_TOGGLES: ReadonlyArray<{
 ])
 
 type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number }
+type TerminalLinkPreviewContent =
+  | { kind: 'http'; url: string }
+  | { kind: 'file'; label: string; system: boolean }
+type TerminalLinkPreview = TerminalLinkPreviewContent & { placement: 'top' | 'bottom' }
 
 function terminalPathAtPointer(
   terminal: Terminal | null,
@@ -214,6 +217,7 @@ export function TerminalView({
   linkOriginRef.current = linkOrigin
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
+  const linkPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
   // Font size is a prop the attach effect must NOT depend on (a change must not rebuild xterm and
@@ -278,11 +282,12 @@ export function TerminalView({
   // 两者可以同时有话说（上一轮搜到 47 条、这一轮正则还没打完），挤在一格里会互相盖掉。
   const [searchCount, setSearchCount] = useState<string | undefined>(undefined)
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
-  const [linkPreview, setLinkPreview] = useState<
-    | { kind: 'http'; url: string; left: number; top: number; placement: 'above' | 'below'; fastPath: boolean }
-    | { kind: 'file'; label: string; system: boolean; left: number; top: number; placement: 'above' | 'below' }
-    | null
-  >(null)
+  const [linkPreview, setLinkPreview] = useState<TerminalLinkPreview | null>(null)
+  function clearLinkPreview(): void {
+    if (linkPreviewTimerRef.current !== null) clearTimeout(linkPreviewTimerRef.current)
+    linkPreviewTimerRef.current = null
+    setLinkPreview(null)
+  }
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
@@ -374,6 +379,7 @@ export function TerminalView({
 
   useLayoutEffect(() => {
     const terminal = terminalRef.current
+    if (!visible) clearLinkPreview()
     if (!visible && terminal) {
       const buffer = terminal.buffer.active
       viewportMemoryRef.current = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
@@ -449,6 +455,7 @@ export function TerminalView({
      * 少接一个不会让另一个变红。
      */
     const activateHttpLink = (event: MouseEvent, uri: string): void => {
+      clearLinkPreview()
       const url = parseHttpLinkUrl(uri)
       if (!url) return
       // Both providers activate on a mouse-up over the link, so a drag that selects text across one
@@ -457,6 +464,8 @@ export function TerminalView({
       const origin = linkPressRef.current
       linkPressRef.current = null
       if (!isTerminalLinkClick({
+        button: event.button,
+        contextMenu: isMac && event.ctrlKey,
         origin,
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
@@ -464,7 +473,6 @@ export function TerminalView({
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
       // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
-        setLinkPreview(null)
         void openHttpLink(linkOriginRef.current, url, 'system').catch(reportError)
         return
       }
@@ -477,43 +485,39 @@ export function TerminalView({
       }
       linkRequestRef.current = request
       setLinkRequest(request)
-      setLinkPreview(null)
     }
     const hoverHttpLink = (event: MouseEvent, text: string): void => {
       const url = parseHttpLinkUrl(text)
       if (!url) return
-      const anchor = previewAnchorAt(event.clientX, event.clientY)
-      setLinkPreview({
-        kind: 'http',
-        url,
-        left: anchor.left,
-        top: anchor.top,
-        placement: anchor.placement,
-        fastPath: terminalLinkModifierOpensSystemBrowser(event, isMac)
-      })
+      showLinkPreview(event, { kind: 'http', url })
     }
     // OSC 8 链接的出口。`allowNonHttpProtocols` 保持默认（假）：xterm 会在 provideLinks 里就把
     // 非 http(s) 的 URI 丢掉，于是这个 handler 只会收到我们的选择器能处理的东西。
     terminal.options.linkHandler = {
       activate: (event, text) => activateHttpLink(event, text),
       hover: (event, text) => hoverHttpLink(event, text),
-      leave: () => setLinkPreview(null)
+      leave: clearLinkPreview
     }
     const webLinks = new WebLinksAddon(activateHttpLink, {
       hover: hoverHttpLink,
-      leave: () => setLinkPreview(null),
+      leave: clearLinkPreview,
       urlRegex: TERMINAL_HTTP_URL_REGEX
     })
-    // Shared anchor math for both link previews (http URLs and file paths), so the file-path preview
-    // never covers its link either. Cell height is derived from the grid (no private xterm API).
-    function previewAnchorAt(clientX: number, clientY: number) {
-      const rect = terminalRoot.getBoundingClientRect()
-      const cellHeight = terminal.rows > 0 ? rect.height / terminal.rows : 0
-      return terminalLinkPreviewAnchor({
-        pointer: { x: clientX, y: clientY },
-        cellHeight,
-        viewport: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
-      })
+    // Like a browser status readout, stay at the opposite edge of this pane instead of covering
+    // the lines around the pointer. One timer belongs to this retained TerminalView, not the Run.
+    function showLinkPreview(event: MouseEvent, preview: TerminalLinkPreviewContent): void {
+      clearLinkPreview()
+      if (event.buttons !== 0 || !visibleRef.current || terminal.hasSelection()) return
+      const pointerY = event.clientY
+      linkPreviewTimerRef.current = setTimeout(() => {
+        linkPreviewTimerRef.current = null
+        if (!visibleRef.current || terminal.hasSelection() || linkRequestRef.current) return
+        const rect = terminalRoot.getBoundingClientRect()
+        // Two short readout lines need space away from the hovered row in very short splits.
+        if (rect.height < 80) return
+        const placement = pointerY < rect.top + rect.height / 2 ? 'bottom' : 'top'
+        setLinkPreview({ ...preview, placement })
+      }, 350)
     }
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
@@ -562,16 +566,18 @@ export function TerminalView({
             },
             text: match.path,
             activate: (event: MouseEvent) => {
+              clearLinkPreview()
               // Same drag-guard as the http provider: a drag that ends over a path must select,
               // not open. Shares the single linkPressRef set on pointerdown.
               const origin = linkPressRef.current
               linkPressRef.current = null
               if (!isTerminalLinkClick({
+                button: event.button,
+                contextMenu: isMac && event.ctrlKey,
                 origin,
                 release: { x: event.clientX, y: event.clientY },
                 hasSelection: terminal.hasSelection()
               })) return
-              setLinkPreview(null)
               // System artifacts belong to the host OS. Keep the Workspace id on the typed seam so
               // Main can enforce local/root confinement; never turn a `.dmg`/`.app` path into an
               // editor or Browser Tab. Ordinary source paths retain the existing openFile route.
@@ -583,17 +589,13 @@ export function TerminalView({
               }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
-              const anchor = previewAnchorAt(event.clientX, event.clientY)
-              setLinkPreview({
+              showLinkPreview(event, {
                 kind: 'file',
                 label,
-                system: isSystemArtifactPath(match.path),
-                left: anchor.left,
-                top: anchor.top,
-                placement: anchor.placement
+                system: isSystemArtifactPath(match.path)
               })
             },
-            leave: () => setLinkPreview(null)
+            leave: clearLinkPreview
           }
         }))
       }
@@ -601,10 +603,10 @@ export function TerminalView({
 
     const resourceOwners = acquireTerminalResourceOwners({
       addons: 3,
-      // 8 而非 7：onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
-      // 加上 search addon 的 onDidChangeResults（计数订阅）。三者都在 cleanup 里释放。
+      // onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
+      // 加上 search addon 的结果计数和 onScroll 读出清理；各自都在 cleanup 里释放。
       // 少数一个就等于把一条泄漏账瞒下去。
-      listeners: 8
+      listeners: 9
     })
     let webgl: WebglAddon | null = null
     let webglContextLoss: { dispose(): void } | null = null
@@ -1002,10 +1004,12 @@ export function TerminalView({
       if (!pasteInput.consume(data)) sendInput(data)
     })
     const selection = terminal.onSelectionChange(() => {
+      clearLinkPreview()
       const text = terminal.getSelection()
       if (text) rememberedSelectionRef.current = text
       setHasSelection(text.length > 0)
     })
+    const linkPreviewScroll = terminal.onScroll(clearLinkPreview)
     const oscHandlers = installTerminalOscHandlers(terminal, {
       isReplaying: () => replayingContinuation,
       respondFromRenderer: session.kind === 'terminal',
@@ -1183,7 +1187,7 @@ export function TerminalView({
       disposed = true
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       clearTimeout(revealDeadline)
-      setLinkPreview(null)
+      clearLinkPreview()
       setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
         linkRequestRef.current = next
@@ -1199,6 +1203,7 @@ export function TerminalView({
       oscHandlers.dispose()
       searchCounter.dispose()
       selection.dispose()
+      linkPreviewScroll.dispose()
       pathLinks.dispose()
       pasteSanitizer()
       disposeEvents()
@@ -1414,7 +1419,10 @@ export function TerminalView({
           <div
             className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
             ref={rootRef}
+            onWheelCapture={clearLinkPreview}
+            onPointerLeave={clearLinkPreview}
             onPointerDown={(event) => {
+              clearLinkPreview()
               // xterm may clear its live selection while the native context-menu gesture
               // moves focus. Snapshot it before that transition so Radix Copy stays enabled.
               if (event.button === 2) {
@@ -1446,29 +1454,15 @@ export function TerminalView({
               className="terminal-link-preview"
               data-placement={linkPreview.placement}
               role="tooltip"
-              style={{ left: linkPreview.left, top: linkPreview.top }}
             >
-              {linkPreview.kind === 'http' ? (
-                <>
-                  <ExternalLink size={13} />
-                  <span className="terminal-link-preview__url" title={linkPreview.url}>
-                    {linkPreview.url}
-                  </span>
-                  <kbd className="terminal-link-preview__hint">
-                    {linkPreview.fastPath
-                      ? 'Open in browser'
-                      : `${isMac ? '⌘' : 'Ctrl'}+click to open · click to choose`}
-                  </kbd>
-                </>
-              ) : (
-                <>
-                  <FileCode size={13} />
-                  <span className="terminal-link-preview__url" title={linkPreview.label}>
-                    {linkPreview.label}
-                  </span>
-                  <span className="terminal-link-preview__hint">{linkPreview.system ? 'click to open with system' : 'click to open'}</span>
-                </>
-              )}
+              <span className="terminal-link-preview__url">
+                {linkPreview.kind === 'http' ? linkPreview.url : linkPreview.label}
+              </span>
+              <span className="terminal-link-preview__hint">
+                {linkPreview.kind === 'http'
+                  ? `Click to choose · ${isMac ? '⌘' : 'Ctrl'}+click: system`
+                  : linkPreview.system ? 'Click to open with system' : 'Click to open file'}
+              </span>
             </div>
           ) : null}
           {startupPhase === 'restoring' ? (

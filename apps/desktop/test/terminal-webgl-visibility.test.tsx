@@ -11,6 +11,7 @@ type FixtureTerminal = HeadlessTerminal & {
   refresh: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   written: string[]
+  completed: string[]
 }
 type FixtureWebgl = {
   disposed: ReturnType<typeof vi.fn>
@@ -23,7 +24,6 @@ const fixture = vi.hoisted(() => ({
   receive: null as ((event: RuntimeEvent) => void) | null,
   attach: vi.fn(),
   detach: vi.fn(),
-  acknowledge: vi.fn(),
   unsubscribe: vi.fn()
 }))
 
@@ -33,14 +33,16 @@ vi.mock('@xterm/xterm', async () => {
     element?: HTMLElement
     refresh = vi.fn()
     written: string[] = []
+    completed: string[] = []
     constructor(options: ConstructorParameters<typeof Terminal>[0]) {
       super(options)
       this.dispose = vi.fn(() => super.dispose())
       fixture.terminals.push(this as unknown as FixtureTerminal)
     }
     write(data: string | Uint8Array, callback?: () => void) {
-      this.written.push(typeof data === 'string' ? data : new TextDecoder().decode(data))
-      super.write(data, callback)
+      const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+      this.written.push(text)
+      super.write(data, () => { this.completed.push(text); callback?.() })
     }
     open(root: HTMLElement) { this.element = document.createElement('div'); root.append(this.element) }
     focus() {}
@@ -83,7 +85,6 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
   detach: fixture.detach,
-  acknowledge: fixture.acknowledge,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
     fixture.receive = receive
     return fixture.unsubscribe
@@ -106,6 +107,7 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
     setInteractiveResize() {}
     setVisible() {}
     observeViewport() {}
+    acceptOwnerSize() {}
     async startLiveSynchronization() {}
     dispose() {}
   }
@@ -131,9 +133,10 @@ beforeEach(() => {
   fixture.receive = null
   vi.clearAllMocks()
   fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [{ data: 'before ', dataBytes: new TextEncoder().encode('before '), endByte: 7 }] })
+    session: { ...session, latestOutputBytes: 7 }, terminal: { type: 'unavailable', reason: 'source_gap' },
+    resizeRevision: 0, gap: null,
+    replay: [{ runId: session.control.run.runId, data: 'before ', dataBytes: new TextEncoder().encode('before '), startByte: 0, endByte: 7 }] })
   fixture.detach.mockResolvedValue(undefined)
-  fixture.acknowledge.mockResolvedValue(undefined)
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -150,7 +153,7 @@ async function render(visible: boolean) {
     root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={linkOrigin} />)
   })
   await act(async () => {
-    await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, 7))
+    await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain('before '))
   })
 }
 async function hiddenOutput(data: string, startByte: number) {
@@ -160,7 +163,7 @@ async function hiddenOutput(data: string, startByte: number) {
       type: 'terminal-output', run: session.control.run, data, dataBytes: new TextEncoder().encode(data),
       evidence: { outputByteRange: { startByte, endByte: startByte + data.length } }
     } } as RuntimeEvent)
-    await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, startByte + data.length))
+    await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain(data))
   })
 }
 
@@ -170,12 +173,12 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.webgl).toHaveLength(1)
   const terminal = fixture.terminals[0]!
   const first = fixture.webgl[0]!
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 8 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 9 })
 
   await render(false)
   expect(first.disposed).toHaveBeenCalledOnce()
   expect(first.contextLossDisposed).toHaveBeenCalledOnce()
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 8 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 9 })
   // Split an ANSI parser sequence across separate hidden writes, in byte order.
   await hiddenOutput('\u001b[3', 7)
   await hiddenOutput('1mhidden\u001b[0m', 10)
@@ -213,7 +216,7 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(0)
   expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 8 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 9 })
   await render(true)
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)
