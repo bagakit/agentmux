@@ -379,7 +379,7 @@ function buildTimeline(
     'text'
   )
   const toolName = stringField(payload, 'tool_name', 'toolName', 'name')
-  const rawToolInput = payload.tool_input ?? payload.toolInput ?? payload.args ?? payload.input
+  const rawToolInput = payload.tool_input ?? payload.toolInput ?? payload.toolArgs ?? payload.args ?? payload.input
   const toolInput =
     typeof rawToolInput === 'string'
       ? rawToolInput
