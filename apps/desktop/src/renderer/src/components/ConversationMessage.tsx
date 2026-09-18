@@ -35,6 +35,13 @@ export type ConversationAnnotation = {
   note: string
 }
 
+function partText(part: AgentSessionHistoryContentPart): string {
+  if (part.kind === 'text' || part.kind === 'reasoning') return part.text
+  if (part.kind === 'tool-call') return `${part.name}\n${part.input}`
+  if (part.kind === 'tool-result') return `${part.name ?? 'Tool result'}\n${part.output}`
+  return part.label === undefined ? part.reference : `${part.label}\n${part.reference}`
+}
+
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
@@ -44,7 +51,7 @@ export function ConversationMessage({
   const parts: readonly AgentSessionHistoryContentPart[] = typeof content === 'string'
     ? [{ kind: 'text', text: content }]
     : content
-  const hasContent = parts.some((part) => part.kind === 'resource' || part.text.length > 0)
+  const hasContent = parts.some((part) => partText(part).length > 0)
   const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker ? 'Assistant' : 'Activity')
   // Native parts have no annotation offset contract. Live string annotations retain their original
   // source offsets; read-only callers do not collect selection state.
@@ -65,8 +72,7 @@ export function ConversationMessage({
     setSelection({ quote, start: Math.max(0, start), end: Math.max(0, start) + quote.length })
   }
   async function copyMessage(): Promise<void> {
-    const text = parts.map((part) => part.kind === 'text' ? part.text
-      : part.label === undefined ? part.reference : `${part.label}\n${part.reference}`).join('\n')
+    const text = parts.map(partText).join('\n')
     const accepted = await copyTextToClipboard(text, () => setCopyState('failed'))
     setCopyState(accepted ? 'copied' : 'failed')
     if (accepted) window.setTimeout(() => setCopyState('idle'), 1600)
@@ -116,7 +122,16 @@ export function ConversationMessage({
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
             {...(readPastedImage ? { readPastedImage } : {})}
             {...(openHttpLink ? { openHttpLink } : {})}
-          /> : <div key={index} className="log-turn__resource">
+          /> : part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+            <details key={index} className="log-turn__trace" data-trace-kind={part.kind}
+              {...(part.kind === 'tool-result' && part.failed === true ? { 'data-status': 'failed' } : {})}>
+              <summary>{part.kind === 'reasoning' ? 'Reasoning' : part.kind === 'tool-call'
+                ? `Tool call · ${part.name}` : `Tool result${part.name ? ` · ${part.name}` : ''}`}
+                {part.kind === 'tool-result' && part.failed === true ? ' · Failed' : null}
+              </summary>
+              <pre>{part.kind === 'reasoning' ? part.text : part.kind === 'tool-call' ? part.input : part.output}</pre>
+            </details>
+          ) : <div key={index} className="log-turn__resource">
             <span>{part.label ?? `${part.resourceType} resource`}</span>
             <code>{part.reference}</code>
             <small>Resource reference; preview is not available here.</small>
