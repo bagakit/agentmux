@@ -23,11 +23,11 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
@@ -799,6 +799,22 @@ function WorkbenchRegionLeaf({
   )
 }
 
+/** Project the Store's accepted ratio into the existing PanelGroup, leaving drag commits with its owner. */
+function usePersistedSplitLayout(ratio: number, dragging: boolean) {
+  const groupRef = useRef<ImperativePanelGroupHandle>(null)
+  useLayoutEffect(() => {
+    if (dragging) return
+    const group = groupRef.current
+    if (!group) return
+    const sizes = [ratio * 100, (1 - ratio) * 100]
+    const current = group.getLayout()
+    // The library rounds percentages; ignore only numerical dust in this visible projection.
+    if (current.length === 2 && current.every((size, index) => Math.abs(size - sizes[index]!) < 1e-6)) return
+    group.setLayout(sizes)
+  }, [ratio, dragging])
+  return groupRef
+}
+
 function WorkbenchRegionBranch({
   node,
   nodePath,
@@ -829,8 +845,10 @@ function WorkbenchRegionBranch({
   }
   const committer = committerRef.current
   committer.synchronizePersistedRatio(node.ratio)
+  const groupRef = usePersistedSplitLayout(node.ratio, dragging)
   return (
     <PanelGroup
+      ref={groupRef}
       direction={node.direction}
       className="workbench-region-split"
       onLayout={(sizes) => committer.observeLayout(sizes)}
@@ -1153,8 +1171,10 @@ function SplitBranch({
   }
   const committer = committerRef.current
   committer.synchronizePersistedRatio(ratio)
+  const groupRef = usePersistedSplitLayout(ratio, dragging)
   return (
     <PanelGroup
+      ref={groupRef}
       direction={node.direction}
       className="pane-split"
       onLayout={(sizes) => committer.observeLayout(sizes)}
