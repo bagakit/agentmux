@@ -10,6 +10,7 @@ import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { activate, click, desktopFixture } from './fixtures/settings-cli/desktop.mjs'
 import { preferenceProof, preferenceVocabulary } from './fixtures/settings-cli/preferences.mjs'
 import { fontInput, replaceFontText, verifyFontDraft } from './fixtures/settings-cli/font.mjs'
+import { verifyRadioKeyboard } from './fixtures/settings-cli/radio.mjs'
 
 // Real bundled Desktop/Main IPC + Core + built CLI. Only initial private fixture materialization
 // writes configuration directly; every setting operation after launch goes through the product owner.
@@ -98,15 +99,15 @@ async function section(probe, title, id) {
   await waitFor(`actual ${title} pane`, () => probe.cdp.evaluate(`Boolean(document.querySelector(${JSON.stringify(pane(id))}))`))
 }
 async function chooseAppearance(probe, title) {
-  await activate(probe.cdp, `${nodes(`${pane('appearance')} [aria-label="Application appearance"] [role="radio"]`)}.filter(e=>e.querySelector('strong')?.textContent===${JSON.stringify(title)})`)
+  await click(probe.cdp, `${pane('appearance')} .settings-appearance-choice:has(input[aria-label=${JSON.stringify(title)}])`)
   await waitFor(`actual ${title} draft`, async () => (await ui(probe)).appearance === title)
 }
 async function ui(probe) {
   return probe.cdp.evaluate(`(() => {
-    const appearance=document.querySelector('[data-settings-pane="appearance"] [aria-label="Application appearance"] [aria-checked="true"]')
+    const appearance=document.querySelector('[data-settings-pane="appearance"] [aria-label="Application appearance"] input[type="radio"]:checked')
     const copy=document.querySelector('[data-settings-pane="copy-paths"] input[type="checkbox"]')
     const active=document.querySelector('.settings-content__scroll:not([hidden])')
-    return { appearance:appearance?.querySelector('strong')?.textContent, copy:copy?.checked,
+    return { appearance:appearance?.getAttribute('aria-label'), copy:copy?.checked,
       font:Number(document.querySelector('[data-settings-pane="appearance"] input[aria-label="Terminal font size in pixels"]')?.value),
       alert:active?.querySelector('[role="alert"]')?.textContent ?? '',
       saveDisabled:active?.querySelector('.settings-pane-actions button')?.disabled,
@@ -275,6 +276,8 @@ try {
   phase='native-font-draft'
   receipt.facts.fontDraft={}
   await verifyFontDraft({probe:first,entries,command,section,saved,waitFor,configPath,facts:receipt.facts.fontDraft})
+  phase='native-radio-keyboard'
+  receipt.facts.radioKeyboard=await verifyRadioKeyboard({probe:first,section,command,saved,waitFor,evidence})
   const finalPreferences=Object.fromEntries((await entries()).map(entry=>[entry.key,entry.value]))
   assert.deepEqual(finalPreferences,{...preferences.facts.restartValues,'appearance.terminalFontSize':14},'Font editing preserves every unrelated ordinary setting')
   preferences.facts.restartValues=finalPreferences

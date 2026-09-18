@@ -1,5 +1,6 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
+import { useId } from 'react'
 import { useSettingDraft } from './use-setting-draft'
 import {
   APP_APPEARANCE_IDS,
@@ -23,6 +24,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
   onSave: (appearance: AppearanceConfig, expected: AppearanceConfig) => Promise<void>
 }) {
+  const choiceId = useId()
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
   const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
   const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
@@ -57,11 +59,14 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
         <header><span>Application appearance</span><small>Window</small></header>
         <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">
           {APP_APPEARANCE_IDS.map((mode) => (
-            <button type="button" key={mode} className={`settings-appearance-choice ${appAppearance === mode ? 'settings-appearance-choice--selected' : ''}`} role="radio" aria-checked={appAppearance === mode} onClick={() => setAppAppearance(mode)}>
+            <label key={mode} className={`settings-appearance-choice ${appAppearance === mode ? 'settings-appearance-choice--selected' : ''}`}>
+              <input className="settings-choice-radio" type="radio" name={`${choiceId}-application`}
+                value={mode} checked={appAppearance === mode} onChange={() => setAppAppearance(mode)}
+                aria-label={APP_APPEARANCE_COPY[mode].title} aria-describedby={`${choiceId}-${mode}-description`} />
               {(() => { const Icon = APP_APPEARANCE_COPY[mode].icon; return <Icon size={20} /> })()}
-              <span><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small>{APP_APPEARANCE_COPY[mode].description}</small></span>
+              <span><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small id={`${choiceId}-${mode}-description`}>{APP_APPEARANCE_COPY[mode].description}</small></span>
               {appAppearance === mode ? <Check className="settings-appearance-choice__check" size={13} /> : null}
-            </button>
+            </label>
           ))}
         </div>
       </section>
@@ -72,14 +77,13 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             const selected = terminalTheme === definition.id
             const theme = definition.theme
             return (
-              <button
-                type="button"
+              <label
                 key={definition.id}
                 className={`terminal-theme-choice ${selected ? 'terminal-theme-choice--selected' : ''}`}
-                role="radio"
-                aria-checked={selected}
-                onClick={() => setTerminalTheme(definition.id)}
               >
+                <input className="settings-choice-radio" type="radio" name={`${choiceId}-terminal`}
+                  value={definition.id} checked={selected} onChange={() => setTerminalTheme(definition.id)}
+                  aria-label={definition.label} aria-describedby={`${choiceId}-${definition.id}-description`} />
                 <span className="terminal-theme-preview" style={{ background: theme.background, color: theme.foreground }}>
                   <span className="terminal-theme-preview__chrome">
                     <i style={{ background: theme.red }} />
@@ -91,10 +95,10 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
                 </span>
                 <span className="terminal-theme-choice__copy">
                   <strong>{definition.label}</strong>
-                  <small>{definition.description}</small>
+                  <small id={`${choiceId}-${definition.id}-description`}>{definition.description}</small>
                 </span>
                 {selected ? <Palette size={14} /> : <SquareTerminal size={14} />}
-              </button>
+              </label>
             )
           })}
         </div>

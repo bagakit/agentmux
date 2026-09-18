@@ -13,13 +13,13 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const initial: AppearanceConfig = { terminalTheme: 'graphite', appAppearance: 'dark' }
 function mode(name: string) {
-  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Application appearance"] [role="radio"]')]
-    .find((node) => node.querySelector('strong')?.textContent === name)
-  if (!button) throw new Error(`Missing appearance choice: ${name}`)
-  return button
+  const input = [...dom.container.querySelectorAll<HTMLInputElement>('[aria-label="Application appearance"] input[type="radio"]')]
+    .find((node) => node.getAttribute('aria-label') === name)
+  if (!input) throw new Error(`Missing appearance choice: ${name}`)
+  return input
 }
 async function choose(name: string) { await act(async () => mode(name).click()) }
-const selected = (name: string) => mode(name).getAttribute('aria-checked')
+const selected = (name: string) => String(mode(name).checked)
 const saveButton = () => dom.container.querySelector<HTMLButtonElement>('.settings-pane-actions button')!
 
 describe('Settings drafts across external commits', () => {
