@@ -62,8 +62,11 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; ta
   }))
 }
 
-export function requestPmoTeamsTopicFloatingClose(): void {
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { open: false, targetTabId: undefined, pendingPrompt: undefined } }))
+export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boolean }): void {
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: {
+    open: false, targetTabId: undefined, pendingPrompt: undefined,
+    restoreFocus: options?.restoreFocus ?? true
+  } }))
 }
 
 export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
@@ -73,7 +76,7 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
   useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => {
     const onEvent = (event: Event): void => {
-      const detail = (event as CustomEvent<Partial<FloatingState>>).detail ?? {}
+      const { restoreFocus, ...detail } = (event as CustomEvent<Partial<FloatingState> & { restoreFocus?: boolean }>).detail ?? {}
       const nextOpen = detail.open
       if (typeof nextOpen !== 'boolean' && detail.pendingPrompt === undefined) return
       const current = stateRef.current
@@ -93,7 +96,7 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
       if (nextOpen === false) {
         const target = returnFocusRef.current
         returnFocusRef.current = null
-        if (target && document.contains(target)) {
+        if (restoreFocus !== false && target && document.contains(target)) {
           requestAnimationFrame(() => target.focus({ preventScroll: true }))
         }
       }
