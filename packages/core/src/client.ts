@@ -60,7 +60,7 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
-import { cloneSession, sameRun } from './agent-session-identity.js'
+import { agentTurnEndEvidence, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
@@ -3386,11 +3386,7 @@ export class AgentMuxClient {
           'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
         )
       }
-      // 只判 `readyThroughByte === undefined`：这里**没有** `consumedBySubmissionId === undefined`
-      // 那一项，因为 `terminalPromptReadiness()` 的归一化已经先拦下「有 consumedBySubmissionId 却没有
-      // readyThroughByte」这个组合（抛 'Terminal prompt readiness does not match its Agent Run
-      // boundary.'），所以只要 readyThroughByte 缺席，consumedBySubmissionId 就必然也缺席——那一项
-      // 恒真、不可达，删掉不改变任何行为。
+      // A native end can be consumed without a physical composer observation.
       if (readiness.readyThroughByte === undefined) {
         this.promptSubmission.observeReadiness(current, readiness)
       }
@@ -4185,7 +4181,8 @@ export class AgentMuxClient {
     // （tool-use-start / tool-use-end）是两个不相交的集合，所以「拿推进前的值还是推进后的值」对任何一条
     // 事件都算出同一个答案。hook-turn-phase.test.ts 里钉着这条不相交性；哪天有事件同时进两族，那条会先红，
     // 而**那时**这里的顺序才开始承重。仍写成先读后推，是因为它读起来就是判据本身要说的话。
-    const turnPhase = this.hookTurnPhases.get(envelope.runId)
+    const turnPhase = this.hookTurnPhases.get(envelope.runId) ??
+      (agentTurnEndEvidence(session) ? 'turn-ended' : undefined)
     const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
     if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
@@ -4211,7 +4208,7 @@ export class AgentMuxClient {
     // 无关。所以快照降级为 best-effort——只吞断线这一种，别的错误照旧响亮失败（那是真 bug，不是 wire
     // 抖动）。光标确实丢了，我们不假装它没丢：缺席保持缺席，绝不编一个 0 冒充「输出到此为止」——那会
     // 让 screenEvidence 从头扫，把上一轮的提示符误认成这一轮的，于是在 Agent 其实没就绪时放行 prompt。
-    // 缺席则让下一次 agentPrompt 收到 `epoch-missing` 的响亮拒绝（prompt-submission.ts:199）。
+    // The native end remains authoritative even when this optional output snapshot is absent.
     const stopRun = normalized.lifecycleEvent === 'turn-end'
       ? await this.observeHookRun(session.run.runId, signal).catch((error: unknown) => {
           if (error instanceof AgentMuxError && error.code === 'CTXMUX_DISCONNECTED') return null
@@ -4243,18 +4240,19 @@ export class AgentMuxClient {
       current: AgentMuxStoredAgentSession
     ): AgentMuxStoredAgentSession => {
       signal.throwIfAborted()
-      const existingReadiness = (
-        current.terminalPromptReadiness?.source === 'native-stop' &&
-        current.terminalPromptReadiness.id === receipt.id
-      )
-        ? current.terminalPromptReadiness
+      const nativeReadiness = current.terminalPromptReadiness?.source === 'native-stop'
+        ? current.terminalPromptReadiness : undefined
+      const existingReadiness = nativeReadiness && (
+        nativeReadiness.id === receipt.id ||
+        (nativeReadiness.observedAt !== undefined && receipt.observedAt <= nativeReadiness.observedAt)
+      ) ? nativeReadiness
         : undefined
-      const persistedReceipt = existingReadiness
+      const persistedReceipt = normalized.lifecycleEvent === 'turn-end' &&
+        existingReadiness?.id === receipt.id && existingReadiness.outputCursorBytes !== undefined
         ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
         : receipt
       const { turnUsage: _staleTurnUsage, ...currentBase } = current
-      if (normalized.lifecycleEvent === 'turn-end' && !stopRun &&
-        currentBase.terminalPromptReadiness?.consumedBySubmissionId !== undefined) {
+      if (nextTurnPhase === 'in-turn' && nativeReadiness) {
         delete currentBase.terminalPromptReadiness
       }
       const next: AgentMuxStoredAgentSession = {
@@ -4264,13 +4262,14 @@ export class AgentMuxClient {
         ...(normalized.semanticState === 'unknown' || !updatesSemanticStatus
           ? {}
           : { semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, normalized.status) }),
-        ...(stopRun
+        ...(normalized.lifecycleEvent === 'turn-end'
           ? {
               terminalPromptReadiness: existingReadiness ?? {
                 source: 'native-stop' as const,
                 id: receipt.id,
                 run: { ...current.run },
-                outputCursorBytes: stopRun.latestOutputBytes
+                observedAt: receipt.observedAt,
+                ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
               }
             }
           : {}),
@@ -4392,10 +4391,10 @@ export class AgentMuxClient {
       this.publisher.publishInteraction(request)
     }
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
-    // 同上：只判 `readyThroughByte === undefined`，不再判 `consumedBySubmissionId === undefined`。
-    // `terminalPromptReadiness()` 的归一化拦下「有 consumedBySubmissionId 却没有 readyThroughByte」
-    // 的组合（抛 'Terminal prompt readiness does not match its Agent Run boundary.'），故 readyThroughByte
-    // 缺席时 consumedBySubmissionId 必然缺席——那一项恒真、不可达。
+    if (nextTurnPhase === 'in-turn' && session.terminalPromptReadiness?.source === 'native-stop') {
+      this.promptSubmission.cancelReadiness(session.agentSessionId)
+    }
+    // Physical readiness observation is optional; its owner checks cursor and consumption.
     if (
       normalized.lifecycleEvent === 'turn-end' &&
       next.terminalPromptReadiness &&
