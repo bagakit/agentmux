@@ -22,10 +22,11 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}): FocusProjectLane[] {
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now()): FocusProjectLane[] {
   const tabWorkspace = new Map<string, string>()
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
+  const priorities = new Map<string, number>()
   for (const row of rows) {
     const workspace = config?.workspaces.find(item => item.id === row.workspaceId)
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
@@ -44,6 +45,9 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
+    const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1
+      : row.lastActivityAt != null ? (now - row.lastActivityAt <= 24 * 60 * 60 * 1000 ? 2 : 3) : 4
+    priorities.set(id, Math.min(priorities.get(id) ?? priority, priority))
   }
-  return [...lanes.values()]
+  return [...lanes.values()].sort((a, b) => priorities.get(a.id)! - priorities.get(b.id)!)
 }
