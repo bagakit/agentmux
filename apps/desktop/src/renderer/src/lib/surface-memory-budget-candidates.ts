@@ -16,6 +16,7 @@ export type SurfaceMemoryCollectionInput = {
   savingDocuments: Readonly<Record<string, boolean>>
   activeWorkspaceId: string | null
   workbenchVisible: boolean
+  projectedVisibleTabIds?: ReadonlySet<string> | undefined
 }
 
 function candidateForSurface(

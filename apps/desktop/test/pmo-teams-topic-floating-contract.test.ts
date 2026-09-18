@@ -53,7 +53,7 @@ it('keeps PMO teams on one bottom entry and one canonical Topic', () => {
   expect(panel).toContain('id="pmo-teams-topic-floating-panel"')
   expect(panel).not.toContain('launcherPosition')
   expect(panel).not.toContain('openAnchor')
-  expect(app).toContain('<PmoTeamsTopicFloatingPanel />')
+  expect(app).toContain('<PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />')
   expect(app).toContain('<SurfaceSwitch onOpenSettings={openSettings}')
   expect(app).not.toContain('window-status-bar__pmo-entry')
   expect(navigation).toContain("id: 'pmo-teams'")

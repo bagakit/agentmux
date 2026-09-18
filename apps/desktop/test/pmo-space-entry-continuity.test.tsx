@@ -12,7 +12,7 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 // The contents are covered by the production-workbench process restart test, T008.
 // This test keeps the actual entry, window, tree and navigation store owners.
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceWorkbench: () => createElement('div', { 'data-workbench-fixture': true }) }))
@@ -24,6 +24,10 @@ const baseline = useAppStore.getState()
 let container: HTMLDivElement, root: Root, directory: string
 let pending: Promise<void>[]
 let workspace: { id: string; hostId: string; path: string; name: string; kind: 'folder' }
+function ControlledFloatingPanel() {
+  const [floating, setFloating] = usePmoTeamsTopicFloatingState()
+  return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating })
+}
 function NavigationTarget() {
   const active = useAppStore((state) => state.activeWorkspaceId)
   useEffect(() => { if (active === SCRATCH_WORKSPACE_ID) document.getElementById('full-space-focus')?.focus() }, [active])
@@ -38,7 +42,7 @@ async function settle() { await act(async () => { await Promise.all(pending); aw
 async function render() {
   await act(async () => root.render(createElement(Fragment, null,
     createElement('button', { id: 'execution-focus' }, 'Execution input'), createElement(NavigationTarget),
-    createElement(PmoTeamsTopicEntry), createElement(PmoTeamsTopicFloatingPanel), createElement(SpaceTopicsTree, { workspace })
+    createElement(PmoTeamsTopicEntry), createElement(ControlledFloatingPanel), createElement(SpaceTopicsTree, { workspace })
   )))
   await settle()
 }
