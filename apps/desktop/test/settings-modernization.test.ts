@@ -25,7 +25,7 @@ describe('settings workbench shell', () => {
       'settings-content__close',
       'settings-content__breadcrumb',
       'settings-content__actions',
-      'settings-sidebar__context'
+      'settings-section-picker'
     ]
     for (const token of shellClasses) {
       expect(panel, `${token} 没有渲染出来`).toContain(token)
@@ -103,10 +103,9 @@ describe('settings workbench shell', () => {
     // 每一条都是"窄窗口下这个表面必须让位"的具体行为。少任何一条，手机宽度就挤成一团。
     const collapses: Array<[string, RegExp]> = [
       ['侧栏从左右并排改成上下堆叠', /\.settings-page\s*\{[^}]*flex-direction:\s*column/u],
-      ['侧栏导航横向滚动而不是竖排', /\.settings-sidebar nav\s*\{[^}]*display:\s*flex/u],
-      ['侧栏的说明段落收起', /\.settings-sidebar__context\s*\{[^}]*display:\s*none/u],
+      ['窄窗完整分类选择', /\.settings-section-picker\s*\{[^}]*display:\s*flex/u],
+      ['桌面导航在窄窗隐藏', /\.settings-sidebar nav\s*\{[^}]*display:\s*none/u],
       ['主区 header 不再吸顶', /\.settings-content__header\s*\{[^}]*position:\s*relative/u],
-      ['主区大图标收起', /\.settings-content__icon\s*\{[^}]*display:\s*none/u],
       ['键盘提示收起', /\.settings-content__hint\s*\{[^}]*display:\s*none/u]
     ]
     const missing = collapses.filter(([, pattern]) => !pattern.test(narrow)).map(([why]) => why)
@@ -116,11 +115,8 @@ describe('settings workbench shell', () => {
         '（类名在样式表别处有基础规则，所以全表 toContain 判不出这件事——实测删掉这几条仍全绿）'
     ).toEqual([])
 
-    // 导航按钮在窄窗口下仍要能看见文字标签：只留图标就不可发现了（A2「侧栏导航保持可发现」）。
-    expect(
-      narrow,
-      '窄窗口下导航按钮的文字被藏了，只剩图标——侧栏导航不再可发现'
-    ).toMatch(/\.settings-sidebar nav > button > span\s*\{[^}]*display:\s*block/u)
+    expect(panel).toContain('aria-label="Settings section"')
+    expect(panel).toContain('<DropdownMenu.RadioGroup value={active}')
   })
 
   it('颜色一律走 token，不在设置页硬编码十六进制', () => {

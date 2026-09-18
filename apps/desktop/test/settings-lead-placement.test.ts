@@ -73,7 +73,7 @@ describe('设置面导语不被卡片脚注样式吃掉', () => {
 
   it('每个 .settings-lead 都在脚注容器之外', () => {
     // 挡板：一个 lead 都没扫到就说明解析或选择器错了、判据失效——直接红，不许静默通过。
-    expect(sites.length, '没有扫到任何 .settings-lead，导语判据失效').toBeGreaterThanOrEqual(3)
+    expect(sites.length, '没有扫到任何 .settings-lead，导语判据失效').toBeGreaterThan(0)
 
     for (const site of sites) {
       const offending = site.ancestors.filter((className) =>

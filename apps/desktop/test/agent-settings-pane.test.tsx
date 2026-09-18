@@ -50,8 +50,9 @@ describe('AgentSettingsPane Executor identity', () => {
       onSave: async () => {}
     }))
 
-    expect(markup).toContain('<span>Provider</span><select disabled=""')
-    expect(markup).toContain('Provider is part of this Executor identity. Create a new Executor to change it.')
+    expect(markup).toContain('<dt>Provider</dt><dd>Codex</dd>')
+    expect(markup).toContain('<dt>Executor ID</dt><dd><code>review</code>')
+    expect(markup).not.toContain('<span>Provider</span><select')
     expect(markup).toContain('Add executor')
   })
 
