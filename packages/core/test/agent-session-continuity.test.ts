@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { decideAgentSessionContinuity } from '../src/agent-session-continuity.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type {
-  CtxmuxAdapterDataEvent,
   CtxmuxAdapterObservationEvent,
+  CtxmuxAdapterOutputObservation,
   CtxmuxAdapterRun
 } from '../src/ctxmux-run-adapter.js'
 import type {
@@ -300,14 +303,16 @@ describe('Agent Session continuity decision', () => {
 // **输家是 session-run-changed 而非 lifecycle-busy**——这条对「删 tail」变红；计数 == 1 只作 outcome 存档。
 // ---------------------------------------------------------------------------
 
-function continuityStoredSession(): AgentMuxStoredAgentSession {
+const continuityDirectories: string[] = []
+
+function continuityStoredSession(workspacePath: string): AgentMuxStoredAgentSession {
   return {
     kind: 'agent',
     agentSessionId: 'agent-1',
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: '/repo',
+    workspacePath,
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-continuity'.padEnd(43, 'A'),
@@ -321,14 +326,15 @@ function continuityStoredSession(): AgentMuxStoredAgentSession {
 
 function continuityRun(
   runId: string,
-  state: CtxmuxAdapterRun['state']
+  state: CtxmuxAdapterRun['state'],
+  workspacePath: string
 ): CtxmuxAdapterRun {
   return {
     runId,
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: '/repo',
+    workspacePath,
     pid: state.type === 'running' ? 999 : null,
     state,
     cols: 80,
@@ -364,8 +370,19 @@ async function continuityHarness(options: {
   hookIngress?: 'ok' | 'busy'
   runId1State?: CtxmuxAdapterRun['state']
 } = {}): Promise<ContinuityHarness> {
+  const workspacePath = await mkdtemp(join(tmpdir(), 'amx-continuity-workspace-'))
+  continuityDirectories.push(workspacePath)
+  const runtime = join(workspacePath, 'runtime')
+  await mkdir(runtime)
+  for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime)
+  vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', join(workspacePath, 'sessions.json'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(workspacePath, 'messages.ndjson'))
+  for (const key of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH']) {
+    expect(process.env[key]?.startsWith(workspacePath + '/')).toBe(true)
+  }
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, continuityStoredSession())
+  await store.compareAndSwap(null, continuityStoredSession(workspacePath))
   const client = new AgentMuxClient({ store })
   const internals = client as unknown as {
     registry: { load(hostId: string): Promise<void> }
@@ -389,14 +406,14 @@ async function continuityHarness(options: {
   // run-1 已退出 → decision=resume；任何 spawn 出来的新 Run 报 running。
   internals.kernel.status = async (runId: string) =>
     runId === 'run-1'
-      ? continuityRun('run-1', options.runId1State ?? { type: 'exited', code: 0, signal: null })
-      : continuityRun(runId, { type: 'running' })
+      ? continuityRun('run-1', options.runId1State ?? { type: 'exited', code: 0, signal: null }, workspacePath)
+      : continuityRun(runId, { type: 'running' }, workspacePath)
   // resumeAgentRun 里 kernel.start 是唯一的 Run 创建点：对它计数即对 spawn 次数计数。
   internals.kernel.start = async () => {
     spawns += 1
     const runId = `spawned-run-${spawns}`
     runIds.push(runId)
-    return continuityRun(runId, { type: 'running' })
+    return continuityRun(runId, { type: 'running' }, workspacePath)
   }
 
   if (options.hookIngress === 'busy') {
@@ -612,7 +629,7 @@ describe('重启恢复保持原 Session 身份且输入不误投递（f-25k8f8m9
       inputs.push(op.data)
       inputRuns.push(runId)
       return {
-        run: continuityRun(runId, { type: 'running' }),
+        run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
         appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(op.data) }
       }
     }
@@ -690,19 +707,17 @@ function promptRun(
   }
 }
 
-type PromptObservation = {
-  run: CtxmuxAdapterRun
-  replay: CtxmuxAdapterDataEvent[]
-  gap: { requestedAfterByte: number; firstAvailableByte: number } | null
-  close(): Promise<void>
-}
+type PromptObservation = CtxmuxAdapterOutputObservation
 
 /** replay 被 CtxMux 截断：观察一开始就带 gap。 */
 function truncatedReplayObservation(): PromptObservation {
   return {
-    run: promptRun(),
+    run: { ...promptRun(), latestOutputBytes: 4096, firstAvailableByte: 4096 },
     replay: [],
     gap: { requestedAfterByte: 0, firstAvailableByte: 4096 },
+    // The original prefix is gone and no owner checkpoint exists. A byte cursor is not authority.
+    terminal: { type: 'unknown', reason: 'origin_unknown' },
+    resizeRevision: 0,
     close: async () => {}
   }
 }
@@ -712,7 +727,7 @@ function renderedComposerObservation(content: string): PromptObservation {
   const data = `› ${content}`
   const dataBytes = Uint8Array.from(Buffer.from(data))
   return {
-    run: promptRun(),
+    run: { ...promptRun(), latestOutputBytes: dataBytes.byteLength },
     replay: [{
       type: 'data',
       runId: 'prompt-run',
@@ -722,6 +737,12 @@ function renderedComposerObservation(content: string): PromptObservation {
       dataBytes
     }],
     gap: null,
+    // The Runtime fixture owns a fresh blank screen at original byte zero plus the exact replay tail.
+    // Restore bytes are synthetic and do not advance that original byte cursor.
+    terminal: { type: 'basic-vt', checkpoint: { runId: 'prompt-run', throughByte: 0,
+      resizeRevision: 0, size: { cols: 80, rows: 24 } },
+      restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
+    resizeRevision: 0,
     close: async () => {}
   }
 }
@@ -732,6 +753,11 @@ function silentObservation(): PromptObservation {
     run: promptRun(),
     replay: [],
     gap: null,
+    // This Run has emitted no output or resize; its owner-confirmed empty checkpoint is still valid.
+    terminal: { type: 'basic-vt', checkpoint: { runId: 'prompt-run', throughByte: 0,
+      resizeRevision: 0, size: { cols: 80, rows: 24 } },
+      restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
+    resizeRevision: 0,
     close: async () => {}
   }
 }
@@ -813,7 +839,7 @@ async function promptClient(options: {
     _runId: string,
     _afterByte: number,
     listener: (event: CtxmuxAdapterObservationEvent) => void
-  ) => {
+  ): Promise<CtxmuxAdapterOutputObservation> => {
     observeCalls += 1
     if (!options.observeOutput) throw new Error('fixture did not expect a screen observation')
     return options.observeOutput(listener)
@@ -838,8 +864,10 @@ function deliveryMarkers(events: AgentMuxClientEvent[]): AgentTerminalPromptDeli
   ))
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
+  await Promise.all(continuityDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 })
 
 describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 存活）', () => {
