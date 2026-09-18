@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { AgentProviderRegistry } from './agent-provider.js'
-import { agentTurnCompletionIdentity, cloneSession, sameRun } from './agent-session-identity.js'
+import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
@@ -123,11 +123,12 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     const assertTurnBoundary = (current: AgentMuxAgentSession, hasPreviousPrompt: boolean): boolean => {
-      // Composer/readiness observations do not prove a native turn boundary. Both input
-      // plans use the same one-message choice and the same completion consumption record.
+      // Native cancellation ends a turn without completing it successfully. Both input
+      // plans consume that boundary in the same admission; composer observations do not prove it.
       const completionId = agentTurnCompletionIdentity(current)
       const completed = completionId !== undefined && current.promptCompletionAdmission?.completionId !== completionId
-      const uncertain = !completed &&
+      const ended = agentTurnEndBoundary(current) !== undefined
+      const uncertain = !completed && !ended &&
         (hasPreviousPrompt || current.semanticStatus?.state === 'working')
       if (uncertain && (!allowUncertainTurn || expectedCompletionId !== undefined)) {
         throw new AgentMuxError(
@@ -139,13 +140,20 @@ export class AgentPromptSubmissionCoordinator {
     }
     const claimInput = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number, uncertainTurn: boolean): AgentMuxStoredAgentSession => {
       const completionId = agentTurnCompletionIdentity(current)
+      const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
       return { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
-        submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte
-      }, ...(uncertainTurn ? { terminalPromptDelivery: {
+        submissionId, ...(completionId ? { completionId } : {}),
+        operationId, startByte, endByte
+      }, ...(ended ? { terminalPromptReadiness: { ...current.terminalPromptReadiness!, consumedBySubmissionId: submissionId } } : {}),
+      ...(uncertainTurn ? { terminalPromptDelivery: {
         state: 'unverified' as const, mode: 'degraded' as const, reason: 'turn-end-unconfirmed' as const,
         submissionId, run: { ...current.run }, observedAt
       } } : {}) }
+    }
+    const cancelConsumedNativeReadiness = (current: AgentMuxAgentSession): void => {
+      if (current.terminalPromptReadiness?.source === 'native-stop' &&
+        current.terminalPromptReadiness.consumedBySubmissionId === submissionId) this.cancelReadiness(current.agentSessionId)
     }
     if (plan.kind === 'single-phase') {
       const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'payload', plan.data)
@@ -179,6 +187,7 @@ export class AgentPromptSubmissionCoordinator {
         return claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data), uncertainTurn)
       })
       const admitted = current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
+      cancelConsumedNativeReadiness(current)
       this.localSubmissionClaims.add(operationId)
       if (uncertainTurn) await this.publishDeliveryDegrade(session, {
         state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
@@ -288,6 +297,7 @@ export class AgentPromptSubmissionCoordinator {
       uncertainTurn = assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
       const readiness = stored.terminalPromptReadiness
       const readinessEvidence = readiness && readiness.run.runId === session.run.runId &&
+        readiness.outputCursorBytes !== undefined &&
         readiness.readyThroughByte !== undefined &&
         (readiness.consumedBySubmissionId === undefined ||
           (replaceableClaim && readiness.consumedBySubmissionId === existing?.submissionId))
@@ -387,6 +397,7 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     let submission = current.terminalPromptSubmission
+    cancelConsumedNativeReadiness(current)
     if (!submission) {
       throw new AgentMuxError(
         'Agent prompt submission claim was not persisted.',
@@ -704,7 +715,7 @@ export class AgentPromptSubmissionCoordinator {
     readiness: AgentTerminalPromptReadinessState
   ): void {
     const matcher = this.deps.providers.get(session.providerId).terminalPromptRender
-    if (!matcher) return
+    if (!matcher || readiness.outputCursorBytes === undefined || readiness.consumedBySubmissionId !== undefined) return
     this.readinessCancels.get(session.agentSessionId)?.()
     const controller = new AbortController()
     const cancel = (): void => {
@@ -731,18 +742,7 @@ export class AgentPromptSubmissionCoordinator {
             )
           }
           if (currentReadiness.readyThroughByte !== undefined) return current
-          if (currentReadiness.consumedBySubmissionId !== undefined) {
-            throw new AgentMuxError(
-              'Prompt readiness epoch was consumed before readiness was persisted.',
-              'AGENT_PROMPT_READINESS_CONFLICT',
-              promptReadinessDetail({
-                expectedRunId: session.run.runId,
-                readinessId: readiness.id,
-                consumedBySubmissionId: currentReadiness.consumedBySubmissionId,
-                reason: 'readiness-consumed-before-persist'
-              })
-            )
-          }
+          if (currentReadiness.consumedBySubmissionId !== undefined) return current
           return {
             ...current,
             terminalPromptReadiness: { ...currentReadiness, readyThroughByte },
