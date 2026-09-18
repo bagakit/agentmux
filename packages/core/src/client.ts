@@ -727,12 +727,6 @@ export class AgentMuxClient {
       // 就在这里驱动整套「置 disconnected → 有界重连 → 恢复真相」。这不是某个 run 的语义错误，故与
       // onError 分居两处。
       this.unsubscribeConnectionLost = this.kernel.onConnectionLost(() => this.handleConnectionLost(epoch))
-      // Hook config files outlive an App bundle. Re-ensure the managed entries from the current
-      // executable before restoring bindings so a moved/replaced install cannot leave old
-      // `/Applications/AgentMux.app` commands behind. This is deliberately best-effort and
-      // deduplicated by Provider + Workspace; a hook repair failure is an advisory diagnostic,
-      // never a reason to block the runtime or healthy Agent Runs.
-      await this.repairManagedHooks()
       await this.tryRestoreHookIngress(runs)
       // Probe every running Session together. A serial `await` here makes N healthy Agents
       // wait behind N ten-second capability windows, which is especially visible when the
@@ -2077,19 +2071,18 @@ export class AgentMuxClient {
    * the config is never uninstalled on stop, because a provider like antigravity shares one global
    * `~/.gemini` file across every concurrent agent and ripping it out would break a running sibling.
    *
-   * Best-effort: a native provider whose hook config cannot be written still launches (its terminal
-   * output remains observable) — the install failure is surfaced as a non-fatal `agent-error` rather
-   * than aborting the launch. Providers whose hooks are `unmanaged` (e.g. pi's TypeScript extension)
-   * never reach the installer — the `explicit-managed` gate below returns before a plan is resolved.
+   * Best-effort: a native provider whose hook config cannot be written still launches or reattaches.
+   * An unscoped diagnostic reaches the existing window notice without marking a healthy Agent failed.
+   * Providers whose hooks are not explicit-managed never reach the installer.
    *
    * The launch `env` is threaded into plan resolution because a provider's config dir can be env-derived
    * (hermes reads `$HERMES_HOME`): the installer must target the same dir the launched process will read.
    *
-   * `endpoint` is present only on the launch path, where a Binding already exists. It is what a Provider
+   * `endpoint` comes from the launch or restored Binding. It is what a Provider
    * that writes its **delivery code** into a file needs (opencode's JS plugin runs inside OpenCode's own
    * process and never sees the PTY env), so such a Provider must inline the URL and token at install time.
-   * The repair path below has no Binding and passes it absent — a Provider that needs it must then decline
-   * to produce a plan rather than write one carrying a dead token.
+   * Without a Binding, a Provider that needs it must decline to produce a plan rather than write one
+   * carrying a dead token. A connection alone never supplies the Executor's configuration environment.
    */
   private async ensureManagedHooks(
     provider: AgentProvider,
@@ -2108,41 +2101,13 @@ export class AgentMuxClient {
     } catch (error) {
       this.publisher.publish({
         type: 'agent-error',
-        agentSessionId,
         code: error instanceof AgentMuxError ? error.code : 'HOOK_INSTALL_FAILED',
-        message: `Managed Hook install for ${provider.label} failed; launching without status hooks. ${
+        message: `Managed Hook configuration for ${provider.label} (Agent ${agentSessionId}) could not be repaired. ` +
+          `The Agent continues; status Hook delivery is unconfirmed. Check its configuration permissions and retry recovery. ${
           error instanceof Error ? error.message : String(error)
         }`,
         evidence: { source: 'user', observedAt: Date.now() }
       })
-    }
-  }
-
-  private async repairManagedHooks(): Promise<void> {
-    const repaired = new Set<string>()
-    for (const session of this.registry.list()) {
-      let provider: AgentProvider
-      try {
-        provider = this.providers.get(session.providerId)
-      } catch {
-        // A persisted Session for an unavailable Provider is handled by the existing Session
-        // projection. It must not prevent other Providers' hook paths from being repaired.
-        continue
-      }
-      if (
-        provider.catalog.hookStrategy.kind !== 'native' ||
-        provider.catalog.hookStrategy.installation !== 'explicit-managed'
-      ) continue
-      const key = `${session.providerId}\u0000${session.workspacePath}`
-      if (repaired.has(key)) continue
-      repaired.add(key)
-      await this.ensureManagedHooks(
-        provider,
-        session.providerId,
-        session.workspacePath,
-        session.agentSessionId,
-        {}
-      )
     }
   }
 
@@ -2535,6 +2500,16 @@ export class AgentMuxClient {
       catalog,
       capability
     })
+    if (decision.kind === 'reattachable' && current && input.env !== undefined) {
+      await this.ensureManagedHooks(
+        this.providers.get(current.providerId),
+        current.providerId,
+        current.workspacePath,
+        current.agentSessionId,
+        input.env,
+        this.hookBindings.get(current.run.runId)?.endpoint
+      )
+    }
     if (decision.kind !== 'resume') return decision
 
     try {
