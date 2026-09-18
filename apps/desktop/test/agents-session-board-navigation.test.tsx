@@ -34,10 +34,10 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons).toHaveLength(6)
-    expect(buttons[0]?.getAttribute('aria-label')).toContain('PMO teams topic')
+    expect(buttons[0]?.getAttribute('aria-label')).toContain('Mote')
     expect(buttons.slice(1).map((button) => button.getAttribute('aria-label'))).toEqual([
       'Space: show terminal and file workbench',
-      'Focus: show execution contexts',
+      expect.stringMatching(/^Focus: show execution contexts\. \d+ working, \d+ requests, \d+ failed$/),
       'Goals: show goals and progress',
       'Survey: browse and verify information',
       'Settings'

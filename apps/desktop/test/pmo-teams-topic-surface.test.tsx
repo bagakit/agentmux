@@ -27,6 +27,6 @@ describe('compact PMO teams topic surface', () => {
     window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 }, launcherPlacement: 'compact', launcherPosition: { left: 100, top: 100 } }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
     expect(container.querySelector('.pmo-teams-topic-compact-launcher')).toBeTruthy()
-    expect(container.querySelector('button[aria-label="Open PMO teams topic"]')).toBeTruthy()
+    expect(container.querySelector('button[aria-label="Open Mote"]')).toBeTruthy()
   })
 })

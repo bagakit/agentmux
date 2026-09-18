@@ -481,7 +481,7 @@ export function BoardToolList({ hostId: _hostId }: { hostId: string }) {
   return (
     <section className="board-tool-list" aria-label="Global goal index">
       <div className="board-tool-context"><span><Columns3 size={12} /> Goals</span><em>{demands.length} goal{demands.length === 1 ? '' : 's'}</em></div>
-      {demands.length === 0 ? <div className="board-tool-row__empty">No goals yet. Use PMO Teams to clarify your first goal.</div> : null}
+      {demands.length === 0 ? <div className="board-tool-row__empty">No goals yet. Use Mote to clarify your first goal.</div> : null}
       {shown.map(({ demand, status }) => (
         <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
           <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
