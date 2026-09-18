@@ -4218,7 +4218,7 @@ export class AgentMuxClient {
     const updatesSemanticStatus = hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
-      eventNamesCanReopenTurn(provider.hook.rules.flatMap((rule) => rule.events))
+      provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))
     )
     // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
     //
@@ -4249,6 +4249,7 @@ export class AgentMuxClient {
       agentSessionId: session.agentSessionId,
       run: { ...session.run },
       eventName: normalized.eventName,
+      ...(normalized.lifecycleEvent ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
