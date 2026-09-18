@@ -1,3 +1,5 @@
+import { inspectDesktopClient } from './client-observation.js'
+import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { captureComposerScreenshot } from './composer-screenshot.js'
@@ -136,6 +138,8 @@ export async function registerIpc(args: {
   scratchTopics: ScratchTopics
   environmentWarning?: string
   onRendererUpdateReady?: (token: string) => void
+  loadedPackage?: DesktopPackageIdentity | null
+  loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
   const initialPalette = terminalPalette(config.appearance.terminalTheme)
@@ -226,6 +230,12 @@ export async function registerIpc(args: {
   const executeControl = async (
     request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'inspect.client') return await inspectDesktopClient(request, {
+      pid: process.pid, package: args.loadedPackage ?? null,
+      renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+      generation: () => args.runtime.rendererGeneration(args.window.webContents),
+      runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
+    })
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
       if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')

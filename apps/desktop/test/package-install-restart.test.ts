@@ -84,10 +84,10 @@ function cutoverOffset(body: ts.Block): number {
 function newInstanceLaunchOffset(body: ts.Block): number {
   let offset = Number.POSITIVE_INFINITY
   const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && node.name.getText() === 'relaunched' && node.initializer) {
-      const value = node.initializer
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && node.left.getText() === 'relaunched') {
+      const value = node.right
       if (ts.isAwaitExpression(value) && ts.isCallExpression(value.expression) &&
-        ts.isIdentifier(value.expression.expression) && value.expression.expression.text === 'relaunchInstalledApplication') {
+        ts.isIdentifier(value.expression.expression) && value.expression.expression.text === 'launch') {
         offset = Math.min(offset, value.expression.getStart())
       }
     }
@@ -98,11 +98,23 @@ function newInstanceLaunchOffset(body: ts.Block): number {
 }
 
 describe('installing must hand over a process running the new bundle', () => {
+  it('uses the original public application IO for production', () => {
+    const install = parse(SOURCE).statements.filter(ts.isFunctionDeclaration).find(node => node.name?.text === 'installApplication')
+    expect(install?.parameters).toHaveLength(2)
+    const options = install!.parameters[1]!.name
+    expect(ts.isObjectBindingPattern(options)).toBe(true)
+    if (!ts.isObjectBindingPattern(options)) throw new Error('Installation options must expose the actual IO defaults')
+    const bindings = options.elements.filter(node => node.name.getText() === 'quit' || node.name.getText() === 'launch')
+    expect(bindings.map(node => [node.name.getText(), node.initializer?.getText()])).toEqual([
+      ['quit', 'quitInstalledApplication'], ['launch', 'relaunchInstalledApplication']
+    ])
+  })
+
   it('quits the previous instance before the directory cutover', () => {
     const body = functionBody(SOURCE, 'installApplication')
-    const quit = firstCallOffset(body, 'quitInstalledApplication')
+    const quit = firstCallOffset(body, 'quit')
     const cutover = cutoverOffset(body)
-    expect(Number.isFinite(quit), 'installApplication 必须调用 quitInstalledApplication').toBe(true)
+    expect(Number.isFinite(quit), 'installApplication 必须调用实际退出入口 quit').toBe(true)
     expect(Number.isFinite(cutover), 'installApplication 必须有 rename(next, destination) 这次切换').toBe(true)
     // 顺序是判据本身：换完目录再退旧实例，中间那段窗口里旧进程仍在按旧代码写状态。
     expect(quit, '退出旧实例必须发生在换目录之前').toBeLessThan(cutover)
@@ -112,7 +124,7 @@ describe('installing must hand over a process running the new bundle', () => {
     const body = functionBody(SOURCE, 'installApplication')
     const relaunch = newInstanceLaunchOffset(body)
     const cutover = cutoverOffset(body)
-    expect(Number.isFinite(relaunch), 'installApplication 必须调用 relaunchInstalledApplication').toBe(true)
+    expect(Number.isFinite(relaunch), 'installApplication 必须调用实际新 GUI 入口 launch').toBe(true)
     expect(relaunch, '重新拉起必须发生在换目录之后').toBeGreaterThan(cutover)
   })
 
@@ -149,7 +161,7 @@ describe('installing must hand over a process running the new bundle', () => {
       .replace(/await relaunchInstalledApplication\(destination\)/g, '[] /* restart removed */')
     expect(mutated, '注入必须真的改动了源码').not.toBe(SOURCE)
     const body = functionBody(mutated, 'installApplication')
-    expect(firstCallOffset(body, 'quitInstalledApplication')).toBe(Number.POSITIVE_INFINITY)
+    expect(firstCallOffset(body, 'quit')).toBe(Number.POSITIVE_INFINITY)
     expect(firstCallOffset(body, 'relaunchInstalledApplication')).toBe(Number.POSITIVE_INFINITY)
   })
 

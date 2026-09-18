@@ -1,3 +1,4 @@
+import type { DesktopLoadedRenderer } from '../shared/client-observation.js'
 import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,6 +14,7 @@ export class RendererUpdates {
   private watcher: FSWatcher | undefined
   private tail = Promise.resolve()
   private current: string | null = null
+  private loaded: DesktopLoadedRenderer | null = null
   private identity!: RendererRelease['identity']
   constructor(private readonly options: {
     directory: string
@@ -33,7 +35,7 @@ export class RendererUpdates {
     try {
       try { pointer = await this.pointer() }
       catch (error) {
-        await this.options.load(await this.resolve(null))
+        await this.load(await this.resolve(null))
         await this.publish(pointer)
         await this.writeBundledMarker(bundledRelease.id)
         this.options.report(error)
@@ -43,7 +45,7 @@ export class RendererUpdates {
         pointer = { current: null, previous: null }
         await this.publish(pointer)
       }
-      await this.options.load(await this.resolve(pointer.current))
+      await this.load(await this.resolve(pointer.current))
       this.current = pointer.current
       await this.writeBundledMarker(bundledRelease.id)
       await this.recordOutcome(pointer.current).catch(this.options.report)
@@ -51,10 +53,10 @@ export class RendererUpdates {
       // A staged page can fail on cold start too. Recover before announcing readiness.
       if (pointer.current === null) throw error
       let restored = pointer.previous
-      let file: string
+      let file: { path: string; renderer: DesktopLoadedRenderer }
       try { file = await this.resolve(restored) }
       catch { restored = null; file = await this.resolve(null) }
-      await this.options.load(file)
+      await this.load(file)
       this.current = restored
       await this.publish({ current: restored, previous: pointer.current })
       await this.writeBundledMarker(bundledRelease.id)
@@ -95,12 +97,25 @@ export class RendererUpdates {
     await writeFile(temporary, JSON.stringify({ schema: 1, id }), { mode: 0o600 })
     await rename(temporary, join(this.options.directory, 'bundled.json'))
   }
-  private async resolve(id: string | null): Promise<string> {
-    if (id === null) return join(this.options.bundled, 'index.html')
+  /** The successful load owner, not the current on-disk pointer. */
+  loadedRenderer(): DesktopLoadedRenderer | null { return this.loaded }
+
+  private async load(release: { path: string; renderer: DesktopLoadedRenderer }): Promise<void> {
+    this.loaded = null
+    await this.options.load(release.path)
+    this.loaded = Object.freeze(release.renderer)
+  }
+
+  private async resolve(id: string | null): Promise<{ path: string; renderer: DesktopLoadedRenderer }> {
+    if (id === null) {
+      const release = JSON.parse(await readFile(join(this.options.bundled, 'release.json'), 'utf8')) as RendererRelease
+      if (!bundledReleaseId(release.id)) throw new Error('Bundled Renderer release identity is invalid')
+      return { path: join(this.options.bundled, 'index.html'), renderer: { kind: 'bundled', id: release.id, identity: release.identity } }
+    }
     const directory = join(this.options.directory, id)
     const release = await validateRendererRelease(directory, this.identity)
     if (release.id !== id) throw new Error('Renderer release identity mismatch')
-    return join(directory, 'index.html')
+    return { path: join(directory, 'index.html'), renderer: { kind: 'staged', id, identity: release.identity } }
   }
   private async recordOutcome(requested: string | null, error?: unknown): Promise<void> {
     const temporary = join(this.options.directory, `.status-${randomUUID()}.json`)
@@ -124,7 +139,7 @@ export class RendererUpdates {
   private async applyPointer(): Promise<void> {
     const next = await this.pointer()
     if (next.current === this.current) { await this.recordOutcome(next.current); return }
-    let file: string
+    let file: { path: string; renderer: DesktopLoadedRenderer }
     try {
       file = await this.resolve(next.current)
       await this.options.prepare()
@@ -135,9 +150,9 @@ export class RendererUpdates {
     }
     const previous = this.current
     try {
-      await this.options.load(file)
+      await this.load(file)
     } catch (error) {
-      await this.options.load(await this.resolve(previous))
+      await this.load(await this.resolve(previous))
       await this.publishResult(next, { current: previous, previous: next.current })
       await this.recordOutcome(next.current, error)
       throw new Error(`Frontend update failed; restored the previous interface. ${error instanceof Error ? error.message : String(error)}`)

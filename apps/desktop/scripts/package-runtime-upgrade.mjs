@@ -1,3 +1,4 @@
+import { parseDesktopClientObservation } from '../src/shared/client-observation.ts'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -31,7 +32,7 @@ async function artifact(app) {
   // Read the address from the actual App, not the packaging checkout's artifact.
   const paths = await import(pathToFileURL(join(core, 'dist/runtime-paths.js')).href)
   return { root, manifest, manifestSha256: hash(bytes), daemonPath, daemonSha256: daemon.sha256,
-    archivePath, socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
+    archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
 }
 
 async function extractSdk(artifact, directory) {
@@ -40,8 +41,8 @@ async function extractSdk(artifact, directory) {
   return join(directory, 'package/dist/index.js')
 }
 
-async function inspect(sdk, socket) {
-  const { stdout } = await exec(process.execPath, [script, '--inspect', sdk, socket], {
+async function inspect(sdk, socket, core) {
+  const { stdout } = await exec(process.execPath, [script, '--inspect', sdk, socket, ...(core ? [core] : [])], {
     timeout: 10_000, maxBuffer: 1024 * 1024,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
@@ -50,10 +51,20 @@ async function inspect(sdk, socket) {
 
 // Only metadata leaves the bounded helper process. It owns any sockets it opens;
 // terminating that helper on a deadline cannot signal the daemon or a Run.
-async function inspectPublicRuntime(sdkPath, socketPath) {
+async function inspectPublicRuntime(sdkPath, socketPath, corePath) {
   const sdk = await import(pathToFileURL(sdkPath).href)
   const client = new sdk.CtxmuxClient({ socketPath })
   const runtime = await client.runtimeInfo()
+  if (corePath) {
+    // The candidate's existing Core predicate owns compatibility. An observation
+    // never calls Core.connect, which may legitimately start a missing daemon.
+    const { assertAgentMuxRuntimeCompatibility } = await import(pathToFileURL(corePath).href)
+    assertAgentMuxRuntimeCompatibility(runtime)
+  }
+  if (corePath) {
+    process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime, running: [] }))
+    return
+  }
   const running = []
   let cursor = null
   do {
@@ -127,6 +138,70 @@ async function assertRunsKept(plan, inspection, sdk) {
       'Original Run byte cursors moved backwards during handoff.')
   }
   return statuses
+}
+
+/** One bounded public Control read; no Renderer injection or lifecycle action. */
+export async function observeUiClient(appPath) {
+  const { stdout } = await exec(process.execPath, [script, '--inspect-ui', join(appPath, coreRelative, 'dist/index.js')], {
+    timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  })
+  return parseDesktopClientObservation(JSON.parse(stdout))
+}
+
+/** UI-only preflight: no owner receipt, mapped-image claim, signal or spawn authority. */
+export async function prepareUiRuntime(currentApp, candidateApp, observation) {
+  const old = await artifact(currentApp), candidate = await artifact(candidateApp)
+  fail(old.socketPath === candidate.socketPath && old.stateDirectory === candidate.stateDirectory,
+    'UI update changes the durable Runtime address. No application was changed.')
+  const liveness = await probeSocketLiveness(old.socketPath)
+  fail(liveness === 'alive', 'The existing Runtime listener is unavailable or unknown; no UI was changed.')
+  const temporary = await mkdtemp(join(tmpdir(), 'agentmux-install-sdk-'))
+  try {
+    const newSdk = await extractSdk(candidate, join(temporary, 'candidate'))
+    const before = await inspect(newSdk, old.socketPath, join(candidateApp, coreRelative, 'dist/index.js'))
+    const observed = parseDesktopClientObservation(observation)
+    const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
+    fail(local && local.instanceId === before.runtime.daemonInstanceId && local.buildIdentity === before.runtime.buildId &&
+      local.protocolVersion === before.runtime.protocolGeneration, 'The GUI and selected listener do not report the same serving Runtime.')
+    const ids = [...new Set(observed.workbench.tabs.flatMap(tab => tab.regions.flatMap(region =>
+      (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' ? [region.control.run.runId] : [])))]
+    const { stdout } = await exec(process.execPath, [script, '--status', newSdk, old.socketPath, JSON.stringify(ids)], {
+      timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    })
+    const statuses = JSON.parse(stdout)
+    fail(statuses.length === ids.length, 'The original workbench Run metadata is incomplete.')
+    before.running = statuses.filter(entry => entry.state.type === 'running')
+
+    return { old, candidate, newSdk, before, temporary, corePath: candidate.corePath }
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true })
+    throw error
+  }
+}
+
+/** Re-read the exact original service and Runs without Native mutation. */
+export async function confirmUiRuntime(plan) {
+  const { stdout } = await exec(process.execPath, [script, '--identity', plan.newSdk, plan.old.socketPath], {
+    timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  })
+  const after = JSON.parse(stdout)
+  const originalRuns = await assertRunsKept(plan, after, plan.newSdk)
+  return { runtime: after.runtime, originalRuns }
+}
+
+/** Match this GUI observation to the already-confirmed exact listener and Run facts. */
+export function assertUiRuntimeObservation(observation, confirmation) {
+  const observed = parseDesktopClientObservation(observation)
+  const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
+  const runtime = confirmation.runtime
+  fail(local && local.instanceId === runtime.daemonInstanceId && local.buildIdentity === runtime.buildId &&
+    local.protocolVersion === runtime.protocolGeneration, 'The activated GUI is not connected to the confirmed serving Runtime.')
+  for (const run of confirmation.originalRuns) {
+    const regions = observed.workbench.tabs.flatMap(tab => tab.regions.filter(region =>
+      (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' && region.control.run.runId === run.id))
+    fail(regions.length > 0 && regions.every(region => region.processState === run.state.type),
+      'The activated GUI has not observed the confirmed original Run state.')
+  }
 }
 
 /** Preflight before closing the GUI. Never signals or starts a Runtime. */
@@ -235,7 +310,15 @@ export async function closeRuntimeUpgrade(plan) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === script) {
-  if (process.argv[2] === '--inspect') await inspectPublicRuntime(process.argv[3], process.argv[4])
+  if (process.argv[2] === '--inspect-ui') {
+  const { requestAgentMuxControl } = await import(pathToFileURL(process.argv[3]).href)
+  const receipt = await requestAgentMuxControl({ schemaVersion: 5, requestId: randomUUID(), operation: 'inspect.client' })
+  process.stdout.write(JSON.stringify(parseDesktopClientObservation(receipt.result.observation)))
+} else if (process.argv[2] === '--identity') {
+  const sdk = await import(pathToFileURL(process.argv[3]).href)
+  const runtime = await new sdk.CtxmuxClient({ socketPath: process.argv[4] }).runtimeInfo()
+  process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime }))
+} else if (process.argv[2] === '--inspect') await inspectPublicRuntime(process.argv[3], process.argv[4], process.argv[5])
   else if (process.argv[2] === '--status') {
     const { CtxmuxClient } = await import(pathToFileURL(process.argv[3]).href)
     const client = new CtxmuxClient({ socketPath: process.argv[4] })
@@ -243,7 +326,7 @@ if (process.argv[1] && resolve(process.argv[1]) === script) {
     for (const id of JSON.parse(process.argv[5])) {
       const run = await client.status(id)
       statuses.push({ id: run.id, pid: run.pid, state: run.state, acceptedInputBytes: run.applied_input_bytes,
-        outputBytes: run.latest_output_bytes })
+        outputBytes: run.latest_output_bytes, currentSize: run.current_size })
     }
     process.stdout.write(JSON.stringify(statuses))
   } else throw new Error('Unknown installer Runtime inspection operation.')

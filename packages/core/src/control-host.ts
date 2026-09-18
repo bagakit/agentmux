@@ -245,6 +245,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'inspect.client') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
   if (source.operation === 'settings.get') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
     return {
@@ -759,6 +763,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'inspect.client') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: object(result.observation, 'Client observation is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  }
   if (operation === 'settings.get') {
     settingsFields(result, ['entries', 'partial'], 'CONTROL_PROTOCOL_ERROR')
     if (result.partial !== true || !Array.isArray(result.entries) || result.entries.length === 0) {
@@ -1109,6 +1118,9 @@ export class AgentMuxControlServer {
       socket.setTimeout(agentMuxControlTimeoutMs(request.operation))
       if (request.operation === 'browser.subscribe') { await this.stream(socket, request); return }
       receipt = successReceipt(request, await this.control.execute(request))
+      if (request.operation === 'inspect.client' && Buffer.byteLength(JSON.stringify(receipt)) > MAX_MESSAGE_BYTES) {
+        throw new AgentMuxError('Complete client observation exceeds the Control message budget.', 'CONTROL_FAILED')
+      }
     } catch (error) {
       const identity = requestIdentity(raw)
       const code = controlErrorCode(typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined)

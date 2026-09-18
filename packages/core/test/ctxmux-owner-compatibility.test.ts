@@ -7,6 +7,7 @@ import { CtxmuxRunAdapter, CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-r
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
+import { assertAgentMuxRuntimeCompatibility } from '../src/index.js'
 
 const processSpies = vi.hoisted(() => ({ spawn: vi.fn() }))
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -36,6 +37,17 @@ async function fixture() {
 }
 
 describe('Runtime compatibility independent of launch provenance', () => {
+  it('validates public listener facts without connecting, starting or claiming a Runtime', () => {
+    expect(() => assertAgentMuxRuntimeCompatibility(runtime)).not.toThrow()
+    const incompatible = [
+      { ...runtime, protocolGeneration: PROTOCOL_VERSION + 1 },
+      { ...runtime, capabilities: { ...runtime.capabilities, 'native.recoverable_input': 0 } }
+    ]
+    expect(incompatible).toHaveLength(2)
+    for (const identity of incompatible) expect(() => assertAgentMuxRuntimeCompatibility(identity))
+      .toThrow(expect.objectContaining({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' }))
+    expect(processSpies.spawn).not.toHaveBeenCalled()
+  })
   it('reports the connected listener rather than assigning the new bundle source to a nonempty older Runtime', async () => {
     const { directory } = await fixture()
     const original: RunInfo = {
