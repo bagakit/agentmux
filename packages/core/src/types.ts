@@ -494,6 +494,8 @@ export type AgentHookReceipt = {
   agentSessionId: string
   run: AgentMuxRunRef
   eventName: string
+  /** Provider-normalized lifecycle; unknown stays absent and the raw eventName is retained. */
+  lifecycleEvent?: AgentHookLifecycleEvent
   observedAt: number
   outputCursorBytes?: number
 }

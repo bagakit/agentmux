@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
-import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
+import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import {
@@ -451,6 +451,10 @@ function nativeHandle(value: unknown): AgentNativeSessionHandle {
 function hookReceipt(value: unknown): AgentHookReceipt {
   const source = record(value, 'hookReceipt')
   const eventName = string(source.eventName, 'hookReceipt.eventName')
+  if (source.lifecycleEvent !== undefined && !isAgentHookLifecycleEvent(source.lifecycleEvent)) {
+    throw new AgentMuxError('hookReceipt.lifecycleEvent is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const lifecycleEvent = canonicalHookLifecycleEvent(eventName, source.lifecycleEvent)
   const outputCursorBytes = source.outputCursorBytes === undefined
     ? undefined
     : timestamp(source.outputCursorBytes, 'hookReceipt.outputCursorBytes')
@@ -465,7 +469,7 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   // 失败（则整条收尾丢失、Agent 永久卡 working），要么编一个假光标。两条都比「收尾落盘、光标缺席」
   // 坏。所以这里只守伪造那一侧：缺席就是缺席，下游 readiness 也一并缺席，下一次发 prompt 收到
   // `epoch-missing` 的响亮拒绝，而不是一次静默走错边界的发送。
-  if (outputCursorBytes !== undefined && canonicalHookLifecycleEvent(eventName) !== 'turn-end') {
+  if (outputCursorBytes !== undefined && lifecycleEvent !== 'turn-end') {
     throw new AgentMuxError(
       'Only native turn-end receipts may carry an authoritative output cursor.',
       'INVALID_AGENT_SESSION_STORE'
@@ -477,6 +481,7 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     agentSessionId: string(source.agentSessionId, 'hookReceipt.agentSessionId'),
     run: runRef(source.run),
     eventName,
+    ...(lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
     ...(outputCursorBytes === undefined ? {} : { outputCursorBytes })
   }
