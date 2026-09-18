@@ -86,7 +86,7 @@ try {
   receipt.topicFilesAfter = Object.fromEntries(await Promise.all(topicFiles.map(async file => [path.relative(scratch.path, file), hash(await fs.readFile(file))])))
   assert.deepEqual(receipt.topicFilesAfter, receipt.topicFilesBefore, 'Restart must preserve Topic, Agent plaque and Mote SOUL contents')
   assert.deepEqual(await hashes(), receipt.inputs, 'Source changed while verifying this candidate')
-  for (const task of ['T-001', 'T-002', 'T-003', 'T-004', 'T-005', 'T-006', 'T-007', 'T-009']) {
+  for (const task of ['T-001', 'T-002', 'T-003', 'T-004', 'T-005', 'T-006', 'T-007', 'T-009', 'T-010']) {
     const file = path.join(root, 'docs/reviews/evidence/space-topic-role-iteration', task, 'proof.json')
     let proof
     try { proof = JSON.parse(await fs.readFile(file, 'utf8')) } catch (error) {
@@ -130,7 +130,7 @@ try {
       staleCandidateFiles: stale })
   }
   if (!provisional) {
-    assert.equal(receipt.prerequisiteProofs.length, 8)
+    assert.equal(receipt.prerequisiteProofs.length, 9)
     for (const proof of receipt.prerequisiteProofs) {
       assert.equal(proof.missing, undefined, `${proof.task} proof missing`)
       assert.equal(proof.mutationsRed, true, `${proof.task} lacks nonempty red mutations`)
