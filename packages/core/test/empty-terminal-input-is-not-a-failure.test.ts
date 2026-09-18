@@ -120,7 +120,7 @@ describe('空载荷的终端输入不是故障', () => {
   it('IME 组字途中的空字符串：不抛，不下到 ctxmux，游标停在真实持久值', async () => {
     const { client, sentToKernel } = await harness()
     try {
-      const ack = await client.writeAgent(SESSION_ID, '')
+      const ack = await client.writeAgent({ agentSessionId: SESSION_ID, expectedRun: client.agentSession(SESSION_ID).run, data: '', source: 'user' })
       expect(sentToKernel, '空载荷被送下去了——它会撞上 daemon 那条校验').toEqual([])
       expect(ack.acceptedThroughByte).toBe(ACCEPTED_INPUT_BYTES)
       // 没有字节被接受，所以区间是个真正的空区间（首尾同点），不是凭空推进了。
@@ -137,7 +137,7 @@ describe('空载荷的终端输入不是故障', () => {
   it('旧式鼠标上报的零长字节：与空字符串同一结局（两个编码面不能只挡一面）', async () => {
     const { client, sentToKernel } = await harness()
     try {
-      const ack = await client.writeAgent(SESSION_ID, new Uint8Array(0))
+      const ack = await client.writeAgent({ agentSessionId: SESSION_ID, expectedRun: client.agentSession(SESSION_ID).run, data: new Uint8Array(0), source: 'user' })
       expect(sentToKernel).toEqual([])
       expect(ack.acceptedThroughByte).toBe(ACCEPTED_INPUT_BYTES)
     } finally {
@@ -148,7 +148,7 @@ describe('空载荷的终端输入不是故障', () => {
   it('正向控制：非空输入照样下到 ctxmux 并推进游标（证明闸门没把所有输入都吃掉）', async () => {
     const { client, sentToKernel } = await harness()
     try {
-      const ack = await client.writeAgent(SESSION_ID, 'ls\r')
+      const ack = await client.writeAgent({ agentSessionId: SESSION_ID, expectedRun: client.agentSession(SESSION_ID).run, data: 'ls\r', source: 'user' })
       expect(sentToKernel).toEqual(['ls\r'])
       expect(ack.appliedByteRange).toEqual({
         startByte: ACCEPTED_INPUT_BYTES,
@@ -163,7 +163,7 @@ describe('空载荷的终端输入不是故障', () => {
   it("'0' 是合法输入，不是空——闸门判长度而不是判真值", async () => {
     const { client, sentToKernel } = await harness()
     try {
-      await client.writeAgent(SESSION_ID, '0')
+      await client.writeAgent({ agentSessionId: SESSION_ID, expectedRun: client.agentSession(SESSION_ID).run, data: '0', source: 'user' })
       expect(sentToKernel, "'0' 被闸门吃掉了——判据写成真值而不是长度").toEqual(['0'])
     } finally {
       await client.dispose()
@@ -173,7 +173,7 @@ describe('空载荷的终端输入不是故障', () => {
   it('单个 NUL 字节发得出去：长度 1 的载荷不是空载荷', async () => {
     const { client, sentToKernel } = await harness()
     try {
-      await client.writeAgent(SESSION_ID, new Uint8Array([0]))
+      await client.writeAgent({ agentSessionId: SESSION_ID, expectedRun: client.agentSession(SESSION_ID).run, data: new Uint8Array([0]), source: 'user' })
       expect(sentToKernel).toEqual([new Uint8Array([0])])
     } finally {
       await client.dispose()

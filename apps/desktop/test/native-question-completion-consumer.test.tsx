@@ -14,7 +14,7 @@ const transport = vi.hoisted(() => ({
 }))
 
 // Real xterm parser, input emitter and production TerminalView; only its native canvas/DOM shell
-// is scaffolded. No input/Agent/Run is sent to a real Runtime or user session by this fixture.
+// is scaffolded. Input reaches public Core with a synthetic byte owner; no real Runtime or user session is accessed.
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -68,6 +68,7 @@ vi.mock('../src/renderer/src/lib/api', async (importOriginal) => {
   } } }
 })
 
+import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -76,7 +77,7 @@ const RUN_ID = 'native-question-consumer-run'
 const questionInput = { questions: [{ question: 'Choose the next action', options: [{ label: 'First' }, { label: 'Second' }] }] }
 const initialSession: SessionSnapshot = {
   id: AGENT_ID, hostId: 'local', workspacePath: '/synthetic', label: 'Synthetic question',
-  createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+  createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
   status: { state: 'running', source: 'run-process', observedAt: 1 },
   kind: 'agent', providerId: 'claude', executorId: 'claude',
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
@@ -143,14 +144,14 @@ beforeEach(async () => {
   })
   unsubscribe = client.onEvent((event) => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event }))
   const bytes = new TextEncoder().encode('same parser\x1b[31mR\x1b[0m')
-  transport.attach.mockResolvedValue({ attachmentId: 'synthetic-view', currentSize: { cols: 80, rows: 24 }, gap: null,
-    replay: [{ startByte: 0, endByte: bytes.byteLength, data: new TextDecoder().decode(bytes), dataBytes: bytes }] })
-  transport.write.mockResolvedValue(undefined); transport.acknowledge.mockResolvedValue(undefined)
+  transport.attach.mockResolvedValue({ attachmentId: 'synthetic-view', session: initialSession, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
+    replay: [{ type: 'data', runId: RUN_ID, startByte: 0, endByte: bytes.byteLength, data: new TextDecoder().decode(bytes), dataBytes: bytes }] })
+  transport.write.mockImplementation((control, data, source) => client.writeAgent({ agentSessionId: control.agentSessionId, expectedRun: control.run, data, source }).then(() => undefined)); transport.acknowledge.mockResolvedValue(undefined)
   transport.detach.mockResolvedValue(undefined); transport.resize.mockResolvedValue(undefined)
   const container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(<SessionPane sessionId={AGENT_ID} surfaceKind="agent" interactiveResize={false} visible
     linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />))
-  await act(async () => await vi.waitFor(() => expect(transport.acknowledge).toHaveBeenCalled()))
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: 'region', sessionId: AGENT_ID, runId: RUN_ID })?.liveReady).toBe(true)))
   expect(transport.terminals).toHaveLength(1)
   transport.write.mockClear(); transport.resize.mockClear(); transport.detach.mockClear()
 })
@@ -186,44 +187,46 @@ function expectSameTerminal(instance: BrowserTerminal) {
   expect(transport.resize).not.toHaveBeenCalled()
 }
 
-it('public native Hook settlement removes the mounted card and reopens the same terminal only for the matched question', async () => {
+it('a matched native Hook clears the mounted service notice while raw input uses the same live terminal', async () => {
   const instance = terminal()
   await act(async () => expect(await hook('PreToolUse', 'pre-1', 'call-1')).toBe(204))
   expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-  expect(useAppStore.getState().sessions[0]!.kind).toBe('agent')
-  await input('blocked before completion'); expect(transport.write).not.toHaveBeenCalled()
+  await input('native answer')
+  expect(transport.write).toHaveBeenCalledExactlyOnceWith(initialSession.control, 'native answer', 'user')
+  expect(nativeWrites).toEqual(['native answer'])
+  expect(document.querySelector('.agent-interaction')?.textContent).toContain('Native input was accepted')
+  expect(document.querySelector('.agent-interaction')?.textContent).toContain('Open terminal')
   await act(async () => expect(await hook('PostToolUse', 'wrong-post', 'other-call')).toBe(204))
-  expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-  await input('still blocked'); expect(transport.write).not.toHaveBeenCalled()
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('pre-1')
   await act(async () => expect(await hook('PostToolUse', 'post-1', 'call-1')).toBe(204))
   expect(document.querySelector('[aria-label="Agent question"]')).toBeNull()
   expect(client.agentSession(AGENT_ID).pendingInteraction).toBeUndefined()
-  expect(nativeWrites).toEqual([])
   await input('healthy after native completion')
-  expect(transport.write).toHaveBeenCalledExactlyOnceWith(initialSession.control, 'healthy after native completion')
+  expect(nativeWrites).toEqual(['native answer', 'healthy after native completion'])
   expectSameTerminal(instance)
-  transport.write.mockClear()
   await act(async () => expect(await hook('PreToolUse', 'pre-2', 'call-2')).toBe(204))
   await act(async () => expect(await hook('PostToolUse', 'old-post-again', 'call-1')).toBe(204))
   expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('pre-2')
   expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-  await input('not the second question answer'); expect(transport.write).not.toHaveBeenCalled()
   expectSameTerminal(instance)
 })
 
-it('working and question completion never release the mounted raw pending permission gate', async () => {
+it('question completion cannot settle a pending permission, and raw permission input remains usable', async () => {
   const instance = terminal()
   await act(async () => expect(await hook('PermissionRequest', 'permission-1', 'permission-call', 'Bash')).toBe(204))
   expect(document.querySelector('[aria-label="Agent permission request"]')).not.toBeNull()
   await act(async () => expect(await hook('PostToolUse', 'question-post', 'permission-call')).toBe(204))
   expect(client.agentSession(AGENT_ID).pendingInteraction?.request).toMatchObject({ kind: 'permission', id: 'permission-1' })
-  expect(document.querySelector('[aria-label="Agent permission request"]')).not.toBeNull()
-  await input('permission remains card-only')
-  expect(transport.write).not.toHaveBeenCalled(); expect(nativeWrites).toEqual([])
+  await input('\x1b')
+  expect(transport.write).toHaveBeenCalledExactlyOnceWith(initialSession.control, '\x1b', 'user')
+  expect(nativeWrites).toEqual(['\x1b'])
+  expect(document.querySelector('.agent-interaction')?.textContent).toContain('Native input was accepted')
+  await act(async () => expect(await hook('PostToolUse', 'permission-post', 'permission-call', 'Bash')).toBe(204))
+  expect(client.agentSession(AGENT_ID).pendingInteraction).toBeUndefined()
   expectSameTerminal(instance)
 })
 
-it('a native Post preserves a claimed answer until its original full ACK settles through the existing owner', async () => {
+it('the original typed ACK cannot clear the newer mounted request after exact native completion', async () => {
   const instance = terminal()
   await act(async () => expect(await hook('PreToolUse', 'claimed-pre', 'claimed-call')).toBe(204))
   let entered!: () => void
@@ -241,23 +244,34 @@ it('a native Post preserves a claimed answer until its original full ACK settles
         answers: [{ questionId: 'question-1', optionId: 'option-1' }] } })
     await inputEntered
   })
-  const claim = structuredClone(client.agentSession(AGENT_ID).pendingInteraction)
-  expect(claim?.response).toMatchObject({ acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
+  const claim = structuredClone(client.agentSession(AGENT_ID).pendingInteraction?.response)
+  expect(claim).toMatchObject({ acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
   await act(async () => expect(await hook('PostToolUse', 'claimed-post', 'claimed-call')).toBe(204))
-  expect(client.agentSession(AGENT_ID).pendingInteraction).toEqual(claim)
-  expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-  await input('claimed gate remains'); expect(transport.write).not.toHaveBeenCalled()
-  await act(async () => expect(await hook('PreToolUse', 'early-next', 'next-call')).toBe(503))
-  expect(client.agentSession(AGENT_ID).pendingInteraction).toEqual(claim)
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.response).toEqual(claim)
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.nativeCompleted).toBeDefined()
+  expect(document.querySelector('.agent-interaction')?.textContent).toContain('This native request has ended')
+  await act(async () => expect(await hook('PreToolUse', 'early-next', 'next-call')).toBe(204))
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('early-next')
   await act(async () => { releaseAck!(); await answer })
-  expect(client.agentSession(AGENT_ID).pendingInteraction).toBeUndefined()
-  expect(document.querySelector('[aria-label="Agent question"]')).toBeNull()
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('early-next')
+  expect(document.querySelector('[aria-label="Agent question"]')?.textContent).toContain('Choose the next action')
   expect(nativeWrites).toEqual(['1'])
-  await input('healthy after typed ACK')
-  expect(transport.write).toHaveBeenCalledExactlyOnceWith(initialSession.control, 'healthy after typed ACK')
-  transport.write.mockClear()
-  await act(async () => expect(await hook('PreToolUse', 'next-after-ack', 'next-call')).toBe(204))
-  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('next-after-ack')
-  expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
+  await input('still usable')
+  expect(nativeWrites).toEqual(['1', 'still usable'])
   expectSameTerminal(instance)
+})
+
+it('activity newer than Core cannot hide a live request, and older Core snapshots cannot restore an ended request', async () => {
+  const activityTime = Date.now() + 60_000
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, updatedAt: activityTime })) })))
+  await act(async () => expect(await hook('PreToolUse', 'freshness-first', 'first-call')).toBe(204))
+  expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
+  const stale = structuredClone(client.agentSession(AGENT_ID))
+  stale.updatedAt -= 1
+  await act(async () => expect(await hook('PostToolUse', 'freshness-complete', 'first-call')).toBe(204))
+  await act(async () => expect(await hook('PreToolUse', 'freshness-second', 'second-call')).toBe(204))
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-session', session: stale } }))
+  expect(useAppStore.getState().sessions[0]).toMatchObject({ updatedAt: activityTime,
+    agentSessionUpdatedAt: client.agentSession(AGENT_ID).updatedAt, pendingInteraction: { id: 'freshness-second' } })
+  expect(document.querySelector('[aria-label="Agent question"]')).not.toBeNull()
 })

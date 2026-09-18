@@ -168,7 +168,7 @@ it('the file owner and a fresh public client preserve known and unknown entry fa
   await first.feed('Stop')
   const second = await harness(session(), new AgentMuxFileAgentSessionStore(path), false)
   expect(second.client.agentSessions().map((entry) => entry.semanticStatus?.stateEnteredAt)).toEqual([100])
-  await second.client.writeAgent('entry-agent', '\u001b[0n')
+  await second.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: second.client.agentSession('entry-agent').run, data: '\u001b[0n', source: 'user' })
   const third = await harness(session(), new AgentMuxFileAgentSessionStore(path), false)
   expect(third.client.agentSession('entry-agent').semanticStatus).toEqual({
     state: 'done', source: 'native-hook', observedAt: 2_000, detail: 'Stop'
@@ -211,15 +211,15 @@ it('a failed typed input leaves unknown idle evidence without claiming working o
 it('empty raw input preserves idle evidence while acknowledged protocol bytes invalidate it only once', async () => {
   const h = await harness(session(done(100)))
   const save = vi.spyOn(h.store, 'compareAndSwap')
-  await h.client.writeAgent('entry-agent', '')
-  await h.client.writeAgent('entry-agent', new Uint8Array())
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: '', source: 'user' })
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: new Uint8Array(), source: 'user' })
   expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(100)
   expect(save).not.toHaveBeenCalled()
   expect(h.writes).toEqual([])
-  await h.client.writeAgent('entry-agent', '\u001b[0n')
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: '\u001b[0n', source: 'user' })
   expect(h.client.agentSession('entry-agent').semanticStatus).toEqual(done())
   expect(save).toHaveBeenCalledTimes(1)
-  await h.client.writeAgent('entry-agent', 'next')
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'next', source: 'user' })
   expect(save).toHaveBeenCalledTimes(1)
   expect(h.writes.map((input) => input.data)).toEqual(['\u001b[0n', 'next'])
   expect(h.inner.agentInputCursors.get('entry-agent')).toBe(8)
@@ -228,7 +228,7 @@ it('empty raw input preserves idle evidence while acknowledged protocol bytes in
 it('a failed raw input does not consume durable idle evidence', async () => {
   const h = await harness(session(done(100)))
   h.inner.kernel.input = async () => { throw new Error('input unavailable') }
-  await expect(h.client.writeAgent('entry-agent', 'x')).rejects.toThrow('input unavailable')
+  await expect(h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })).rejects.toThrow('input unavailable')
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBe(100)
 })
 
@@ -240,7 +240,7 @@ it('a newer done epoch arriving before raw ACK is not erased by the old input', 
     clock.mockReturnValue(3_000)
     await h.feed('Stop')
   })
-  await h.client.writeAgent('entry-agent', 'x')
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })
   expect(h.client.agentSession('entry-agent').semanticStatus).toMatchObject({ state: 'done', stateEnteredAt: 3_000 })
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBe(3_000)
   expect(h.writes.map((input) => input.data)).toEqual(['x'])
@@ -252,7 +252,7 @@ it('an exact Run change before raw ACK cannot consume another Runs idle epoch', 
     const current = h.inner.registry.get('entry-agent')
     await h.inner.registry.put({ ...current, run: { runId: 'replacement-run' }, retiredRuns: [{ runId: 'entry-run' }], semanticStatus: done(100) }, current.run)
   })
-  await expect(h.client.writeAgent('entry-agent', 'x')).resolves.toEqual({
+  await expect(h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })).resolves.toEqual({
     runId: 'entry-run', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1
   })
   expect(h.client.agentSession('entry-agent').run.runId).toBe('replacement-run')
@@ -269,7 +269,7 @@ it.each([100, 99])('a non-advancing clock %i keeps a new semantic epoch honestly
     expect(h.client.agentSession('entry-agent').semanticStatus).toMatchObject({ state: 'done' })
     expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBeUndefined()
   })
-  await h.client.writeAgent('entry-agent', 'x')
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })
   expect((await h.stored()).semanticStatus).toMatchObject({ state: 'done' })
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBeUndefined()
   expect(h.writes.map((input) => input.data)).toEqual(['x'])
@@ -278,7 +278,7 @@ it.each([100, 99])('a non-advancing clock %i keeps a new semantic epoch honestly
 it('failed idle persistence after accepted input preserves ACK and cursor with an honest non-Agent-failure advisory', async () => {
   const h = await harness(session(done(100)))
   vi.spyOn(h.store, 'compareAndSwap').mockRejectedValueOnce(new Error('private storage denied'))
-  await expect(h.client.writeAgent('entry-agent', 'x')).resolves.toEqual({
+  await expect(h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })).resolves.toEqual({
     runId: 'entry-run', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1
   })
   expect(h.inner.agentInputCursors.get('entry-agent')).toBe(1)
@@ -288,7 +288,7 @@ it('failed idle persistence after accepted input preserves ACK and cursor with a
     evidence: { source: 'user', observedAt: expect.any(Number), run: { runId: 'entry-run' } }
   }])
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBe(100)
-  await h.client.writeAgent('entry-agent', 'y')
+  await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'y', source: 'user' })
   expect(h.writes.map((input) => [input.expectedByte, input.data])).toEqual([[0, 'x'], [1, 'y']])
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBeUndefined()
 })

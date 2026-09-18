@@ -12,7 +12,7 @@ afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
 function agent(id = 's', runId = `${id}-run`): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
     id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local',
-    workspacePath: '/repo', label: 'Agent', createdAt: 1, updatedAt: 1,
+    workspacePath: '/repo', label: 'Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
     processState: 'running', status: { state: 'working', source: 'native-hook', observedAt: 1 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     latestOutputBytes: 0,

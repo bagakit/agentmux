@@ -61,11 +61,11 @@ function state(current: SessionSnapshot) {
 }
 function snapshot(current: SessionSnapshot): SessionAttachResult {
   const data = 'live private screen'
-  // A real retained suffix cannot prove the earlier 2004 mode. Preserve that byte-gap
-  // fact instead of supplying the protocol18 terminal representation to protocol17.
+  // A retained suffix cannot prove the earlier mode; report the missing continuation honestly.
   const firstAvailableByte = 64
   return { attachmentId: 'paste-attachment', session: { ...current, latestOutputBytes: firstAvailableByte + data.length },
     currentSize: { cols: 80, rows: 24 }, gap: { requestedAfterByte: 0, firstAvailableByte },
+    terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: current.control.run.runId, startByte: firstAvailableByte, endByte: firstAvailableByte + data.length,
       data, dataBytes: new TextEncoder().encode(data) }] }
 }
@@ -140,7 +140,7 @@ it.each([false, true])('routes DOM and menu paste exactly once with real xterm b
   expect(raw).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
   await act(async () => terminal.input('z'))
-  expect(raw.mock.calls).toEqual([[session.control, 'z']])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
   expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded]])
 })
 
@@ -152,22 +152,55 @@ it('consumes the paste source before a synchronous callback reenters with an ord
   paste.mockImplementationOnce(async () => { terminal.input('z') })
   await domPaste(terminal)
   expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
-  expect(raw.mock.calls).toEqual([[session.control, 'z']])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
   await act(async () => terminal.input('q'))
-  expect(raw.mock.calls).toEqual([[session.control, 'z'], [session.control, 'q']])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user'], [session.control, 'q', 'user']])
   expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
 })
 
-it.each(['read-only', 'permission'] as const)('keeps both paste entrances behind the existing %s input guard', async guard => {
+it.each(['read-only', 'permission'] as const)('keeps read-only input closed and a %s terminal request usable', async guard => {
   const current = guard === 'permission' ? { ...session, pendingInteraction: { id: 'private-permission', kind: 'permission' as const,
     agentSessionId: session.id, title: 'Private permission', options: [], evidence: { source: 'native-hook' as const, observedAt: 1 } } } : session
   const terminal = await ready(current, guard === 'read-only')
   await domPaste(terminal); await menuPaste(); await act(async () => terminal.input('z'))
-  expect(paste).not.toHaveBeenCalled(); expect(raw).not.toHaveBeenCalled()
+  if (guard === 'read-only') {
+    expect(paste).not.toHaveBeenCalled(); expect(raw).not.toHaveBeenCalled()
+  } else {
+    expect(paste.mock.calls).toEqual([
+      [session.control, sanitizedText, normalizedText],
+      [session.control, sanitizedText, normalizedText]
+    ])
+    expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
+  }
   expect(recover).not.toHaveBeenCalled()
+  paste.mockClear(); raw.mockClear()
   state(session); await render(session)
   await domPaste(terminal)
   expect(fixture.terminals).toEqual([terminal])
   expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
   expect(raw).not.toHaveBeenCalled()
+})
+
+
+it('attributes real xterm protocol replies, keyboard and delayed IME bytes by the library user-input fact', async () => {
+  const pending: typeof session = { ...session, pendingInteraction: { kind: 'permission', id: 'pending-source',
+    agentSessionId: session.id, title: 'Private request', options: [], evidence: { source: 'native-hook', observedAt: 1, run: session.control.run } } }
+  const terminal = await ready(pending)
+  await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[5n', resolve)))
+  expect(raw.mock.calls).toEqual([[session.control, '\x1b[0n', 'terminal-protocol']])
+  raw.mockClear()
+  await act(async () => terminal.textarea!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true })))
+  expect(raw.mock.calls).toEqual([[session.control, '\x1b', 'user']])
+  raw.mockClear()
+  await act(async () => {
+    terminal.textarea!.value = ''
+    terminal.textarea!.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    terminal.textarea!.value = '测试'
+    terminal.textarea!.dispatchEvent(new CompositionEvent('compositionupdate', { data: '测试', bubbles: true }))
+    terminal.textarea!.dispatchEvent(new CompositionEvent('compositionend', { data: '测试', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  })
+  expect(raw.mock.calls).toEqual([[session.control, '测试', 'user']])
+  expect(paste).not.toHaveBeenCalled()
+  expect(recover).not.toHaveBeenCalled()
 })

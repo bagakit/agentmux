@@ -423,10 +423,9 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_INTERACTION_PENDING'
 )
-await assert.rejects(
-  codexFirst.writeAgent(codex.agentSessionId, '1'),
-  (error) => error?.code === 'AGENT_INTERACTION_PENDING'
-)
+// Automatic terminal protocol replies preserve the typed request and remain writable.
+await codexFirst.writeAgent({ agentSessionId: codex.agentSessionId, expectedRun: codex.run, data: '\u001b[0n', source: 'terminal-protocol' })
+assert.equal(codexFirst.agentSession(codex.agentSessionId).pendingInteraction.request.id, initialInteraction.id)
 await codexFirst.respondAgentInteraction({
   agentSessionId: codex.agentSessionId,
   expectedRun: codex.run,
@@ -1140,7 +1139,7 @@ assert.equal(
   noStopReconnected.agentSession(noStop.agentSessionId).terminalPromptReadiness?.readyThroughByte,
   undefined
 )
-await noStopReconnected.writeAgent(noStop.agentSessionId, '\u001d')
+await noStopReconnected.writeAgent({ agentSessionId: noStop.agentSessionId, expectedRun: noStopReconnected.agentSession(noStop.agentSessionId).run, data: '\u001d', source: 'user' })
 const readyInitialReadiness = await waitFor('post-handshake empty initial composer', () => {
   const readiness = noStopReconnected.agentSession(noStop.agentSessionId).terminalPromptReadiness
   return readiness?.readyThroughByte === undefined ? null : readiness
@@ -1207,7 +1206,7 @@ await reattachAgentWithReplay(handshakeRaceOwner, handshakeRace.agentSessionId, 
 await waitFor('handshake race controlled composer pending', () => (
   output(handshakeRaceEvents, handshakeRace.run.runId).includes('codex-controlled-ready-pending')
 ))
-await handshakeRaceOwner.writeAgent(handshakeRace.agentSessionId, '\u001d')
+await handshakeRaceOwner.writeAgent({ agentSessionId: handshakeRace.agentSessionId, expectedRun: handshakeRaceOwner.agentSession(handshakeRace.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('handshake race observer adoption', () => (
   handshakeRaceOwner.agentSession(handshakeRace.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte ?? null
@@ -1247,7 +1246,7 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
 )
-await initialAssistantClient.writeAgent(initialAssistant.agentSessionId, '\u001d')
+await initialAssistantClient.writeAgent({ agentSessionId: initialAssistant.agentSessionId, expectedRun: initialAssistantClient.agentSession(initialAssistant.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('real initial composer after misleading assistant marker', () => (
   initialAssistantClient.agentSession(initialAssistant.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte ?? null
@@ -1285,7 +1284,7 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
 )
-await preHandshakeComposerClient.writeAgent(preHandshakeComposer.agentSessionId, '\u001d')
+await preHandshakeComposerClient.writeAgent({ agentSessionId: preHandshakeComposer.agentSessionId, expectedRun: preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('new complete composer frame after handshake boundary', () => (
   preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte ?? null
@@ -1318,7 +1317,7 @@ assert.equal(
   promptedNoStopClient.agentSession(promptedNoStop.agentSessionId).terminalPromptReadiness,
   undefined
 )
-await promptedNoStopClient.writeAgent(promptedNoStop.agentSessionId, '\u001d')
+await promptedNoStopClient.writeAgent({ agentSessionId: promptedNoStop.agentSessionId, expectedRun: promptedNoStopClient.agentSession(promptedNoStop.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('prompted Run empty composer', () => (
   output(promptedNoStopEvents, promptedNoStop.run.runId).includes('codex-composer-ready-frame')
 ))
@@ -1358,7 +1357,7 @@ assert.equal(
   argsPromptClient.agentSession(argsPrompt.agentSessionId).terminalPromptReadiness,
   undefined
 )
-await argsPromptClient.writeAgent(argsPrompt.agentSessionId, '\u001d')
+await argsPromptClient.writeAgent({ agentSessionId: argsPrompt.agentSessionId, expectedRun: argsPromptClient.agentSession(argsPrompt.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('args-prompt Run empty composer', () => (
   output(argsPromptEvents, argsPrompt.run.runId).includes('codex-composer-ready-frame')
 ))
@@ -1486,7 +1485,7 @@ await waitFor('after-cursor fake control readiness', () => (
   `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`
     .includes('codex-controlled-ready-pending')
 ))
-await afterCursorClient.writeAgent(afterCursor.agentSessionId, '\u001d')
+await afterCursorClient.writeAgent({ agentSessionId: afterCursor.agentSessionId, expectedRun: afterCursorClient.agentSession(afterCursor.agentSessionId).run, data: '\u001d', source: 'user' })
 const readyAfterCursor = await waitFor('composer frame after captured Stop cursor', () => {
   const readiness = afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness
   return readiness?.readyThroughByte === undefined ? null : readiness
@@ -1562,7 +1561,7 @@ await waitFor('assistant-marker fake control readiness', () => (
   `${assistantMarkerReplay}${output(assistantMarkerEvents, assistantMarker.run.runId)}`
     .includes('codex-controlled-ready-pending')
 ))
-await assistantMarkerClient.writeAgent(assistantMarker.agentSessionId, '\u001d')
+await assistantMarkerClient.writeAgent({ agentSessionId: assistantMarker.agentSessionId, expectedRun: assistantMarkerClient.agentSession(assistantMarker.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('real composer after misleading assistant marker', () => (
   assistantMarkerClient.agentSession(assistantMarker.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte ?? null
@@ -1584,7 +1583,7 @@ await waitFor('concurrent initial composer pending', async () => (
   (await concurrentOwner.readRunReplay(concurrent.run, 0)).replay
     .some((event) => event.data.includes('codex-controlled-ready-pending'))
 ))
-await concurrentOwner.writeAgent(concurrent.agentSessionId, '\u001d')
+await concurrentOwner.writeAgent({ agentSessionId: concurrent.agentSessionId, expectedRun: concurrentOwner.agentSession(concurrent.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('concurrent prompt ready initial epoch', () => (
   concurrentOwner.agentSession(concurrent.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte !== undefined

@@ -24,6 +24,8 @@ export type AgentTerminalInteractionDetection = {
   questionTools: readonly string[]
   /** Successful completion events for those exact question invocations, when supported. */
   questionCompletionEvents?: readonly string[]
+  /** Successful completions which can correlate a native permission invocation. */
+  permissionCompletionEvents?: readonly string[]
   permissionOptions: readonly TerminalPermissionOption[]
 }
 
@@ -243,16 +245,17 @@ function questionRequest(
 ): AgentMuxInteractionRequest | undefined {
   const source = record(rawInput)
   const rawQuestions = Array.isArray(source?.questions) ? source.questions : [rawInput]
-  if (rawQuestions.length === 0 || rawQuestions.length > MAX_QUESTIONS) return undefined
-  const questions = rawQuestions.map(parseQuestion)
-  if (questions.some((question) => question === null)) return undefined
+  const parsed = rawQuestions.length === MAX_QUESTIONS ? rawQuestions.map(parseQuestion) : []
+  const supported = parsed.length === MAX_QUESTIONS && parsed[0] !== null
+  const questions = supported ? parsed as AgentMuxQuestion[] : []
   const nativeToolCallId = nativeHookToolCallId(envelope.payload ?? {})
   return {
     kind: 'question',
     id: envelope.receiptId,
     agentSessionId: envelope.agentSessionId,
     ...(nativeToolCallId ? { nativeToolCallId } : {}),
-    questions: questions as AgentMuxQuestion[],
+    questions,
+    ...(!supported ? { responseUnavailableReason: 'This Provider supports one question with up to nine single-choice options. Answer this question in the native terminal.' } : {}),
     evidence: {
       source: 'native-hook',
       observedAt,
@@ -293,10 +296,12 @@ export function normalizeTerminalInteraction(
   // 拼法，不受影响），于是 Agent 一直停在等待、用户无从批准。与 7377272b 是同一个决定。
   if (canonicalHookLifecycleEvent(eventName ?? undefined) === 'permission-request') {
     const toolInput = serializedInput(payload.tool_input ?? payload.toolInput)
+    const nativeToolCallId = nativeHookToolCallId(payload)
     return {
       kind: 'permission',
       id: envelope.receiptId,
       agentSessionId: envelope.agentSessionId,
+      ...(nativeToolCallId ? { nativeToolCallId } : {}),
       title: toolName ? `Allow ${toolName}?` : 'Allow this action?',
       // Project the DESCRIBE half out of the Provider's declaration — never a hardcoded pair. The
       // keystroke (`input`) is intentionally dropped here: it stays core-side and is resolved at reply
@@ -330,10 +335,12 @@ export function normalizeTerminalInteractionCompletion(
   const eventName = resolveHookEventName(envelope.eventName, payload)
   const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
   const nativeToolCallId = nativeHookToolCallId(payload)
-  if (!eventName || !protocol.questionCompletionEvents?.includes(eventName) ||
-    !toolName || !protocol.questionTools.includes(toolName.toLowerCase()) || !nativeToolCallId) return undefined
+  if (!eventName || !toolName || !nativeToolCallId) return undefined
+  const question = protocol.questionTools.includes(toolName.toLowerCase())
+  const events = question ? protocol.questionCompletionEvents : protocol.permissionCompletionEvents
+  if (!events?.includes(eventName)) return undefined
   return {
-    kind: 'question', agentSessionId: envelope.agentSessionId, nativeToolCallId,
+    kind: question ? 'question' : 'permission', agentSessionId: envelope.agentSessionId, nativeToolCallId,
     evidence: { source: 'native-hook', observedAt, run: { runId: envelope.runId }, hookReceiptId: envelope.receiptId }
   }
 }
@@ -352,6 +359,7 @@ export function createNumberedTerminalInteractionProtocol(
     questionEvents: config.questionEvents,
     questionTools: config.questionTools,
     ...(config.questionCompletionEvents ? { questionCompletionEvents: config.questionCompletionEvents } : {}),
+    ...(config.permissionCompletionEvents ? { permissionCompletionEvents: config.permissionCompletionEvents } : {}),
     permissionOptions: config.permissionOptions,
     planResponse(request, response) {
       const normalized = normalizeAgentInteractionResponse(request, response)
@@ -412,6 +420,9 @@ export function normalizeAgentInteractionResponse(
       throw new AgentMuxError('Permission response selected an unknown option.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
     return structuredClone(response)
+  }
+  if (request.responseUnavailableReason) {
+    throw new AgentMuxError(request.responseUnavailableReason, 'AGENT_INTERACTION_UNSUPPORTED')
   }
   if (response.kind !== 'question') {
     throw new AgentMuxError('Question response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')

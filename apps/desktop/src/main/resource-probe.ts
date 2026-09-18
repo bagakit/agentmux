@@ -800,7 +800,7 @@ export async function runDesktopResourceProbe(options: {
     const terminalBaseline = await sample('terminal-baseline', options.window, options.runtime, config, identity)
     const source = "process.stdout.write('t'.repeat(300000))"
     const terminalCommand = `ELECTRON_RUN_AS_NODE=1 ${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\r`
-    await options.runtime.write(terminalControl, terminalCommand)
+    await options.runtime.write(terminalControl, terminalCommand, 'user')
     await waitFor('bounded Terminal output', async () => {
       const current = runningTerminal((await options.runtime.snapshot(config)).sessions, launcherTerminal.id)
       return (current?.latestOutputBytes ?? 0) >= 300_000
@@ -861,7 +861,7 @@ export async function runDesktopResourceProbe(options: {
         releaseBaselineOwners,
         workspaceC.id
       )
-      await options.runtime.write(terminalControl, terminalCommand)
+      await options.runtime.write(terminalControl, terminalCommand, 'user')
       await waitFor(`cycle ${cycle} bounded Terminal output`, async () => (
         (runningTerminal((await options.runtime.snapshot(config)).sessions, current.id)?.latestOutputBytes ?? 0) >= 300_000
       ))

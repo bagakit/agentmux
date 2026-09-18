@@ -50,7 +50,7 @@ const semantic = (state: Semantic = 'working', observedAt = 1000, stateEnteredAt
 function initialAgent(): Agent {
   const status = semantic()
   return { id: 'state-agent', kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local',
-    workspacePath: '/private/state-time', label: 'Private Agent', createdAt: 1, updatedAt: 1000,
+    workspacePath: '/private/state-time', label: 'Private Agent', createdAt: 1, updatedAt: 1000, agentSessionUpdatedAt: 1000,
     processState: 'running', status: structuredClone(status), semanticStatus: status, latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: 'state-agent', run: { runId: 'state-run' } } }

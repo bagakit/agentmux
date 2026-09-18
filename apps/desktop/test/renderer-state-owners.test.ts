@@ -43,6 +43,7 @@ const session: SessionSnapshot = {
   label: 'Codex',
   createdAt: 1,
   updatedAt: 2,
+  agentSessionUpdatedAt: 2,
   processState: 'running',
   status: { state: 'running', source: 'run-process', observedAt: 2 },
   latestOutputBytes: 0,
@@ -197,7 +198,13 @@ describe('Renderer resource state owners', () => {
         hookReceiptId: 'permission-1'
       }
     }
-    const pending = reduceRuntimeEvent(state, core({ type: 'interaction', request }))
+    const observed = reduceRuntimeEvent(state, core({ type: 'interaction', request }))
+    expect(observed.sessions[0]?.pendingInteraction).toBeUndefined()
+    const pending = reduceRuntimeEvent(observed, core({ type: 'agent-session', session: {
+      kind: 'agent', agentSessionId: session.id, providerId: 'codex', executorId: 'codex', hostId: 'local',
+      workspacePath: '/repo', run: session.control.run, retiredRuns: [], createdAt: 1, updatedAt: 3,
+      pendingInteraction: { request }
+    } }))
     expect(pending.sessions[0]).toMatchObject({ pendingInteraction: request })
 
     const cleared = reduceRuntimeEvent(pending, core({

@@ -153,7 +153,7 @@ describe('conditional exact Run prompt admission', () => {
     const acknowledged = deferred()
     const release = deferred()
     h.beforeAck(async () => { acknowledged.resolve(); await release.promise })
-    const first = h.client.writeAgent('bound-agent', 'x')
+    const first = h.client.writeAgent({ agentSessionId: 'bound-agent', expectedRun: h.client.agentSession('bound-agent').run, data: 'x', source: 'user' })
     await acknowledged.promise
     const second = h.client.submitAgentPrompt(h.input).then(() => null, (error: unknown) => error)
     await h.replace()

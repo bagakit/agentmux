@@ -169,6 +169,7 @@ const mockSessions: SessionSnapshot[] = [
     label: 'Codex · runtime core',
     createdAt: now - 12 * 60_000,
     updatedAt: now,
+    agentSessionUpdatedAt: now,
     processState: 'running',
     status: { state: 'working', source: 'native-hook', observedAt: now, detail: 'PreToolUse' },
     latestOutputBytes: 0,
@@ -190,6 +191,7 @@ const mockSessions: SessionSnapshot[] = [
     label: 'Claude · material audit',
     createdAt: now - 38 * 60_000,
     updatedAt: now - 20_000,
+    agentSessionUpdatedAt: now - 20_000,
     processState: 'interrupted',
     status: { state: 'error', source: 'run-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
     latestOutputBytes: 0,
@@ -743,6 +745,7 @@ const mockApi: AgentMuxDesktopApi = {
         providerId: executor.providerId,
         executorId: input.executorId,
         capabilities: mockStructuredCapabilities,
+        agentSessionUpdatedAt: Date.now(),
         hostId: input.hostId || 'local',
         workspacePath: input.workspacePath,
         label: `${executor.label} · new session`,
@@ -827,7 +830,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     detach: async (attachmentId) => { mockAttachmentControls.delete(attachmentId) },
     paste: async (control, _text, terminalData) => {
-      await mockApi.sessions.write(control, terminalData)
+      await mockApi.sessions.write(control, terminalData, 'user')
     },
     write: async (control, input) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
@@ -877,7 +880,7 @@ const mockApi: AgentMuxDesktopApi = {
       }
     },
     submitPrompt: async (control, prompt) => {
-      await mockApi.sessions.write(control, `${prompt.trim()}\r`)
+      await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
     },
     respondInteraction: async (control, response) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
@@ -904,7 +907,7 @@ const mockApi: AgentMuxDesktopApi = {
       session.status = { state: 'running', source: 'run-process', observedAt: Date.now() }
       session.updatedAt = Date.now()
       session.control = { ...session.control, run: { runId } }
-      await mockApi.sessions.write(session.control, `${prompt.trim()}\r`)
+      await mockApi.sessions.write(session.control, `${prompt.trim()}\r`, 'user')
       return structuredClone(session)
     },
     interrupt: async () => {},

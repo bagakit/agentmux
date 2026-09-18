@@ -116,7 +116,7 @@ try {
  assert.ok(session); assert.equal(session.kind, 'agent'); assert.equal(session.processState, 'running')
  const initial = await core.statusAgent(id)
  await wait(async () => (await core.statusAgent(id)).run.latestOutputBytes > 0, 'nonempty PTY')
- await runtime.write(session.control, mode === 'first' ? 'a' : 'b')
+ await runtime.write(session.control, mode === 'first' ? 'a' : 'b', 'user')
  const current = await wait(async () => { const value = await core.statusAgent(id);
   return value.run.acceptedInputBytes > initial.run.acceptedInputBytes && value.run.latestOutputBytes > initial.run.latestOutputBytes ? value : null }, 'actual input and output')
  const state = useAppStore.getState()

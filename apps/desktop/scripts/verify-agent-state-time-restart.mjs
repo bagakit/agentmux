@@ -290,7 +290,7 @@ try {
   assert.equal(restartUi.rows.find(r=>r.label.startsWith('Unknown clock'))?.meta,'start time unknown')
   receipt.secondUi={persisted,restoredGeometry,activeRegions,restoredTab:restoredTab.result.tab,restartUi,sessionFacts:snapshot.sessions.map(s=>({id:s.id,processState:s.processState,control:s.control,semanticStatus:s.semanticStatus}))}
   const marker='private-state-time-after-restart-'+randomUUID()
-  await second.cdp.evaluate(`(async()=>{const s=(await window.agentmux.sessions.snapshot()).sessions.find(s=>s.id===${JSON.stringify(unknown.agentSessionId)});await window.agentmux.sessions.write(s.control,${JSON.stringify(marker+'\r')});return true})()`)
+  await second.cdp.evaluate(`(async()=>{const s=(await window.agentmux.sessions.snapshot()).sessions.find(s=>s.id===${JSON.stringify(unknown.agentSessionId)});await window.agentmux.sessions.write(s.control,${JSON.stringify(marker+'\r')},'user');return true})()`)
   // The exact public Core reader observes the native output after UI->registered Main->Core input.
   client=await connectLocalAgentMux({store})
   const output=await waitFor('actual nonempty private output',async()=>{const replay=await client.readRunReplay(unknown.run);const text=replay.replay.map(e=>e.data).join('');return text.includes(marker)?{pid:replay.run.pid,acceptedInputBytes:replay.run.acceptedInputBytes,events:replay.replay.length,textSha256:digest(text),gap:replay.gap}:null})

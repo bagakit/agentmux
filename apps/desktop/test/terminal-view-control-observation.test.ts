@@ -70,6 +70,7 @@ async function inspect(regionId = origin.regionId) {
 }
 function replay(data: string): SessionAttachResult {
   return { attachmentId: 'observed-attachment', session, currentSize: { cols: 80, rows: 24 }, gap: null,
+    terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
 async function render(current: SessionSnapshot = session, props: { visible?: boolean; readOnly?: boolean; regionId?: string } = {}) {
@@ -146,7 +147,7 @@ it('reads real alternate+vt200/normal transitions and current hidden/readOnly/pe
   const pending: typeof session = { ...session, pendingInteraction: { id: 'private-request', kind: 'permission', agentSessionId: session.id,
     title: 'Private synthetic permission', options: [], evidence: { source: 'native-hook', observedAt: 1 } } }
   surfaceState(pending); await render(pending)
-  expect((await inspect()).terminalView).toMatchObject({ visible: true, readOnly: false, acceptsInput: false })
+  expect((await inspect()).terminalView).toMatchObject({ visible: true, readOnly: false, acceptsInput: true })
   await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[?1049l\x1b[?1000l', resolve)))
   surfaceState(); await render()
   expect((await inspect()).terminalView).toMatchObject({ buffer: { type: 'normal' }, mouseTrackingMode: 'none', acceptsInput: true })
@@ -161,6 +162,19 @@ it('reports not-live readiness before attach settles and never guesses success',
   await act(async () => release(replay(lines)))
   await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })?.liveReady).toBe(true)))
   expect((await inspect()).terminalView).toMatchObject({ liveReady: true, acceptsInput: true })
+})
+
+it('the mounted terminal handler forwards native input with a permission present and preserves the same view', async () => {
+  const terminal = await ready(lines)
+  const pending: typeof session = { ...session, pendingInteraction: { id: 'native-pending', kind: 'permission', agentSessionId: session.id,
+    title: 'Private permission', options: [], evidence: { source: 'native-hook', observedAt: 1, run: session.control.run } } }
+  surfaceState(pending); await render(pending)
+  await act(async () => terminal.input('\u001b'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control, '\u001b', 'user')
+  expect(useAppStore.getState().sessions).toEqual([pending])
+  expect((await inspect()).terminalView).toMatchObject({ liveReady: true, acceptsInput: true })
+  expect(fixture.terminals).toEqual([terminal]); expect(attach).toHaveBeenCalledOnce()
+  expect(recover).not.toHaveBeenCalled()
 })
 
 it('readdresses only the callback and releases unmounted views without rebuilding or mutating the Run', async () => {

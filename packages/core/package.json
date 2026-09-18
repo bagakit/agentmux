@@ -87,6 +87,10 @@
     "./continuous-progress-scheduler": {
       "types": "./dist/continuous-progress-scheduler.d.ts",
       "import": "./dist/continuous-progress-scheduler.js"
+    },
+    "./agent-interaction-state": {
+      "types": "./dist/agent-interaction-state.d.ts",
+      "import": "./dist/agent-interaction-state.js"
     }
   },
   "bin": {

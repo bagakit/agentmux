@@ -233,7 +233,8 @@ export function TerminalView({
   const canControlRun = session.processState === 'running'
   const canControlRunRef = useRef(canControlRun)
   canControlRunRef.current = canControlRun
-  const acceptsInput = session.kind !== 'agent' || session.pendingInteraction === undefined
+  // A pending semantic request belongs to its card; it cannot close the native terminal.
+  const acceptsInput = true
   const acceptsInputRef = useRef(acceptsInput)
   acceptsInputRef.current = acceptsInput
   const searchAddonRef = useRef<SearchAddon | null>(null)
@@ -987,21 +988,21 @@ export function TerminalView({
      */
     const sendInput = terminalInputSender({
       accepts: acceptsCurrentInput,
-      write: (data) => {
-        if (!readOnlyRef.current) void api.sessions.write(session.control, data)
+      write: (data, source) => {
+        if (!readOnlyRef.current) void api.sessions.write(session.control, data, source).catch(reportError)
       }
     })
     const pasteInput = createTerminalPasteInput(terminal, (text, terminalData) => {
       terminalInputSender({
         accepts: acceptsCurrentInput,
         write: () => {
-          if (!readOnlyRef.current) void api.sessions.paste(session.control, text, terminalData)
+          if (!readOnlyRef.current) void api.sessions.paste(session.control, text, terminalData).catch(reportError)
         }
       })(terminalData)
     })
     pasteTargetRef.current = pasteInput
-    const input = subscribeTerminalInput(terminal, (data) => {
-      if (!pasteInput.consume(data)) sendInput(data)
+    const input = subscribeTerminalInput(terminal, (data, source) => {
+      if (!pasteInput.consume(data)) sendInput(data, source)
     })
     const selection = terminal.onSelectionChange(() => {
       clearLinkPreview()
@@ -1013,7 +1014,7 @@ export function TerminalView({
     const oscHandlers = installTerminalOscHandlers(terminal, {
       isReplaying: () => replayingContinuation,
       respondFromRenderer: session.kind === 'terminal',
-      sendInput,
+      sendInput: (data) => sendInput(data, 'terminal-protocol'),
       // PTY 里的 TUI（nvim / fzf / lazygit）用 OSC 52 往剪贴板写。走的是和 Cmd+C 同一个出口，
       // 所以失败同样响亮报错，不会静默丢。
       writeClipboard: (text) => {

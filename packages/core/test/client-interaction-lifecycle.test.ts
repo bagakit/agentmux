@@ -103,6 +103,36 @@ async function connectedClient(pending?: AgentMuxInteractionRequest): Promise<{
 }
 
 describe('respondAgentInteraction: the answer must bind to this Session/Run/request', () => {
+  it.each([undefined, 'unspecified'])('rejects an undeclared input source (%s) without guessing or writing', async source => {
+    const h = await connectedClient(permission('source-required'))
+    try {
+      await expect(h.client.writeAgent({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, data: '1', source: source as never }))
+        .rejects.toMatchObject({ code: 'INVALID_AGENT_INPUT_SOURCE' })
+      expect(h.writes).toEqual([])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual({ request: permission('source-required') })
+    } finally { await h.client.dispose() }
+  })
+
+  it('native user input and protocol replies remain usable without approving or clearing the request', async () => {
+    const { client, writes, store } = await connectedClient(permission('native-pending'))
+    try {
+      await client.writeAgent({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, source: 'terminal-protocol', data: '\u001b[0n' })
+      await client.writeAgent({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, source: 'user', data: '\u001b' })
+      expect(writes).toEqual(['\u001b[0n', '\u001b'])
+      expect((await loadAgentSessions(store))[0]!.pendingInteraction).toMatchObject({ request: permission('native-pending'), nativeInput: { delivery: 'accepted' } })
+    } finally { await client.dispose() }
+  })
+
+  it('a prior native terminal cannot redirect input to this Session after the Run changed', async () => {
+    const { client, writes, store } = await connectedClient(permission('native-pending'))
+    try {
+      await expect(client.writeAgent({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: 'old-run' }, source: 'user', data: '1' }))
+        .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+      expect(writes).toEqual([])
+      expect((await loadAgentSessions(store))[0]!.pendingInteraction?.request.id).toBe('native-pending')
+    } finally { await client.dispose() }
+  })
+
   it('answers the pending request and clears it, writing the provider byte (positive control)', async () => {
     const { client, writes } = await connectedClient(permission('rcpt-1'))
 
@@ -285,5 +315,133 @@ describe('typed response settlement and recoverable input disposition', () => {
       expect(h.writes).toEqual(['\u001b'])
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.client.dispose() }
+  })
+})
+
+const nativeWrite = (source: 'user' | 'terminal-protocol' = 'user') => ({
+  agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, source, data: '\u001b'
+})
+
+describe('native input keeps one durable, unconfirmed request owner', () => {
+  it('automatic terminal replies leave the typed response available', async () => {
+    const h = await connectedClient(permission('protocol-pending'))
+    try {
+      await h.client.writeAgent(nativeWrite('terminal-protocol'))
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual({ request: permission('protocol-pending') })
+      await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('protocol-pending') })
+      expect(h.writes).toEqual(['\u001b', '\u001b'])
+    } finally { await h.client.dispose() }
+  })
+
+  it('persists uncertainty before native bytes and rejects stale typed answers from another Client', async () => {
+    const h = await connectedClient(permission('native-shared'))
+    const second = new AgentMuxClient({ store: h.store })
+    const owner = second as unknown as Internals
+    await owner.registry.load('local'); owner.kernel = h.state.kernel
+    ;(second as unknown as { connected: boolean }).connected = true
+    const original = h.state.kernel.input as (runId: string, input: unknown) => Promise<unknown>
+    let beforeInput: unknown
+    h.state.kernel.input = async (runId: string, input: unknown) => {
+      beforeInput = (await loadAgentSessions(h.store))[0]!.pendingInteraction?.nativeInput
+      return await original(runId, input)
+    }
+    try {
+      await h.client.writeAgent(nativeWrite())
+      expect(beforeInput).toMatchObject({ delivery: 'unknown' })
+      const recorded = (await loadAgentSessions(h.store))[0]!.pendingInteraction!
+      expect(recorded).toMatchObject({ request: permission('native-shared'), nativeInput: { delivery: 'accepted' } })
+      expect(recorded.nativeInput!.operationId.length).toBeGreaterThan(0)
+      await expect(second.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-shared', 'allow-once') }))
+        .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+      await h.client.writeAgent({ ...nativeWrite(), data: 'z' })
+      expect(h.writes).toEqual(['\u001b', 'z'])
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual(recorded)
+    } finally { await second.dispose(); await h.client.dispose() }
+  })
+
+  it.each(['not_applied', 'unknown'] as const)('%s native delivery never invents a response or retries bytes', async disposition => {
+    const h = await connectedClient(permission('native-failure'))
+    const original = h.state.kernel.input
+    let attempts = 0
+    h.state.kernel.input = async () => {
+      attempts++
+      throw new AgentMuxError('Native receipt unavailable.', 'PRIVATE_INPUT_FAILURE', disposition)
+    }
+    try {
+      await expect(h.client.writeAgent(nativeWrite())).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE', detail: disposition })
+      expect(attempts).toBe(1)
+      expect(h.writes).toEqual([])
+      const pending = (await loadAgentSessions(h.store))[0]!.pendingInteraction!
+      expect(pending.request.id).toBe('native-failure')
+      expect(pending.response).toBeUndefined()
+      h.state.kernel.input = original
+      const respond = () => h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-failure') })
+      if (disposition === 'not_applied') {
+        expect(pending.nativeInput).toBeUndefined()
+        await respond()
+        expect(h.writes).toEqual(['\u001b'])
+      } else {
+        expect(pending.nativeInput?.delivery).toBe('unknown')
+        await expect(respond()).rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+        await h.client.writeAgent({ ...nativeWrite(), data: 'z' })
+        expect(h.writes).toEqual(['z'])
+        expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.nativeInput).toEqual(pending.nativeInput)
+      }
+    } finally { await h.client.dispose() }
+  })
+
+  it('keeps empty native input a no-op and leaves the request answerable', async () => {
+    const h = await connectedClient(permission('empty-native'))
+    try {
+      await h.client.writeAgent({ ...nativeWrite(), data: '' })
+      expect(h.writes).toEqual([])
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual({ request: permission('empty-native') })
+    } finally { await h.client.dispose() }
+  })
+
+  it('a Store failure does not prevent native bytes reaching a healthy Run and remains visible', async () => {
+    const h = await connectedClient(permission('store-failure'))
+    const events: import('../src/types.js').AgentMuxClientEvent[] = []
+    h.client.onEvent(event => events.push(event))
+    const original = h.store.compareAndSwap.bind(h.store)
+    h.store.compareAndSwap = async () => { throw new Error('Private Store unavailable') }
+    try {
+      expect(await h.client.writeAgent(nativeWrite())).toMatchObject({ acceptedThroughByte: 1 })
+      expect(h.writes).toEqual(['\u001b'])
+      const notices = events.filter(event => event.type === 'agent-error')
+      expect(notices.length).toBeGreaterThan(0)
+      expect(notices[0]).toMatchObject({ code: 'AGENT_NATIVE_INPUT_PERSIST_FAILED' })
+      expect(notices[0]).not.toHaveProperty('agentSessionId')
+    } finally { h.store.compareAndSwap = original; await h.client.dispose() }
+  })
+})
+
+describe('native takeover during typed recovery', () => {
+  it.each(['accepted', 'unknown'] as const)('%s native input preserves the old claim without replay or an invented ACK', async delivery => {
+    const h = await connectedClient(permission('takeover'))
+    const originalInput = h.state.kernel.input as (runId: string, input: unknown) => Promise<unknown>
+    try {
+      h.state.kernel.input = async () => { throw new AgentMuxError('Private typed write was not applied', 'PRIVATE_INPUT_FAILURE', 'not_applied') }
+      await expect(h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('takeover') }))
+        .rejects.toMatchObject({ detail: 'not_applied' })
+      const claim = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response)
+      h.state.kernel.input = async (runId: string, input: unknown) => {
+        const ack = await originalInput(runId, input)
+        if (delivery === 'unknown') throw new AgentMuxError('Private native ACK was lost', 'PRIVATE_INPUT_FAILURE', 'unknown')
+        return ack
+      }
+      const native = h.client.writeAgent({ ...nativeWrite(), data: 'z' })
+      if (delivery === 'unknown') await expect(native).rejects.toMatchObject({ detail: 'unknown' })
+      else await native
+      const pending = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction)
+      expect(pending).toMatchObject({ response: claim, nativeInput: { delivery } })
+      // Direct owner reconciliation isolates the recovery decision with a synthetic byte owner.
+      // The private Electron restart proof separately exercises the public connection caller.
+      const reconcile = h.client as unknown as { recoverPendingInteractionResponses(runs: ReturnType<typeof runProjection>[]): Promise<void> }
+      await reconcile.recoverPendingInteractionResponses([runProjection(1)])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual(pending)
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual(pending)
+      expect(h.writes).toEqual(['z'])
+    } finally { h.state.kernel.input = originalInput; await h.client.dispose() }
   })
 })

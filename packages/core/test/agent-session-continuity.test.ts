@@ -625,7 +625,7 @@ describe('重启恢复保持原 Session 身份且输入不误投递（f-25k8f8m9
     expect(resumed.kind).toBe('resumed')
 
     // 按原稳定身份发输入——调用方只知道 agentSessionId，不知道 Run 换过。
-    await harness.client.writeAgent('agent-1', 'after-restart')
+    await harness.client.writeAgent({ agentSessionId: 'agent-1', expectedRun: harness.client.agentSession('agent-1').run, data: 'after-restart', source: 'user' })
 
     // 承重：这次输入落到**新** Run，不落到退役的旧 Run。若 resume 让身份/绑定漂移，
     // 这里会看到 run-1（或抛 STALE_AGENT_SESSION_BINDING）。

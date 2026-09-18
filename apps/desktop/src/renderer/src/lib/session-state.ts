@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/contracts'
 import { runInterruptionFact } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
+import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { agentDisplayState, isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
@@ -87,8 +88,8 @@ function acceptsAgentSessionTransition(
   incoming: AgentMuxAgentSession
 ): boolean {
   if (session.id !== incoming.agentSessionId) return false
-  if (incoming.updatedAt < session.updatedAt) return false
-  if (incoming.updatedAt === session.updatedAt) return sameRun(session.control.run, incoming.run)
+  if (incoming.updatedAt < session.agentSessionUpdatedAt) return false
+  if (incoming.updatedAt === session.agentSessionUpdatedAt) return sameRun(session.control.run, incoming.run)
   if (sameRun(session.control.run, incoming.run)) return true
   return incoming.retiredRuns.some((run) => sameRun(run, session.control.run))
 }
@@ -613,6 +614,7 @@ export function projectRuntimeEvent(
         ? (() => {
             const {
               pendingInteraction: _pendingInteraction,
+              interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
               semanticStatus: _semanticStatus,
               terminalCapability: _terminalCapability,
               terminalPromptDelivery: _terminalPromptDelivery,
@@ -620,12 +622,14 @@ export function projectRuntimeEvent(
               turnUsage: _turnUsage,
               ...current
             } = item
+            const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
             return {
               ...current,
               providerId: core.session.providerId,
               hostId: core.session.hostId,
               workspacePath: core.session.workspacePath,
               updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
+              agentSessionUpdatedAt: core.session.updatedAt,
               // Mirror the Core fact independently of the display freshness gate below.
               // An accepted snapshot may clear an idle epoch without a new observation.
               ...(core.session.semanticStatus
@@ -665,6 +669,7 @@ export function projectRuntimeEvent(
               ...(core.session.pendingInteraction
                 ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }
                 : {}),
+              ...(reason ? { interactionResponseUnavailableReason: reason } : {}),
               control: {
                 kind: 'agent' as const,
                 hostId: core.session.hostId,
@@ -676,16 +681,8 @@ export function projectRuntimeEvent(
         : item)
     } }
   }
-  if (core.type === 'interaction') {
-    return { state: {
-      ...state,
-      sessions: state.sessions.map((item) => item.kind === 'agent' &&
-        item.id === core.request.agentSessionId &&
-        acceptsAgentEvidence(item, core.request.evidence)
-        ? { ...item, pendingInteraction: structuredClone(core.request) }
-        : item)
-    } }
-  }
+  // Interaction events announce observations, including additional native requests.
+  // Only the authoritative agent-session record chooses the current answerable request.
   if (core.type === 'agent-timeline') {
     const session = state.sessions.find((item) => item.id === core.agentSessionId)
     if (!session) return { state }

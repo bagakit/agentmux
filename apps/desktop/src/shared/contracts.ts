@@ -19,6 +19,7 @@ import type {
   AgentMuxRunAttachment,
   AgentMuxRunExitReason,
   AgentMuxRunInputData,
+  AgentMuxAgentWriteInput,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
@@ -889,6 +890,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       providerId: AgentProviderId
       executorId: AgentExecutorId
       capabilities: AgentCapabilities
+      /** Core record freshness; activity updatedAt cannot order authoritative Session snapshots. */
+      agentSessionUpdatedAt: number
       /** Durable native semantic fact, independent of the current Run's display status. */
       semanticStatus?: AgentStatus
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
@@ -897,6 +900,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
       terminalOutputChannel?: AgentTerminalOutputChannelState
       pendingInteraction?: AgentMuxInteractionRequest
+      interactionResponseUnavailableReason?: string
       /**
        * The launch-option choice ids that fixed this Agent's security posture at spawn, projected from
        * the Core Session record so a surface can show what this Agent is ALLOWED to do without asking
@@ -1417,7 +1421,7 @@ export type AgentMuxDesktopApi = {
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>
-    write(session: SessionControl, data: AgentMuxRunInputData): Promise<void>
+    write(session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<void>
     paste(session: SessionControl, text: string, terminalData: string): Promise<void>
     // `operationId` is the caller's correlation key for ONE submission attempt. A retry of the same
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead

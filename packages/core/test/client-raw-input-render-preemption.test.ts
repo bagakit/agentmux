@@ -102,7 +102,7 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
   let raw: Array<Promise<unknown>> = []
   try {
     await screen.entered.promise
-    raw = ['\x1b[<64;10;10M', 'z'].map(data => h.client.writeAgent(h.stored.agentSessionId, data))
+    raw = ['\x1b[<64;10;10M', 'z'].map(data => h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: data, source: 'user' }))
     await checkpoint()
     const beforeRelease = h.writes.map(write => write.data)
     // The fallback only settles broken implementations; it cannot make the before-release oracle green.
@@ -136,11 +136,11 @@ it('registers observation cancellation before a prompt enters its queued render 
     return await originalInput(runId, input)
   }
   const screen = heldRender(h)
-  const prior = h.client.writeAgent(h.stored.agentSessionId, 'prior')
+  const prior = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'prior', source: 'user' })
   await priorEntered.promise
   const prompt = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'queued-operation', prompt: 'hello' })
-  const raw = h.client.writeAgent(h.stored.agentSessionId, 'z')
+  const raw = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'z', source: 'user' })
   try {
     priorRelease.resolve()
     await screen.entered.promise
@@ -165,7 +165,7 @@ it('does not cancel another Run or preempt a prompt for empty input', async () =
   const prompt = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'kept-operation', prompt: 'hello' })
   await screen.entered.promise
-  const empty = h.client.writeAgent(h.stored.agentSessionId, '')
+  const empty = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: '', source: 'user' })
   const wrongRun = h.inner.writeAgentInput({ ...h.stored, run: { runId: 'another-run' } }, 'z')
     .then(() => null, error => error)
   try {
@@ -203,23 +203,24 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
     if (reason === 'cancel') { abort.abort(); await checkpoint() }
     else await vi.advanceTimersByTimeAsync(25)
     const settledBeforeAttachment = settled
-    attachment.resolve({ run: h.run(), replay: [], gap: null, close })
+    attachment.resolve({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt', checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close })
     const result = await waiting
     await Promise.resolve()
     expect(settledBeforeAttachment).toBe(true)
     expect(result).toMatchObject({ code: reason === 'cancel'
       ? 'AGENT_PROMPT_READINESS_CANCELLED' : 'AGENT_PROMPT_RENDER_TIMEOUT' })
     expect(waiter).not.toHaveBeenCalled()
-    const ready = await h.inner.screenEvidence.wait(h.client.agentSession(h.stored.agentSessionId), 0, false,
+    const ready = h.inner.screenEvidence.wait(h.client.agentSession(h.stored.agentSessionId), 0, false,
       () => true, { timeoutMessage: 'Synthetic timeout', terminalMessage: 'Synthetic exit' })
-    expect(ready).toBe(0)
+    if (reason === 'timeout') await vi.advanceTimersByTimeAsync(0)
+    expect(await ready).toBe(0)
     expect(observe).toHaveBeenCalledTimes(1)
     expect(waiter).toHaveBeenCalledTimes(1)
     h.inner.screenEvidence.discardAll()
     expect(close).toHaveBeenCalledTimes(1)
   } finally {
     vi.useRealTimers()
-    attachment.resolve({ run: h.run(), replay: [], gap: null, close })
+    attachment.resolve({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt', checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close })
     await waiting
   }
 })
@@ -228,7 +229,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
 it('preserves the timeout reason after attachment and cleans the single observation lifetime', async () => {
   const h = await fixture('codex')
   const close = vi.fn(async () => {})
-  h.inner.kernel.observeOutput = vi.fn(async () => ({ run: h.run(), replay: [], gap: null, close }))
+  h.inner.kernel.observeOutput = vi.fn(async () => ({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt' as const, checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close }))
   const abort = new AbortController()
   const removeListener = vi.spyOn(abort.signal, 'removeEventListener')
   vi.useFakeTimers()

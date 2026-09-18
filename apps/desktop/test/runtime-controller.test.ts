@@ -111,7 +111,7 @@ const runtimeFixture = vi.hoisted(() => {
       },
       acceptedThroughByte: operation.expectedByte + Buffer.byteLength(operation.data)
     }))
-    readonly writeAgent = vi.fn(async (_agentSessionId: string, data: string) => ({
+    readonly writeAgent = vi.fn(async ({ data }: { data: string }) => ({
       runId: 'agent-run',
       appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
       acceptedThroughByte: Buffer.byteLength(data)
@@ -241,7 +241,8 @@ const runtimeFixture = vi.hoisted(() => {
   }
 })
 
-vi.mock('@agentmux/core', () => {
+vi.mock('@agentmux/core', async () => {
+  const { agentInteractionResponseUnavailableReason } = await import('@agentmux/core/agent-interaction-state')
   class AgentMuxError extends Error {
     readonly code: string
     readonly detail?: string
@@ -254,6 +255,7 @@ vi.mock('@agentmux/core', () => {
   }
   return {
     AgentMuxError,
+    agentInteractionResponseUnavailableReason,
     AgentMuxClient: runtimeFixture.FakeClient,
     AgentMuxMemoryAgentSessionStore: class {},
     connectLocalAgentMux: runtimeFixture.connectClient,
@@ -1628,7 +1630,7 @@ describe('RuntimeController configuration transaction', () => {
             observedAt: 3,
             detail: 'PermissionRequest'
           },
-          pendingInteraction: { request }
+          pendingInteraction: { request, nativeInput: { operationId: 'private-native-input', delivery: 'unknown', observedAt: 3 } }
         },
         run: {
           ...status.run,
@@ -1644,7 +1646,10 @@ describe('RuntimeController configuration transaction', () => {
     expect(snapshot.sessions[0]).toMatchObject({
       processState: 'running',
       status: { state: 'waiting', source: 'native-hook', detail: 'PermissionRequest' },
-      pendingInteraction: request
+      pendingInteraction: request,
+      agentSessionUpdatedAt: 3,
+      updatedAt: 4,
+      interactionResponseUnavailableReason: 'Native input delivery is unknown. Check the terminal before answering; input will not be resent.'
     })
   })
 
@@ -1956,8 +1961,8 @@ describe('RuntimeController configuration transaction', () => {
     }
 
     await Promise.all([
-      controller.write(control, 'A'),
-      controller.write(control, '😀')
+      controller.write(control, 'A', 'user'),
+      controller.write(control, '😀', 'user')
     ])
 
     expect(client.writeTerminal.mock.calls.map(([, operation]) => ({
@@ -2016,8 +2021,8 @@ describe('RuntimeController configuration transaction', () => {
 
     await vi.waitFor(() => {
       expect(client.writeAgent).toHaveBeenCalledWith(
-        'agent-1',
-        '\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\'
+        { agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol',
+          data: '\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\' }
       )
     })
   })
@@ -2032,7 +2037,7 @@ describe('RuntimeController configuration transaction', () => {
     const afterByte=100+Buffer.byteLength(old)
     client.eventListener?.({type:'terminal-output',agentSessionId:'agent-1',run:{runId:'run-1'},data:old,dataBytes:Buffer.from(old),
       evidence:{source:'terminal-output',observedAt:1,outputByteRange:{startByte:100,endByte:afterByte}}} satisfies AgentMuxClientEvent)
-    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith('agent-1','\x1b]11;rgb:0000/0000/0000\x1b\\'))
+    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol', data: '\x1b]11;rgb:0000/0000/0000\x1b\\' }))
     client.writeAgent.mockClear()
     const data=old+'?\x07'
     client.eventListener?.({type:'terminal-snapshot',agentSessionId:'agent-1',afterByte,
@@ -2041,7 +2046,7 @@ describe('RuntimeController configuration transaction', () => {
       terminal:{type:'basic-vt',checkpoint:{runId:'run-1',throughByte:100,resizeRevision:0,size:{cols:80,rows:24}},
         restoreBytes:Buffer.from('\x1b]10;?\x07'),resizes:[]},gap:null,resizeRevision:0,
       replay:[{type:'data',runId:'run-1',startByte:100,endByte:100+Buffer.byteLength(data),data,dataBytes:Buffer.from(data)}]} satisfies AgentMuxClientEvent)
-    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith('agent-1','\x1b]10;rgb:ffff/ffff/ffff\x1b\\'))
+    await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol', data: '\x1b]10;rgb:ffff/ffff/ffff\x1b\\' }))
   })
 
   it('shares one retained Run Attachment across concurrent Desktop View leases', async () => {

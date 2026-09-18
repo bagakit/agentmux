@@ -144,10 +144,10 @@ describe('public Agent paste edits without submitting', () => {
       if (input.data === 'prior') { entered.resolve(); await release.promise }
       return await original(runId, input)
     }
-    const prior = h.client.writeAgent('paste-agent', 'prior')
+    const prior = h.client.writeAgent({ agentSessionId: 'paste-agent', expectedRun: h.client.agentSession('paste-agent').run, data: 'prior', source: 'user' })
     await entered.promise
     const paste = h.client.pasteAgent({ ...h.input, terminalData: 'p\rq' })
-    const following = h.client.writeAgent('paste-agent', 'z')
+    const following = h.client.writeAgent({ agentSessionId: 'paste-agent', expectedRun: h.client.agentSession('paste-agent').run, data: 'z', source: 'user' })
     try {
       expect(h.writes).toEqual([])
       release.resolve()
@@ -166,7 +166,7 @@ describe('public Agent paste edits without submitting', () => {
       if (input.data === 'prior') { entered.resolve(); await release.promise }
       return await original(runId, input)
     }
-    const prior = h.client.writeAgent('paste-agent', 'prior')
+    const prior = h.client.writeAgent({ agentSessionId: 'paste-agent', expectedRun: h.client.agentSession('paste-agent').run, data: 'prior', source: 'user' })
     await entered.promise
     const paste = h.client.pasteAgent(h.input).then(() => undefined, error => error)
     try {
@@ -178,10 +178,10 @@ describe('public Agent paste edits without submitting', () => {
     } finally { release.resolve(); await Promise.allSettled([prior, paste]) }
   })
 
-  it('preserves the pending-interaction boundary without writing or recording a Prompt', async () => {
+  it('pastes into the native draft while preserving the pending request and not recording a Prompt', async () => {
     const h = await fixture('codex', true)
-    await expect(h.client.pasteAgent(h.input)).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
-    expect(h.writes).toEqual([])
+    await h.client.pasteAgent(h.input)
+    expect(h.writes.map(write => write.data)).toEqual([`\u001b[200~${h.input.text}\u001b[201~`])
     expect(h.client.agentSession('paste-agent').pendingInteraction?.request.id).toBe('permission')
     expect((await h.store.loadTimeline('paste-agent')).items).toEqual([])
   })

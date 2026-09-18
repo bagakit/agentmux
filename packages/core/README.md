@@ -52,11 +52,16 @@ Provider/ACP semantic status 与 pending Permission/Question 也是 Core-owned S
 通过 `interaction` 事件和 `session.pendingInteraction` 公开 typed request；Consumer 用
 `respondAgentInteraction({ agentSessionId, expectedRun, response })` 回答。Core 会验证 exact Session、
 Run、request 与选项，ACP response 回到 Adapter，Native response 交给 Provider 规划终端协议。
-Consumer 不发送裸终端按键，也不从 `status.detail` 猜交互。需要两阶段 Prompt 的 Provider 必须同时
+结构化回答的 Consumer 不生成厂商按键，也不从 `status.detail` 猜交互。需要两阶段 Prompt 的 Provider 必须同时
 声明真实 transport `payload` 与 TUI `renderedText`；bracketed paste 不是 Core 默认行为。Prompt 采用
 64 KiB 上限，screen oracle 的有界 scrollback 覆盖同一范围。pending interaction 期间，普通 Prompt
-和 raw Agent Input 都被 Core 拒绝；ACP response 只有在 Adapter delivery 与 semantic settlement 完成
-后才成功，Native response 即使遇到已终止 Run 也按原 ctxmux recoverable Input claim 收敛。
+被 Core 拒绝；原生终端仍通过 `writeAgent({ agentSessionId, expectedRun, data, source })`
+可用。`source` 必须为 `user` 或 `terminal-protocol`，自动协议回应不视为用户回答。原生输入
+只记录调用时精确请求的投递事实；accepted/unknown 不等于批准，不自动重放。Consumer 从
+`session.pendingInteraction` 读取当前事实，用 `agentInteractionResponseUnavailableReason` 显示
+结构化回答不可用的原因与原生入口；新请求、Working 或 Stop 不证明旧请求已完成。ACP response
+只有在 Adapter delivery 与 semantic settlement 完成后才成功，Native response 按原 ctxmux
+recoverable Input claim 收敛。
 
 ```ts
 const session = await client.createAgent({
@@ -78,6 +83,6 @@ const byNative = client.resolveAgentSession({
 
 Packed consumer 已覆盖 Core API 与 `agentmux list/status/send/interrupt/attach/resume/stop` 的真实 Codex 生命周期。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
 
-浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。两个子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
+浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。结构化回答的可用性判断从 `@agentmux/core/agent-interaction-state` 导入。这些子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
 
 `client.sessionTimeline(agentSessionId)` 返回 `{ agentSessionId, revision, items }`。Timeline 事件也带 revision；Core 一定先保存，再发布事件。Store 是 revision 的唯一 owner，只有内容真的变化才加一，完全相同的重试不会改文件，也不会再次发事件。消费者先读取 snapshot，再按 revision 接事件；遇到断号就重新读取 snapshot，不要自己猜缺失内容。流式更新提交当前完整 content，不提交字符串 delta。

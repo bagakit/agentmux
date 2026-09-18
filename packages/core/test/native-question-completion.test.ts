@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentHookServer } from '../src/hook-server.js'
 import { AgentProviderRegistry, defineAgentProvider, type AgentProvider } from '../src/agent-provider.js'
@@ -86,6 +87,34 @@ async function harness(providerId: string, provider?: AgentProvider) {
 }
 
 describe('native successful question completion owns only an exact unclaimed question', () => {
+  it.each(providers)('%s permission completion uses an actual native call identity, never an inferred approval', async providerId => {
+    const h = await harness(providerId)
+    try {
+      expect(await h.feed('PermissionRequest', { tool_name: 'shell', tool_use_id: 'permission-call' })).toBe(204)
+      expect((await h.stored()).pendingInteraction?.request).toMatchObject({ kind: 'permission', nativeToolCallId: 'permission-call' })
+      expect(await h.feed('PostToolUse', { tool_name: 'shell', tool_use_id: 'other-call' })).toBe(204)
+      expect((await h.stored()).pendingInteraction?.request.id).toBe('receipt-1')
+      expect(await h.feed('PostToolUse', { tool_name: 'shell', tool_use_id: 'permission-call' })).toBe(204)
+      expect((await h.stored()).pendingInteraction).toBeUndefined()
+      expect(h.writes).toEqual([])
+      expect(await h.feed('PermissionRequest', { tool_name: 'shell', tool_use_id: 'next-call' })).toBe(204)
+      expect((await h.stored()).pendingInteraction?.request).toMatchObject({ id: 'receipt-4', nativeToolCallId: 'next-call' })
+    } finally { await h.close() }
+  })
+
+  it('permission without a reported native call identity stays unconfirmed after tool success or Stop', async () => {
+    const h = await harness('codex')
+    try {
+      expect(await h.feed('PermissionRequest', { tool_name: 'shell', tool_use_id: undefined })).toBe(204)
+      expect(await h.feed('PostToolUse', { tool_name: 'shell', tool_use_id: 'unrelated-call' })).toBe(204)
+      expect(await h.feed('Stop')).toBe(204)
+      const pending = (await h.stored()).pendingInteraction!
+      expect(pending.request).toMatchObject({ kind: 'permission', id: 'receipt-1' })
+      expect(pending.request).not.toHaveProperty('nativeToolCallId')
+      expect(h.writes).toEqual([])
+    } finally { await h.close() }
+  })
+
   it.each(providers)('%s authenticated ingress persists correlation, publishes settlement and adopts the next question without input', async providerId => {
     const h = await harness(providerId)
     try {
@@ -132,8 +161,9 @@ describe('native successful question completion owns only an exact unclaimed que
       expect(await h.feed('PermissionRequest', { tool_name: 'shell' })).toBe(204)
       expect(await h.feed('PostToolUse')).toBe(204)
       expect((await h.stored()).pendingInteraction?.request).toMatchObject({ kind: 'permission', id: 'receipt-1' })
-      await expect(h.client.writeAgent(agentSessionId, '1')).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
-      expect(h.writes).toEqual([])
+      await h.client.writeAgent({ agentSessionId, expectedRun: { runId }, data: '1', source: 'user' })
+      expect(h.writes).toEqual(['1'])
+      expect((await h.stored()).pendingInteraction?.request.id).toBe('receipt-1')
     } finally { await h.close() }
   })
 
@@ -174,7 +204,7 @@ describe('native successful question completion owns only an exact unclaimed que
       const completion = event.interactionCompletion
       if (!completion) return event
       return { ...event, interactionCompletion: { ...completion,
-        ...(field === 'kind' ? { kind: 'permission' as unknown as 'question' } : {}),
+        ...(field === 'kind' ? { kind: 'invented' as unknown as 'question' } : {}),
         ...(field === 'id-missing' ? { nativeToolCallId: undefined as unknown as string } : {}),
         ...(field === 'id-empty' ? { nativeToolCallId: '' } : {}),
         ...(field === 'id-whitespace' ? { nativeToolCallId: ' \t ' } : {}),
@@ -210,31 +240,92 @@ describe('native successful question completion owns only an exact unclaimed que
     } finally { await h.close() }
   })
 
-  it('a claimed response survives native completion; original ACK settles once, then the next question adopts', async () => {
+  it('native completion preserves a claim; the next request after exact completion survives the old ACK', async () => {
     const h = await harness('codex')
     let releaseAck!: () => void, entered!: () => void
     const waiting = new Promise<void>(resolve => { releaseAck = resolve })
     const admitted = new Promise<void>(resolve => { entered = resolve })
+    let answering: Promise<void> | undefined
     h.pauseAck(async () => { entered(); await waiting })
     try {
       expect(await h.feed('PreToolUse')).toBe(204)
-      const answering = h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: {
+      answering = h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: {
         kind: 'question', requestId: 'receipt-1', outcome: 'answered', answers: [{ questionId: 'question-1', optionId: 'option-1' }]
       } })
       await admitted
       const original = (await h.stored()).pendingInteraction
       expect(original!.response).toMatchObject({ acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
       expect(await h.feed('PostToolUse')).toBe(204)
-      expect((await h.stored()).pendingInteraction).toEqual(original)
-      expect(await h.feed('PreToolUse', { tool_use_id: 'call-2' })).toBe(503)
-      expect((await h.stored()).pendingInteraction).toEqual(original)
+      expect((await h.stored()).pendingInteraction?.response).toEqual(original!.response)
+      expect((await h.stored()).pendingInteraction?.nativeCompleted).toMatchObject({ source: 'native-hook', hookReceiptId: 'receipt-2' })
+      expect(await h.feed('PreToolUse', { tool_use_id: 'call-2' })).toBe(204)
+      const next = (await h.stored()).pendingInteraction
+      expect(next).toMatchObject({ request: { id: 'receipt-3', nativeToolCallId: 'call-2' } })
+      expect(next!.response).toBeUndefined()
       releaseAck()
       await expect(answering).resolves.toBeUndefined()
-      expect((await h.stored()).pendingInteraction).toBeUndefined()
+      expect((await h.stored()).pendingInteraction).toEqual(next)
       expect(h.writes).toEqual(['1'])
+      await expect(h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } })).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(h.writes).toEqual(['1'])
+    } finally { releaseAck(); await answering?.catch(() => {}); await h.close() }
+  })
+
+
+  it('additional requests remain observed without inventing a completion or blocking Hook delivery', async () => {
+    const h = await harness('codex')
+    try {
+      expect(await h.feed('PreToolUse')).toBe(204)
       expect(await h.feed('PreToolUse', { tool_use_id: 'call-2' })).toBe(204)
-      expect((await h.stored()).pendingInteraction?.request).toMatchObject({ nativeToolCallId: 'call-2' })
-    } finally { releaseAck(); await h.close() }
+      const pending = (await h.stored()).pendingInteraction!
+      expect(pending.request.id).toBe('receipt-1')
+      expect(pending.additionalRequests).toMatchObject([{ id: 'receipt-2', nativeToolCallId: 'call-2' }])
+      await expect(h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } }))
+        .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+      expect(h.writes).toEqual([])
+      expect(await h.feed('PostToolUse')).toBe(204)
+      expect((await h.stored()).pendingInteraction).toMatchObject({ request: { id: 'receipt-2', nativeToolCallId: 'call-2' } })
+      expect((await h.stored()).pendingInteraction!.additionalRequests).toBeUndefined()
+      expect(await h.feed('PostToolUse')).toBe(204)
+      expect((await h.stored()).pendingInteraction?.request.id).toBe('receipt-2')
+      await h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-2', outcome: 'cancelled' } })
+      expect(h.writes).toEqual(['\x1b'])
+    } finally { await h.close() }
+  })
+
+  it('completion of an additional request leaves the active request intact', async () => {
+    const h = await harness('codex')
+    try {
+      expect(await h.feed('PreToolUse')).toBe(204)
+      expect(await h.feed('PreToolUse', { tool_use_id: 'call-2' })).toBe(204)
+      expect(await h.feed('PostToolUse', { tool_use_id: 'call-2' })).toBe(204)
+      expect((await h.stored()).pendingInteraction).toEqual({ request: { ...h.client.agentSession(agentSessionId).pendingInteraction!.request } })
+      expect((await h.stored()).pendingInteraction?.request.id).toBe('receipt-1')
+      expect(h.writes).toEqual([])
+    } finally { await h.close() }
+  })
+
+  it.each(['ack', 'unknown'] as const)('late native %s cannot mark a newer request', async outcome => {
+    const h = await harness('codex')
+    let release!: () => void, entered!: () => void
+    const wait = new Promise<void>(resolve => { release = resolve })
+    const admitted = new Promise<void>(resolve => { entered = resolve })
+    let writing: Promise<unknown> | undefined
+    h.pauseAck(async () => { entered(); await wait; if (outcome === 'unknown') throw new AgentMuxError('Private ACK unavailable', 'PRIVATE_INPUT_FAILURE', 'unknown') })
+    try {
+      expect(await h.feed('PreToolUse')).toBe(204)
+      writing = h.client.writeAgent({ agentSessionId, expectedRun: { runId }, source: 'user', data: '\x1b' }).then(value => value, error => error)
+      await admitted
+      expect((await h.stored()).pendingInteraction?.nativeInput?.delivery).toBe('unknown')
+      expect(await h.feed('PostToolUse')).toBe(204)
+      expect(await h.feed('PreToolUse', { tool_use_id: 'new-call' })).toBe(204)
+      const next = (await h.stored()).pendingInteraction
+      expect(next).toMatchObject({ request: { id: 'receipt-3', nativeToolCallId: 'new-call' } })
+      release(); const result = await writing
+      expect(result).toMatchObject(outcome === 'ack' ? { acceptedThroughByte: 1 } : { code: 'PRIVATE_INPUT_FAILURE', detail: 'unknown' })
+      expect((await h.stored()).pendingInteraction).toEqual(next)
+      expect(h.writes).toEqual(['\x1b'])
+    } finally { release(); await writing; await h.close() }
   })
 
   it('a custom declarative Provider uses its own successful event and shared default child keys', async () => {

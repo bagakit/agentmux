@@ -407,7 +407,7 @@ it('binds replay to the current lease, refuses a different renderer/Run and keep
   expect(readRunReplay).toHaveBeenCalledOnce()
   expect(await busy).toMatchObject({message:expect.stringContaining('still pending')})
   expect(await controller.resizeSessionAttachment(7,'attachment-retained',90,30)).toEqual({cols:90,rows:30})
-  await controller.write(control,'input')
+  await controller.write(control,'input','user')
   expect(client.writeTerminal).toHaveBeenCalledWith(control.run,expect.objectContaining({data:'input',expectedByte:0}))
   expect(client.resizeTerminal).toHaveBeenCalledWith(control.run,90,30)
   expect(readRunReplay).toHaveBeenCalledOnce()

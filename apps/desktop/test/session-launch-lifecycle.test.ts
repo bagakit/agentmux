@@ -86,6 +86,7 @@ function agentSession(id: string): SessionSnapshot {
   return {
     ...terminalSession(id),
     kind: 'agent',
+    agentSessionUpdatedAt: 1,
     providerId: 'codex',
     executorId: 'codex',
     label: 'Codex',

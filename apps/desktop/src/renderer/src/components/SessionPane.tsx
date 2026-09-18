@@ -484,6 +484,14 @@ export function SessionPane({
           {session.pendingInteraction ? (
             <AgentInteractionCard
               request={session.pendingInteraction}
+              responseUnavailableReason={session.interactionResponseUnavailableReason}
+              onOpenTerminal={() => {
+                useAppStore.getState().setViewMode(session.id, 'terminal')
+                setHistoryOpen(false)
+                if (linkOrigin.tabId && linkOrigin.regionId) {
+                  useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId)
+                }
+              }}
               // A pending request outlives the process that asked it, so the card must go inert on the
               // same terms as the composer below it — otherwise a dead Run still shows live buttons and
               // answering it fails on a Run that can no longer accept input.

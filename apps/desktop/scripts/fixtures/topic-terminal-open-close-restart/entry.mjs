@@ -31,7 +31,7 @@ api.sessions.attach = async (control, afterByte) => request('attach', control, a
 api.sessions.detach = async id => request('detach', id)
 api.sessions.replay = async (id, afterByte) => request('replay', id, afterByte)
 api.sessions.resize = async (id, cols, rows) => request('resize', id, cols, rows)
-api.sessions.write = async (control, data) => request('write', control, data)
+api.sessions.write = async (control, data, source) => request('write', control, data, source)
 api.sessions.stop = async control => request('stop', control)
 api.sessions.refresh = async control => request('refresh', control)
 window.topicEventCounts = { raw: {}, delivered: {}, tracking: false }

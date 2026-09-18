@@ -361,7 +361,7 @@ try {
     const failedState=await state(second.cdp);assert.deepEqual(failedState.workbench.tabs[point.tab.id],persisted.workbench.tabs[point.tab.id])
     await sameHealthyRun(second.cdp,originalRun.acceptedInputBytes)
     const marker=`private-healthy-after-git-failure-${randomUUID()}`
-    const ack=await client.writeAgent(session.agentSessionId,`${marker}\r`);assert.equal(ack.runId,session.run.runId);assert.equal(ack.appliedByteRange.startByte,originalRun.acceptedInputBytes);assert.ok(ack.appliedByteRange.endByte>ack.appliedByteRange.startByte)
+    const ack=await client.writeAgent({agentSessionId:session.agentSessionId,expectedRun:session.run,data:`${marker}\r`,source:"user"});assert.equal(ack.runId,session.run.runId);assert.equal(ack.appliedByteRange.startByte,originalRun.acceptedInputBytes);assert.ok(ack.appliedByteRange.endByte>ack.appliedByteRange.startByte)
     const output=await waitFor('actual healthy cat output after Git failure',async()=>{const reply=await client.readRunReplay(session.run);const text=reply.replay.map(event=>event.data).join('');return text.includes(marker)?{run:reply.run,marker,outputDigest:digest(text),events:reply.replay.length,gap:reply.gap}:null});assert.ok(output.events>0);assert.equal(output.run.pid,originalRun.pid)
     receipt.failureIsolation={blob,blobDigest:digest(blobBytes),error,retainedCanvas,ack,output}
     await control('focus',{kind:'region',regionId:long.surface.regionId});const goodCanvas=await monaco(second.cdp,'long ancestor','long target B',long.surface.regionId)
