@@ -512,6 +512,9 @@ export type AgentTerminalPromptReadinessState = {
 export type AgentSessionHistoryContentPart =
   | { kind: 'text'; text: string }
   | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other'; reference: string; label?: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool-call'; name: string; input: string; callId?: string }
+  | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
 
 export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
 
