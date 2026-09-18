@@ -32,7 +32,7 @@ it('shows actual named Topic and branch lanes with compact recovery in their own
   const lanes = [...container.querySelectorAll<HTMLElement>('[data-lane-id]')]
   expect(lanes).toHaveLength(3)
   expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__heading')!.parentElement!.className)).toEqual(['focus-context-group__header', 'focus-context-group__header', 'focus-context-group__header'])
-  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__axis')!.textContent)).toEqual(['ScratchPlanning', 'ScratchBug fixes', 'Productfeature/compact'])
+  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__axis')!.textContent)).toEqual(['Productfeature/compact', 'ScratchPlanning', 'ScratchBug fixes'])
   expect(container.querySelectorAll('[data-session-id]')).toHaveLength(1)
   const vaults = [...container.querySelectorAll<HTMLButtonElement>('.focus-recovery-toggle')]
   expect(vaults.map(button => button.textContent)).toEqual(['Disconnected2', 'Disconnected1'])

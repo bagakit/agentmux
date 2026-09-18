@@ -50,11 +50,17 @@ describe('attention request resolution boundaries', () => {
   })
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true) })
 
+  function reviewButton(): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>('.focus-toolbar__review')
+    expect(button).toBeTruthy()
+    return button!
+  }
+
   it('does not invent answer controls when Core has no typed request', async () => {
     useAppStore.setState({ config: testConfig, sessions: [session('a')], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
-    await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
+    await act(async () => reviewButton().click())
     expect(container.querySelector('[aria-label="Agent question"]')).toBeNull()
     expect(container.textContent).toContain('Core has not exposed a typed request')
   })
@@ -65,7 +71,7 @@ describe('attention request resolution boundaries', () => {
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const rows = [...container.querySelectorAll<HTMLElement>('.focus-context')]
     await act(async () => rows[1]!.click())
-    await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
+    await act(async () => reviewButton().click())
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('b')
     expect(selectSession).not.toHaveBeenCalled()
   })
@@ -74,7 +80,7 @@ describe('attention request resolution boundaries', () => {
   async function openReview(id: string): Promise<void> {
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector(`[data-session-id="${id}"]`) as HTMLElement).click())
-    await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
+    await act(async () => reviewButton().click())
   }
 
   it('waits for Core to clear the request before moving to the next Agent', async () => {
@@ -137,7 +143,7 @@ describe('attention request resolution boundaries', () => {
     useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
-    const review = container.querySelector('.global-board-action') as HTMLButtonElement
+    const review = reviewButton()
     review.focus()
     await act(async () => review.click())
     const panel = container.querySelector('.attention-request-panel') as HTMLElement

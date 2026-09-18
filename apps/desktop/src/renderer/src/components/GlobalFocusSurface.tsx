@@ -49,8 +49,9 @@ export function GlobalFocusSurface() {
     const stop = () => { resizingFocusRef.current = false; document.body.style.cursor = ''; document.body.style.userSelect = '' }
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
     window.addEventListener('blur', stop)
-    return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('blur', stop) }
+    return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs), [laneContexts, config, facts, tabs])
@@ -105,14 +106,15 @@ export function GlobalFocusSurface() {
       aria-valuemax={76}
       aria-valuenow={Math.round(workspaceRatio * 100)}
       onPointerDown={(event) => {
+        if (event.button !== 0) return
         event.preventDefault()
         resizingFocusRef.current = true
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
       }}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') { event.preventDefault(); adjustWorkspaceRatio(workspaceRatio - 0.02) }
-        if (event.key === 'ArrowRight') { event.preventDefault(); adjustWorkspaceRatio(workspaceRatio + 0.02) }
+        if (event.key === 'ArrowLeft') { event.preventDefault(); adjustWorkspaceRatio(workspaceRatio + 0.02) }
+        if (event.key === 'ArrowRight') { event.preventDefault(); adjustWorkspaceRatio(workspaceRatio - 0.02) }
         if (event.key === 'Home') { event.preventDefault(); adjustWorkspaceRatio(0.38) }
         if (event.key === 'End') { event.preventDefault(); adjustWorkspaceRatio(0.76) }
       }}

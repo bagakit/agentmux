@@ -11,6 +11,7 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView:
 
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { api } from '../src/renderer/src/lib/api.js'
 
 const request = { kind: 'question', id: 'request-a', questions: [{ id: 'channel', title: 'Choose a release channel', prompt: 'Where should this go?', options: [{ id: 'stable', label: 'Stable' }, { id: 'canary', label: 'Canary' }] }] } as never
 const session = {
@@ -38,28 +39,35 @@ describe('Needs you request panel', () => {
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div'); document.body.append(container); root = createRoot(container)
-    useAppStore.setState({ config: testConfig, sessions: [session], providerCatalog: [] })
+    useAppStore.setState({ config: testConfig, sessions: [session], providerCatalog: [], mainSurface: 'agents', tabs: {}, timelines: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   })
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true) })
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
 
-  it('opens the typed request in place without switching away from Agents', async () => {
+  function reviewButton(): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>('.focus-toolbar__review')
+    expect(button).toBeTruthy()
+    return button!
+  }
+
+  it('opens the typed request from the Focus toolbar without leaving the selected context', async () => {
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="attention-a"]') as HTMLElement).click())
-    const review = container.querySelector('.global-board-action') as HTMLElement
+    const review = reviewButton()
     await act(async () => review.click())
     expect(container.querySelector('.attention-request-panel')).toBeTruthy()
     expect(container.querySelector('[aria-label="Agent question"]')).toBeTruthy()
-    expect(useAppStore.getState().mainSurface).toBe(baseline.mainSurface)
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('attention-a')
   })
 
   it('routes the response through the existing Core interaction owner', async () => {
-    const respondInteraction = vi.fn(() => Promise.resolve())
-    useAppStore.setState({ respondInteraction: respondInteraction as never })
+    const respondInteraction = vi.spyOn(api.sessions, 'respondInteraction').mockResolvedValue(undefined)
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="attention-a"]') as HTMLElement).click())
-    await act(async () => (container.querySelector('.global-board-action') as HTMLElement).click())
+    await act(async () => reviewButton().click())
     const answer = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Stable')) as HTMLButtonElement
     await act(async () => answer.click())
-    expect(respondInteraction).toHaveBeenCalledWith('attention-a', expect.objectContaining({ kind: 'question' }))
+    expect(respondInteraction).toHaveBeenCalledExactlyOnceWith(session.control, { kind: 'question', requestId: 'request-a', outcome: 'answered', answers: [{ questionId: 'channel', optionId: 'stable' }] })
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('attention-a')
   })
 })
