@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   EMPTY_AGENT_FOCUS,
+  executionFocusHistory,
   executionFocusContextText,
   focusExecution,
   focusLaneForSession,
@@ -14,12 +15,23 @@ function entry(sessionId: string, focusedAt: number) {
 }
 
 describe('Agent focus context', () => {
-  it('records a unique bounded execution history like a git ref log', () => {
+  it('records a bounded event sequence without erasing revisits', () => {
     const history = recordExecutionFocus([
       entry('older', 1), entry('current', 2)
     ], 'current', 3, 2)
     expect(history).toEqual([entry('current', 3), entry('older', 1)])
     expect(recordExecutionFocus(history, 'newest', 4, 2)).toEqual([entry('newest', 4), entry('current', 3)])
+  })
+
+  it('keeps 2000 switch events, derives MRU12 and ignores repeated selection inside one Context', () => {
+    let focus = focusExecution(EMPTY_AGENT_FOCUS, 'zero', 0)
+    for (let index = 1; index <= 2001; index++) focus = focusExecution(focus, `s${index % 20}`, index)
+    expect(focus.execution.history).toHaveLength(2000)
+    expect(focus.execution.history.at(-1)).toEqual(entry('s2', 2))
+    expect(executionFocusHistory(focus)).toEqual(Array.from({ length: 12 }, (_, index) => entry(`s${(2001 - index) % 20}`, 2001 - index)))
+    expect(focusExecution(focus, focus.execution.sessionId, 3000)).toBe(focus)
+    expect(restoreAgentFocus(focus)).toEqual(focus)
+    expect(restoreAgentFocus({ execution: { sessionId: 'missing', history: [] } }).execution.history).toEqual([])
   })
 
   it('keeps PMO focus outside execution history', () => {

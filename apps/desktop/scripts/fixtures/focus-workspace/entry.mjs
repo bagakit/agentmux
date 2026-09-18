@@ -5,6 +5,7 @@ import { WorkspaceWorkbench } from '../../../src/renderer/src/components/Workspa
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { restorePersistedUiState } from '../../../src/renderer/src/store'
+import { restoreAgentFocus } from '../../../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
@@ -24,16 +25,19 @@ api.workspaces.listBranches = async id => projects.some(project => project.id ==
 const recovery = topics.flatMap((topic, group) => Array.from({ length: 12 }, (_, index) => ({ ...selected, id: `recovery-${group}-${index}`, label: `Saved task ${index + 1}`, workspacePath: topic.directoryPath, processState: 'disconnected', status: { ...selected.status, state: 'disconnected' } })))
 const sessions = [selected, ...recovery, ...projects.map((workspace, index) => ({ ...selected, id: `context-${index}`, label: `Context ${index}`, workspacePath: workspace.path }))]
 const tab = createWorkbenchTab('fixture-tab', { regionId: 'fixture-region', workspaceId, kind: 'agent', phase: 'attached', sessionId: selected.id })
+const now = Date.now()
+const fixtureUserMessage = { id: 'fixture-user-message', agentSessionId: selected.id, kind: 'user_message', status: 'complete', source: 'user', createdAt: now - 45 * 60000, updatedAt: now - 45 * 60000, title: 'User prompt', content: 'Inspect the original Context at this time.' }
+snapshot.timelines[selected.id] = { ...snapshot.timelines[selected.id], items: [...snapshot.timelines[selected.id].items, fixtureUserMessage] }
 const seed = {
   config, sessions, focusTimelineHeight: 96, timelines: snapshot.timelines, providerCatalog: [], agentNames: {},
   tabs: { [tab.id]: tab }, layouts: { [workspaceId]: { root: { type: 'leaf', groupId: 'fixture-group' }, groups: [{ id: 'fixture-group', tabOrder: [tab.id], activeTabId: tab.id, recentTabIds: [tab.id] }], activeGroupId: 'fixture-group' } },
   mainSurface: 'agents', activeWorkspaceId: workspaceId,
-  agentFocus: { execution: { sessionId: selected.id, history: sessions.map((session, index) => ({ sessionId: session.id, focusedAt: 1000 + index * 60000 })) }, pmo: { sessionId: null } }
+  agentFocus: { execution: { sessionId: selected.id, history: [...sessions.map((session, index) => ({ sessionId: session.id, focusedAt: now - index * 60000 })), { sessionId: selected.id, focusedAt: now - 2 * 3600000 }] }, pmo: { sessionId: null } }
 }
 useAppStore.setState(seed)
 window.focusProbeWheels = []
 document.addEventListener('wheel', event => window.focusProbeWheels.push({ trusted: event.isTrusted, tracks: Boolean(event.target.closest('.recent-focus__viewport')), lanes: Boolean(event.target.closest('.focus-project-lanes__rows')), deltaX: event.deltaX, deltaY: event.deltaY }), true)
-window.restoreFocusProbe = state => useAppStore.setState({ ...state, config, ...restorePersistedUiState(config, state) })
+window.restoreFocusProbe = state => useAppStore.setState({ ...state, config, ...restorePersistedUiState(config, state), agentFocus: restoreAgentFocus(state.agentFocus) })
 window.focusProbeInputReceipt = async () => (await api.sessions.snapshot()).timelines['session-codex'].items.at(-1)
 window.focusProbeState = () => {
   const { tabs, layouts, agentFocus, sessions, timelines, focusTimelineHeight } = useAppStore.getState()

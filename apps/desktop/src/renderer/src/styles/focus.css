@@ -54,7 +54,7 @@
 /* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */
 .recent-focus { position: relative; flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
 .recent-focus[data-mode='collapsed'] { height: 28px; }
-.recent-focus__header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--sp-2); height: 28px; padding: 0 var(--sp-2); }
+.recent-focus__header { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--sp-2); min-height: 28px; padding: 0 var(--sp-2); }
 .recent-focus__title, .recent-focus__controls { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .recent-focus__title { min-width: 0; }
 .recent-focus__title strong { font-weight: 500; color: var(--text-2); white-space: nowrap; }
@@ -62,8 +62,12 @@
 .recent-focus__controls { flex: none; gap: 2px; }
 .recent-focus__controls .icon-button { width: 22px; height: 22px; }
 .recent-focus__controls button:disabled { opacity: .35; cursor: default; }
+.recent-focus__controls input, .recent-focus__controls select, .recent-focus__now { min-width: 0; height: 22px; padding: 0 3px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); font: inherit; font-variant-numeric: tabular-nums; }
+.recent-focus__controls .recent-focus__date { width: 158px; }
+.recent-focus__now { cursor: pointer; }
+.recent-focus__now[aria-pressed='true'] { color: var(--green); }
 .recent-focus__viewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.recent-focus__canvas { min-width: 100%; width: calc(100% * var(--timeline-zoom)); padding-right: 8px; }
+.recent-focus__canvas { min-width: 100%; padding-right: 8px; }
 .recent-focus__ruler, .recent-focus__track { display: grid; grid-template-columns: 112px minmax(0, 1fr); min-width: 0; }
 .recent-focus__ruler { position: sticky; top: 0; z-index: 3; height: 18px; color: var(--text-3); background: var(--surface-1); font-size: 9px; font-variant-numeric: tabular-nums; }
 .recent-focus__gutter { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); min-width: 0; border-right: 1px solid var(--line); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
@@ -72,15 +76,25 @@
 .recent-focus__time-scale { position: relative; margin: 0 8px; }
 .recent-focus__time-scale time { position: absolute; top: 1px; transform: translateX(-50%); }
 .recent-focus__time-scale time:first-child { transform: none; }
-.recent-focus__time-scale time:last-child { transform: translateX(-100%); }
+.recent-focus__time-scale time:last-of-type { transform: translateX(-100%); }
 .recent-focus__track { height: 24px; }
 .recent-focus__lane { position: relative; min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line-soft); background: repeating-linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 1px, transparent 1px, transparent 25%); }
 .recent-focus__segment { position: absolute; top: 3px; bottom: 3px; min-width: 8px; padding: 0 4px; overflow: hidden; border: 0; border-radius: 2px; background: var(--surface-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
-.recent-focus__segment.is-open { width: 8px; transform: translateX(-8px); border-right: 1px dashed var(--text-3); }
+.recent-focus__segment.is-open { width: 8px; border-right: 1px dashed var(--text-3); }
 .recent-focus__segment.is-current { background: color-mix(in srgb, var(--green) 22%, var(--surface-3)); color: var(--text); }
 .recent-focus__segment:hover, .recent-focus__segment:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
-.recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 1; background: var(--green); pointer-events: none; }
+.recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 2; background: var(--green); pointer-events: none; }
+.recent-focus__playhead--ruler::before { position: absolute; top: 0; left: -3px; width: 7px; height: 5px; background: var(--green); clip-path: polygon(0 0, 100% 0, 50% 100%); content: ''; }
+.recent-focus__message { position: absolute; top: 4px; z-index: 3; display: grid; place-items: center; width: 14px; height: 15px; padding: 0; transform: translateX(-50%); border: 1px solid var(--text-3); border-radius: 2px; background: var(--surface-1); color: var(--text-2); cursor: pointer; }
+.recent-focus__message:hover, .recent-focus__message:focus-visible { color: var(--text); outline: 1px solid var(--green); }
+.recent-focus__tracks:has(.recent-focus__track) + .recent-focus__empty { display: none; }
 .recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus__message-preview { position: absolute; bottom: calc(100% + 6px); right: var(--sp-2); z-index: 6; width: min(420px, calc(100% - 16px)); max-height: min(320px, 50vh); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); box-shadow: 0 4px 16px #0004; font-size: var(--fs-micro); }
+.recent-focus__message-preview header { display: flex; align-items: center; gap: var(--sp-2); }
+.recent-focus__message-preview header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-focus__message-preview time { flex: 1; color: var(--text-3); white-space: nowrap; }
+.recent-focus__message-preview p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.recent-focus__message-preview > button { border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); padding: 3px 6px; font: inherit; cursor: pointer; }
 
 .focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
 
