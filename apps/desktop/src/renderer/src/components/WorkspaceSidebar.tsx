@@ -281,7 +281,8 @@ export function WorkspaceSidebar() {
         </div>
       </div>
       {scratch ? <SpaceTopicsTree workspace={scratch} /> : null}
-      <nav className="project-list" aria-label="Projects">
+      <nav className="project-list" aria-label="Folders">
+        <div className="sidebar__section-heading"><span>Folders</span></div>
         {projectRailTree(projects).map((group) => {
           const key = projectGroupKey(group)
           const collapsed = key !== null && collapsedProjectGroups[key] === true

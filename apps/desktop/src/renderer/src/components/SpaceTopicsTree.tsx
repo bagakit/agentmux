@@ -81,6 +81,7 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
               style={{ '--rail-depth': 1 } as CSSProperties} aria-label={`Open ${topic.title}`}
               aria-current={selected ? 'page' : undefined} title={topic.readError ?? (topic.summary || topic.directoryPath)}
               onClick={() => void openTopic(id, workspace.id).catch(reportError)}>
+              <span className="project-rail-row__icon"><NotebookText size={12} /></span>
               <span className="project-rail-row__identity"><strong>{topic.title}</strong></span>
               {pinned?.includes(id) ? <Pin size={10} aria-label="Pinned" /> : null}
             </button>
