@@ -96,6 +96,17 @@ function state() {
     sessions: current.sessions.map(one => ({ id: one.id, processState: one.processState, runId: one.control.run.runId })) }
 }
 window.spaceRestartState = state
+function pinnedTopicGeometry() {
+  const row = [...document.querySelectorAll('.space-topic-row')].find(node => node.querySelector('[aria-label="Pinned"]'))
+  const box = node => {
+    if (!node) return null
+    const rect = node.getBoundingClientRect()
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right,
+      centerY: rect.y + rect.height / 2 }
+  }
+  return { row: box(row), icon: box(row?.querySelector('.project-rail-row__icon')),
+    title: box(row?.querySelector('.project-rail-row__identity')), pin: box(row?.querySelector('[aria-label="Pinned"]')) }
+}
 window.spaceRestartUi = () => ({
   regions: [...document.querySelectorAll('[data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId).sort(),
   topicTree: [...document.querySelectorAll('.space-topic-row strong')].map(node => node.textContent),
@@ -104,7 +115,8 @@ window.spaceRestartUi = () => ({
   alerts: [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent),
   overviewSelected: document.querySelector('[data-current="true"]')?.dataset.topicId,
   topicSelected: document.querySelector('.space-topic-row[aria-current="page"]')?.getAttribute('aria-label'),
-  topologies: [...document.querySelectorAll('[data-topic-tab-id]')].map(node => node.dataset.topicTabId)
+  topologies: [...document.querySelectorAll('[data-topic-tab-id]')].map(node => node.dataset.topicTabId),
+  pinnedTopicGeometry: pinnedTopicGeometry()
 })
 function Fixture() {
   const error = useAppStore(one => one.error)
