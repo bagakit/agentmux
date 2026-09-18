@@ -112,7 +112,7 @@ app.whenReady().then(async () => {
       } while (Date.now() < deadline)
       throw new Error(`Space restart condition did not settle: ${expression}`)
     }
-    await until('window.spaceRestartReady === true && document.querySelectorAll(".space-topic-row").length === 2')
+    await until('window.spaceRestartReady === true && document.querySelectorAll(".space-topic-row").length === 2 && window.spaceRestartUi().overview.length === 2')
     result.shell = await win.webContents.executeJavaScript('({ state: window.spaceRestartState(), ui: window.spaceRestartUi() })')
     assert.equal(result.shell.state.loading, false)
     assert.deepEqual(Object.keys(result.shell.state.tabs).sort(), ['original-agent-tab', 'original-background-tab', 'original-idle-tab', 'original-mote-tab'])
