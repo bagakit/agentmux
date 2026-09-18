@@ -146,7 +146,6 @@
 .project-rail-row__collapse:hover { color: var(--text); background: var(--surface-2); }
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
-.space-topic-row { grid-template-columns: minmax(0, 1fr) auto; }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
 .project-rail-row__icon { width: var(--rail-icon, 16px); height: var(--rail-icon, 16px); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
 /* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
