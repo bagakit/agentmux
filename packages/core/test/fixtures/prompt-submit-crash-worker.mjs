@@ -86,7 +86,7 @@ for (let attempt = 0; attempt < 400; attempt += 1) {
   if (attempt === 399) throw new Error('Timed out waiting for controlled initial composer')
   await new Promise((resolve) => setTimeout(resolve, 20))
 }
-await client.writeAgent(session.agentSessionId, '\u001d')
+await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: client.agentSession(session.agentSessionId).run, data: '\u001d', source: 'user' })
 if (client.agentSession(session.agentSessionId).terminalPromptReadiness?.readyThroughByte === undefined) {
   await new Promise((resolve) => {
     const unsubscribe = client.onEvent((event) => {

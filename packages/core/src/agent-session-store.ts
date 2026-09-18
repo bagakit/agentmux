@@ -595,10 +595,14 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
       title: text(source.title, 'pendingInteraction.request.title'),
       options,
       ...(toolName ? { toolName } : {}),
-      ...(toolInput ? { toolInput } : {})
+      ...(toolInput ? { toolInput } : {}),
+      ...(source.nativeToolCallId === undefined ? {} : {
+        nativeToolCallId: string(source.nativeToolCallId, 'pendingInteraction.request.nativeToolCallId')
+      })
     }
   }
-  if (source.kind !== 'question' || !Array.isArray(source.questions) || source.questions.length !== 1) {
+  if (source.kind !== 'question' || !Array.isArray(source.questions) ||
+    (source.responseUnavailableReason === undefined ? source.questions.length !== 1 : source.questions.length !== 0)) {
     throw new AgentMuxError('Question request is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const questions = source.questions.map((value, questionIndex) => {
@@ -634,6 +638,9 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
     throw new AgentMuxError('Questions contain duplicate identifiers.', 'INVALID_AGENT_SESSION_STORE')
   }
   return { kind: 'question', ...base, questions,
+    ...(source.responseUnavailableReason === undefined ? {} : {
+      responseUnavailableReason: string(source.responseUnavailableReason, 'pendingInteraction.request.responseUnavailableReason')
+    }),
     ...(source.nativeToolCallId === undefined ? {} : {
       nativeToolCallId: string(source.nativeToolCallId, 'pendingInteraction.request.nativeToolCallId')
     }) }
@@ -642,7 +649,34 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
 function pendingInteraction(value: unknown): AgentMuxPendingInteraction {
   const source = record(value, 'pendingInteraction')
   const request = interactionRequest(source.request)
-  if (source.response === undefined) return { request }
+  const nativeCompleted = source.nativeCompleted === undefined ? undefined : interactionEvidence(source.nativeCompleted)
+  if (nativeCompleted && (request.evidence.source !== 'native-hook' || !request.nativeToolCallId ||
+      nativeCompleted.source !== 'native-hook' || nativeCompleted.run?.runId !== request.evidence.run?.runId)) {
+    throw new AgentMuxError('Native completion does not match its request.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const native = source.nativeInput === undefined ? undefined : record(source.nativeInput, 'pendingInteraction.nativeInput')
+  if (native && native.delivery !== 'unknown' && native.delivery !== 'accepted') {
+    throw new AgentMuxError('Native interaction input delivery is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (source.additionalRequests !== undefined && !Array.isArray(source.additionalRequests)) {
+    throw new AgentMuxError('Additional native requests must be an array.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const additionalRequests = (source.additionalRequests ?? []).map(interactionRequest)
+  if (additionalRequests.some(other => other.agentSessionId !== request.agentSessionId ||
+      other.evidence.source !== 'native-hook' || other.evidence.run?.runId !== request.evidence.run?.runId) ||
+      new Set([request.id, ...additionalRequests.map(other => other.id)]).size !== additionalRequests.length + 1) {
+    throw new AgentMuxError('Additional native requests do not match the current Session and Run.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const facts = {
+    ...(additionalRequests.length ? { additionalRequests } : {}),
+    ...(nativeCompleted ? { nativeCompleted } : {}),
+    ...(native ? { nativeInput: {
+      operationId: string(native.operationId, 'pendingInteraction.nativeInput.operationId'),
+      delivery: native.delivery as 'unknown' | 'accepted',
+      observedAt: timestamp(native.observedAt, 'pendingInteraction.nativeInput.observedAt')
+    } } : {})
+  }
+  if (source.response === undefined) return { request, ...facts }
   const response = record(source.response, 'pendingInteraction.response')
   const responseValue = interactionResponse(
     response.value,
@@ -666,6 +700,7 @@ function pendingInteraction(value: unknown): AgentMuxPendingInteraction {
   }
   return {
     request,
+    ...facts,
     response: {
       value: responseValue,
       responseDigest,

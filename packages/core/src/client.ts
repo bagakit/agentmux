@@ -8,6 +8,7 @@ import {
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
+import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import {
   normalizeLaunchOptionSelection,
   type LaunchOptionSelection
@@ -107,6 +108,7 @@ import type {
   AgentExecutorId,
   AgentProviderId,
   AgentMuxAgentPasteInput,
+  AgentMuxAgentWriteInput,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
   AgentMuxInteractionRequest,
@@ -2627,9 +2629,16 @@ export class AgentMuxClient {
     })
   }
 
-  async writeAgent(agentSessionId: string, data: AgentMuxRunInputData): Promise<AgentMuxRunInputAck> {
+  async writeAgent(input: AgentMuxAgentWriteInput): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
-    return await this.writeAgentInput(this.requireAgentSession(agentSessionId), data)
+    const session = this.requireAgentSession(input.agentSessionId)
+    if (!sameRun(session.run, input.expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before native input.', 'STALE_AGENT_SESSION')
+    }
+    if (input.source !== 'user' && input.source !== 'terminal-protocol') {
+      throw new AgentMuxError('Native input must declare its user or terminal-protocol source.', 'INVALID_AGENT_INPUT_SOURCE')
+    }
+    return await this.writeAgentInput(session, input.data, input.source)
   }
 
   async pasteAgent(input: AgentMuxAgentPasteInput): Promise<AgentMuxRunInputAck> {
@@ -2641,7 +2650,7 @@ export class AgentMuxClient {
     const plan = this.providers.get(session.providerId).planPromptInput(input.text)
     return await this.writeAgentInput(session, plan.kind === 'render-then-submit'
       ? plan.payload
-      : input.terminalData)
+      : input.terminalData, 'user')
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
@@ -2743,7 +2752,7 @@ export class AgentMuxClient {
     if (!plan.data) {
       throw new AgentMuxError('Provider posture keystroke cannot be empty.', 'INVALID_AGENT_PROVIDER')
     }
-    await this.writeAgentInput(session, plan.data)
+    await this.writeAgentInput(session, plan.data, 'user')
   }
 
   async resizeAgent(
@@ -2941,7 +2950,20 @@ export class AgentMuxClient {
         }
         continue
       }
-      const response = pending?.response
+      // Native input or another request makes replay unsafe. A previously acknowledged claim
+      // can still settle without bytes when the Run cursor confirms its original receipt.
+      if (pending.nativeInput || pending.nativeCompleted || pending.additionalRequests?.length) {
+        const response = pending.response
+        const run = runs.find(candidate => candidate.runId === session.run.runId)
+        if (response?.acknowledged && (!pending.nativeInput || pending.nativeCompleted) &&
+            run?.acceptedInputBytes !== null && run?.acceptedInputBytes !== undefined &&
+            run.acceptedInputBytes >= response.inputByteRange.endByte) {
+          const settled = await this.clearPendingInteraction(session, pending.request.id)
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+        }
+        continue
+      }
+      const response = pending.response
       const run = runs.find((candidate) => candidate.runId === session.run.runId)
       if (!response || pending.request.evidence.source !== 'native-hook') continue
       if (!run) {
@@ -3798,10 +3820,7 @@ export class AgentMuxClient {
       const existing = current.pendingInteraction
       if (existing) {
         if (existing.request.id !== request.id) {
-          throw new AgentMuxError(
-            'Another Agent interaction is already pending.',
-            'AGENT_INTERACTION_BUSY'
-          )
+          throw new AgentMuxError('Another Agent interaction is already pending.', 'AGENT_INTERACTION_BUSY')
         }
         return current
       }
@@ -3823,7 +3842,9 @@ export class AgentMuxClient {
         throw new AgentMuxError('Agent interaction changed before settlement.', 'UNKNOWN_AGENT_INTERACTION')
       }
       const next = { ...current, updatedAt: Date.now() }
-      delete next.pendingInteraction
+      const [request, ...additionalRequests] = current.pendingInteraction.additionalRequests ?? []
+      if (request) next.pendingInteraction = { request, ...(additionalRequests.length ? { additionalRequests } : {}) }
+      else delete next.pendingInteraction
       return next
     })
   }
@@ -3875,6 +3896,8 @@ export class AgentMuxClient {
         if (!pending || pending.request.id !== request.id) {
           throw new AgentMuxError('Agent interaction is not pending.', 'UNKNOWN_AGENT_INTERACTION')
         }
+        const unavailableReason = agentInteractionResponseUnavailableReason(pending)
+        if (unavailableReason) throw new AgentMuxError(unavailableReason, 'AGENT_INTERACTION_UNCONFIRMED')
         if (pending.response) {
           assertResponse(pending.response)
           return stored
@@ -3930,7 +3953,10 @@ export class AgentMuxClient {
         session.agentSessionId,
         session.run,
         (stored) => {
-          const responseState = stored.pendingInteraction?.response
+          // A subsequent native request can arrive while this accepted Input awaits its ACK.
+          // Record the cursor, but never settle or overwrite that newer request.
+          if (stored.pendingInteraction?.request.id !== request.id) return stored
+          const responseState = stored.pendingInteraction.response
           if (!responseState) {
             throw new AgentMuxError(
               'Agent interaction response claim disappeared.',
@@ -3942,13 +3968,18 @@ export class AgentMuxClient {
           return {
             ...stored,
             pendingInteraction: {
-              request: stored.pendingInteraction!.request,
+              ...stored.pendingInteraction,
               response: { ...responseState, acknowledged: true }
             },
             updatedAt: Date.now()
           }
         }
       )
+      if (current.pendingInteraction?.request.id !== request.id || current.pendingInteraction.nativeInput) {
+        this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+        this.publisher.publish({ type: 'agent-session', session: cloneSession(current) })
+        return
+      }
       state = current.pendingInteraction?.response
     }
     if (
@@ -3968,8 +3999,13 @@ export class AgentMuxClient {
 
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
-    data: AgentMuxRunInputData
+    data: AgentMuxRunInputData,
+    source: AgentMuxAgentWriteInput['source']
   ): Promise<AgentMuxRunInputAck> {
+    // Capture before waiting on the input lane: a later request cannot inherit this operation.
+    const requestId = source === 'user' && !requestedSession.pendingInteraction?.nativeInput &&
+      requestedSession.pendingInteraction?.request.evidence.source === 'native-hook'
+      ? requestedSession.pendingInteraction.request.id : undefined
     // 空载荷在这里就地收掉，不下到 ctxmux。daemon 的 RecoverableInput 校验会拒绝空载荷
     // （`recoverable native Input must not be empty`），而「按了键但没有字节要发」是**正常**的终端
     // 事件：IME 组字途中的 onData('')、旧式鼠标上报越界时的零长字节。把它当失败上报，等于用户在
@@ -3998,24 +4034,52 @@ export class AgentMuxClient {
       if (sameRun(observation.run, requestedSession.run)) observation.controller.abort()
     }
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
-      if (session.pendingInteraction) {
-        throw new AgentMuxError(
-          'Answer the pending Agent interaction through the typed response API.',
-          'AGENT_INTERACTION_PENDING'
-        )
-      }
+      // The native terminal remains usable while a typed request is pending. These bytes
+      // are not a semantic answer and must not settle or approve that request.
       const expectedByte = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       const idleEntryTime = session.semanticStatus?.state === 'done'
         ? session.semanticStatus.stateEnteredAt : undefined
-      const result = await this.kernel.input(session.run.runId, {
-        ownerInstanceId: this.kernel.identity().daemonInstanceId,
-        operationId: randomUUID(),
-        expectedByte,
-        data
-      })
+      const operationId = randomUUID()
+      // Save uncertainty before the side effect; a crash must not re-enable an old typed approval.
+      const observeNativeInput = async (delivery: 'unknown' | 'accepted' | 'not_applied'): Promise<void> => {
+        if (!requestId) return
+        try {
+          const next = await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
+            const pending = current.pendingInteraction
+            if (pending?.request.id !== requestId) return current
+            const native = pending.nativeInput
+            if (native && native.operationId !== operationId) return current
+            if (delivery === 'not_applied') {
+              if (!native) return current
+              const { nativeInput: _removed, ...rest } = pending
+              return { ...current, pendingInteraction: rest, updatedAt: Date.now() }
+            }
+            if (native?.delivery === delivery) return current
+            return { ...current, pendingInteraction: {
+              ...pending, nativeInput: { operationId, delivery, observedAt: native?.observedAt ?? Date.now() }
+            }, updatedAt: Date.now() }
+          })
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+        } catch (error) {
+          this.publisher.publish({ type: 'agent-error', code: 'AGENT_NATIVE_INPUT_PERSIST_FAILED',
+            message: `Native input state could not be saved for Agent ${session.agentSessionId} (Run ${session.run.runId}). The terminal remains available; whether the saved request is still pending cannot be confirmed across restart. ${error instanceof Error ? error.message : String(error)}`,
+            evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } } })
+        }
+      }
+      await observeNativeInput('unknown')
+      let result: Awaited<ReturnType<typeof this.kernel.input>>
+      try {
+        result = await this.kernel.input(session.run.runId, {
+          ownerInstanceId: this.kernel.identity().daemonInstanceId, operationId, expectedByte, data
+        })
+      } catch (error) {
+        if (error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
+        throw error
+      }
+      await observeNativeInput('accepted')
       if (result.run.acceptedInputBytes === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
@@ -4191,12 +4255,12 @@ export class AgentMuxClient {
     const completion = normalized.interactionCompletion
     if (completion && (
       typeof completion.nativeToolCallId !== 'string' || !completion.nativeToolCallId.trim() ||
-      completion.kind !== 'question' || completion.agentSessionId !== session.agentSessionId ||
+      (completion.kind !== 'question' && completion.kind !== 'permission') || completion.agentSessionId !== session.agentSessionId ||
       completion.evidence.source !== 'native-hook' ||
       completion.evidence.run?.runId !== session.run.runId ||
       completion.evidence.hookReceiptId !== receipt.id
-    )) throw new AgentMuxError('Provider question completion does not match its native Hook receipt.', 'INVALID_AGENT_INTERACTION')
-    const completedRequestId = completion && session.pendingInteraction?.request.kind === 'question' &&
+    )) throw new AgentMuxError('Provider interaction completion does not match its native Hook receipt.', 'INVALID_AGENT_INTERACTION')
+    const completedRequestId = completion && session.pendingInteraction?.request.kind === completion.kind &&
       session.pendingInteraction.request.nativeToolCallId === completion.nativeToolCallId
       ? session.pendingInteraction.request.id : undefined
     const persistReceipt = (
@@ -4251,11 +4315,20 @@ export class AgentMuxClient {
               : {})
       }
       const pending = current.pendingInteraction
-      if (completion && completedRequestId && pending?.request.kind === 'question' &&
+      if (completion && completedRequestId && pending?.request.kind === completion.kind &&
         pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
         pending.request.evidence.source === 'native-hook' && pending.request.evidence.run?.runId === current.run.runId &&
-        pending.request.nativeToolCallId === completion.nativeToolCallId && pending.response === undefined) {
-        delete next.pendingInteraction
+        pending.request.nativeToolCallId === completion.nativeToolCallId) {
+        const [request, ...additionalRequests] = pending.additionalRequests ?? []
+        if (request) next.pendingInteraction = { request, ...(additionalRequests.length ? { additionalRequests } : {}) }
+        else if (pending.response) next.pendingInteraction = { ...pending, nativeCompleted: structuredClone(completion.evidence) }
+        else delete next.pendingInteraction
+      }
+      if (completion && next.pendingInteraction?.additionalRequests?.length) {
+        const additionalRequests = next.pendingInteraction.additionalRequests.filter(request =>
+          !(request.kind === completion.kind && request.nativeToolCallId === completion.nativeToolCallId))
+        const { additionalRequests: _previous, ...active } = next.pendingInteraction
+        next.pendingInteraction = { ...active, ...(additionalRequests.length ? { additionalRequests } : {}) }
       }
       if (normalized.interaction) {
         const interaction = normalized.interaction
@@ -4270,17 +4343,15 @@ export class AgentMuxClient {
             'INVALID_AGENT_INTERACTION'
           )
         }
-        if (
-          current.pendingInteraction &&
-          current.pendingInteraction.request.id !== interaction.id
-        ) {
-          throw new AgentMuxError(
-            'Another Agent interaction is already pending.',
-            'AGENT_INTERACTION_BUSY'
-          )
-        }
-        next.pendingInteraction = current.pendingInteraction ?? {
-          request: structuredClone(interaction)
+        const previous = next.pendingInteraction
+        if (!previous) next.pendingInteraction = { request: structuredClone(interaction) }
+        else if (previous.request.id !== interaction.id && !previous.additionalRequests?.some(request => request.id === interaction.id)) {
+          // Preserve both observations instead of guessing which UI is active or refusing the Hook.
+          const additionalRequests = [...(previous.additionalRequests ?? []), structuredClone(interaction)]
+          if (previous.nativeCompleted) {
+            const [request, ...remaining] = additionalRequests
+            next.pendingInteraction = { request: request!, ...(remaining.length ? { additionalRequests: remaining } : {}) }
+          } else next.pendingInteraction = { ...previous, additionalRequests }
         }
       }
       return next
@@ -4333,8 +4404,10 @@ export class AgentMuxClient {
     // 这个推论。
     if (updatesSemanticStatus) this.publisher.publishHook(next, normalized, persistedReceipt)
     if (normalized.interaction) {
-      const request = next.pendingInteraction?.request
-      if (!request || request.id !== normalized.interaction.id) {
+      const request = next.pendingInteraction?.request.id === normalized.interaction.id
+        ? next.pendingInteraction.request
+        : next.pendingInteraction?.additionalRequests?.find(request => request.id === normalized.interaction!.id)
+      if (!request) {
         throw new AgentMuxError(
           'Native Agent interaction was not persisted.',
           'AGENT_INTERACTION_STATE_INVALID'

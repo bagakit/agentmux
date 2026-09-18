@@ -17,14 +17,18 @@ import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } 
 export function AgentInteractionCard({
   request,
   disabled = false,
+  responseUnavailableReason,
+  onOpenTerminal,
   onRespond
 }: {
   request: AgentMuxInteractionRequest
   disabled?: boolean
+  responseUnavailableReason?: string | undefined
+  onOpenTerminal?(): void
   onRespond(response: AgentMuxInteractionResponse): Promise<void>
 }) {
   const [submitting, setSubmitting] = useState(false)
-  const unavailable = disabled || submitting
+  const unavailable = disabled || submitting || Boolean(responseUnavailableReason)
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
     if (unavailable) return
     setSubmitting(true)
@@ -34,6 +38,19 @@ export function AgentInteractionCard({
       setSubmitting(false)
     }
   }
+
+  const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
+  if (reason) return (
+    <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" role="status">
+      <div className="agent-interaction__heading">
+        <ShieldAlert size={15} />
+        <div><strong>Answer in terminal</strong><span>{reason}</span></div>
+      </div>
+      {onOpenTerminal ? <div className="agent-interaction__actions">
+        <button type="button" onClick={onOpenTerminal}>Open terminal</button>
+      </div> : null}
+    </section>
+  )
 
   // 按 request 自己的 kind 分派，让 TS 收窄出这一支独有的展示字段（title/toolName/toolInput）；
   // 取值仍然只有一处，就是下面这个 plan。

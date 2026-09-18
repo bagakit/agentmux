@@ -137,6 +137,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       questionEvents: ['PermissionRequest', 'PreToolUse'],
       questionTools: ['askuserquestion'],
       questionCompletionEvents: ['PostToolUse'],
+      permissionCompletionEvents: ['PostToolUse'],
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,

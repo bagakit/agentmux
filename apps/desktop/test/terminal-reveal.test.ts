@@ -273,7 +273,7 @@ describe('输入只有一个出口', () => {
     // 同一个 sender——两者的 accepts 极性由下面「两个输入事件源共用一把闸一个出口」那组**真跑**
     // 的断言守，源码文本只钉"确实经那个共享出口接上了"。
     expect(code, 'onData/onBinary 没经 subscribeTerminalInput 接到 sender')
-      .toContain('subscribeTerminalInput(terminal, sendInput)')
+      .toContain('subscribeTerminalInput(terminal, (data, source) =>')
     // 键那一路（Shift+Enter 换行）：判据是 `terminalKeyEventHandler({ … })` 那个选项对象里的
     // `sendInput` **取的就是那个带闸的 sender 标识符本身**。
     //
@@ -358,10 +358,12 @@ describe('两个输入事件源共用一把闸一个出口', () => {
   /** 一个可被驱动的 xterm 输入事件源替身：记录 dispose，并允许测试主动触发两个事件。 */
   function fakeSource() {
     let onData: ((data: string) => void) | null = null
+    let onUserInput: (() => void) | null = null
     let onBinary: ((data: string) => void) | null = null
     let dataDisposed = false
     let binaryDisposed = false
     const source: TerminalInputEventSource = {
+      onUserInput: listener => { onUserInput = listener; return { dispose() {} } },
       onData: (listener) => {
         onData = listener
         return { dispose() { dataDisposed = true } }
@@ -373,7 +375,7 @@ describe('两个输入事件源共用一把闸一个出口', () => {
     }
     return {
       source,
-      fireData: (data: string) => onData?.(data),
+      fireData: (data: string) => { onUserInput?.(); onData?.(data) },
       fireBinary: (data: string) => onBinary?.(data),
       get dataDisposed() { return dataDisposed },
       get binaryDisposed() { return binaryDisposed }

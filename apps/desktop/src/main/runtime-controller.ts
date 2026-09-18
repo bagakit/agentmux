@@ -6,6 +6,7 @@ import {
   connectSshAgentMux,
   runtimeStorageUsage,
   loadAgentSessions,
+  agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
   type AgentCatalogEntry,
   type AgentExecutorId,
@@ -17,6 +18,7 @@ import {
   type AgentMuxAgentSessionStore,
   type AgentMuxRun,
   type AgentMuxRunInputData,
+  type AgentMuxAgentWriteInput,
   type AgentMuxRuntimeSubject,
   type AgentMuxRuntimeSubjectTarget,
   type ExecutionHost
@@ -210,6 +212,8 @@ function projectSession(
     // 覆盖成裸 running：同一个 Agent 在场看 running、reload 看 waiting，且两侧都不会红（实测把这里
     // 收窄成只认 native-hook，93 条全绿）。两侧现在同判一次，新增来源只需在 Core 那张表里表态一次。
     const semantic = subject.agentSession.semanticStatus
+    const pending = subject.agentSession.pendingInteraction
+    const unavailableReason = pending ? agentInteractionResponseUnavailableReason(pending) : undefined
     const status = run.state === 'running' && semantic && isAgentActivityStatusSource(semantic.source)
       ? structuredClone(semantic)
       : processStatus
@@ -225,6 +229,7 @@ function projectSession(
       label: agentFallbackLabel(config, subject),
       createdAt: subject.agentSession.createdAt,
       updatedAt: Math.max(subject.agentSession.updatedAt, observedAt),
+      agentSessionUpdatedAt: subject.agentSession.updatedAt,
       // The posture the create fixed at spawn. Projected as ids only: a surface resolves them against
       // the Provider's own catalog declaration for labels, so the argv stays in Core. Absent when the
       // create narrowed nothing, which a surface must show as "no scope declared" rather than a guess.
@@ -243,9 +248,8 @@ function projectSession(
       processState: run.state,
       ...runInterruptionFact(run),
       status,
-      ...(subject.agentSession.pendingInteraction
-        ? { pendingInteraction: structuredClone(subject.agentSession.pendingInteraction.request) }
-        : {}),
+      ...(pending ? { pendingInteraction: structuredClone(pending.request) } : {}),
+      ...(unavailableReason ? { interactionResponseUnavailableReason: unavailableReason } : {}),
       // 最近一 turn 的真实原生用量，随收尾事件的 hook 回执落在会话上。缺席就不投影，UI 据此显示
       // "此 Provider 不报 token 用量"或"还没有一 turn 的用量"，绝不落成 0。
       ...(subject.agentSession.turnUsage
@@ -938,9 +942,11 @@ export class RuntimeController {
     })
   }
 
-  async write(control: SessionControl, data: AgentMuxRunInputData): Promise<void> {
+  async write(control: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.writeAgent(control.agentSessionId, data)
+    if (control.kind === 'agent') await client.writeAgent({
+      agentSessionId: control.agentSessionId, expectedRun: control.run, data, source
+    })
     else await this.writeTerminalInput(client, control, data)
   }
 
@@ -1544,7 +1550,9 @@ export class RuntimeController {
     data: string
   ): Promise<void> {
     try {
-      await (await this.connectedClient(hostId)).writeAgent(agentSessionId, data)
+      await (await this.connectedClient(hostId)).writeAgent({
+        agentSessionId, expectedRun: { runId }, data, source: 'terminal-protocol'
+      })
     } catch (error) {
       console.error(`Failed to answer Terminal color query for Run ${runId}`, error)
     }

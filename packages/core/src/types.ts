@@ -209,6 +209,15 @@ export type AgentMuxRunAttachment = {
  */
 export type AgentMuxRunInputData = string | Uint8Array
 
+/** Native terminal input, addressed to the Run the caller actually observed. */
+export type AgentMuxAgentWriteInput = {
+  agentSessionId: string
+  expectedRun: AgentMuxRunRef
+  data: AgentMuxRunInputData
+  /** Protocol replies are not user attempts to answer a pending request. */
+  source: 'user' | 'terminal-protocol'
+}
+
 /** A terminal paste edits the current Run's draft without submitting a prompt. */
 export type AgentMuxAgentPasteInput = {
   agentSessionId: string
@@ -778,6 +787,8 @@ export type AgentMuxPermissionRequest = {
   kind: 'permission'
   id: string
   agentSessionId: string
+  /** Actual Provider-native invocation identity; absent when the Hook does not report it. */
+  nativeToolCallId?: string
   title: string
   options: AgentMuxPermissionOption[]
   toolName?: string
@@ -809,6 +820,8 @@ export type AgentMuxQuestionRequest = {
   /** Provider-native identity of this question tool invocation, when actually reported. */
   nativeToolCallId?: string
   questions: AgentMuxQuestion[]
+  /** The question is observed, but this Provider cannot plan a typed response to its shape. */
+  responseUnavailableReason?: string
   evidence: AgentMuxEvidence
 }
 
@@ -864,6 +877,16 @@ export type AgentMuxInteractionResponseState = {
 export type AgentMuxPendingInteraction = {
   request: AgentMuxInteractionRequest
   response?: AgentMuxInteractionResponseState
+  /** Other observed native requests do not prove that this current request ended. */
+  additionalRequests?: AgentMuxInteractionRequest[]
+  /** Exact Provider completion observed while a typed receipt is still outstanding; not its ACK. */
+  nativeCompleted?: AgentMuxEvidence
+  /** Native bytes do not identify an answer. Keep the old typed response unavailable until re-observed. */
+  nativeInput?: {
+    operationId: string
+    delivery: 'unknown' | 'accepted'
+    observedAt: number
+  }
 }
 
 export type AgentMuxAcpEvent =
@@ -1158,7 +1181,7 @@ export type NormalizedHookEvent = {
   timeline: AgentTimelineMutation[]
   interaction?: AgentMuxInteractionRequest
   interactionCompletion?: {
-    kind: 'question'
+    kind: 'question' | 'permission'
     agentSessionId: string
     nativeToolCallId: string
     evidence: AgentMuxEvidence

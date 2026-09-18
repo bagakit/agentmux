@@ -85,7 +85,7 @@ describe('Agent terminal interaction protocol', () => {
     })).toEqual({ data: '2' })
   })
 
-  it('does not claim unsupported multi-question or multi-select interactions', () => {
+  it('keeps unsupported question shapes observed with an explicit native response reason', () => {
     for (const toolInput of [
       {
         questions: [
@@ -95,14 +95,16 @@ describe('Agent terminal interaction protocol', () => {
       },
       { question: 'Choose?', multiSelect: true, options: ['A', 'B'] }
     ]) {
-      expect(normalizeTerminalInteraction({
+      const request = normalizeTerminalInteraction({
         receiptId: 'receipt-unsupported',
         agentSessionId: 'agent-1',
         runId: 'run-1',
         providerId: 'codex',
         eventName: 'PreToolUse',
         payload: { tool_name: 'request_user_input', tool_input: toolInput }
-      }, 100, codexProtocol)).toBeUndefined()
+      }, 100, codexProtocol)
+      expect(request).toMatchObject({ kind: 'question', id: 'receipt-unsupported', questions: [], responseUnavailableReason: expect.stringContaining('single-choice') })
+      expect(() => codexProtocol.planResponse(request!, { kind: 'question', requestId: request!.id, outcome: 'cancelled' })).toThrow('single-choice')
     }
   })
 
