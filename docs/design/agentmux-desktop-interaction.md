@@ -167,7 +167,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 
 - Space 的 `+` 提供 Open Folder As a Project、Create Another Topic 和 Create Mote；从任意当前 Space 创建 Topic/Mote 都进入其持久目录，不要求先切到默认 Topics。
 - Mote 创建时提供可编辑的 SOUL.md 和默认 PMO 角色；普通 Topic 不继承人格。一个目录中的 SOUL.md 是该目录具有持久人格的文件事实，和有没有运行 Session 分开。Topic 的知识基础继续保留，Mote 自行组织后续知识。
-- 左下角默认 Mote 仍打开已有协调对象的快捷面；入口的展开状态独立于 Working / Needs you 等真实 Session 状态，无障碍名称与描述可辨；树条目进入该对象的完整工作面。快捷面可打开完整 Space，完整面可编辑同一 SOUL.md。两条入口复用既有 Tab/Region/Session，不因面板开合新建对象；关闭快捷面恢复原执行上下文，进入完整 Space 则保留明确选择的新目标。
+- 左下角默认 Mote 仍打开已有协调对象的快捷面；入口的展开状态独立于 Working / Needs you 等真实 Session 状态，无障碍名称与描述可辨；树条目进入该对象的完整工作面。快捷面可打开完整 Space，完整面可编辑同一 SOUL.md。两条入口复用既有 Tab/Region/Session，不因面板开合新建对象；关闭快捷面恢复原执行上下文，进入完整 Space 则保留明确选择的新目标。同一 Mote 有多个会话时，快捷面与重启恢复保留已有目标 Tab 和 Mote 焦点，不能仅因它排在列表前面就换到另一个会话；浮层的目标选择不改写原主工作面的选中。
 - 新 Mote 从没有运行 Session 的可用启动面开始，不凭打开或创建预制启动额外 Terminal。普通 Topic 的首次 Terminal 规则继续成立。
 - SOUL.md 的内容在新执行会话启动时作为该 Mote 的人格上下文实际传入 Core；恢复已有会话保留其原上下文和持久目录。正在运行的会话不因文件保存而声称已热更新；文件编辑入口明确说明新会话使用更新后的内容。读取失败应给出可见原因，原目录、工作面和健康 Session 保留。
 - Topic 升级成角色、复制、归档和自定义头像是此前 Agent 提出的额外设想，不是本轮已确认需求。
