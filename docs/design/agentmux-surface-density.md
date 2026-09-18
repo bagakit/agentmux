@@ -1,5 +1,7 @@
 # AgentMux Surface 与密度合同
 
+Provider 完整性（Session 分析、对话模式与 trace 观察）的行为与能力边界统一见 [交互合同《Provider 能力对齐与移植边界》](agentmux-desktop-interaction.md#provider-能力对齐与移植边界)。同类消息、资源与观察事实沿既有公共组件呈现；缺口与流程降级沿既有服务窗表达，不能逐家制造另一套控件语言。
+
 ## 左下角导航与右下角工具组
 
 全局导航以窗口左下角为稳定锚点。入口顺序、Space/Goals 命名、PMO 浮窗和焦点语义只定义在交互 SSOT《左下角导航、Space 与 Goals》。
