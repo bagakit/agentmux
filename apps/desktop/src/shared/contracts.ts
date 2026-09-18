@@ -1,5 +1,6 @@
 import type {
   AgentCatalogEntry,
+  AgentMuxAgentSession,
   AgentMuxAgentContinuityResult,
   AgentMuxAgentContinuityConflictReason,
   AgentMuxAgentContinuityUnavailableReason,
@@ -956,8 +957,11 @@ export type AgentSessionRecoveryCandidate = {
 }
 
 export type AgentLaunchResult = {
-  session: Extract<SessionSnapshot, { kind: 'agent' }>
-  timeline: AgentTimelineSnapshot
+  /** One public Core creation receipt; missing display reads never revoke it. */
+  created: AgentMuxAgentSession
+  session?: Extract<SessionSnapshot, { kind: 'agent' }>
+  timeline?: AgentTimelineSnapshot
+  projectionFailures: Array<{ step: 'session' | 'timeline'; message: string }>
 }
 
 export type SessionAttachResult = {

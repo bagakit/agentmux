@@ -771,7 +771,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.stopAgent).not.toHaveBeenCalled()
   })
 
-  it('stops a created Agent when its launch projection cannot produce the matching Timeline baseline', async () => {
+  it('keeps a created Agent when its launch projection cannot produce the matching Timeline baseline', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const status = agentStatusFixture()
@@ -809,8 +809,12 @@ describe('RuntimeController configuration transaction', () => {
       hostId: 'local',
       workspacePath: _hygiene_fixturePath("repo"),
       agentSessionId: 'agent-1'
-    }, config)).rejects.toThrow('Agent launch returned a Timeline for another Session')
-    expect(client.stopAgent).toHaveBeenCalledWith('agent-1', { runId: 'run-1' })
+    }, config)).resolves.toMatchObject({
+      created: { agentSessionId: 'agent-1', run: { runId: 'run-1' } },
+      session: { id: 'agent-1' },
+      projectionFailures: [{ step: 'timeline', message: 'Agent launch returned a Timeline for another Session: another-session' }]
+    })
+    expect(client.stopAgent).not.toHaveBeenCalled()
   })
 
   it.each(['resumeSession', 'recoverSession'] as const)(
@@ -2096,7 +2100,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(first.currentSize).toEqual({ cols: 132, rows: 45 })
     expect(second.currentSize).toBeNull()
     expect(client.attachTerminal).toHaveBeenCalledOnce()
-    expect(client.readRunReplay).toHaveBeenCalledWith(control.run, 8)
+    expect(client.readRunReplay).toHaveBeenCalledWith(control.run, 8, 'terminal')
     expect(controller.resourceOwnerCounts()).toEqual({
       sessionAttachmentOwners: 1,
       sessionAttachmentLeases: 2

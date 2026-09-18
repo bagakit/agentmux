@@ -47,6 +47,9 @@ export type PendingAgentLaunch = {
   request?: { executorId: string; prompt?: string }
   events: RuntimeEvent[]
   overflowed: boolean
+  /** Accepted Core identity while optional display reads are unavailable. */
+  created?: AgentLaunchResult['created']
+  projectionFailures?: AgentLaunchResult['projectionFailures']
 }
 
 export type RuntimeEventReduction = {
@@ -221,22 +224,38 @@ function projectAgentLaunchResult(
   state: SessionProjectionState,
   result: AgentLaunchResult
 ): RuntimeEventReduction {
-  const pending = state.pendingAgentLaunches[result.session.id]
-  let gap = false
+  const id = result.created.agentSessionId
+  const pending = state.pendingAgentLaunches[id]
+  const current = state.sessions.find((session) => session.id === id)
+  // A later canonical Run must never be replaced by an old creation receipt.
+  const newer = current?.kind === 'agent' &&
+    !sameRun(current.control.run, result.created.run) && current.updatedAt >= result.created.updatedAt
+  const incoming = !newer && result.session?.id === id &&
+    sameRun(result.session.control.run, result.created.run) ? result.session : undefined
+  const session = incoming && current?.kind === 'agent' && current.updatedAt > incoming.updatedAt
+    ? current : incoming
+  const timeline = result.timeline?.agentSessionId === id ? result.timeline : undefined
+  const failures = newer ? [] : result.projectionFailures
+  const unresolved = !newer && (!session || !timeline || failures.length > 0)
   let projected: SessionProjectionState = {
     ...state,
-    timelines: { ...state.timelines, [result.session.id]: result.timeline },
-    pendingAgentLaunches: withoutKey(state.pendingAgentLaunches, result.session.id)
+    ...(session ? { sessions: [...state.sessions.filter((item) => item.id !== id), session] } : {}),
+    ...(timeline && (!state.timelines[id] || timeline.revision > state.timelines[id].revision)
+      ? { timelines: { ...state.timelines, [id]: timeline } } : {}),
+    pendingAgentLaunches: unresolved
+      ? { ...state.pendingAgentLaunches, [id]: {
+          ...pending, events: session ? [] : pending?.events ?? [], overflowed: pending?.overflowed ?? false,
+          created: result.created, projectionFailures: failures
+        } }
+      : withoutKey(state.pendingAgentLaunches, id)
   }
-  for (const buffered of pending?.events ?? []) {
+  let gap = Boolean(session && !timeline)
+  if (session) for (const buffered of pending?.events ?? []) {
     const reduced = projectRuntimeEvent(projected, buffered)
     projected = reduced.state
-    gap ||= reduced.timelineGapSessionId === result.session.id
+    gap ||= reduced.timelineGapSessionId === id
   }
-  return {
-    state: projected,
-    ...(gap ? { timelineGapSessionId: result.session.id } : {})
-  }
+  return { state: projected, ...(gap ? { timelineGapSessionId: id } : {}) }
 }
 
 export function reduceAgentSessionLaunchAttached(
@@ -244,19 +263,23 @@ export function reduceAgentSessionLaunchAttached(
   regionId: string,
   result: AgentLaunchResult
 ): RuntimeEventReduction {
-  const attached = reduceSessionLaunchAttached(state, regionId, result.session)
-  return attached === state ? { state } : projectAgentLaunchResult(attached, result)
+  const owner = findWorkbenchRegion(state.tabs, regionId)
+  if (!owner || !ownsSessionLaunch(owner.surface, 'agent', result.created.agentSessionId)) return { state }
+  const attached = {
+    ...state,
+    tabs: { ...state.tabs, [owner.tab.id]: updateWorkbenchRegion(owner.tab, regionId, (surface) => (
+      surface.kind === 'agent' ? { ...surface, phase: 'attached' } : surface
+    )) },
+    viewModes: { ...state.viewModes, [result.created.agentSessionId]: 'terminal' as const }
+  }
+  return projectAgentLaunchResult(attached, result)
 }
 
 export function reduceDetachedAgentLaunch(
   state: SessionProjectionState,
   result: AgentLaunchResult
 ): RuntimeEventReduction {
-  const projected = {
-    ...state,
-    sessions: [...state.sessions.filter((session) => session.id !== result.session.id), result.session]
-  }
-  return projectAgentLaunchResult(projected, result)
+  return projectAgentLaunchResult(state, result)
 }
 
 export function reduceTimelineSnapshot(
@@ -267,10 +290,16 @@ export function reduceTimelineSnapshot(
     return state
   }
   const current = state.timelines[snapshot.agentSessionId]
-  if (current && snapshot.revision <= current.revision) return state
+  const pending = state.pendingAgentLaunches[snapshot.agentSessionId]
+  const failures = pending?.projectionFailures?.filter(failure => failure.step !== 'timeline')
   return {
     ...state,
-    timelines: { ...state.timelines, [snapshot.agentSessionId]: snapshot }
+    ...(current && snapshot.revision <= current.revision ? {} : {
+      timelines: { ...state.timelines, [snapshot.agentSessionId]: snapshot }
+    }),
+    ...(pending?.created && failures ? { pendingAgentLaunches: failures.length > 0
+      ? { ...state.pendingAgentLaunches, [snapshot.agentSessionId]: { ...pending, projectionFailures: failures } }
+      : withoutKey(state.pendingAgentLaunches, snapshot.agentSessionId) } : {})
   }
 }
 

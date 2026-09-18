@@ -19,6 +19,7 @@ import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from './ConversationMessage'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
@@ -263,6 +264,32 @@ export function SessionPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.kind, missing, interruptionReason])
 
+  const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
+    ? pendingLaunch.created : undefined
+  const launchFailures = pendingLaunch?.projectionFailures ?? []
+  const launchNotice = acceptedLaunch && launchFailures.length > 0 ? (
+    <div>
+      <ServiceWindowNotice notice={{
+        kind: session?.processState === 'running' ? 'process-degraded' : 'indeterminate',
+        notice: {
+          step: `Agent created; ${launchFailures.map(failure => `${failure.step}: ${failure.message}`).join('; ')}`,
+          mode: session?.processState === 'running'
+            ? 'The confirmed running Session and its input remain available.'
+            : 'Creation is confirmed. Process observation and input availability are not yet confirmed.',
+          restore: 'Check again to re-read this same Session and Timeline. No new Agent will be created.'
+        }
+      }} />
+      {!readOnly ? <button type="button" className="small-button" disabled={refreshing}
+        onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null}
+    </div>
+  ) : null
+  if (!session && acceptedLaunch) {
+    return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
+      <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
+      {!readOnly ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
+    </section>
+  }
+
   // A launching Region exists before Core returns its Session snapshot. Keep that handoff
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
   if (!session || !terminalThemeId) {
@@ -330,6 +357,7 @@ export function SessionPane({
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
+      {launchNotice}
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
           <div className="agent-terminal-stage">

@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -74,7 +75,7 @@ function agent(
 }
 
 function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentLaunchResult {
-  return { session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
+  return { created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
 }
 
 function scratchTopicTab(tabId: string, topicId?: string): WorkbenchTab {
