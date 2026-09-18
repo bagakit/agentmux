@@ -38,7 +38,21 @@ function button(label: string) {
   expect(found, label).not.toBeNull()
   return found!
 }
-async function settle() { await act(async () => { await Promise.all(pending); await new Promise((resolve) => setTimeout(resolve, 25)) }) }
+function track<T>(operation: Promise<T>): Promise<T> {
+  pending.push(operation.then(() => undefined))
+  return operation
+}
+async function settle() {
+  await act(async () => {
+    let completed = 0
+    while (completed < pending.length) {
+      const batch = pending.slice(completed)
+      completed = pending.length
+      await Promise.all(batch)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  })
+}
 async function render() {
   await act(async () => root.render(createElement(Fragment, null,
     createElement('button', { id: 'execution-focus' }, 'Execution input'), createElement(NavigationTarget),
@@ -54,10 +68,10 @@ beforeEach(async () => {
   const service = new ScratchTopics()
   await service.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)
   await service.renameTitle(workspace, PMO_TEAMS_TOPIC_ID, 'My coordinator')
-  vi.spyOn(api.scratch, 'ensureTopic').mockImplementation(async (_id, topic) => service.ensure(workspace, topic))
-  vi.spyOn(api.scratch, 'ensureMote').mockImplementation(async (_id, topic) => service.ensureMote(workspace, topic))
-  vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_id, topic) => service.read(workspace, topic))
-  vi.spyOn(api.scratch, 'listTopics').mockImplementation(async () => service.list(workspace))
+  vi.spyOn(api.scratch, 'ensureTopic').mockImplementation((_id, topic) => track(service.ensure(workspace, topic)))
+  vi.spyOn(api.scratch, 'ensureMote').mockImplementation((_id, topic) => track(service.ensureMote(workspace, topic)))
+  vi.spyOn(api.scratch, 'readTopic').mockImplementation((_id, topic) => track(service.read(workspace, topic)))
+  vi.spyOn(api.scratch, 'listTopics').mockImplementation(() => track(service.list(workspace)))
   vi.spyOn(api.scratch, 'renameTitle')
   vi.spyOn(api.sessions, 'launchTerminal')
   const open = baseline.openScratchTopic
@@ -70,7 +84,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); window.localStorage.clear()
+  await act(async () => root.unmount()); await settle(); container.remove(); window.localStorage.clear()
   vi.restoreAllMocks(); useAppStore.setState(baseline, true); await rm(directory, { recursive: true, force: true })
 })
 it('reuses the same durable Mote from the fixed shortcut and tree without changing execution context', async () => {
