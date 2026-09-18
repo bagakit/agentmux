@@ -6,7 +6,7 @@ import { api } from '../lib/api'
 import {
   clampPmoTeamsTopicFloatingState,
   requestPmoTeamsTopicFloatingClose,
-  usePmoTeamsTopicFloatingState,
+  PMO_FLOATING_TAB_SLOT_PREFIX,
   type PmoTeamsTopicFloatingState
 } from '../lib/pmo-teams-topic-floating'
 import { topicIdForSession } from '../lib/workbench-tabs'
@@ -27,7 +27,10 @@ type PanelDrag = {
   frameId: number | null
 }
 
-export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
+export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
+  floating: PmoTeamsTopicFloatingState
+  setFloating: (next: Partial<PmoTeamsTopicFloatingState>) => void
+}): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const launchAgent = useAppStore((state) => state.launchAgent)
@@ -40,7 +43,6 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   const pmoSessionId = useAppStore((state) => pmoFocusSessionId(state.agentFocus))
   const agentNames = useAppStore((state) => state.agentNames)
   const reportError = useAppStore((state) => state.reportError)
-  const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const [opening, setOpening] = useState(false)
   const deliveredPromptRef = useRef<string | null>(null)
   const conversationInitializedRef = useRef<string | null>(null)
@@ -138,7 +140,7 @@ export function PmoTeamsTopicFloatingPanel(): React.JSX.Element | null {
   }, [floating, setFloating])
 
   const workbench = useMemo(
-    () => <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" visible={visible} interactiveResize={false} />,
+    () => <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" viewOwnership="projection" viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} visible={visible} interactiveResize={false} />,
     [visible]
   )
 

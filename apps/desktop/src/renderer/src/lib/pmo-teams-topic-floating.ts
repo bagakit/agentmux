@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
+
 // Stable UI state key: renaming the code surface must not lose a user's saved position/size.
 const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
 const EVENT_NAME = 'agentmux:pmo-teams-topic-floating'

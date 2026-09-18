@@ -31,6 +31,7 @@ export type TerminalParkingCollectionInput = {
   sessions: readonly SessionSnapshot[]
   activeWorkspaceId: string | null
   workbenchVisible: boolean
+  projectedVisibleTabIds?: ReadonlySet<string> | undefined
 }
 
 /**
@@ -93,6 +94,7 @@ export function collectTerminalColdParkCandidates(
 
 type TerminalParkingCoordinatorOptions = {
   workbenchVisible: boolean
+  projectedVisibleTabIds?: ReadonlySet<string> | undefined
   /** Resource probes own their measurement window and must observe the unparked baseline. */
   measurementActive?: boolean
   parkingEnabled?: boolean
@@ -128,6 +130,7 @@ export function useTerminalRegionParked(regionId: string): boolean {
  */
 export function useTerminalColdParking({
   workbenchVisible,
+  projectedVisibleTabIds,
   measurementActive = false,
   parkingEnabled = true
 }: TerminalParkingCoordinatorOptions): ReadonlySet<string> {
@@ -154,9 +157,10 @@ export function useTerminalColdParking({
       layouts,
       sessions,
       activeWorkspaceId,
-      workbenchVisible
+      workbenchVisible,
+      projectedVisibleTabIds
     }),
-    [activeWorkspaceId, layouts, sessions, tabs, workbenchVisible]
+    [activeWorkspaceId, layouts, sessions, tabs, workbenchVisible, projectedVisibleTabIds]
   )
   const candidateKey = useMemo(
     () => candidates.map((candidate) => [

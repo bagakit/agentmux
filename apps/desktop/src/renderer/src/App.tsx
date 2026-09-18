@@ -24,12 +24,15 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
+import { PMO_FLOATING_TAB_SLOT_PREFIX, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
 import { tabForFocusedSession } from './lib/focus-tab-projection'
+import { layoutForActiveTopic } from './lib/scratch-topic-layout'
 import { api } from './lib/api'
 import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
@@ -67,6 +70,18 @@ function DesktopApp() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
   const tabs = useAppStore((state) => state.tabs)
+  const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
+  const moteViewTargets = useMemo(() => {
+    const layout = layouts[SCRATCH_WORKSPACE_ID]
+    if (!moteFloating.open || !layout) return undefined
+    const targets: Record<string, string> = {}
+    // Move only the floating projection's active Views. Hidden Tabs stay parked and cannot
+    // resize their terminal against an inactive slot; the projection uses this same layout.
+    for (const group of layoutForActiveTopic(layout, tabs, PMO_TEAMS_TOPIC_ID, false).groups) {
+      if (group.activeTabId) targets[group.activeTabId] = `${PMO_FLOATING_TAB_SLOT_PREFIX}:${group.activeTabId}`
+    }
+    return targets
+  }, [moteFloating.open, layouts[SCRATCH_WORKSPACE_ID], tabs])
   const agentFocus = useAppStore((state) => state.agentFocus)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
@@ -129,6 +144,9 @@ function DesktopApp() {
   }, [fileEditingProbe])
   const focusSessionId = mainSurface === 'agents' ? executionFocusSessionId(agentFocus) : null
   const focusTab = tabForFocusedSession(tabs, focusSessionId)
+  const projectedVisibleTabIds = useMemo(() => new Set([
+    ...Object.keys(moteViewTargets ?? {}), ...(focusTab ? [focusTab.id] : [])
+  ]), [moteViewTargets, focusTab?.id])
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
@@ -230,7 +248,7 @@ function DesktopApp() {
   return (
     <SettingsNavigation.Provider value={{ open: openSettings }}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
-      <RendererResourceOwners workbenchVisible={workbenchVisible || Boolean(focusTab)} measurementActive={terminalParkingMeasurement}>
+      <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} measurementActive={terminalParkingMeasurement}>
       <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
@@ -247,16 +265,7 @@ function DesktopApp() {
             <TopRowLeadingChrome />
           </header>
         ) : null}
-        {!workspace && mainSurface === 'workbench' ? (
-          <section className="welcome">
-            <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
-            <div className="eyebrow">Terminal-first agent workbench</div>
-            <h1>Bring a workspace.<br />Keep the agents visible.</h1>
-            <p>Add a local folder from the sidebar, or configure an SSH host and remote path.</p>
-            <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
-          </section>
-        ) : (
-          <div className="workbench-shell">
+        <div className="workbench-shell">
             {toolsVisible ? (
               <div
                 ref={containerRef}
@@ -285,10 +294,19 @@ function DesktopApp() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
+              {!workspace && mainSurface === 'workbench' ? (
+                <section className="welcome">
+                  <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
+                  <div className="eyebrow">Terminal-first agent workbench</div>
+                  <h1>Bring a workspace.<br />Keep the agents visible.</h1>
+                  <p>Add a local folder from the sidebar, or configure an SSH host and remote path.</p>
+                  <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
+                </section>
+              ) : null}
               {mainSurface === 'survey' ? <GlobalSurveySurface /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
-              {config && (workspace || focusTab) ? (
+              {config && mountedWorkspaces.length > 0 ? (
                 <div
                   className={`workspace-workbench-registry ${workbenchVisible || focusTab ? '' : 'workspace-workbench-registry--parked'}`}
                   aria-hidden={!workbenchVisible && !focusTab}
@@ -312,6 +330,7 @@ function DesktopApp() {
                           visible={mounted}
                           focusTabId={focusVisible && focusTab ? focusTab.id : null}
                           focusPortalTargetId={focusVisible ? 'focus-workspace-slot' : null}
+                          viewTargets={candidate.id === SCRATCH_WORKSPACE_ID ? moteViewTargets : undefined}
                           interactiveResize={windowResizeActive || isResizing}
                         />
                       </div>
@@ -319,10 +338,9 @@ function DesktopApp() {
                   })}
                 </div>
               ) : null}
-              <PmoTeamsTopicFloatingPanel />
+              <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />
             </section>
           </div>
-        )}
         <div className="main-shell__notices">
           <TransientErrorNotice
             error={error}

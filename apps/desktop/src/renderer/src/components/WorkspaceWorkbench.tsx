@@ -450,6 +450,7 @@ function SortableWorkbenchTab({
             tabIndex={0}
             className="workbench-tab__close"
             aria-label={`Close ${displayName}`}
+            title={`Close ${displayName}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => void requestClose(event)}
             onKeyDown={(event) => {
@@ -877,7 +878,8 @@ function PaneGroup({
   nativeSurfacesVisible,
   interactiveResize,
   isRootLeaf,
-  showWindowChrome = false
+  showWindowChrome = false,
+  viewHostPrefix
 }: {
   group: TabGroup
   workspaceId: string
@@ -890,6 +892,7 @@ function PaneGroup({
   interactiveResize: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  viewHostPrefix: string
 }) {
   const tabsById = useAppStore((state) => state.tabs)
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
@@ -1023,7 +1026,7 @@ function PaneGroup({
             // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
             inert={tab.id !== group.activeTabId}
           >
-            <div id={`workbench-tab-slot:${tab.id}`} className="workbench-tab-slot" />
+            <div id={`${viewHostPrefix}:${tab.id}`} className="workbench-tab-slot" />
           </div>
         )) : (
           <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
@@ -1059,7 +1062,8 @@ function SplitNode({
   nativeSurfacesVisible,
   interactiveResize = false,
   isRootLeaf = false,
-  showWindowChrome = false
+  showWindowChrome = false,
+  viewHostPrefix
 }: {
   node: TabGroupLayoutNode
   nodePath: string
@@ -1072,6 +1076,7 @@ function SplitNode({
   interactiveResize?: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  viewHostPrefix: string
 }) {
   if (node.type === 'leaf') {
     const group = layout.groups.find((candidate) => candidate.id === node.groupId)
@@ -1087,6 +1092,7 @@ function SplitNode({
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
         showWindowChrome={showWindowChrome}
+        viewHostPrefix={viewHostPrefix}
       />
     ) : null
   }
@@ -1102,6 +1108,7 @@ function SplitNode({
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
+      viewHostPrefix={viewHostPrefix}
     />
   )
 }
@@ -1116,7 +1123,8 @@ function SplitBranch({
   surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
-  showWindowChrome
+  showWindowChrome,
+  viewHostPrefix
 }: {
   node: Extract<TabGroupLayoutNode, { type: 'split' }>
   nodePath: string
@@ -1128,6 +1136,7 @@ function SplitBranch({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   showWindowChrome: boolean
+  viewHostPrefix: string
 }) {
   const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
   const [dragging, setDragging] = useState(false)
@@ -1162,6 +1171,7 @@ function SplitBranch({
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
+          viewHostPrefix={viewHostPrefix}
         />
       </Panel>
       <PanelResizeHandle
@@ -1183,6 +1193,7 @@ function SplitBranch({
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={false}
+          viewHostPrefix={viewHostPrefix}
         />
       </Panel>
     </PanelGroup>
@@ -1217,7 +1228,10 @@ export function WorkspaceWorkbench({
   topicId,
   topicIsolation = 'default',
   focusTabId = null,
-  focusPortalTargetId = null
+  focusPortalTargetId = null,
+  viewOwnership = 'owner',
+  viewHostPrefix = 'workbench-tab-slot',
+  viewTargets
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1233,6 +1247,11 @@ export function WorkspaceWorkbench({
   /** When Focus owns a Session, keep this Workbench instance alive but project one complete Tab into Focus. */
   focusTabId?: string | null
   focusPortalTargetId?: string | null
+  /** Projection chrome supplies slots; the window registry remains the single View owner. */
+  viewOwnership?: 'owner' | 'projection'
+  viewHostPrefix?: string
+  /** Explicit visible destinations move existing Tab contents without mounting another tree. */
+  viewTargets?: Readonly<Record<string, string>> | undefined
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
@@ -1339,20 +1358,22 @@ export function WorkspaceWorkbench({
           nodePath=""
           workspaceId={workspaceId}
           layout={layout}
-          allLayout={storedLayout ?? layout}
+          allLayout={viewOwnership === 'owner' ? storedLayout ?? layout : layout}
           splitTarget={splitTarget}
           surfaceVisible={visible && !focusTab}
           nativeSurfacesVisible={visible && !focusTab && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
+          viewHostPrefix={viewHostPrefix}
         />
       </div>
-      {Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
+      {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
         const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
-        const tabVisible = visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id)
-        return <StableWorkbenchView key={tab.id} homeId={`workbench-tab-slot:${tab.id}`} targetId={focusTab?.id === tab.id ? focusPortalTargetId : null}>
+        const targetId = focusTab?.id === tab.id ? focusPortalTargetId : viewTargets?.[tab.id] ?? null
+        const tabVisible = targetId !== null || (visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
+        return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionNode
             node={tab.layout.root} nodePath="" tab={tab} groupId={ownerId}

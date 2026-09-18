@@ -4498,6 +4498,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
+    // Ordinary Topics open one attached Terminal through the existing Region lifecycle.
+    // Mote creation keeps its launcher so selecting a personality does not start a shell.
+    const createdLayout = get().layouts[workspace.id]
+    const createdGroup = tabGroupForTab(createdLayout, targetTab.id)
+    if (createdGroup && preset !== 'mote' && !snapshot.soul) {
+      await get().promoteWarmTerminal(createdGroup, { tabId: targetTab.id, regionId: targetTab.layout.activeRegionId })
+    }
     return snapshot
   },
   setScratchTopicOrder(order) {
@@ -4532,7 +4539,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const priorTabIds = new Set(Object.keys(state.tabs))
+    let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
       const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
@@ -4551,6 +4558,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return current
       }
       if (boundTab) {
+        if (!reveal) return current
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
           ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
@@ -4568,10 +4576,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         placementFailed = true
         return current
       }
+      createdLauncher = tab
+      // Background preparation adds a retained owner without selecting it behind the float.
+      // The floating chrome derives its bound-only layout from these same Tabs.
+      const placedLayout = reveal ? nextLayout : {
+        ...nextLayout, activeGroupId: layout.activeGroupId,
+        groups: nextLayout.groups.map(group => {
+          const original = layout.groups.find(candidate => candidate.id === group.id)
+          return original ? { ...group, activeTabId: original.activeTabId, recentTabIds: original.recentTabIds } : group
+        })
+      }
       return {
         ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
         tabs: { ...current.tabs, [tab.id]: tab },
-        layouts: { ...current.layouts, [workspace.id]: nextLayout }
+        layouts: { ...current.layouts, [workspace.id]: placedLayout }
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
@@ -4580,19 +4598,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // the same lifecycle path used by the New Tab Terminal action. Background preparation (the
     // fixed PMO Teams Topic) deliberately stops at the launcher so it cannot steal the user's focus
     // or start a duplicate terminal.
-    const liveState = get()
-    const liveLayout = liveState.layouts[workspace.id]
-    const createdLauncher = liveLayout
-      ? Object.values(liveState.tabs).find((tab) => (
-        tab.workspaceId === workspace.id &&
-        tab.topicId === topicId &&
-        !priorTabIds.has(tab.id) &&
-        tabGroupForTab(liveLayout, tab.id) !== null &&
-        titleWorkbenchSurface(tab).kind === 'launcher'
-      ))
-      : undefined
+    const liveLayout = get().layouts[workspace.id]
     if (createdLauncher && reveal && liveLayout && !snapshot.soul) {
-      await get().launchTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
+      await get().promoteWarmTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
         tabId: createdLauncher.id,
         regionId: createdLauncher.layout.activeRegionId
       })
@@ -5177,10 +5185,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     const held = state.warmTerminal
-    // Consume the slot before awaiting so concurrent clicks cannot claim it twice.
-    set({ warmTerminal: null })
+    // Reserve an explicit launcher Region while the warm Run is in flight. Otherwise its
+    // still-mounted create page sees an empty warm slot and starts another shell before this
+    // one attaches. Claim the existing healthy Run; do not stop it to repair our projection.
+    const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
+      regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
+      sessionId: held.session?.id ?? crypto.randomUUID()
+    } : undefined
+    set((current) => ({ warmTerminal: null, ...(pendingSurface && launcherTab ? {
+      tabs: { ...current.tabs, [launcherTab.id]: replaceWorkbenchRegion(launcherTab, pendingSurface.regionId, pendingSurface) }
+    } : {}) }))
     const session = await held.ready
     if (!session) {
+      if (pendingSurface && launcherTab && launcherSurface) {
+        let restored = false
+        set((current) => {
+          const live = current.tabs[launcherTab.id]
+          if (!live || !ownsSessionLaunch(live.regions[pendingSurface.regionId], 'terminal', pendingSurface.sessionId)) return current
+          restored = true
+          return { tabs: { ...current.tabs, [live.id]: replaceWorkbenchRegion(live, pendingSurface.regionId, launcherSurface) } }
+        })
+        if (!restored) return
+      }
       await get().launchTerminal(tabGroupId, launcher)
       return
     }
@@ -5220,7 +5246,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       let baseTab = targetTab
       if (launcher) {
         const live = current.tabs[tabId]
-        if (!live || live.regions[regionId]?.kind !== 'launcher') return current
+        if (!live || (pendingSurface
+          ? !ownsSessionLaunch(live.regions[regionId], 'terminal', pendingSurface.sessionId)
+          : live.regions[regionId]?.kind !== 'launcher')) return current
         baseTab = live
       }
       const nextTabs = { ...current.tabs, [tabId]: replaceWorkbenchRegion(baseTab, regionId, surface) }
