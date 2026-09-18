@@ -35,6 +35,13 @@ describe('终端链接预览：压平后仍守住的性质', () => {
     expect(previewRule()).toContain('pointer-events: none')
   })
 
+  it('绝对定位的读出宽度随 Region 收敛，不推动网格或溢出窄栏', () => {
+    const rule = previewRule()
+    expect(rule).toContain('position: absolute')
+    expect(rule).toContain('box-sizing: border-box')
+    expect(rule).toMatch(/max-width:\s*min\([^;]*100%[^;]*\)/)
+  })
+
   it('仍有 box-shadow 作为与终端的分离——平不等于隐形', () => {
     // 只判「有阴影」这个性质，不钉具体是 elev-1 还是 elev-2：压得更平可以换更浅的阴影，
     // 但完全删掉阴影就失去了在任意终端底色上的边界。

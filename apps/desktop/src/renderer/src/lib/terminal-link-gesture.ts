@@ -8,12 +8,15 @@
 export const TERMINAL_LINK_DRAG_SLOP_PX = 4
 
 export function isTerminalLinkClick(input: {
+  button: number
+  /** macOS Ctrl+primary is a context-menu gesture despite its button=0 MouseEvent. */
+  contextMenu: boolean
   /** Where the gesture began, or null when no press was seen (e.g. a synthetic activation). */
   origin: { x: number; y: number } | null
   release: { x: number; y: number }
   hasSelection: boolean
 }): boolean {
-  if (input.hasSelection) return false
+  if (input.button !== 0 || input.contextMenu || input.hasSelection) return false
   if (!input.origin) return true
   return (
     Math.abs(input.release.x - input.origin.x) <= TERMINAL_LINK_DRAG_SLOP_PX &&

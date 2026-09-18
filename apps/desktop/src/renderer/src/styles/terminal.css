@@ -18,40 +18,40 @@
   margin-left:var(--sp-2);
 }
 .terminal-view__xterm--hydrating { visibility: hidden; }
-/* Hover preview for terminal links: a passive role=tooltip / pointer-events:none readout, anchored
-   by JS so it never covers the link. `above` grows upward from its top edge; `below` grows downward.
-   刻意比共用的浮层配方（.agent-roster/.resource-usage 等 elev-2+hl-strong+菜单入场）更平：那套
-   是「你点出来的」交互菜单语言（见 agentmux-surface-density.md《动效》「菜单从指针处生长」），
-   而这是被动悬停信息，不该受光、不该从指针处弹出。可读性靠的不是深度而是近乎不透明的
-   --overlay-surface 填充（文字对比来自面板底色而非终端）＋ --scrim-2 一圈暗描边（无论终端底色
-   是深是浅都给出边界），--elev-1 只做「浮着但几乎不抬」的一点分离。 */
+/* Passive pane-corner status readout; the opposite vertical edge keeps the hovered row clear.
+   Absolute positioning stays within this Region without changing xterm's grid or taking input. */
 .terminal-link-preview {
-  position: fixed;
+  position: absolute;
+  box-sizing: border-box;
+  left: 0;
+  bottom: 0;
   z-index: 40;
-  max-width: 360px;
-  display: flex;
-  align-items: center;
-  gap:var(--sp-3);
+  max-width: min(360px, 100%);
+  display: grid;
+  gap:var(--sp-1);
   padding:var(--sp-2) var(--sp-4);
-  border-radius: var(--radius-sm);
+  border-radius: 0 var(--radius-sm) 0 0;
   color: var(--text-2);
   background: var(--overlay-surface);
-  box-shadow: var(--elev-1), 0 0 0 1px var(--scrim-2);
+  box-shadow: 0 0 0 1px var(--scrim-2);
   pointer-events: none;
 }
-.terminal-link-preview[data-placement='above'] { transform: translateY(-100%); }
-.terminal-link-preview > svg { flex: 0 0 auto; color: var(--green); }
+.terminal-link-preview[data-placement='top'] {
+  top: 0;
+  bottom: auto;
+  border-radius: 0 0 var(--radius-sm) 0;
+}
 .terminal-link-preview__url {
   min-width: 0;
   overflow: hidden;
-  font: 10px/1.4 var(--font-mono);
+  font: 11px/1.4 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .terminal-link-preview__hint {
-  flex: 0 0 auto;
-  padding-left:var(--sp-4);
-  margin-left:var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-3);
   font: 10px/1.2 var(--font-mono);
   white-space: nowrap;
