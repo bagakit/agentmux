@@ -1,4 +1,5 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
+import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { agentDisplayName, firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
@@ -11,8 +12,13 @@ export type FocusContext = {
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
+  lastActivityAt: number | null
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null }
+function activityEntryTime(session: SessionSnapshot): number | undefined {
+  const activity = session.kind === 'agent' ? session.semanticStatus : undefined
+  return activity && isAgentActivityStatusSource(activity.source) ? activity.stateEnteredAt : undefined
+}
 export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean): FocusBucket {
   const state = session.status.state
   if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
@@ -31,6 +37,10 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? 'Stopped' : state === 'starting' ? 'Starting' : 'Working'
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const workspace = workspaceForSession(config, session)
+  const activityTimes = items.filter(item => item.kind !== 'lifecycle').map(item => item.updatedAt)
+  const enteredAt = activityEntryTime(session)
+  if (enteredAt !== undefined) activityTimes.push(enteredAt)
+  const lastActivityAt = activityTimes.reduce<number | null>((last, time) => Number.isFinite(time) && time > 0 ? Math.max(last ?? 0, time) : last, null)
   let detail = 'No activity details observed'
   if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
   else if (pending) detail = session.pendingInteraction!.kind === 'permission' ? 'Review permission request' : 'Review request in context'
@@ -41,11 +51,12 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   else if (state === 'done') detail = 'Ready for another prompt · No result observed'
   return { id: session.id, name, detail, state, stateLabel, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId: topicIdForSession(config, session), workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
-    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) }
+    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
+    && activityEntryTime(a) === activityEntryTime(b)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }
 /** Cache only held presentation facts. A change to one Session never re-derives its neighbours. */
