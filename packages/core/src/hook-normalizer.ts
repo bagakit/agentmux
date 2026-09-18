@@ -27,6 +27,10 @@ export type AgentNativeHookStateRule = {
   events: readonly string[]
   state: AgentSemanticState
   toolNames?: readonly string[]
+  /** A pure predicate over the flattened native payload; first matching rule wins. */
+  matches?: (payload: Readonly<Record<string, unknown>>) => boolean
+  /** Payload-dependent lifecycle, consumed by the existing turn/admission owner. */
+  lifecycleEvent?: AgentHookLifecycleEvent
 }
 
 /**
@@ -50,6 +54,8 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   rules: readonly AgentNativeHookStateRule[]
+  /** Native child subject evidence, independent of start/stop events or a live roster. */
+  subagentSubject?: (payload: Readonly<Record<string, unknown>>) => boolean
   subagentTracking?: AgentNativeSubagentTracking
   nativeHandle?: {
     sessionIdKeys: readonly string[]
@@ -156,9 +162,11 @@ export function nativeHookHasSubagentSubject(
   eventName: string,
   payload: Record<string, unknown>
 ): boolean {
+  const flattened = flattenNestedPayload(payload)
+  if (specification.subagentSubject?.(flattened)) return true
   const tracking = specification.subagentTracking
   return Boolean(tracking && (
-    subagentId(tracking, flattenNestedPayload(payload)) ||
+    subagentId(tracking, flattened) ||
     tracking.startEvents.includes(eventName) || tracking.stopEvents.includes(eventName)
   ))
 }
@@ -252,18 +260,19 @@ function transcriptPathField(
   return undefined
 }
 
-function eventState(
+function eventRule(
   specification: AgentNativeHookSpecification,
   eventName: string,
   payload: Record<string, unknown>
-): AgentSemanticState {
+): AgentNativeHookStateRule | undefined {
   const toolName = stringField(payload, 'tool_name', 'toolName', 'name')?.toLowerCase()
   for (const rule of specification.rules) {
     if (!rule.events.includes(eventName)) continue
     if (rule.toolNames && !rule.toolNames.includes(toolName ?? '')) continue
-    return rule.state
+    if (rule.matches && !rule.matches(payload)) continue
+    return rule
   }
-  return 'unknown'
+  return undefined
 }
 
 /**
@@ -493,9 +502,10 @@ export function normalizeNativeHook(
   // 事件名可能在信封上，也可能藏在负载的三个拼法之一里——读取顺序由 agent-hook-event.ts 唯一持有，
   // 与 hook 子进程共用同一份，故不会再出现「一边认得出、另一边读成 null」。读不出时如实记为 'unknown'。
   const eventName = resolveHookEventName(envelope.eventName, payload) ?? 'unknown'
+  const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
-  const lifecycleEvent = canonicalHookLifecycleEvent(eventName)
+  const lifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
   // 先按 rules 定出这条事件本身的语义，再经子代理在途记账压制：主 Agent 报收尾时若子代理还活着，
   // rules 给出的 `done` 会被压回 `working`，直到最后一个子代理落地才兑现。
   const semanticState = applySubagentTracking(
@@ -503,7 +513,7 @@ export function normalizeNativeHook(
     envelope,
     eventName,
     payload,
-    eventState(specification, eventName, payload)
+    rule?.state ?? 'unknown'
   )
   const observedAt = Date.now()
   const status: AgentStatus = {

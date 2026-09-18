@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
@@ -356,12 +355,21 @@ describe('native successful question completion owns only an exact unclaimed que
   it('two real Node processes reopen the persisted question and settle through authenticated ingress', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amux-question-process-'))
     const path = join(root, 'agent-sessions.json')
-    const publicCore = pathToFileURL(resolve('dist/index.js')).href
-    const hookModule = pathToFileURL(resolve('dist/hook-server.js')).href
+    const publicCore = new URL('../dist/index.js', import.meta.url).href
+    const hookModule = new URL('../dist/hook-server.js', import.meta.url).href
+    const env = { ...process.env }
+    for (const key of Object.keys(env)) if (key.startsWith('AGENTMUX_')) delete env[key]
+    Object.assign(env, {
+      AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'),
+      AGENTMUX_AGENT_SESSION_STORE: path
+    })
     const script = `
-      import {AgentMuxClient,AgentMuxFileAgentSessionStore} from ${JSON.stringify(publicCore)};
-      import {AgentHookServer} from ${JSON.stringify(hookModule)};
-      const [path,phase]=process.argv.slice(1),store=new AgentMuxFileAgentSessionStore(path);
+      import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';
+      const [path,phase]=process.argv.slice(1);os.homedir=()=>${JSON.stringify(join(root, 'home'))};syncBuiltinESMExports();
+      const {AgentMuxClient,AgentMuxFileAgentSessionStore}=await import(${JSON.stringify(publicCore)});
+      const {AgentHookServer}=await import(${JSON.stringify(hookModule)});
+      const store=new AgentMuxFileAgentSessionStore(path);
       if(phase==='pre')await store.compareAndSwap(null,${JSON.stringify(seed('codex'))});
       const client=new AgentMuxClient({store});await client.registry.load('local');
       let writes=0;client.kernel.input=async()=>{writes++;throw Error('Native completion must not input')};
@@ -373,9 +381,9 @@ describe('native successful question completion owns only an exact unclaimed que
         console.log(JSON.stringify({pid:process.pid,pending:sessions[0].pendingInteraction?.request??null,writes}));
       }finally{await server.stop();await client.dispose()}`
     try {
-      const first = JSON.parse((await exec(process.execPath, ['--input-type=module', '-e', script, path, 'pre'], { timeout: 8000 })).stdout)
+      const first = JSON.parse((await exec(process.execPath, ['--input-type=module', '-e', script, path, 'pre'], { timeout: 8000, env })).stdout)
       expect(first.pending).toMatchObject({ id: 'process-pre', nativeToolCallId: 'process-call' })
-      const second = JSON.parse((await exec(process.execPath, ['--input-type=module', '-e', script, path, 'post'], { timeout: 8000 })).stdout)
+      const second = JSON.parse((await exec(process.execPath, ['--input-type=module', '-e', script, path, 'post'], { timeout: 8000, env })).stdout)
       expect(first.pid).not.toBe(second.pid)
       expect(second.pending).toBeNull()
       expect([first.writes, second.writes]).toEqual([0, 0])

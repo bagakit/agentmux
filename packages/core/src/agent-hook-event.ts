@@ -353,16 +353,25 @@ export function resolveHookEventName(
 }
 
 /**
- * 把一个厂商方言事件名归一化到 Core canonical 生命周期事件。
+ * 按 Provider 匹配规则的贡献或既有事件方言，计算同一份 canonical 生命周期语义。
  *
  * 认不出就返回 `undefined`——这是一等公民的答案，读作「Core 对这条事件没有 canonical 语义」，
  * 而不是「这条事件不重要」或「就当它是 working」。调用方必须能在缺席下正确工作。
  */
 export function canonicalHookLifecycleEvent(
-  rawEventName: string | undefined
+  rawEventName: string | undefined,
+  declaredLifecycleEvent?: AgentHookLifecycleEvent
 ): AgentHookLifecycleEvent | undefined {
+  if (declaredLifecycleEvent !== undefined) return declaredLifecycleEvent
   if (!rawEventName) return undefined
   return AGENT_HOOK_LIFECYCLE_DIALECT[rawEventName]
+}
+
+const CANONICAL_HOOK_EVENTS = new Set(Object.values(AGENT_HOOK_LIFECYCLE_DIALECT))
+
+/** Validate persisted canonical evidence against the same lifecycle vocabulary. */
+export function isAgentHookLifecycleEvent(value: unknown): value is AgentHookLifecycleEvent {
+  return typeof value === 'string' && CANONICAL_HOOK_EVENTS.has(value as AgentHookLifecycleEvent)
 }
 
 /**
@@ -386,15 +395,18 @@ export function rawEventNamesForLifecycle(
  * Provider 让这个前提直接失效，闸门于是从「可逆的抑制」退化成「永久拒绝」。所以前提可满足性要算出来，
  * 而不是靠谁记得给哪家 Provider 加例外。
  *
- * 判据取 Provider **自己声明的原始事件名**（它 rules 里出现的那些）经方言归一后的结果，而不是去猜它
- * 属于哪份方言表——方言表按原始名查，压根没有「哪家用哪份」的绑定，硬做一份绑定等于新增一处手抄。
+ * 判据取 Provider 自己声明的规则贡献；未声明 lifecycleEvent 时沿用原始事件名的规范语义。
+ * 与摄入侧共用 canonical 计算口，不另抄一份 Provider 或重开事件清单。
  *
  * 刻意是**存在性**而不是清单：不问「有没有 pre_llm_call」，只问「有没有任何声明的事件归一到重开事件」。
  * 换厂商事件名、接新 Provider 都不必改这里；写成清单则每加一家都要回来补，而漏补是静默的。
  */
-export function eventNamesCanReopenTurn(rawEventNames: Iterable<string>): boolean {
+export function eventNamesCanReopenTurn(
+  rawEventNames: Iterable<string>,
+  declaredLifecycleEvent?: AgentHookLifecycleEvent
+): boolean {
   for (const raw of rawEventNames) {
-    const canonical = canonicalHookLifecycleEvent(raw)
+    const canonical = canonicalHookLifecycleEvent(raw, declaredLifecycleEvent)
     if (canonical && TURN_REOPENING_EVENTS.includes(canonical)) return true
   }
   return false
