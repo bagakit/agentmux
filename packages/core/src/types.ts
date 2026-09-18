@@ -1209,3 +1209,13 @@ export type NormalizedHookEvent = {
    */
   turnUsage?: AgentTurnUsage
 }
+
+/** Immutable public facts required by the existing Local Runtime compatibility predicate. */
+export type AgentMuxRuntimeCompatibilityInput = {
+  protocolGeneration: number
+  runtimeIdPersistence: string
+  buildId: string
+  platform: string
+  arch: string
+  capabilities: Readonly<Record<string, number>>
+}

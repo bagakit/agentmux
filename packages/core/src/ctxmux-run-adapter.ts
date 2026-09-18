@@ -30,7 +30,7 @@ import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
-import type { AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation } from './types.js'
+import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
   defaultAgentMuxRuntimeDirectory,
@@ -537,7 +537,8 @@ function ownerReceiptMatchesExpected(receipt: unknown, expected: OwnerReceipt): 
   )
 }
 
-function assertRuntimeIdentity(runtime: RuntimeIdentity): void {
+/** Validate an already-observed listener; this performs no connection or lifecycle action. */
+export function assertAgentMuxRuntimeCompatibility(runtime: AgentMuxRuntimeCompatibilityInput): void {
   const missingCapability = Object.entries(REQUIRED_RUNTIME_CAPABILITIES).find(
     ([capability, requiredVersion]) => runtime.capabilities[capability] !== requiredVersion
   )
@@ -745,7 +746,7 @@ export class CtxmuxRunAdapter {
     let runtime: RuntimeIdentity | null = null
     try {
       runtime = await diagnosticsClient.runtimeInfo()
-      assertRuntimeIdentity(runtime)
+      assertAgentMuxRuntimeCompatibility(runtime)
       try {
         await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
         this.runtimeOwnership = 'owned'
@@ -807,7 +808,7 @@ export class CtxmuxRunAdapter {
           }
           try {
             runtime = await diagnosticsClient.runtimeInfo()
-            assertRuntimeIdentity(runtime)
+            assertAgentMuxRuntimeCompatibility(runtime)
             if (runtime.daemonInstanceId !== spawnedDaemonInstanceId) {
               throw new AgentMuxError(
                 'The CtxMux socket responder does not match the exact daemon child that AgentMux spawned.',
