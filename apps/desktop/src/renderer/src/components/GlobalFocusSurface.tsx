@@ -92,7 +92,7 @@ export function GlobalFocusSurface() {
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
       {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
-      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>PMO Teams · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
+      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <FocusProjectLanes lanes={focusProjectLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} />
       </div>}

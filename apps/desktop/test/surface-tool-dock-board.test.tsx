@@ -152,7 +152,7 @@ describe('Board 工具面板是工作清单', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const list = dockSource.slice(start, end)
-    expect(list).toContain('No goals yet. Use PMO Teams to clarify your first goal.')
+    expect(list).toContain('No goals yet. Use Mote to clarify your first goal.')
     expect(list).not.toContain('boardRows.rows.slice')
     expect(list).not.toContain('row.name')
   })
