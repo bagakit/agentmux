@@ -65,9 +65,17 @@ app.whenReady().then(async () => {
     assert.ok(snapshotForIdentity.sessions.length >= 4)
     const state = () => win.webContents.executeJavaScript('topicTerminalState()')
     const ui = () => win.webContents.executeJavaScript('topicTerminalUi()')
-    result.initial = { state: await state(), ui: await ui() }
+    await until('window.topicTerminalUi().floating.activeTabIds.length === 1 && window.topicTerminalUi().floating.activeTabIds[0] === "mote-tab"')
+    result.initial = { state: await state(), ui: await ui(), savedFloatingAtStartup: await win.webContents.executeJavaScript('window.topicTerminalFloatingAtStartup') }
+    assert.equal(result.initial.savedFloatingAtStartup.open, true, 'Both App generations start from the saved open floating state')
+    assert.equal(result.initial.savedFloatingAtStartup.targetTabId, 'mote-tab', 'Both App generations read the original saved explicit target')
+    assert.deepEqual(result.initial.ui.floating.activeTabIds, ['mote-tab'])
+    assert.equal(result.initial.ui.floating.open, true)
+    assert.equal(result.initial.state.error, null, 'A valid durable saved target restores without a preparation error')
+    assert.equal(result.initial.state.tabs['mote-launcher-tab'].regions['mote-launcher-region'].kind, 'launcher', 'The earlier same-Mote Tab remains a genuine non-running workface')
+    assert.equal(result.initial.state.layouts.__scratch__.groups[0].activeTabId, ids.tabId, 'Saved-open floating target cannot change main Topic selection')
     assert.equal(result.initial.ui.sessionPanes, 4, 'Each original Region must own exactly one SessionPane')
-    assert.deepEqual(result.initial.ui.regions, [ids.regionId, 'secondary-region', 'mote-region', 'close-region'].sort())
+    assert.deepEqual(result.initial.ui.regions, [ids.regionId, 'secondary-region', 'mote-launcher-region', 'mote-region', 'close-region'].sort())
     assert.equal(new Set(result.initial.ui.terminals.map((terminal: any) => terminal.regionId)).size, 4)
     if (phase === 'seed') assert.equal(calls.filter(call => call.operation === 'launch').length, 4, 'Rapid opening plus three explicit extra Terminals')
     else {
@@ -78,6 +86,11 @@ app.whenReady().then(async () => {
     }
     await until(`window.topicTerminalUi().terminals.find(one => one.regionId === ${JSON.stringify(ids.regionId)})?.baseY > 800`)
     await win.webContents.executeJavaScript(`window.originalTopicTerminal = window.terminals.find(one => one.element?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === ${JSON.stringify(ids.regionId)}); window.originalMoteTerminal = window.terminals.find(one => one.element?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === 'mote-region'); true`)
+    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll("[data-workbench-region-id=mote-launcher-region]").length'), 1, 'Earlier launcher is retained once; no healthy workface is removed')
+    await win.webContents.executeJavaScript('topicTerminalCloseFloat()')
+    await until('document.getElementById("workbench-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    assert.deepEqual((await state()).focus.execution, result.initial.state.focus.execution, 'Closing saved-open floating target keeps original execution focus')
     await delay(300)
     await win.webContents.executeJavaScript('window.topicEventCounts.tracking = true; true')
     result.reading = []
@@ -98,6 +111,7 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript('topicTerminalBoard(); topicTerminalOpenFloat()')
     await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().terminals.find(one => one.regionId === "mote-region")?.visible')
     assert.equal((await ui()).sessionPanes, 4)
+    assert.deepEqual((await ui()).floating.activeTabIds, ['mote-tab'], 'Chrome and original View share the explicit target')
     assert.equal(await win.webContents.executeJavaScript('window.terminals.filter(one => one.element?.isConnected).length === 4 && document.getElementById("mote-floating-tab-slot:mote-tab").contains(window.originalMoteTerminal.element)'), true)
     assert.deepEqual((await state()).focus.execution, result.initial.state.focus.execution, 'Shortcut opening preserves the original execution focus and history')
     result.floating = await ui()
@@ -131,8 +145,7 @@ app.whenReady().then(async () => {
     result.afterMovement = await state()
     assert.equal(result.afterMovement.drafts['untouched-draft'], 'An unsent draft remains')
     assert.equal(result.afterMovement.tabs[ids.tabId].layout.root.ratio, 0.61)
-    if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(result.afterMovement))
-    else {
+    if (phase === 'restore') {
       // Exercise the actual close affordance after verifying the original persisted workface.
       await win.webContents.executeJavaScript('document.querySelector("[data-workbench-tab-id=close-tab] .workbench-tab__close").click()')
       await until('window.topicTerminalState().tabs["close-tab"] === undefined')
@@ -142,6 +155,14 @@ app.whenReady().then(async () => {
       result.afterClose = await state()
       assert.equal(result.afterClose.tabs[ids.tabId].regions[ids.regionId].sessionId, ids.sessionId)
     }
+    await win.webContents.executeJavaScript('topicTerminalOpenFloat()')
+    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().floating.activeTabIds[0] === "mote-tab"')
+    result.savedOpenForRestart = { state: await state(), ui: await ui() }
+    assert.equal(result.savedOpenForRestart.ui.floating.saved.open, true)
+    assert.equal(result.savedOpenForRestart.ui.floating.saved.targetTabId, 'mote-tab')
+    assert.equal(result.savedOpenForRestart.state.layouts.__scratch__.groups[0].activeTabId, ids.tabId)
+    assert.deepEqual(result.savedOpenForRestart.state.focus.execution, result.afterMovement.focus.execution)
+    if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(result.savedOpenForRestart.state))
     await delay(350)
     await win.webContents.session.flushStorageData()
     result.owners = runtime.resourceOwnerCounts()
