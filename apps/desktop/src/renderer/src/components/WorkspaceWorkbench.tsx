@@ -1231,7 +1231,8 @@ export function WorkspaceWorkbench({
   focusPortalTargetId = null,
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
-  viewTargets
+  viewTargets,
+  projectionTabId
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1252,6 +1253,8 @@ export function WorkspaceWorkbench({
   viewHostPrefix?: string
   /** Explicit visible destinations move existing Tab contents without mounting another tree. */
   viewTargets?: Readonly<Record<string, string>> | undefined
+  /** Select within projection chrome without changing the durable main workface. */
+  projectionTabId?: string | undefined
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
@@ -1264,9 +1267,9 @@ export function WorkspaceWorkbench({
   const focusTab = focusTabId ? tabs[focusTabId] : null
   const layout = useMemo(
     () => residentLayout
-      ? layoutForActiveTopic(residentLayout, tabs, topicId ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only')
+      ? layoutForActiveTopic(residentLayout, tabs, topicId ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId)
       : residentLayout,
-    [residentLayout, tabs, topicId, topicIsolation]
+    [residentLayout, tabs, topicId, topicIsolation, projectionTabId]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
