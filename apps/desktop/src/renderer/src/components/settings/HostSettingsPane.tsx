@@ -67,7 +67,7 @@ export function HostSettingsPane({ config, onSave }: {
   return (
     <div className="settings-pane-stack">
       <div className="settings-pane-toolbar">
-        <div><strong>Execution hosts</strong><span>Local and SSH machines available to workspaces and agents.</span></div>
+        <span className="settings-resource-count">{hosts.length} {hosts.length === 1 ? 'host' : 'hosts'}</span>
         <button className="small-button" onClick={addHost}><Plus size={13} /> Add SSH host</button>
       </div>
       <div className="host-settings-list">

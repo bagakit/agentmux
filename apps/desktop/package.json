@@ -50,7 +50,7 @@
     "react-resizable-panels": "^2.1.7",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
-    "string-argv": "^0.3.2",
+    "shlex": "^3.0.0",
     "tldts": "7.4.10",
     "unified": "^11.0.5",
     "zod": "^4.0.0",

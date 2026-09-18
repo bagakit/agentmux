@@ -1,4 +1,4 @@
-import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, X } from 'lucide-react'
+import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -11,6 +11,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   config: AppConfig
   onClose: () => void
 }) {
+  const [filter, setFilter] = useState('')
   const [hostId, setHostId] = useState(config.workspaces[0]?.hostId ?? 'local')
   const [projectPath, setProjectPath] = useState('')
   const [name, setName] = useState('')
@@ -33,6 +34,9 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   })), [config.executors, detections, hostId])
   const readyExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const checking = executors.some((executor) => executor.detection?.state === 'checking')
+  const matchingWorkspaces = config.workspaces.filter((workspace) =>
+    `${workspace.name} ${workspace.path} ${workspace.hostId} ${workspace.branch ?? ''}`.toLowerCase().includes(filter.trim().toLowerCase())
+  )
 
   useEffect(() => {
     for (const host of config.hosts) if (!hostChecks[host.id]) void checkHost(host)
@@ -83,7 +87,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   return (
     <div className="settings-pane-stack">
       <div className="settings-pane-toolbar">
-        <div><strong>{config.workspaces.length} {config.workspaces.length === 1 ? 'workspace' : 'workspaces'}</strong><span>Project folders and their worktrees</span></div>
+        <span className="settings-resource-count">{filter.trim() ? `${matchingWorkspaces.length} of ` : ''}{config.workspaces.length} {config.workspaces.length === 1 ? 'workspace' : 'workspaces'}</span>
         {!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add project</button> : null}
       </div>
       <div className="settings-workspace-create" hidden={!adding}>
@@ -101,8 +105,9 @@ export function WorkspaceSettingsPane({ config, onClose }: {
       </section>
       </div>
       {config.workspaces.length > 0 ? <section className="settings-group">
-        <header><span>Your workspaces</span><small>Registered on this machine</small></header>
-        <div className="workspace-settings-list">{config.workspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small>{workspace.path}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
+        <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Filter workspaces" placeholder="Find a workspace…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
+        <div className="workspace-settings-list">{matchingWorkspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small>{workspace.path}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
+      {matchingWorkspaces.length === 0 ? <p className="settings-resource-empty" role="status">No workspaces match “{filter}”.</p> : null}
       </section> : <div className="settings-workspaces-empty"><p>Your projects will appear here.</p>{!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add your first project</button> : null}</div>}
     </div>
   )

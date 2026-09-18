@@ -40,7 +40,6 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">A familiar place to focus. Choose your window appearance and a palette for your terminals.</p>
       <section className="settings-group">
         <header><span>Application appearance</span><small>Window</small></header>
         <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">

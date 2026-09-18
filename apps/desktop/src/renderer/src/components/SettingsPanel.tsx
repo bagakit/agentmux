@@ -1,5 +1,6 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import { Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { Check, ChevronDown, Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -40,15 +41,15 @@ const GROUPS: { id: SettingsGroupId; title: string }[] = [
 const AGENT_PROVIDER_KEYWORDS = BUILT_IN_AGENT_PROVIDER_IDS.map((id) => id.toLowerCase()).join(' ')
 
 const SECTIONS = [
-  { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Your projects, ready when you are.', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
-  { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Choose where your agents work.', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
-  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Give each agent a name, a look, and a way to work.', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
-  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Make your workspace feel like yours.', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
-  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Decide when your agents should get your attention.', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
+  { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Project folders and their worktrees.', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
+  { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Local and SSH connections for your workspace.', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
+  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Reusable executors for your next agent session.', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
+  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Theme, typography, and terminal colors.', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
+  { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Choose when and how agents get your attention.', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
   { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Choose how agents interact with your pages.', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
   { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Keep your everyday instructions close at hand.', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
   { id: 'copy-paths' as const, group: 'preferences' as const, title: 'Copy Paths', description: 'Choose how paths look when you share them.', icon: ClipboardCopy, keywords: 'copy path clipboard home directory tilde abbreviate absolute full shorten' },
-  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'A little about your local workbench.', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
+  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Local storage, session continuity, and diagnostics.', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
 
 /**
@@ -184,13 +185,26 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
       <div className="window-drag-region" />
       <aside className="settings-sidebar">
         <header>
-          <div className="settings-sidebar__brand"><BrandIcon size={30} /><span><strong>AgentMux</strong><small>Your local agent workbench</small></span></div>
+          <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>
         </header>
         <label className="settings-search"><Search size={14} /><input aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
-        <div className="settings-sidebar__context">
-          <span>Settings</span>
-          <p>A workspace that works your way.</p>
-        </div>
+        <DropdownMenu.Root modal={false}>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ChevronDown size={13} /></button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()}>
+              <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsSectionId)}>
+                {navGroups.map((group) => <Fragment key={group.id}>
+                  <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
+                  {group.items.map((item) => <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item">
+                    <span><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>{item.title}
+                  </DropdownMenu.RadioItem>)}
+                </Fragment>)}
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         <nav aria-label="Settings sections">
           {navGroups.map((group) => (
             <Fragment key={group.id}>
@@ -202,14 +216,12 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
             </Fragment>
           ))}
         </nav>
-        <footer><BrandIcon size={16} /><span>Local by design.<br />Yours to shape.</span></footer>
       </aside>
       <main className="settings-content">
         <header className="settings-content__header">
           <div className="settings-content__title">
-            <span className="settings-content__icon" aria-hidden="true"><section.icon size={17} /></span>
             <div>
-              <div className="settings-content__breadcrumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{groupTitle}</strong></div>
+              <div className="settings-content__breadcrumb"><span>{groupTitle}</span></div>
               <h2>{section.title}</h2>
               <p>{section.description}</p>
             </div>
