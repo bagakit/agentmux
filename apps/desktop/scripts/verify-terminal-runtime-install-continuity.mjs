@@ -22,7 +22,7 @@ const sha = async (p) => createHash('sha256').update(await readFile(p)).digest('
 const critical = [join(oldArtifacts, 'manifest.json'), join(oldArtifacts, 'bin/ctxmuxd'), join(oldArtifacts, 'ctxmux-sdk-0.0.0.tgz'),
   daemon18, sdk18, new URL(import.meta.url).pathname, join(base, 'apps/desktop/scripts/package-runtime-upgrade.mjs'),
   join(base, 'apps/desktop/scripts/package-macos.mjs'), join(base, 'packages/core/src/runtime-paths.ts'),
-  'packages/core/dist/runtime-paths.js']
+  join(base, 'packages/core/dist/runtime-paths.js')]
 const inputsBefore = Object.fromEntries(await Promise.all(critical.map(async (p) => [p, await sha(p)])))
 const root = await mkdtemp('/tmp/amx-install-proof-')
 const previousEnv = process.env.AGENTMUX_RUNTIME_DIRECTORY
@@ -41,7 +41,7 @@ async function app(appPath, candidate) {
   await mkdir(join(vendor, 'bin'), { recursive: true })
   await mkdir(join(core, 'dist'))
   await writeFile(join(core, 'package.json'), '{"type":"module"}\n')
-  await copyFile('packages/core/dist/runtime-paths.js', join(core, 'dist/runtime-paths.js'))
+  await copyFile(join(base, 'packages/core/dist/runtime-paths.js'), join(core, 'dist/runtime-paths.js'))
   await copyFile(candidate ? daemon18 : join(oldArtifacts, 'bin/ctxmuxd'), join(vendor, 'bin/ctxmuxd'))
   await chmod(join(vendor, 'bin/ctxmuxd'), 0o755)
   await copyFile(candidate ? sdk18 : join(oldArtifacts, 'ctxmux-sdk-0.0.0.tgz'), join(vendor, 'ctxmux-sdk-0.0.0.tgz'))
