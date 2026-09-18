@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import type { CtxmuxAdapterObservationEvent } from '../src/ctxmux-run-adapter.js'
+import type {
+  CtxmuxAdapterObservationEvent,
+  CtxmuxAdapterOutputObservation,
+  CtxmuxAdapterRun
+} from '../src/ctxmux-run-adapter.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 
@@ -52,6 +56,8 @@ type Internals = {
 
 const RUN_ID = 'resize-run'
 const AGENT_SESSION_ID = 'resize-agent'
+const clients: AgentMuxClient[] = []
+afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.dispose())) })
 
 // 未就绪的观察：只有边界，没有 readyThroughByte。这正是 resize 会打死的那个状态。
 const PENDING_READINESS = {
@@ -86,18 +92,18 @@ function storedSession(
   }
 }
 
-function runProjection(cols: number, rows: number) {
+function runProjection(cols: number, rows: number, latestOutputBytes = 0): CtxmuxAdapterRun {
   return {
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',
-    args: [] as string[],
+    args: [],
     workspacePath: '/tmp/resize-agent',
     pid: 321,
-    state: { type: 'running' as const },
+    state: { type: 'running' },
     cols,
     rows,
-    latestOutputBytes: 0,
+    latestOutputBytes,
     firstAvailableByte: 0,
     acceptedInputBytes: 0
   }
@@ -105,11 +111,10 @@ function runProjection(cols: number, rows: number) {
 
 /**
  * 真 client + 真 AgentScreenEvidenceStore + 真 registry + 真 AgentPromptSubmissionCoordinator；
- * 只把 kernel 的三个协作方法换成 fake（observeOutput 计次并给空重放、resize 原样回报、isConnected 为真）。
+ * 只把 kernel 的三个协作方法换成 fake（observeOutput 给新 Run 的空屏 checkpoint、resize 原样回报、isConnected 为真）。
  * 屏幕证据的失效与重建逻辑是被测对象，绝不 stub。
  *
- * 空重放 ⇒ 屏幕上没有 composer 帧 ⇒ 任何 readiness 观察都停在 pending。「屏幕永不再变」在生产上就是
- * 这个形状。
+ * 空屏 checkpoint 不算原输出或 composer 帧，readiness 保持 pending，直到原字节里真的出现空 composer。
  */
 async function resizeClient(
   readiness: NonNullable<AgentMuxStoredAgentSession['terminalPromptReadiness']>
@@ -127,10 +132,14 @@ async function resizeClient(
   const store = new AgentMuxMemoryAgentSessionStore()
   await store.compareAndSwap(null, storedSession(readiness))
   const client = new AgentMuxClient({ store })
+  clients.push(client)
   const state = client as unknown as Internals
   await state.registry.load('local')
 
   let observeCalls = 0
+  let size = { cols: 80, rows: 24 }
+  let resizeRevision = 0
+  let latestOutputBytes = 0
   let liveListener: ((event: CtxmuxAdapterObservationEvent) => void) | null = null
   // 在 `kernel.resize` 的 await 里跑一次真相变更，模拟 resize 与别的生命周期操作撞车的交错。
   // 换 Run（resume）与退场（stop/删除）各是一种，注入点相同，所以共用这一个钩子。
@@ -140,13 +149,17 @@ async function resizeClient(
     _runId: string,
     _afterByte: number,
     listener: (event: CtxmuxAdapterObservationEvent) => void
-  ) => {
+  ): Promise<CtxmuxAdapterOutputObservation> => {
+    if (latestOutputBytes !== 0) throw new Error('The blank checkpoint fixture only represents a Run before its first output.')
     observeCalls += 1
     liveListener = listener
     return {
-      run: runProjection(observeCalls === 1 ? 80 : 200, observeCalls === 1 ? 24 : 87),
-      replay: [] as CtxmuxAdapterObservationEvent[],
+      run: runProjection(size.cols, size.rows, latestOutputBytes),
+      replay: [],
       gap: null,
+      terminal: { type: 'basic-vt', checkpoint: { runId: RUN_ID, throughByte: latestOutputBytes,
+        resizeRevision, size: { ...size } }, restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
+      resizeRevision,
       close: async () => {}
     }
   }
@@ -154,6 +167,8 @@ async function resizeClient(
     const mutate = duringResize
     duringResize = null
     await mutate?.()
+    size = { cols, rows }
+    resizeRevision += 1
     return { run: runProjection(cols, rows), cols, rows }
   }
   ;(client as unknown as { connected: boolean }).connected = true
@@ -176,7 +191,13 @@ async function resizeClient(
     observeCalls: () => observeCalls,
     cancelEntry: () => cancels.get(AGENT_SESSION_ID),
     cancelCount: () => cancels.size,
-    emit: (event) => liveListener?.(event),
+    emit: (event) => {
+      if (event.type === 'resized') {
+        size = { cols: event.cols, rows: event.rows }
+        resizeRevision = event.resizeRevision
+      } else if (event.type === 'data') latestOutputBytes = event.endByte
+      liveListener?.(event)
+    },
     swapRunDuringResize: (nextRunId: string) => {
       duringResize = async () => {
         // readiness 必须跟着换到新 Run 上：`terminalPromptReadiness` 的归一化要求它的 run 与 Session
@@ -326,18 +347,38 @@ describe('#660 resizeAgent 作废屏幕证据之后要重挂在途的 readiness 
   })
 })
 
-describe('别的客户端 resize 后，长连接 readiness 观察按 Resized 重建', () => {
-  it('收到 Resized 后重新 observeOutput，不继续用旧几何', async () => {
+describe('别的客户端 resize 后，长连接 readiness 观察按 Resized 继续', () => {
+  it('同一 Attachment 按有序几何解析新输出并把 readiness 落盘', async () => {
     const fixture = await resizeClient(PENDING_READINESS)
-    await armPendingObservation(fixture)
+    const armed = await armPendingObservation(fixture)
 
-    fixture.emit({ type: 'resized', runId: RUN_ID, cols: 200, rows: 87 })
+    fixture.emit({ type: 'resized', runId: RUN_ID, cols: 200, rows: 87, throughByte: 0, resizeRevision: 1 })
+    const redraw = '\x1b[?2026h\x1b[2J\x1b[22;1H› head\x1b[22;150Htail\x1b[?2026l'
+    const redrawBytes = new TextEncoder().encode(redraw)
+    fixture.emit({ type: 'data', runId: RUN_ID, startByte: 0, endByte: redrawBytes.byteLength,
+      data: redraw, dataBytes: redrawBytes })
+
+    // At the stale 80-column grid, column 150 is clamped and this exact composer cannot be read.
+    await expect(fixture.state.screenEvidence.wait(fixture.session, 0, true,
+      screen => screen.composerText('›') === `head${' '.repeat(143)}tail`,
+      { timeoutMs: 1_000, timeoutMessage: '新输出没有按 200 列解析', terminalMessage: 'fixture exit' }
+    )).resolves.toBe(redrawBytes.byteLength)
+    expect(fixture.client.agentSession(AGENT_SESSION_ID).terminalPromptReadiness?.readyThroughByte).toBeUndefined()
+    expect(fixture.cancelEntry()).toBe(armed)
+    expect(fixture.cancelCount()).toBe(1)
+
+    const emptyComposer = '\x1b[?2026h\x1b[2J\x1b[22;1H› \x1b[22;3H\x1b[?2026l'
+    const emptyBytes = new TextEncoder().encode(emptyComposer)
+    const readyByte = redrawBytes.byteLength + emptyBytes.byteLength
+    fixture.emit({ type: 'data', runId: RUN_ID, startByte: redrawBytes.byteLength, endByte: readyByte,
+      data: emptyComposer, dataBytes: emptyBytes })
 
     await vi.waitFor(() => {
-      expect(
-        fixture.observeCalls(),
-        'Resized 之后没有重挂：readiness 仍挂在 80x24 的屏幕上'
-      ).toBe(2)
+      expect(fixture.client.agentSession(AGENT_SESSION_ID).terminalPromptReadiness).toEqual({
+        ...PENDING_READINESS, readyThroughByte: readyByte
+      })
+      expect(fixture.cancelCount()).toBe(0)
     })
+    expect(fixture.observeCalls(), '有序 Resized 不应重放历史或替换健康 Attachment').toBe(1)
   })
 })

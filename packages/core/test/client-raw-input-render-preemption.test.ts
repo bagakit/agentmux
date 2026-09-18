@@ -72,6 +72,19 @@ async function fixture(providerId: 'codex' | 'claude') {
 
 const checkpoint = (): Promise<void> => new Promise(done => setImmediate(done))
 
+function blankTerminalObservation(run: CtxmuxAdapterRun, close: () => Promise<void>): CtxmuxAdapterOutputObservation {
+  if (run.cols === null || run.rows === null || run.latestOutputBytes !== 0) {
+    throw new Error('This fixture requires a fresh Run with a known empty terminal.')
+  }
+  return {
+    run, replay: [], gap: null, resizeRevision: 0, close,
+    // An owner-confirmed blank checkpoint restores a screen without advancing original output.
+    terminal: { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 0,
+      resizeRevision: 0, size: { cols: run.cols, rows: run.rows } },
+      restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] }
+  }
+}
+
 function heldRender(h: Awaited<ReturnType<typeof fixture>>) {
   const entered = deferred<void>()
   const release = deferred<number>()
@@ -188,7 +201,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
   const h = await fixture('codex')
   const entered = deferred<void>(), attachment = deferred<CtxmuxAdapterOutputObservation>()
   const close = vi.fn(async () => {})
-  const observe = vi.fn(async () => { entered.resolve(); return await attachment.promise })
+  const observe = vi.fn(async (): Promise<CtxmuxAdapterOutputObservation> => { entered.resolve(); return await attachment.promise })
   h.inner.kernel.observeOutput = observe
   const waiter = vi.spyOn(AgentTerminalScreenEvidence.prototype, 'wait')
   const abort = new AbortController()
@@ -203,7 +216,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
     if (reason === 'cancel') { abort.abort(); await checkpoint() }
     else await vi.advanceTimersByTimeAsync(25)
     const settledBeforeAttachment = settled
-    attachment.resolve({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt', checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close })
+    attachment.resolve(blankTerminalObservation(h.run(), close))
     const result = await waiting
     await Promise.resolve()
     expect(settledBeforeAttachment).toBe(true)
@@ -212,6 +225,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
     expect(waiter).not.toHaveBeenCalled()
     const ready = h.inner.screenEvidence.wait(h.client.agentSession(h.stored.agentSessionId), 0, false,
       () => true, { timeoutMessage: 'Synthetic timeout', terminalMessage: 'Synthetic exit' })
+    // Checkpoint restoration uses xterm's asynchronous write queue, which this branch's clock owns.
     if (reason === 'timeout') await vi.advanceTimersByTimeAsync(0)
     expect(await ready).toBe(0)
     expect(observe).toHaveBeenCalledTimes(1)
@@ -220,7 +234,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
     expect(close).toHaveBeenCalledTimes(1)
   } finally {
     vi.useRealTimers()
-    attachment.resolve({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt', checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close })
+    attachment.resolve(blankTerminalObservation(h.run(), close))
     await waiting
   }
 })
@@ -229,7 +243,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
 it('preserves the timeout reason after attachment and cleans the single observation lifetime', async () => {
   const h = await fixture('codex')
   const close = vi.fn(async () => {})
-  h.inner.kernel.observeOutput = vi.fn(async () => ({ run: h.run(), replay: [], gap: null, terminal: { type: 'basic-vt' as const, checkpoint: { runId: h.stored.run.runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, resizeRevision: 0, close }))
+  h.inner.kernel.observeOutput = vi.fn(async (): Promise<CtxmuxAdapterOutputObservation> => blankTerminalObservation(h.run(), close))
   const abort = new AbortController()
   const removeListener = vi.spyOn(abort.signal, 'removeEventListener')
   vi.useFakeTimers()

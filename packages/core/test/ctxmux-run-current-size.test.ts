@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PROTOCOL_VERSION, type RunEvent, type RunInfo } from '@ctxmux/sdk'
+import { PROTOCOL_VERSION, type AttachedSnapshot, type RunEvent, type RunInfo } from '@ctxmux/sdk'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
@@ -75,7 +75,7 @@ function adapterWith(options: {
       current = applied
       return {
         run: runInfo(current),
-        receipt: { type: 'resize', applied_size: applied }
+        receipt: { type: 'resize', applied_size: applied, through_byte: 0, resize_revision: 1 }
       }
     },
     status: async () => runInfo(current),
@@ -149,20 +149,17 @@ describe('Resized 是几何事件，不是进程退出', () => {
     const adapter = new CtxmuxRunAdapter()
     const seen: CtxmuxAdapterObservationEvent[] = []
     async function* events(): AsyncGenerator<RunEvent, void, void> {
-      yield { type: 'resized', size: { cols: 200, rows: 87 } } as unknown as RunEvent
+      yield { type: 'resized', size: { cols: 200, rows: 87 }, through_byte: 0, resize_revision: 1 }
       yield { type: 'exited', state: { type: 'exited', code: 0, signal: null } }
+    }
+    const snapshot: AttachedSnapshot = {
+      run: runInfo({ cols: 80, rows: 24 }),
+      replay: { chunks: [], first_available_byte: 0, latest_output_bytes: 0, truncated: false },
+      terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0
     }
     ;(adapter as unknown as { client: unknown }).client = {
       attach: async () => ({
-        snapshot: {
-          run: runInfo({ cols: 80, rows: 24 }),
-          replay: {
-            chunks: [],
-            first_available_byte: 0,
-            latest_output_bytes: 0,
-            truncated: false
-          }
-        },
+        snapshot,
         events,
         detach: async () => {},
         close: () => {}
@@ -176,7 +173,7 @@ describe('Resized 是几何事件，不是进程退出', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(seen.map((event) => event.type)).toEqual(['resized', 'exit'])
-    expect(seen[0]).toMatchObject({ type: 'resized', cols: 200, rows: 87 })
+    expect(seen[0]).toMatchObject({ type: 'resized', cols: 200, rows: 87, throughByte: 0, resizeRevision: 1 })
     // 事件**只**投递给观察者，不回填进任何本地尺寸记录：owner 随后说 null，投影就得是 null。
     // 这一条是删掉那本台账的守卫——谁再把 `resized` 记进一张 Map 并让 projectRun 读它，这里立刻红。
     await expect(adapter.status('resize-run')).resolves.toMatchObject({ cols: null, rows: null })
@@ -193,11 +190,11 @@ describe('Resized 是几何事件，不是进程退出', () => {
  * 删掉了那本只记录**我们自己**发起的 resize 的本地台账——daemon 的答案在每条路径上都先到。
  */
 describe('vendored ctxmux 的协议现状', () => {
-  it('是 protocol 17：current_size 与 resized 都已在场', () => {
+  it('是 protocol 18：current_size 与带原字节栅栏的 resized 已在场', () => {
     // 用 SDK 导出的常量，而不是 grep 生成物的 .d.ts：常量是 SDK 的公开契约，随 tarball 一起被
     // pnpm-lock 的 integrity 钉住；grep 要写死一条 node_modules/.pnpm 路径，路径一变就**静默**
     // 变成读不到文件或恒真断言——那正是这条用例要防的东西。
-    expect(PROTOCOL_VERSION).toBe(17)
+    expect(PROTOCOL_VERSION).toBe(18)
   })
 
   it('current_size 是必填字段——台账被删掉正是靠这一条', () => {
@@ -219,12 +216,17 @@ describe('attachment snapshot precedes its live iterator', () => {
     const detach = vi.fn(async () => { if (cleanupFails) throw new Error('detach failed') })
     const events = vi.fn(async function* (): AsyncGenerator<RunEvent> {
       order.push('iterator')
-      yield { type: 'resized', size: { cols: 160, rows: 50 } }
+      yield { type: 'resized', size: { cols: 160, rows: 50 }, through_byte: 0, resize_revision: 1 }
       yield { type: 'exited', state: { type: 'exited', code: 0, signal: null } }
     })
+    const snapshot: AttachedSnapshot = {
+      run: runInfo({ cols: 132, rows: 45 }),
+      replay: { chunks: [], truncated: false, first_available_byte: 0, latest_output_bytes: 0 },
+      terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0
+    }
     ;(adapter as unknown as { client: unknown }).client = {
       attach: async () => ({
-        snapshot: { run: runInfo({ cols: 132, rows: 45 }), replay: { chunks: [], truncated: false, first_available_byte: 0 } },
+        snapshot,
         events, detach, close
       })
     }

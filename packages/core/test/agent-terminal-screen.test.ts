@@ -5,7 +5,11 @@ import {
 } from '../src/agent-terminal-screen.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import type {
+  CtxmuxAdapterObservationEvent,
+  CtxmuxAdapterOutputObservation,
+  CtxmuxAdapterRun
+} from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 const encoder = new TextEncoder()
@@ -343,7 +347,7 @@ async function screenClient(
     _runId: string,
     _afterByte: number,
     accept: (event: CtxmuxAdapterObservationEvent) => void
-  ) => {
+  ): Promise<CtxmuxAdapterOutputObservation> => {
     const replay = replays[Math.min(observeCalls, Math.max(0, replays.length - 1))] ?? ''
     const size = sizes[Math.min(observeCalls, Math.max(0, sizes.length - 1))] ?? { cols: 80, rows: 24 }
     observeCalls += 1
@@ -351,7 +355,11 @@ async function screenClient(
     const dataBytes = Uint8Array.from(Buffer.from(replay))
     replayedBytes += dataBytes.byteLength
     return {
-      run: { ...screenRun(size.cols, size.rows), firstAvailableByte: retainedStart },
+      run: {
+        ...screenRun(size.cols, size.rows),
+        firstAvailableByte: retainedStart,
+        latestOutputBytes: retainedStart + dataBytes.byteLength
+      },
       replay: replay
         ? [{
             type: 'data' as const,
@@ -363,6 +371,9 @@ async function screenClient(
           }]
         : [],
       gap: _afterByte < retainedStart ? { requestedAfterByte: _afterByte, firstAvailableByte: retainedStart } : null,
+      // No checkpoint is supplied. Only an actual RIS in original output can establish authority.
+      terminal: { type: 'unknown', reason: 'origin_unknown' },
+      resizeRevision: 0,
       close: async () => {}
     }
   }
@@ -378,7 +389,7 @@ async function screenClient(
 describe('有界增量屏幕证据接到 client 观察路径', () => {
   it('同一 Session 连续两次观察只从 byte 0 重放一次，重放字节量相对全量基线有界', async () => {
     // 大体积历史：全量基线下第二次观察会把它整个再重放一遍（2x）。
-    const history = `${'x'.repeat(64 * 1024)}\r\n${FRAME_START}\u001b[2J\u001b[22;1H› hello${FRAME_END}`
+    const history = `\u001bc${'x'.repeat(64 * 1024)}\r\n${FRAME_START}\u001b[2J\u001b[22;1H› hello${FRAME_END}`
     const historyBytes = Buffer.byteLength(history)
     const { client, waiter, observeCalls, replayedBytes } = await screenClient([history])
     const session = screenStoredSession()
@@ -409,8 +420,8 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
   })
 
   it('gap 失效后丢弃重建，重建仍能正确判定 composer', async () => {
-    const first = `${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
-    const second = `${FRAME_START}\u001b[22;1H› two\u001b[22;7H${FRAME_END}`
+    const first = `\u001bc${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
+    const second = `\u001bc${FRAME_START}\u001b[22;1H› two\u001b[22;7H${FRAME_END}`
     const { client, waiter, observeCalls, emit } = await screenClient([first, second])
     const session = screenStoredSession()
 
@@ -436,17 +447,12 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     await client.dispose()
   })
 
-  it('Resized 后按新的 owner-confirmed 尺寸重建，不再用启动宽度解析后续输出', async () => {
-    const narrow = `${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
+  it('Resized 在原屏幕按字节栅栏应用新几何，不再用启动宽度解析后续输出', async () => {
+    const narrow = `\u001bc${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
     const wide = `${FRAME_START}\u001b[2J\u001b[22;1H› head\u001b[22;150Htail${FRAME_END}`
-    const { client, waiter, observeCalls, emit } = await screenClient(
-      [narrow, wide],
-      [
-        { cols: 80, rows: 24 },
-        { cols: 200, rows: 87 }
-      ]
-    )
+    const { client, waiter, observeCalls, replayedBytes, emit } = await screenClient([narrow])
     const session = screenStoredSession()
+    const resizeByte = Buffer.byteLength(narrow)
 
     await expect(waiter.wait(
       session,
@@ -456,16 +462,20 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
       { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
     )).resolves.toBeGreaterThan(0)
 
-    emit({ type: 'resized', runId: 'screen-run', cols: 200, rows: 87 })
+    emit({ type: 'resized', runId: 'screen-run', cols: 200, rows: 87, throughByte: resizeByte, resizeRevision: 1 })
+    const dataBytes = encoder.encode(wide)
+    emit({ type: 'data', runId: 'screen-run', startByte: resizeByte,
+      endByte: resizeByte + dataBytes.byteLength, data: wide, dataBytes })
 
     await expect(waiter.wait(
       session,
-      0,
+      resizeByte,
       true,
       (screen) => screen.composerText('›') === `head${' '.repeat(143)}tail`,
       { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
-    )).resolves.toBeGreaterThan(0)
-    expect(observeCalls()).toBe(2)
+    )).resolves.toBe(resizeByte + dataBytes.byteLength)
+    expect(observeCalls()).toBe(1)
+    expect(replayedBytes()).toBe(resizeByte)
     await client.dispose()
   })
 
