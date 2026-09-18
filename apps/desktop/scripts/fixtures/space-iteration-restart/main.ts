@@ -144,6 +144,16 @@ app.whenReady().then(async () => {
     await until('document.querySelector("[data-workbench-region-id=original-file-region] .editor-pane") !== null')
     await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     result.final = await win.webContents.executeJavaScript('({ state: window.spaceRestartState(), ui: window.spaceRestartUi(), durable: JSON.parse(localStorage.getItem("agentmux-workbench-v1")) })')
+    const geometry = result.final.ui.pinnedTopicGeometry
+    for (const name of ['row', 'icon', 'title', 'pin']) {
+      assert.ok(geometry[name] && geometry[name].width > 0 && geometry[name].height > 0,
+        `Pinned Topic ${name} must have a real nonempty rendered box`)
+    }
+    assert.ok(geometry.icon.x < geometry.title.x && geometry.title.x < geometry.pin.x,
+      'Pinned Topic must place its type icon, title and pin in increasing x order')
+    assert.ok(Math.abs(geometry.icon.centerY - geometry.title.centerY) <= 1.5 &&
+      Math.abs(geometry.pin.centerY - geometry.title.centerY) <= 1.5,
+      'Pinned Topic icon, title and pin must share one row, with no pin wrapping below')
     assert.equal(result.final.state.drafts['private-live-agent'], 'Original unsent draft survives restart')
     assert.equal(result.final.state.documents['__scratch__\u0000topic--view--original/topic.md'].content,
       '# Original Topic\n\nOriginal shared goal\n\nOriginal unsaved file note\n')
