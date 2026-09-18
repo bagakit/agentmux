@@ -1,3 +1,4 @@
+import { sessionPresentationById } from '../lib/session-presentation'
 import { CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FileDiff, Globe2, ListChecks, MessageCircle, X } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -57,7 +58,7 @@ export function SessionResultReview({
   origin: OpenHttpLinkOrigin
   visible: boolean
 }) {
-  const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
+  const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const setViewMode = useAppStore((state) => state.setViewMode)
   const openFileDiff = useAppStore((state) => state.openFileDiff)
   const openHttpLink = useAppStore((state) => state.openHttpLink)

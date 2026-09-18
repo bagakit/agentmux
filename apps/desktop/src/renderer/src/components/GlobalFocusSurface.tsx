@@ -17,6 +17,7 @@ import { RecentFocusTimeline } from './RecentFocusTimeline'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
+import { sessionPresentationById } from '../lib/session-presentation'
 
 export function GlobalFocusSurface() {
   const contextSelector = useMemo(createFocusProjectionSelector, [])
@@ -25,7 +26,8 @@ export function GlobalFocusSurface() {
   const tabs = useAppStore((state) => state.tabs)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const selectedTab = useMemo(() => tabForFocusedSession(tabs, selectedId), [selectedId, tabs])
-  const sessions = useAppStore(useShallow(state => selectedTab ? [] : state.sessions.filter(session => session.id === selectedId)))
+  const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
+  const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
@@ -117,7 +119,7 @@ export function GlobalFocusSurface() {
     /><aside className="global-session-workspace" aria-label="Focus workspace">
       {selectedTab
         ? <div id="focus-workspace-slot" className="focused-tab-workspace" data-focus-tab-id={selectedTab.id} />
-        : <><AgentTopologySummary sessionIds={[selectedId]} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={[selectedId]} contextId={`agent:${selectedId}`} /></>}
+        : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
     <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} onSelect={focusExecutionSession} />
