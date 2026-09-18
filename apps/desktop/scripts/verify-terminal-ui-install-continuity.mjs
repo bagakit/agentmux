@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, cp } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, cp, lstat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { join, resolve } from 'node:path'
@@ -22,7 +22,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex'), delay = 
 const root = await mkdtemp('/tmp/amx-ui-install-'), home = join(root, 'home'), userData = join(root, 'user-data')
 const runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), workspaceId = 'private-ui-install'
 const destination = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate/AgentMux.app')
-const failedCandidate = join(root, 'failed/AgentMux.app'), socketPath = join(runtimeDirectory, 'ctxmux.sock')
+const failedCandidate = join(root, 'failed/AgentMux.app'), unrestoredCandidate = join(root, 'unrestored/AgentMux.app'), socketPath = join(runtimeDirectory, 'ctxmux.sock')
 const oldArtifacts = process.env.AGENTMUX_VERIFY_PREVIOUS_ARTIFACTS ?? join(repositoryRoot, '.tmp/ctxmux-wal-capacity-worktree/.tmp/wal-release-artifacts')
 const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), CODEX_HOME: join(home, 'codex') }
@@ -105,8 +105,11 @@ async function launch(appPath) {
   const endpoint = new URL(await waitFor('Renderer debugger', () => { alive(); return rendererUrl }))
   const page = await waitFor('real loaded Renderer', async () => { alive(); return (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(row => row.type === 'page' && row.url.startsWith('file:')) })
   probe.cdp = await cdpConnect(page.webSocketDebuggerUrl); await probe.cdp.call('Runtime.enable')
+  // Let startup create its actual Browser/Renderer helpers before collecting
+  // the process scope. This checks readiness only, never the original workbench
+  // or serving/Run agreement that the installer must independently qualify.
   await waitFor('public IPC and loaded Store', () => probe.cdp.evaluate('Boolean(window.agentmux && document.querySelector(".project-list"))'))
-  await waitFor('complete public client observation', async () => { try { const observed = await observeUiClient(appPath); return !observed.workbench.loading && observed.main.package ? observed : null } catch (error) { alive(); return null } })
+  await waitFor('current client readiness', async () => { try { const observed = await observeUiClient(appPath); return !observed.workbench.loading && observed.main.package ? observed : null } catch (error) { alive(); return null } })
   const processes = classifyApplicationProcesses((await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout, {
     executable: join(appPath, 'Contents/MacOS/AgentMux'), helperRoot: join(appPath, 'Contents/Frameworks') + '/'
   }).serving
@@ -131,6 +134,18 @@ async function click(selector) {
   await active.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
 }
 async function control(operation, fields = {}) { return requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation, ...fields }, join(runtimeDirectory, 'control.sock')) }
+async function dragOriginalSplit() {
+  const before=await observeUiClient(destination), tab=before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId))
+  assert.equal(tab.layout.root.type,'split');const ratio=tab.layout.root.ratio
+  const point=await active.cdp.evaluate(`(() => {const split=Array.from(document.querySelectorAll('.workbench-region-split')).find(e=>e.getClientRects().length);const handle=split&&Array.from(split.children).find(e=>e.classList.contains('workbench-region-resize-handle'));if(!handle)return null;const r=handle.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  assert.ok(point)
+  await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',...point})
+  await active.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point})
+  await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,x:point.x+24,y:point.y})
+  await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,x:point.x+24,y:point.y})
+  const changed=await waitFor('actual split gesture persisted by its product owner',async()=>{const observed=await observeUiClient(destination),root=observed.workbench.tabs.find(row=>row.id===tab.id)?.layout.root;return root?.type==='split'&&Math.abs(root.ratio-ratio)>0.001?root.ratio:null})
+  receipt.actualSplitGesture={beforeRatio:ratio,afterRatio:changed}
+}
 async function mountedTerminal() {
   return await waitFor('actual mounted Terminal and authoritative grid', async () => {
     await active.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -197,7 +212,9 @@ try {
   await mkdir(join(home,'Applications'),{recursive:true});await exec('/usr/bin/ditto',[candidate,destination],{timeout:30000})
   server=createServer((request,response)=>{response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><title>Private Browser</title><h1>Private install Browser</h1>')});await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const pageUrl=`http://127.0.0.1:${server.address().port}/page`
-  await launch(destination);await click(`.project-rail-row[data-workspace-id="${workspaceId}"]`)
+  await launch(destination)
+  await waitFor('initial public IPC and loaded Store', () => active.cdp.evaluate('Boolean(window.agentmux && document.querySelector(".project-list"))'))
+  await click(`.project-rail-row[data-workspace-id="${workspaceId}"]`)
   await click('[aria-label="Browser Tools"]');
   const button = await waitFor('New Browser menu', () => active.cdp.evaluate(`(() => { const es=Array.from(document.querySelectorAll('button')).filter(e=>e.getClientRects().length&&e.textContent.trim()==='New Browser');if(es.length!==1)return null;const r=es[0].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2} })()`));
   await active.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...button});await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...button})
@@ -206,6 +223,9 @@ try {
   const opened=await control('open.agent',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{kind:'split',direction:'right',region:{kind:'region',regionId:initial.regionId}}})
   const command=`/bin/cat`;const openedTerminal=await control('open.terminal',{shellCommand:command,destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.result.region.regionId}}})
   terminal=openedTerminal.result.region;let terminalRun=await sdk.status(terminal.runId);owners.set(terminalRun.pid,await identity(terminalRun.pid));receipt.terminal={run:terminal.runId,pid:terminalRun.pid}
+  // A real user resize supplies the durable ratio through the existing committer.
+  // The earlier programmatic nested-split/defaultSize mismatch is retained separately.
+  await dragOriginalSplit()
   await control('focus',{target:{kind:'region',regionId:initial.regionId}})
   receipt.browserBefore=await nativePages(pageUrl);receipt.before=projectObservation(await observeUiClient(destination));assert.equal(receipt.before.workbench.tabs.flatMap(tab=>tab.regions).length,3)
   const loadedIdentityPath=packageIdentityPath(destination), loadedIdentityBytes=await readFile(loadedIdentityPath)
@@ -218,7 +238,12 @@ try {
   terminalRun=await mountedTerminal();receipt.terminal.currentSize=terminalRun.current_size
   let nativeSignals=0;const originalKill=process.kill;process.kill=function(pid,signal){if(pid===daemon.pid&&signal!==0)nativeSignals++;return originalKill.call(process,pid,signal)}
   try {
-    phase='actual-ui-only-transaction';const result=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,quit,launch});receipt.success=result
+    phase='actual-ui-only-transaction';let result, installError
+    try { result=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,quit,launch}) }
+    catch(error){installError=error;receipt.unexpectedInstallFailure={message:error.message,transaction:error.transaction};receipt.nativeSignals=nativeSignals}
+    phase='actual-ui-only-transaction'
+    assert.equal(installError,undefined,'An actual UI-only transaction must not enter Native preparation')
+    receipt.success=result
     assert.equal(result.ui.status,'committed');assert.equal(result.native.status,'deferred');assert.equal(nativeSignals,0)
     reportInstallTransaction(result)
     receipt.after=projectObservation(await observeUiClient(destination));assert.notEqual(receipt.after.pid,receipt.before.pid)
@@ -236,7 +261,41 @@ try {
     assert.ok(rejected);assert.equal(rejected.transaction?.ui.status,'restored');assert.equal(rejected.transaction?.native.status,'deferred');assert.equal(nativeSignals,0)
     reportInstallTransaction(rejected.transaction)
     receipt.restored=projectObservation(await observeUiClient(destination));receipt.inputAfterRollback=await healthyInput('C');receipt.browserAfterRollback=await nativePages(pageUrl)
-    assert.deepEqual(await sdk.runtimeInfo(),originalRuntime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid));receipt.nativeSignals=nativeSignals
+    assert.deepEqual(await sdk.runtimeInfo(),originalRuntime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid))
+    // The next GUI is genuinely live and loaded, but starts with an empty private
+    // userData. Basic process/identity appearance cannot confirm workbench recovery.
+    // This fault does not alter the original durable Store or inject a fake reply.
+    await mkdir(join(root,'unrestored'),{recursive:true});await exec('/bin/cp',['-cR',candidate,unrestoredCandidate],{timeout:30000})
+    const emptyUserData=join(root,'unrestored-user-data');await mkdir(emptyUserData,{recursive:true})
+    const unrestoredMain=join(unrestoredCandidate,'Contents/Resources/app/out/main/index.js'), originalMain=await readFile(unrestoredMain,'utf8')
+    const userDataAnchor='app.setPath("userData", process.env.AGENTMUX_DESKTOP_USER_DATA ?? packagedUserDataPath);'
+    assert.equal(originalMain.split(userDataAnchor).length,2)
+    await writeFile(unrestoredMain,originalMain.replace(userDataAnchor,`app.setPath("userData", ${JSON.stringify(emptyUserData)});`))
+    receipt.unrestoredFault={kind:'private-source-empty-user-data',sha256:hash(await readFile(unrestoredMain))}
+    await exec('/usr/bin/codesign',['--force','--deep','--sign','-',unrestoredCandidate],{timeout:30000,maxBuffer:1024*1024})
+    phase='actual-live-unrestored-candidate';let unrestoredError, unrestoredResult
+    try {unrestoredResult=await installApplication(unrestoredCandidate,{intent:'ui-only',homeDirectory:home,quit,launch})}
+    catch(error){unrestoredError=error;receipt.unrestored={message:error.message,transaction:error.transaction}}
+    const emptyObservation=await observeUiClient(destination)
+    receipt.unrestoredObservation=projectObservation(emptyObservation);receipt.unrestoredUnexpectedResult=unrestoredResult??null
+    assert.equal(emptyObservation.workbench.loading,false);assert.equal(emptyObservation.workbench.tabs.length,0)
+    assert.ok(emptyObservation.main.package);assert.ok(active.child.exitCode===null&&active.child.signalCode===null)
+    phase='actual-live-unrestored-candidate'
+    assert.ok(unrestoredError,'A live loaded GUI without the original workbench must not commit')
+    assert.equal(unrestoredError.transaction?.ui.status,'unknown');assert.equal(unrestoredError.transaction?.native.status,'deferred')
+    assert.equal((await lstat(unrestoredError.transaction.candidate)).isDirectory(),true)
+    assert.equal((await lstat(unrestoredError.transaction.previous)).isDirectory(),true)
+    reportInstallTransaction(unrestoredError.transaction)
+    assert.deepEqual(await sdk.runtimeInfo(),originalRuntime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid))
+    creator=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
+    const beforeDirect=await sdk.status(agent.run.runId)
+    await creator.writeAgent({agentSessionId:agent.agentSessionId,expectedRun:agent.run,data:'D',source:'user'})
+    const afterDirect=await waitFor('original Core input while GUI recovery is unknown',async()=>{const row=await sdk.status(agent.run.runId);return row.applied_input_bytes===beforeDirect.applied_input_bytes+1?row:null})
+    assert.equal(afterDirect.pid,beforeDirect.pid);assert.equal(afterDirect.state.type,'running')
+    await waitFor('original Core input nonempty output',async()=>{const attachment=await sdk.attach(agent.run.runId,0);try{return Buffer.concat(attachment.snapshot.replay.chunks.map(chunk=>Buffer.from(chunk.data))).includes(Buffer.from('D'))}finally{attachment.close()}})
+    receipt.inputWhileUiUnknown={pid:afterDirect.pid,run:afterDirect.id,inputBefore:beforeDirect.applied_input_bytes,inputAfter:afterDirect.applied_input_bytes,outputBytes:afterDirect.latest_output_bytes}
+    await creator.dispose();creator=null
+    assert.equal(nativeSignals,0);receipt.nativeSignals=nativeSignals
   } finally {process.kill=originalKill}
   receipt.inputsAfter=await inputs();assert.deepEqual(receipt.inputsAfter,receipt.inputsBefore)
   receipt.passed=true
