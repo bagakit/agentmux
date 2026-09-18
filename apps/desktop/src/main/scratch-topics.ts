@@ -32,10 +32,10 @@ Add the facts and constraints every collaborator should know.
 Keep durable decisions here. Put deliverables in \`outcome/\` and source material in \`refs/\`.
 `
 
-function topicPrompt(directoryPath: string, wiki: { content: string; version: string }): string {
+function topicPrompt(directoryPath: string, wiki: { content: string; version: string }, mote: boolean): string {
   return `Scratch Topic context:
 Your working directory is the filesystem-backed Topic at ${directoryPath}.
-Read topic.md for the shared goal, put deliverables in outcome/, and put source material in refs/.
+${mote ? 'Read topic.md for the current context. Choose how to organize your knowledge and durable notes; preserve existing files, references, outcomes and collaborator plaques.' : 'Read topic.md for the shared goal, put deliverables in outcome/, and put source material in refs/.'}
 Inspect .agents/ to discover collaborators. Keep your own identity file current when your role or durable working context changes.
 The identity files are shared short memory, not authoritative process or Run state.
 
@@ -279,7 +279,7 @@ export class ScratchTopics {
     }
   }
 
-  async ensure(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
+  async ensure(workspace: WorkspaceRecord, topicId: string, initialTitle?: string): Promise<ScratchTopicSnapshot> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)
     const root = await realpath(workspace.path)
@@ -291,7 +291,7 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agents')),
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
-    await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : TOPIC_TEMPLATE)
+    await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : initialTitle ? renamedTopicContent(TOPIC_TEMPLATE, initialTitle) : TOPIC_TEMPLATE)
     if (topicId === PMO_TEAMS_TOPIC_ID) await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
@@ -299,7 +299,7 @@ export class ScratchTopics {
   }
 
   async ensureMote(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
-    const snapshot = await this.ensure(workspace, topicId)
+    const snapshot = await this.ensure(workspace, topicId, 'Untitled Mote')
     const directory = join(await realpath(workspace.path), snapshot.directoryPath)
     await ensureRegularFile(join(directory, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
     return (await this.read(workspace, topicId))!
@@ -370,12 +370,18 @@ export class ScratchTopics {
       },
       absolutePath,
       prompt: [
+        ...(snapshot.soul ? [`Mote personality from ${MOTE_SOUL_PATH} (version ${snapshot.soul.version}):
+Your persistent Mote identity is ${topicId}, with its durable home at ${absolutePath}. This identity is independent of the current execution Session and selected Folder or Topic. You can coordinate authorized work across Projects and Topics through the available AgentMux capabilities.
+This saved personality applies to this new Session. Recovery retains the Session's existing context; editing the file does not hot-update a running Session.
+Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over this personality.
+
+${snapshot.soul.content}`] : []),
         ...(topicId === PMO_TEAMS_TOPIC_ID ? [PMO_TEAMS_TOPIC_ROLE] : []),
         snapshot.wiki?.enabled
         ? topicPrompt(absolutePath, {
             content: snapshot.wiki.content,
             version: snapshot.wiki.version
-          })
+          }, snapshot.soul !== undefined)
         : `Scratch Topic context:\nYour working directory is the filesystem-backed Topic at ${absolutePath}.\nTopic Wiki injection is disabled for this Topic.`
       ].join('\n\n'),
       identityPath,
