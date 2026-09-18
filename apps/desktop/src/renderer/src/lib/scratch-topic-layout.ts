@@ -207,7 +207,8 @@ export function layoutForActiveTopic(
   layout: WorkspaceLayout,
   tabs: Readonly<Record<string, WorkbenchTab>>,
   activeTopicId: string | null,
-  includeUnbound = true
+  includeUnbound = true,
+  targetTabId?: string
 ): WorkspaceLayout {
   // 没有选中 Topic 就不做无谓的隐藏。
   if (!activeTopicId) return layout
@@ -221,7 +222,7 @@ export function layoutForActiveTopic(
     // 等于切过去却什么也没发生——你看到的仍是刚才那一张。
     const stays = group.activeTabId !== null &&
       tabs[group.activeTabId]?.topicId === activeTopicId
-    const activeTabId = stays
+    const activeTabId = targetTabId && tabOrder.includes(targetTabId) ? targetTabId : stays
       ? group.activeTabId
       : tabOrder.find((tabId) => tabs[tabId]?.topicId === activeTopicId) ?? tabOrder[0] ?? null
     return {
@@ -245,9 +246,9 @@ export function layoutForActiveTopic(
     // 活动格被摘掉时把 activeGroupId 落到一个还在树里的格上：留着一个指向已不在屏上的
     // 格的指针，会让「当前是哪一格」与用户看到的东西对不上（`activeTopicIdFromLayout`
     // 正是按它取值的）。树里已经没有任何格时原样保留，交由上层处理。
-    activeGroupId: visibleGroupIds.has(layout.activeGroupId)
+    activeGroupId: groups.find(group => targetTabId && group.tabOrder.includes(targetTabId))?.id ?? (visibleGroupIds.has(layout.activeGroupId)
       ? layout.activeGroupId
-      : collectLeafIds(root, groupLeafId)[0] ?? layout.activeGroupId
+      : collectLeafIds(root, groupLeafId)[0] ?? layout.activeGroupId)
   }
 }
 
