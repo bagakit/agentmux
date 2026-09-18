@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, readFile, rename, rm, truncate, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { NativeJsonlHistoryReader } from '../src/native-jsonl-history-reader.js'
+import { NativeJsonlHistoryReader } from '../dist/native-jsonl-history-reader.js'
 import type { AgentProviderSessionHistoryContext } from '../src/types.js'
 
 const roots: string[] = []
@@ -30,6 +30,9 @@ it('reads newest-first bounded records and keeps older pages fixed across append
   expect((await reader.readPrevious())?.value).toEqual({ id: 'three', text: 'exact 中 three' })
   const cursor = await reader.nextCursor('parent-two')
   expect(cursor).toBeTypeOf('string')
+  expect(Object.keys(JSON.parse(Buffer.from(cursor!, 'base64url').toString('utf8'))).sort()).toEqual([
+    'before', 'continuation', 'cut', 'dev', 'head', 'ino', 'nativeSessionId', 'path', 'providerId', 'tail', 'version'
+  ])
   await appendFile(path, lines('four'))
   const expectedBytes = await readFile(path)
   const older = await open({ ...context, cursor: cursor! })
@@ -39,6 +42,94 @@ it('reads newest-first bounded records and keeps older pages fixed across append
   expect(await older.readPrevious()).toBeNull()
   expect(await older.nextCursor()).toBeNull()
   expect(await readFile(path)).toEqual(expectedBytes)
+})
+
+it('repeats the complete record at its true end after partial UTF8 exclusion and valid append', async () => {
+  const prefix = lines('older')
+  const batch = { messages: [
+    { id: 'one', text: '中🙂'.repeat(18_000) },
+    { id: 'two', text: '答复 二' },
+    { id: 'three', text: '答复 三' }
+  ] }
+  const complete = Buffer.from(prefix + JSON.stringify(batch) + '\n')
+  const partial = Buffer.concat([complete, Buffer.from('{"text":"'), Buffer.from([0xe4, 0xb8])])
+  const { path, context } = await fixture(partial)
+  const reader = await open(context)
+  const expectedRecord = { value: batch, start: Buffer.byteLength(prefix) }
+  expect(await reader.readPrevious()).toEqual(expectedRecord)
+  reader.repeatPrevious()
+  const firstCursor = await reader.nextCursor('batch:1')
+  expect(firstCursor).toBeTypeOf('string')
+  const firstState = JSON.parse(Buffer.from(firstCursor!, 'base64url').toString('utf8'))
+  expect(firstState).toEqual({
+    version: 1, providerId: 'pi', nativeSessionId: 'native-main', path,
+    dev: expect.any(Number), ino: expect.any(Number), cut: complete.length, before: complete.length,
+    head: expect.stringMatching(/^[a-f0-9]{64}$/), tail: expect.stringMatching(/^[a-f0-9]{64}$/), continuation: 'batch:1'
+  })
+  expect(Buffer.byteLength(firstCursor!)).toBeLessThan(1024)
+  await appendFile(path, Buffer.concat([Buffer.from([0xad]), Buffer.from('"}\n' + lines('newer'))]))
+  const appended = await readFile(path)
+  const second = await open({ ...context, cursor: firstCursor! })
+  expect(second.continuation).toBe('batch:1')
+  expect(await second.readPrevious()).toEqual(expectedRecord)
+  second.repeatPrevious()
+  const secondCursor = await second.nextCursor('batch:2')
+  expect(secondCursor).toBeTypeOf('string')
+  expect(JSON.parse(Buffer.from(secondCursor!, 'base64url').toString('utf8'))).toEqual({
+    ...firstState, continuation: 'batch:2'
+  })
+  const third = await open({ ...context, cursor: secondCursor! })
+  expect(third.continuation).toBe('batch:2')
+  expect(await third.readPrevious()).toEqual(expectedRecord)
+  expect((await third.readPrevious())?.value).toEqual({ id: 'older', text: 'exact 中 older' })
+  expect(await third.readPrevious()).toBeNull()
+  expect(await third.nextCursor()).toBeNull()
+  expect(await readFile(path)).toEqual(appended)
+})
+
+it('repeats only the most recently returned record, including after exhaustion', async () => {
+  const newest = { id: 'newest', text: 'exact 中 newest' }
+  const oldest = { id: 'oldest', text: 'exact 中 oldest' }
+  const { context } = await fixture(lines('oldest', 'newest'))
+  const reader = await open(context)
+  expect((await reader.readPrevious())?.value).toEqual(newest)
+  expect((await reader.readPrevious())?.value).toEqual(oldest)
+  expect(await reader.readPrevious()).toBeNull()
+  reader.repeatPrevious()
+  const cursor = await reader.nextCursor('unfinished-oldest')
+  expect(cursor).toBeTypeOf('string')
+  const resumed = await open({ ...context, cursor: cursor! })
+  expect(resumed.continuation).toBe('unfinished-oldest')
+  expect((await resumed.readPrevious())?.value).toEqual(oldest)
+  expect(await resumed.readPrevious()).toBeNull()
+  expect(await resumed.nextCursor()).toBeNull()
+})
+
+it.each([true, false])('can repeat the sole complete record with a trailing newline: %s', async (terminated) => {
+  const value = { messages: ['一', '二🙂'] }
+  const { context } = await fixture(JSON.stringify(value) + (terminated ? '\n' : ''))
+  const reader = await open(context)
+  expect(await reader.readPrevious()).toEqual({ value, start: 0 })
+  expect(await reader.nextCursor()).toBeNull()
+  reader.repeatPrevious()
+  const cursor = await reader.nextCursor('remaining:1')
+  expect(cursor).toBeTypeOf('string')
+  const resumed = await open({ ...context, cursor: cursor! })
+  expect(resumed.continuation).toBe('remaining:1')
+  expect(await resumed.readPrevious()).toEqual({ value, start: 0 })
+  expect(await resumed.nextCursor()).toBeNull()
+})
+
+it('requires a successful reverse record read before repetition and obeys cancellation', async () => {
+  const { context } = await fixture(lines('one'))
+  const controller = new AbortController()
+  const reader = await open({ ...context, signal: controller.signal })
+  expect(() => reader.repeatPrevious()).toThrowError(expect.objectContaining({ code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' }))
+  expect(await reader.readFirst()).toEqual({ id: 'one', text: 'exact 中 one' })
+  expect(() => reader.repeatPrevious()).toThrowError(expect.objectContaining({ code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' }))
+  expect((await reader.readPrevious())?.value).toEqual({ id: 'one', text: 'exact 中 one' })
+  controller.abort(new Error('cancelled'))
+  expect(() => reader.repeatPrevious()).toThrow('cancelled')
 })
 
 it('excludes partial UTF8 append but rejects a malformed complete JSON line', async () => {
