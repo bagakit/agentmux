@@ -49,6 +49,13 @@
 
 Scratch 不再承担与其他工作上下文分离的一套产品组织方式。用户从「Scratch 放进 Projects 作为默认 Project」进一步提出更外层的 Space 抽象，当前产品对象方向见《Space、Folder 与 Topic》。
 
+### Agent Region 关闭与身份入口
+
+- 用户反馈：「右上角 Conversation history 好像占关闭位置，与画面中间按钮重复；这个位置应显示 Agent 名字和功能菜单」。首先必须恢复 Region 的基本关闭能力：多 Region 时，原 Region 关闭按钮始终可见、可点击且键盘可达；Terminal、显式 History、待恢复记录与流程告示都不能遮挡它的完整命中区。Tab 关闭成功不能代替 Region 关闭验收。
+- History 只保留一个应用入口，使用现有记录阅读与返回 owner，不争用关闭位置。中间的 `Full-screen history` 是 TerminalView 的阅读边界状态告示，不是第二个手动入口，须保留其诚实边界。CLI 原生画面不冒充另一应用按钮，也不能靠遮盖正文掩饰重复内容 owner。
+- Region 的完整方向是紧凑的 Agent 语义显示名与既有功能菜单，关闭保持在固定、可发现的位置；名称使用现有 Session 身份事实，不新增状态或厂商分支。关闭遮挡修复可独立交付，不等待完整 Header 编排。
+- 关闭继续走现有精确 Tab/Region、未保存确认与资源处理 owner；同一 Session 的视图切换、History、冷态内联记录及服务窗不另建 Terminal、Session 或 Run。正常与恢复状态、窄分屏、记录面和进程重启后都保持这一合同；无关 Session 不产生额外处理。
+
 ### Agent 输入行与视图切换
 
 - Agent 输入区的顶部行同时承担“这是哪个 Agent/Session”和“当前工作面是什么”的定位职责。主名称使用用户为该 Agent 设置的显示名（例如 `/name` 的结果），旁边以弱化元信息显示 Executor/Provider 与可辨认的 Session 标识；长文本必须截断，完整值放在 tooltip 与可访问名称中。
@@ -580,6 +587,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 - **打开 Terminal 不得被一次瞬态 WAL checkpoint 争用永久阻断**。ctxmux 是 WAL、SQLite durable state 与 persistence actor 的唯一 Owner；AgentMux 只消费它公开的可用性结果，不在 Desktop 另建 checkpoint、截断或修复逻辑。
 - **可恢复的 busy 不是永久失败**。当 WAL checkpoint 因短暂 reader/attachment 争用未能归零时，ctxmux 必须在有界窗口内重试并继续 FIFO 写入；一次可恢复的 busy 不得把 persistence actor 锁存在 `durable state rejected`，也不得让后续 Terminal 创建或 semantic resume 永久失败。
+- **合法写入不能被 WAL 自身增长限额永久堵住（，P0）**。用户实际遇到「ctxmux durable state rejected a mutation: ctxmux durable state is corrupt: WAL exceeds 16 MiB」。WAL 是唯一 Native owner 可安全回收的提交日志，物理长度超出运行预算不等于 SQLite 数据损坏。持续合法输出与可恢复状态须在有界内存、写入和回收成本下继续推进；输出准入要包含实际修改、裁剪与索引页的工作，不能只按新正文大小估计后在提交成功时把健康 Runtime 永久锁死。真正的完整性、权限与 I/O 故障仍按原事实区分；不得盲增阈值、吞 corruption、删除或截断用户 WAL、迁移格式，或建立第二个修复 owner。原有字节、durable fence、Run 身份和健康输入保持；已有持久化故障时，升级不能以停止健康 Run 换取解除锁存，无法证明安全交接就保留旧服务并说明限制。现场原因与隔离复现分别绑定，局部通过不能声称当前用户错误已消失。
 - **真正的数据完整性或不变量失败仍需 fail closed**。无法确认 WAL 已安全回收、SQLite 报告 corruption、磁盘空间不足或 checkpoint 在有界窗口内持续失败时，界面要保留原投影并给出可操作的服务窗告示；不得静默丢掉 Run、Session 或布局，也不得手工删除/截断用户状态。
 - **健康边界必须可观测**。ctxmux 对外给出可区分的 recovered、busy-retry-exhausted、disk-full 与 corruption 结果；Desktop 的 Terminal/Resume 入口沿用同一结果分类，不把所有底层错误折叠成“Agent resume unavailable”。
 - **持久化故障回归必须是隔离注入，而不是破坏宿主**。测试在临时 state-dir 中注入一次可控的 SQLite I/O 失败，验证 mutation 的失败分类、后续写入的边界以及 daemon 重启后的恢复；不得填满宿主磁盘、触碰用户 runtime、杀掉宿主应用或把测试故障伪装成真实用户数据损坏。

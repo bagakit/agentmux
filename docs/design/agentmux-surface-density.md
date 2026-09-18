@@ -26,6 +26,12 @@ Provider 完整性（Session 分析、对话模式与 trace 观察）的行为�
 
 - Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同《Topic 点击必须打开可见 Tabs》。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
 
+### Agent Region 的关闭与动作密度
+
+行为与身份归属见交互合同《Agent Region 关闭与身份入口》。关闭命中区是 Region 的固定保留区；History 入口、阅读工具条、服务窗和长文本不能进入该区，不能仅提高层级后让两个控件视觉叠在一起。正常与窄分屏都保持原关闭尺寸、焦点环和完整可访问名称，不靠 hover 才找得到。
+
+后续身份与菜单沿现有控件、字号和间距组织为紧凑的一组；名称截断、动作保留命中区，不叠加第二常驻标题或新增装饰容器。本轮 P0 关闭修复不额外占一条 Header 高度，也不改变终端内容、输入与记录的外观 owner。
+
 ### Agent 输入行密度
 
 - `AGENT INPUT` 行保持单行基线：左侧显示 Agent 用户名，右侧用弱化的小字号承载 Executor/Provider 与短 Session 标识；名称过长以省略号收窄，完整信息由 tooltip/读屏补全。
@@ -312,6 +318,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
 - Core 侧用于 prompt/readiness 的屏幕证据同样计入内存预算：不得为每次观察临时堆出与全会话历史等长的 headless 终端尖峰；增量或帧起点有界证据是交互合同要求，本层只要求该证据不得变成常驻无界缓存，且 cold-park 唤醒不得依赖「从 byte 0 重放全史」作为唯一重建路径。
 - Durable Runtime 的异常使用同一套紧凑服务窗语言：瞬态 WAL busy 的重试不占据 Terminal 内容区，也不显示永久 loading；只有重试耗尽、磁盘不足或完整性失败才在原 Region 旁显示一行分类告示与下一步。数据库达到容量上限时标题必须说明“状态库已满/启动未完成”这一阶段，保留已恢复工作面，不把 readiness 超时写成 Agent 故障。退出清理中的 attach 门禁同样只在原 Region 旁短暂告示，清理完成后自动收敛，不使用永久全局遮罩。具体状态与 Owner 边界归交互合同的《Durable Runtime 健康》，本层不复制错误码或另造控件。相关回归测试必须在隔离临时 state-dir 注入 I/O 失败，不填满宿主磁盘、不改用户 runtime；测试只验证服务窗分类与恢复边界，不把宿主带入故障态。
+- WAL 增长预算与真实数据损坏的区分同样归《Durable Runtime 健康》；恢复使用现有局部服务窗，不新增遮罩、常驻指标或诊断轮询，不把健康 Run 的正常输入与原工作面拿走。
 - 资源面板和基线报告按 Main/Renderer/GPU/Utility/Browser 进程与 Terminal/Monaco/Browser/attachment owner 分栏；不把共享 RSS 或 V8 已保留容量重复计入，也不以单一总 RSS 推断泄漏。跨客户端比较只采用同窗口、同场景、同等待窗口的相对变化。
 - Session 恢复状态使用现有服务窗/状态行表达，不新增一条常驻的“Resume”工具栏或第二套 Tab chrome；自动恢复成功不占视觉空间，只有分类失败或待处理状态才在原 Region 旁给出短告示和动作入口。
 - 启动时先显示已保存的布局；单个 Host/runtime 探测失败只占用对应服务窗/状态行的密度，不得用全屏 loading 或空态覆盖工作面。具体恢复顺序与错误边界归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)。
