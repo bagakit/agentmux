@@ -133,8 +133,8 @@ export function ProjectActivity({
     }
   }, [open, hasActivity])
   if (!hasActivity) return null
-  // 视觉槽只保留语义图标和数字，完整状态名称与数量由外层 aria-label/title 提供；这样四种状态
-  // 共享同一列宽和基线，又不会让窄栏被长文案撑开。
+  // 数量作为图标角标，完整状态名称与数量仍由外层 aria-label/title 提供。
+  // 网格保留长数字的自然宽度；紧凑布局不截断计数，也不另存一份状态。
   const groups = buildActivityGroups(sessions, contexts)
   const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
   const metricLabel = metrics.map((metric) => `${metric.count} ${metric.label}`).join(' · ')
