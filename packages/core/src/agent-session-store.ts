@@ -806,10 +806,10 @@ function terminalPromptReadiness(
     source.source,
     'Terminal prompt readiness source'
   )
-  const outputCursorBytes = timestamp(
-    source.outputCursorBytes,
-    'terminalPromptReadiness.outputCursorBytes'
-  )
+  const outputCursorBytes = source.outputCursorBytes === undefined ? undefined
+    : timestamp(source.outputCursorBytes, 'terminalPromptReadiness.outputCursorBytes')
+  const observedAt = source.observedAt === undefined ? undefined
+    : timestamp(source.observedAt, 'terminalPromptReadiness.observedAt')
   const readyThroughByte = source.readyThroughByte === undefined
     ? undefined
     : timestamp(source.readyThroughByte, 'terminalPromptReadiness.readyThroughByte')
@@ -818,27 +818,30 @@ function terminalPromptReadiness(
     : string(source.consumedBySubmissionId, 'terminalPromptReadiness.consumedBySubmissionId')
   if (
     run.runId !== currentRun.runId ||
+    (readinessSource === 'initial-composer' && (outputCursorBytes === undefined || observedAt !== undefined)) ||
     (
       readyThroughByte !== undefined &&
-      (readinessSource === 'initial-composer'
+      (outputCursorBytes === undefined || (readinessSource === 'initial-composer'
         ? readyThroughByte <= outputCursorBytes
-        : readyThroughByte < outputCursorBytes)
+        : readyThroughByte < outputCursorBytes))
     ) ||
-    (consumedBySubmissionId !== undefined && readyThroughByte === undefined)
+    (readinessSource === 'initial-composer' && consumedBySubmissionId !== undefined && readyThroughByte === undefined)
   ) {
     throw new AgentMuxError(
       'Terminal prompt readiness does not match its Agent Run boundary.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
-  return {
-    source: readinessSource,
+  const base = {
     id: string(source.id, 'terminalPromptReadiness.id'),
     run,
-    outputCursorBytes,
     ...(readyThroughByte === undefined ? {} : { readyThroughByte }),
     ...(consumedBySubmissionId === undefined ? {} : { consumedBySubmissionId })
   }
+  return readinessSource === 'initial-composer'
+    ? { ...base, source: 'initial-composer', outputCursorBytes: outputCursorBytes! }
+    : { ...base, source: 'native-stop', ...(outputCursorBytes === undefined ? {} : { outputCursorBytes }),
+        ...(observedAt === undefined ? {} : { observedAt }) }
 }
 
 function terminalHandshake(
@@ -1085,6 +1088,10 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) }),
     ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
+  }
+  if (session.terminalPromptReadiness?.source === 'native-stop' &&
+    session.terminalPromptReadiness.observedAt !== undefined && session.terminalPromptReadiness.observedAt > session.updatedAt) {
+    throw new AgentMuxError('Native turn end observation exceeds the Session time.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId !== session.providerId) {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')

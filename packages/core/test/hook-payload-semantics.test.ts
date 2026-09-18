@@ -228,7 +228,8 @@ describe('payload-dependent Hook contributions', () => {
       expect(cancelled.hookReceipt).toMatchObject({ id: 'receipt-4', eventName: profile.eventName,
         lifecycleEvent: 'turn-end', outputCursorBytes: 123, run: { runId } })
       expect(cancelled.semanticStatus).toEqual(waiting)
-      expect(cancelled.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-4', run: { runId }, outputCursorBytes: 123 })
+      expect(cancelled.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-4', run: { runId },
+        outputCursorBytes: 123, observedAt: cancelled.hookReceipt!.observedAt })
       await expect(h.client.submitAgentPrompt({ agentSessionId, operationId: 'cancel-is-not-success',
         prompt: 'Synthetic automatic prompt', expectedCompletionId: JSON.stringify([runId, cancelled.hookReceipt!.observedAt]) }))
         .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })

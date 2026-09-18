@@ -512,13 +512,20 @@ export type AgentHookReceipt = {
 export type AgentTerminalPromptReadinessSource = 'initial-composer' | 'native-stop'
 
 export type AgentTerminalPromptReadinessState = {
-  source: AgentTerminalPromptReadinessSource
   id: string
   run: AgentMuxRunRef
-  outputCursorBytes: number
   readyThroughByte?: number
   consumedBySubmissionId?: string
-}
+} & (
+  | { source: 'initial-composer'; outputCursorBytes: number }
+  | {
+      source: 'native-stop'
+      /** Time of the native end itself; absent evidence remains unknown. */
+      observedAt?: number
+      /** A failed output snapshot cannot erase the native end. */
+      outputCursorBytes?: number
+    }
+)
 
 export type AgentSessionHistoryContentPart =
   | { kind: 'text'; text: string }
@@ -593,7 +600,7 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
-  /** Latest claimed prompt range; an observed completed turn is consumed by the same admission. */
+  /** Latest claimed prompt range; successful completion is consumed by the same admission. */
   promptCompletionAdmission?: {
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string

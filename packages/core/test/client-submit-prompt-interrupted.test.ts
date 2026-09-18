@@ -3,6 +3,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
+import type { CtxmuxAdapterOutputObservation } from '../src/ctxmux-run-adapter.js'
 import type {
   AgentMuxStoredAgentSession
 } from '../src/types.js'
@@ -106,9 +107,12 @@ async function submitClient(
   }
   // Empty replay ⇒ the screen has no composer text ⇒ the render predicate never matches ⇒ the wait parks.
   // That parked wait is exactly what a discard cancels.
-  state.kernel.observeOutput = async () => {
+  state.kernel.observeOutput = async (): Promise<CtxmuxAdapterOutputObservation> => {
     observeCalls += 1
-    return { run: runProjection(0), replay: [], gap: null, close: async () => {} }
+    return { run: runProjection(0), replay: [], gap: null, resizeRevision: 0, close: async () => {},
+      terminal: { type: 'basic-vt', checkpoint: { runId: RUN_ID, throughByte: 0,
+        resizeRevision: 0, size: { cols: 80, rows: 24 } },
+        restoreBytes: new TextEncoder().encode('\u001bc'), resizes: [] } }
   }
   ;(client as unknown as { connected: boolean }).connected = true
 
