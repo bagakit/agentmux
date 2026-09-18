@@ -1,3 +1,4 @@
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 // @vitest-environment happy-dom
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -60,7 +61,7 @@ function agent(id: string, label = id): Extract<SessionSnapshot, { kind: 'agent'
   }
 }
 function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentLaunchResult {
-  return { session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
+  return { created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
 }
 function fixture(): WorkbenchTab {
   const caller = agent('caller')

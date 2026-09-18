@@ -1,3 +1,4 @@
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -128,7 +129,7 @@ describe('displaced-agent 启动竞态：带缺口的缓冲事件必须触发 re
       }))
       // Region 在启动期间没了（关闭 / id 被回收）——ownsSessionLaunch 于是为 false，走 displaced 路。
       useAppStore.setState({ tabs: {} })
-      return { session: launchedAgent(agentSessionId), timeline: { agentSessionId, revision: 0, items: [] } }
+      return { created: agentCreationFixture(launchedAgent(agentSessionId)), projectionFailures: [], session: launchedAgent(agentSessionId), timeline: { agentSessionId, revision: 0, items: [] } }
     })
 
     // displaced 路以 CONTROL_OWNER_LOST 拒回执（Run 仍在跑）——这条 reject 同时自证我们真的进了被测分支，

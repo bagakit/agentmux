@@ -1,3 +1,4 @@
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -448,6 +449,7 @@ describe('universal new tab transitions', () => {
         }
       }
       return {
+        created: agentCreationFixture(launched), projectionFailures: [],
         session: launched,
         timeline: { agentSessionId: sessionId, revision: 0, items: [] }
       } satisfies AgentLaunchResult

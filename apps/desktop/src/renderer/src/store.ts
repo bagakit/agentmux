@@ -3204,7 +3204,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       let launched: AgentLaunchResult | null = null
       const cleanup = async (primary: Error): Promise<never> => {
         if (launched) {
-          try { await api.sessions.stop(launched.session.control) }
+          try { await api.sessions.stop({ kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run }) }
           catch (cleanupError) {
             set((current) => reduceDetachedAgentLaunch(current, launched!).state)
             throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
@@ -3225,19 +3225,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ...(content.prompt === undefined ? {} : { prompt: content.prompt }),
           ...(request.caller ? { authorAgentSessionId: request.caller.agentSessionId } : {})
         })
-        if (launched.session.id !== agentSessionId || launched.timeline.agentSessionId !== agentSessionId) {
+        if (launched.created.agentSessionId !== agentSessionId) {
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Session identity.'))
         }
-        let canonical: AgentLaunchResult | null = null
-        try {
-          canonical = await get().canonicalizeAgentLaunch(launched)
-        } catch (cause) {
-          await cleanup(Object.assign(
-            controlFailure('CONTROL_FAILED', 'Agent launch state could not be reconciled.'),
-            { cause }
-          ))
-        }
-        if (!canonical) return await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Agent Session ended during launch.'))
+        const canonical = await get().canonicalizeAgentLaunch(launched)
+        if (!canonical) return await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Agent launch owner disappeared during creation.'))
         const committed: AgentLaunchResult = canonical
         launched = committed
         if (signal?.aborted) await cleanup(controlCancellation(signal))
@@ -3262,7 +3254,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
           throw controlFailure('CONTROL_OWNER_LOST', 'Agent launched successfully but its Region disappeared during launch.')
         }
-        if (!workspaceOwnsSessionPath(workspace, committed.session)) {
+        if (!workspaceOwnsSessionPath(workspace, committed.created)) {
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))
         }
         set((current) => reduceAgentSessionLaunchAttached(current, plan.regionId, committed).state)
@@ -3277,7 +3269,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           operation: request.operation,
           region: {
             tabId: landing.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
-            agentSessionId, providerId: committed.session.providerId, executorId: committed.session.executorId
+            agentSessionId, providerId: committed.created.providerId, executorId: committed.created.executorId
           }
         }
       } catch (error) {
@@ -4894,11 +4886,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createOperationId: crypto.randomUUID()
       })
       if (
-        launched.session.id !== sessionId ||
-        launched.timeline.agentSessionId !== sessionId
+        launched.created.agentSessionId !== sessionId
       ) {
         try {
-          await api.sessions.stop(launched.session.control)
+          await api.sessions.stop({ kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run })
           set((current) => discardPendingAgentLaunch(current, sessionId))
         } catch (cleanupError) {
           let timelineGapSessionId: string | undefined
@@ -4915,50 +4906,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         throw new Error('Agent launch result does not match its requested Session identity')
       }
-      let result: AgentLaunchResult | null
-      try {
-        result = await get().canonicalizeAgentLaunch(launched)
-      } catch (reconcileError) {
-        try {
-          await api.sessions.stop(launched.session.control)
-          set((current) => discardPendingAgentLaunch(current, sessionId))
-        } catch (cleanupError) {
-          let timelineGapSessionId: string | undefined
-          set((current) => {
-            const reduced = reduceDetachedAgentLaunch(current, launched)
-            timelineGapSessionId = reduced.timelineGapSessionId
-            return reduced.state
-          })
-          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-          throw Object.assign(
-            new Error(`Agent launch state could not be reconciled and cleanup failed: ${presentError(cleanupError)}`),
-            {
-              code: 'AGENT_LAUNCH_CLEANUP_FAILED',
-              cause: new AggregateError([reconcileError, cleanupError])
-            }
-          )
-        }
-        throw reconcileError
-      }
+      const result = await get().canonicalizeAgentLaunch(launched)
       if (!result) {
-        // 这个 Session 在启动过程中就没了（在途事件溢出后重取快照，它已经不在快照里）。
-        // 抛出去而不是就地 `set(...) + return`：下面那个 catch 已经是这个方法唯一的失败出口，
-        // 它会翻回 launcher、reportError、再抛给调用方。就地静默回滚的话，用户看到的是初始页
-        // 自己闪回来而没有任何一个字解释，与「我刚才是不是没点上」完全同形；批量扇出的调用方
-        // 也会把这次当成成功继续往下走。同一个条件在 Control 那条路上判的是 CONTROL_OWNER_LOST
-        // （见 runControlRequest 里 `if (!canonical)`），两条路对同一个事实必须判得一样。
-        throw Object.assign(new Error('Agent Session ended during launch.'), {
+        // Only the pending launch owner disappeared. Missing display information does not
+        // establish that the Session ended; cancellation stays on its existing failure path.
+        throw Object.assign(new Error('Agent launch owner disappeared during creation.'), {
           code: 'CONTROL_OWNER_LOST'
         })
       }
-      const session = result.session
+      const control: SessionControl = { kind: 'agent', hostId: result.created.hostId, agentSessionId: result.created.agentSessionId, run: result.created.run }
       const launchOwner = findWorkbenchRegion(get().tabs, regionId)
       if (
         !ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) ||
         (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
       ) {
         try {
-          await api.sessions.stop(session.control)
+          await api.sessions.stop(control)
           set((current) => discardPendingAgentLaunch(current, sessionId))
         } catch (cleanupError) {
           let timelineGapSessionId: string | undefined
@@ -5837,20 +5800,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const before = get()
     if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
     const current = before.sessions.find((item) => item.id === sessionId)
-    if (!current) return
-    try {
-      const session = await api.sessions.refresh(current.control)
+    const accepted = before.pendingAgentLaunches[sessionId]?.created
+    const control: SessionControl | undefined = current?.control ?? (accepted ? {
+      kind: 'agent', hostId: accepted.hostId, agentSessionId: accepted.agentSessionId, run: accepted.run
+    } : undefined)
+    if (!control) return
+    if (accepted) {
+      const result: AgentLaunchResult = { created: accepted, projectionFailures: [] }
+      try {
+        const session = await api.sessions.refresh(control)
+        if (session.kind !== 'agent' || session.id !== sessionId || session.control.run.runId !== accepted.run.runId) {
+          throw new Error('Created Session re-read returned a different identity.')
+        }
+        result.session = session
+      } catch (error) { result.projectionFailures.push({ step: 'session', message: presentError(error) }) }
+      try {
+        const timeline = await api.sessions.timeline(control as AgentSessionControl)
+        if (timeline.agentSessionId !== sessionId) throw new Error('Created Timeline re-read returned a different identity.')
+        result.timeline = timeline
+      } catch (error) { result.projectionFailures.push({ step: 'timeline', message: presentError(error) }) }
       set((state) => {
-        if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) return state
         const live = state.sessions.find((item) => item.id === sessionId)
-        if (!live || !sessionOwnsControl(live, current.control)) return state
-        if (!hasAttachedSessionView(state.tabs, sessionId)) return state
-        return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
+        if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
+          !hasAttachedSessionView(state.tabs, sessionId) || (live && !sessionOwnsControl(live, control))) return state
+        return reduceDetachedAgentLaunch(state, result).state
       })
-      void get().flushAgentSteerQueue(sessionId)
-    } catch (error) {
-      get().reportError(error)
+    } else {
+      try {
+        const session = await api.sessions.refresh(control)
+        set((state) => {
+          const live = state.sessions.find((item) => item.id === sessionId)
+          if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
+            !live || !sessionOwnsControl(live, control) || !hasAttachedSessionView(state.tabs, sessionId)) return state
+          return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
+        })
+      } catch (error) { get().reportError(error) }
     }
+    void get().flushAgentSteerQueue(sessionId)
   },
   async recoverSession(sessionId, operationId) {
     const before = get()
@@ -5932,29 +5918,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (session) await api.sessions.stop(session.control).catch((error) => get().reportError(error))
   },
   async canonicalizeAgentLaunch(result) {
-    while (get().pendingAgentLaunches[result.session.id]?.overflowed) {
+    const id = result.created.agentSessionId
+    if (result.session && (result.session.id !== id || result.session.control.run.runId !== result.created.run.runId)) {
+      const { session: _invalid, ...rest } = result
+      result = { ...rest, projectionFailures: [...result.projectionFailures,
+        { step: 'session', message: 'Agent launch projected a different Session or Run.' }] }
+    }
+    if (result.timeline && result.timeline.agentSessionId !== id) {
+      const { timeline: _invalid, ...rest } = result
+      result = { ...rest, projectionFailures: [...result.projectionFailures,
+        { step: 'timeline', message: 'Agent launch returned another Session Timeline.' }] }
+    }
+    while (get().pendingAgentLaunches[id]?.overflowed) {
       set((state) => {
-        const pending = state.pendingAgentLaunches[result.session.id]
+        const pending = state.pendingAgentLaunches[id]
         if (!pending) return state
-        return {
-          pendingAgentLaunches: {
-            ...state.pendingAgentLaunches,
-            [result.session.id]: { ...pending, events: [], overflowed: false }
-          }
-        }
+        return { pendingAgentLaunches: { ...state.pendingAgentLaunches,
+          [id]: { ...pending, events: [], overflowed: false } } }
       })
-      const snapshot = await api.sessions.snapshot()
-      const pending = get().pendingAgentLaunches[result.session.id]
-      if (!pending) return null
-      if (pending.overflowed) continue
-      const session = snapshot.sessions.find((candidate) => candidate.id === result.session.id)
-      if (!session) return null
-      if (session.kind !== 'agent') throw new Error('Agent launch resync projected a non-Agent Session')
-      const timeline = snapshot.timelines[result.session.id]
-      if (!timeline || timeline.agentSessionId !== result.session.id) {
-        throw new Error('Agent launch resync did not return its matching Timeline baseline')
+      try {
+        const snapshot = await api.sessions.snapshot()
+        const pending = get().pendingAgentLaunches[id]
+        if (!pending) return null
+        if (pending.overflowed) continue
+        const session = snapshot.sessions.find((candidate) => candidate.id === id)
+        const timeline = snapshot.timelines[id]
+        return { ...result,
+          ...(session?.kind === 'agent' && session.control.run.runId === result.created.run.runId ? { session } : {}),
+          ...(timeline?.agentSessionId === id ? { timeline } : {}),
+          projectionFailures: [
+            ...(session?.kind === 'agent' ? [] : [{ step: 'session' as const, message: 'Created Session display is not yet available.' }]),
+            ...(timeline?.agentSessionId === id ? [] : [{ step: 'timeline' as const, message: 'Created Session Timeline is not yet available.' }])
+          ] }
+      } catch (error) {
+        // A failed display read cannot revoke the already accepted Core creation.
+        return { ...result, projectionFailures: [...result.projectionFailures,
+          { step: 'session', message: `Launch display re-read failed: ${presentError(error)}` }] }
       }
-      result = { session, timeline }
     }
     return result
   },

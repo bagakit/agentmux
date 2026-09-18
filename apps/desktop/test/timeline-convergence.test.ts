@@ -1,3 +1,4 @@
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -223,10 +224,12 @@ describe('Timeline convergence', () => {
     useAppStore.getState().applyEvent(timelineEvent(rightSession, 1, rightItem))
 
     pending.get(leftSession.id)!.resolve({
+      created: agentCreationFixture(leftSession), projectionFailures: [],
       session: leftSession,
       timeline: { agentSessionId: leftSession.id, revision: 1, items: [leftItem] }
     })
     pending.get(rightSession.id)!.resolve({
+      created: agentCreationFixture(rightSession), projectionFailures: [],
       session: rightSession,
       timeline: { agentSessionId: rightSession.id, revision: 0, items: [] }
     })
@@ -284,6 +287,7 @@ describe('Timeline convergence', () => {
     expect(useAppStore.getState().pendingAgentLaunches[session.id]?.events).toHaveLength(1)
 
     pending.resolve({
+      created: agentCreationFixture(session), projectionFailures: [],
       session,
       timeline: { agentSessionId: session.id, revision: 0, items: [] }
     })
@@ -328,6 +332,7 @@ describe('Timeline convergence', () => {
     })
 
     pending.resolve({
+      created: agentCreationFixture(session), projectionFailures: [],
       session,
       timeline: { agentSessionId: session.id, revision: 0, items: [] }
     })
@@ -513,6 +518,7 @@ describe('Timeline convergence', () => {
     })
     await vi.waitFor(() => expect(useAppStore.getState().sessions).toContainEqual(externalSession))
     launchResult.resolve({
+      created: agentCreationFixture(pendingSession), projectionFailures: [],
       session: pendingSession,
       timeline: { agentSessionId: pendingSession.id, revision: 0, items: [] }
     })
@@ -579,6 +585,7 @@ describe('Timeline convergence', () => {
     })
     useAppStore.getState().applyEvent(timelineEvent(launchedSession, 1, response))
     launchResult.resolve({
+      created: agentCreationFixture(launchedSession), projectionFailures: [],
       session: launchedSession,
       timeline: { agentSessionId: launchedSession.id, revision: 0, items: [] }
     })
@@ -711,6 +718,7 @@ describe('Timeline convergence', () => {
     )
     const baseline = { agentSessionId: session.id, revision: 257, items: [] }
     pending.resolve({
+      created: agentCreationFixture(session), projectionFailures: [],
       session,
       timeline: { agentSessionId: session.id, revision: 0, items: [] }
     })
@@ -781,6 +789,7 @@ describe('Timeline convergence', () => {
       }
     })
     pending.resolve({
+      created: agentCreationFixture(session), projectionFailures: [],
       session,
       timeline: { agentSessionId: session.id, revision: 0, items: [] }
     })
@@ -911,6 +920,7 @@ describe('Timeline convergence', () => {
     const lateOldRunCommit = item(session.id, 'late-old-run-commit', 'committed at resume boundary')
     useAppStore.getState().applyEvent(timelineEvent(session, 2, lateOldRunCommit))
     pending.resolve({
+      created: agentCreationFixture(session), projectionFailures: [],
       session,
       timeline: { agentSessionId: session.id, revision: 0, items: [] }
     })
@@ -951,7 +961,7 @@ describe('Timeline convergence', () => {
     const session = agentSession(surface.sessionId)
     const baseline = { agentSessionId: session.id, revision: 0, items: [] }
     await useAppStore.getState().closeTab('workspace', 'pane', launcher.id)
-    pending.resolve({ session, timeline: baseline })
+    pending.resolve({ created: agentCreationFixture(session), projectionFailures: [], session, timeline: baseline })
 
     await expect(launched).rejects.toMatchObject({ code: 'AGENT_LAUNCH_CLEANUP_FAILED' })
     expect(stop).toHaveBeenCalledWith(session.control)

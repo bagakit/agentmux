@@ -14,22 +14,8 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-// ---------------------------------------------------------------------------
-// 启动失败绝不能是静默的。
-//
-// 缺陷形状：`canonicalizeAgentLaunch` 返回 `null`（在途 overflow 触发重新取快照，而这个 session
-// 已经不在快照里了——进程在启动过程中就没了）时，`launchAgent` 只翻回 launcher 然后**直接 return**：
-// 既不 `reportError`，也不 throw。用户看到的是初始页自己闪回来，草稿还在，而没有任何一个字解释
-// 发生了什么——与「我刚才是不是没点上」一字不差。
-//
-// 同一个条件在另一个调用点（Control 那条 `runControlRequest` 路径）判得完全不同：那里
-// `if (!canonical) return await cleanup(controlFailure('CONTROL_OWNER_LOST', ...))`，是响亮失败。
-// 两条路对同一个事实判得不一样，就先假定其中一条是 bug（记忆 guard-count-exits-not-conditions）。
-//
-// 这一族的判据落在**用户能不能知道**上，而不是「状态对不对」：状态本来就是对的（region 翻回
-// launcher 是正确行为），错的是它一声不响。所以断言钉的是 `error` 有值 + 那个 Promise 被 reject。
-// ---------------------------------------------------------------------------
-
+// An empty display snapshot is not a terminal Core fact. Creation has succeeded:
+// preserve the Region and report which display re-read failed, without stopping the Run.
 const initialState = useAppStore.getState()
 
 const config: AppConfig = {
@@ -107,12 +93,16 @@ function launchThatVanishesDuringResync(): { stopped: string[] } {
     useAppStore.setState((state) => ({
       pendingAgentLaunches: {
         ...state.pendingAgentLaunches,
-        [id]: { events: [], overflowed: true }
+        [id]: { ...state.pendingAgentLaunches[id]!, events: [], overflowed: true }
       }
     }))
-    return { session: agentSession(id), timeline: { agentSessionId: id, revision: 0, items: [] } }
+    const session = agentSession(id)
+    return { created: { kind: 'agent', agentSessionId: id, providerId: session.providerId,
+      executorId: session.executorId, hostId: session.hostId, workspacePath: session.workspacePath,
+      run: session.control.run, retiredRuns: [], createdAt: 1, updatedAt: 1 }, projectionFailures: [],
+      session, timeline: { agentSessionId: id, revision: 0, items: [] } }
   })
-  // 快照里没有它 —— `canonicalizeAgentLaunch` 于是返回 null。
+  // 显示快照暂缺该身份，不能撤销已经接受的创建事实。
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {} } as never)
   vi.spyOn(api.sessions, 'stop').mockImplementation(async (control) => {
     stopped.push((control as { agentSessionId: string }).agentSessionId)
@@ -125,93 +115,31 @@ afterEach(() => {
   useAppStore.setState(initialState, true)
 })
 
-describe('启动在重新对齐时失败也必须响亮', () => {
-  it('前提自检：这一次真的走进了 canonicalize 返回 null 那条路', async () => {
-    // 若 fixture 没能让 canonicalize 返回 null，下面两条会因为「启动成功了」而绿，
-    // 判据就与被测的那条路无关了。region 翻回 launcher 是这条路独有的可观测结果：
-    // 启动成功会是 attached agent，别的失败路径会先抛在更前面（那时 stop 也不会被调）。
-    const launcher = launcherFixture()
-    const regionId = launcher.layout.activeRegionId
-    launchThatVanishesDuringResync()
-
-    await useAppStore
-      .getState()
-      .launchAgent('codex', 'p', 'pane', { tabId: launcher.id, regionId })
-      .catch(() => {})
-
-    expect(
-      useAppStore.getState().tabs[launcher.id]?.regions[regionId],
-      '没有走到「翻回 launcher」那一步——本族判据与被测路径无关了'
-    ).toMatchObject({ kind: 'launcher' })
+describe('创建成功后缺失显示快照保留已确认事实', () => {
+  it('empty canonical projection preserves the same attached Region and reports the missing display', async () => {
+    const launcher = launcherFixture(), regionId = launcher.layout.activeRegionId
+    const { stopped } = launchThatVanishesDuringResync()
+    await expect(useAppStore.getState().launchAgent('codex', 'p', 'pane', { tabId: launcher.id, regionId })).resolves.toBeUndefined()
+    const state = useAppStore.getState(), surface = state.tabs[launcher.id]!.regions[regionId]!
+    expect(surface).toMatchObject({ kind: 'agent', phase: 'attached' })
+    if (surface.kind !== 'agent') throw new Error('Missing Agent Region')
+    expect(state.sessions).toEqual([expect.objectContaining({ id: surface.sessionId, processState: 'running' })])
+    expect(state.pendingAgentLaunches[surface.sessionId]?.projectionFailures).toEqual([
+      { step: 'session', message: 'Created Session display is not yet available.' },
+      { step: 'timeline', message: 'Created Session Timeline is not yet available.' }
+    ])
+    expect(stopped).toEqual([])
   })
-
-  it('用户被告知了：错误进 store，界面不会一声不响地闪回初始页', async () => {
-    const launcher = launcherFixture()
-    const regionId = launcher.layout.activeRegionId
+  it('the accepted request remains available in the original Region while display re-reading is unavailable', async () => {
+    const launcher = launcherFixture(), regionId = launcher.layout.activeRegionId
     launchThatVanishesDuringResync()
-
-    await useAppStore
-      .getState()
-      .launchAgent('codex', 'p', 'pane', { tabId: launcher.id, regionId })
-      .catch(() => {})
-
-    const error = useAppStore.getState().error
-    expect(
-      error,
-      '启动失败后 error 仍是空的——用户只看到初始页自己闪回来，没有任何解释'
-    ).toBeTruthy()
-    // 内容判据：那句话必须说清是这个 Session 没了，而不是一句泛泛的「失败」。
-    // 只判「非空」的话，把它换成 reportError('') 或任意常量串也会绿。
-    expect(String(error).toLowerCase(), `错误文本没有说明原因：${String(error)}`).toMatch(
-      /session|会话/
-    )
-  })
-
-  it('调用方也知道：那个 Promise 被 reject，不是静默 resolve', async () => {
-    // 与上一条判的是不同的事：只 reportError 不 throw 时，UI 上有提示了，但 `run()` 的
-    // await 会正常返回，调用方（含扇出批量启动）会把这次当成成功继续往下走。
-    const launcher = launcherFixture()
-    const regionId = launcher.layout.activeRegionId
-    launchThatVanishesDuringResync()
-
-    await expect(
-      useAppStore.getState().launchAgent('codex', 'p', 'pane', { tabId: launcher.id, regionId })
-    ).rejects.toThrow()
-  })
-
-  it('草稿留在原处，重试不用重新打一遍', async () => {
-    // 这条路与别的失败路径一样沿用同一个 regionId 翻回 launcher，所以草稿的规矩也必须一样。
-    const launcher = launcherFixture()
-    const regionId = launcher.layout.activeRegionId
-    useAppStore.getState().setAgentComposerDraft(regionId, '我打了很久的那段话')
-    launchThatVanishesDuringResync()
-
-    await useAppStore
-      .getState()
-      .launchAgent('codex', '我打了很久的那段话', 'pane', { tabId: launcher.id, regionId })
-      .catch(() => {})
-
-    expect(
-      useAppStore.getState().agentComposerDrafts[regionId],
-      '这条失败路径把草稿清掉了——用户要重新打一遍'
-    ).toBe('我打了很久的那段话')
-  })
-
-  it('在途台账里那条记录被销掉，不留一个永远 pending 的 session', async () => {
-    // 反向边界：翻回 launcher 之后，`pendingAgentLaunches` 里那一条若留着，
-    // 迟到的 hook 事件会继续往一个没有归属的 session 上投（#157/#176 那一族的形状）。
-    const launcher = launcherFixture()
-    const regionId = launcher.layout.activeRegionId
-    launchThatVanishesDuringResync()
-
-    await useAppStore
-      .getState()
-      .launchAgent('codex', 'p', 'pane', { tabId: launcher.id, regionId })
-      .catch(() => {})
-
-    expect(
-      Object.keys(useAppStore.getState().pendingAgentLaunches),
-      '在途台账里留下了一条没有归属的记录'
-    ).toEqual([])
+    const prompt = '我打了很久的那段话'
+    useAppStore.getState().setAgentComposerDraft(regionId, prompt)
+    await useAppStore.getState().launchAgent('codex', prompt, 'pane', { tabId: launcher.id, regionId })
+    const state = useAppStore.getState(), surface = state.tabs[launcher.id]!.regions[regionId]!
+    if (surface.kind !== 'agent') throw new Error('Missing Agent Region')
+    expect(state.pendingAgentLaunches[surface.sessionId]?.request).toEqual({ executorId: 'codex', prompt })
+    expect(state.pendingAgentLaunches[surface.sessionId]?.created?.agentSessionId).toBe(surface.sessionId)
+    expect(state.pendingAgentLaunches[surface.sessionId]?.overflowed).toBe(false)
   })
 })

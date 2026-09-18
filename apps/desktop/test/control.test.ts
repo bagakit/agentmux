@@ -1,3 +1,4 @@
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -116,7 +117,7 @@ function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 's
 }
 
 function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentLaunchResult {
-  return { session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
+  return { created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
 }
 
 afterEach(() => {

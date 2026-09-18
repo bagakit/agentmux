@@ -407,7 +407,7 @@ export async function registerIpc(args: {
             agentSessionId: mintAgentSessionId(),
             createOperationId: randomUUID()
           }, current)
-          return { sessionId: launched.session.id }
+          return { sessionId: launched.created.agentSessionId }
         },
         removeWorktree: async (removeInput, current) => await worktrees.removeWorktree(removeInput, current)
       })
@@ -663,7 +663,7 @@ export async function registerIpc(args: {
       { code: 'CONTROL_OWNER_LOST' }
     )
     try {
-      await args.runtime.stopSession(result.session.control)
+      await args.runtime.stopSession({ kind: 'agent', hostId: result.created.hostId, agentSessionId: result.created.agentSessionId, run: result.created.run })
     } catch (cleanupError) {
       throw Object.assign(
         new Error(`${primary.message} Cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`),

@@ -766,7 +766,11 @@ const mockApi: AgentMuxDesktopApi = {
       }
       mockSnapshot.timelines[session.id] = timeline
       mockOutput.set(session.id, 'Starting agent…\r\n')
-      return { session, timeline }
+      return { session, timeline, projectionFailures: [], created: {
+        kind: 'agent', agentSessionId: session.id, providerId: session.providerId,
+        executorId: session.executorId, hostId: session.hostId, workspacePath: session.workspacePath,
+        run: session.control.run, retiredRuns: [], createdAt: session.createdAt, updatedAt: session.updatedAt
+      } }
     },
     launchTerminal: async (input) => {
       const runId = crypto.randomUUID()

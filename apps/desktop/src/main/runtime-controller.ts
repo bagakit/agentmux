@@ -606,6 +606,7 @@ export class RuntimeController {
       if (!executor) throw new Error(`Missing Agent Executor configuration: ${request.executorId}`)
       const client = await this.connectedClient(request.hostId)
       let preparedTopic: PreparedScratchAgentTopic | null = null
+      let created: AgentLaunchResult['created']
       try {
         if (request.scratchTopicId !== undefined) {
           if (!request.agentSessionId) {
@@ -622,7 +623,7 @@ export class RuntimeController {
         }
         // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
         // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
-        const agentSession = await client.createAgent({
+        created = await client.createAgent({
           providerId: executor.providerId,
           executorId: request.executorId,
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
@@ -642,31 +643,6 @@ export class RuntimeController {
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
-        try {
-          const session = await this.sessionByTarget(
-            client,
-            { kind: 'agent-session', agentSessionId: agentSession.agentSessionId },
-            config
-          )
-          if (session.kind !== 'agent') {
-            throw new Error(`Agent launch projected a non-Agent Session: ${agentSession.agentSessionId}`)
-          }
-          const timeline = await client.sessionTimeline(agentSession.agentSessionId)
-          if (timeline.agentSessionId !== agentSession.agentSessionId) {
-            throw new Error(`Agent launch returned a Timeline for another Session: ${timeline.agentSessionId}`)
-          }
-          return { session, timeline }
-        } catch (error) {
-          try {
-            await client.stopAgent(agentSession.agentSessionId, agentSession.run)
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Agent launch projection failed and cleanup also failed: ${agentSession.agentSessionId}`
-            )
-          }
-          throw error
-        }
       } catch (error) {
         try {
           if (preparedTopic) await this.scratchTopics.discardPreparedIdentity(preparedTopic)
@@ -678,6 +654,31 @@ export class RuntimeController {
         }
         throw error
       }
+      const result: AgentLaunchResult = { created, projectionFailures: [] }
+      try {
+        const session = await this.sessionByTarget(
+          client,
+          { kind: 'agent-session', agentSessionId: created.agentSessionId },
+          config
+        )
+        if (session.kind !== 'agent' || session.id !== created.agentSessionId ||
+          session.control.run.runId !== created.run.runId) {
+          throw new Error(`Agent launch projected a different identity: ${created.agentSessionId}`)
+        }
+        result.session = session
+      } catch (error) {
+        result.projectionFailures.push({ step: 'session', message: error instanceof Error ? error.message : String(error) })
+      }
+      try {
+        const timeline = await client.sessionTimeline(created.agentSessionId)
+        if (timeline.agentSessionId !== created.agentSessionId) {
+          throw new Error(`Agent launch returned a Timeline for another Session: ${timeline.agentSessionId}`)
+        }
+        result.timeline = timeline
+      } catch (error) {
+        result.projectionFailures.push({ step: 'timeline', message: error instanceof Error ? error.message : String(error) })
+      }
+      return result
     })
   }
 
