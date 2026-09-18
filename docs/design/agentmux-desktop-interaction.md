@@ -733,6 +733,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### Provider 能力对齐与移植边界
 
+- 用户要求「很多 Provider 的实现不完整」，全面分析后对照最新参考实现逐家完善，尤其是 Agent 的 Session 分析、对话模式与 trace 观察。每个 Provider 的能力闭环必须分别可验证：原生 Session 身份与记录解析、完整对话与资源顺序、工具与推理等观察事实、恢复与交互能力不能只凭启动成功或 Hook 存在宣称完成。已有参考实现的能力应核验并复用；缺少协议依据时如实保留未知或不支持，不能把观察缺口变成健康 Agent 的阻断。完善任务按 Provider 分开验收，共享协议与展示只有一个 owner。
 - 外部对照只提供对照证据，不是 AgentMux 的第二份 Provider 注册表。每个 AgentMux Provider 必须以真实可执行文件与真实运行回执为准，分别声明 launch、ready、Hook、permission、status、resume 与 reply-correlation 能力；未核实的能力保持未声明，不用 UI 对称性或终端字节推断补齐。
 - 现有 Provider 的 parity 工作按能力闭环推进：Grok 与 Gemini 若二进制支持 native resume，就必须同时接通可信 native handle、resume argv、managed Hook 与事件字段归一化；Pi 的 resume 与扩展部署是两件事，不能只做 locator；Claude、Hermes、Cursor 的事件/信任细节分别按各自 CLI 合同接入。Cursor 没有 native resume 时必须明确保持 unsupported，不伪造恢复入口。
 - Hook 入口同时接受厂商的 camelCase 与 snake_case 字段，但在 Core 内收敛到同一 canonical event；`sessionId` 等 provider-native handle 只能由对应 Provider 解释，不能由 ctxmux 或 Desktop 猜测。流程探测或 Hook 安装失败属于非阻断降级，必须在服务窗说明当前状态与恢复动作。
