@@ -1020,6 +1020,7 @@ export async function installApplication(appPath, { intent = installIntent, home
   }
 
   const destination = canonicalInstallPath(homeDirectory)
+  const previouslyInstalled = await pathExists(destination)
   const applicationsRoot = dirname(destination)
   const trashRoot = join(homeDirectory, '.Trash')
   const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
@@ -1032,10 +1033,11 @@ export async function installApplication(appPath, { intent = installIntent, home
   const running = await processIdsForApplication(currentPath)
   try {
     if (running.length > 0) before = await qualifyUi(currentPath)
-    assert(intent !== 'ui-only' || before, 'UI-only installation requires an observed outgoing GUI and listener; no UI was changed.')
-    if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(currentPath, next, before)
+    if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
     if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
-    if (intent === 'ui-only') native = { status: 'deferred', reason: 'Explicit UI-only transaction; no Native upgrade was attempted.' }
+    if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime
+      ? 'Explicit UI-only transaction; the existing Runtime is retained without a Native upgrade.'
+      : 'No existing listener was observed. No Native upgrade was attempted; ordinary GUI startup may start a Runtime.' }
   } catch (error) {
     await closeRuntimeUpgrade(uiRuntime)
     throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message }, native } })
@@ -1043,8 +1045,7 @@ export async function installApplication(appPath, { intent = installIntent, home
   try {
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
     // 不该白关掉用户正在用的窗口。
-    const previouslyInstalled = await pathExists(destination)
-    const quitOutcome = previouslyInstalled
+    const quitOutcome = previouslyInstalled && running.length > 0
       ? await quit(destination)
       : { wasRunning: false, pids: [] }
     // A pending action in the old GUI could have started a Runtime after the
@@ -1059,6 +1060,10 @@ export async function installApplication(appPath, { intent = installIntent, home
         }
         throw error
       }
+    }
+    if (running.length === 0 && (await processIdsForApplication(destination)).length > 0) {
+      throw Object.assign(new Error('A GUI appeared during cold preflight; the original application directory was not changed.'),
+        { transaction: { intent, ui: { status: 'not-started' }, native } })
     }
     let previousInstall
     if (previouslyInstalled) {
@@ -1115,7 +1120,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     } catch (error) {
       const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
       // An unobserved GUI cannot be force-quit or treated as safely rolled back.
-      if (native.status !== 'committed' && previousInstall && (await processIdsForApplication(destination)).length === 0) {
+      if (before && native.status !== 'committed' && previousInstall && (await processIdsForApplication(destination)).length === 0) {
         await rename(destination, next)
         if (uiRuntime) await confirmUiRuntime(uiRuntime)
         await rename(previousInstall, destination)
@@ -1133,6 +1138,8 @@ export async function installApplication(appPath, { intent = installIntent, home
       survivors.length === 0,
       `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
     )
+    if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
+      reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
     return { intent, ui: { status: 'committed', main: observed.main, path: destination }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
