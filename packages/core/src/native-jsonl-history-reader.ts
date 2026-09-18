@@ -47,8 +47,10 @@ function decodeCursor(text: string): Cursor {
 export class NativeJsonlHistoryReader {
   private bytesRead = 0
   private readonly startedAt = Date.now()
+  private readonly identity: { dev: number; ino: number }
   private position: number
   private cut: number
+  private lastRecordEnd: number | undefined
   private cache: Buffer = Buffer.alloc(0)
   private cacheStart = 0
   private head = ''
@@ -58,10 +60,11 @@ export class NativeJsonlHistoryReader {
   private constructor(
     private readonly context: AgentProviderSessionHistoryContext,
     private readonly file: FileHandle,
-    private readonly identity: { dev: number; ino: number },
+    { dev, ino }: { dev: number; ino: number },
     size: number,
     cursor?: Cursor
   ) {
+    this.identity = { dev, ino }
     this.cut = cursor?.cut ?? size
     this.position = cursor?.before ?? size
     this.continuation = cursor?.continuation
@@ -180,9 +183,19 @@ export class NativeJsonlHistoryReader {
         this.cut = start
         continue
       }
+      this.lastRecordEnd = end
       return { value, start }
     }
     return null
+  }
+
+  /** Include the last returned complete physical record in the next page. */
+  repeatPrevious(): void {
+    this.check()
+    if (this.lastRecordEnd === undefined) {
+      failure('INVALID_CURSOR', 'Read a complete native history record before repeating it.')
+    }
+    this.position = this.lastRecordEnd
   }
 
   /** Provider format identity/header check; does not move the backwards page position. */
