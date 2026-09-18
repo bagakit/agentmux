@@ -7,7 +7,7 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 // The actual Toolbar and Radix focus scopes are mounted. Only the external
 // action owners are mocked; this suite does not assert Core/Run authority.
 const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), focusExecutionSession: vi.fn() }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: (selector: (state: typeof owners) => unknown) => selector(owners) }))
+vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ activeWorkspaceId: null, layouts: {}, tabs: {} }) }) }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
 const selected: FocusContext = {
@@ -28,7 +28,7 @@ beforeEach(async () => {
   owners.setMainSurface.mockImplementation(() => destination.focus())
   owners.focusExecutionSession.mockImplementation(() => destination.focus())
   root = createRoot(container)
-  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab: null, onReview: review })))
+  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab: null, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
 })
 afterEach(async () => {
   await act(async () => root.unmount()); await settle()
