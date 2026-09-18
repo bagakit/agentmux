@@ -351,6 +351,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
 | Terminal link span | 裸 URL 下划线只覆盖 ASCII URL 本身；相邻 CJK 文字/标点保持普通终端字形 | 链接边界属于交互合同（见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md) 的 Terminal 链接约束）；不因相邻中文输出改变 URL 的目标或悬停范围 |
+| Terminal link readout | 延迟出现的边角被动读出；目标单行省略、打开方式为短的次级文本；宽度不超过 Region | 用户「hover 浮窗设计差」：用平面、轻边界的文字读出，不画图标按钮或快捷键胶囊，不跟指针浮动；清除时机、链接行避让与点击出口统一归交互合同 Terminal 链接约束 |
 | Terminal restart projection | Runtime 未确认期间保留布局但在 Region 内显示中性等待/不可用状态；权威 snapshot 确认旧 PTY 不存在后清掉 Terminal Region/Tab，不留只有标题的空壳 | Terminal 没有 Provider-native semantic resume，不能把未知身份伪装成可用终端，也不能让临时探测失败变成永久空 Tab |
 | Confirmed Agent crash notice | 沿用现有服务窗与唯一错误提示；由同一分类派生 ARIA 音量 | 行为边界归交互合同《我们的流程坏了，不等于 Agent 坏了》。不另造弹窗、严重度颜色表或覆盖工作面的遮罩 |
 | Managed Hook notice | 服务窗/状态行；不覆盖 Terminal 内容、不抢焦点 | Hook 路径失效属于流程降级，Agent 仍可用；说明如何让当前 App 重新校正配置 |
@@ -662,6 +663,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 - Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属只定义在交互 SSOT《Space、Folder 与 Topic》。
 - 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。树的子项与总览列表使用各自适合的密度，树整合不能把总览缩成只有一列名称；两处都消费同一事实和既有控件能力。特殊图标用于 Topics 父节点，列表行首图标继续遵守《控件语言》中同图标不重复占位的规则。
 - Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头的 `+` 打开紧凑动作菜单；入口含义与 Topic 的自动识别规则只定义在交互 SSOT《Space、Folder 与 Topic》。
+- Topic 与一般 Folder 使用不同的类型图标；Topics 的默认父节点与 Folder 分组均有可读标签，Topic 子项保持明确缩进，避免靠颜色或底层目录地址猜类别。两类复用同一行密度和工作面操作语言，目标是好懂好找。
 - Mote 使用自己的类型图标与名称，共用 Space 行的密度、选择、焦点与状态语言；正常大小写为 `Mote`，不采用全大写缩写。Topics、Mote 和 Folder/Project 共用 Space 标题行的密度与 `+` 菜单，Topic 子项按现有树缩进表达，保留总览的独立密度。产品身份与创建/人格行为只定义在交互 SSOT《Space、Folder 与 Topic》。PMO 默认角色与 Provider/Executor 身份各有含义，不能让预制头像冒充底层执行者或运行状态；具体 PMO 入口与浮窗密度继续复用对应章节。
 - Project Rail 的所有树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。Pinned child 的标题比普通项目小一档，hover 只使用下划线，不使用项目行的 Surface 填充；它和所属 Project 之间用一条低对比、断续的连接线表达层级关系。连接线是结构提示，不得复用选中、running、needs-you 或 error 的颜色与动效。
 - 用户原话：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。
