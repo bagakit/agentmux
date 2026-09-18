@@ -1,3 +1,4 @@
+import { readLoadedPackageIdentity } from './client-observation.js'
 import { randomUUID } from 'node:crypto'
 import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
@@ -74,6 +75,7 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
+  const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
   const scratchTopics = new ScratchTopics()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
@@ -230,6 +232,7 @@ function startPrimaryInstance(): void {
     await disposeIpc?.()
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles,
+      loadedPackage: await loadedPackage, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')
     if (process.env.ELECTRON_RENDERER_URL) { reportStartupStage('before-load-url'); await window.loadURL(process.env.ELECTRON_RENDERER_URL); reportStartupStage('after-load-url') }

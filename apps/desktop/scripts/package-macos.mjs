@@ -18,12 +18,13 @@ import {
   writeFile
 } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 import { classifyApplicationProcesses } from './package-process-scope.mjs'
-import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade } from './package-runtime-upgrade.mjs'
+import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient } from './package-runtime-upgrade.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -47,6 +48,7 @@ const outputDmg = join(
   `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`
 )
 const installRequested = process.argv.includes('--install')
+const installIntent = process.argv.includes('--ui-only') ? 'ui-only' : 'full'
 // Runtime 变了就必须先做 Run/resume review——但 review 做完之后要有一条路能装。缺了这条路，
 // 任何 ctxmux 升级都永远装不上：门就不再是"先 review"，而是"不许升级"。
 // 这个参数带的是 review 记录的路径，不是一个裸开关；它会被读、被校验非空、被打进安装收据。
@@ -136,7 +138,7 @@ async function plistValue(path, key) {
   return (await run('plutil', ['-extract', key, 'raw', '-o', '-', path], { capture: true })).stdout.trim()
 }
 
-async function brandApplication(appPath) {
+export async function brandApplication(appPath) {
   const contents = join(appPath, 'Contents')
   const plist = join(contents, 'Info.plist')
   const resources = join(contents, 'Resources')
@@ -187,7 +189,7 @@ async function brandApplication(appPath) {
   await rm(join(resources, 'default_app.asar'), { force: true })
 }
 
-async function copyRuntimeApplication(appPath, source) {
+export async function copyRuntimeApplication(appPath, source) {
   const resources = join(appPath, 'Contents', 'Resources')
   const appResources = join(resources, 'app')
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
@@ -895,7 +897,9 @@ async function quitInstalledApplication(appPath) {
     process.stdout.write(`ignored_detached_crash_reporter=${crashReporter.join(',')} (orphaned Electron crash handler; serves no bundle, left for the OS to reap)\n`)
   }
   if (running.length === 0) return { wasRunning: false, pids: [] }
-  await run('osascript', ['-e', `quit app id "${BUNDLE_ID}"`], { capture: true, timeoutMs: 15_000 })
+  const bundleId = await plistValue(join(appPath, 'Contents/Info.plist'), 'CFBundleIdentifier')
+  assert(/^[a-zA-Z0-9.-]+$/.test(bundleId), 'Application bundle identity is invalid; no quit was requested.')
+  await run('osascript', ['-e', `quit app id "${bundleId}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
   let remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 20_000)
   assert(remaining.length === 0,
@@ -932,8 +936,66 @@ async function relaunchInstalledApplication(appPath) {
   return pids
 }
 
-async function installApplication(appPath) {
-  const currentPath = canonicalInstallPath(homedir())
+function workbenchIdentity(workbench) {
+  return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
+    layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
+      if (region.kind === 'agent' || region.kind === 'terminal') {
+        const { control, processState, ...descriptor } = region
+        return descriptor
+      }
+      if (region.kind === 'browser') {
+        const { loading, error, navigationId, ...descriptor } = region
+        return descriptor
+      }
+      return region
+    }) })) }
+}
+
+/** Actual loaded identity and complete Store topology, not process appearance. */
+async function qualifyUi(appPath, before = null) {
+  const observation = await observeUiClient(appPath)
+  assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
+  assertPackageIdentity(observation.main.package, await readPackageIdentity(appPath))
+  assert(!observation.workbench.loading, 'The saved workbench is still loading; no UI commit can be confirmed.')
+  const bundled = JSON.parse(await readFile(join(appPath, 'Contents/Resources/app/out/renderer/release.json'), 'utf8'))
+  assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
+    'The loaded Renderer does not belong to this application contract.')
+  if (before) {
+    assert(JSON.stringify(workbenchIdentity(observation.workbench)) === JSON.stringify(workbenchIdentity(before.workbench)),
+      'The original workbench, Region descriptors or focus have not been restored.')
+    for (const tab of before.workbench.tabs) for (const region of tab.regions) {
+      const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
+      if ((region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running') {
+        assert(restored && restored.kind === region.kind && restored.control && region.control &&
+          restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
+        'An original healthy Run is not yet available in its restored Region.')
+      }
+      if (region.kind === 'browser' && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
+        'An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
+    }
+  }
+  return observation
+}
+
+async function awaitUiActivation(appPath, before, runtimePlan = null) {
+  const deadline = Date.now() + 30_000
+  let lastError
+  do {
+    try {
+      const observed = await qualifyUi(appPath, before)
+      if (runtimePlan) assertUiRuntimeObservation(observed, await confirmUiRuntime(runtimePlan))
+      return observed
+    }
+    catch (error) { lastError = error }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  } while (Date.now() < deadline)
+  throw lastError
+}
+
+export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
+  quit = quitInstalledApplication, launch = relaunchInstalledApplication } = {}) {
+  assert(intent === 'full' || intent === 'ui-only', 'Unknown installation intent.')
+  const currentPath = canonicalInstallPath(homeDirectory)
   let runtimeReviewPath
   let runtimeChanged = false
   if (await pathExists(currentPath)) {
@@ -945,38 +1007,56 @@ async function installApplication(appPath) {
       runtimeChanged = true
       // Review records the release boundary. Actual same-Runtime planned-exec
       // confirmation below is required before the new GUI can start.
-      assert(runtimeReviewArgument,
+      assert(intent === 'ui-only' || runtimeReviewArgument,
         'CtxMux runtime differs; record its same-Runtime planned-exec review and pass --runtime-reviewed=<path>. No running application was changed.')
-      runtimeReviewPath = runtimeReviewArgument.slice('--runtime-reviewed='.length)
-      assert(runtimeReviewPath, '--runtime-reviewed= needs the path to the Run/resume review, not an empty value.')
-      const review = await readFile(runtimeReviewPath, 'utf8').catch(() => null)
-      assert(review !== null, `Cannot read the Run/resume review at ${runtimeReviewPath}; nothing proves the review happened.`)
-      assert(review.trim().length > 0, `The Run/resume review at ${runtimeReviewPath} is empty.`)
+      if (intent === 'full') {
+        runtimeReviewPath = runtimeReviewArgument.slice('--runtime-reviewed='.length)
+        assert(runtimeReviewPath, '--runtime-reviewed= needs the path to the Run/resume review, not an empty value.')
+        const review = await readFile(runtimeReviewPath, 'utf8').catch(() => null)
+        assert(review !== null, `Cannot read the Run/resume review at ${runtimeReviewPath}; nothing proves the review happened.`)
+        assert(review.trim().length > 0, `The Run/resume review at ${runtimeReviewPath} is empty.`)
+      }
     }
   }
 
-  const destination = canonicalInstallPath(homedir())
+  const destination = canonicalInstallPath(homeDirectory)
   const applicationsRoot = dirname(destination)
-  const trashRoot = join(homedir(), '.Trash')
+  const trashRoot = join(homeDirectory, '.Trash')
   const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
   await mkdir(applicationsRoot, { recursive: true })
   await rm(next, { recursive: true, force: true })
   await run('ditto', [appPath, next], { capture: true })
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
-  let runtimeUpgrade = runtimeChanged ? await prepareRuntimeUpgrade(currentPath, next) : null
+  let runtimeUpgrade = null, uiRuntime = null, before = null
+  let native = { status: 'unchanged' }
+  const running = await processIdsForApplication(currentPath)
+  try {
+    if (running.length > 0) before = await qualifyUi(currentPath)
+    assert(intent !== 'ui-only' || before, 'UI-only installation requires an observed outgoing GUI and listener; no UI was changed.')
+    if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(currentPath, next, before)
+    if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
+    if (intent === 'ui-only') native = { status: 'deferred', reason: 'Explicit UI-only transaction; no Native upgrade was attempted.' }
+  } catch (error) {
+    await closeRuntimeUpgrade(uiRuntime)
+    throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message }, native } })
+  }
   try {
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
     // 不该白关掉用户正在用的窗口。
     const previouslyInstalled = await pathExists(destination)
     const quitOutcome = previouslyInstalled
-      ? await quitInstalledApplication(destination)
+      ? await quit(destination)
       : { wasRunning: false, pids: [] }
     // A pending action in the old GUI could have started a Runtime after the
     // first absent-listener observation. Recheck that same owner after GUI exit.
-    if (runtimeChanged && !runtimeUpgrade) {
+    if (intent === 'full' && runtimeChanged && !runtimeUpgrade) {
       try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next) }
       catch (error) {
-        if (quitOutcome.wasRunning) await relaunchInstalledApplication(destination)
+        if (quitOutcome.wasRunning) {
+          await launch(destination)
+          await awaitUiActivation(destination, before, uiRuntime)
+          error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+        }
         throw error
       }
     }
@@ -996,20 +1076,29 @@ async function installApplication(appPath) {
         await rename(previousInstall, destination).catch((restoreError) => {
           throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
         })
+        if (uiRuntime) await confirmUiRuntime(uiRuntime)
+        if (quitOutcome.wasRunning) {
+          await launch(destination)
+          await awaitUiActivation(destination, before, uiRuntime)
+          error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+        }
       }
       throw error
     }
     if (runtimeUpgrade) {
       const handoff = await finishRuntimeUpgrade(runtimeUpgrade, destination)
       process.stdout.write(`runtime_handoff=${JSON.stringify(handoff)}\n`)
+      native = { status: handoff.status === 'upgraded' ? 'committed' : handoff.status === 'old-confirmed' ? 'unchanged' : 'unknown', handoff }
       if (handoff.status === 'old-confirmed') {
         // The original protocol and exact owner/Run facts are positively confirmed.
         // Keep the candidate in next; restore the old client for that live service.
         assert(previousInstall, 'The original application is unavailable for the confirmed old Runtime.')
         await rename(destination, next)
         await rename(previousInstall, destination)
-        await relaunchInstalledApplication(destination)
-        throw new Error(`Runtime upgrade failed; the original application and healthy Runtime are restored: ${handoff.error}`)
+        await launch(destination)
+        await awaitUiActivation(destination, before, { ...runtimeUpgrade, newSdk: runtimeUpgrade.oldSdk })
+        throw Object.assign(new Error(`Runtime upgrade failed; the original application and healthy Runtime are restored: ${handoff.error}`),
+          { transaction: { intent, ui: { status: 'restored', error: handoff.error }, native } })
       }
       assert(handoff.status === 'upgraded',
         `Runtime handoff is unknown; candidate and previous application are retained. No new GUI was started: ${handoff.error}`)
@@ -1019,7 +1108,23 @@ async function installApplication(appPath) {
     if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
     if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
     process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
-    const relaunched = await relaunchInstalledApplication(destination)
+    let relaunched, observed
+    try {
+      relaunched = await launch(destination)
+      observed = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
+    } catch (error) {
+      const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
+      // An unobserved GUI cannot be force-quit or treated as safely rolled back.
+      if (native.status !== 'committed' && previousInstall && (await processIdsForApplication(destination)).length === 0) {
+        await rename(destination, next)
+        if (uiRuntime) await confirmUiRuntime(uiRuntime)
+        await rename(previousInstall, destination)
+        await launch(destination)
+        await awaitUiActivation(destination, before, uiRuntime)
+        result.ui = { status: 'restored', error: error.message }
+      }
+      throw Object.assign(error, { transaction: result })
+    }
     process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
     // 交付判据：装完之后，跑在已装路径上的每一个进程都必须是**这次**拉起的。留下任何一个更早的
     // 进程，就意味着"用户点的那个窗口"可能仍在服务上一份包——那正是这段代码存在的原因。
@@ -1028,12 +1133,25 @@ async function installApplication(appPath) {
       survivors.length === 0,
       `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
     )
+    return { intent, ui: { status: 'committed', main: observed.main, path: destination }, native }
+  } catch (error) {
+    if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
+    throw error
   } finally {
     await closeRuntimeUpgrade(runtimeUpgrade)
+    await closeRuntimeUpgrade(uiRuntime)
   }
 }
 
+/** UI and Native outcomes are separate, including partial or unknown failure. */
+export function reportInstallTransaction(result) {
+  assert(result && result.ui && result.native, 'Installation did not return both component outcomes.')
+  process.stdout.write(`install_transaction=${JSON.stringify(result)}\n`)
+  if (result.native.status === 'deferred') process.stdout.write(`Native update deferred: ${result.native.reason} The existing Runtime and Runs were not replaced.\n`)
+}
+
 async function main() {
+  assert(!process.argv.includes('--ui-only') || installRequested, '--ui-only requires --install.')
   assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
   assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
   const initialSource = await sourceIdentity()
@@ -1084,7 +1202,7 @@ async function main() {
     await mkdir(releaseRoot, { recursive: true })
     await rename(stagedApp, outputApp)
     await rename(stagedDmg, outputDmg)
-    if (installRequested) await installApplication(outputApp)
+    if (installRequested) reportInstallTransaction(await installApplication(outputApp))
     await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
       sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
@@ -1111,4 +1229,9 @@ async function main() {
   }
 }
 
-await main()
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { await main() } catch (error) {
+    if (error.transaction) reportInstallTransaction(error.transaction)
+    throw error
+  }
+}

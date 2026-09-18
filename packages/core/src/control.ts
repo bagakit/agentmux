@@ -201,6 +201,8 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
+/** A host-owned, content-free client observation; the host owns its concrete schema. */
+export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
 export type AgentMuxControlInspectTabRequest = RequestBase & {
   operation: 'inspect.tab'; target: AgentMuxTabAnchor; caller?: AgentMuxControlCaller
 }
@@ -457,6 +459,7 @@ export type AgentMuxControlBrowserSubscribeRequest = RequestBase & {
   operation: 'browser.subscribe'; operationId: string; afterSequence?: number
 }
 export type AgentMuxControlRequest =
+  | AgentMuxControlInspectClientRequest
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
   | AgentMuxControlOpenAgentRequest
@@ -540,6 +543,7 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.agent'; region: AgentMuxAgentRegion }
@@ -746,6 +750,7 @@ export const AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS = 60_000
  * 本地状态、或只发一次不等结果的信号，2 秒之内不返回就是真的出事了。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'inspect.client': 'short',
   'inspect.tab': 'short',
   'inspect.region': 'short',
   'open.agent': 'long',

@@ -1,3 +1,5 @@
+import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
+import { sessionPresentationById } from './lib/session-presentation'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
@@ -2708,6 +2710,40 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { tabId, ...(region ? { regionId: region.regionId } : {}) }
     }
     requireActive()
+    if (request.operation === 'inspect.client') {
+      const state = get()
+      const sessions = sessionPresentationById(state.sessions)
+      const observation: DesktopWorkbenchObservation = {
+        loading: state.loading, startupProgress: state.startupProgress,
+        activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
+        focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
+        layouts: state.layouts,
+        tabs: Object.values(state.tabs).map(tab => ({
+          id: tab.id, workspaceId: tab.workspaceId, titleRegionId: tab.titleRegionId,
+          ...(tab.topicId === undefined ? {} : { topicId: tab.topicId }),
+          ...(tab.name === undefined ? {} : { name: tab.name }), layout: tab.layout,
+          regions: Object.values(tab.regions).map(surface => {
+            const base = { regionId: surface.regionId, workspaceId: surface.workspaceId }
+            switch (surface.kind) {
+              case 'agent': case 'terminal': {
+                const session = sessions.get(surface.sessionId)
+                const matched = session?.kind === surface.kind ? session : null
+                return { ...base, kind: surface.kind, sessionId: surface.sessionId, phase: surface.phase,
+                  control: surface.phase === 'attached' ? matched?.control ?? null : null,
+                  processState: matched?.processState ?? null }
+              }
+              case 'browser': return { ...base, kind: surface.kind, browserId: surface.browserId,
+                url: surface.url, title: surface.title, profileId: surface.profileId, navigationId: surface.navigationId,
+                error: surface.error, loading: surface.loading }
+              case 'file': return { ...base, kind: surface.kind, path: surface.path }
+              case 'git-diff': return { ...base, kind: surface.kind, comparison: surface.comparison }
+              case 'launcher': return { ...base, kind: surface.kind }
+            }
+          })
+        }))
+      }
+      return { operation: request.operation, observation }
+    }
     if (request.operation === 'inspect.tab') {
       const tab = resolveWorkbenchControlTab(input(), request.target, request.caller)
       return { operation: request.operation, tab: inspectWorkbenchControlTab(input(), tab) }

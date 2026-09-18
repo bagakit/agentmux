@@ -484,6 +484,16 @@ export class RuntimeController {
     }
   }
 
+  /** Read the existing navigation owner; absence is not a ready Renderer. */
+  rendererGeneration(client: WebContents): number | null {
+    return this.clients.has(client) && !client.isDestroyed() ? this.rendererGenerations.get(client.id) ?? null : null
+  }
+
+  /** Cached public identities from connected hosts only; no lifecycle or probing action. */
+  connectedRuntimeIdentities() {
+    return [...this.hosts].map(([hostId, host]) => ({ hostId, identity: host.client.runtimeIdentity() }))
+  }
+
   executionHost(hostId: string): ExecutionHost {
     const host = this.hosts.get(hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${hostId}`)
