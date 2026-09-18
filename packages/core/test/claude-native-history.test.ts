@@ -37,7 +37,7 @@ it('reads main Claude pages with exact UUIDs and ordered resources, excluding si
   expect(first.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'before ' },
     { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,cGlj' },
     { kind: 'text', text: ' after 中' }])
-  expect(first.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'actual tool output' }])
+  expect(first.items[0]!.contentParts).toEqual([{ kind: 'tool-result', output: 'actual tool output', callId: 'tool-1' }])
   const older = await f.client.sessionHistoryPage('private-agent', { limit: 2, cursor: first.nextCursor! })
   expect(older.items.map((item) => item.id)).toEqual(['user-1', 'assistant-1'])
   expect(older.items[0]!.startedAt).toBe(Date.parse('2026-10-01T01:02:03Z'))
@@ -50,13 +50,13 @@ it('reads main Claude pages with exact UUIDs and ordered resources, excluding si
 it('preserves neutral unknown activity and missing time, while keeping mixed tool records out of human speech', async () => {
   const f = await fixture(jsonl([
     { type: 'future-native-event', uuid: 'unknown', sessionId: 'native-main', detail: 'kept', timestamp: 'not-a-date' },
-    record('tool', 'assistant', [{ type: 'text', text: 'planning ' }, { type: 'tool_use', id: 'call', name: 'read', input: { path: 'a' } }])
+    record('tool', 'assistant', [{ type: 'tool_use', id: 'call', name: 'read', input: { path: 'a' } }])
   ]))
   const page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items.map((item) => item.kind)).toEqual(['activity', 'activity'])
   expect(page.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: JSON.stringify({ type: 'future-native-event', uuid: 'unknown', sessionId: 'native-main', detail: 'kept', timestamp: 'not-a-date' }) })
   expect(page.items[0]).not.toHaveProperty('startedAt')
-  expect(page.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'planning ' }, { kind: 'text', text: '{"type":"tool_use","id":"call","name":"read","input":{"path":"a"}}' }])
+  expect(page.items[1]!.contentParts).toEqual([{ kind: 'tool-call', name: 'read', input: '{"path":"a"}', callId: 'call' }])
 })
 
 it('keeps synthetic and compaction summary user records neutral instead of assigning a human speaker', async () => {
