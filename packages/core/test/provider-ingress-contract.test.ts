@@ -184,8 +184,17 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       await expect(restarted.client.submitAgentPrompt({ ...input, prompt: 'changed after restart' }))
         .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
       expect(daemon.writes).toEqual(['persist me\r'])
-      // A new logical prompt remains usable without a native completion/start hook.
-      await restarted.client.submitAgentPrompt({ ...input, operationId: 'next-operation', prompt: 'next' })
+      // Replay is not a new turn. An unconfirmed turn needs the same explicit continuation
+      // after restart as before it; that choice does not fabricate a native completion.
+      const next = { ...input, operationId: 'next-operation', prompt: 'next' }
+      await expect(restarted.client.submitAgentPrompt(next))
+        .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+      expect(daemon.writes).toEqual(['persist me\r'])
+      await restarted.client.submitAgentPrompt({ ...next, allowUncertainTurn: true })
+      expect(daemon.writes).toEqual(['persist me\r', 'next\r'])
+      expect(((await restarted.store.load())[0] as AgentMuxStoredAgentSession).terminalPromptDelivery)
+        .toMatchObject({ reason: 'turn-end-unconfirmed', submissionId: next.operationId })
+      await restarted.client.submitAgentPrompt(next)
       expect(daemon.writes).toEqual(['persist me\r', 'next\r'])
     } finally { await rm(root, { recursive: true, force: true }) }
   })

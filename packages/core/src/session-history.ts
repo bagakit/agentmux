@@ -55,6 +55,18 @@ export function normalizeSessionHistoryPage(
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)
       if (part.kind === 'text' && typeof part.text === 'string') return { kind: 'text', text: part.text }
+      if (part.kind === 'reasoning' && typeof part.text === 'string') return { kind: 'reasoning', text: part.text }
+      if (part.kind === 'tool-call' || part.kind === 'tool-result') {
+        const callId = part.callId === undefined ? {} : { callId: nonempty(part.callId) }
+        if (part.kind === 'tool-call') {
+          if (typeof part.input !== 'string') return invalid()
+          return { kind: 'tool-call', name: nonempty(part.name), input: part.input, ...callId }
+        }
+        if (typeof part.output !== 'string' || (part.failed !== undefined && typeof part.failed !== 'boolean')) return invalid()
+        return { kind: 'tool-result', output: part.output, ...callId,
+          ...(part.name === undefined ? {} : { name: nonempty(part.name) }),
+          ...(part.failed === undefined ? {} : { failed: part.failed }) }
+      }
       if (part.kind !== 'resource' || !['image', 'audio', 'file', 'other'].includes(part.resourceType as string)) return invalid()
       if (part.label !== undefined && typeof part.label !== 'string') return invalid()
       return { kind: 'resource', resourceType: part.resourceType as 'image' | 'audio' | 'file' | 'other',
