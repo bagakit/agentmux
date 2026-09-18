@@ -1415,6 +1415,7 @@ type SessionMembershipResync = {
     pendingLaunchAgentSessionId: string | null
   }>
   overflowed: boolean
+  recoverSavedAgents: boolean
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
 let regionCaretFocusNonce = 0
@@ -1434,17 +1435,20 @@ function enqueueSessionMembershipEvent(
 
 function startSessionMembershipResync(
   event?: RuntimeEvent,
-  options: { reportFailure?: boolean } = {}
+  options: { reportFailure?: boolean; recoverSavedAgents?: boolean } = {}
 ): void {
   if (sessionMembershipResync) {
+    sessionMembershipResync.recoverSavedAgents ||= options.recoverSavedAgents === true
     if (event) enqueueSessionMembershipEvent(sessionMembershipResync, event)
     return
   }
   const entry: SessionMembershipResync = {
     events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
-    overflowed: false
+    overflowed: false,
+    recoverSavedAgents: options.recoverSavedAgents === true
   }
   sessionMembershipResync = entry
+  const attemptedStartupRecovery = new Set<string>()
   void (async () => {
     try {
       while (sessionMembershipResync === entry) {
@@ -1455,6 +1459,18 @@ function startSessionMembershipResync(
         entry.overflowed = false
         const snapshot = await api.sessions.snapshot()
         if (entry.overflowed) continue
+        // A cold-start observation may have contained no usable Session facts. The saved shell is
+        // already visible now; admit its later canonical candidates through the same recovery
+        // policy and action as ordinary startup, without another initialize or lifecycle owner.
+        const savedSessionIds = entry.recoverSavedAgents
+          ? persistedSessionSurfaceIds(projectPersistedWorkbench(useAppStore.getState()))
+          : new Set<string>()
+        const startupCandidates = entry.recoverSavedAgents ? [
+          ...snapshot.recoveryCandidates,
+          ...snapshot.sessions.flatMap((session) => session.kind === 'agent'
+            ? [{ ...session, agentSessionId: session.id, run: session.control.run }]
+            : [])
+        ].filter((candidate) => savedSessionIds.has(candidate.agentSessionId)) : []
         const events = entry.events.splice(0)
         let membershipGap = false
         const timelineGaps = new Set<string>()
@@ -1464,6 +1480,18 @@ function startSessionMembershipResync(
           )))
           let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
+          for (const candidate of startupCandidates) {
+            if (projected.sessions.some((session) => session.id === candidate.agentSessionId)) continue
+            const decision = agentStartupRecoveryDecision({
+              runState: 'missing',
+              ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
+              canonical: !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+              now: Date.now()
+            })
+            projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
+              kind: 'pending', detail: agentStartupRecoveryDetail(decision)
+            })] }
+          }
           for (const pending of events) {
             if (
               pending.pendingLaunchAgentSessionId &&
@@ -1478,9 +1506,24 @@ function startSessionMembershipResync(
           }
           return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
+        for (const candidate of startupCandidates) {
+          const current = useAppStore.getState().sessions.find((session) => session.id === candidate.agentSessionId)
+          if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
+          const decision = agentStartupRecoveryDecision({
+            runState: current.processState,
+            ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
+            canonical: !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+            now: Date.now()
+          })
+          if (decision.kind !== 'resume') continue
+          attemptedStartupRecovery.add(candidate.agentSessionId)
+          await useAppStore.getState().recoverSession(candidate.agentSessionId)
+        }
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) void useAppStore.getState().flushAgentSteerQueue(sessionId)
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
-        if (!membershipGap) return
+        // Recovery above can publish events while its public API call is pending. Drain those
+        // queued facts before releasing this resync owner, just as events during snapshot reads.
+        if (!membershipGap && entry.events.length === 0 && !entry.overflowed) return
       }
     } catch (error) {
       // A best-effort retry launched after an initial startup outage must not replace the richer
@@ -2162,6 +2205,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot.recoveryCandidates.length === 0
       ) {
         retainUnknownSessionViews = true
+        snapshotVerified = false
         startupWarnings.push(
           'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
         )
@@ -2384,7 +2428,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
       // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
-      if (!snapshotVerified) startSessionMembershipResync(undefined, { reportFailure: false })
+      if (!snapshotVerified) startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
       return () => {
         disposeRuntimeSubscriptions()
       }
