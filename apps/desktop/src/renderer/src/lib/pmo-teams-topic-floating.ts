@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { WorkspaceLayout } from '@agentmux/layout'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import type { WorkbenchTab } from './workbench-tabs'
 
 export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
 
@@ -35,6 +38,8 @@ function readState(): FloatingState {
     const value = JSON.parse(raw) as Partial<FloatingState>
     return {
       open: value.open === true,
+      targetTabId: typeof value.targetTabId === 'string' && value.targetTabId.trim()
+        ? value.targetTabId.trim() : undefined,
       maximized: value.maximized === true,
       position: value.position && Number.isFinite(value.position.left) && Number.isFinite(value.position.top)
         ? { left: value.position.left, top: value.position.top }
@@ -46,6 +51,25 @@ function readState(): FloatingState {
   } catch {
     return defaultState()
   }
+}
+
+/** Select from durable Tabs first: live Session projections can arrive after the workface. */
+export function pmoTeamsTopicFloatingTargetTabId(
+  state: PmoTeamsTopicFloatingState,
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  layout: WorkspaceLayout | undefined,
+  pmoSessionId: string | null
+): string | undefined {
+  if (state.targetTabId) return state.targetTabId
+  const belongs = (tab: WorkbenchTab | undefined): tab is WorkbenchTab =>
+    tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID
+  const candidates = Object.values(tabs).filter(belongs)
+  const focused = pmoSessionId ? candidates.find(tab => Object.values(tab.regions)
+    .some(region => region.kind === 'agent' && region.sessionId === pmoSessionId)) : undefined
+  if (focused) return focused.id
+  const active = layout?.groups.find(group => group.id === layout.activeGroupId)?.activeTabId
+  if (active && belongs(tabs[active])) return active
+  return candidates[0]?.id
 }
 
 function writeState(state: FloatingState): void {
