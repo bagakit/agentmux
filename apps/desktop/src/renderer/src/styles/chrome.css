@@ -326,9 +326,12 @@
 .project-rail-row__icon img { width: 100%; height: 100%; object-fit: contain; }
 
 .project-activity { flex-shrink: 0; display: inline-flex; align-items: center; border: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
-.project-activity__metrics { display: inline-flex; align-items: center; gap: var(--sp-3); }
-.project-activity__metric { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 22px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.project-activity__metric strong { min-width: 1.1em; text-align: center; font-size: var(--fs-micro); font-weight: 650; }
+/* Counts share the icon cell as corner badges. Grid retains the intrinsic width of longer
+   counts, so a two- or three-digit total never overlaps the next status. */
+.project-activity__metrics { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.project-activity__metric { display: inline-grid; align-items: center; min-width: var(--sp-6); height: var(--sp-6); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.project-activity__metric > svg { grid-area: 1 / 1; justify-self: start; }
+.project-activity__metric > strong { grid-area: 1 / 1; justify-self: end; align-self: start; min-width: 1em; margin-left: var(--sp-3); padding: 0 1px; transform: translate(1px, -2px); border-radius: var(--radius-sm); background: var(--surface-1); text-align: center; font-size: var(--fs-micro); line-height: 1; font-weight: 650; }
 .project-activity__metric--needs-you { color: var(--amber); }
 .project-activity__metric--error { color: var(--red-text); }
 .project-activity__metric--working { color: var(--green); }
