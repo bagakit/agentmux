@@ -59,7 +59,7 @@ function httpLinkEntries(source: string): HttpEntry[] {
       // 只转发的壳：函数体（或表达式体）恰好是一次对某标识符的调用。
       const body = node.body
       const call = ts.isBlock(body)
-        ? body.statements.length === 1 && ts.isExpressionStatement(body.statements[0])
+        ? body.statements.length === 1 && ts.isExpressionStatement(body.statements[0]!)
           ? body.statements[0].expression
           : undefined
         : body
