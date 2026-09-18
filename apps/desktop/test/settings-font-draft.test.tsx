@@ -105,7 +105,7 @@ describe('font editing on actual settings consumers', () => {
     await dom.render(<AppearanceSettingsPane appearance={{ ...appearance, appAppearance: 'system', terminalFontSize: 20 }} onSave={onSave} />)
     expect(numeric().value).toBe('')
     expect(range().value).toBe('12')
-    expect(dom.container.querySelector('[aria-label="Application appearance"] [aria-checked="true"] strong')?.textContent).toBe('System')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Application appearance"] input[type="radio"]:checked')?.getAttribute('aria-label')).toBe('System')
     expect(onSave).not.toHaveBeenCalled()
   })
 
