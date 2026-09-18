@@ -1,6 +1,7 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useEffect, useState, type CSSProperties } from 'react'
+import type { CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
+import { useSettingDraft } from './use-setting-draft'
 import {
   NOTIFICATION_TIERS,
   resolveNotificationModeId,
@@ -13,19 +14,16 @@ import {
 // plus a number field — is what "一个控件而不是开关加输入框" asks for.
 export function NotificationSettingsPane({ notifications, onSave }: {
   notifications: AppConfig['notifications']
-  onSave: (notifications: NonNullable<AppConfig['notifications']>) => Promise<void>
+  onSave: (notifications: NonNullable<AppConfig['notifications']>, expected: NonNullable<AppConfig['notifications']>) => Promise<void>
 }) {
-  const [mode, setMode] = useState<NotificationModeId>(resolveNotificationModeId({ notifications }))
+  const modeDraft = useSettingDraft<NotificationModeId>(resolveNotificationModeId({ notifications }))
   // A second, independent dimension — not a sixth stop on the dwell slider. The slider answers "how
   // long does it stay"; this answers "do I hear it". Either is a coherent choice at any setting of the
   // other, which is exactly why folding them into one control would force a false ordering.
-  const [sound, setSound] = useState(resolveNotificationSound({ notifications }))
+  const soundDraft = useSettingDraft(resolveNotificationSound({ notifications }))
+  const mode = modeDraft.value, setMode = modeDraft.setValue
+  const sound = soundDraft.value, setSound = soundDraft.setValue
   const saveState = useSettingsSave()
-
-  const savedMode = resolveNotificationModeId({ notifications })
-  const savedSound = resolveNotificationSound({ notifications })
-  useEffect(() => setMode(savedMode), [savedMode])
-  useEffect(() => setSound(savedSound), [savedSound])
 
   const index = NOTIFICATION_TIERS.findIndex((tier) => tier.id === mode)
   const active = NOTIFICATION_TIERS[index] ?? NOTIFICATION_TIERS[0]!
@@ -48,7 +46,13 @@ export function NotificationSettingsPane({ notifications, onSave }: {
       : '0%'
 
   async function save(): Promise<void> {
-    await saveState.run(() => onSave({ mode, sound }))
+    const submittedMode = modeDraft.beginSave(), submittedSound = soundDraft.beginSave()
+    const committed = await saveState.run(() => onSave(
+      { mode: submittedMode.value, sound: submittedSound.value },
+      { mode: submittedMode.expected, sound: submittedSound.expected }
+    ))
+    submittedMode.finish(committed)
+    submittedSound.finish(committed)
   }
 
   return (
@@ -106,7 +110,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           </span>
         </label>
       </section>
-      <SettingsSaveBar save={saveState} dirty={mode !== savedMode || sound !== savedSound} label="Save notifications" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={modeDraft.dirty || soundDraft.dirty} label="Save notifications" onSave={() => void save()} />
     </div>
   )
 }

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { CtxmuxClient, PROTOCOL_VERSION, type RuntimeIdentity } from '@ctxmux/sdk'
-import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
+import { CtxmuxClient, PROTOCOL_VERSION, type RuntimeIdentity, type RunInfo } from '@ctxmux/sdk'
+import { CtxmuxRunAdapter, CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { diagnoseAgentMux } from '../src/doctor.js'
 
 const processSpies = vi.hoisted(() => ({ spawn: vi.fn() }))
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -34,6 +36,50 @@ async function fixture() {
 }
 
 describe('Runtime compatibility independent of launch provenance', () => {
+  it('reports the connected listener rather than assigning the new bundle source to a nonempty older Runtime', async () => {
+    const { directory } = await fixture()
+    const original: RunInfo = {
+      id: '33333333-3333-4333-8333-333333333333', spec: null, lineage: null,
+      backend: { type: 'native' },
+      capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: true, fork_level_b: false, replay: 'raw_from_start' },
+      pid: 12345, state: { type: 'running' }, latest_output_bytes: 19, durable_output_bytes: 19,
+      first_available_byte: 0, attachments: 0, applied_input_bytes: 4, current_size: { rows: 24, cols: 80 }
+    }
+    vi.mocked(CtxmuxClient.prototype.list).mockResolvedValue([{ id: original.id, backend: 'native',
+      pid: original.pid, state: original.state, latest_output_bytes: 19, retained_output_bytes: 19, attachments: 0 }])
+    vi.spyOn(CtxmuxClient.prototype, 'status').mockResolvedValue(original)
+    const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+    try {
+      await client.connect()
+      expect(await client.listRuns()).toMatchObject([{ runId: original.id, pid: original.pid, state: 'running', latestOutputBytes: 19 }])
+      expect(client.runtimeIdentity()).toEqual({ hostId: 'local', ownership: 'unverified', processId: null,
+        buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration, instanceId: runtime.daemonInstanceId })
+      const diagnostics = await client.runtimeDiagnostics()
+      expect(diagnostics.ctxmux.serving).toEqual({ buildIdentity: runtime.buildId,
+        protocolVersion: runtime.protocolGeneration, instanceId: runtime.daemonInstanceId, sourceCommit: null })
+      expect(diagnostics.ctxmux.bundled).toEqual({ version: CTXMUX_VERSION, sourceCommit: CTXMUX_COMMIT, artifactPlatform: 'darwin-arm64' })
+      expect(processSpies.spawn).not.toHaveBeenCalled()
+      await expect(readFile(join(directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await client.dispose() }
+  })
+
+  it('Doctor consumes actual serving identity and keeps unproven serving source distinct from bundled provenance', async () => {
+    const { directory } = await fixture()
+    const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+    // Only provider discovery is scoped out: this case owns Runtime identity, not CLI installation.
+    const overrides = Object.fromEntries(client.catalog().map(entry => [entry.id, join(directory, 'absent', entry.id)]))
+    try {
+      const report = await diagnoseAgentMux({ client, workspacePath: directory,
+        env: { HOME: directory, CODEX_HOME: join(directory, 'codex') }, commandOverrides: overrides })
+      expect(report.agents).toHaveLength(client.catalog().length)
+      expect(report.host).toMatchObject({ reachable: true, buildIdentity: runtime.buildId,
+        protocolVersion: runtime.protocolGeneration, runtimeInstanceId: runtime.daemonInstanceId })
+      expect(report.runtime?.ctxmux.serving.sourceCommit).toBeNull()
+      expect(report.runtime?.ctxmux.bundled.sourceCommit).toBe(CTXMUX_COMMIT)
+      expect(processSpies.spawn).not.toHaveBeenCalled()
+    } finally { await client.dispose() }
+  })
+
   it.each(['missing', 'malformed', 'mismatch'] as const)('connects to the same compatible Runtime with a %s receipt without rewriting or stopping it', async (kind) => {
     const { directory, adapter } = await fixture()
     const receipt = join(directory, 'owner.json')

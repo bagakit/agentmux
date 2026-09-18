@@ -41,6 +41,7 @@ vi.mock('electron', () => ({
       listeners.add(listener); fixture.listeners.set(channel, listeners)
     },
     off: (channel: string, listener: (...values: unknown[]) => void) => fixture.listeners.get(channel)?.delete(listener),
+    removeListener: (channel: string, listener: (...values: unknown[]) => void) => fixture.listeners.get(channel)?.delete(listener),
     send: vi.fn()
   },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -159,7 +160,7 @@ it('delivers the actual current crash through preload/Store/App as assertive wit
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().sessions.find(s => s.id === 'healthy')).toBe(before.sessions[1])
   await act(async () => { expect(useAppStore.getState().send('healthy', 'Explicit healthy request')).toBe(true); await useAppStore.getState().flushAgentSteerQueue('healthy') })
-  expect(submit).toHaveBeenCalledWith(before.sessions[1]!.control, 'Explicit healthy request', expect.any(String), undefined, undefined, undefined)
+  expect(submit).toHaveBeenCalledWith(before.sessions[1]!.control, 'Explicit healthy request', expect.any(String), undefined, undefined, { allowUncertainTurn: true })
   expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })
 
@@ -176,9 +177,11 @@ it('keeps healthy workflow errors polite and clears the previous crash classific
   const healthy = useAppStore.getState().sessions.find(s => s.id === 'healthy')!
   await emit({ type: 'core', hostId: 'local', event: { type: 'agent-error', agentSessionId: healthy.id, code: 'OUTPUT_GAP', message: 'Private replay gap',
     evidence: { source: 'terminal-output', observedAt: Date.now() + 100, run: healthy.control.run } } })
-  expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.status.state).toBe('error')
+  expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)).toBe(healthy)
+  expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.status.state).toBe('working')
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.processState).toBe('running')
-  expect(notice(element)).toBeNull()
+  expect(notice(element)?.textContent).toContain('Private replay gap')
+  expect(notice(element)?.getAttribute('aria-live')).toBe('polite')
   await emit(processEvent())
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   await emit({ type: 'core', hostId: 'local', event: { type: 'agent-error', code: 'AGENT_STORE_IO', message: 'Private storage observation failed',
@@ -186,7 +189,7 @@ it('keeps healthy workflow errors polite and clears the previous crash classific
   expect(notice(element)?.getAttribute('role')).toBe('status')
   expect(notice(element)?.getAttribute('aria-live')).toBe('polite')
   expect(notice(element)?.textContent).toContain('Private storage observation failed')
-  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(useAppStore.getState().errorNoticeContext).toEqual({ kind: 'indeterminate' })
 })
 
 it.each([false, true])('resets retained crash metadata when startup completes or fails (failure=%s)', async fails => {

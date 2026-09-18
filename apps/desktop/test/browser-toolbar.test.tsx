@@ -5,10 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import type { BrowserAnnotation } from '../src/renderer/src/lib/browser-annotations.js'
-import {
-  BROWSER_TOOLBAR_ITEM_ORDER,
-  withBrowserToolbarItem
-} from '../src/renderer/src/lib/browser-toolbar.js'
+import { BROWSER_TOOLBAR_ITEM_ORDER } from '../src/shared/browser-toolbar.js'
+import { withBrowserToolbarItem } from '../src/renderer/src/lib/browser-toolbar.js'
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)

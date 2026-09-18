@@ -1,8 +1,9 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useSettingDraft } from './use-setting-draft'
 import {
   APP_APPEARANCE_IDS,
+  APP_APPEARANCE_DEFAULT,
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN,
@@ -20,22 +21,34 @@ const APP_APPEARANCE_COPY = {
 
 export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
-  onSave: (appearance: AppearanceConfig) => Promise<void>
+  onSave: (appearance: AppearanceConfig, expected: AppearanceConfig) => Promise<void>
 }) {
-  const [appAppearance, setAppAppearance] = useState<AppAppearanceId>(appearance.appAppearance ?? 'dark')
-  const [terminalTheme, setTerminalTheme] = useState<TerminalThemeId>(appearance.terminalTheme)
-  const savedFontSize = appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
-  const [fontSize, setFontSize] = useState<number>(savedFontSize)
+  const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
+  const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
+  const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
   const saveState = useSettingsSave()
-
-  useEffect(() => setAppAppearance(appearance.appAppearance ?? 'dark'), [appearance.appAppearance])
-  useEffect(() => setTerminalTheme(appearance.terminalTheme), [appearance.terminalTheme])
-  useEffect(() => setFontSize(savedFontSize), [savedFontSize])
-
-  const dirty = appAppearance !== (appearance.appAppearance ?? 'dark') || terminalTheme !== appearance.terminalTheme || fontSize !== savedFontSize
+  const parsedFontSize = Number(font.value)
+  const validFontSize = font.value.trim() !== '' && Number.isFinite(parsedFontSize) && Number.isInteger(parsedFontSize)
+    && parsedFontSize >= TERMINAL_FONT_SIZE_MIN && parsedFontSize <= TERMINAL_FONT_SIZE_MAX
+  const fontSize = validFontSize ? parsedFontSize : Number(font.expected)
+  const appAppearance = app.value, terminalTheme = terminal.value
+  const dirty = app.dirty || terminal.dirty || font.dirty
+  const setAppAppearance = app.setValue, setTerminalTheme = terminal.setValue, setFontSize = font.setValue
 
   async function save(): Promise<void> {
-    await saveState.run(() => onSave({ ...appearance, appAppearance, terminalTheme, terminalFontSize: fontSize }))
+    if (!validFontSize) {
+      await saveState.run(async () => {
+        throw new Error(`Terminal font size must be a whole number from ${TERMINAL_FONT_SIZE_MIN} to ${TERMINAL_FONT_SIZE_MAX} pixels.`)
+      })
+      return
+    }
+    const submittedApp = app.beginSave(), submittedTerminal = terminal.beginSave(), submittedFont = font.beginSave()
+    const next = { ...appearance, appAppearance: submittedApp.value, terminalTheme: submittedTerminal.value, terminalFontSize: parsedFontSize }
+    const expected = { ...appearance, appAppearance: submittedApp.expected, terminalTheme: submittedTerminal.expected, terminalFontSize: Number(submittedFont.expected) }
+    const committed = await saveState.run(() => onSave(next, expected))
+    submittedApp.finish(committed)
+    submittedTerminal.finish(committed)
+    submittedFont.finish(committed)
   }
 
   return (
@@ -89,11 +102,8 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
       <section className="settings-group">
         <header><span>Terminal font size</span><small>{fontSize}px</small></header>
         <div className="terminal-font-size-control">
-          {/* Range + number share one state. The range gives a quick drag; the number a precise value.
-              Both are bounded by the SSOT min/max so the widget cannot express an out-of-range size in
-              the first place — the authoritative clamp still lives in the persistence schema, this is
-              only the affordance. `Math.round` keeps the number input from proposing a fractional cell
-              metric before it is even saved. */}
+          {/* Incomplete numeric text stays editable. The range shows the original expectation until
+              the draft is a legal size; Save validates before beginning any field's transaction. */}
           <input
             type="range"
             aria-label="Terminal font size"
@@ -101,7 +111,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             max={TERMINAL_FONT_SIZE_MAX}
             step={1}
             value={fontSize}
-            onChange={(event) => setFontSize(Number(event.target.value))}
+            onChange={(event) => setFontSize(event.target.value)}
           />
           <input
             type="number"
@@ -109,13 +119,8 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             min={TERMINAL_FONT_SIZE_MIN}
             max={TERMINAL_FONT_SIZE_MAX}
             step={1}
-            value={fontSize}
-            onChange={(event) => {
-              const next = Number(event.target.value)
-              if (Number.isFinite(next)) {
-                setFontSize(Math.min(TERMINAL_FONT_SIZE_MAX, Math.max(TERMINAL_FONT_SIZE_MIN, Math.round(next))))
-              }
-            }}
+            value={font.value}
+            onChange={(event) => setFontSize(event.target.value)}
           />
           <span className="terminal-font-size-control__unit">px</span>
         </div>

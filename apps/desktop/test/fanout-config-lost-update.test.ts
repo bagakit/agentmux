@@ -17,17 +17,9 @@ import type {
 //
 // 这不是推理出来的，是这条用例真跑出来的（改回"开场快照 + 末尾整份回写"当场变红）。
 //
-// ## 这条用例守的是哪一段，以及哪一段还没守
-//
-// 逐 lane 取当前值、逐 lane 回写，关掉的是**lane 与 lane 之间**那段窗口——扇出里最长的一段，
-// 因为它横跨其余每一条 lane 的建树与启动。剩下的是**单条 lane 自己**的"建完到发布"那一小段，
-// 它和仓里其它每一个 handler 的形状完全一样（读 config → 干活 → 整份写回），不是扇出特有的。
-// 真要关掉它，得让 config 的写入变成单写者 + 版本校验（`ConfigStore.save` 现在用 `saveTail`
-// **串行化**了写，但不做合并：两个读-改-写都会落盘，后一个整份覆盖前一个）。那是另一件事，
-// 不该夹带在这里做——见 `fanout-run.ts` 顶上「Why each lane re-reads the config」那段。
-//
-// 所以下面这条用例把干扰注入在**两条 lane 之间**，那正是它声称修好的那一段。把干扰挪到
-// createWorktree 内部它会红，而那个红是如实的：那段确实还开着。
+// 这里继续守 lane 与 lane 之间的旧反例。单条 lane 在 Git 等待期间的精确登记由 Main
+// ConfigOwner 负责；config-owner-interleaving.test.ts 真跑 WorktreeService 的事务接线，
+// 证明同一个 owner 能在长操作期间接收设置，并在后续资源变更中保留它。
 // ---------------------------------------------------------------------------
 
 const BASE: AppConfig = {
@@ -75,28 +67,18 @@ describe('扇出进行期间，别的 IPC 对 config 的改动会不会被盖掉
     const ports: FanOutRequestPorts = {
       config: () => shared.read(),
       listBranches: async () => gitRepository(),
-      commitConfig: (next) => shared.write(next),
       lanes: (_source: WorkspaceRecord) => ({
         createWorktree: async (createInput, current) => {
           laneSeq += 1
           const workspace = { id: `lane-${laneSeq}`, path: createInput.path }
-          return {
-            config: {
-              ...current,
-              workspaces: [
-                ...current.workspaces,
-                {
-                  ...workspace,
-                  name: createInput.branch,
-                  hostId: 'local',
-                  kind: 'worktree' as const,
-                  repoPath: '/repo',
-                  branch: createInput.branch
-                }
-              ]
-            },
-            workspace
+          const next: AppConfig = {
+            ...current,
+            workspaces: [...current.workspaces, {
+              ...workspace, name: createInput.branch, hostId: 'local', kind: 'worktree', repoPath: '/repo', branch: createInput.branch
+            }]
           }
+          shared.write(next)
+          return { config: next, workspace }
         },
         launchAgent: async () => {
           // 第一条 lane 收尾之后、第二条开始之前，模拟另一个 IPC handler 在同一个闭包上做了一次

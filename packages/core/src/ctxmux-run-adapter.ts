@@ -41,13 +41,11 @@ import {
 // CTXMUX_COMMIT / CTXMUX_VERSION are exported because they are the SHA-verified originals: this
 // module asserts them against the vendored manifest.json at load time (see verifyArtifacts —
 // manifest.source.commit === CTXMUX_COMMIT and manifest.product.version === CTXMUX_VERSION, guarded
-// by CTXMUX_MANIFEST_SHA256). Consumers that need to report the running runtime's version/commit
-// (client.ts's runtimeDiagnostics and terminalEnvironment) MUST import these rather than retype the
-// literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
-// vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
-// runtime with no compile error. Binding two consumers to this one validated source is the fix.
-export const CTXMUX_COMMIT = 'ddd30b902b84ab6f426243c758b773f936e87469'
-const CTXMUX_TREE = 'dc198ed0fd5c06a70ae488adb87d2c14b583bb6b'
+// by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
+// instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
+// its source commit is not exposed by that protocol and must not be inferred from this bundle.
+export const CTXMUX_COMMIT = 'ec637607946718c8bdec0a215b47a72f4a1692da'
+const CTXMUX_TREE = '699207e07a62cdea1201b2f7e32483a0ecc43124'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -896,8 +894,8 @@ export class CtxmuxRunAdapter {
     }
     return {
       daemonInstanceId: this.runtime.daemonInstanceId,
-      protocolVersion: PROTOCOL_VERSION,
-      buildIdentity: `ctxmux@${CTXMUX_VERSION}+${CTXMUX_COMMIT}`
+      protocolVersion: this.runtime.protocolGeneration,
+      buildIdentity: this.runtime.buildId
     }
   }
 

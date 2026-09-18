@@ -96,7 +96,6 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   executorId?: string | undefined
 }) {
   const config = useAppStore((state) => state.config)
-  const setConfig = useAppStore((state) => state.setConfig)
   const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const [query, setQuery] = useState('')
   const [visited, setVisited] = useState<SettingsSectionId[]>([initialSection])
@@ -139,37 +138,37 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   async function saveExecutors(executors: Record<string, AgentExecutorConfig>): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, executors }))
+    await api.config.save({ ...current, executors }, current)
   }
 
-  async function saveAppearance(appearance: AppearanceConfig): Promise<void> {
+  async function saveAppearance(appearance: AppearanceConfig, expected: AppearanceConfig): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, appearance }))
+    await api.config.save({ ...current, appearance }, { ...current, appearance: expected })
   }
 
-  async function saveNotifications(notifications: NonNullable<AppConfig['notifications']>): Promise<void> {
+  async function saveNotifications(notifications: NonNullable<AppConfig['notifications']>, expected: NonNullable<AppConfig['notifications']>): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, notifications }))
+    await api.config.save({ ...current, notifications }, { ...current, notifications: expected })
   }
 
   async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[]): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, hosts, workspaces }))
+    await api.config.save({ ...current, hosts, workspaces }, current)
   }
 
   async function saveBrowser(browser: BrowserConfig): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, browser }))
+    await api.config.save({ ...current, browser }, current)
   }
 
-  async function saveCopyPathsAsAbsolute(copyPathsAsAbsolute: boolean): Promise<void> {
+  async function saveCopyPathsAsAbsolute(copyPathsAsAbsolute: boolean, expected: boolean): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, copyPathsAsAbsolute }))
+    await api.config.save({ ...current, copyPathsAsAbsolute }, { ...current, copyPathsAsAbsolute: expected })
   }
 
   // 空列表照样写：`[]` 是「用户把默认那两条都删了」这个事实。写成按长度判会让删光静默变回默认，
@@ -177,7 +176,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[]): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    setConfig(await api.config.save({ ...current, composerShortcuts }))
+    await api.config.save({ ...current, composerShortcuts }, current)
   }
 
   return (

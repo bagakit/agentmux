@@ -89,7 +89,7 @@ function statusAfterProcessEvent(
 }
 
 describe('实时路径的进程状态投影', () => {
-  it('readiness observer failure after a stop stays exited instead of becoming a red error', () => {
+  it('a readiness observer diagnostic does not invent an exit or replace known Run facts', () => {
     const next = reduceRuntimeEvent(initialState(), core({
       type: 'agent-error',
       agentSessionId: session.id,
@@ -97,11 +97,7 @@ describe('实时路径的进程状态投影', () => {
       message: 'Agent Run exited before its composer became ready.',
       evidence: { source: 'terminal-output', observedAt: 5, run: session.control.run }
     }))
-    expect(next.sessions[0]?.status).toMatchObject({
-      state: 'exited',
-      detail: 'Agent Run exited before its composer became ready.'
-    })
-    expect(next.sessions[0]?.status.state).not.toBe('error')
+    expect(next.sessions[0]).toBe(session)
   })
 
   it('a late readiness observer cannot replace a Core crash fact', () => {

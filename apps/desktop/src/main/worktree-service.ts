@@ -27,7 +27,7 @@ import {
 import { findWorkspaceByLocation } from './workspace-location.js'
 
 type ConfigWriter = {
-  save(value: AppConfig): Promise<AppConfig>
+  save(value: AppConfig, expected: AppConfig): Promise<AppConfig>
 }
 
 /**
@@ -413,7 +413,7 @@ export class WorktreeService {
       nextConfig = await this.configWriter.save({
         ...config,
         workspaces: config.workspaces.filter((item) => item.id !== workspace.id)
-      })
+      }, config)
     } catch (error) {
       throw new WorktreeRetainedError(
         'record-not-withdrawn',
@@ -630,7 +630,7 @@ export class WorktreeService {
       nextConfig = await this.configWriter.save({
         ...config,
         workspaces: [...config.workspaces, workspace]
-      })
+      }, config)
     } catch (error) {
       throw new WorktreeRetainedError(
         'git-failed',

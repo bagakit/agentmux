@@ -153,6 +153,7 @@ import {
   pendingAgentLaunchEventId,
   discardPendingAgentLaunch,
   projectRuntimeEvent,
+  runtimeDiagnosticNotice,
   removeSessionProjection,
   reduceAgentMembershipSnapshot,
   reduceTerminalMembershipSnapshot,
@@ -1507,6 +1508,11 @@ function startSessionMembershipResync(
           }
           return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
+        for (const pending of events) {
+          const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
+          if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate',
+            ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
+        }
         for (const candidate of startupCandidates) {
           const current = useAppStore.getState().sessions.find((session) => session.id === candidate.agentSessionId)
           if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
@@ -2125,6 +2131,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // are narrower runtime observations: either can be temporarily unavailable while the saved
       // Workbench and an already-running Agent remain usable. Keep those failures scoped to a visible
       // startup notice instead of letting Promise.all turn them into a full-window connection error.
+      const configBeforeRead = get().config
       const [configResult, initialSnapshotResult, providerCatalogResult, demandResult] = await Promise.allSettled([
         api.config.get(),
         api.sessions.snapshot(),
@@ -2132,7 +2139,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         api.demands.list()
       ])
       if (configResult.status === 'rejected') throw configResult.reason
-      const config = configResult.value
       if (initialSnapshotResult.status === 'fulfilled') set({
         environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
         runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? []
@@ -2310,6 +2316,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         )))
       ].filter((session) => !retiredAgentIds.has(session.id)).map((session) => [session.id, session])).values()]
       const persistedState = get()
+      // Main may publish while get or Session recovery is awaiting. An older read must not roll back
+      // that committed fact; use the existing Store identity, with no second configuration cache.
+      const config = persistedState.config !== configBeforeRead && persistedState.config !== null
+        ? persistedState.config : configResult.value
       const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,
@@ -2648,6 +2658,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
+    if (request.operation === 'settings.get' || request.operation === 'settings.set') {
+      throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
+    }
     const input = () => {
       const state = get()
       return { sessions: state.sessions, tabs: state.tabs, layouts: state.layouts }
@@ -3870,15 +3883,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
   async openFileDiff(path, requestedWorkspaceId) {
-    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
+    const navigation = get()
+    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
     if (!workspaceId) return
     // 同 createNote：把开头解析出来的那一个显式传下去。下面 regionId 是按这个 workspaceId 派生的，
     // 若 openFile 自己重读活动 Workspace，两者就会指向不同的 Workspace——文件在 A 打开、diff 模式
     // 却切到了 B 的 Region（或谁的都不是）。
     await get().openFile(path, undefined, undefined, workspaceId)
-    // openFile places the file at its canonical Region, so the id is derived by the same rule rather
-    // than read back — a wrong regionId here would flip a different Region into diff mode (or none).
-    const regionId = initialWorkbenchRegionId(fileTabId(workspaceId, path))
+    const tabId = fileTabId(workspaceId, path)
+    const regionId = initialWorkbenchRegionId(tabId)
+    const state = get(), tab = state.tabs[tabId], layout = state.layouts[workspaceId]
+    const surface = tab?.regions[regionId]
+    const groupId = tabGroupForTab(layout, tabId)
+    // A failed file read has no destination. Reveal the exact successful placement without
+    // setMainSurface's Session navigation replacing it with the original Agent Tab.
+    if (!tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
+    // A later navigation owns the screen while the file producer is pending.
+    if (
+      state.mainSurface === navigation.mainSurface &&
+      state.activeWorkspaceId === navigation.activeWorkspaceId &&
+      state.agentFocus === navigation.agentFocus
+    ) {
+      set({
+        activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+        tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
+        layouts: { ...state.layouts, [workspaceId]: activateLayoutTab(layout, groupId, tabId) }
+      })
+    }
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
   openBranchDiff(workspaceId, comparison) {
@@ -5427,6 +5458,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         planned = true
         return {
+          activeWorkspaceId: placementOrigin.workspaceId, mainSurface: 'workbench',
           tabs: { ...current.tabs, [tabId]: tab },
           layouts: { ...current.layouts, [placementOrigin.workspaceId]: nextLayout }
         }
@@ -5993,9 +6025,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   applyEvent(event) {
     const core = event.event
-    // Membership buffering only owns Session projections, not a host-wide diagnostic notice.
-    // Keep the notice visible without painting a healthy Agent failed or gating its input.
-    if (core.type === 'agent-error' && core.agentSessionId === undefined) get().reportError(core.message)
+    // Diagnostics use the existing notice owner, even while membership is reconciling.
+    // They never replace semantic state or its clock.
+    const diagnostic = runtimeDiagnosticNotice(get(), event)
+    if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate',
+      ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
@@ -6053,8 +6087,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setConfig(config) {
-    detectionRequestIds.clear()
-    hostCheckRequestIds.clear()
+    const runtimeConfigChanged = JSON.stringify(get().config?.hosts) !== JSON.stringify(config.hosts) ||
+      JSON.stringify(get().config?.executors) !== JSON.stringify(config.executors)
+    if (runtimeConfigChanged) {
+      detectionRequestIds.clear()
+      hostCheckRequestIds.clear()
+    }
     // 活动位跟着一起算。此前这里只清 host 键的两张缓存却不管 `activeWorkspaceId`，而那正是**唯一**
     // 会被「配置里少了一条 workspace」打坏的引用：删 host 会连带删掉它上面的全部 workspace（见
     // HostSettingsPane 的 filter），删项目会删掉一整组，而两处都经过这里。缺了这一行，每个删除现场
@@ -6066,8 +6104,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     disposeObserversForRemovedWorkspaces(get().tabs, config)
     set((state) => ({
       ...adoptedConfig(state.activeWorkspaceId, config),
-      executorDetections: {},
-      hostChecks: {}
+      ...(runtimeConfigChanged ? { executorDetections: {}, hostChecks: {} } : {})
     }))
   },
   reportError(error, context) {

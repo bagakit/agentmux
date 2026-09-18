@@ -26,6 +26,7 @@ import {
   type AgentMuxControlReceipt,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
+  type AgentMuxControlSettingEntry,
   type AgentMuxControlDemandUpdateRequest,
   AGENTMUX_DEMAND_PRIORITIES,
   AGENTMUX_DEMAND_STATUSES,
@@ -244,6 +245,20 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'settings.get') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...(source.target === undefined ? {} : { target: text(source.target, 'Settings target') })
+    }
+  }
+  if (source.operation === 'settings.set') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'key', 'value'], 'INVALID_CONTROL_REQUEST')
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      key: text(source.key, 'Setting key'), value: text(source.value, 'Setting value')
+    }
+  }
   if (source.operation === 'inspect.tab') {
     const target = tabAnchor(source.target)
     const owner = optionalCaller(source.caller)
@@ -707,6 +722,36 @@ function successReceipt(request: AgentMuxControlRequest, result: AgentMuxControl
   return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation, result: body } as AgentMuxControlSuccessReceipt
 }
 
+function settingsFields(source: Record<string, unknown>, allowed: readonly string[], code: string): void {
+  if (Object.keys(source).some((key) => !allowed.includes(key))) {
+    throw new AgentMuxError('Settings fields are invalid.', code)
+  }
+}
+
+function settingEntry(value: unknown): AgentMuxControlSettingEntry {
+  const source = object(value, 'Setting entry is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  settingsFields(source, ['key', 'kind', 'value', 'default', 'enum'], 'CONTROL_PROTOCOL_ERROR')
+  const key = id(source.key, 'Setting key is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const kind = source.kind
+  if (kind !== 'string' && kind !== 'boolean' && kind !== 'number') {
+    throw new AgentMuxError('Setting kind is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const scalar = (item: unknown): item is AgentMuxControlSettingEntry['value'] => (
+    typeof item === kind && (typeof item !== 'number' || Number.isFinite(item))
+  )
+  if (!scalar(source.value) || !scalar(source.default)) {
+    throw new AgentMuxError('Setting scalar is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const choices = source.enum
+  if (choices !== undefined && (!Array.isArray(choices) || choices.length === 0 ||
+    !choices.every(scalar) || !choices.includes(source.value) || !choices.includes(source.default))) {
+    throw new AgentMuxError('Setting enum is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  // The discriminator and all scalar members were checked together above.
+  return { key, kind, value: source.value, default: source.default,
+    ...(choices === undefined ? {} : { enum: choices }) } as AgentMuxControlSettingEntry
+}
+
 function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSuccessReceipt {
   const requestId = id(source.requestId, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const result = object(source.result, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -714,6 +759,23 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'settings.get') {
+    settingsFields(result, ['entries', 'partial'], 'CONTROL_PROTOCOL_ERROR')
+    if (result.partial !== true || !Array.isArray(result.entries) || result.entries.length === 0) {
+      throw new AgentMuxError('Settings result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    const entries = result.entries.map(settingEntry)
+    if (new Set(entries.map(({ key }) => key)).size !== entries.length) {
+      throw new AgentMuxError('Setting keys are not unique.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { entries, partial: true } }
+  }
+  if (operation === 'settings.set') {
+    settingsFields(result, ['entry'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { entry: settingEntry(result.entry) } }
+  }
   if (operation === 'inspect.tab') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
   }

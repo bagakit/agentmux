@@ -16,7 +16,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-typed-native-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: 'agentmux.typed-native-restart.v1', passed: false, phases: [], inputs: null, cleanup: null,
+const receipt = { schema: 'agentmux.typed-native-restart.v1', passed: false, phases: [], inputs: null, inputsAfter: null, cleanup: null,
   limitations: ['Real private Electron process restart and production App/Store/SessionPane/TerminalView are exercised.',
     'All private Agent Runs, attachment, replay, resize, input and stop use the existing RuntimeController and Core public APIs.',
     'One private workface is seeded. Chromium sends real keyboard events through production TerminalView and public Core; no physical keyboard is claimed.', 'The real ctxmux ACK is deliberately lost at the private Core adapter boundary once. This is fault injection, not an observed network outage.', 'The native CLI is the repository fixture, not an upstream Provider version; permission has no invocation identity, so completion remains unconfirmed.',
@@ -25,7 +25,10 @@ const files = async directory => (await Promise.all((await fs.readdir(directory,
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
-  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'patches/@xterm__xterm@6.1.0-beta.303.patch'), path.join(root, 'pnpm-lock.yaml'), electron]
+  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/src')),
+  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
+  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
+  path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'patches/@xterm__xterm@6.1.0-beta.303.patch'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 let client
@@ -63,6 +66,7 @@ try {
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
     process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
     client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
+    receipt.runtimeIdentity = client.runtimeIdentity()
     const runs = (await client.listRuns()).filter(run => run.state === 'running')
     assert.equal(runs.length, 1, 'Exactly one private Agent Run remains healthy')
     const current = runs.map(run => ({ runId: run.runId, pid: run.pid }))
@@ -72,7 +76,8 @@ try {
   }
   assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, 2)
   assert.deepEqual(receipt.phases[0].native.persisted.pendingInteraction, receipt.phases[1].native.persisted.pendingInteraction, 'Exact request and unknown input survive restart unchanged')
-  assert.deepEqual(await hashes(), receipt.inputs, 'Source changed during native verification')
+  receipt.inputsAfter = await hashes()
+  assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during native verification')
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {

@@ -1,5 +1,5 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useEffect, useState } from 'react'
+import { useSettingDraft } from './use-setting-draft'
 import type { AppConfig } from '../../../../shared/contracts'
 
 /**
@@ -14,17 +14,18 @@ import type { AppConfig } from '../../../../shared/contracts'
  */
 export function CopyPathsSettingsPane({ copyPathsAsAbsolute, onSave }: {
   copyPathsAsAbsolute: boolean | undefined
-  onSave: (copyPathsAsAbsolute: boolean) => Promise<void>
+  onSave: (copyPathsAsAbsolute: boolean, expected: boolean) => Promise<void>
 }) {
   // 缺席 / `false` 都是默认档（缩写）；只有显式 `true` 是绝对路径档。
   const saved = copyPathsAsAbsolute === true
-  const [absolute, setAbsolute] = useState(saved)
+  const draft = useSettingDraft(saved)
+  const absolute = draft.value, setAbsolute = draft.setValue
   const saveState = useSettingsSave()
 
-  useEffect(() => setAbsolute(saved), [saved])
 
   async function save(): Promise<void> {
-    await saveState.run(() => onSave(absolute))
+    const submitted = draft.beginSave()
+    submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
 
   return (
@@ -44,7 +45,7 @@ export function CopyPathsSettingsPane({ copyPathsAsAbsolute, onSave }: {
           </span>
         </label>
       </section>
-      <SettingsSaveBar save={saveState} dirty={absolute !== saved} label="Save" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save" onSave={() => void save()} />
     </div>
   )
 }

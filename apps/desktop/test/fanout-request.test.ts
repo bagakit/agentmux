@@ -64,17 +64,13 @@ type Recorded = {
 function ports(overrides: Partial<FanOutRequestPorts> = {}): FanOutRequestPorts & { recorded: Recorded } {
   const recorded: Recorded = { created: [], launched: [], removed: [], committed: [], laneSources: [] }
   let laneSeq = 0
-  // ipc.ts 那个可变的 config 闭包，如实照搬：`config()` 每次取**当前**值，`commitConfig` 就地推进它。
+  // ipc.ts 那个可变的 config 闭包：`config()` 每次取当前值，登记端口返回前已由 owner 发布。
   // 之前这里是 `config: () => CONFIG` 一个常量——那样读不读得到上一条 lane 的回写完全看不出来，
   // 「每条 lane 从当前值出发」和「每条 lane 从开场快照出发」在常量下是同一个结果。
   let live: AppConfig = CONFIG
   const base: FanOutRequestPorts = {
     config: () => live,
     listBranches: async () => gitRepository(),
-    commitConfig: (next) => {
-      live = next
-      recorded.committed.push(next)
-    },
     lanes: (source) => {
       recorded.laneSources.push(source)
       return {
@@ -82,11 +78,9 @@ function ports(overrides: Partial<FanOutRequestPorts> = {}): FanOutRequestPorts 
           recorded.created.push({ branch: input.branch, path: input.path })
           laneSeq += 1
           const workspace = { id: `lane-${laneSeq}`, path: input.path }
-          return {
-            // config 逐 lane 前进：这份 workspaces 会被下一条 lane 看到。
-            config: { ...config, workspaces: [...config.workspaces, { ...workspace, name: input.branch, hostId: 'local', kind: 'worktree' as const, repoPath: '/repo', branch: input.branch }] },
-            workspace
-          }
+          live = { ...config, workspaces: [...config.workspaces, { ...workspace, name: input.branch, hostId: 'local', kind: 'worktree' as const, repoPath: '/repo', branch: input.branch }] }
+          recorded.committed.push(live)
+          return { config: live, workspace }
         },
         launchAgent: async (input) => {
           recorded.launched.push({

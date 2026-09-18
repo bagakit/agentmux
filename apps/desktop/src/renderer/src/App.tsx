@@ -110,6 +110,7 @@ function DesktopApp() {
   )
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
   useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
+  useEffect(() => api.config.onChange((committed) => useAppStore.getState().setConfig(committed)), [])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'

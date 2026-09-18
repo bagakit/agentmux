@@ -47,6 +47,7 @@ Intents:
   endpoint    Print the Control endpoint path and schema version without connecting.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents, projects, or active Agent Sessions from their owners.
+  settings    Read or change preferences supported by the running Desktop host.
   pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
   open        Open typed content at one exact spatial destination.
@@ -81,6 +82,42 @@ Options:
   --help, -h     Show help.`
 
 const HELP = new Map<string, string>([
+  ['settings', `Read or change host-owned settings
+
+Usage:
+  agentmux settings get [target]
+  agentmux settings set <key> <value>
+
+The running Desktop host owns setting keys, legal values and defaults. Get returns the
+supported entries with their current value, default, scalar kind and optional enum; partial
+means other settings are not exposed by this host. Use those exact keys with set.
+
+Values are positional data. Quote spaces; a literal --help in the value position is data.
+No Agent caller or open View is required. The Desktop host must be running: an unavailable
+host returns CONTROL_UNAVAILABLE; the CLI never writes its configuration files directly.
+Success and failure use versioned JSON receipts. Set reports the committed entry only after
+persistence succeeds. A timeout does not prove whether a write committed; read before deciding
+what to do next.`],
+  ['settings.get', `Read host-owned settings
+
+Usage: agentmux settings get [target]
+
+Without a target, read all entries currently supported by the running Desktop host. A target
+selects a host-defined group or exact key. The result contains entries (key, value, default,
+kind and optional enum) and an explicit partial scope. Keys and values come from the host;
+this offline help does not define them. No Agent caller or View is required.
+An unavailable host returns CONTROL_UNAVAILABLE; unsupported targets return UNSUPPORTED_SETTING.`],
+  ['settings.set', `Commit one host-owned setting
+
+Usage: agentmux settings set <key> <value>
+
+Read settings get first to discover supported keys and legal scalar values. Values are
+positional data, so --help in the value position is sent literally; quote spaces.
+The running Desktop host validates and persists the value before returning its committed
+entry. Unsupported keys return UNSUPPORTED_SETTING; invalid values return INVALID_SETTING_VALUE.
+No Agent caller or View is required. An unavailable host returns CONTROL_UNAVAILABLE without
+writing any configuration file. A timeout does not establish a committed result: inspect
+settings get before deciding what to do next.`],
   ['whoami', `Report your own coordinates and available capabilities
 
 Usage:
@@ -736,6 +773,21 @@ to the receiver and you stop awaiting it. The receipt reports \`ownerAgentSessio
 \`originAwaits: false\`, and \`taskId\`. Handoff transfers ownership only — it delivers no message and
 opens no Session; deliver any text with send or discuss. Do not simulate a handoff by wording a
 send: the ownership transfer is a Core fact, not a phrase.
+
+## Settings
+
+\`\`\`bash
+agentmux settings get
+agentmux settings get <target>
+agentmux settings set <key> <value>
+\`\`\`
+
+Read the running host's supported entries before setting a value. Each entry reports its
+key, current value, default, scalar kind and optional enum; partial means other settings
+are not yet exposed. Use the returned exact keys and legal values. Success reports the
+committed entry after persistence. No managed Agent caller or open View is required.
+An offline host returns CONTROL_UNAVAILABLE; never substitute direct configuration-file
+writes. A timeout does not prove whether a write committed: read before deciding the next action.
 
 ## Runtime intents
 

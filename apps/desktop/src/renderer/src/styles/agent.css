@@ -56,6 +56,7 @@
 .agent-provider-icon > svg, .agent-provider-icon > img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .agent-provider-icon > img { border-radius: 3px; }
 .agent-body { min-height: 0; overflow: hidden; }
+.agent-launch-notice { padding-right: var(--region-close-clearance, 0); }
 .agent-body[data-observation-surface='workflow'] { background: radial-gradient(70% 18% at 50% 0, color-mix(in oklab, var(--blue) 5%, transparent), transparent 72%); }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
 .terminal-cold-parked { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-meta); text-align: center; }

@@ -66,6 +66,23 @@ function ports(overrides: Partial<FanOutPorts> = {}): FanOutPorts {
   }
 }
 
+// A successful registration/withdrawal publishes through its owner before returning.
+function registeredPorts(io: FanOutPorts, cell: ReturnType<typeof configCell>): FanOutPorts {
+  return {
+    ...io,
+    createWorktree: async (...args) => {
+      const created = await io.createWorktree(...args)
+      cell.commit(created.config)
+      return created
+    },
+    ...(io.removeWorktree ? { removeWorktree: async (...args: Parameters<NonNullable<FanOutPorts['removeWorktree']>>) => {
+      const removed = await io.removeWorktree!(...args)
+      cell.commit(removed.config)
+      return removed
+    } } : {})
+  }
+}
+
 describe('fan-out run', () => {
   it('launches one agent per lane and threads the config through every registration', async () => {
     const cell = configCell()
@@ -73,9 +90,7 @@ describe('fan-out run', () => {
       workspaceId: 'repo',
       prompt: 'Add retry to the uploader',
       lanes: [lane('retry-1'), lane('retry-2'), lane('retry-3')],
-      readConfig: cell.read,
-      commitConfig: cell.commit,
-      ports: ports()
+      readConfig: cell.read, ports: registeredPorts(ports(), cell)
     })
 
     expect(result.lanes.map((entry) => entry.status)).toEqual(['launched', 'launched', 'launched'])
@@ -94,9 +109,7 @@ describe('fan-out run', () => {
       workspaceId: 'repo',
       prompt: 'One prompt, three ways',
       lanes: [lane('a'), lane('b')],
-      readConfig: cell.read,
-      commitConfig: cell.commit,
-      ports: io
+      readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     const calls = (io.launchAgent as ReturnType<typeof vi.fn>).mock.calls
@@ -108,7 +121,7 @@ describe('fan-out run', () => {
   it('always creates the branch: a bake-off opens fresh branches, it does not adopt existing ones', async () => {
     const cell = configCell()
     const io = ports()
-    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io })
+    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell) })
 
     expect((io.createWorktree as ReturnType<typeof vi.fn>).mock.calls[0]![0])
       .toMatchObject({ createBranch: true, branch: 'a' })
@@ -128,9 +141,7 @@ describe('fan-out run', () => {
       workspaceId: 'repo',
       prompt: 'p',
       lanes: [lane('a'), lane('b'), lane('c')],
-      readConfig: cell.read,
-      commitConfig: cell.commit,
-      ports: io
+      readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(result.lanes.map((entry) => entry.status)).toEqual(['launched', 'launch-failed', 'launched'])
@@ -147,7 +158,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(result.lanes[0]).toMatchObject({
@@ -173,7 +184,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(removeWorktree).toHaveBeenCalledWith({ workspaceId: 'ws-a' }, expect.anything())
@@ -193,7 +204,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(result.lanes[0]).toMatchObject({
@@ -223,7 +234,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     const [first] = result.lanes
@@ -248,7 +259,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(strandedLanes(result).map((entry) => entry.branch)).toEqual(['a'])
@@ -263,7 +274,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(result.lanes[0]).toEqual({
@@ -295,7 +306,7 @@ describe('fan-out run', () => {
     })
 
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     // 判据不是"状态换了个名字"，而是这条 lane 进了「有签出、无 Agent、等人决定」那一档。
@@ -306,7 +317,7 @@ describe('fan-out run', () => {
     const refused = configCell()
     const refusedIo = ports({ createWorktree: vi.fn(async () => { throw new Error('branch already exists') }) })
     const refusedResult = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: refused.read, commitConfig: refused.commit, ports: refusedIo
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: refused.read, ports: registeredPorts(refusedIo, refused)
     })
     expect(refusedResult.lanes[0]!.status).toBe('worktree-failed')
     expect(strandedLanes(refusedResult), '什么都没建的 lane 不该被列成搁浅——那是在发明一个不存在的孤儿')
@@ -320,7 +331,7 @@ describe('fan-out run', () => {
     const cell = configCell()
     const io = ports({ createWorktree: vi.fn(async () => { throw new Error('no') }) })
     const result = await runFanOut({
-      workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, commitConfig: cell.commit, ports: io
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, ports: registeredPorts(io, cell)
     })
 
     expect(launchedLanes(result)).toEqual([])
@@ -349,7 +360,7 @@ describe('fan-out run', () => {
       })
     })
 
-    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, commitConfig: cell.commit, ports: io })
+    await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [lane('a'), lane('b')], readConfig: cell.read, ports: registeredPorts(io, cell) })
 
     expect(order).toEqual(['create:a', 'created:a', 'create:b', 'created:b'])
   })
@@ -357,7 +368,7 @@ describe('fan-out run', () => {
   it('handles an empty lane list without inventing work', async () => {
     const cell = configCell()
     const io = ports()
-    const result = await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [], readConfig: cell.read, commitConfig: cell.commit, ports: io })
+    const result = await runFanOut({ workspaceId: 'repo', prompt: 'p', lanes: [], readConfig: cell.read, ports: registeredPorts(io, cell) })
 
     expect(result.lanes).toEqual([])
     // Identity, not deep equality: no lane ran, so nothing was ever published — the cell still holds

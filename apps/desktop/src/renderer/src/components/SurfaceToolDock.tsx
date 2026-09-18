@@ -26,11 +26,10 @@ import type {
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
-import {
-  BROWSER_TOOLBAR_ITEM_LABELS,
-  BROWSER_TOOLBAR_ITEM_ORDER,
-  type BrowserToolbarItem
-} from '../lib/browser-toolbar'
+import { BROWSER_TOOLBAR_ITEM_LABELS } from '../lib/browser-toolbar'
+import { BROWSER_TOOLBAR_ITEM_ORDER, type BrowserToolbarItem } from '../../../shared/browser-toolbar'
+import { useSettingDraftRecord } from './settings/use-setting-draft'
+import { useSettingsSave } from './settings/SettingsSaveBar'
 import { demandColumns, projectDemands, type DemandStatus } from '../lib/global-demand-board'
 import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
@@ -130,16 +129,19 @@ export function BrowserToolbarPreferences({
 }: {
   toolbar: BrowserToolbarConfig
   saving: boolean
-  onSave(toolbar: BrowserToolbarConfig): Promise<void>
+  onSave(toolbar: BrowserToolbarConfig, expected: BrowserToolbarConfig): Promise<void>
 }) {
-  const [draft, setDraft] = useState(toolbar)
-
-  useEffect(() => setDraft(toolbar), [toolbar])
-
-  const dirty = BROWSER_TOOLBAR_ITEM_ORDER.some((item) => draft[item] !== toolbar[item])
+  const draft = useSettingDraftRecord(toolbar)
+  const saveState = useSettingsSave()
+  const busy = saving || saveState.saving
 
   function setItem(item: BrowserToolbarItem, shown: boolean): void {
-    setDraft((current) => ({ ...current, [item]: shown }))
+    draft.setField(item, shown)
+  }
+
+  async function save(): Promise<void> {
+    const submitted = draft.beginSave()
+    submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
 
   return (
@@ -150,8 +152,8 @@ export function BrowserToolbarPreferences({
           <label key={item}>
             <input
               type="checkbox"
-              checked={draft[item]}
-              disabled={saving}
+              checked={draft.value[item]}
+              disabled={busy}
               onChange={(event) => setItem(item, event.target.checked)}
             />
             <span>{BROWSER_TOOLBAR_ITEM_LABELS[item]}</span>
@@ -161,12 +163,13 @@ export function BrowserToolbarPreferences({
       <button
         className="small-button"
         type="button"
-        disabled={!dirty || saving}
-        onClick={() => void onSave(draft)}
+        disabled={!draft.dirty || busy}
+        onClick={() => void save()}
       >
-        {saving ? <LoaderCircle className="spin" size={12} /> : null}
-        {saving ? 'Saving…' : 'Save Browser bar'}
+        {busy ? <LoaderCircle className="spin" size={12} /> : null}
+        {busy ? 'Saving…' : 'Save Browser bar'}
       </button>
+      {saveState.error ? <p className="settings-inline-error" role="alert">{saveState.error}</p> : null}
     </section>
   )
 }
@@ -507,7 +510,6 @@ export function SurfaceToolDock({
   const workspaceTool = useAppStore((state) => state.workspaceTool)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
-  const setConfig = useAppStore((state) => state.setConfig)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const createBrowser = useAppStore((state) => state.createBrowser)
   const selectSession = useAppStore((state) => state.selectSession)
@@ -581,16 +583,14 @@ export function SurfaceToolDock({
     }
   }
 
-  async function saveBrowserToolbar(toolbar: BrowserToolbarConfig): Promise<void> {
+  async function saveBrowserToolbar(toolbar: BrowserToolbarConfig, expected: BrowserToolbarConfig): Promise<void> {
     if (savingBrowserToolbar) return
     const current = useAppStore.getState().config
     if (!current) return
     setSavingBrowserToolbar(true)
-    setError(null)
     try {
-      setConfig(await api.config.save({ ...current, browser: { ...current.browser, toolbar } }))
-    } catch (cause) {
-      setError(presentError(cause))
+      await api.config.save({ ...current, browser: { ...current.browser, toolbar } },
+        { ...current, browser: { ...current.browser, toolbar: expected } })
     } finally {
       setSavingBrowserToolbar(false)
     }

@@ -35,8 +35,6 @@ export type FanOutRequestPorts = {
    * 判一次。让 handler 自己再查一遍就等于同一个概念两处判定，两处的失败文案还会不一样。
    */
   lanes(workspace: WorkspaceRecord): FanOutPorts
-  /** 成功的 lane 会注册 worktree，config 因此前进——回写由调用方负责。 */
-  commitConfig(config: AppConfig): void
 }
 
 export async function runFanOutRequest(
@@ -79,7 +77,6 @@ export async function runFanOutRequest(
     prompt: input.prompt,
     lanes: plan.lanes,
     readConfig: () => ports.config(),
-    commitConfig: (next) => ports.commitConfig(next),
     ports: ports.lanes(workspace)
   })
   return { kind: 'fanout', lanes: result.lanes }

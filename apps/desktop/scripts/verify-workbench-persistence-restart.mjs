@@ -18,8 +18,9 @@ const require = createRequire(import.meta.url)
 const exec = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const root = await mkdtemp('/tmp/amx-workbench-crash-')
-const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace')
+const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
+const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
+const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
@@ -29,6 +30,10 @@ const deadline = Date.now() + 110_000
 const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-file'
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
+const regionCloseProof = process.argv.includes('--close-region')
+const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
+assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
+if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
 let client, session, producer, failure, result, ownedRunProcess
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
@@ -83,9 +88,13 @@ async function launch(label) {
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
-  await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]') && document.querySelector('[data-workbench-region-id="${fileRegionId}"]'))`))
+  await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''})`))
   } catch (error) {
-    const observed = await cdp.evaluate(`({text:document.body.innerText.slice(0,2000),regions:[...document.querySelectorAll('[data-workbench-region-id]')].map(n=>n.dataset.workbenchRegionId),errors:[...document.querySelectorAll('[role=alert]')].map(n=>n.textContent)})`).catch(cause => ({diagnosticError:cause.message}))
+    const observed = await cdp.evaluate(`({text:document.querySelector('main')?.innerText.slice(0,800),
+      stored:JSON.parse(localStorage.getItem('agentmux-workbench-v1')),
+      regions:[...document.querySelectorAll('[data-workbench-region-id]')].map(n=>n.dataset.workbenchRegionId),errors:[...document.querySelectorAll('[role=alert]')].map(n=>n.textContent)})`).catch(cause => ({diagnosticError:cause.message}))
+    await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
+    await writeFile(join(repositoryRoot,'.tmp/region-close-launch-failure.json'),JSON.stringify(observed,null,2))
     throw new Error(`${error.message}; observed=${JSON.stringify(observed)}`)
   }
   const origin = await cdp.evaluate('({url:location.href,origin:location.origin})'); return { child, cdp, origin }
@@ -186,11 +195,14 @@ try {
   Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
     AGENTMUX_MESSAGE_QUEUE_PATH: fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
+  await mkdir(topicsPath, { recursive: true })
   await mkdir(codexHome, { recursive: true, mode: 0o700 })
   const executable = join(workspacePath, 'private-cat.sh'), bindingPath = join(root, 'private-hook-binding.json')
   // Generated identifiers/URL/token contain only the Core-defined safe ASCII alphabet. Never print
   // the binding or put it in argv; it belongs to this one temporary private Run only.
-  await writeFile(executable, `#!/bin/sh\numask 077\nprintf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${bindingPath}'\nprintf 'Private crash proof PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
+  // Record birth identity before exec removes the wrapper path from argv. The outer watchdog can
+  // reap this exact detached cat even when it kills Node before Node's finally can run.
+  await writeFile(executable, `#!/bin/sh\numask 077\nLC_ALL=C /bin/ps -p "$$" -o pid=,pgid=,lstart= > '${join(root, 'owned-run-process.txt')}'\nprintf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${bindingPath}'\nprintf 'Private crash proof PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
   const store = new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json'))
   client = await connectLocalAgentMux({ store })
   session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'probe', providerId: 'codex', commandOverride: executable,
@@ -200,12 +212,18 @@ try {
   assert.ok(Number.isFinite(originalRun.acceptedInputBytes) && originalRun.acceptedInputBytes >= 0,
     'Zero-replay proof requires an actual known Runtime input cursor')
   ownedRunProcess = await runProcessIdentity(originalRun.pid); assert.ok(ownedRunProcess)
+  if (holdForWatchdog) {
+    await client.dispose(); client = null
+    console.error('region_restart_private_run_ready')
+    await waitFor('outer watchdog must terminate this private mutation', () => false, 105_000)
+  }
   await client.dispose(); client = null
   await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region stays present\n')
   await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private crash fixture' }],
     executors: { probe: { label: 'Private cat', providerId: 'codex', command: executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
-    workspaces: [{ id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
+    workspaces: [{ id: '__scratch__', name: 'Private Topics', hostId: 'local', path: topicsPath, kind: 'folder' },
+      { id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
   const seed = { version: 1, state: { activeWorkspaceId: workspaceId, mainSurface: 'workbench',
     agentFocus: { execution: { sessionId: session.agentSessionId, history: [{ sessionId: session.agentSessionId, focusedAt: 1 }] }, pmo: { sessionId: null } },
@@ -218,7 +236,7 @@ try {
       tabs: { [tabId]: { id: tabId, workspaceId, titleRegionId: agentRegionId,
         layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.7, first: { type: 'leaf', regionId: agentRegionId }, second: { type: 'leaf', regionId: fileRegionId } }, activeRegionId: agentRegionId },
         regions: { [agentRegionId]: { regionId: agentRegionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: session.agentSessionId },
-          [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId, path: join(workspacePath, 'split.txt') } } } },
+          [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId, path: 'split.txt' } } } },
       layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId },
         __scratch__: { root: { type: 'leaf', groupId: scratchGroupId }, groups: [{ id: scratchGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: scratchGroupId } }
     } } }
@@ -285,10 +303,27 @@ try {
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
   await waitFor('actual file Region focus changed', async () => { const s = await surface(first.cdp); return s.activeRegions.length === 1 && s.activeRegions[0] === fileRegionId })
-  const lastEditAt = Date.now()
+  let lastEditAt = Date.now()
   const expectedWorkbench = structuredClone(before.workbench)
   expectedWorkbench.tabs[tabId].layout.root.ratio = 0.6
   expectedWorkbench.tabs[tabId].layout.activeRegionId = fileRegionId
+  if (regionCloseProof) {
+    // Close the existing file Region through its actual X. Dirty cancellation/confirmation is
+    // separately exercised by the mounted Workbench owner; Editor loading is not a Header gate.
+    const closePoint = await first.cdp.evaluate(`(() => {
+      const button=document.querySelector('[data-workbench-region-id="${fileRegionId}"] .workbench-region__close'), r=button.getBoundingClientRect();
+      if(r.width<=0 || r.height<=0)throw new Error('Actual file Region X has no hit area');
+      const point={x:r.x+r.width/2,y:r.y+r.height/2};
+      if(document.elementFromPoint(point.x,point.y)?.closest('.workbench-region__close')!==button)throw new Error('Actual file Region X is covered');
+      return point
+    })()`)
+    for (const type of ['mousePressed','mouseReleased']) await first.cdp.call('Input.dispatchMouseEvent', { type, ...closePoint, button:'left', clickCount:1 })
+    await waitFor('only exact file Region closed', async () => JSON.stringify((await surface(first.cdp)).regions) === JSON.stringify([agentRegionId]))
+    const expectedTab=expectedWorkbench.tabs[tabId]
+    expectedTab.layout={root:{type:'leaf',regionId:agentRegionId},activeRegionId:agentRegionId}
+    delete expectedTab.regions[fileRegionId]
+    lastEditAt=Date.now()
+  }
   await assertPrivateRunOutsideElectronGroup(first.child.pid, originalRun.pid)
   await delay(Math.max(0, lastEditAt + 2_000 - Date.now()))
   const immediatelyBeforeCrash = await surface(first.cdp)
@@ -301,9 +336,10 @@ try {
   assert.equal(producer.exitCode, null); assert.equal(producer.signalCode, null)
   assert.equal(acknowledgements.at(-1)?.status, 204); assert.ok(crashAt-acknowledgements.at(-1).at < 400)
   assert.deepEqual(observer.unloads, [])
-  assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, 60)
+  assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60)
   assert.deepEqual(immediatelyBeforeCrash.queued, expectedQueue, 'Actual queue order and its recorded or unknown times must be written before the abrupt crash')
-  assert.deepEqual(immediatelyBeforeCrash.activeRegions, [fileRegionId])
+  // The sole surviving Region stays active in durable layout; its ring has no competing choice.
+  assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
   first.cdp.close()
   process.kill(-first.child.pid, 'SIGKILL') // Exact detached private Electron group; the Run is outside it.
   await waitFor('first abrupt exit', () => first.child.signalCode !== null || first.child.exitCode !== null, 5_000)
@@ -315,6 +351,7 @@ try {
   assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
+    regionClose: regionCloseProof,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
@@ -338,7 +375,7 @@ try {
   assert.deepEqual(restored.workbench, expectedWorkbench, 'The exact edited workbench must survive sudden process termination while Agent events are active')
   assert.equal(restored.draft, newDraft, 'The unsent edited draft must survive without an unload flush')
   assert.deepEqual(restored.queued, expectedQueue, 'Moved pending order, immutable admission time and historical execution pause must survive the second process')
-  assert.deepEqual(restored.focus, before.focus); assert.deepEqual(restored.regions, [agentRegionId, fileRegionId].sort()); assert.deepEqual(restored.activeRegions, [fileRegionId])
+  assert.deepEqual(restored.focus, before.focus); assert.deepEqual(restored.regions, regionCloseProof ? [agentRegionId] : [agentRegionId, fileRegionId].sort()); assert.deepEqual(restored.activeRegions, regionCloseProof ? [] : [fileRegionId])
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
@@ -355,6 +392,7 @@ try {
 } catch (error) {
   failure = error
 } finally {
+  if (holdForWatchdog) await writeFile(join(root, 'inner-finally-reached'), 'Node finally ran\n')
   const cleanupErrors = []
   const attempt = async action => { try { await action() } catch (error) { cleanupErrors.push(error) } }
   for (const child of children) await attempt(async () => {

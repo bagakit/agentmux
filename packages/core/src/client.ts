@@ -1416,15 +1416,17 @@ export class AgentMuxClient {
       arch: process.arch,
       supported: process.platform === 'darwin' && process.arch === 'arm64',
       ctxmux: {
-        // version/sourceCommit are the SHA-verified vendored originals (CTXMUX_VERSION /
-        // CTXMUX_COMMIT in ctxmux-run-adapter.ts, asserted against manifest.json at load), NOT
-        // retyped literals. protocolVersion already comes from the live identity object, so it was
-        // never at risk; version and commit were frozen literals that drift when the artifact is
-        // bumped. Importing the constants makes doctor/about report the actual running runtime.
-        version: CTXMUX_VERSION,
-        protocolVersion: identity.protocolVersion,
-        sourceCommit: CTXMUX_COMMIT,
-        artifactPlatform: 'darwin-arm64',
+        serving: {
+          buildIdentity: identity.buildIdentity,
+          protocolVersion: identity.protocolVersion,
+          instanceId: identity.daemonInstanceId,
+          sourceCommit: null
+        },
+        bundled: {
+          version: CTXMUX_VERSION,
+          sourceCommit: CTXMUX_COMMIT,
+          artifactPlatform: 'darwin-arm64'
+        },
         ready: true,
         capabilities: {
           transport: 'local-unix',

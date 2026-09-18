@@ -170,9 +170,10 @@
 .terminal-search {
   position: absolute;
   z-index: 30;
-  top: 8px;
-  right: 11px;
-  min-width: 260px;
+  top: var(--region-close-clearance, 8px);
+  right: var(--region-close-clearance, 11px);
+  min-width: 0;
+  max-width: calc(100% - var(--region-close-clearance, 11px) - var(--sp-3));
   height: 30px;
   display: flex;
   align-items: center;
@@ -186,7 +187,7 @@
   backdrop-filter: blur(18px);
 }
 .terminal-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px/1.4 var(--font-mono); }
-.terminal-search button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.terminal-search button { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .terminal-search button:hover { color: var(--text); background: var(--wash-2); }
 /* 三个开关的字形是文字（Aa / .* / ab|）不是图标，所以要自己定字体——按钮不继承正文字体。
    等宽让三枚宽度一致，排起来是一条整齐的段，不是三块参差的补丁。 */

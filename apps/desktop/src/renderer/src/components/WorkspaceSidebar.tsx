@@ -3,7 +3,7 @@ import { ProjectActivity } from './ProjectActivity'
 import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower, Rows2, Rows3, Rows4 } from 'lucide-react'
 import { useMemo, useState, Fragment, type CSSProperties, type ReactNode } from 'react'
 import { SCRATCH_WORKSPACE_ID, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
-import type { ProjectRailDensity } from '../../../shared/contracts'
+import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
   projectGroupKey,
@@ -39,7 +39,6 @@ export function WorkspaceSidebar() {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
-  const setConfig = useAppStore((state) => state.setConfig)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
   const pinnedItems = useAppStore((state) => state.pinnedItems)
@@ -65,7 +64,7 @@ export function WorkspaceSidebar() {
   }
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
   // 密度是看法不是数据：缺席即默认档，读处一律 `?? 'default'`，不改树结构/归属/选中/滚动位置。
-  const railDensity: ProjectRailDensity = config?.projectRailDensity ?? 'default'
+  const railDensity: ProjectRailDensity = config?.projectRailDensity ?? PROJECT_RAIL_DENSITY_DEFAULT
   const nextDensity: ProjectRailDensity = railDensity === 'default'
     ? 'compact'
     : railDensity === 'compact'
@@ -85,7 +84,7 @@ export function WorkspaceSidebar() {
     if (!config) return
     // 走 api.config.save 而非只改内存：这一档 durable，重启后仍是用户选的那一档。
     try {
-      setConfig(await api.config.save({ ...config, projectRailDensity: nextDensity }))
+      await api.config.save({ ...config, projectRailDensity: nextDensity }, config)
     } catch (error) {
       reportError(error)
     }
@@ -103,8 +102,8 @@ export function WorkspaceSidebar() {
       const saved = await api.config.save({
         ...config,
         workspaces: removeProjectWorkspaces(config.workspaces, removeRequest)
-      })
-      setConfig(saved)
+      }, config)
+
       if (activeProjectId === removeRequest.id) {
         const fallback = saved.workspaces.find((workspace) => workspace.id === scratch?.id) ?? saved.workspaces[0]
         if (fallback) await selectWorkspace(fallback.id)

@@ -1005,6 +1005,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'list.agents': 'short',
       'list.projects': 'short',
       'list.active-agents': 'short',
+      'settings.get': 'short',
+      'settings.set': 'short',
       // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
       // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
       interrupt: 'short',

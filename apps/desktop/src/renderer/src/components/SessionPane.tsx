@@ -268,7 +268,7 @@ export function SessionPane({
     ? pendingLaunch.created : undefined
   const launchFailures = pendingLaunch?.projectionFailures ?? []
   const launchNotice = acceptedLaunch && launchFailures.length > 0 ? (
-    <div>
+    <div className="agent-launch-notice">
       <ServiceWindowNotice notice={{
         kind: session?.processState === 'running' ? 'process-degraded' : 'indeterminate',
         notice: {

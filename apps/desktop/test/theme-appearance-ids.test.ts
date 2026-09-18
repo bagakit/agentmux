@@ -16,6 +16,6 @@ describe('appearance choices SSOT', () => {
   })
 
   it('keeps the copy map exhaustive through the AppAppearanceId type', () => {
-    expect(settings).toContain('satisfies Record<AppAppearanceId, { title: string; description: string }>')
+    expect(settings).toContain('satisfies Record<AppAppearanceId, { title: string; description: string; icon: typeof Moon }>')
   })
 })
