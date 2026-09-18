@@ -315,7 +315,7 @@ describe('当前 Topic 由活动 Tab 的绑定派生', () => {
 
   it('Workbench 从 layout 派生当前 Topic，而不是读那个只有面板会写的字段', () => {
     // 这条钉住接线：派生函数本身全绿，也证明不了渲染面真的用了它。改回读 store 字段会红。
-    expect(workspaceWorkbenchSource).toContain('activeTopicIdFromLayout(storedLayout, tabs)')
+    expect(workspaceWorkbenchSource).toContain('activeTopicIdFromLayout(residentLayout, tabs)')
     expect(workspaceWorkbenchSource).not.toContain('state.activeScratchTopicId')
   })
 })
