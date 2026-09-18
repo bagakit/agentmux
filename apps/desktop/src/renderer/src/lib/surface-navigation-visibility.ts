@@ -30,8 +30,11 @@ export function surfaceNavigationVisibility(
   tab: WorkbenchTab,
   layout: WorkspaceLayout,
   tabs: Tabs,
-  input: { activeWorkspaceId: string | null; workbenchVisible: boolean }
+  input: { activeWorkspaceId: string | null; workbenchVisible: boolean; projectedVisibleTabIds?: ReadonlySet<string> | undefined }
 ): { navigationContextActive: boolean; tabVisible: boolean } {
+  // Focus/floating destinations show the original Tab outside its base navigation context.
+  // Both resource owners consume this same fact; a visible projection cannot be reclaimed.
+  if (input.projectedVisibleTabIds?.has(tab.id)) return { navigationContextActive: true, tabVisible: true }
   const activeTopicId = isScratchWorkspaceId(tab.workspaceId)
     ? activeTopicIdFromLayout(layout, tabs)
     : null

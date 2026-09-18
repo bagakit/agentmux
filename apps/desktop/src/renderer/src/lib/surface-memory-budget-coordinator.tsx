@@ -53,6 +53,7 @@ export function useBrowserSurfaceReleased(regionId: string): boolean {
 
 type CoordinatorOptions = {
   workbenchVisible: boolean
+  projectedVisibleTabIds?: ReadonlySet<string> | undefined
   measurementActive?: boolean
   parkingEnabled?: boolean
 }
@@ -60,6 +61,7 @@ type CoordinatorOptions = {
 /** Window-level scheduler for Browser and Monaco owners. */
 export function useSurfaceMemoryBudget({
   workbenchVisible,
+  projectedVisibleTabIds,
   measurementActive = false,
   parkingEnabled = true
 }: CoordinatorOptions): SurfaceMemoryBudgetState {
@@ -77,9 +79,10 @@ export function useSurfaceMemoryBudget({
       dirtyDocuments,
       savingDocuments,
       activeWorkspaceId,
-      workbenchVisible
+      workbenchVisible,
+      projectedVisibleTabIds
     }),
-    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, tabs, workbenchVisible]
+    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, tabs, workbenchVisible, projectedVisibleTabIds]
   )
   const candidateKey = useMemo(
     () => candidates.map((candidate) => [

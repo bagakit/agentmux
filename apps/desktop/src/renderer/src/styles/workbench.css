@@ -192,9 +192,8 @@
   justify-content: center;
   flex: 0 0 auto;
   border-radius: 4px;
-  opacity: 0;
+  opacity: .7;
 }
-.workbench-tab:hover .workbench-tab__close, .workbench-tab--active .workbench-tab__close { opacity: .7; }
 .workbench-tab__close:hover { opacity: 1; background: var(--surface-3); }
 .pane-action {
   width: 24px;
@@ -301,10 +300,8 @@
   color: var(--text-3);
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   box-shadow: 0 2px 8px var(--scrim-2);
-  opacity: 0;
+  opacity: .78;
 }
-.workbench-region:hover > .workbench-region__close,
-.workbench-region--active > .workbench-region__close { opacity: .78; }
 .workbench-region__close:hover { color: var(--text); background: var(--surface-3); opacity: 1; }
 .pane-drop-overlay {
   position: absolute;
