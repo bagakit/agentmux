@@ -16,7 +16,7 @@ import { FocusToolbar } from './FocusToolbar'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { isMacPlatform } from '../lib/host-platform'
-import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
+import { executionFocusSessionId } from '../lib/agent-focus'
 
 export function GlobalFocusSurface() {
   const contextSelector = useMemo(createFocusProjectionSelector, [])
@@ -26,7 +26,7 @@ export function GlobalFocusSurface() {
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const selectedTab = useMemo(() => tabForFocusedSession(tabs, selectedId), [selectedId, tabs])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : state.sessions.filter(session => session.id === selectedId)))
-  const executionHistory = useAppStore((state) => executionFocusHistory(state.agentFocus))
+  const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
