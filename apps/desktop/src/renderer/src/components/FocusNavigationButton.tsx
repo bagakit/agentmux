@@ -1,24 +1,30 @@
-import type { ButtonHTMLAttributes } from 'react'
+import {useMemo, type ButtonHTMLAttributes} from 'react'
 import { CirclePlay, CircleAlert } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
-import { focusBucketForSession } from '../lib/focus-context'
-import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
-import { topicIdForSession } from '../lib/workbench-tabs'
+import {createFocusProjectionSelector, type FocusContext} from '../lib/focus-context'
 
-export function focusNavigationSummary({ sessions, config }: { sessions: readonly SessionSnapshot[]; config: AppConfig | null }) {
+export function focusNavigationSummary(contexts: readonly FocusContext[]) {
   let working = 0, requests = 0, errors = 0
-  for (const session of sessions) {
-    if (session.kind !== 'agent' || topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID) continue
-    const bucket = focusBucketForSession(session, false)
-    if (bucket === 'working') working++
-    else if (bucket === 'attention') { if (session.status.state === 'error') errors++; else requests++ }
+  for (const context of contexts) {
+    if (context.kind !== 'agent') continue
+    if (context.bucket === 'working') working++
+    else if (context.bucket === 'attention') { if (context.state === 'error') errors++; else requests++ }
   }
   return { working, requests, errors }
 }
 export function FocusNavigationButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  const summary = useAppStore(useShallow(focusNavigationSummary))
+  const selectSummary = useMemo(() => {
+    const project = createFocusProjectionSelector()
+    let previous: readonly FocusContext[] | undefined
+    let summary = {working: 0, requests: 0, errors: 0}
+    return (state: Parameters<typeof project>[0]) => {
+      const contexts = project(state).contexts
+      if (contexts !== previous) {previous = contexts; summary = focusNavigationSummary(contexts)}
+      return summary
+    }
+  }, [])
+  const summary = useAppStore(useShallow(selectSummary))
   const attention = summary.requests + summary.errors
   const detail = `${summary.working} working, ${summary.requests} requests, ${summary.errors} failed`
   return <button {...props} className={`${props.className ?? ''} surface-navigation__focus`} aria-label={`${props['aria-label']}. ${detail}`} title={props['aria-describedby'] ? undefined : `${props.title ?? 'Focus'} · ${detail}`}>
