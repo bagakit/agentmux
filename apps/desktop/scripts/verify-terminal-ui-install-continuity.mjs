@@ -17,6 +17,8 @@ import { packageIdentityPath } from './package-identity.mjs'
 // original SDK listener and installer directory transaction. Launch/ordinary quit IO
 // use the existing private pre-home Inspector seam, not LaunchServices or user UI.
 const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
+const coldOnly = process.argv.includes('--cold-only')
+const candidateInput = process.env.AGENTMUX_VERIFY_CANDIDATE_APP ?? null
 const require = createRequire(join(desktopRoot, 'package.json')), exec = promisify(execFile)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), delay = ms => new Promise(done => setTimeout(done, ms))
 const root = await mkdtemp('/tmp/amx-ui-install-'), home = join(root, 'home'), userData = join(root, 'user-data')
@@ -31,7 +33,7 @@ const children = new Set(), connections = new Set(), owners = new Map(), probes 
 const deadline = Date.now() + 300000
 const receipt = { schema: 'agentmux.ui-native-install-continuity.v1', passed: false, userRuntimeTouched: false,
   temporaryRoot: root, startedAt: Date.now(), limitations: ['Actual private compiled Apps; launch and graceful quit IO use public Electron Inspector isolation, not OS LaunchServices.',
-    'Both observation-capable GUI bundles use the frozen candidate source; the actual original Native differs from their bundled Native.',
+    'Both observation-capable GUI bundles use the recorded candidate input; installer source is separately bound. Original Native differs from bundled Native.',
     'This does not qualify the currently installed old1b user GUI or prove all terminal performance/codec behavior.'], cleanup: {} }
 let phase = 'prepare', failure, daemon, sdk, creator, active, server, agent, terminal
 const cwdEnv = { ...process.env, ...fixtureEnvironment }
@@ -165,6 +167,10 @@ async function nativePages(url) {
 }
 function projectObservation(observation) { return { pid: observation.main.pid, package: observation.main.package, renderer: observation.main.renderer,
   runtime: observation.main.runtimes, workbench: observation.workbench } }
+function retainedWorkbench(workbench) { return { activeWorkspaceId: workbench.activeWorkspaceId,
+  mainSurface: workbench.mainSurface, focus: workbench.focus, layouts: workbench.layouts,
+  tabs: workbench.tabs.map(tab => ({ ...tab,
+  regions: tab.regions.map(region => { if(region.kind!=='browser')return region;const {navigationId,loading,error,...descriptor}=region;return descriptor }) })) } }
 async function healthyInput(label) {
   const snapshot = await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()')
   const current = snapshot.sessions.find(session => session.id === agent.agentSessionId)
@@ -186,6 +192,11 @@ async function inputs() {
     'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/core/src/ctxmux-run-adapter.ts','packages/core/src/runtime-paths.ts','pnpm-lock.yaml']
   async function visit(directory) { for (const entry of await readdir(directory, { withFileTypes: true })) { const path=join(directory,entry.name); if(entry.isDirectory())await visit(path);else if(entry.isFile())paths.push(path) } }
   await visit(join(repositoryRoot,'apps/desktop/out')); await visit(join(repositoryRoot,'packages/core/dist'))
+  if(candidateInput){
+    const app=join(candidateInput,'Contents/Resources/app')
+    for(const directory of ['out','node_modules/@agentmux/core/dist','node_modules/@agentmux/core/vendor'])await visit(join(app,directory))
+    paths.push(packageIdentityPath(candidateInput),join(candidateInput,'Contents/MacOS/AgentMux'))
+  }
   paths.push(join(oldArtifacts,'bin/ctxmuxd'),join(oldArtifacts,'manifest.json'),join(oldArtifacts,'ctxmux-sdk-0.0.0.tgz'),require('electron'))
   return Object.fromEntries(await Promise.all(paths.map(async path=>{const full=path.startsWith('/')?path:join(repositoryRoot,path);return [full,hash(await readFile(full))]})))
 }
@@ -205,8 +216,15 @@ try {
   const agentRun=await sdk.status(agent.run.runId);assert.equal(agentRun.state.type,'running');owners.set(agentRun.pid,await identity(agentRun.pid));receipt.agent={session:agent.agentSessionId,run:agent.run.runId,pid:agentRun.pid}
   await creator.dispose();creator=null
   await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{'private-agent':{label:'Private Agent',providerId:'codex',command:executable,args:[],env:{CODEX_HOME:fixtureEnvironment.CODEX_HOME},injectAgentMuxGuide:false}},workspaces:[{id:workspaceId,name:'Private UI install',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
-  await mkdir(join(root,'candidate'),{recursive:true});await exec('/bin/cp',['-cR',join(require.resolve('electron/package.json'),'../dist/Electron.app'),candidate],{timeout:30000})
-  await brandApplication(candidate);await copyRuntimeApplication(candidate,receipt.source)
+  await mkdir(join(root,'candidate'),{recursive:true})
+  if(candidateInput){
+    await exec('/bin/cp',['-cR',candidateInput,candidate],{timeout:90000})
+    receipt.candidateInput={path:candidateInput,package:JSON.parse(await readFile(packageIdentityPath(candidateInput),'utf8')),
+      mainSha256:hash(await readFile(join(candidateInput,'Contents/Resources/app/out/main/index.js')))}
+  }else{
+    await exec('/bin/cp',['-cR',join(require.resolve('electron/package.json'),'../dist/Electron.app'),candidate],{timeout:30000})
+    await brandApplication(candidate);await copyRuntimeApplication(candidate,receipt.source)
+  }
   await exec('/usr/bin/plutil',['-replace','CFBundleIdentifier','-string',`dev.agentmux.private-ui-${randomUUID()}`,join(candidate,'Contents/Info.plist')])
   await exec('/usr/bin/codesign',['--force','--deep','--sign','-',candidate],{timeout:30000,maxBuffer:1024*1024})
   await mkdir(join(home,'Applications'),{recursive:true});await exec('/usr/bin/ditto',[candidate,destination],{timeout:30000})
@@ -238,6 +256,29 @@ try {
   terminalRun=await mountedTerminal();receipt.terminal.currentSize=terminalRun.current_size
   let nativeSignals=0;const originalKill=process.kill;process.kill=function(pid,signal){if(pid===daemon.pid&&signal!==0)nativeSignals++;return originalKill.call(process,pid,signal)}
   try {
+    // The fixture knows its original nonempty workbench. The installer receives
+    // no fabricated outgoing observation after this ordinary process exit.
+    phase='ordinary-exit-before-cold-ui-only';await quit(destination)
+    phase='actual-cold-ui-only-transaction'
+    let coldQuitCalls=0
+    const coldResult=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,launch,
+      quit:async()=>{coldQuitCalls++;throw new Error('Cold installation must not request outgoing quit')}})
+    receipt.cold={result:coldResult,quitCalls:coldQuitCalls}
+    assert.equal(coldQuitCalls,0);assert.equal(coldResult.ui.status,'unknown');assert.equal(coldResult.native.status,'deferred')
+    assert.ok(coldResult.ui.reason.includes('Without an outgoing workbench observation'))
+    receipt.cold.browser=await nativePages(pageUrl)
+    receipt.cold.after=projectObservation(await waitFor('original nonempty cold workbench',async()=>{
+      const observed=await observeUiClient(destination)
+      return JSON.stringify(retainedWorkbench(observed.workbench))===JSON.stringify(retainedWorkbench(receipt.before.workbench))?observed:null
+    }))
+    assert.deepEqual(retainedWorkbench(receipt.cold.after.workbench),retainedWorkbench(receipt.before.workbench))
+    assert.equal(coldResult.ui.observation.main.pid,receipt.cold.after.pid)
+    assert.notEqual(receipt.cold.after.pid,receipt.before.pid)
+    receipt.cold.input=await healthyInput('K')
+    assert.deepEqual(await sdk.runtimeInfo(),originalRuntime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid))
+    const coldTerminal=await mountedTerminal();assert.equal(coldTerminal.pid,terminalRun.pid);assert.deepEqual(coldTerminal.current_size,terminalRun.current_size)
+    assert.equal(nativeSignals,0);reportInstallTransaction(coldResult)
+    if(!coldOnly){
     phase='actual-ui-only-transaction';let result, installError
     try { result=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,quit,launch}) }
     catch(error){installError=error;receipt.unexpectedInstallFailure={message:error.message,transaction:error.transaction};receipt.nativeSignals=nativeSignals}
@@ -295,11 +336,13 @@ try {
     await waitFor('original Core input nonempty output',async()=>{const attachment=await sdk.attach(agent.run.runId,0);try{return Buffer.concat(attachment.snapshot.replay.chunks.map(chunk=>Buffer.from(chunk.data))).includes(Buffer.from('D'))}finally{attachment.close()}})
     receipt.inputWhileUiUnknown={pid:afterDirect.pid,run:afterDirect.id,inputBefore:beforeDirect.applied_input_bytes,inputAfter:afterDirect.applied_input_bytes,outputBytes:afterDirect.latest_output_bytes}
     await creator.dispose();creator=null
+    }
     assert.equal(nativeSignals,0);receipt.nativeSignals=nativeSignals
   } finally {process.kill=originalKill}
   receipt.inputsAfter=await inputs();assert.deepEqual(receipt.inputsAfter,receipt.inputsBefore)
   receipt.passed=true
-} catch(error){failure={phase,message:error.message,stack:error.stack};receipt.passed=false}
+} catch(error){failure={phase,message:error.message,stack:error.stack,code:error.code??null,signal:error.signal??null,
+  killed:error.killed??null,stderr:error.stderr??null};receipt.passed=false}
 finally {
   clearTimeout(hardDeadline);const errors=[]
   if(creator)try{await creator.dispose()}catch(error){errors.push(error.message)}

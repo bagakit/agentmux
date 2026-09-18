@@ -87,3 +87,37 @@ it('reports the actual UI and Native results independently to the product caller
     expect(() => reportInstallTransaction({ ui: { status: 'committed' } })).toThrow('both component outcomes')
   } finally { process.stdout.write = original }
 })
+
+it('cold installation never requests quit and rechecks actual GUI scope immediately before moving the original directory', () => {
+  const outcome = install.body!.statements.flatMap(node => ts.isTryStatement(node) ? [...node.tryBlock.statements] : [])
+    .find(node => ts.isVariableStatement(node) && node.declarationList.declarations[0]?.name.getText(parsed) === 'quitOutcome')
+  expect(outcome).toBeDefined()
+  if (!outcome || !ts.isVariableStatement(outcome)) throw new Error('The actual quit decision must exist')
+  const expression = outcome.declarationList.declarations[0]!.initializer!
+  expect(ts.isConditionalExpression(expression)).toBe(true)
+  if (!ts.isConditionalExpression(expression)) throw new Error('Quit must depend on an actual outgoing process')
+  expect(expression.condition.getText(parsed)).toBe('previouslyInstalled && running.length > 0')
+  const branches: ts.IfStatement[] = []
+  const visit = (node: ts.Node): void => { if (ts.isIfStatement(node)) branches.push(node); ts.forEachChild(node, visit) }
+  visit(install)
+  const race = branches.find(node => node.expression.getText(parsed) === 'running.length === 0 && (await processIdsForApplication(destination)).length > 0')
+  expect(race?.thenStatement.getText(parsed)).toContain("ui: { status: 'not-started' }")
+  expect(race).toBeDefined()
+  const moves = calls(install, 'rename')
+  expect(moves.length).toBeGreaterThan(0)
+  expect(race!.getEnd()).toBeLessThan(moves.find(node => node.arguments[0]?.getText(parsed) === 'destination')!.getStart(parsed))
+})
+
+it('cold UI qualification remains unknown and cannot launch an unqualified previous GUI on activation failure', () => {
+  const branches: ts.IfStatement[] = []
+  const visit = (node: ts.Node): void => { if (ts.isIfStatement(node)) branches.push(node); ts.forEachChild(node, visit) }
+  visit(install)
+  const cold = branches.find(node => node.expression.getText(parsed) === "intent === 'ui-only' && !before")
+  expect(cold).toBeDefined()
+  expect(cold!.thenStatement.getText(parsed)).toContain("status: 'unknown'")
+  expect(cold!.thenStatement.getText(parsed)).toContain('observation: observed')
+  const rollback = branches.find(node => calls(node.thenStatement, 'rename').some(call => call.arguments[0]?.getText(parsed) === 'destination') &&
+    node.expression.getText(parsed).includes("native.status !== 'committed'"))
+  expect(rollback).toBeDefined()
+  expect(rollback!.expression.getText(parsed)).toMatch(/^before && /)
+})

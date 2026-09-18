@@ -150,27 +150,35 @@ export async function observeUiClient(appPath) {
 
 /** UI-only preflight: no owner receipt, mapped-image claim, signal or spawn authority. */
 export async function prepareUiRuntime(currentApp, candidateApp, observation) {
-  const old = await artifact(currentApp), candidate = await artifact(candidateApp)
+  const candidate = await artifact(candidateApp)
+  // A first cold installation selects its address from the actual candidate.
+  // This does not claim that a previous GUI or Native image was loaded.
+  const old = currentApp ? await artifact(currentApp) : candidate
   fail(old.socketPath === candidate.socketPath && old.stateDirectory === candidate.stateDirectory,
     'UI update changes the durable Runtime address. No application was changed.')
   const liveness = await probeSocketLiveness(old.socketPath)
+  if (liveness === 'dead' && observation === null) return null
   fail(liveness === 'alive', 'The existing Runtime listener is unavailable or unknown; no UI was changed.')
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-install-sdk-'))
   try {
     const newSdk = await extractSdk(candidate, join(temporary, 'candidate'))
     const before = await inspect(newSdk, old.socketPath, join(candidateApp, coreRelative, 'dist/index.js'))
-    const observed = parseDesktopClientObservation(observation)
-    const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
-    fail(local && local.instanceId === before.runtime.daemonInstanceId && local.buildIdentity === before.runtime.buildId &&
-      local.protocolVersion === before.runtime.protocolGeneration, 'The GUI and selected listener do not report the same serving Runtime.')
-    const ids = [...new Set(observed.workbench.tabs.flatMap(tab => tab.regions.flatMap(region =>
-      (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' ? [region.control.run.runId] : [])))]
-    const { stdout } = await exec(process.execPath, [script, '--status', newSdk, old.socketPath, JSON.stringify(ids)], {
-      timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-    })
-    const statuses = JSON.parse(stdout)
-    fail(statuses.length === ids.length, 'The original workbench Run metadata is incomplete.')
-    before.running = statuses.filter(entry => entry.state.type === 'running')
+    if (observation !== null) {
+      const observed = parseDesktopClientObservation(observation)
+      const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
+      fail(local && local.instanceId === before.runtime.daemonInstanceId && local.buildIdentity === before.runtime.buildId &&
+        local.protocolVersion === before.runtime.protocolGeneration, 'The GUI and selected listener do not report the same serving Runtime.')
+      const ids = [...new Set(observed.workbench.tabs.flatMap(tab => tab.regions.flatMap(region =>
+        (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' ? [region.control.run.runId] : [])))]
+      const { stdout } = await exec(process.execPath, [script, '--status', newSdk, old.socketPath, JSON.stringify(ids)], {
+        timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      })
+      const statuses = JSON.parse(stdout)
+      fail(statuses.length === ids.length, 'The original workbench Run metadata is incomplete.')
+      before.running = statuses.filter(entry => entry.state.type === 'running')
+    }
+    // Cold observation has no outgoing Region -> Run baseline. The helper's
+    // empty inventory must not be reported as proof that original Runs survived.
 
     return { old, candidate, newSdk, before, temporary, corePath: candidate.corePath }
   } catch (error) {
