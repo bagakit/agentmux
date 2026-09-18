@@ -91,6 +91,9 @@ import { nativeImageFromBrowserPng } from './browser-image.js'
 import { pastedDirectory } from './pasted-directory.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
+import { ConfigOwner } from './config-owner.js'
+import { executeSettingsControl } from './settings-control.js'
+import { CONFIG_CHANGED_CHANNEL } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
@@ -141,9 +144,22 @@ export async function registerIpc(args: {
     background: initialPalette.background
   })
   args.runtime.commit(await args.runtime.prepare(config))
+  const configOwner = new ConfigOwner({
+    read: () => config,
+    save: async (next) => await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next: args.configStore.validate(next) }),
+    publish: (saved) => {
+      const paletteChanged = saved.appearance.terminalTheme !== config.appearance.terminalTheme
+      config = saved
+      if (paletteChanged) {
+        const palette = terminalPalette(saved.appearance.terminalTheme)
+        args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
+      }
+      if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
+    }
+  })
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
-  const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
+  const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
   // about the same repository in one breath, and two separately-constructed services could resolve a
@@ -156,17 +172,14 @@ export async function registerIpc(args: {
   )
   await browserOperationJournal.ready()
   const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore(), {
-    // 每次现读 `config`（这个闭包变量在 config:save 里被重新赋值），不是构造时快照一份：
-    // 用户刚在 Settings 里把某个 scheme 改回 allow，不该等重启才生效。
+    // Read the current owner fact so a remembered answer or explicit Forget takes effect immediately.
     rememberedSchemes: async () => config.browser.appLinkSchemes ?? {},
     rememberScheme: async (scheme, choice) => {
-      // 走 configStore.save 这条既有写路并回写闭包，和别处改 config 的写法一致；直接改
-      // `config.browser` 不落盘，关掉应用就没了。
-      const current = config.browser.appLinkSchemes ?? {}
-      config = await args.configStore.save({
-        ...config,
-        browser: { ...config.browser, appLinkSchemes: { ...current, [scheme]: choice } }
-      })
+      // Only the native human choice creates this answer; Settings exposes Forget, never an allow setter.
+      await configOwner.update((current) => ({
+        ...current,
+        browser: { ...current.browser, appLinkSchemes: { ...current.browser.appLinkSchemes, [scheme]: choice } }
+      }))
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
@@ -199,7 +212,7 @@ export async function registerIpc(args: {
   const channels: string[] = []
   let acceptingControl = true
   const controlBridge = new DesktopControlIpcBridge({
-    isAvailable: () => acceptingControl && !args.window.webContents.isDestroyed(),
+    isAvailable: () => acceptingControl && !args.window.isDestroyed() && !args.window.webContents.isDestroyed(),
     sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
@@ -213,6 +226,7 @@ export async function registerIpc(args: {
   const executeControl = async (
     request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
       if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')
       await args.runtime.authorizeAgentMessage({
@@ -262,16 +276,7 @@ export async function registerIpc(args: {
     assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
 
   handle('config:get', () => config)
-  handle('config:save', async (next: AppConfig) => {
-    const saved = await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next })
-    config = saved
-    const palette = terminalPalette(saved.appearance.terminalTheme)
-    args.runtime.setTerminalViewColors({
-      foreground: palette.foreground,
-      background: palette.background
-    })
-    return saved
-  })
+  handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   handle('hosts:check', async (input: HostConfig) => {
     try {
       return await args.runtime.checkHost(input)
@@ -312,7 +317,7 @@ export async function registerIpc(args: {
       path,
       kind: 'folder'
     })
-    if (insertion.inserted) config = await args.configStore.save(insertion.config)
+    if (insertion.inserted) await configOwner.edit(config, insertion.config)
     return insertion.workspace
   })
   // 重绑一个本地文件夹 Workspace。编排在 `workspace-rebind` 里，所以测试够得着：这个 handler
@@ -322,10 +327,8 @@ export async function registerIpc(args: {
     const result = await rebindLocalFolder(workspaceId, config, {
       chooseDirectory: async (defaultPath) =>
         await dialog.showOpenDialog(args.window, { properties: ['openDirectory'], defaultPath }),
-      save: async (next) =>
-        await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next })
+      save: async (next, expected) => await configOwner.edit(expected, next)
     })
-    config = result.config
     return result.workspace
   })
   handle('workspaces:add', async (input: CreateWorkspaceInput) => {
@@ -339,18 +342,16 @@ export async function registerIpc(args: {
       path: input.path,
       kind: 'folder'
     })
-    if (insertion.inserted) config = await args.configStore.save(insertion.config)
+    if (insertion.inserted) await configOwner.edit(config, insertion.config)
     return insertion.workspace
   })
   handle('workspaces:listBranches', async (workspaceId: string) => await worktrees.list(workspaceId, config))
   handle('workspaces:openBranch', async (workspaceId: string, branch: string) => {
     const selection = await worktrees.openBranch(workspaceId, branch, config)
-    config = selection.config
     return selection
   })
   handle('workspaces:createWorktreeForBranch', async (input: CreateWorktreeForBranchInput) => {
     const selection = await worktrees.createForBranch(input, config)
-    config = selection.config
     return selection
   })
   // 单条删除。与批量收尾（keepOneOfFanOut）共用同一个 teardown primitive，所以脏树保护在这条路上
@@ -372,7 +373,6 @@ export async function registerIpc(args: {
   handle('workspaces:removeWorktree', async (input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome> => {
     try {
       const removal = await worktrees.removeWorktree(input, config)
-      config = removal.config
       return { status: 'removed', removedPath: removal.removedPath, config: removal.config }
     } catch (error) {
       // `classifyRetention` rather than a local re-derivation: the renderer decides what to offer from
@@ -389,9 +389,6 @@ export async function registerIpc(args: {
     await runFanOutRequest(input, {
       config: () => config,
       listBranches: async (workspaceId, current) => await worktrees.list(workspaceId, current),
-      commitConfig: (next) => {
-        config = next
-      },
       lanes: (source) => ({
         createWorktree: async (createInput, current) => {
           const selection = await worktrees.createForBranch(createInput, current)
@@ -419,7 +416,6 @@ export async function registerIpc(args: {
   // `retained` and stays on disk, because "it lost" is not a reason to discard someone's work.
   handle('workspaces:keepOneOfFanOut', async (input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome> => {
     const result = await worktrees.keepOneOfFanOut(input, config)
-    config = result.config
     return { keptWorkspaceId: result.keptWorkspaceId, outcomes: result.outcomes }
   })
   handle('git:compareBranches', async (workspaceId: string, input: GitBranchCompareInput) =>

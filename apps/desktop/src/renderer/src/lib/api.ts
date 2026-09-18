@@ -18,6 +18,7 @@ import type {
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
+import { applyConfigEdit } from '../../../shared/config-edit'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
@@ -36,6 +37,7 @@ import {
 } from '../../../shared/scratch-topics'
 import { bookmarkKindForPath, isBinaryContent, parseBookmarkUrl } from '../../../shared/bookmark-file'
 
+const configListeners = new Set<(config: AppConfig) => void>()
 const now = Date.now()
 const MOCK_SCREENSHOT_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg=='
 // Typed against the core contract, not a free-floating literal: the annotation makes tsc reject any
@@ -329,7 +331,15 @@ function normalizeMockBrowserUrl(value: string): string {
 const mockApi: AgentMuxDesktopApi = {
   config: {
     get: async () => structuredClone(mockConfig),
-    save: async (config) => (mockConfig = structuredClone(config))
+    save: async (config, expected) => {
+      mockConfig = structuredClone(applyConfigEdit(mockConfig, expected, config))
+      for (const listener of configListeners) listener(structuredClone(mockConfig))
+      return structuredClone(mockConfig)
+    },
+    onChange: (listener) => {
+      configListeners.add(listener)
+      return () => configListeners.delete(listener)
+    }
   },
   hosts: { check: async (host) => host.kind === 'ssh'
     ? { ok: false, detail: 'Remote Runs are not yet supported.' }

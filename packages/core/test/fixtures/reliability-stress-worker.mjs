@@ -168,7 +168,7 @@ try {
   const daemonPid = await exactDaemon()
   const initialRuntimeIdentity = client.runtimeIdentity()
   const runtimeDiagnostics = await client.runtimeDiagnostics()
-  assert.equal(runtimeDiagnostics.ctxmux.sourceCommit, ctxmuxSourceCommit)
+  assert.equal(runtimeDiagnostics.ctxmux.bundled.sourceCommit, ctxmuxSourceCommit)
   const baseline = await sample('connected-baseline', daemonPid)
 
   const runs = await Promise.all(Array.from({ length: budgets.runCount }, async (_, index) => {
@@ -405,9 +405,9 @@ try {
         trackedDiffClean: trackedDiffClean === '1'
       },
       ctxmux: {
-        sourceCommit: runtimeDiagnostics.ctxmux.sourceCommit,
-        artifactPlatform: runtimeDiagnostics.ctxmux.artifactPlatform,
-        protocolVersion: runtimeDiagnostics.ctxmux.protocolVersion,
+        sourceCommit: runtimeDiagnostics.ctxmux.bundled.sourceCommit,
+        artifactPlatform: runtimeDiagnostics.ctxmux.bundled.artifactPlatform,
+        protocolVersion: runtimeDiagnostics.ctxmux.serving.protocolVersion,
         capabilities: runtimeDiagnostics.ctxmux.capabilities
       },
       daemon: {

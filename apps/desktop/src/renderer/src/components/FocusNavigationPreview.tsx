@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { CircleAlert, CircleCheck, CirclePause, CirclePlay, SquareTerminal } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
+import { createTerminalFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
@@ -15,7 +15,7 @@ const priority: Record<FocusBucket, number> = { attention: 0, working: 1, result
 
 /** Mounted only while the footer tooltip is open; no fetching or hidden detail subscription. */
 export function FocusNavigationPreview() {
-  const selectContexts = useMemo(createFocusProjectionSelector, [])
+  const selectContexts = useMemo(createTerminalFocusProjectionSelector, [])
   const contexts = useAppStore(useShallow(state => selectContexts(state).contexts))
   const selectedId = useAppStore(state => state.agentFocus.execution.sessionId)
   const disconnected = contexts.filter(context => context.state === 'disconnected').length
@@ -30,7 +30,7 @@ export function FocusNavigationPreview() {
         return <span key={bucket} data-preview-count={bucket} data-active={count > 0}><Icon size={12} aria-hidden="true" /><b>{count}</b><span>{label}</span></span>
       })}
     </div>
-    {visible.length ? <div className="focus-navigation-preview__rows">{visible.map(context => <div className="focus-navigation-preview__row" data-preview-session={context.id} data-bucket={context.bucket} key={context.id}>
+    {visible.length ? <div className="focus-navigation-preview__rows">{visible.map(context => <div className="focus-navigation-preview__row" data-preview-session={context.id} data-bucket={context.bucket} key={context.id} title={context.originAddress}>
       <span className="focus-navigation-preview__avatar" aria-hidden="true">{context.kind === 'agent' ? <AgentProviderIcon {...(context.providerId ? { providerId: context.providerId } : {})} size={16} /> : <SquareTerminal size={15} />}</span>
       <span className="focus-navigation-preview__copy">
         <span className="focus-navigation-preview__identity">{context.id === selectedId ? <small className="focus-navigation-preview__viewing">Viewing</small> : null}<strong>{context.name}</strong><small>{context.stateLabel}</small></span>

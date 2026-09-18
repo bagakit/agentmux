@@ -47,7 +47,7 @@ it('preserves notification drafts when an unrelated save returns cloned config v
   await dom.render(<NotificationSettingsPane notifications={{ ...notifications }} onSave={onSave} />)
   expect(dom.container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true)
   await dom.click('.primary-button')
-  expect(onSave).toHaveBeenCalledWith({ mode: 'brief', sound: true })
+  expect(onSave).toHaveBeenCalledWith({ mode: 'brief', sound: true }, { mode: 'brief', sound: false })
   expect(dom.container.querySelector('[role="alert"]')!.textContent).toBe('Cannot save notifications')
 })
 

@@ -310,6 +310,7 @@ export function clampTerminalFontSize(value: number): number {
 
 export const APP_APPEARANCE_IDS = ['dark', 'light', 'system'] as const
 export type AppAppearanceId = (typeof APP_APPEARANCE_IDS)[number]
+export const APP_APPEARANCE_DEFAULT: AppAppearanceId = 'dark'
 
 /**
  * 用户对一个应用链接 scheme 记住的两档答案，唯一真源。
@@ -351,6 +352,7 @@ void _appLinkSchemeChoicesAreExactlyTheUnion
  */
 export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact', 'dense'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
+export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 
 /** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
 export const AGENT_AVATAR_BADGE_IDS = ['spark', 'bolt', 'shield', 'flame'] as const
@@ -1262,6 +1264,8 @@ export const AGENT_ATTENTION_ACTIVATE_CHANNEL = 'agentmux:agent-attention-activa
 // invoke/handle surface cannot drift this way because ipc-parity.test.ts compares the two sets — but
 // that extractor only reads `handle(...)`/`invoke(...)` call nodes, so `.send`/`.on` were entirely
 // outside its view. Naming each channel once here makes a rename a compile error at every use site.
+/** Main -> renderer: the committed configuration from its sole Main owner. */
+export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 /** Main -> renderer: one runtime/session event from the Agent runtime controller. */
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
@@ -1278,7 +1282,8 @@ export type WindowResizeEvent = {
 export type AgentMuxDesktopApi = {
   config: {
     get(): Promise<AppConfig>
-    save(config: AppConfig): Promise<AppConfig>
+    save(config: AppConfig, expected: AppConfig): Promise<AppConfig>
+    onChange(listener: (config: AppConfig) => void): () => void
   }
   hosts: {
     check(host: HostConfig): Promise<HostCheckResult>

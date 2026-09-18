@@ -2,7 +2,7 @@ import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Users } from 'luc
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
+import { createTerminalFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusRecoveryGroup } from './FocusRecoveryGroup'
@@ -20,7 +20,7 @@ import { executionFocusSessionId } from '../lib/agent-focus'
 import { sessionPresentationById } from '../lib/session-presentation'
 
 export function GlobalFocusSurface() {
-  const contextSelector = useMemo(createFocusProjectionSelector, [])
+  const contextSelector = useMemo(createTerminalFocusProjectionSelector, [])
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
   const config = useAppStore((state) => state.config)
   const tabs = useAppStore((state) => state.tabs)

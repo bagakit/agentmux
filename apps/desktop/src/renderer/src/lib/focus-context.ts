@@ -2,7 +2,10 @@ import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
-import { agentDisplayName, firstPromptFromTimeline, workspaceForSession } from './workbench-tabs'
+import { agentDisplayName, firstPromptFromTimeline, workspaceForSession, workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
+import { regionIds } from '@agentmux/layout'
+import { regionDisplayNames, regionSurfaceLabel } from './region-display-name'
+import { isSessionSurface } from './workbench-surface-kinds'
 import { isNeedsYouState } from './attention-vocabulary'
 import { turnWorking } from './activity-working-state'
 import { clampStep, stepSummary } from './activity-step-summary'
@@ -14,6 +17,7 @@ export type FocusContext = {
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
   workspace: WorkspaceRecord | undefined
+  originAddress?: string
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null }
 function activityEntryTime(session: SessionSnapshot): number | undefined {
@@ -66,11 +70,11 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
     && a.workspaceId === b.workspaceId && a.workspaceName === b.workspaceName && a.liveAgent === b.liveAgent && a.bucket === b.bucket && a.lastActivityAt === b.lastActivityAt
 }
 /** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
-export function createFocusProjectionSelector() {
+function createFocusProjectionCache() {
   const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
-  return (input: Inputs): FocusProjection => {
+  const select = (input: Inputs): FocusProjection => {
     if (previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
@@ -102,6 +106,98 @@ export function createFocusProjectionSelector() {
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
     previous = {sessions: input.sessions, timelines: input.timelines, agentNames: input.agentNames, config: input.config}
+    return result
+  }
+  return { select, session: (id: string) => cache.get(id)?.session }
+}
+
+export function createFocusProjectionSelector() {
+  return createFocusProjectionCache().select
+}
+
+/** Terminal names describe the original working surface; semantic facts and counts stay in the base selector. */
+export function createTerminalFocusProjectionSelector() {
+  const { select: project, session: sessionForId } = createFocusProjectionCache()
+  const members = new Map<string, { tab: WorkbenchTab; sessions: Array<{ sessionId: string; regionId: string }> }>()
+  const names = new Map<string, { tab: WorkbenchTab; regions: WorkbenchTab['regions']; root: WorkbenchTab['layout']['root']; labels: Map<string, string | undefined>; sessions: readonly SessionSnapshot[]; names: Map<string, string> }>()
+  const rows = new Map<string, { base: FocusContext; tab: WorkbenchTab; regionName: string; regionId: string; model: FocusContext }>()
+  let owners = new Map<string, { tabId: string; regionId: string }>()
+  let order: string[] = []
+  let previousTabs: Readonly<Record<string, WorkbenchTab>> | undefined
+  let previousContexts: readonly FocusContext[] | undefined
+  let result: FocusProjection = { contexts: [], laneContexts: [], pmoAttention: [] }
+  return (input: Inputs & { tabs: Readonly<Record<string, WorkbenchTab>> }): FocusProjection => {
+    const base = project(input)
+    const labelsChanged = (cached: { sessions: readonly SessionSnapshot[]; labels: ReadonlyMap<string, string | undefined> }) => {
+      if (cached.sessions === input.sessions || cached.labels.size === 0) return false
+      for (const [id, label] of cached.labels) if (sessionForId(id)?.label !== label) return true
+      cached.sessions = input.sessions
+      return false
+    }
+    if (previousContexts === base.contexts && previousTabs === input.tabs && !Array.from(names.values()).some(labelsChanged)) return result
+
+    if (previousTabs !== input.tabs) {
+      const nextOrder = Object.keys(input.tabs)
+      let changed = !sameItems(order, nextOrder)
+      for (const tabId of nextOrder) {
+        const tab = input.tabs[tabId]!, old = members.get(tabId)
+        if (old?.tab === tab) continue
+        const sessions = old?.tab.regions === tab.regions ? old.sessions : workbenchSurfaces(tab).flatMap(surface => isSessionSurface(surface) ? [{ sessionId: surface.sessionId, regionId: surface.regionId }] : [])
+        if (!old || old.sessions.length !== sessions.length || old.sessions.some((surface, index) => surface.sessionId !== sessions[index]!.sessionId || surface.regionId !== sessions[index]!.regionId)) changed = true
+        members.set(tabId, { tab, sessions })
+      }
+      for (const id of members.keys()) if (!input.tabs[id]) { members.delete(id); names.delete(id) }
+      if (changed) {
+        owners = new Map()
+        // Match tabForFocusedSession/selectSession: first Tab, then first session surface in record order.
+        for (const tabId of nextOrder) for (const surface of members.get(tabId)!.sessions) {
+          if (!owners.has(surface.sessionId)) owners.set(surface.sessionId, { tabId, regionId: surface.regionId })
+        }
+      }
+      order = nextOrder
+    }
+
+    const checked = new Map<string, Map<string, string>>()
+    const contextRows = base.contexts.map(context => {
+      if (context.kind !== 'terminal') return context
+      const owner = owners.get(context.id), tab = owner ? input.tabs[owner.tabId] : undefined
+      if (!owner || !tab) { rows.delete(context.id); return context }
+      let regionNames = checked.get(tab.id)
+      if (!regionNames) {
+        const old = names.get(tab.id)
+        if (old && (old.tab === tab || old.regions === tab.regions && old.root === tab.layout.root) && !labelsChanged(old)) {
+          old.tab = tab
+          regionNames = old.names
+        } else {
+          const labels = new Map<string, string | undefined>()
+          const regions = regionIds(tab.layout.root).map(regionId => {
+            const surface = tab.regions[regionId]!
+            const session = surface.kind === 'agent' ? sessionForId(surface.sessionId) : undefined
+            if (surface.kind === 'agent') labels.set(surface.sessionId, session?.label)
+            return { regionId, label: regionSurfaceLabel(surface, session ? [session] : []) }
+          })
+          regionNames = new Map(regionDisplayNames(regions).map(region => [region.regionId, region.name]))
+          names.set(tab.id, { tab, regions: tab.regions, root: tab.layout.root, labels, sessions: input.sessions, names: regionNames })
+        }
+        checked.set(tab.id, regionNames)
+      }
+      const regionName = regionNames.get(owner.regionId)
+      if (!regionName) { rows.delete(context.id); return context }
+      const old = rows.get(context.id)
+      if (old?.base === context && old.tab === tab && old.regionName === regionName && old.regionId === owner.regionId) return old.model
+      const name = tab.name ? `${tab.name} · ${regionName}` : regionName
+      const originAddress = `Tab ${tab.id}\nRegion ${owner.regionId}`
+      const model = old?.base === context && old.model.name === name && old.model.originAddress === originAddress ? old.model : { ...context, name, originAddress }
+      rows.set(context.id, { base: context, tab, regionName, regionId: owner.regionId, model })
+      return model
+    })
+    if (previousContexts !== base.contexts) {
+      const retained = new Set(base.contexts.map(context => context.id))
+      for (const id of rows.keys()) if (!retained.has(id)) rows.delete(id)
+    }
+    result = { ...base, contexts: sameItems(result.contexts, contextRows) ? result.contexts : contextRows }
+    previousContexts = base.contexts
+    previousTabs = input.tabs
     return result
   }
 }

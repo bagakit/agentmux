@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-const expectedManifestSha256 = '9c333bedab45bf1ed684c3d0a339bd5be76302dd26392e4060f9b30d1236bb84'
+const expectedManifestSha256 = 'ddd46ca9a9293742490466f1a806bb7cc2ed9798b97d0fa0509befec3baeda6b'
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
 const artifactRoot = join(
@@ -42,8 +42,8 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
-    manifest.source.commit !== 'ddd30b902b84ab6f426243c758b773f936e87469' ||
-    manifest.source.tree !== 'dc198ed0fd5c06a70ae488adb87d2c14b583bb6b' ||
+    manifest.source.commit !== 'ec637607946718c8bdec0a215b47a72f4a1692da' ||
+    manifest.source.tree !== '699207e07a62cdea1201b2f7e32483a0ecc43124' ||
     manifest.source.worktree_clean !== true ||
     manifest.product.version !== '0.1.0' ||
     manifest.product.protocol !== 18 ||

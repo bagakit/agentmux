@@ -3,6 +3,7 @@ import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, Age
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   BROWSER_EVENT_CHANNEL,
+  CONFIG_CHANGED_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
@@ -56,7 +57,12 @@ import type {
 const api: AgentMuxPreloadApi = {
   config: {
     get: () => ipcRenderer.invoke('config:get'),
-    save: (config: AppConfig) => ipcRenderer.invoke('config:save', config)
+    save: (config: AppConfig, expected: AppConfig) => ipcRenderer.invoke('config:save', config, expected),
+    onChange: (listener) => {
+      const receive = (_event: unknown, config: AppConfig) => listener(config)
+      ipcRenderer.on(CONFIG_CHANGED_CHANNEL, receive)
+      return () => ipcRenderer.removeListener(CONFIG_CHANGED_CHANNEL, receive)
+    }
   },
   hosts: {
     check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host)
