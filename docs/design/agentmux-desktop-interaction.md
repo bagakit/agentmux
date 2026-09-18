@@ -249,6 +249,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 - `Region` 是 View 内的内容 leaf，可展示 Agent、Terminal、File、Browser 或 Launcher。
 - `split-left|right|up|down` 只修改当前 View 的 Region 树；`placement=tab` 只在用户明确要求时创建新 View。
 - Workspace 保存 Tab Group 树，每个 View 保存自己的 Region 树。两个树使用不同 ID、焦点、resize 状态和操作入口。
+- **眼前的分屏比例必须与已保存布局一致。** 用户或公开 Control 追加、重排及改变分屏比例后，已打开的原 Region 立即按同一布局显示；不能只写持久树、等重启才变成真实尺寸。拖动仍由原分隔条表达当前意图，不被过时投影拉回。同步尺寸保留 Tab、Group、Region、焦点、原内容实例与健康 Run；普通重启在同窗口尺寸与字体条件下恢复同一最终比例和终端网格。
 - **应用重启必须先恢复持久化的 Tab Group/Region 拓扑，再恢复其中的 Session 投影**。Tab、分组、Region、焦点和 split ratio 是用户工作面的 durable 索引，不能因为 Runtime 首次快照暂时为空、恢复探测超时或恢复流程报错而被写回空布局；健康 Agent 的流程故障只留下可见服务窗告示并保留原 Region。只有 Core 明确报告 Session 已退休，才能移除该 Region。
 - **恢复不能把旧进程的生命周期租约当成仍在运行**。启动新进程时必须回收 owner PID 已退出、租约已过期或属于本次重启的未完成 lifecycle reservation；只有能证明旧 owner 仍活着的租约才报告“运行在其他进程”。判断不清时保留 Session/Region，并明确提示正在等待归属核验，不得静默丢失或伪造新 Session。
 - **退役 Run 记满了，不能把整次启动判死。** 用户原话：「刚才打包以后启动就失败了」。新进程回收未完成的停止租约时，必须把这次停止落进账本：该 Session 记成用户退役，它的 Run 进入有上限的退役 Run 环。环满时丢掉最旧的 Run，并同时丢掉只指向这些 Run 的退役 Session——这是容量到顶，不是账本损坏。刚刚停下的这条 Session 的退役记录必须留下。不得因为挤掉了旧记录就让停止落账失败、整窗退出。同一身份仍在当前 Session 里，才是真冲突，继续拒绝。
