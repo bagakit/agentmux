@@ -30,7 +30,7 @@ afterEach(async () => {
 describe('PMO teams topic launcher', () => {
   it('renders one bottom entry and opens the fixed Topic', async () => {
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
-    const button = container.querySelector('button[aria-label="Open PMO teams topic"]') as HTMLButtonElement
+    const button = container.querySelector('button[aria-label="Open Mote"]') as HTMLButtonElement
     expect(button).toBeTruthy()
     expect(container.querySelector('.pmo-teams-topic-floating-launcher')).toBeNull()
     await act(async () => button.click())
@@ -51,7 +51,7 @@ describe('PMO teams topic launcher', () => {
   it('uses the avatar as the close toggle when the panel is already open', async () => {
     window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
-    const button = container.querySelector('button[aria-label="Close PMO teams topic"]') as HTMLButtonElement
+    const button = container.querySelector('button[aria-label="Close Mote"]') as HTMLButtonElement
     await act(async () => button.click())
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
   })

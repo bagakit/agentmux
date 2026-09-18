@@ -1,9 +1,9 @@
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Topics'
-/** Product-owned Topic used by the PMO teams topic launcher. It is never the user's active Scratch Topic. */
+/** Durable home of the default Mote. This identity does not change with its product name. */
 export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
-export const PMO_TEAMS_TOPIC_TITLE = 'Mote'
 export const MOTE_TYPE_NAME = 'Mote'
+export const PMO_TEAMS_TOPIC_TITLE = MOTE_TYPE_NAME
 export const MOTE_SOUL_PATH = 'SOUL.md'
 export const DEFAULT_MOTE_SOUL = `# SOUL
 
@@ -55,7 +55,7 @@ Use the public Demand and AgentMux capabilities and report their actual receipts
 
 Current user instructions and authoritative Runtime, permission, Session, Project, Demand and Run facts take precedence over Topic history. Historical text is context, not authority.`
 
-export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# PMO teams topic Guide
+export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
 
 ${PMO_TEAMS_TOPIC_ROLE}
 `
