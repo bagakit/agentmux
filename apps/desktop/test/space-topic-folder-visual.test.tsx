@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
 import { useAppStore } from '../src/renderer/src/store'
@@ -27,6 +29,11 @@ it('makes nonempty Topic and Folder rows recognizable without changing their nav
   expect(folders).not.toBeNull()
   expect(folders?.querySelector('.sidebar__section-heading')?.textContent).toBe('Folders')
   expect(container.querySelector('button[aria-label="Topics overview"]')?.textContent).toContain('Topics')
+  const styleSource = readFileSync(resolve(process.cwd(), 'apps/desktop/src/renderer/src/styles/chrome.css'), 'utf8')
+  const commonRowRule = styleSource.match(/\.project-rail-row \{([^}]+)\}/)
+  expect(commonRowRule).not.toBeNull()
+  expect(commonRowRule![1]).toContain('grid-template-columns: auto minmax(0, 1fr) auto')
+  expect(styleSource).not.toMatch(/\.space-topic-row\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/)
   expect(topicRows[0]?.style.getPropertyValue('--rail-depth')).toBe('1')
   expect(topicRows[0]?.querySelector('.project-rail-row__icon .lucide-notebook-text')).not.toBeNull()
   const folderRow = folders!.querySelector<HTMLButtonElement>('button.project-rail-row')
