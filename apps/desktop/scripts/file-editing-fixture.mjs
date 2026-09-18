@@ -33,8 +33,12 @@ export const FILE_EDITING_ALTERNATE_WORKSPACE_ID = 'workspace-file-editing-alter
  * @param {{ userData: string; workspace: string; alternateWorkspace: string }} paths
  */
 export async function materializeFileEditingFixture({ userData, workspace, alternateWorkspace }) {
+  // An explicit Scratch identity prevents ConfigStore from adding the user's
+  // home-backed Topics directory to this otherwise private verification config.
+  const scratchWorkspace = join(userData, 'private-scratch')
   await Promise.all([
     mkdir(userData, { recursive: true }),
+    mkdir(scratchWorkspace, { recursive: true }),
     mkdir(join(workspace, 'explorer-source'), { recursive: true }),
     mkdir(join(workspace, 'targets', 'valid'), { recursive: true }),
     mkdir(join(workspace, 'targets', 'collision'), { recursive: true }),
@@ -70,6 +74,12 @@ export async function materializeFileEditingFixture({ userData, workspace, alter
         name: 'Workspace File Editing Alternate E2E',
         hostId: 'local',
         path: alternateWorkspace,
+        kind: 'folder'
+      }, {
+        id: '__scratch__',
+        name: 'Topics',
+        hostId: 'local',
+        path: scratchWorkspace,
         kind: 'folder'
       }],
       appearance: { terminalTheme: 'graphite' },

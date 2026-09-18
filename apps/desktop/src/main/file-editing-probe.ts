@@ -287,7 +287,11 @@ async function snapshot(window: BrowserWindow, path: string): Promise<{
   }
 }
 
-type Point = { x: number; y: number }
+type Point = {
+  x: number
+  y: number
+  hit?: { tagName: string | null; workspaceId: string | null }
+}
 type InputModifier = 'shift' | 'meta' | 'leftbuttondown'
 
 function treeRowSource(path: string): string {
@@ -318,7 +322,13 @@ async function elementPoint(
       element.scrollIntoView({ block: 'center', inline: 'nearest' })
       const rect = element.getBoundingClientRect()
       if (rect.width <= 0 || rect.height <= 0) return null
-      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+      const x = Math.round(rect.left + rect.width / 2)
+      const y = Math.round(rect.top + rect.height / 2)
+      const hit = document.elementFromPoint(x, y)
+      return { x, y, hit: {
+        tagName: hit?.tagName ?? null,
+        workspaceId: hit?.closest('.project-rail-row')?.getAttribute('data-workspace-id') ?? null
+      } }
     })()`) as Point | null
     return point !== null
   })
@@ -346,11 +356,12 @@ async function nativeClick(
   description: string,
   source: string,
   modifiers: InputModifier[] = []
-): Promise<void> {
+): Promise<Point> {
   const point = await elementPoint(window, description, source)
   sendMouse(window, 'mouseMove', point, undefined, modifiers)
   sendMouse(window, 'mouseDown', point, 'left', modifiers)
   sendMouse(window, 'mouseUp', point, 'left', modifiers)
+  return point
 }
 
 async function nativeContextMenu(
@@ -492,14 +503,48 @@ async function pathExists(path: string): Promise<boolean> {
 async function selectWorkspaceProject(
   window: BrowserWindow,
   description: string,
-  workspaceId: string
+  workspaceId: string,
+  evidence?: Record<string, unknown>
 ): Promise<void> {
-  await nativeClick(window, description, projectRowSource(workspaceId))
-  await waitFor(`active ${description}`, async () => (
-    await window.webContents.executeJavaScript(
-      `${projectRowSource(workspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(workspaceId)}`
-    ) as boolean
-  ))
+  if (evidence) {
+    // Verification-only observation. It does not select, focus or dispatch input.
+    await window.webContents.executeJavaScript(`(() => {
+      const events = []
+      const names = ['pointerdown', 'mousedown', 'mouseup', 'click']
+      const capture = (event) => {
+        if (events.length >= 8) return
+        events.push({ type: event.type, trusted: event.isTrusted, x: event.clientX, y: event.clientY,
+          workspaceId: event.target?.closest?.('.project-rail-row')?.getAttribute('data-workspace-id') ?? null })
+      }
+      for (const name of names) document.addEventListener(name, capture, true)
+      window.__agentmuxFileEditingClick = () => {
+        for (const name of names) document.removeEventListener(name, capture, true)
+        delete window.__agentmuxFileEditingClick
+        return events
+      }
+    })()`)
+  }
+  try {
+    const point = await nativeClick(window, description, projectRowSource(workspaceId))
+    if (evidence) evidence.point = point
+    const accepted = await waitFor(`active ${description}`, async () => (
+      await window.webContents.executeJavaScript(
+        `${projectRowSource(workspaceId)}?.getAttribute('data-active-workspace-id') === ${JSON.stringify(workspaceId)}`
+      ) as boolean
+    ))
+    if (evidence) evidence.accepted = accepted
+  } finally {
+    if (evidence) {
+      try {
+        Object.assign(evidence, await window.webContents.executeJavaScript(`(() => ({
+          events: window.__agentmuxFileEditingClick(),
+          activeWorkspaceId: ${projectRowSource(workspaceId)}?.getAttribute('data-active-workspace-id') ?? null
+        }))()`))
+      } catch (error) {
+        evidence.observationError = error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
 }
 
 async function runExplorerInteractionProbe(options: {
@@ -844,7 +889,9 @@ export async function runDesktopFileEditingProbe(options: {
   const path = join(options.workspacePath, relativePath)
   const phases: Record<string, unknown> = {}
   try {
-    await selectWorkspaceProject(options.window, 'file editing Workspace project', options.workspaceId)
+    const firstWorkspace: Record<string, unknown> = { workspaceId: options.workspaceId }
+    phases.firstWorkspace = firstWorkspace
+    await selectWorkspaceProject(options.window, 'file editing Workspace project', options.workspaceId, firstWorkspace)
     await waitFor('revision probe file row', async () => (
       await options.window.webContents.executeJavaScript(
         `Boolean(document.querySelector('[data-tree-path=${JSON.stringify(relativePath)}]'))`

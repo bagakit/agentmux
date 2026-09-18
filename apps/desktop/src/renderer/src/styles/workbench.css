@@ -225,6 +225,7 @@
 .pane-body__region[data-active="false"] { visibility: hidden; pointer-events: none; }
 .workbench-region-split,
 .workbench-region {
+  /* Keep content actions clear of the existing X without adding a permanent header row. */
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -232,6 +233,8 @@
 }
 .workbench-region-split { overflow: hidden; }
 .workbench-region {
+  --region-close-size: 22px;
+  --region-close-clearance: calc(var(--region-close-size) + 2 * var(--sp-3));
   position: relative;
   overflow: hidden;
   background: var(--surface-0);
@@ -286,10 +289,10 @@
 .workbench-region-resize-handle::after { content: ''; position: absolute; inset: -3px; }
 .workbench-region-resize-handle[data-resize-handle-active] { background: var(--green-2); }
 .workbench-region__close {
-  width: 22px;
-  height: 22px;
+  width: var(--region-close-size);
+  height: var(--region-close-size);
   position: absolute;
-  z-index: 12;
+  z-index: 41; /* Above the local native-history reader (40); window overlays retain their owner. */
   top: 5px;
   right: 6px;
   display: inline-flex;
@@ -339,3 +342,11 @@
 .workbench-tab-slot, .retained-workbench-view { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .retained-workbench-parking { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
 .workspace-workbench-slot.workspace-workbench-slot--focus-source { visibility: hidden; pointer-events: none; }
+
+/* Retained geometry stays measurable. A descendant's own visibility:visible (including Monaco's
+   diff sides) must not paint or hit through a hidden owner; portaled visible views leave this owner. */
+.workspace-workbench-registry--parked,
+.workspace-workbench-slot--parked,
+.workspace-workbench-slot--focus-source,
+.pane-body__region[data-active="false"],
+.retained-workbench-parking { clip-path: inset(50%); }

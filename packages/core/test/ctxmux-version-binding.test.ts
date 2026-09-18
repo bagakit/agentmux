@@ -7,9 +7,9 @@ import { describe, expect, it } from 'vitest'
 import { CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-run-adapter.js'
 
 // ---------------------------------------------------------------------------
-// 「运行时上报的 CtxMux 版本/commit 必须绑定到 SHA 校验过的那份原件」的接线守护（F2）。
+// 「随包 CtxMux 版本/commit 必须绑定到 SHA 校验过的那份原件」的接线守护（F2）。
 //
-// 由来：`client.ts` 的 `runtimeDiagnostics`（ctxmux.version / ctxmux.sourceCommit）与
+// 由来：`client.ts` 的 `runtimeDiagnostics`（ctxmux.bundled.version / ctxmux.bundled.sourceCommit）与
 // `terminalEnvironment`（TERM_PROGRAM_VERSION）、以及 `ctxmux-run-adapter.ts` 的 daemonEnvironment
 // 曾各自**手抄**一份 '0.1.0' / 40 位 commit 字面量。可信原件是 `ctxmux-run-adapter.ts` 里的
 // `CTXMUX_VERSION` / `CTXMUX_COMMIT`（以及 `runtime-paths.ts` 的 `CTXMUX_MANIFEST_SHA256`）——那些
@@ -81,9 +81,8 @@ function parse(path: string, source: string): ts.SourceFile {
 }
 
 /**
- * 一个源码里，属性键为 `key` 的所有 PropertyAssignment 的初始化器节点。返回节点本身，让调用方去判
- * 「是不是那个标识符」。刻意收集**全部**同名键：若某处被改回字面量，它照样在集合里、照样被质询，
- * 而不是被过滤掉。
+ * 收集同名属性的初始化器；sourceCommit 只在 bundled 对象内检查绑定。serving.sourceCommit
+ * 是公开协议未提供的来源，必须为 null，不能绑到随包常量。对 bundled 不按值过滤：改回字面量仍入集合。
  */
 function propertyValues(sourceFile: ts.SourceFile, key: string): ts.Expression[] {
   const values: ts.Expression[] = []
@@ -91,7 +90,10 @@ function propertyValues(sourceFile: ts.SourceFile, key: string): ts.Expression[]
     if (
       ts.isPropertyAssignment(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === key
+      node.name.text === key &&
+      (key !== 'sourceCommit' ||
+        ts.isPropertyAssignment(node.parent.parent) &&
+        ts.isIdentifier(node.parent.parent.name) && node.parent.parent.name.text === 'bundled')
     ) {
       values.push(node.initializer)
     }
@@ -132,9 +134,9 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
  * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
  */
 const IDENTITY_HASHES = [
-  'ddd30b902b84ab6f426243c758b773f936e87469',
-  'dc198ed0fd5c06a70ae488adb87d2c14b583bb6b',
-  '9c333bedab45bf1ed684c3d0a339bd5be76302dd26392e4060f9b30d1236bb84'
+  'ec637607946718c8bdec0a215b47a72f4a1692da',
+  '699207e07a62cdea1201b2f7e32483a0ecc43124',
+  'ddd46ca9a9293742490466f1a806bb7cc2ed9798b97d0fa0509befec3baeda6b'
 ] as const
 
 /**

@@ -25,8 +25,22 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview }: {
   const [draft, setDraft] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const renameRef = useRef<HTMLInputElement>(null)
+  const identityRef = useRef<HTMLButtonElement>(null)
+  const menuOriginRef = useRef<HTMLButtonElement | null>(null)
+  const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
+  const renameCancelledRef = useRef(false)
   const name = (selected?.kind === 'terminal' ? tab?.name : null) || selected?.name || 'Session awaiting recovery'
-  useEffect(() => { if (draft !== null) { renameRef.current?.focus(); renameRef.current?.select() } }, [draft === null])
+  useEffect(() => {
+    if (draft !== null) { renameRef.current?.focus(); renameRef.current?.select() }
+    else if (renameCancelledRef.current) { renameCancelledRef.current = false; identityRef.current?.focus() }
+  }, [draft === null])
+  function closeMenuFocus(event: Event) {
+    // Selected actions and outside interaction keep their own destination.
+    event.preventDefault()
+    const origin = menuEscapeReturnRef.current
+    menuEscapeReturnRef.current = null
+    origin?.focus()
+  }
   function commitRename() {
     if (draft === null) return
     const value = draft.trim() || null
@@ -41,14 +55,14 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview }: {
     { key: 'close', label: 'Close Focus workspace', icon: PanelRightClose, run: () => focusExecutionSession(null) }
   ]
   return <div className="focus-toolbar__context">
-    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Focus context" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); setDraft(null) } }} /> : <ContextMenu.Root>
-      <ContextMenu.Trigger asChild><button type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${selected?.stateLabel ?? 'Recovery unknown'} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
+    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Focus context" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root>
+      <ContextMenu.Trigger asChild><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${selected?.stateLabel ?? 'Recovery unknown'} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
+      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" onClick={onReview}><Inbox size={12} />Review</button> : null}
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label="Focus context actions"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
-      <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal>
+      <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label="Focus context actions" onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     <button type="button" className="icon-button" aria-label="Close Focus workspace" onClick={() => focusExecutionSession(null)}><PanelRightClose size={14} /></button>
   </div>

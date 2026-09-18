@@ -15,6 +15,9 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'CONTROL_CANCELLED',
   'CONTROL_REQUEST_CONFLICT',
   'CONTROL_OWNER_LOST',
+  'UNSUPPORTED_SETTING',
+  'INVALID_SETTING_VALUE',
+  'CONFIG_CONFLICT',
   'CALLER_NOT_OPEN',
   'TAB_NOT_OPEN',
   'REGION_NOT_OPEN',
@@ -241,6 +244,13 @@ export type AgentMuxControlPromoteRegionRequest = RequestBase & {
 export type AgentMuxControlListAgentsRequest = RequestBase & { operation: 'list.agents' }
 export type AgentMuxControlListProjectsRequest = RequestBase & { operation: 'list.projects' }
 export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 'list.active-agents' }
+/** Host-owned preferences. Core transports scalar facts without owning their keys or defaults. */
+export type AgentMuxControlSettingsGetRequest = RequestBase & { operation: 'settings.get'; target?: string }
+export type AgentMuxControlSettingsSetRequest = RequestBase & { operation: 'settings.set'; key: string; value: string }
+export type AgentMuxControlSettingEntry =
+  | { key: string; kind: 'string'; value: string; default: string; enum?: string[] }
+  | { key: string; kind: 'boolean'; value: boolean; default: boolean; enum?: boolean[] }
+  | { key: string; kind: 'number'; value: number; default: number; enum?: number[] }
 export type AgentMuxSessionSelector = AgentMuxSelfAnchor | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxControlInterruptRequest = RequestBase & {
   operation: 'interrupt'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
@@ -459,6 +469,8 @@ export type AgentMuxControlRequest =
   | AgentMuxControlListAgentsRequest
   | AgentMuxControlListProjectsRequest
   | AgentMuxControlListActiveAgentsRequest
+  | AgentMuxControlSettingsGetRequest
+  | AgentMuxControlSettingsSetRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
@@ -543,6 +555,8 @@ export type AgentMuxControlResult =
   | { operation: 'list.agents'; agents: AgentMuxControlExecutor[] }
   | { operation: 'list.projects'; projects: AgentMuxControlProject[] }
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
+  | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
+  | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry }
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
@@ -745,6 +759,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.agents': 'short',
   'list.projects': 'short',
   'list.active-agents': 'short',
+  'settings.get': 'short',
+  'settings.set': 'short',
   interrupt: 'short',
   resume: 'long',
   stop: 'long',

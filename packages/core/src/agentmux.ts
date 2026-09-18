@@ -29,6 +29,7 @@ import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
 import { appendGlobalMessage, recordGlobalMessageDelivery, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
+import { parseSettingsCommand } from './settings-cli.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -961,12 +962,17 @@ function operationPath(args: readonly string[]): string | null {
   // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
   // 不写死 'run' 是因为将来若有第二个 browser 子命令，漏改这里会让它的 --help 静默落到 'browser'
   // 那条上（拿到一份讲别的命令的帮助，而不是一句"没这个命令"）。
-  if ((args[0] === 'browser' || args[0] === 'deliveries') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
+  if ((args[0] === 'browser' || args[0] === 'deliveries' || args[0] === 'settings') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
     return `${args[0]}.${args[1]}`
   }
   return args[0] ?? null
 }
 function requestsHelp(args: readonly string[]): boolean {
+  if (args[0] === 'settings') {
+    const help = (value: string | undefined): boolean => value === '--help' || value === '-h'
+    return (args.length === 2 && help(args[1])) ||
+      (args.length === 3 && (args[1] === 'get' || args[1] === 'set') && help(args[2]))
+  }
   return args.some((argument, index) => (
     (argument === '--help' || argument === '-h') &&
     args[index - 1] !== '--text' && args[index - 1] !== '--prompt' && args[index - 1] !== '--command'
@@ -1062,6 +1068,10 @@ async function main(): Promise<number> {
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
+  if (args[0] === 'settings') {
+    const receipt = await requestAgentMuxControl({ ...requestBase(), ...parseSettingsCommand(args.slice(1)) })
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
   if (args[0] === 'pmo') return await pmoCommand(args.slice(1))
   if (args[0] === 'demand') return await demandCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))

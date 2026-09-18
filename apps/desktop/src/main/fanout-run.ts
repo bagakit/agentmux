@@ -80,9 +80,8 @@ function message(error: unknown): string {
  * before this change.
  *
  * `readConfig()` is the same live accessor the handler exposes, so each lane starts from what is
- * actually current. The remaining window is one lane's own create-then-save, which is the same shape
- * every other handler already has; closing it completely needs a single-writer config with a version
- * check, which is a separate change and not one to smuggle in here.
+ * actually current. Registrations now publish through the Main config owner before returning. The loop reads
+ * that committed fact; it never republishes a returned snapshot over another writer.
  */
 export async function runFanOut(input: {
   workspaceId: string
@@ -90,8 +89,6 @@ export async function runFanOut(input: {
   lanes: readonly FanOutBranch[]
   /** The live config accessor — called once per lane, never cached across an await. */
   readConfig: () => AppConfig
-  /** Publish one lane's registration immediately, so the next reader sees it. */
-  commitConfig: (config: AppConfig) => void
   ports: FanOutPorts
 }): Promise<FanOutResult> {
   const results: FanOutLaneResult[] = []
@@ -143,7 +140,6 @@ export async function runFanOut(input: {
     // Published per lane rather than accumulated: a later lane that throws must not take the earlier
     // lanes' registrations down with it, and any other handler that runs between two lanes has to see
     // the worktrees that already exist on disk.
-    input.commitConfig(created.config)
 
     try {
       const launched = await input.ports.launchAgent(
@@ -175,11 +171,10 @@ export async function runFanOut(input: {
       }
       if (input.ports.removeWorktree) {
         try {
-          const cleaned = await input.ports.removeWorktree(
+          await input.ports.removeWorktree(
             { workspaceId: created.workspace.id },
             input.readConfig()
           )
-          input.commitConfig(cleaned.config)
           cleanup = null
         } catch (cleanupError) {
           cleanup = classifyRetention(cleanupError)

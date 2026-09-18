@@ -7,6 +7,7 @@ import type { AppConfig, ComposerShortcut, TerminalThemeId, WorkspaceKind, Works
 import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
+  APP_APPEARANCE_DEFAULT,
   APP_LINK_SCHEME_CHOICES,
   AGENT_AVATAR_BADGE_IDS,
   CONFIG_VERSION,
@@ -318,7 +319,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     opencode: { label: 'OpenCode', providerId: 'opencode', command: 'opencode', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
-  appearance: { appAppearance: 'dark', terminalTheme: 'graphite' },
+  appearance: { appAppearance: APP_APPEARANCE_DEFAULT, terminalTheme: 'graphite' },
   browser: {
     agentAutomation: false,
     toolbar: {
@@ -960,6 +961,11 @@ export class ConfigStore {
     return await this.write(value, { enforceExecutorBinding: true })
   }
 
+  /** Validate and normalize at the owner boundary before preparing any Runtime change. */
+  validate(value: AppConfig): AppConfig {
+    return configSchema.parse(value) as AppConfig
+  }
+
   /**
    * `enforceExecutorBinding: false` is for exactly one caller: retiring an older-version file.
    *
@@ -978,7 +984,7 @@ export class ConfigStore {
     value: AppConfig,
     { enforceExecutorBinding }: { enforceExecutorBinding: boolean }
   ): Promise<AppConfig> {
-    const config = configSchema.parse(value) as AppConfig
+    const config = this.validate(value)
     let saved!: AppConfig
     const operation = this.saveTail.catch(() => {}).then(async () => {
       // The exact bytes currently on disk, read once and used for two things: the binding check below,

@@ -45,10 +45,17 @@ export type AgentMuxRuntimeDiagnostics = {
   arch: string
   supported: boolean
   ctxmux: {
-    version: string
-    protocolVersion: number
-    sourceCommit: string
-    artifactPlatform: string
+    /** The connected listener's public identity, never the package's identity. */
+    serving: Pick<AgentMuxRuntimeIdentity, 'buildIdentity' | 'protocolVersion' | 'instanceId'> & {
+      /** The public Runtime contract does not supply source provenance. */
+      sourceCommit: null
+    }
+    /** Artifact provenance validated before connecting; it may differ from the listener. */
+    bundled: {
+      version: string
+      sourceCommit: string
+      artifactPlatform: string
+    }
     ready: boolean
     capabilities: {
       transport: 'local-unix'

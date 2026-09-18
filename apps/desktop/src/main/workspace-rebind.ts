@@ -19,7 +19,7 @@ export type RebindPorts = {
   /** 弹目录选择器。`defaultPath` 落在当前路径的父目录——用户要找的是那个"搬走了的"目录。 */
   chooseDirectory(defaultPath: string): Promise<{ canceled: boolean; filePaths: string[] }>
   /** 走 Runtime 事务写 config，失败要能把已准备的 Runtime 回收掉。 */
-  save(next: AppConfig): Promise<AppConfig>
+  save(next: AppConfig, expected: AppConfig): Promise<AppConfig>
 }
 
 export async function rebindLocalFolder(
@@ -49,6 +49,6 @@ export async function rebindLocalFolder(
   const next = await ports.save({
     ...config,
     workspaces: config.workspaces.map((item) => (item.id === workspaceId ? updated : item))
-  })
+  }, config)
   return { config: next, workspace: next.workspaces.find((item) => item.id === workspaceId) ?? updated }
 }

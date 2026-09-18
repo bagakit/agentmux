@@ -121,6 +121,8 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'list.agents': true,
   'list.projects': true,
   'list.active-agents': true,
+  'settings.get': true,
+  'settings.set': true,
   interrupt: true,
   resume: true,
   stop: true,
