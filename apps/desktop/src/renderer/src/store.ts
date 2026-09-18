@@ -1048,6 +1048,7 @@ export function recoveryCandidateSession(
     providerId: candidate.providerId,
     executorId: candidate.executorId,
     capabilities: candidate.capabilities,
+    agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }

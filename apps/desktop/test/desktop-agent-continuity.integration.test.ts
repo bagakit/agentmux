@@ -371,7 +371,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
         event.data.includes('codex-controlled-ready-pending')
       ))
     })
-    await directClient1.writeAgent(initialSessionId, '\u001d')
+    await directClient1.writeAgent({ agentSessionId: initialSessionId, expectedRun: directClient1.agentSession(initialSessionId).run, data: '\u001d', source: 'user' })
     await waitFor('controlled initial composer frame', async () => {
       const replay = await directClient1.readRunReplay({ runId: initialRunId }, 0)
       return replay.replay.some((event) => (

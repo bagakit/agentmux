@@ -31,7 +31,7 @@ ipcMain.handle('topic-terminal:request', async (event, operation, ...args) => {
     case 'detach': return runtime.detachSession(event.sender.id, args[0])
     case 'replay': return runtime.readSessionReplay(event.sender.id, args[0], args[1])
     case 'resize': return runtime.resizeSessionAttachment(event.sender.id, args[0], args[1], args[2])
-    case 'write': return runtime.write(args[0], args[1])
+    case 'write': return runtime.write(args[0], args[1], args[2])
     case 'stop': return runtime.stopSession(args[0])
     case 'refresh': return runtime.refresh(args[0], config)
     case 'resolve': return runtime.resolveSession(args[0], config)

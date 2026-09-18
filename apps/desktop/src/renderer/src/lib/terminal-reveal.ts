@@ -1,4 +1,4 @@
-import type { AgentMuxRunInputData, AgentMuxRunState } from '@agentmux/core'
+import type { AgentMuxAgentWriteInput, AgentMuxRunInputData, AgentMuxRunState } from '@agentmux/core'
 import { agentViabilityFromProcessState, type StepOutcome } from './service-window-notice'
 
 /**
@@ -54,7 +54,7 @@ export function terminalRevealDecision(input: {
 export function terminalAcceptsInput(input: {
   /** Run 还能不能被控制（进程在跑）。 */
   canControlRun: boolean
-  /** 这个 Session 此刻是否接受输入（Agent 有待答交互时不接受）。 */
+  /** 当前视图是否允许控制输入。待答请求不禁用原生终端。 */
   acceptsInput: boolean
   /** replay→live 交接是否已完成。 */
   liveReady: boolean
@@ -79,9 +79,9 @@ export function terminalAcceptsInput(input: {
  */
 export function terminalInputSender(input: {
   accepts: () => boolean
-  write: (data: AgentMuxRunInputData) => void
-}): (data: AgentMuxRunInputData) => void {
-  return (data) => {
+  write: (data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => void
+}): (data: AgentMuxRunInputData, source?: AgentMuxAgentWriteInput['source']) => void {
+  return (data, source = 'user') => {
     if (!input.accepts()) return
     // 空载荷不上线。xterm 有两处会送出「按了键但没有字节要发」：IME 组字途中的 `onData('')`，
     // 以及旧式鼠标上报被禁用/坐标越界时 `onBinary('')`（经 encodeTerminalBinaryInput 变成零长
@@ -93,7 +93,7 @@ export function terminalInputSender(input: {
     // （见 subscribeTerminalInput 的注释），空值判据跟着它走，否则下一次改闸必漏一处。
     // 判长度而不是判真值：`'0'` 是合法输入而 `''`/零长字节不是，`if (!data)` 会把两者混为一谈。
     if (data.length === 0) return
-    input.write(data)
+    input.write(data, source)
   }
 }
 
@@ -120,6 +120,7 @@ export function encodeTerminalBinaryInput(report: string): Uint8Array {
  * 不会让任何断言变红。
  */
 export type TerminalInputEventSource = {
+  onUserInput: (listener: () => void) => { dispose(): void }
   onData: (listener: (data: string) => void) => { dispose(): void }
   onBinary: (listener: (data: string) => void) => { dispose(): void }
 }
@@ -140,12 +141,22 @@ export type TerminalInputEventSource = {
  */
 export function subscribeTerminalInput(
   source: TerminalInputEventSource,
-  send: (data: AgentMuxRunInputData) => void
+  send: (data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => void
 ): { dispose(): void } {
-  const data = source.onData((report) => send(report))
-  const binary = source.onBinary((report) => send(encodeTerminalBinaryInput(report)))
+  // xterm emits its existing user-input fact immediately before onData, including
+  // asynchronous IME text. Parser-generated DA/DSR and focus replies do not emit it.
+  let userInput = false
+  const user = source.onUserInput(() => { userInput = true })
+  const data = source.onData((report) => {
+    const origin = userInput ? 'user' : 'terminal-protocol'
+    userInput = false
+    send(report, origin)
+  })
+  // xterm's binary channel carries legacy mouse reports, not parser replies.
+  const binary = source.onBinary((report) => send(encodeTerminalBinaryInput(report), 'user'))
   return {
     dispose() {
+      user.dispose()
       data.dispose()
       binary.dispose()
     }

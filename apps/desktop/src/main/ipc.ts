@@ -30,7 +30,8 @@ import {
   type AgentExecutorId,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
-  type AgentMuxRunInputData
+  type AgentMuxRunInputData,
+  type AgentMuxAgentWriteInput
 } from '@agentmux/core'
 import type {
   AgentAttentionNotifyInput,
@@ -689,8 +690,8 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })
-  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData) => {
-    await args.runtime.write(session, data)
+  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => {
+    await args.runtime.write(session, data, source)
   })
   handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string) => {
     await args.runtime.paste(session, text, terminalData)
