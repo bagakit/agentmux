@@ -1,28 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import type {
   AgentMuxInteractionRequest,
+  AgentMuxInteractionResponse,
   AgentMuxStoredAgentSession
 } from '../src/types.js'
 
 /**
- * T-003 的 client 级生命周期闸门：回答一次交互，必须绑定当前的 Session/Run/request。
- *
- * `provider-human-request-contract.test.ts` 已经把 **provider 那半** 钉死了——optionId→byte 的解析、
- * 未知选项、requestId 与 request.id 不符，全走 `planInteractionResponse` / `normalizeAgentInteractionResponse`。
- * 但 A3 还要 client 这半：「旧 Run 的回答、已被替换的 request，不影响新请求」。这半只活在
- * `client.respondAgentInteraction`（client.ts:2433 的 sameRun 闸门、:2440 的 pending-id 闸门）里，而在此之前
- * **没有任何测试直接调用过它**——它只在 packed-consumer 集成用例里跑过一次成功路径。
- *
- * 实测的缺口（2026-09-26）：把这两道闸门整段删掉、重建 core dist，T-003 的三条 gate（agent-interaction /
- * agent-provider-protocol / provider-human-request-contract）**47 条全绿**。也就是说「答错 Run / 答一个不再
- * pending 的 request」当前一条判据都没有。本文件补的正是这半。
- *
- * 为什么这半和 provider 那半必须分开证：provider 的 id 校验比的是「这个 response 冲着这个 request 吗」，
- * client 的闸门比的是「这个 request 此刻还在这个 Session 上等着答吗」。一个新的交互替换了旧的之后，旧回答
- * 的 requestId 对旧 request 完全合法——只有 client 这道 `pending.request.id !== requestId` 能把它挡住。
+ * Public Client lifecycle behavior complements the Provider's response-plan contract.
+ * Kernel input is synthetic; Store, Provider planning, identity admission, durable claim
+ * and settlement are real. These tests do not prove upstream CLI completion or ctxmux dedup.
+ * See docs/reviews/typed-interaction-lifecycle-gate-review-2026-10-02.md for gate scope.
  */
 
 const RUN_ID = 'lifecycle-run'
@@ -89,6 +79,8 @@ type Internals = {
 async function connectedClient(pending?: AgentMuxInteractionRequest): Promise<{
   client: AgentMuxClient
   writes: string[]
+  store: AgentMuxMemoryAgentSessionStore
+  state: Internals
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
   await store.compareAndSwap(null, storedSession(pending))
@@ -107,7 +99,7 @@ async function connectedClient(pending?: AgentMuxInteractionRequest): Promise<{
     return { run: runProjection(cursor), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
   }
   ;(client as unknown as { connected: boolean }).connected = true
-  return { client, writes }
+  return { client, writes, store, state }
 }
 
 describe('respondAgentInteraction: the answer must bind to this Session/Run/request', () => {
@@ -162,8 +154,8 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
 
   it('refuses an answer for a superseded request — a newer interaction replaced the one being answered', async () => {
     // 关键的一条：pending 已经是 rcpt-2（新交互替换了旧的），而回答冲着 rcpt-1（旧的）来。
-    // rcpt-1 这个 requestId 对旧 request 完全合法，所以 provider 的 id 校验拦不住它——只有 client
-    // 这道 `pending.request.id !== requestId` 能认出「你答的那个已经不在了」。
+    // Client 必须给出 UNKNOWN_AGENT_INTERACTION 并保留当前请求；Provider 自己也有
+    // response/request 配对校验，故删掉 Client 闸门并不必然导致错误字节写入。
     const { client, writes } = await connectedClient(permission('rcpt-2'))
 
     const error = await client.respondAgentInteraction({
@@ -178,5 +170,120 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
     // 新交互原样留着：一次答错的旧回答绝不能把当前在等的这个清掉。
     expect(client.agentSessions()[0]!.pendingInteraction?.request.id, 'the superseding interaction was disturbed').toBe('rcpt-2')
     await client.dispose()
+  })
+})
+
+
+function answer(requestId: string, optionId = 'reject-once'): AgentMuxInteractionResponse {
+  return { kind: 'permission', requestId, decision: { outcome: 'selected', optionId } }
+}
+
+describe('typed response settlement and recoverable input disposition', () => {
+  it('cancels the exact request with the Provider cancellation plan, without selecting a grant', async () => {
+    const { client, writes } = await connectedClient(permission('cancel-1'))
+    try {
+      await client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+        response: { kind: 'permission', requestId: 'cancel-1', decision: { outcome: 'cancelled' } } })
+      expect(writes).toEqual(['\u001b'])
+      expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await client.dispose() }
+  })
+
+  it('settles once when two callers answer the same request concurrently', async () => {
+    const { client, writes } = await connectedClient(permission('parallel-1'))
+    const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('parallel-1') }
+    try {
+      const outcomes = await Promise.allSettled([client.respondAgentInteraction(input), client.respondAgentInteraction(input)])
+      expect(outcomes[0]!.status).toBe('fulfilled')
+      expect(outcomes[1]).toMatchObject({ status: 'rejected', reason: { code: 'UNKNOWN_AGENT_INTERACTION' } })
+      expect(writes).toEqual(['\u001b'])
+      expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+      await expect(client.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(writes).toEqual(['\u001b'])
+    } finally { await client.dispose() }
+  })
+
+  it('a second Client with a stale cache cannot answer a request another Client already settled', async () => {
+    const h = await connectedClient(permission('shared-1'))
+    const second = new AgentMuxClient({ store: h.store })
+    const owner = second as unknown as Internals
+    await owner.registry.load('local')
+    owner.kernel = h.state.kernel
+    ;(second as unknown as { connected: boolean }).connected = true
+    const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('shared-1') }
+    try {
+      await h.client.respondAgentInteraction(input)
+      await expect(second.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(h.writes).toEqual(['\u001b'])
+      expect(second.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await second.dispose(); await h.client.dispose() }
+  })
+
+  it('reloads durable replacement before answering from a stale Client cache', async () => {
+    const h = await connectedClient(permission('old-request'))
+    try {
+      const saved = await loadAgentSessions(h.store)
+      expect(saved).toHaveLength(1)
+      await h.store.compareAndSwap(saved[0]!, storedSession(permission('new-request')))
+      await expect(h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID,
+        expectedRun: { runId: RUN_ID }, response: answer('old-request') }))
+        .rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(h.writes).toEqual([])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe('new-request')
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['answered', 'cancelled'] as const)('question %s uses its semantic plan and settles the exact request', async outcome => {
+    const request: AgentMuxInteractionRequest = {
+      kind: 'question', id: 'question-1', agentSessionId: AGENT_SESSION_ID,
+      questions: [{ id: 'choice-1', prompt: 'Which?', options: [{ id: 'first', label: 'First' }, { id: 'second', label: 'Second' }] }],
+      evidence: { source: 'native-hook', observedAt: 1, run: { runId: RUN_ID }, hookReceiptId: 'question-1' }
+    }
+    const h = await connectedClient(request)
+    try {
+      const response: AgentMuxInteractionResponse = outcome === 'cancelled'
+        ? { kind: 'question', requestId: request.id, outcome }
+        : { kind: 'question', requestId: request.id, outcome, answers: [{ questionId: 'choice-1', optionId: 'second' }] }
+      await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response })
+      expect(h.writes).toEqual([outcome === 'cancelled' ? '\u001b' : '2'])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['accepted-receipt-lost', 'not-applied'] as const)('%s retains the exact claim and recovers the same operation without changing the answer', async disposition => {
+    const h = await connectedClient(permission('recover-1'))
+    const receipts = new Map<string, unknown>()
+    const calls: { operationId: string; expectedByte: number; data: string }[] = []
+    const original = h.state.kernel.input as (runId: string, operation: typeof calls[number]) => Promise<unknown>
+    let first = true
+    h.state.kernel.input = async (runId: string, operation: typeof calls[number]) => {
+      calls.push({ ...operation })
+      if (first) {
+        first = false
+        if (disposition === 'accepted-receipt-lost') receipts.set(operation.operationId, await original(runId, operation))
+        throw new AgentMuxError('Private input receipt unavailable.', 'PRIVATE_INPUT_FAILURE', disposition === 'not-applied' ? 'not_applied' : 'unknown')
+      }
+      const receipt = receipts.get(operation.operationId)
+      return receipt ?? await original(runId, operation)
+    }
+    const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('recover-1') }
+    try {
+      await expect(h.client.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE' })
+      const claim = h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response!
+      expect(claim).toMatchObject({ value: answer('recover-1'), acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
+      expect(claim.operationId.length).toBeGreaterThan(0)
+      expect(h.writes).toEqual(disposition === 'not-applied' ? [] : ['\u001b'])
+      const recorded = await loadAgentSessions(h.store)
+      expect(recorded).toHaveLength(1)
+      expect(recorded[0]!.pendingInteraction!.response).toEqual(claim)
+      await expect(h.client.respondAgentInteraction({ ...input, response: answer('recover-1', 'allow-once') }))
+        .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+      expect(calls).toHaveLength(1)
+      await h.client.respondAgentInteraction(input)
+      expect(calls).toHaveLength(2)
+      expect(calls[1]).toEqual(calls[0])
+      expect(h.writes).toEqual(['\u001b'])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await h.client.dispose() }
   })
 })
