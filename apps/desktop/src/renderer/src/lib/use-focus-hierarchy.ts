@@ -5,7 +5,7 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { api } from './api'
 import { presentError } from './error-presentation'
-import { EMPTY_FOCUS_HIERARCHY, retainedWorktreeFacts, type FocusHierarchyFacts } from './focus-project-lanes'
+import { EMPTY_FOCUS_HIERARCHY, focusProjectRoots, retainedWorktreeFacts, type FocusHierarchyFacts } from './focus-project-lanes'
 import type { FocusContext } from './focus-context'
 
 type Snapshot = { id: string; topics?: ScratchTopicSnapshot[]; branches?: WorkspaceBranchesSnapshot; error?: string }
@@ -14,10 +14,11 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
   const [facts, setFacts] = useState<FocusHierarchyFacts>(EMPTY_FOCUS_HIERARCHY)
   const scopes = useMemo(() => {
     const scopes = new Map<string, NonNullable<AppConfig>['workspaces'][number]>()
+    const roots = focusProjectRoots(config)
     for (const row of rows) {
-      const workspace = config?.workspaces.find(item => item.id === row.workspaceId)
+      const workspace = row.workspace
       const repoPath = workspace?.repoPath ?? facts.worktrees.find(item => item.hostId === row.hostId && item.path === row.workspacePath)?.repoPath
-      const root = repoPath ? config?.workspaces.find(item => item.hostId === row.hostId && item.path === repoPath) : workspace
+      const root = repoPath ? roots.get(JSON.stringify([row.hostId, repoPath])) : workspace
       const scope = root ?? workspace
       if (scope) scopes.set(scope.id, scope)
     }

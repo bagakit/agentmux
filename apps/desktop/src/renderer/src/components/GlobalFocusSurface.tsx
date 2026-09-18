@@ -2,7 +2,7 @@ import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Users } from 'luc
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusContextSelector, type FocusBucket } from '../lib/focus-context'
+import { createFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusRecoveryGroup } from './FocusRecoveryGroup'
@@ -15,15 +15,12 @@ import { FocusProjectLanes } from './FocusProjectLanes'
 import { FocusToolbar } from './FocusToolbar'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
-import { topicIdForSession } from '../lib/workbench-tabs'
-import { focusBucketForSession } from '../lib/focus-context'
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusHistory, executionFocusSessionId } from '../lib/agent-focus'
 
 export function GlobalFocusSurface() {
-  const contextSelector = useMemo(createFocusContextSelector, [])
-  const executionRows = useAppStore(useShallow(contextSelector))
+  const contextSelector = useMemo(createFocusProjectionSelector, [])
+  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
   const config = useAppStore((state) => state.config)
   const tabs = useAppStore((state) => state.tabs)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
@@ -31,7 +28,6 @@ export function GlobalFocusSurface() {
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : state.sessions.filter(session => session.id === selectedId)))
   const executionHistory = useAppStore((state) => executionFocusHistory(state.agentFocus))
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
-  const pmoAttention = useAppStore(useShallow(state => state.sessions.filter(session => topicIdForSession(state.config, session) === PMO_TEAMS_TOPIC_ID && focusBucketForSession(session, false) === 'attention').map(session => session.id)))
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
@@ -54,8 +50,8 @@ export function GlobalFocusSurface() {
     window.addEventListener('blur', stop)
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('blur', stop) }
   }, [])
-  const { facts, errors: hierarchyErrors } = useFocusHierarchy(executionRows, config)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(executionRows, config, facts, tabs), [executionRows, config, facts, tabs])
+  const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs), [laneContexts, config, facts, tabs])
   const search = query.trim().toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   const matching = executionRows.filter(row => (project === 'all' || laneByContext.get(row.id)?.projectId === project) && `${row.name} ${row.detail} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search))

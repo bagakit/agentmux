@@ -4,7 +4,7 @@ import {createRoot} from 'react-dom/client'
 import {expect, it, vi} from 'vitest'
 import {api} from '../src/renderer/src/lib/api'
 import {useAppStore} from '../src/renderer/src/store'
-import {createFocusContextSelector} from '../src/renderer/src/lib/focus-context'
+import {createFocusProjectionSelector} from '../src/renderer/src/lib/focus-context'
 import {deriveFocusProjectLanes} from '../src/renderer/src/lib/focus-project-lanes'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({AgentAvatar: () => null}))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({SessionPane: () => null}))
@@ -40,7 +40,8 @@ it('moves stale lanes behind actionable and recent work without reordering ties 
 it('uses task events and authoritative state-entry time, excluding heartbeat, lifecycle, process and byte timestamps', async () => {
   const {sessions} = await api.sessions.snapshot(), base = sessions[0]!, old = now - day - 1
   const input = {sessions: [{...base, id: 'old', status: {...base.status, state: 'done' as const, source: 'native-hook' as const, observedAt: now}, semanticStatus: {state: 'done' as const, source: 'native-hook' as const, stateEnteredAt: old, observedAt: now}, updatedAt: now}], timelines: {}, config: null, agentNames: {}}
-  const selector = createFocusContextSelector()
+  const select = createFocusProjectionSelector()
+  const selector = (input: Parameters<typeof select>[0]) => select(input).contexts
   const before = selector(input)
   expect(before).toHaveLength(1); expect(before[0]!.lastActivityAt).toBe(old)
   expect(selector({...input, sessions: [{...input.sessions[0]!, updatedAt: now + 1, latestOutputBytes: 999, status: {...input.sessions[0]!.status, observedAt: now + 1}}]})[0]).toBe(before[0])

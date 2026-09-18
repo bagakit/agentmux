@@ -5,7 +5,7 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../src/renderer/src/lib/agent-attention'
 import { sessionBoardColumn, workingAgentCount } from '../src/renderer/src/lib/project-board'
-import { focusBucketForSession } from '../src/renderer/src/lib/focus-context'
+import { createFocusProjectionSelector, focusBucketForSession } from '../src/renderer/src/lib/focus-context'
 import { focusNavigationSummary } from '../src/renderer/src/components/FocusNavigationButton'
 
 // Core owns the state union. Derive the covered cases from its declaration, never a drifting list.
@@ -33,11 +33,12 @@ it('Focus navigation and Focus grouping share the same work and attention projec
   const sessions = displayStates().map(state => agent(state, state))
   const groups = sessions.map(session => focusBucketForSession(session, false))
   expect(groups.length).toBe(sessions.length)
-  const summary = focusNavigationSummary({ sessions })
+  const summarize = (sessions: SessionSnapshot[]) => focusNavigationSummary(createFocusProjectionSelector()({sessions,config:null,timelines:{},agentNames:{}}).contexts)
+  const summary = summarize(sessions)
   expect(summary.working).toBe(groups.filter(bucket => bucket === 'working').length)
   expect(summary.requests + summary.errors).toBe(groups.filter(bucket => bucket === 'attention').length)
   // Process liveness is a separate fact from turn work. Independent expected cases catch shared drift.
-  expect(focusNavigationSummary({ sessions: [agent('unknown', 'running'), agent('work', 'working'), agent('start', 'starting'), agent('reply', 'waiting'), agent('failure', 'error')] })).toEqual({ working: 2, requests: 1, errors: 1 })
+  expect(summarize([agent('unknown', 'running'), agent('work', 'working'), agent('start', 'starting'), agent('reply', 'waiting'), agent('failure', 'error')])).toEqual({ working: 2, requests: 1, errors: 1 })
 })
 it('the product projection delegates turn work rather than copying a literal status comparison', () => {
   const source = ts.createSourceFile('focus-context.ts', readFileSync(new URL('../src/renderer/src/lib/focus-context.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)

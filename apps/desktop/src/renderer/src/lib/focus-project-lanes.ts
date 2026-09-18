@@ -8,6 +8,20 @@ export type FocusHierarchyFacts = {
   worktrees: readonly FocusWorktreeFact[]
 }
 export const EMPTY_FOCUS_HIERARCHY: FocusHierarchyFacts = { topics: {}, worktrees: [] }
+let indexedConfig: AppConfig | null | undefined
+let roots: ReadonlyMap<string, AppConfig['workspaces'][number]> = new Map()
+/** Cached read-only references to the immutable Config, never an independent ownership registry. */
+export function focusProjectRoots(config: AppConfig | null) {
+  if (indexedConfig !== config) {
+    const next = new Map<string, AppConfig['workspaces'][number]>()
+    for (const workspace of config?.workspaces ?? []) {
+      const key = JSON.stringify([workspace.hostId, workspace.path])
+      if (!next.has(key)) next.set(key, workspace)
+    }
+    indexedConfig = config; roots = next
+  }
+  return roots
+}
 export type FocusProjectLane = {
   id: string; workspaceId: string; projectId: string; name: string; path: string
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
@@ -27,11 +41,12 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
+  const projectRoots = focusProjectRoots(config)
   for (const row of rows) {
-    const workspace = config?.workspaces.find(item => item.id === row.workspaceId)
+    const workspace = row.workspace
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
     const repoPath = workspace?.repoPath ?? checkout?.repoPath
-    const project = repoPath ? config?.workspaces.find(item => item.hostId === row.hostId && item.path === repoPath) : workspace
+    const project = repoPath ? projectRoots.get(JSON.stringify([row.hostId, repoPath])) : workspace
     const projectId = project?.id ?? workspace?.id ?? row.workspaceId
     const workspaceId = workspace?.id ?? tabWorkspace.get(row.id) ?? row.workspaceId
     const topicId = row.topicId ?? null
