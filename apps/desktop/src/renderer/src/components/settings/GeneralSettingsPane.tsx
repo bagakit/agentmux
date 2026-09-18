@@ -2,12 +2,6 @@ import { useState } from 'react'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice, type CrashLogReveal } from '../../lib/crash-log-reveal'
 
-// General is read-only: it states where the runtime lives, not a control you flip. A pane-level lead
-// sentence introduces it (as in the other panes), then one flat informational block (surface-0 +
-// hairline, no box, no accent icon tile) holds the muted footnote facts — reachable without spending
-// elevation or brand green on prose. The lead sits OUTSIDE .settings-card on purpose: `.settings-card p`
-// is footnote-styled (--fs-meta/--text-3, higher specificity than .settings-lead), so nesting the lead
-// there would collapse it to footnote size and erase the lead/footnote hierarchy this pane exists to show.
 export function GeneralSettingsPane() {
   const [reveal, setReveal] = useState<CrashLogReveal>('idle')
 
@@ -22,15 +16,14 @@ export function GeneralSettingsPane() {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Your workspace. Your agents. Your flow.</p>
       <section className="settings-card">
         <dl className="settings-footnote">
           <div>
-            <dt>Made for local work</dt>
+            <dt>Local data</dt>
             <dd>Bring your projects and agent tools together in one place. AgentMux keeps your workspace configuration on this machine.</dd>
           </div>
           <div>
-            <dt>Pick up where you left off</dt>
+            <dt>Session recovery</dt>
             <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.</dd>
           </div>
           <div>

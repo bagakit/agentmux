@@ -309,6 +309,28 @@
 .agent-pick--action:disabled { opacity: .5; cursor: default; }
 .agent-pick__go { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); transition: color 120ms ease, transform 120ms ease; }
 .agent-pick--action:hover:not(:disabled) .agent-pick__go { color: var(--green); transform: translateX(1px); }
+.settings-executor-identity { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin: 0; }
+.settings-executor-identity > div { display: grid; gap: var(--sp-2); min-width: 0; }
+.settings-executor-identity dt { color: var(--text-3); font-size: var(--fs-meta); }
+.settings-executor-identity dd { margin: 0; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.settings-executor-identity code { font: var(--fs-meta)/1.5 var(--font-mono); }
+.agent-settings-fields .agent-avatar-settings__row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: var(--sp-4); padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.agent-settings-fields .agent-avatar-settings__name small { font-size: var(--fs-micro); }
+.settings-launch-config { min-width: 0; border-top: 1px solid var(--line-soft); }
+.settings-launch-config > summary, .settings-bulk-actions > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding-block: var(--sp-4); list-style: none; cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); }
+.settings-launch-config > summary::-webkit-details-marker, .settings-bulk-actions > summary::-webkit-details-marker { display: none; }
+.settings-launch-config > summary > span { display: grid; gap: var(--sp-1); }
+.settings-launch-config > summary small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-launch-config[open] > summary > svg, .settings-bulk-actions[open] > summary > svg { transform: rotate(180deg); }
+.settings-launch-config__fields { display: grid; gap: var(--sp-4); padding-bottom: var(--sp-4); }
+.settings-launch-config__fields .settings-group-note { padding: 0; }
+.settings-launch-config__fields input, .settings-launch-config__fields textarea { font-family: var(--font-mono); font-size: var(--fs-meta); }
+.settings-launch-action { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-3); padding-block: var(--sp-3); }
+.settings-launch-action > span { flex: 1; min-width: 16ch; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.settings-executor-remove { display: flex; justify-content: flex-end; }
+.settings-executor-remove button { color: var(--red-text); background: transparent; }
+.settings-bulk-actions { border-top: 1px solid var(--line-soft); }
+
 .agent-settings-list, .host-settings-list { display: grid; gap: 0; }
 .agent-settings-list { padding: 0; }
 .agent-settings-card { border-bottom: 1px solid var(--line-soft); background: transparent; }
@@ -319,18 +341,18 @@
 .agent-settings-card > summary > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .agent-settings-card > summary strong { font-size: var(--fs-body); }
 .agent-settings-card > summary small { overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.agent-settings-card[open] .settings-disclosure-icon, .host-edit-disclosure[open] > summary svg { transform: rotate(180deg); }
-.agent-settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap:var(--sp-4); padding:var(--sp-5); border-top: 1px solid var(--line-soft); background: var(--surface-1); }
+.agent-settings-card[open] > summary .settings-disclosure-icon, .host-edit-disclosure[open] > summary svg { transform: rotate(180deg); }
+.agent-settings-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap:var(--sp-4); padding:var(--sp-5); border-top: 1px solid var(--line-soft); background: var(--surface-1); }
 .agent-settings-fields label, .host-edit-grid label, .workspace-composer label { display: grid; gap:var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
-.agent-settings-fields label:first-child, .agent-settings-fields .settings-inline-error { grid-column: 1 / -1; }
+.agent-settings-card[hidden] { display: none; }
 .agent-settings-fields .agent-guide-toggle { grid-column: 1 / -1; display: flex; grid-template-columns: none; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); cursor: pointer; }
 .agent-settings-fields .agent-guide-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:1px 0 0; padding:0; border: 0; background: none; accent-color: var(--green); }
 .agent-settings-fields .agent-guide-toggle > span { display: grid; justify-content: normal; gap:var(--sp-1); }
 .agent-settings-fields .agent-guide-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .agent-settings-fields label > span, .host-edit-grid label > span, .workspace-composer label > span { display: flex; justify-content: space-between; }
 .agent-settings-fields label small, .host-edit-grid label small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
-.agent-settings-fields input, .agent-settings-fields textarea, .host-edit-grid input, .workspace-composer input, .workspace-composer select { width: 100%; padding:var(--sp-3) var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font: 11px/1.5 "SFMono-Regular", monospace; }
-.agent-settings-fields input:focus, .agent-settings-fields textarea:focus, .host-edit-grid input:focus, .workspace-composer input:focus, .workspace-composer select:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.agent-settings-fields input, .agent-settings-fields select, .agent-settings-fields textarea, .host-edit-grid input, .workspace-composer input, .workspace-composer select { width: 100%; padding:var(--sp-3) var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font: var(--fs-body)/1.5 var(--font-sans); }
+.agent-settings-fields input:focus, .agent-settings-fields select:focus, .agent-settings-fields textarea:focus, .host-edit-grid input:focus, .workspace-composer input:focus, .workspace-composer select:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 
 /* 服务窗（AGENTS.md 原则 11）：像窗口上贴的一条告示。停在旁边，不挡路，也不消失。
    语汇沿用紧邻其下的审批卡片——Surface 填充 + elevation + 一枚 STATUS 图标，不用描边（描边会与
@@ -370,5 +392,6 @@
 .focus-navigation__attention.has-error { color: var(--red); }
 
 @media (max-width: 560px) {
-  .agent-settings-fields { grid-template-columns: minmax(0, 1fr); }
+  .agent-settings-fields .agent-avatar-settings__row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .agent-settings-fields .agent-avatar-settings__name { grid-column: 1 / -1; }
 }
