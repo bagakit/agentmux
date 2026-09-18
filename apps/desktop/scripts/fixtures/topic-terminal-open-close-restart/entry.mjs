@@ -15,6 +15,13 @@ window.terminals = []
 const request = window.topicTerminalBoundary.request
 const setup = await request('setup')
 const workspace = setup.config.workspaces[0]
+const floatingStorageKey = 'agentmux.leader-topic-floating.v1'
+if (setup.phase === 'seed') window.localStorage.setItem(floatingStorageKey, JSON.stringify({
+  open: true, targetTabId: 'mote-tab', maximized: false,
+  position: { left: 80, top: 72 }, size: { width: 720, height: 520 }
+}))
+window.topicTerminalSavedFloating = () => JSON.parse(window.localStorage.getItem(floatingStorageKey) ?? 'null')
+window.topicTerminalFloatingAtStartup = window.topicTerminalSavedFloating()
 api.config.get = async () => setup.config
 api.providers.list = async () => []
 api.demands.list = async () => []
@@ -48,6 +55,25 @@ api.scratch.ensureMote = async (id, topic) => request('ensure-mote', id, topic)
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
 api.files.unobserve = async () => {}
+// A saved floating target refers to a durable workface that already exists before App mounts.
+// Seed that existing Mote Run once, then let the real main launcher prewarm and ordinary Topic
+// open claim its own Run through production store owners.
+let seededMote
+if (setup.phase === 'seed') {
+  await api.scratch.ensureMote(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const session = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
+  const launcher = { ...createWorkbenchTab('mote-launcher-tab', { regionId: 'mote-launcher-region', kind: 'launcher', workspaceId: workspace.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: session.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  const layout = createWorkspaceLayout('original-group', [launcher.id, tab.id])
+  layout.groups[0].activeTabId = null
+  layout.groups[0].recentTabIds = []
+  seededMote = { session, launcher, tab }
+  const { name, version } = useAppStore.persist.getOptions()
+  window.localStorage.setItem(name, JSON.stringify({ version, state: {
+    restoredWorkbench: projectPersistedWorkbench({ tabs: { [launcher.id]: launcher, [tab.id]: tab }, layouts: { [workspace.id]: layout } }),
+    activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false
+  } }))
+}
 const initialize = useAppStore.getState().initialize
 useAppStore.setState({ initialize: async () => {
   const dispose = await initialize()
@@ -62,15 +88,13 @@ useAppStore.setState({ initialize: async () => {
     const split = { ...ordinary, layout: splitWorkbenchRegion(ordinary.layout, ordinary.layout.activeRegionId, 'right', 'secondary-region'),
       regions: { ...ordinary.regions, 'secondary-region': { regionId: 'secondary-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: second.id } } }
     split.layout.root.ratio = 0.61
-    await api.scratch.ensureMote(workspace.id, PMO_TEAMS_TOPIC_ID)
-    const moteSession = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
-    const mote = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: moteSession.id }), topicId: PMO_TEAMS_TOPIC_ID }
+    const { session: moteSession, launcher: moteLauncher, tab: mote } = seededMote
     const closeSession = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
     const close = { ...createWorkbenchTab('close-tab', { regionId: 'close-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: closeSession.id }), topicId: 'launcher:ordinary' }
-    const layout = createWorkspaceLayout('original-group', [ordinary.id, mote.id, close.id])
+    const layout = createWorkspaceLayout('original-group', [ordinary.id, moteLauncher.id, mote.id, close.id])
     layout.groups[0].activeTabId = ordinary.id
     useAppStore.setState({ sessions: [await request('resolve', window.topicDefault.sessionId), second, moteSession, closeSession],
-      tabs: { [split.id]: split, [mote.id]: mote, [close.id]: close }, layouts: { [workspace.id]: layout },
+      tabs: { [split.id]: split, [moteLauncher.id]: moteLauncher, [mote.id]: mote, [close.id]: close }, layouts: { [workspace.id]: layout },
       agentFocus: focusExecution(useAppStore.getState().agentFocus, window.topicDefault.sessionId),
       activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { 'untouched-draft': 'An unsent draft remains' }, toolsOpen: false, projectRailOpen: false })
     await request('save-ids', { ...window.topicDefault, moteId: moteSession.id, secondId: second.id, closeId: closeSession.id })
@@ -93,7 +117,11 @@ window.topicTerminalUi = () => ({
     point: (() => { const rect = terminal.element.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } })() })),
   sessionPanes: document.querySelectorAll('.agent-surface').length,
   close: [...document.querySelectorAll('.workbench-tab__close,.workbench-region__close')].map(button => ({ label: button.getAttribute('aria-label'), opacity: getComputedStyle(button).opacity })),
-  floatingOpen: document.querySelector('[data-pmo-teams-topic-floating]')?.dataset.open
+  floating: {
+    open: document.querySelector('[data-pmo-teams-topic-floating]')?.getAttribute('aria-hidden') === 'false',
+    saved: window.topicTerminalSavedFloating(),
+    activeTabIds: [...document.querySelectorAll('[data-pmo-teams-topic-floating] .workbench-tab--active')].map(button => button.dataset.workbenchTabId)
+  }
 })
 window.topicTerminalOpenFloat = () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'mote-tab' })
 window.topicTerminalCloseFloat = () => requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
