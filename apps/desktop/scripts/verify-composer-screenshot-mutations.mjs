@@ -15,6 +15,7 @@ const cases = [
   ['child-error-listener-consumed-once', main, "child.on('error', onError)", "child.once('error', onError)"],
   ['missing-file-fabricated-cancel', main, '} catch (error) {\n            reason =', "} catch (error) {\n            if ((error as NodeJS.ErrnoException).code === 'ENOENT') { settled = true; resolve(null); return }\n            reason ="],
   ['timeout-late-file-flips-success', main, 'let reason = firstFailure', 'let reason: string | undefined = undefined'],
+  ['first-failure-drops-actual-close', main, '        if (reason) reason += ` Actual close: code ${code}, signal ${signal}.`\n', ''],
   ['launcher-late-result-not-isolated', components + 'NewTabSurface.tsx', 'if (!feedback.isCurrent()) return null\n', ''],
   ['feedback-generation-not-owned', components + 'ComposerFeedback.tsx', 'mounted.current && currentScope.current.generation === generation', 'mounted.current']
 ]
