@@ -125,6 +125,7 @@ describe('Topics tree and polished overview share filesystem and workface facts'
     expect(element('[data-topic-id="view:second"] .workspace-topic-entry__pin')).toBeDefined()
     expect(element('[aria-label="Open Second Topic"] [aria-label="Pinned"]')).toBeDefined()
     expect(element('[aria-label="Open First Topic"]').getAttribute('aria-current')).toBe('page')
+    expect(element('[aria-label="Topics overview"]').classList.contains('project-rail-row--active')).toBe(false)
     expect(element('[data-topic-id="view:first"]').dataset.current).toBe('true')
     await act(async () => element<HTMLButtonElement>('[aria-label="Create new Topic"]').click())
     expect(fixture.state.createScratchTopic).toHaveBeenCalledOnce()
