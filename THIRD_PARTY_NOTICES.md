@@ -29,3 +29,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## fs-native-extensions
+
+fs-native-extensions 1.5.1, Copyright 2023 Holepunch Inc., is a runtime dependency licensed under Apache-2.0. The license text is reproduced in [Core notices](packages/core/THIRD_PARTY_NOTICES.md) and included in the dependency package. Its require-addon loader and transitive loader dependencies retain their own licenses in the distributed packages.

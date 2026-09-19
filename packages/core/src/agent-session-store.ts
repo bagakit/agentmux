@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
@@ -25,6 +26,7 @@ import type {
   AgentMuxPendingInteraction,
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
+  AgentPromptInputPlan,
   AgentNativeSessionHandle,
   AgentStatus,
   AgentTerminalCapabilityState,
@@ -110,6 +112,8 @@ export type AgentMuxRetiredAgentSession = {
 }
 
 export type AgentMuxAgentSessionStore = {
+  /** Exclusive in-flight Prompt orchestration; contention rejects without invoking operation. */
+  withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
   load(): Promise<readonly unknown[]>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
@@ -964,13 +968,15 @@ function terminalInputPhase(
   const inputByteRange = record(source.inputByteRange, `${name}.inputByteRange`)
   const startByte = timestamp(inputByteRange.startByte, `${name}.inputByteRange.startByte`)
   const endByte = positiveInteger(inputByteRange.endByte, `${name}.inputByteRange.endByte`)
-  if (endByte <= startByte || typeof source.acknowledged !== 'boolean') {
+  if (endByte <= startByte || typeof source.acknowledged !== 'boolean' ||
+    (source.notApplied !== undefined && (source.notApplied !== true || source.acknowledged))) {
     throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   }
   return {
     operationId: string(source.operationId, `${name}.operationId`),
     inputByteRange: { startByte, endByte },
-    acknowledged: source.acknowledged
+    acknowledged: source.acknowledged,
+    ...(source.notApplied === true ? { notApplied: true as const } : {})
   }
 }
 
@@ -1014,6 +1020,25 @@ function terminalPromptSubmission(
     payload,
     submit
   }
+}
+
+function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
+  const source = record(value, 'promptCompletionAdmission.intent')
+  const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
+  const bytes = (value: unknown): string => {
+    if (typeof value !== 'string' || !value.length || Buffer.byteLength(value) > MAX_STORE_BYTES) {
+      throw new AgentMuxError('Frozen prompt input is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    return value
+  }
+  let input: AgentPromptInputPlan
+  if (plan.kind === 'single-phase') input = { kind: plan.kind, data: bytes(plan.data) }
+  else if (plan.kind === 'render-then-submit') input = {
+    kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit)
+  }
+  else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  return { run: runRef(source.run), ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
+    prompt: bytes(source.prompt), plan: input }
 }
 
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
@@ -1065,6 +1090,15 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
       return {
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
+        ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
+        ...(admission.acknowledged === undefined ? {} : { acknowledged: (() => {
+          if (typeof admission.acknowledged !== 'boolean') throw new AgentMuxError('Invalid prompt acknowledgement.', 'INVALID_AGENT_SESSION_STORE')
+          return admission.acknowledged
+        })() }),
+        ...(admission.notApplied === undefined ? {} : { notApplied: (() => {
+          if (typeof admission.notApplied !== 'boolean') throw new AgentMuxError('Invalid prompt Input disposition.', 'INVALID_AGENT_SESSION_STORE')
+          return admission.notApplied
+        })() }),
         operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), startByte, endByte }
     })() }),
     ...(source.terminalPromptSubmission === undefined
@@ -1387,11 +1421,25 @@ function assertLifecycleCommit(
 }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
+  private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
   private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
   private readonly timelines = new Map<string, AgentTimelineSnapshot>()
+
+  async withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
+    string(agentSessionId, 'agentSessionId')
+    if (this.promptSubmissions.has(agentSessionId)) {
+      throw new AgentMuxError('Another Client is delivering a prompt for this Session. Keep this message and retry.', 'AGENT_PROMPT_SUBMISSION_BUSY')
+    }
+    this.promptSubmissions.add(agentSessionId)
+    try {
+      return await operation()
+    } finally {
+      this.promptSubmissions.delete(agentSessionId)
+    }
+  }
 
   async load(): Promise<readonly unknown[]> {
     return [...this.sessions.values()].map((session) => structuredClone(session))
@@ -1702,6 +1750,8 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'agent-sessions.json')
 }
 
+const requireNative = createRequire(import.meta.url)
+
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   private lockReleaseFailure: AgentMuxError | null = null
@@ -1709,6 +1759,24 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   private readonly reportedSalvages = new Set<string>()
 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
+
+  async withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
+    string(agentSessionId, 'agentSessionId')
+    const native: { tryLock(fd: number): boolean } = requireNative('fs-native-extensions')
+    const directory = `${this.path}.prompt-locks`
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const key = createHash('sha256').update(agentSessionId).digest('hex')
+    // Never unlink or replace this file: all contenders must lock the same stable inode.
+    const handle = await open(join(directory, key), 'a+', 0o600)
+    try {
+      if (!native.tryLock(handle.fd)) {
+        throw new AgentMuxError('Another Client is delivering a prompt for this Session. Keep this message and retry.', 'AGENT_PROMPT_SUBMISSION_BUSY')
+      }
+      return await operation()
+    } finally {
+      await handle.close()
+    }
+  }
 
   async load(): Promise<readonly unknown[]> {
     // Loading is a read path.  Taking the writer lock here solely to sweep orphan Timeline files

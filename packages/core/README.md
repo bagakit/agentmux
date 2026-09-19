@@ -63,6 +63,14 @@ Run、request 与选项，ACP response 回到 Adapter，Native response 交给 P
 只有在 Adapter delivery 与 semantic settlement 完成后才成功，Native response 按原 ctxmux
 recoverable Input claim 收敛。
 
+普通 Prompt 通过 `submitAgentPrompt` 投递。首次可能执行的调用前，用
+`agentPromptCondition(await client.refreshAgentSession(agentSessionId, expectedRun))`
+读取精确 Session 的 admission 条件，并与 operationId、正文和 Run 一起保存到调用方已有的发送意图。
+队列尾部到真正派发时才读取；重试和丢回执恢复复用原条件，不按最新状态重新绑定。
+`afterSubmissionId: null` 表示已确认没有前序 admission，缺少该字段表示未知。
+如果后续消息已经替换原 admission 且原 tuple 不在，旧消息返回
+`AGENT_PROMPT_INPUT_UNCONFIRMED`，保留后续事实与原生终端输入；这不代表 Agent 失效。
+
 ```ts
 const session = await client.createAgent({
   providerId: 'codex',

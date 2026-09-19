@@ -4,14 +4,14 @@ import { createRoot, type Root } from 'react-dom/client'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
+import { MAX_AGENT_STEER_QUEUE_ENTRIES, useAppStore } from '../src/renderer/src/store'
 import { requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 // The contents are covered by the production-workbench process restart test, T008.
 // This test keeps the actual entry, window, tree and navigation store owners.
@@ -21,6 +21,9 @@ import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopic
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 
 const baseline = useAppStore.getState()
+let disposeBootstrap: (() => void) | undefined
+beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
+afterAll(() => disposeBootstrap?.())
 let container: HTMLDivElement, root: Root, directory: string
 let pending: Promise<void>[]
 let workspace: { id: string; hostId: string; path: string; name: string; kind: 'folder' }
@@ -144,4 +147,68 @@ it('describes Needs you from the fixed Mote Session and keeps expanded state ind
   await act(async () => useAppStore.setState({ sessions: [{ ...mote, status: { state: 'working', source: 'run-process', observedAt: 3 } }] })); await settle()
   expect(container.querySelector('#mote-shortcut-status')?.textContent).toBe('Working')
   expect(entry.getAttribute('aria-expanded')).toBe('false')
+})
+
+it('hands the floating message to the existing outbox once and retains uncertainty without losing the newer draft', async () => {
+  const mote = workingMote()
+  const tab = { ...createWorkbenchTab('mote-tab', { kind: 'agent', workspaceId: SCRATCH_WORKSPACE_ID,
+    regionId: 'mote-region', sessionId: mote.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  const layout = createWorkspaceLayout('mote-group', [tab.id])
+  useAppStore.setState({ sessions: [mote], tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: layout },
+    agentSteerQueues: {}, agentComposerDrafts: { 'mote-session': 'New unsent draft' } })
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValue(mote)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Control reply is unknown'))
+  await render()
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ prompt: 'Original floating message', targetTabId: tab.id }))
+  await settle()
+  await act(async () => { await vi.waitFor(() => {
+    expect(useAppStore.getState().agentSteerQueues[mote.id]?.[0]?.status).toBe('deferred')
+    expect(JSON.parse(window.localStorage.getItem('agentmux.leader-topic-floating.v1')!).pendingPrompt).toBeUndefined()
+  }) })
+  const retained = useAppStore.getState().agentSteerQueues[mote.id]!
+  expect(retained).toEqual([expect.objectContaining({ operationId: expect.any(String), runId: 'healthy-mote-run',
+    text: 'Original floating message', status: 'deferred', error: 'Control reply is unknown',
+    promptCondition: { expectedRun: { runId: 'healthy-mote-run' }, afterSubmissionId: null } })])
+  expect(submit).toHaveBeenCalledOnce()
+  expect(submit.mock.calls[0]).toEqual([mote.control, 'Original floating message', retained[0]!.operationId,
+    retained[0]!.promptCondition, undefined, { allowUncertainTurn: true }])
+  expect(useAppStore.getState().agentComposerDrafts[mote.id]).toBe('New unsent draft')
+  expect(useAppStore.getState().sessions).toEqual([mote])
+  expect(JSON.parse(window.localStorage.getItem('agentmux.leader-topic-floating.v1')!).pendingPrompt).toBeUndefined()
+  await act(async () => button('Close Mote').click())
+  await act(async () => button('Open Mote').click()); await settle()
+  expect(submit).toHaveBeenCalledOnce()
+  expect(useAppStore.getState().agentSteerQueues[mote.id]).toEqual(retained)
+})
+
+function workingMote(): Extract<SessionSnapshot, { kind: 'agent' }> {
+  return { id: 'mote-session', kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local',
+    workspacePath: join(directory, 'topic--launcher--leader'), label: 'Mote', processState: 'running', createdAt: 1, updatedAt: 2,
+    promptSubmissionPredecessor: null,
+    status: { state: 'working', source: 'run-process', observedAt: 2 }, latestOutputBytes: 0,
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    control: { kind: 'agent', hostId: 'local', agentSessionId: 'mote-session', run: { runId: 'healthy-mote-run' } } }
+}
+
+it('keeps a refused floating handoff intact when the existing outbox is full', async () => {
+  const mote = workingMote()
+  const tab = { ...createWorkbenchTab('mote-tab', { kind: 'agent', workspaceId: SCRATCH_WORKSPACE_ID,
+    regionId: 'mote-region', sessionId: mote.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  const original = Array.from({ length: MAX_AGENT_STEER_QUEUE_ENTRIES }, (_, index) => ({
+    operationId: `existing-${index}`, runId: mote.control.run.runId, text: `Existing message ${index}`,
+    status: 'queued' as const, promptCondition: null }))
+  useAppStore.setState({ sessions: [mote], tabs: { [tab.id]: tab },
+    layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [tab.id]) },
+    agentSteerQueues: { [mote.id]: original }, agentComposerDrafts: { [mote.id]: 'Keep the newer draft' } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  await render()
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ prompt: 'Keep the refused message', targetTabId: tab.id }))
+  await settle()
+  expect(useAppStore.getState().agentSteerQueues[mote.id]).toEqual(original)
+  expect(submit).not.toHaveBeenCalled()
+  expect(JSON.parse(window.localStorage.getItem('agentmux.leader-topic-floating.v1')!).pendingPrompt).toEqual({
+    id: expect.any(String), text: 'Keep the refused message' })
+  expect(useAppStore.getState().error).toContain('The message queue is full')
+  expect(useAppStore.getState().agentComposerDrafts[mote.id]).toBe('Keep the newer draft')
+  expect(useAppStore.getState().sessions).toEqual([mote])
 })

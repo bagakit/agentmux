@@ -44,8 +44,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   const pmoSessionId = useAppStore((state) => pmoFocusSessionId(state.agentFocus))
   const agentNames = useAppStore((state) => state.agentNames)
   const reportError = useAppStore((state) => state.reportError)
+  const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
+  const flushAgentSteerQueue = useAppStore((state) => state.flushAgentSteerQueue)
   const [opening, setOpening] = useState(false)
-  const deliveredPromptRef = useRef<string | null>(null)
+  const handledPromptRef = useRef<string | null>(null)
   const conversationInitializedRef = useRef<string | null>(null)
   const wasOpenRef = useRef(false)
   const scratch = config?.workspaces.find((workspace) => workspace.id === SCRATCH_WORKSPACE_ID)
@@ -98,7 +100,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
 
   useEffect(() => {
     const pending = floating.open ? floating.pendingPrompt : undefined
-    if (!pending || deliveredPromptRef.current === pending.id || !scratch) return
+    if (!pending || handledPromptRef.current === pending.id || !scratch) return
     const targetTab = targetTabId ? tabs[targetTabId] : undefined
     const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
     const targetSessionId = targetSurface?.kind === 'agent' ? targetSurface.sessionId : undefined
@@ -106,13 +108,20 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       ? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSessionId)
       : sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
     if (pmoTeamsSession) {
-      deliveredPromptRef.current = pending.id
+      handledPromptRef.current = pending.id
+      // A refused handoff keeps its original floating text. Re-rendering grants no
+      // new attempt and must not repeat focus changes or the rejection notice.
+      if (!enqueueAgentSteer(pmoTeamsSession.id, pending.text, reportError, pending.id)) return
       focusPmoSession(pmoTeamsSession.id)
       setViewMode(pmoTeamsSession.id, 'activity')
-      void api.sessions.submitPrompt(pmoTeamsSession.control, pending.text, pending.id)
-        .then(() => setFloating({ pendingPrompt: undefined }))
+      void flushAgentSteerQueue(pmoTeamsSession.id, pending.id)
+        .then(() => {
+          // The canonical outbox now owns this intent, including any uncertainty.
+          // Clearing the floating handoff does not claim that the Agent consumed it.
+          setFloating({ pendingPrompt: undefined })
+        })
         .catch((error) => {
-          deliveredPromptRef.current = null
+          handledPromptRef.current = null
           reportError(error)
         })
       return
@@ -125,16 +134,16 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     const regionId = pmoTeamsTab?.layout.activeRegionId
     const executorId = Object.keys(config?.executors ?? {})[0]
     if (!pmoTeamsTab || !group || !regionId || !executorId) return
-    deliveredPromptRef.current = pending.id
+    handledPromptRef.current = pending.id
     const executionContext = executionFocusContextText(agentFocus, sessions, (session) => agentNames[session.id] ?? session.label)
     void launchAgent(executorId, [pending.text, executionContext].join('\n\n'), group.id, {
       tabId: pmoTeamsTab.id,
       regionId
     }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
-      deliveredPromptRef.current = null
+      handledPromptRef.current = null
       reportError(error)
     })
-  }, [agentFocus, agentNames, config, floating.open, floating.pendingPrompt, targetTabId, focusPmoSession, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
+  }, [agentFocus, agentNames, config, enqueueAgentSteer, flushAgentSteerQueue, floating.open, floating.pendingPrompt, targetTabId, focusPmoSession, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
 
   useEffect(() => {
     const onResize = (): void => setFloating(clampPmoTeamsTopicFloatingState(floating))

@@ -23,6 +23,7 @@ import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelect
 import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
+import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
   AgentLaunchResult,
   AgentSessionControl,
@@ -311,6 +312,8 @@ export type AgentSteerQueueEntry = {
   /** The first accepted local intent time; absent means it was never recorded. */
   enqueuedAt?: number
   runId?: string
+  /** null is a new, never-dispatched intent; absence is an unknown historical intent. */
+  promptCondition?: AgentPromptCondition | null
   text: string
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
@@ -805,7 +808,7 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
@@ -1959,10 +1962,16 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
 }
 
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void): string | false {
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID()): string | false {
   if (!text.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
+  const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
+  if (existing) {
+    if (existing.text === text.trim()) return operationId
+    ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
+    return false
+  }
   if ((useAppStore.getState().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
     (onRejected ?? useAppStore.getState().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
     return false
@@ -1976,7 +1985,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     return false
   }
   const entry: AgentSteerQueueEntry = {
-    operationId: crypto.randomUUID(),
+    operationId,
+    promptCondition: null,
     enqueuedAt: Date.now(),
     ...(session.processState === 'running' && session.status.state !== 'disconnected'
       ? { runId: session.control.run.runId } : {}),
@@ -2807,10 +2817,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const state = get()
       const workspaces = state.config?.workspaces ?? []
       const projectForSession = (workspacePath: string) => workspaces.find((workspace) => workspace.path === workspacePath || workspace.repoPath === workspacePath)
-      const activeAgents = state.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent').map((session) => {
+      let observed = state.sessions
+      if (request.operation === 'list.active-agents' && request.agentSessionId !== undefined) {
+        const target = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
+        // A first send asks for this exact binding only, not a refresh of every live Session.
+        observed = [await api.sessions.refresh(target.control)]
+      }
+      const activeAgents = observed.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent').map((session) => {
         const project = projectForSession(session.workspacePath)
         return {
           agentSessionId: session.id,
+          ...(session.promptSubmissionPredecessor === undefined ? {} : { promptCondition: {
+            expectedRun: { ...session.control.run }, afterSubmissionId: session.promptSubmissionPredecessor } }),
           projectId: project?.id ?? null,
           projectName: project?.name ?? null,
           workspacePath: session.workspacePath,
@@ -2893,7 +2911,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (attachedSessionId) {
         const session = get().sessions.find((candidate) => candidate.id === attachedSessionId)
         if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
-        await api.sessions.submitPrompt(session.control, current.description.trim() || current.title, crypto.randomUUID())
+        const operationId = admitAgentSteer(session.id, current.description.trim() || current.title)
+        if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
+        await get().flushAgentSteerQueue(session.id, operationId)
+        const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
+        if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
       } else {
         if (!current.projectId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to a Project before starting.')
         if (!current.assigneeExecutorId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to an Agent before starting.')
@@ -3044,7 +3066,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Run is not the resolved Run.')
         }
       }
-      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? crypto.randomUUID(),
+      const condition = validateAgentPromptCondition(request.promptCondition)
+      if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
+        'STALE_AGENT_SESSION', 'Message intent targets another Run.')
+      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? request.requestId, condition,
         request.caller?.agentSessionId, { allowUncertainTurn: true })
       return { operation: request.operation, agentSessionId: session.id }
     }
@@ -5715,8 +5740,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text, onRejected) {
-    return admitAgentSteer(sessionId, text, onRejected) !== false
+  enqueueAgentSteer(sessionId, text, onRejected, operationId) {
+    return admitAgentSteer(sessionId, text, onRejected, operationId) !== false
   },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
@@ -5798,6 +5823,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Recovery and binding are part of this one attempt. Consume its grant before any
           // failure or await; a new grant arriving during the attempt remains in the set.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId)
+          let preparedHere = false
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
           try {
             if (entry.runId === undefined) {
@@ -5847,7 +5873,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
               'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
             if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
-            await api.sessions.submitPrompt(session.control, entry.text, entry.operationId, undefined,
+            if (pending.promptCondition === undefined) throw new Error(
+              'The original message delivery condition is unknown. This message is kept; compose a new message or use the terminal.')
+            if (pending.promptCondition === null) {
+              // Queue tails bind only as they reach dispatch. The public refresh reads Core's
+              // admission identity; activity status and timeline receipts cannot replace it.
+              const fresh = await api.sessions.refresh(session.control)
+              if (fresh.kind !== 'agent' || fresh.control.run.runId !== pending.runId) throw new Error(
+                'The Run changed before message preparation. This message will not be sent to another Run.')
+              const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
+                afterSubmissionId: fresh.promptSubmissionPredecessor })
+              set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: current.agentSteerQueues[sessionId]!.map(item =>
+                  item.operationId === entry.operationId ? { ...item, promptCondition: condition } : item) } }))
+              preparedHere = true
+            }
+            if (!workbenchWriteFence.isOpen()) throw new Error(
+              'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
+            persistentWorkbenchStorage.flush()
+            await api.ui.requestStorageFlush()
+            pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
+            session = get().sessions.find(item => item.id === sessionId)
+            if (!pending || session?.kind !== 'agent') return
+            const condition = validateAgentPromptCondition(pending.promptCondition)
+            if (!steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
+              'The bound Run changed before dispatch. This message will not be sent to another Run.')
+            await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition, undefined,
               explicitAttempt ? { allowUncertainTurn: true } : undefined)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
@@ -5865,6 +5916,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const turnEndUnconfirmed = typeof error === 'object' && error !== null &&
               'code' in error && error.code === 'AGENT_TURN_END_UNCONFIRMED' ||
               message.includes('Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
+            // These first-call refusals occur before admission. A restored or previously
+            // uncertain intent never refreshes, even if a later attempt reports BUSY.
+            const unadmitted = preparedHere && (turnEndUnconfirmed || typeof error === 'object' && error !== null &&
+              'code' in error && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY' ||
+              message.includes('Diagnostic: code=AGENT_PROMPT_SUBMISSION_BUSY'))
             // A delivery refusal is a retained local fact, not another global notification.
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]
@@ -5875,7 +5931,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   [sessionId]: pending.map((item) => {
                     if (item.operationId !== entry.operationId) return item
                     const { errorCode: _oldCode, ...retained } = item
-                    return { ...retained, status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
+                    return { ...retained, ...(unadmitted ? { promptCondition: null } : {}),
+                      status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
                       ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' } : {}) }
                   })
                 }

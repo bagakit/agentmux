@@ -1,4 +1,5 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentTerminalScreenEvidence } from '../src/agent-terminal-screen.js'
@@ -111,7 +112,7 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
   const events: unknown[] = []
   h.client.onEvent(event => events.push(event))
   expect(h.client.providers.get(providerId).planPromptInput('hello').kind).toBe('render-then-submit')
-  const prompt = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
+  const prompt = h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'synthetic-operation', prompt: 'hello' })
   let raw: Array<Promise<unknown>> = []
   try {
@@ -132,7 +133,7 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
       terminalPromptDelivery: expect.objectContaining({ reason: 'screen-evidence-replaced' })
     }) }))
     const count = h.writes.length
-    await h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
+    await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
       expectedRun: h.stored.run, operationId: 'synthetic-operation', prompt: 'hello' })
     expect(h.writes).toHaveLength(count)
   } finally {
@@ -152,7 +153,7 @@ it('registers observation cancellation before a prompt enters its queued render 
   const screen = heldRender(h)
   const prior = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'prior', source: 'user' })
   await priorEntered.promise
-  const prompt = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
+  const prompt = h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'queued-operation', prompt: 'hello' })
   const raw = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'z', source: 'user' })
   try {
@@ -176,7 +177,7 @@ it('registers observation cancellation before a prompt enters its queued render 
 it('does not cancel another Run or preempt a prompt for empty input', async () => {
   const h = await fixture('codex')
   const screen = heldRender(h)
-  const prompt = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId,
+  const prompt = h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'kept-operation', prompt: 'hello' })
   await screen.entered.promise
   const empty = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: '', source: 'user' })

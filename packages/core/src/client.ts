@@ -60,6 +60,7 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeOutcome } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
+import { agentPromptCondition, validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { agentTurnEndEvidence, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
@@ -198,9 +199,7 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
   prompt?: string
 }
 
-export type AgentMuxAgentPromptInput = {
-  /** Conditional target for a Run-bound intent; absence deliberately selects the current Session Run. */
-  expectedRun?: AgentMuxRunRef
+export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
@@ -666,6 +665,7 @@ export class AgentMuxClient {
       providers: this.providers
     })
     this.promptSubmission = new AgentPromptSubmissionCoordinator({
+      store: this.store,
       kernel: this.kernel,
       providers: this.providers,
       registry: this.registry,
@@ -1290,6 +1290,12 @@ export class AgentMuxClient {
 
   agentSession(agentSessionId: string): AgentMuxAgentSession {
     return cloneSession(this.registry.get(agentSessionId))
+  }
+
+  /** Read one exact durable Session binding without starting, attaching or stopping its Run. */
+  async refreshAgentSession(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
+    this.requireConnected()
+    return cloneSession(await this.registry.refresh(agentSessionId, expectedRun))
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
@@ -2643,13 +2649,15 @@ export class AgentMuxClient {
     // 这里，**那个 run 之后的每一条 prompt 都被永久挡住**。栅栏起点由 daemon 的权威
     // acceptedInputBytes 兜底（submitInputPlan 本来就这么取），不依赖握手是否完成。
     const session = this.requireAgentSession(input.agentSessionId)
-    if (input.expectedRun !== undefined && !sameRun(session.run, input.expectedRun)) {
+    const condition = validateAgentPromptCondition(input)
+    if (!sameRun(session.run, condition.expectedRun)) {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     const renderObservation = new AbortController()
     await this.serializeAgentInput(session, async (current, run) => {
-      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal)
+      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal)
     }, renderObservation)
     await this.recordPromptAfterSideEffect(
       session,
@@ -2696,6 +2704,7 @@ export class AgentMuxClient {
       responseDigest,
       plan.data
     )
+    this.cancelPromptRenderObservation(requestedSession)
     await this.serializeAgentInput(requestedSession, async (session, run) => {
       await this.submitNativeInteractionResponse(
         session,
@@ -3717,6 +3726,7 @@ export class AgentMuxClient {
           `launch-prompt:${lifecycleOperationId}`,
           text,
           provider.planPromptInput(text),
+          agentPromptCondition(session),
           undefined,
           undefined,
           false,
@@ -4002,10 +4012,7 @@ export class AgentMuxClient {
     }
     // Raw input only cancels optional observations already admitted for this exact Run.
     // Bytes still follow the same tail, after the prompt's contiguous payload and submit.
-    const lane = this.agentInputTails.get(requestedSession.agentSessionId)
-    for (const observation of lane?.renderObservations ?? []) {
-      if (sameRun(observation.run, requestedSession.run)) observation.controller.abort()
-    }
+    this.cancelPromptRenderObservation(requestedSession)
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
@@ -4087,6 +4094,13 @@ export class AgentMuxClient {
         acceptedThroughByte: result.run.acceptedInputBytes
       }
     })
+  }
+
+  private cancelPromptRenderObservation(session: AgentMuxAgentSession): void {
+    const lane = this.agentInputTails.get(session.agentSessionId)
+    for (const observation of lane?.renderObservations ?? []) {
+      if (sameRun(observation.run, session.run)) observation.controller.abort()
+    }
   }
 
   private async serializeAgentInput<T>(

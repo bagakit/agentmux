@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { AgentPromptCondition } from './agent-prompt-condition.js'
 
 export type ContinuousProgressLoop = {
   loopId: string
@@ -7,7 +8,7 @@ export type ContinuousProgressLoop = {
   prompt: string
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
-  pendingCompletion?: { id: string; operationId: string }
+  pendingCompletion?: { id: string; operationId: string; condition?: AgentPromptCondition }
   lastCompletionId?: string
   lastTickId?: string
   lastOutcome?: 'sent' | 'skipped' | 'unknown'

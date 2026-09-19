@@ -3,12 +3,14 @@ import { AgentProviderRegistry } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
+import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
+import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import type {
   AgentMuxAgentSession,
@@ -57,6 +59,7 @@ function terminalPromptPhaseOperationIdentity(
 }
 
 type PromptSubmissionDeps = {
+  store: AgentMuxAgentSessionStore
   kernel: CtxmuxRunAdapter
   providers: AgentProviderRegistry
   registry: AgentMuxAgentSessionRegistry
@@ -81,11 +84,6 @@ type PromptSubmissionDeps = {
  */
 export class AgentPromptSubmissionCoordinator {
   private readonly readinessCancels = new Map<string, () => void>()
-  // Claims created by this Core instance are still live even when their first input call
-  // fails. A fresh instance after App restart has an empty set and may reconcile a
-  // persisted claim using CtxMux's accepted-input cursor; an in-process contender must
-  // retain the BUSY guard so two callers cannot interleave bytes.
-  private readonly localSubmissionClaims = new Set<string>()
 
   constructor(private readonly deps: PromptSubmissionDeps) {}
 
@@ -100,6 +98,92 @@ export class AgentPromptSubmissionCoordinator {
   }
 
   async submitInputPlan(
+    session: AgentMuxAgentSession,
+    run: CtxmuxAdapterRun,
+    submissionId: string,
+    prompt: string,
+    plan: AgentPromptInputPlan,
+    condition: AgentPromptCondition,
+    expectedCompletionId?: string,
+    signal?: AbortSignal,
+    allowUncertainTurn = false,
+    renderSignal?: AbortSignal
+  ): Promise<void> {
+    try {
+      await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
+        let current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+        let currentRun = await this.deps.kernel.status(run.runId)
+        this.deps.assertAgentRun(current, currentRun)
+        if (currentRun.state.type !== 'running') {
+          throw new AgentMuxError('Agent Run is not running.', 'AGENT_RUN_NOT_RUNNING')
+        }
+        const previous = current.promptCompletionAdmission
+        const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged
+        try {
+          const predecessor = previous === undefined ? null : previous.submissionId
+          if (predecessor !== submissionId &&
+            (predecessor === undefined || predecessor !== condition.afterSubmissionId)) {
+            throw new AgentMuxError('A later prompt admission has replaced this message\'s original condition. Its delivery is unknown; your message and the current Run are kept.',
+              'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+          }
+          if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId ||
+            (previous && unfinished && !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied)) {
+            if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
+              throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+            }
+            if (previous.submissionId === submissionId && previous.intent.prompt !== prompt) {
+              throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+            }
+            if (unfinished) await this.publishDeliveryDegrade(current, {
+              state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed',
+              submissionId: previous.submissionId, run: { ...current.run }, observedAt: Date.now()
+            })
+            // The old Core is excluded, but Native may still own its request. Join that exact
+            // request; a fresh cursor or a changed Provider plan cannot replace it.
+            try {
+              await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
+                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal)
+            } catch (error) {
+              const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
+              if (previous.submissionId === submissionId ||
+                settled.promptCompletionAdmission?.submissionId !== previous.submissionId ||
+                settled.terminalPromptSubmission?.submissionId !== previous.submissionId ||
+                !settled.terminalPromptSubmission.submit.notApplied) throw error
+              // Actual Native rejected the remaining phase of the old intent. Its
+              // accepted payload is kept as accepted; only a different message may proceed.
+            }
+            if (previous.submissionId === submissionId) return
+            current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+            currentRun = await this.deps.kernel.status(run.runId)
+            this.deps.assertAgentRun(current, currentRun)
+          }
+          await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal)
+        } catch (error) {
+          if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
+            (previous?.submissionId === submissionId || previous &&
+              (previous.submissionId === undefined || unfinished && previous.submissionId === condition.afterSubmissionId))) {
+            await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
+              reason: 'input-unconfirmed', submissionId: previous?.submissionId ?? submissionId,
+              run: { ...current.run }, observedAt: Date.now() })
+          }
+          throw error
+        }
+      })
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY') {
+        const observed = this.deps.requireAgentSession(session.agentSessionId)
+        throw new AgentMuxError(error.message, error.code, promptReadinessDetail({
+          runId: observed.run.runId,
+          activeSubmissionId: observed.promptCompletionAdmission?.submissionId,
+          observedFrom: 'session-projection'
+        }))
+      }
+      throw error
+    }
+  }
+
+  private async submitOwnedInputPlan(
     session: AgentMuxAgentSession,
     run: CtxmuxAdapterRun,
     submissionId: string,
@@ -142,14 +226,17 @@ export class AgentPromptSubmissionCoordinator {
       const completionId = agentTurnCompletionIdentity(current)
       const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
-      return { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
-        submissionId, ...(completionId ? { completionId } : {}),
-        operationId, startByte, endByte
+      const next = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
+        submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte,
+        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan) },
+        acknowledged: false
       }, ...(ended ? { terminalPromptReadiness: { ...current.terminalPromptReadiness!, consumedBySubmissionId: submissionId } } : {}),
       ...(uncertainTurn ? { terminalPromptDelivery: {
         state: 'unverified' as const, mode: 'degraded' as const, reason: 'turn-end-unconfirmed' as const,
         submissionId, run: { ...current.run }, observedAt
       } } : {}) }
+      delete next.terminalPromptSubmission
+      return next
     }
     const cancelConsumedNativeReadiness = (current: AgentMuxAgentSession): void => {
       if (current.terminalPromptReadiness?.source === 'native-stop' &&
@@ -157,13 +244,12 @@ export class AgentPromptSubmissionCoordinator {
     }
     if (plan.kind === 'single-phase') {
       const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'payload', plan.data)
-      const expectedByte = this.deps.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
+      const expectedByte = run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       let uncertainTurn = false
-      let newClaim = false
-      const current = await this.deps.registry.update(session.agentSessionId, session.run, (stored) => {
+      const current = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, (stored) => {
         const admitted = stored.promptCompletionAdmission
         if (admitted && (admitted.operationId === operationId || admitted.submissionId === submissionId)) {
           if (admitted.operationId !== operationId ||
@@ -177,24 +263,21 @@ export class AgentPromptSubmissionCoordinator {
         }
         assertAdmission(stored)
         const incomplete = admitted !== undefined && (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte)
-        const replaceableClaim = admitted !== undefined && incomplete && !this.localSubmissionClaims.has(admitted.operationId) &&
-          run.acceptedInputBytes === admitted.startByte
+        const replaceableClaim = admitted?.notApplied === true
         if (incomplete && !replaceableClaim) {
           throw new AgentMuxError('Another Agent prompt operation is incomplete for this Run.', 'AGENT_PROMPT_SUBMISSION_BUSY')
         }
         uncertainTurn = assertTurnBoundary(stored, admitted !== undefined)
-        newClaim = true
         return claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data), uncertainTurn)
       })
       const admitted = current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
       cancelConsumedNativeReadiness(current)
-      this.localSubmissionClaims.add(operationId)
       if (uncertainTurn) await this.publishDeliveryDegrade(session, {
         state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
         submissionId, run: { ...session.run }, observedAt: Date.now()
       })
-      const accepted = await this.deps.kernel.input(session.run.runId, {
-        ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
+      const accepted = await this.applyInput(session, submissionId, {
+        ownerInstanceId: admitted!.intent!.ownerInstanceId,
         operationId,
         expectedByte: admitted?.startByte ?? expectedByte,
         data: plan.data
@@ -202,9 +285,20 @@ export class AgentPromptSubmissionCoordinator {
       if (accepted.run.acceptedInputBytes === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      if (accepted.appliedByteRange.startByte !== admitted!.startByte || accepted.appliedByteRange.endByte !== admitted!.endByte ||
+        accepted.run.acceptedInputBytes < admitted!.endByte) {
+        throw new AgentMuxError('CtxMux prompt receipt does not match its frozen Input.', 'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH')
+      }
+      await this.deps.registry.refresh(session.agentSessionId, session.run)
+      await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+        if (stored.promptCompletionAdmission?.operationId !== operationId) {
+          throw new AgentMuxError('Prompt admission changed before receipt settlement.', 'STALE_AGENT_SESSION')
+        }
+        return { ...stored, promptCompletionAdmission: { ...stored.promptCompletionAdmission, acknowledged: true, notApplied: false },
+          updatedAt: Math.max(stored.updatedAt, Date.now()) }
+      })
       this.deps.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
-      if (admitted && accepted.run.acceptedInputBytes >= admitted.endByte) this.localSubmissionClaims.delete(operationId)
-      if (newClaim && !uncertainTurn) await this.clearDelivery(session)
+      if (!uncertainTurn) await this.clearDelivery(session, submissionId)
       return
     }
     if (!plan.payload || !plan.renderedText || !plan.submit) {
@@ -249,7 +343,7 @@ export class AgentPromptSubmissionCoordinator {
         )
       }
     }
-    const expectedByte = this.deps.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
+    const expectedByte = run.acceptedInputBytes
     if (expectedByte === null) {
       throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
     }
@@ -267,16 +361,7 @@ export class AgentPromptSubmissionCoordinator {
         return stored
       }
       assertAdmission(stored)
-      // A two-phase claim is a de-duplication record, not a lease that can strand a healthy
-      // Run across an application restart. CtxMux's accepted-input cursor is the only fact
-      // that tells us whether any payload bytes reached the daemon. A new submission may
-      // take over only at the old payload's start cursor. Partial payload or submit acceptance
-      // requires the original operation's idempotent continuation; replacing it would mix
-      // prompt text. An unknown cursor cannot justify replacement.
-      const replaceableClaim = existing && !existing.submit.acknowledged &&
-        !this.localSubmissionClaims.has(existing.payload.operationId) &&
-        run.acceptedInputBytes !== null &&
-        run.acceptedInputBytes === existing.payload.inputByteRange.startByte
+      const replaceableClaim = stored.promptCompletionAdmission?.notApplied === true || existing?.submit.notApplied === true
       if (existing && !existing.submit.acknowledged && !replaceableClaim) {
         throw new AgentMuxError(
           'Another Agent prompt operation is incomplete for this Run.',
@@ -339,63 +424,9 @@ export class AgentPromptSubmissionCoordinator {
         updatedAt: Date.now()
       }
     }
-    const claim = async (): Promise<AgentMuxStoredAgentSession> => (
-      await this.deps.registry.update(
-        session.agentSessionId,
-        session.run,
-        claimPromptReadiness
-      )
+    let current = await this.deps.updateExactAgentSession(
+      session.agentSessionId, session.run, claimPromptReadiness
     )
-    const promptReadinessMayBeStale = (error: AgentMuxError): boolean => (
-      error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
-    )
-    let current: AgentMuxStoredAgentSession
-    try {
-      current = await claim()
-    } catch (error) {
-      if (error instanceof AgentMuxError && promptReadinessMayBeStale(error)) {
-        await this.deps.registry.load(session.hostId)
-        const canonical = this.deps.requireAgentSession(session.agentSessionId)
-        if (!sameRun(canonical.run, session.run)) {
-          throw new AgentMuxError(
-            'Agent Session changed while refreshing prompt readiness.',
-            'STALE_AGENT_SESSION',
-            promptReadinessDetail({
-              expectedRunId: session.run.runId,
-              canonicalRunId: canonical.run.runId,
-              reason: 'run-replaced-during-refresh'
-            })
-          )
-        }
-        try {
-          current = await claim()
-        } catch (refreshError) {
-          if (refreshError instanceof AgentMuxError && refreshError.code === 'STALE_AGENT_SESSION') {
-            throw new AgentMuxError(
-              'Prompt readiness changed or was consumed by another Client.',
-              'AGENT_PROMPT_READINESS_CONFLICT',
-              promptReadinessDetail({
-                expectedRunId: session.run.runId,
-                canonicalRunId: canonical.run.runId,
-                reason: 'session-cas-rejected-after-refresh'
-              })
-            )
-          }
-          throw refreshError
-        }
-      } else if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
-        throw new AgentMuxError(
-          'Prompt readiness changed or was consumed by another Client.',
-          'AGENT_PROMPT_READINESS_CONFLICT',
-          promptReadinessDetail({
-            expectedRunId: session.run.runId,
-            reason: 'session-cas-rejected'
-          })
-        )
-      } else {
-        throw error
-      }
-    }
     let submission = current.terminalPromptSubmission
     cancelConsumedNativeReadiness(current)
     if (!submission) {
@@ -405,7 +436,6 @@ export class AgentPromptSubmissionCoordinator {
       )
     }
     assertSubmission(submission)
-    this.localSubmissionClaims.add(submission.payload.operationId)
     if (uncertainTurn) await this.publishDeliveryDegrade(session, {
       state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
       submissionId, run: { ...session.run }, observedAt: Date.now()
@@ -416,7 +446,8 @@ export class AgentPromptSubmissionCoordinator {
       phaseName: 'payload' | 'submit',
       data: string
     ): Promise<void> => {
-      submission = this.deps.requireAgentSession(session.agentSessionId).terminalPromptSubmission
+      const currentSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
+      submission = currentSession.terminalPromptSubmission
       if (!submission) {
         throw new AgentMuxError(
           'Agent prompt submission claim disappeared.',
@@ -425,6 +456,10 @@ export class AgentPromptSubmissionCoordinator {
       }
       assertSubmission(submission)
       const phase = submission[phaseName]
+      if (phase.notApplied) {
+        throw new AgentMuxError('The original prompt phase was not applied. Its accepted payload is kept; this input range cannot be reused.',
+          'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
+      }
       if (phase.acknowledged) {
         if (acceptedInputBytes === null || acceptedInputBytes < phase.inputByteRange.endByte) {
           throw new AgentMuxError(
@@ -433,15 +468,19 @@ export class AgentPromptSubmissionCoordinator {
           )
         }
         this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
-        if (phaseName === 'submit') this.localSubmissionClaims.delete(submission.payload.operationId)
         return
       }
-      const accepted = await this.deps.kernel.input(session.run.runId, {
-        ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
+      // Rendering/receipt waits can outlive the original admission. A new request owns
+      // subsequent input; only an already-applied phase may recover its exact receipt.
+      if (acceptedInputBytes === null || acceptedInputBytes < phase.inputByteRange.endByte) {
+        assertInteraction(currentSession)
+      }
+      const accepted = await this.applyInput(session, submissionId, {
+        ownerInstanceId: currentSession.promptCompletionAdmission!.intent!.ownerInstanceId,
         operationId: phase.operationId,
         expectedByte: phase.inputByteRange.startByte,
         data
-      })
+      }, phaseName)
       if (
         accepted.appliedByteRange.startByte !== phase.inputByteRange.startByte ||
         accepted.appliedByteRange.endByte !== phase.inputByteRange.endByte ||
@@ -475,6 +514,7 @@ export class AgentPromptSubmissionCoordinator {
         if (state.submit.acknowledged) return stored
         return {
           ...stored,
+          promptCompletionAdmission: { ...stored.promptCompletionAdmission!, acknowledged: true, notApplied: false },
           terminalPromptSubmission: {
             ...state,
             payload: { ...state.payload, acknowledged: true },
@@ -483,40 +523,10 @@ export class AgentPromptSubmissionCoordinator {
           updatedAt: Date.now()
         }
       }
-      try {
-        current = await this.deps.registry.update(
-          session.agentSessionId,
-          session.run,
-          acknowledgePhase
-        )
-      } catch (error) {
-        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
-        await this.deps.registry.load(session.hostId)
-        const canonical = this.deps.requireAgentSession(session.agentSessionId)
-        if (!sameRun(canonical.run, session.run)) {
-          throw new AgentMuxError(
-            'Agent Session changed while adopting its prompt phase receipt.',
-            'STALE_AGENT_SESSION'
-          )
-        }
-        const canonicalSubmission = canonical.terminalPromptSubmission
-        if (!canonicalSubmission) {
-          throw new AgentMuxError(
-            'Agent prompt submission claim disappeared.',
-            'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
-          )
-        }
-        assertSubmission(canonicalSubmission)
-        current = canonicalSubmission[phaseName].acknowledged
-          ? canonical
-          : await this.deps.registry.update(
-              session.agentSessionId,
-              session.run,
-              acknowledgePhase
-            )
-      }
+      current = await this.deps.updateExactAgentSession(
+        session.agentSessionId, session.run, acknowledgePhase
+      )
       submission = current.terminalPromptSubmission
-      this.localSubmissionClaims.delete(payloadOperationId)
       this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
     }
 
@@ -546,6 +556,61 @@ export class AgentPromptSubmissionCoordinator {
       submissionId, run: { ...session.run }, observedAt: Date.now()
     })
     await applyPhase('submit', plan.submit)
+  }
+
+  private async applyInput(
+    session: AgentMuxAgentSession,
+    submissionId: string,
+    operation: Parameters<CtxmuxRunAdapter['input']>[1],
+    phaseName?: 'payload' | 'submit'
+  ): ReturnType<CtxmuxRunAdapter['input']> {
+    const admission = this.deps.requireAgentSession(session.agentSessionId).promptCompletionAdmission
+    if (admission?.submissionId === submissionId && admission.operationId === operation.operationId && admission.notApplied) {
+      // A retry has future dispatch eligibility again. Clear the old negative disposition
+      // durably BEFORE Native receives it, so a cold successor cannot take over this retry.
+      await this.deps.updateExactAgentSession(session.agentSessionId, session.run, current => {
+        if (current.promptCompletionAdmission?.submissionId !== submissionId) {
+          throw new AgentMuxError('Prompt admission changed before retry.', 'STALE_AGENT_SESSION')
+        }
+        return { ...current, promptCompletionAdmission: { ...current.promptCompletionAdmission, notApplied: false },
+          updatedAt: Math.max(current.updatedAt, Date.now()) }
+      })
+    }
+    try {
+      return await this.deps.kernel.input(session.run.runId, operation)
+    } catch (error) {
+      try {
+        const notApplied = error instanceof AgentMuxError && error.detail === 'not_applied' &&
+          operation.ownerInstanceId === this.deps.kernel.identity().daemonInstanceId
+        if (notApplied) {
+          await this.deps.updateExactAgentSession(session.agentSessionId, session.run, current => {
+            const admission = current.promptCompletionAdmission
+            if (admission?.submissionId !== submissionId) return current
+            const submission = current.terminalPromptSubmission
+            if (phaseName === 'submit' && error instanceof AgentMuxError && error.code === 'CTXMUX_input_cursor_mismatch' &&
+              submission?.submissionId === submissionId && submission.submit.operationId === operation.operationId &&
+              submission.submit.inputByteRange.startByte === operation.expectedByte) {
+              // Reaching submit requires the original payload's ACK. Persist its receipt
+              // together with the terminal rejection, without calling the whole prompt unapplied.
+              return { ...current, terminalPromptSubmission: { ...submission,
+                payload: { ...submission.payload, acknowledged: true },
+                submit: { ...submission.submit, notApplied: true } }, updatedAt: Math.max(current.updatedAt, Date.now()) }
+            }
+            if (admission.operationId !== operation.operationId) return current
+            return { ...current, promptCompletionAdmission: { ...admission, notApplied: true },
+              updatedAt: Math.max(current.updatedAt, Date.now()) }
+          })
+        } else {
+          await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
+            reason: 'input-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
+        }
+      } catch (noticeError) {
+        this.deps.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: 'AGENT_PROMPT_NOTICE_UNCONFIRMED', message: noticeError instanceof Error ? noticeError.message : String(noticeError),
+          evidence: { source: 'user', run: { ...session.run }, observedAt: Date.now() } })
+      }
+      throw error
+    }
   }
 
   /**
@@ -609,7 +674,7 @@ export class AgentPromptSubmissionCoordinator {
     // Render success restores screen evidence; it cannot confirm the previous native turn.
     const delivery = this.deps.requireAgentSession(session.agentSessionId).terminalPromptDelivery
     if (delivery?.reason === 'turn-end-unconfirmed' && delivery.submissionId === submissionId) return
-    await this.clearDelivery(session)
+    await this.clearDelivery(session, submissionId)
   }
 
   private async publishDeliveryDegrade(
@@ -653,13 +718,13 @@ export class AgentPromptSubmissionCoordinator {
     this.deps.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
   }
 
-  private async clearDelivery(session: AgentMuxAgentSession): Promise<void> {
+  private async clearDelivery(session: AgentMuxAgentSession, submissionId: string): Promise<void> {
     if (!this.deps.requireAgentSession(session.agentSessionId).terminalPromptDelivery) return
     const next = await this.deps.updateExactAgentSession(
       session.agentSessionId,
       session.run,
       (current) => {
-        if (!current.terminalPromptDelivery) return current
+        if (current.terminalPromptDelivery?.submissionId !== submissionId) return current
         const cleared = { ...current }
         delete cleared.terminalPromptDelivery
         return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }

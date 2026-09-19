@@ -9,6 +9,7 @@ import type {
 import { runInterruptionFact } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
+import { agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { agentDisplayState, isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
@@ -638,6 +639,7 @@ export function projectRuntimeEvent(
               workspacePath: core.session.workspacePath,
               updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
               agentSessionUpdatedAt: core.session.updatedAt,
+              promptSubmissionPredecessor: agentPromptPredecessor(core.session),
               // Mirror the Core fact independently of the display freshness gate below.
               // An accepted snapshot may clear an idle epoch without a new observation.
               ...(core.session.semanticStatus

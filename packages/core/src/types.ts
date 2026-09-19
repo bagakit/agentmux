@@ -615,6 +615,15 @@ export type AgentMuxAgentSession = {
     operationId: string
     startByte: number
     endByte: number
+    /** Frozen before dispatch; missing input facts are unknown, never reconstructed. */
+    intent?: {
+      run: AgentMuxRunRef
+      ownerInstanceId: string
+      prompt: string
+      plan: AgentPromptInputPlan
+    }
+    acknowledged?: boolean
+    notApplied?: boolean
   }
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
@@ -683,7 +692,7 @@ export type AgentTerminalOutputChannelState = {
  * fail-closed 丢掉且无编译错。
  */
 export const PROMPT_DELIVERY_DEGRADED_REASONS = [
-  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced', 'turn-end-unconfirmed'
+  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced', 'turn-end-unconfirmed', 'input-unconfirmed'
 ] as const
 export type PromptDeliveryDegradedReason = (typeof PROMPT_DELIVERY_DEGRADED_REASONS)[number]
 
@@ -714,6 +723,8 @@ export type AgentTerminalInputPhaseState = {
     endByte: number
   }
   acknowledged: boolean
+  /** Original Native owner rejected this immutable phase after its range was occupied. */
+  notApplied?: true
 }
 
 export type AgentTerminalPromptSubmissionState = {
