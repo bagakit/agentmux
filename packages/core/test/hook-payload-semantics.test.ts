@@ -9,7 +9,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { defineAgentProvider } from '../src/agent-provider.js'
 import { createNumberedTerminalInteractionProtocol } from '../src/agent-interaction.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../src/agent-session-store.js'
-import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
+import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { defaultAgentMuxHookPort } from '../src/runtime-paths.js'
 import {
   nativeHookHasSubagentSubject, normalizeNativeHook, releaseSubagentRoster,
@@ -228,14 +228,15 @@ describe('payload-dependent Hook contributions', () => {
       const cancelled = await h.stored()
       expect(cancelled.hookReceipt).toMatchObject({ id: 'receipt-4', eventName: profile.eventName,
         lifecycleEvent: 'turn-end', outputCursorBytes: 123, run: { runId } })
-      expect(cancelled.semanticStatus).toEqual(waiting)
+      expect(cancelled.semanticStatus).toMatchObject({ state: 'running', source: 'native-hook',
+        observedAt: cancelled.hookReceipt!.observedAt, detail: profile.eventName })
       expect(cancelled.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-4', run: { runId },
         outputCursorBytes: 123, observedAt: cancelled.hookReceipt!.observedAt })
       await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(agentSessionId)),  agentSessionId, operationId: 'cancel-is-not-success',
         prompt: 'Synthetic automatic prompt', expectedInputByte: 0, expectedCompletionId: JSON.stringify([runId, cancelled.hookReceipt!.observedAt]) }))
         .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
       expect(await h.feed('PostToolUse')).toBe(204)
-      expect((await h.stored()).semanticStatus).toEqual(waiting)
+      expect((await h.stored()).semanticStatus).toEqual(cancelled.semanticStatus)
       expect(await h.feed('turn_open')).toBe(204)
       expect((await h.stored()).semanticStatus?.state).toBe('working')
       expect(await h.feed('PostToolUse')).toBe(204)
@@ -249,9 +250,9 @@ describe('payload-dependent Hook contributions', () => {
       const ordinary = await h.stored()
       expect(ordinary.hookReceipt?.lifecycleEvent).toBeUndefined()
       expect(ordinary.terminalPromptReadiness).toEqual(beforeRestart.terminalPromptReadiness)
-      expect(ordinary.semanticStatus?.state).toBe('blocked')
+      expect(ordinary.semanticStatus).toEqual(beforeRestart.semanticStatus)
       expect(h.events.filter(e => e.type === 'agent-status').map(e => e.state))
-        .toEqual(['waiting', 'unknown', 'unknown', 'working', 'blocked', 'unknown', 'unknown'])
+        .toEqual(['waiting', 'unknown', 'working', 'blocked', 'unknown'])
       expect((await h.client.listRuns()).map(r => [r.runId, r.state])).toEqual([[runId, 'running']])
       expect(h.create).not.toHaveBeenCalled()
       expect(h.input).not.toHaveBeenCalled()
@@ -298,10 +299,12 @@ describe('payload-dependent Hook contributions', () => {
     expect(normalizeStoredAgentSession({ ...base, hookReceipt: receipt }).hookReceipt).toEqual(receipt)
     expect(normalizeStoredAgentSession({ ...base, hookReceipt: { ...receipt, lifecycleEvent: 'turn-end', outputCursorBytes: 123 } }).hookReceipt)
       .toEqual({ ...receipt, lifecycleEvent: 'turn-end', outputCursorBytes: 123 })
-    for (const lifecycleEvent of ['invented', null, 7]) {
+    expect(normalizeStoredAgentSession({ ...base, hookReceipt: { ...receipt, eventName: 'Stop', lifecycleEvent: null } }).hookReceipt)
+      .toEqual({ ...receipt, eventName: 'Stop', lifecycleEvent: null })
+    for (const lifecycleEvent of ['invented', 7]) {
       expect(() => normalizeStoredAgentSession({ ...base, hookReceipt: { ...receipt, lifecycleEvent } })).toThrow(/lifecycleEvent is invalid/)
     }
-    for (const lifecycleEvent of [undefined, 'permission-request', 'tool-use-end']) {
+    for (const lifecycleEvent of [undefined, null, 'permission-request', 'tool-use-end']) {
       expect(() => normalizeStoredAgentSession({ ...base, hookReceipt: { ...receipt, lifecycleEvent, outputCursorBytes: 123 } }))
         .toThrow(/authoritative output cursor/)
     }

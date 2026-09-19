@@ -218,6 +218,8 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     for (const stream of streams) stream.close()
     await rm(root, { recursive: true, force: true })
   }
+  // The automatic input observation belongs to this logical intent, including retries.
+  const inputFences = new Map<string, number>()
   return { get client() { return client }, feed, stored, writes, events, start, stop, recoverableInput, attachTerminal,
     // Explicit fixture corruption of time only; production ingress remains the positive path.
     async writeFixtureReceipt(receipt: AgentHookReceipt) {
@@ -225,9 +227,24 @@ async function harness(mode: Mode, receiptTime?: number | null) {
       await store.compareAndSwap(current, { ...current, hookReceipt: receipt })
       expect((await stored()).hookReceipt).toEqual(receipt)
     },
-    send: (operationId: string, prompt: string, expectedCompletionId?: string) => client.submitAgentPrompt({
-      ...agentPromptCondition(client.agentSession(sessionId)),
-      agentSessionId: sessionId, operationId, prompt, ...(expectedCompletionId ? { expectedCompletionId } : {}) }),
+    send: async (operationId: string, prompt: string, expectedCompletionId?: string) => {
+      const observed = client.agentSession(sessionId)
+      const automatic: Pick<Parameters<AgentMuxClient['submitAgentPrompt']>[0], 'expectedCompletionId' | 'expectedInputByte'> = {}
+      if (expectedCompletionId !== undefined) {
+        let expectedInputByte = inputFences.get(operationId)
+        if (expectedInputByte === undefined) {
+          const observedRun = (await client.listRuns()).find(run => run.runId === observed.run.runId)
+          expect(observedRun).toBeDefined()
+          if (!observedRun) throw new Error('Expected the fixture Run input observation')
+          expectedInputByte = observedRun.acceptedInputBytes
+          inputFences.set(operationId, expectedInputByte)
+        }
+        automatic.expectedCompletionId = expectedCompletionId
+        automatic.expectedInputByte = expectedInputByte
+      }
+      return await client.submitAgentPrompt({ ...agentPromptCondition(observed),
+        agentSessionId: sessionId, operationId, prompt, ...automatic })
+    },
     failPartial: () => { partialFailure = true },
     failHookSnapshot: () => { snapshotFailure = true },
     async reopen() {
@@ -348,7 +365,7 @@ describe('manual admission after native cancellation', () => {
       await h.send('without-snapshot', 'hello')
       expect(h.writes).toEqual(mode === 'single-phase' ? ['hello\r'] : ['hello', '\r'])
       expect((await h.stored()).terminalPromptReadiness?.consumedBySubmissionId).toBe('without-snapshot')
-      expect((await h.stored()).semanticStatus?.state).toBe('working')
+      expect((await h.stored()).semanticStatus?.state).toBe('running')
       expect((await h.stored()).promptCompletionAdmission?.completionId).toBeUndefined()
       await expect(h.send('without-snapshot-once', 'later')).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
     } finally { await h.close() }
@@ -377,7 +394,7 @@ describe('manual admission after native cancellation', () => {
       expect(await h.feed('notice', { reason: 'cancelled' }, 'cancel-1')).toBe(204)
       const cancelled = await h.stored()
       expect(cancelled.hookReceipt).toMatchObject({ id: 'cancel-1', eventName: 'notice', lifecycleEvent: 'turn-end', run: { runId } })
-      expect(cancelled.semanticStatus?.state).toBe('working')
+      expect(cancelled.semanticStatus?.state).toBe('running')
       expect(agentTurnCompletionIdentity(cancelled)).toBeUndefined()
       await expect(h.send('auto-cancel', 'automatic', JSON.stringify([runId, cancelled.hookReceipt!.observedAt])))
         .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })

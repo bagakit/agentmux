@@ -183,7 +183,10 @@ describe('Stop 落 done 不得依赖活着的内核', () => {
       const session = await stored()
       expect(session?.hookReceipt?.eventName).toBe('Stop')
       expect(session?.hookReceipt?.outputCursorBytes, '断线时编造了一个光标值').toBeUndefined()
-      expect(session?.terminalPromptReadiness, '断线时编造了一个就绪起点').toBeUndefined()
+      expect(session?.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-no-cursor',
+        run: { runId: 'run-1' }, observedAt: session!.hookReceipt!.observedAt })
+      expect(session?.terminalPromptReadiness?.outputCursorBytes, '断线时编造了一个光标').toBeUndefined()
+      expect(session?.terminalPromptReadiness?.readyThroughByte, '断线时编造了物理就绪').toBeUndefined()
     } finally {
       await client.dispose()
     }
@@ -202,7 +205,11 @@ describe('Stop 落 done 不得依赖活着的内核', () => {
       expect(actual?.semanticStatus?.state).toBe('done')
       expect(actual?.hookReceipt).toMatchObject({ id: 'receipt-next-turn-unknown', eventName: 'Stop' })
       expect(actual?.hookReceipt?.outputCursorBytes).toBeUndefined()
-      expect(actual?.terminalPromptReadiness).toBeUndefined()
+      expect(actual?.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-next-turn-unknown',
+        run: { runId: 'run-1' }, observedAt: actual!.hookReceipt!.observedAt })
+      expect(actual?.terminalPromptReadiness?.outputCursorBytes).toBeUndefined()
+      expect(actual?.terminalPromptReadiness?.readyThroughByte).toBeUndefined()
+      expect(actual?.terminalPromptReadiness?.consumedBySubmissionId).toBeUndefined()
       expect(actual).not.toHaveProperty('outputCursorBytes')
     } finally { await client.dispose() }
   })

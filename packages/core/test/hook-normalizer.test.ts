@@ -680,12 +680,12 @@ describe('native hook normalization', () => {
       expect(stop.status.state).toBe('done')
     })
 
-    it('子代理结束但主 Agent 尚未收尾时，停在 working 不擅自判 done', () => {
+    it('子代理结束但主 Agent 尚未收尾时，不贡献主轮状态', () => {
       const hook = claudeRun('run-noStopYet')
       hook('SubagentStart', { agent_id: 'x' })
       const subStop = hook('SubagentStop', { agent_id: 'x' })
       // 主 turn 还没结束（没有 Stop pending），子代理归零不该独自宣布完成。
-      expect(subStop.semanticState).toBe('working')
+      expect(subStop.semanticState).toBe('unknown')
     })
 
     it('重复投递的 SubagentStart（同一 agent_id）幂等，不会虚增在途数', () => {

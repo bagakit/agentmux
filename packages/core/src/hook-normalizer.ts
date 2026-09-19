@@ -29,8 +29,8 @@ export type AgentNativeHookStateRule = {
   toolNames?: readonly string[]
   /** A pure predicate over the flattened native payload; first matching rule wins. */
   matches?: (payload: Readonly<Record<string, unknown>>) => boolean
-  /** Payload-dependent lifecycle, consumed by the existing turn/admission owner. */
-  lifecycleEvent?: AgentHookLifecycleEvent
+  /** Undefined uses native-name semantics; null explicitly declares no lifecycle. */
+  lifecycleEvent?: AgentHookLifecycleEvent | null
 }
 
 /**
@@ -172,61 +172,58 @@ export function nativeHookHasSubagentSubject(
 }
 
 /**
- * 把一条 hook 事件并入子代理花名册，返回**经过在途压制后**的语义状态。
- *
- * 非子代理、非主收尾事件原样返回 `baseState`。三类被接管的事件：
- * - 子代理开始：记一个在途，Agent 仍在 `working`。
- * - 子代理结束：去掉一个在途；若归零且主 Agent 早已请求收尾，则这一步收敛为 `done`（否则 `working`，
- *   主 turn 还没结束）。
- * - 主 Agent 收尾：roster 非空则压成 `working` 并记下 pending；为空才放行 rules 的 `done`。
+ * Child observations keep their neutral main contribution while updating the existing roster.
+ * Only a known child settling a pending successful parent end can contribute a main turn-end.
+ * Aggregation may withhold success, but never an authoritative parent end or manual readiness.
  */
 function applySubagentTracking(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
   eventName: string,
   payload: Record<string, unknown>,
-  baseState: AgentSemanticState
-): AgentSemanticState {
+  observation: { semanticState: AgentSemanticState; lifecycleEvent: AgentHookLifecycleEvent | null | undefined }
+): typeof observation {
   const tracking = specification.subagentTracking
-  if (!tracking) return baseState
+  if (!tracking) return observation
   const key = subagentRosterKey(envelope)
   const id = subagentId(tracking, payload)
+  if (observation.lifecycleEvent === 'user-prompt-submit' || observation.lifecycleEvent === 'turn-start') {
+    const roster = subagentRosters.get(key)
+    // New main work invalidates only the previous parent's pending success, not live child facts.
+    if (roster) roster.mainStopPending = false
+  }
   if (tracking.startEvents.includes(eventName)) {
-    // 只按 id 记账。内建 Provider 的子代理事件都带 id；无 id 时不虚记一个够不到 stop 的幽灵条目，
-    // Agent 照旧显示 working（子代理确实在跑），但不会把主 Stop 永远压住。
+    // An absent id cannot create a roster entry that no later stop can settle.
     if (id) {
       const roster = subagentRosters.get(key) ?? { live: new Set<string>(), mainStopPending: false }
       roster.live.add(id)
       subagentRosters.set(key, roster)
     }
-    return 'working'
+    return observation
   }
   if (tracking.stopEvents.includes(eventName)) {
     const roster = subagentRosters.get(key)
-    // 花名册不存在：可能这个 run 从没记过子代理，也可能是最后一个 SubagentStop 已收敛并删掉了 roster、
-    // 而这一条是它的网络重投（服务端已处理，客户端 2s 超时又发了同一条）。硬编码 'working' 会把已经 done
-    // 的主 Agent 翻回运行中——归零后迟到的 stop 反倒成了假信号。退回 baseState（SubagentStop 无匹配 rule，
-    // baseState 即 'unknown'，落点中性、不落库不改写既有状态），让这条迟到 stop 成为无害幂等。
-    if (!roster) return baseState
-    if (id) roster.live.delete(id)
-    if (subagentRosterAlive(roster)) return 'working'
+    // Orphan, duplicate and unknown child stops carry no parent completion evidence.
+    if (!roster || !id || !roster.live.delete(id)) return observation
+    if (subagentRosterAlive(roster)) return observation
     const pending = roster.mainStopPending
     subagentRosters.delete(key)
-    // 最后一个子代理落地：主 Agent 之前被压住的收尾在此刻兑现为 done——否则会永远卡在 working。
-    return pending ? 'done' : 'working'
+    return pending ? { semanticState: 'done', lifecycleEvent: 'turn-end' } : observation
   }
-  if (tracking.mainStopEvents.includes(eventName)) {
+  if (tracking.mainStopEvents.includes(eventName) && observation.lifecycleEvent === 'turn-end') {
     const roster = subagentRosters.get(key)
-    if (roster && subagentRosterAlive(roster)) {
-      // 主 Agent 说完成了，但子代理还在跑——压住，别让界面提前翻成完成、别误报完成通知。
+    if (observation.semanticState === 'done' && roster && subagentRosterAlive(roster)) {
+      // 聚合成功仍等待子任务；真实主轮结束保留，不能收回手动开始下一轮的资格。
       roster.mainStopPending = true
-      return 'working'
+      return { semanticState: 'working', lifecycleEvent: observation.lifecycleEvent }
     }
     // 没有在途子代理：清掉可能残留的空条目，放行 rules 给出的收尾状态。
     subagentRosters.delete(key)
-    return baseState
+    return observation
   }
-  return baseState
+  // An authoritative non-success main end must not later become a roster's successful completion.
+  if (observation.lifecycleEvent === 'turn-end') subagentRosters.delete(key)
+  return observation
 }
 
 
@@ -505,15 +502,20 @@ export function normalizeNativeHook(
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
-  const lifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
-  // 先按 rules 定出这条事件本身的语义，再经子代理在途记账压制：主 Agent 报收尾时若子代理还活着，
-  // rules 给出的 `done` 会被压回 `working`，直到最后一个子代理落地才兑现。
-  const semanticState = applySubagentTracking(
+  const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
+  const childSubject = nativeHookHasSubagentSubject(specification, eventName, payload)
+  // Main contributions share the same subject boundary as locator and interaction promotion.
+  // Native lifecycle is retained separately for child tool results and trace; it cannot open or
+  // end the main turn. The existing roster can settle only an observed pending parent end.
+  const { semanticState, lifecycleEvent } = applySubagentTracking(
     specification,
     envelope,
     eventName,
     payload,
-    rule?.state ?? 'unknown'
+    {
+      semanticState: childSubject ? 'unknown' : rule?.state ?? 'unknown',
+      lifecycleEvent: childSubject || rule?.lifecycleEvent === null ? null : nativeLifecycleEvent
+    }
   )
   const observedAt = Date.now()
   const status: AgentStatus = {
@@ -528,7 +530,7 @@ export function normalizeNativeHook(
   const handle = nativeHandle(envelope.providerId, specification, eventName, payload)
   // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
   // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
-  const turnUsage = parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined
+  const turnUsage = childSubject ? undefined : parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -536,10 +538,10 @@ export function normalizeNativeHook(
     },
     providerId: envelope.providerId,
     eventName,
-    ...(lifecycleEvent ? { lifecycleEvent } : {}),
+    ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, lifecycleEvent, payload, observedAt),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }
