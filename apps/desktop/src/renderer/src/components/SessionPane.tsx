@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleStop, History, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
+import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
@@ -34,6 +34,7 @@ import {
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
 import { SessionHistoryView } from './SessionHistoryView'
+import { AgentRegionHeader } from './AgentRegionHeader'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
@@ -126,7 +127,6 @@ export function SessionPane({
   const agentInputExecutor = session?.kind === 'agent'
     ? (connectingExecutor?.label ?? session.executorId)
     : undefined
-  const agentInputSessionId = session?.kind === 'agent' ? session.id : undefined
   // 说话人身份 → 「叫什么、画哪个 provider」。这一层是唯一持有 Session 的地方，所以查 store 归这里；
   // ActivityView 与两条轴都保持受控，可以在无 DOM 的测试里直接求值。
   //
@@ -358,6 +358,11 @@ export function SessionPane({
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
+      {session.kind === 'agent' ? <AgentRegionHeader
+        name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
+        regionId={linkOrigin.regionId} readOnly={readOnly}
+        onHistory={!historyOpen && !inlineHistory ? () => setHistoryOpen(true) : undefined}
+      /> : null}
       {launchNotice}
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }}
         busy={recovering} retry={() => void recover()} /> : null}
@@ -385,7 +390,6 @@ export function SessionPane({
                 linkOrigin={linkOrigin}
               />
             )}
-            {session.kind === 'agent' && !historyOpen && !inlineHistory ? <button type="button" className="small-button terminal-history-action" onClick={() => setHistoryOpen(true)}><History size={12} /> Conversation history</button> : null}
             {(historyOpen || inlineHistory) && session.kind === 'agent' ? <SessionHistoryView
               key={`${session.control.hostId}:${session.id}:${session.control.run.runId}`}
               control={session.control}
@@ -465,25 +469,6 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          {session.kind === 'agent' && viewMode === 'terminal' ? (
-            <div
-              className="agent-input-stack__rail"
-              aria-label={agentInputIdentity
-                ? `Agent input for ${agentInputIdentity}; ${agentInputExecutor ?? 'Executor unavailable'}; Session ${agentInputSessionId}`
-                : 'Agent input'}
-            >
-              <span className="agent-input-stack__identity">
-                <span className="agent-input-stack__eyebrow">Agent input</span>
-                <strong title={agentInputIdentity}>{agentInputIdentity ?? 'Agent'}</strong>
-              </span>
-              <span
-                className="agent-input-stack__meta"
-                title={agentInputSessionId ? `Session ${agentInputSessionId}` : undefined}
-              >
-                {agentInputExecutor ?? 'Executor unavailable'}{agentInputSessionId ? ` · ${agentInputSessionId.slice(0, 8)}` : ''}
-              </span>
-            </div>
-          ) : null}
           {session.pendingInteraction ? (
             <AgentInteractionCard
               key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}

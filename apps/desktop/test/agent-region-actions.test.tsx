@@ -3,6 +3,14 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+// Mount the installed client implementation, as the split-ratio owning suite does.
+// The Node primary omits Panel registration effects and cannot exercise a mounted split.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)(
+    '../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'
+  )
+})
 // Geometry is proved in actual Electron. These mocks isolate resource rendering while keeping the
 // actual Workbench/SessionPane, Region intent, dirty confirmation and Store close path mounted.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Original terminal</div> }))

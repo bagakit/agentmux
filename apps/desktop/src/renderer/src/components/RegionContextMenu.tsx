@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, Crosshair, Replace, Send, SquareArrowOutUpRight } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
@@ -27,7 +27,7 @@ type RegionCopyAction = {
  * 守。把 JSX 的条件改成 `{false && model.handoff ? (`，「Message this Agent」与它的分隔符
  * **永不渲染**——那条能力对用户根本不存在——而被 grep 的三个字面量在 `false &&` 之后原样
  * 都在，34 条断言全绿。Radix 的 Content 默认关闭且在 Portal 里，`renderToStaticMarkup`
- * 渲不出它，所以"真挂载点一下"这条路在本仓走不通。
+ * 渲不出它，静态扫描无法证明实际点击；实挂与 private Electron 另外核对同一清单的真实入口。
  *
  * 于是把在场与顺序降成数据：JSX 只 map，条件判断无处可写，而这份数组跑得到、断言得着。
  */
@@ -182,6 +182,81 @@ const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof Send> = {
   'Copy Session Address': Copy
 }
 
+const RegionMenuContext = createContext<readonly RegionMenuEntry[]>([])
+
+/** Both menu surfaces consume the actions already bound by this Region's Workbench owner. */
+export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
+  return useContext(RegionMenuContext)
+}
+
+export function RegionMenuEntryView({ entry, index, Item, Separator }: {
+  entry: RegionMenuEntry
+  index: number
+  Item: typeof ContextMenu.Item
+  Separator: typeof ContextMenu.Separator
+}) {
+  if (entry.kind === 'separator') {
+    return (
+      <Separator
+        key={`separator-${index}`}
+        className="tab-context-menu__separator"
+      />
+    )
+  }
+  if (entry.kind === 'split') {
+    const key = workbenchSplitMenuKey(entry.entry, index)
+    if (entry.entry.kind === 'separator') {
+      return <Separator key={key} className="tab-context-menu__separator" />
+    }
+    const SplitIcon = workbenchSplitMenuIcon(entry.entry)
+    return (
+      <Item
+        key={key}
+        className="tab-context-menu__item"
+        onSelect={entry.entry.onSelect}
+      >
+        <SplitIcon size={14} />
+        <span>{entry.entry.label}</span>
+      </Item>
+    )
+  }
+  if (entry.kind === 'swap') {
+    return (
+      <Item
+        key={`swap-${entry.entry.targetRegionId}`}
+        className="tab-context-menu__item"
+        onSelect={entry.entry.onSelect}
+      >
+        <Replace size={14} />
+        <span>{entry.entry.label}</span>
+      </Item>
+    )
+  }
+  if (entry.kind === 'promote') {
+    return (
+      <Item
+        key="promote"
+        className="tab-context-menu__item"
+        onSelect={entry.onSelect}
+      >
+        <SquareArrowOutUpRight size={14} />
+        <span>Move to New Tab</span>
+      </Item>
+    )
+  }
+  const Icon = REGION_MENU_ICONS[entry.action.label]
+  return (
+    <Item
+      key={entry.action.label}
+      className="tab-context-menu__item"
+      onSelect={entry.action.onSelect}
+    >
+      <Icon size={14} />
+      <span>{entry.action.label}</span>
+    </Item>
+  )
+}
+
 export function RegionContextMenu({
   children,
   regionId,
@@ -235,74 +310,18 @@ export function RegionContextMenu({
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-surface-overlay.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-        <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
-          {model.entries.map((entry, index) => {
-            if (entry.kind === 'separator') {
-              return (
-                <ContextMenu.Separator
-                  key={`separator-${index}`}
-                  className="tab-context-menu__separator"
-                />
-              )
-            }
-            if (entry.kind === 'split') {
-              const key = workbenchSplitMenuKey(entry.entry, index)
-              if (entry.entry.kind === 'separator') {
-                return <ContextMenu.Separator key={key} className="tab-context-menu__separator" />
-              }
-              const SplitIcon = workbenchSplitMenuIcon(entry.entry)
-              return (
-                <ContextMenu.Item
-                  key={key}
-                  className="tab-context-menu__item"
-                  onSelect={entry.entry.onSelect}
-                >
-                  <SplitIcon size={14} />
-                  <span>{entry.entry.label}</span>
-                </ContextMenu.Item>
-              )
-            }
-            if (entry.kind === 'swap') {
-              return (
-                <ContextMenu.Item
-                  key={`swap-${entry.entry.targetRegionId}`}
-                  className="tab-context-menu__item"
-                  onSelect={entry.entry.onSelect}
-                >
-                  <Replace size={14} />
-                  <span>{entry.entry.label}</span>
-                </ContextMenu.Item>
-              )
-            }
-            if (entry.kind === 'promote') {
-              return (
-                <ContextMenu.Item
-                  key="promote"
-                  className="tab-context-menu__item"
-                  onSelect={entry.onSelect}
-                >
-                  <SquareArrowOutUpRight size={14} />
-                  <span>Move to New Tab</span>
-                </ContextMenu.Item>
-              )
-            }
-            const Icon = REGION_MENU_ICONS[entry.action.label]
-            return (
-              <ContextMenu.Item
-                key={entry.action.label}
-                className="tab-context-menu__item"
-                onSelect={entry.action.onSelect}
-              >
-                <Icon size={14} />
-                <span>{entry.action.label}</span>
-              </ContextMenu.Item>
-            )
-          })}
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
+    <RegionMenuContext.Provider value={model.entries}>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+        <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+          <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
+            {model.entries.map((entry, index) => <RegionMenuEntryView
+              key={index} entry={entry} index={index}
+              Item={ContextMenu.Item} Separator={ContextMenu.Separator}
+            />)}
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
+    </RegionMenuContext.Provider>
   )
 }

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import {
   callbackErasureGates,
@@ -269,6 +270,22 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
     return contentSourceText(jsxContentElement(file, tag))
   }
 
+  function itemRendererText(file: string, tag: string): string {
+    const content = contentText(file, tag)
+    if (file !== 'RegionContextMenu.tsx') return content
+    expect(content).toContain('<RegionMenuEntryView')
+    expect(content).toContain('entry={entry}')
+    expect(content).toContain('Item={ContextMenu.Item}')
+    const text = readFileSync(new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url), 'utf8')
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const renderer = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === 'RegionMenuEntryView')
+    expect(renderer, 'actual shared item renderer').toBeDefined()
+    expect(renderer && ts.isFunctionDeclaration(renderer) && renderer.body, 'nonempty renderer body').toBeTruthy()
+    const body = (renderer as ts.FunctionDeclaration).body!.getText(source)
+    expect(body).toContain('<Item')
+    return body
+  }
+
   it('自检：真的取到了那段 JSX，且它确实在画菜单项', () => {
     for (const { file, tag } of CONTAINERS) {
       expect(contentText(file, tag), `${file} 取到的那段里没有菜单项`).toContain(`${tag}.Item`)
@@ -289,7 +306,7 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
         `${file} 的 Content 里有不止一次 map——第二份清单必与共用那份漂移`
       ).toBe(1)
       // 标签与图标都取自清单元素，不能是写死的字面量（写死了就等于自绘项）。
-      expect(content, `${file} 的项标签不是取自清单元素`).toMatch(
+      expect(itemRendererText(file, tag), `${file} 的项标签不是取自清单元素`).toMatch(
         new RegExp(`\\{${entry}[\\w.]*\\.label\\}`)
       )
     }
@@ -346,7 +363,7 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
     // 绕过 onSelect 直接调 onArrange/onSplit 今天等价（onSelect 就是转发），但那样一来模型侧的
     // 「清单与动作同源」就买不到任何东西了——下一次给 onSelect 加副作用时会静默漏掉这一路。
     for (const { file, tag, entry } of CONTAINERS) {
-      const content = contentText(file, tag)
+      const content = itemRendererText(file, tag)
       expect(content, `${file} 没有把清单元素的 onSelect 接上`).toMatch(
         new RegExp(`onSelect=\\{${entry}[\\w.]*\\.onSelect\\}`)
       )
