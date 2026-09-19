@@ -1,5 +1,5 @@
 import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress'
-import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
+import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
@@ -217,7 +217,7 @@ const api: AgentMuxPreloadApi = {
   },
   continuousProgress: {
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
-    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt),
+    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
     action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => ipcRenderer.invoke('continuousProgress:action', target, loopId, action),
     pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('continuousProgress:pauseForInput', control),
     onChanged(listener: (loop: ContinuousProgressLoop) => void) {

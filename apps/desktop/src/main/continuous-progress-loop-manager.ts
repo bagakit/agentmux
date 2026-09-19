@@ -1,4 +1,5 @@
-import { ContinuousProgressScheduler, agentPromptCondition, decideContinuousProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation } from '@agentmux/core'
+import { ContinuousProgressScheduler, agentPromptCondition, decideContinuousProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource } from '@agentmux/core'
+import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
@@ -40,8 +41,9 @@ export class ContinuousProgressLoopManager {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
-  async create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string }): Promise<ContinuousProgressLoop> {
+  async create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource }): Promise<ContinuousProgressLoop> {
     await this.start()
+    if (input.taskSource !== undefined) validateContinuousProgressTaskSource(input.taskSource)
     const loop = this.scheduler.create(input)
     await this.persist(loop.loopId)
     return loop
@@ -125,6 +127,13 @@ export class ContinuousProgressLoopManager {
         if (pending && claim.loop.lastOutcome === 'unknown') {
           outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal)
         } else {
+          // Source truth qualifies only a new continuation, never an already-frozen unknown operation.
+          if (claim.loop.taskSource) {
+            const source = await readContinuousProgressTaskSource(claim.loop.taskSource, controller.signal)
+            if (!isCurrent()) continue
+            this.patch(claim.loop.loopId, { lastDecision: source.reason, ...(source.action === 'stop' ? { status: 'stopped' as const, lastOutcome: 'skipped' as const } : source.action === 'pause' ? { status: 'paused' as const, lastOutcome: 'skipped' as const } : {}) })
+            if (source.action !== 'continue') { await this.persist(claim.loop.loopId); continue }
+          }
           const observation = await this.observe(claim.loop, claim.tickId, now ?? Date.now(), controller.signal)
           if (!isCurrent()) continue
           const decision = decideContinuousProgress({ ...observation, ...(claim.loop.lastCompletionId ? { lastCompletionId: claim.loop.lastCompletionId } : {}) })
@@ -154,7 +163,10 @@ export class ContinuousProgressLoopManager {
         })
         else {
           const { pendingCompletion: _, ...settled } = current
-          if (outcome === 'sent') delete settled.lastDecision
+          if (outcome === 'sent') {
+            if (current.taskSource && settled.lastDecision) settled.lastDecision += ' Host accepted the request; a new Agent turn is not yet confirmed.'
+            else delete settled.lastDecision
+          }
           this.scheduler.restore(this.scheduler.list().map((loop) => loop.loopId === current.loopId
             ? { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) } : loop))
         }
