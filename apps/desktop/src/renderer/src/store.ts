@@ -199,6 +199,7 @@ import {
   tabStillOpen,
   titleWorkbenchSurface,
   topicIdForSession,
+  updateWorkbenchRegion,
   workbenchSurfaces,
   workspaceForSession,
   type AgentWorkbenchSurface,
@@ -957,7 +958,7 @@ function projectRecoveredSession(
   state: AppState,
   previousSessionId: string,
   session: SessionSnapshot
-): Pick<AppState, 'sessions' | 'tabs'> {
+): Pick<AppState, 'sessions' | 'tabs' | 'agentFocus'> {
   const tabs = { ...state.tabs }
   if (session.id !== previousSessionId) {
     for (const tab of Object.values(state.tabs)) {
@@ -967,10 +968,10 @@ function projectRecoveredSession(
           isSessionSurface(surface) &&
           surface.sessionId === previousSessionId
         ) {
-          nextTab = replaceWorkbenchRegion(nextTab, surface.regionId, {
+          nextTab = updateWorkbenchRegion(nextTab, surface.regionId, () => ({
             ...surface,
             sessionId: session.id
-          })
+          }))
         }
       }
       if (nextTab !== tab) tabs[tab.id] = nextTab
@@ -978,6 +979,9 @@ function projectRecoveredSession(
   }
   return {
     tabs,
+    agentFocus: state.agentFocus.execution.sessionId === previousSessionId
+      ? focusExecution(state.agentFocus, session.id)
+      : state.agentFocus,
     sessions: [
       ...state.sessions.filter((item) => item.id !== previousSessionId && item.id !== session.id),
       session
