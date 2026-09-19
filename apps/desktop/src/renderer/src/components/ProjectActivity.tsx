@@ -85,10 +85,12 @@ function contextMeta(group: ActivityGroup): string | null {
 
 export function ProjectActivity({
   sessions,
-  contexts = []
+  contexts = [],
+  compact = false
 }: {
   sessions: SessionSnapshot[]
   contexts?: readonly ActivityContextInput[]
+  compact?: boolean
 }) {
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
@@ -115,6 +117,8 @@ export function ProjectActivity({
     { key: 'done', count: done, icon: 'completed' as const, label: 'Completed' }
   ].filter((metric) => metric.count > 0)
   const hasActivity = metrics.length > 0
+  const attentionMetrics = metrics.filter((metric) => metric.key === 'needs-you' || metric.key === 'error')
+  const visibleMetrics = compact ? (attentionMetrics.length > 0 ? attentionMetrics : metrics.slice(0, 1)) : metrics
   useEffect(() => {
     if (!open || !hasActivity) return
     let timer: ReturnType<typeof setInterval> | undefined
@@ -141,7 +145,7 @@ export function ProjectActivity({
   return <DropdownMenu.Root onOpenChange={setOpen}>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={`${metricLabel} · ${details}`} aria-label={`${metricLabel}. ${details}`}>
       <span className="project-activity__metrics" aria-hidden="true">
-        {metrics.map((metric) => (
+        {visibleMetrics.map((metric) => (
           <span key={metric.key} className={`project-activity__metric project-activity__metric--${metric.key}`}>
             <SemanticIcon name={metric.icon} size={12} />
             <strong>{metric.count}</strong>
@@ -151,6 +155,7 @@ export function ProjectActivity({
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu project-activity-menu" side="right" align="start" sideOffset={4}>
       <DropdownMenu.Label className="composer-menu__hint">Activity by work line · select a row to open</DropdownMenu.Label>
+      {compact ? <DropdownMenu.Label className="composer-menu__hint">{metricLabel}</DropdownMenu.Label> : null}
       {groups.map((group) => {
         const first = group.sessions[0]
         if (!first) return null

@@ -331,7 +331,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     // 此前这一支两侧都无人守——把渲染兜底的 Sparkles 换成终端图标、或让纯函数把 launcher 归成
     // terminal 标记，两种变异都在 20 条全绿下存活。
     const html = render(tabWith(launcherSurface('region-0'), terminalSurface('region-1', 'session-a')))
-    expect(html).toContain('lucide-sparkles')
+    expect(html).toContain('lucide-panels-top-left')
     expect(html).toContain('lucide-square-terminal')
     // 两个：launcher 与终端画出来不一样，都要在（若被折成一种，这里只剩一个）。
     expect(html.match(/<svg/g)).toHaveLength(2)

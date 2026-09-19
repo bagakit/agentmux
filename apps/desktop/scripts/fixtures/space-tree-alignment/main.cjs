@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
     const input = (method, params) => win.webContents.debugger.sendCommand(method, params)
     await input('Emulation.setFocusEmulationEnabled', { enabled: true })
     const click = async selector => {
-      const r = await read(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.x + r.width/2, y:r.y + r.height/2} })()`)
+      const r = await read(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({block:'nearest'}); const r = node.getBoundingClientRect(); return {x:r.x + r.width/2, y:r.y + r.height/2} })()`)
       for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...r })
     }
     for (const tier of ['compact', 'dense']) {
@@ -117,6 +117,80 @@ app.whenReady().then(async () => {
     assert.ok(result.collapsed.scroll.scrollWidth <= result.collapsed.scroll.clientWidth)
     assert.deepEqual(result.collapsed.original, original)
     await capture('collapsed.png')
+    const savedDisclosure = await read('window.spaceTreeDisclosure()')
+    const savedScroll = await read('document.querySelector(".space-tree").scrollTop')
+    const press = async key => {
+      const codes = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, Escape: 27, Enter: 13 }
+      for (const type of ['keyDown', 'keyUp']) await input('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: codes[key], ...(key === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+    }
+    await click('[aria-label="Find Spaces"]')
+    await input('Input.insertText', { text: 'core' })
+    await until('!!document.querySelector(\'[data-workspace-id="core"]\') && !document.querySelector(\'[data-workspace-id="beta"]\')')
+    result.found = await read('window.spaceTreeGeometry()')
+    assert.equal(result.found.topicCount, 0)
+    assert.ok(result.found.alpha && result.found.core, 'search reveals the original collapsed ancestor and its matching child')
+    assert.deepEqual(await read('window.spaceTreeDisclosure()'), savedDisclosure)
+    await capture('found.png')
+    await click('[data-workspace-id="core"]')
+    await read('window.spaceTreeOpenCalls.length = 0')
+    await press('ArrowLeft')
+    assert.equal(await read('document.activeElement.dataset.workspaceId'), 'alpha')
+    await press('ArrowRight')
+    assert.equal(await read('document.activeElement.dataset.workspaceId'), 'core')
+    await press('Home')
+    assert.equal(await read('document.activeElement.dataset.spaceNav'), 'space:topics')
+    await press('End')
+    assert.equal(await read('document.activeElement.dataset.workspaceId'), 'core')
+    assert.deepEqual(await read('window.spaceTreeOpenCalls'), [], 'protocol navigation focuses without activating')
+    await press('Enter')
+    assert.deepEqual(await read('window.spaceTreeOpenCalls'), [{ kind: 'folder', id: 'core' }], 'native Enter reaches the exact original Folder owner')
+    await click('[aria-label="Find Spaces"]')
+    await press('Escape')
+    await until('document.querySelector(\'[aria-label="Find Spaces"]\').value === "" && window.spaceTreeGeometry().topicCount === 13')
+    assert.deepEqual(await read('window.spaceTreeDisclosure()'), savedDisclosure)
+    assert.equal(await read('document.querySelector(".space-tree").scrollTop'), savedScroll)
+    assert.ok(!await read('!!document.querySelector(\'[data-workspace-id="alpha"]\')'))
+    await input('Input.insertText', { text: 'nothing-available' })
+    await until('document.querySelectorAll(".space-tree-empty").length === 2')
+    assert.equal(await read('document.querySelectorAll(".space-topic-row, [data-workspace-id]").length'), 0)
+    await capture('no-results.png')
+    await click('[aria-label="Clear Space search"]')
+    await until('window.spaceTreeGeometry().topicCount === 13')
+    assert.equal(await read('document.querySelector(".space-tree").scrollTop'), savedScroll)
+    assert.deepEqual(await read('window.spaceTreeDisclosure()'), savedDisclosure)
+    assert.deepEqual((await read('window.spaceTreeGeometry()')).original, original)
+    await capture('restored.png')
+    result.navigation = { input: 'CDP Input.insertText and keyDown/keyUp through actual mounted handlers', query: 'core', savedDisclosure, savedScroll, preserved: true, exactFolderEnter: true }
+    await read('document.querySelector(\'[aria-label="Edit Mote SOUL.md"]\').focus()')
+    assert.equal(await read('getComputedStyle(document.activeElement).opacity'), '1', 'the quiet edit action becomes visible at keyboard focus')
+    const hover = await read('(() => { const node = document.querySelector(".space-topic-row"); node.scrollIntoView({block:"nearest"}); const r = node.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 } })()')
+    await input('Input.dispatchMouseEvent', { type: 'mouseMoved', ...hover })
+    await read('Promise.all(document.querySelector(".space-topic-row").getAnimations().map(animation => animation.finished))')
+    result.visual = await read(`(() => {
+      const active = document.querySelector('.project-rail-row--active')
+      const plain = document.querySelector('.space-topic-row')
+      const ordinaryWeight = getComputedStyle(plain.querySelector('strong')).fontWeight
+      const hoverFill = getComputedStyle(plain).backgroundColor
+      return { hovered: plain.matches(':hover'), selectedFill: getComputedStyle(active).backgroundColor, hoverFill, ordinaryWeight,
+        selectedWeight: getComputedStyle(active.querySelector('strong')).fontWeight,
+        topicGlyphs: document.querySelectorAll('.space-topic-row .project-rail-row__icon svg').length }
+    })()`)
+    assert.equal(result.visual.topicGlyphs, 0, 'identical Topic glyphs do not consume attention')
+    assert.equal(result.visual.hovered, true, 'the pointer actually hovers a visible Topic row')
+    assert.ok(Number(result.visual.selectedWeight) > Number(result.visual.ordinaryWeight))
+    assert.notEqual(result.visual.selectedFill, result.visual.hoverFill, 'selected and hover surfaces remain distinguishable')
+    await click('.space-folders-row')
+    await until('!document.querySelector("[data-workspace-id]")')
+    assert.equal((await read('window.spaceTreeGeometry()')).topicCount, 13)
+    const folderSummary = await read('(() => { const node = document.querySelector(".space-folders-heading .project-activity"); const row = document.querySelector(".space-folders-row"); return { label: node.getAttribute("aria-label"), metrics: node.querySelectorAll(".project-activity__metric").length, width: row.querySelector("strong").getBoundingClientRect().width, right: node.getBoundingClientRect().right } })()')
+    assert.ok(folderSummary.label.includes('1 Needs you') && folderSummary.label.includes('1 Error') && folderSummary.label.includes('2 Working'))
+    assert.equal(folderSummary.metrics, 2)
+    assert.ok(folderSummary.width > 0 && folderSummary.right <= result.narrow.width)
+    assert.deepEqual((await read('window.spaceTreeGeometry()')).original, original)
+    result.folderSummary = folderSummary
+    await press('ArrowRight')
+    await until('!!document.querySelector("[data-workspace-id]")')
+    assert.equal(await read('window.spaceTreeDisclosure()["space:folders"]'), undefined)
     result.passed = true
   } catch (error) { result.failure = { message: error.message, stack: error.stack } }
   finally {
