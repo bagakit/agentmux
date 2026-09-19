@@ -88,10 +88,22 @@ export function HostSettingsPane({ config, onSave }: {
               <header>
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'This Mac'}</small></div>
-                {check ? <span className={`check-pill check-pill--${check.state}`}>{check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check.state === 'ready' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}{check.state === 'checking' ? 'Testing' : check.detail}</span> : null}
+                {check ? (
+                  <span role="status" className={`check-pill check-pill--${check.state}`}>
+                    {check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> :
+                      check.state === 'ready' ? <CheckCircle2 size={13} /> : check.state === 'error' ? <XCircle size={13} /> : null}
+                    {{ checking: 'Testing', ready: 'Ready', error: check.result ? 'Unavailable' : 'Check failed', idle: 'Not tested' }[check.state]}
+                  </span>
+                ) : null}
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
               </header>
+              {check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
+                <details className="host-check-details">
+                  <summary>Test details <ChevronDown size={13} /></summary>
+                  <p className="host-check-detail">{check.detail}</p>
+                </details>
+              ) : <p className="host-check-detail">{check.detail}</p> : null}
               {host.kind === 'ssh' ? (
                 <HostConnectionFields
                   host={host}
@@ -137,7 +149,7 @@ function HostConnectionFields({ host, onChange, onClear }: {
         <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="optional" /></label>
         <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="22" /></label>
         <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-        <p className="field-hint host-edit-grid__wide">Remote agent sessions are not available yet. You can save and test this connection.</p>
+        <p className="field-hint host-edit-grid__wide">Remote sessions and saving SSH connections are unavailable. Changes stay in your draft.</p>
       </div>
     </details>
   )
