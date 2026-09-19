@@ -278,7 +278,11 @@ export function AgentSessionComposer({
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
-        if (workspace) void useAppStore.getState().openFile(path, undefined, undefined, workspace.id).catch(reportError)
+        if (workspace) {
+          const store = useAppStore.getState()
+          void store.selectWorkspace(workspace.id).catch(reportError)
+          void store.openFile(path, undefined, undefined, workspace.id).catch(reportError)
+        }
       }}
       commands={commandCandidates}
       promptKeywords={keywordCandidates}
