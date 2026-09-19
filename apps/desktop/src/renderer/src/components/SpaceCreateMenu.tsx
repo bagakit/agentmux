@@ -1,5 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { FolderOpen, NotebookText, Plus, Sparkles } from 'lucide-react'
+import { FolderOpen, NotebookText, Plus } from 'lucide-react'
+import { MoteIcon } from './MoteIcon'
 import { useState } from 'react'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -26,7 +27,7 @@ export function SpaceCreateMenu({ onOpenFolder }: { onOpenFolder(): Promise<void
             <NotebookText size={14} /><span>Create Another Topic</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic('mote'))}>
-            <Sparkles size={14} /><span>Create Mote</span>
+            <MoteIcon size={14} /><span>Create Mote</span>
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

@@ -32,6 +32,7 @@ const topics = [
 api.scratch.listTopics = async () => topics
 api.workspaces.appearance = async () => ({ kind: 'directory', icon: null })
 api.config.save = async updated => { useAppStore.setState({ config: updated }); return updated }
+window.spaceTreeOpenCalls = []
 useAppStore.setState({
   config: { ...config, workspaces: [
     folder(SCRATCH_WORKSPACE_ID, 'Topics', '/topics'),
@@ -41,9 +42,12 @@ useAppStore.setState({
     folder('beta', 'Beta', '/work/beta')
   ] },
   sessions, layouts, tabs, activeWorkspaceId: 'standalone',
-  collapsedProjectGroups: {}, pinnedItems: {}, scratchTopicOrder: [], workspaceFileRevisions: {}
+  collapsedProjectGroups: {}, pinnedItems: {}, scratchTopicOrder: [], workspaceFileRevisions: {},
+  selectWorkspace: async id => { window.spaceTreeOpenCalls.push({ kind: 'folder', id }) },
+  openScratchTopic: async (id, workspaceId) => { window.spaceTreeOpenCalls.push({ kind: 'topic', id, workspaceId }) }
 })
 window.spaceTreeBaseline = { sessions, tabs, layouts }
+window.spaceTreeDisclosure = () => useAppStore.getState().collapsedProjectGroups
 const rect = node => {
   if (!node) return null
   const { x, y, width, height, right, bottom } = node.getBoundingClientRect()

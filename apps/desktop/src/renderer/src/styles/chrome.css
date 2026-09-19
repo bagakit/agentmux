@@ -91,11 +91,21 @@
   opacity: .78;
 }
 .sidebar__heading-actions { display: flex; align-items: center; gap:1px; }
+.space-tree-search { display: flex; align-items: center; gap: var(--sp-3); min-height: 26px; margin: 0 var(--sp-4) var(--sp-4); padding: 0 var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-3); }
+.space-tree-search:focus-within { border-color: var(--focus-line); }
+.space-tree-search > svg { flex: 0 0 auto; }
+.space-tree-search input { width: 100%; min-width: 0; padding: var(--sp-2) 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--fs-meta); }
+.space-tree-search input::placeholder { color: var(--text-3); }
+.space-tree-search input::-webkit-search-cancel-button { display: none; }
+.space-tree-search .icon-button { flex: 0 0 20px; width: 20px; height: 20px; }
+.space-tree-empty { margin: var(--sp-2) var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .space-tree { min-height: 0; flex: 1; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); }
 .space-topics-tree, .space-topic-children, .space-tree-entry, .project-list { display: grid; align-content: start; gap: var(--sp-1); }
 .space-topic-children { position: relative; }
 .space-topic-children::before { content: ''; position: absolute; top: 0; bottom: var(--sp-2); left: calc(var(--sp-4) + 9px); width: 1px; background: var(--line-soft); opacity: .8; pointer-events: none; }
 .project-list > .sidebar__section-heading { margin-top: var(--sp-6); margin-left: var(--sp-4); }
+.space-folders-heading { margin-top: var(--sp-5); }
+.space-folders-row > small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 /* 一组同处一个父目录的 Project。组之间留一点空档，让分组头归属于它下面那几行而不是漂在中间。 */
 .project-rail-group { display: grid; align-content: start; gap:var(--sp-1); }
 .project-rail-group + .project-rail-group { margin-top:var(--sp-2); }
@@ -130,8 +140,8 @@
 .project-rail-group__label {
   min-width: 0;
   overflow: hidden;
-  font-size: var(--fs-micro); font-weight: 560;
-  letter-spacing: .07em; text-transform: uppercase;
+  font-size: var(--fs-micro); font-weight: 500;
+  letter-spacing: .04em; text-transform: none;
   text-overflow: ellipsis; white-space: nowrap;
 }
 /* 折叠后才出现的地址。等宽体现"这是一条路径"，且从末尾保留几段（railGroupAddress 已经砍过头部，
@@ -153,19 +163,23 @@
 .project-rail-row__collapse:hover { color: var(--text); background: var(--surface-2); }
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text); background: var(--surface-2); }
-.project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
+.project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
+.project-rail-row--active .project-rail-row__identity strong { font-weight: 620; }
 .project-rail-row__icon { width: var(--rail-icon, 16px); height: var(--rail-icon, 16px); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
 .project-rail-row__icon > svg { width: 100%; height: 100%; }
 .space-mote-row .project-rail-row__icon { color: var(--green-2); }
 .space-topics-row > small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.space-topic-row .project-rail-row__identity strong { font-size: var(--fs-micro); font-weight: 560; }
+.space-topic-row .project-rail-row__identity strong { font-size: var(--fs-meta); font-weight: 500; }
+.space-topic-row.project-rail-row--active .project-rail-row__identity strong { font-weight: 620; }
 .space-topic-row .project-rail-row__icon > svg { width: calc(100% - 2px); height: calc(100% - 2px); }
-.space-mote-edit.icon-button { flex: 0 0 var(--rail-row-min); width: var(--rail-row-min); height: var(--rail-row-min); color: var(--text-3); }
+.space-mote-edit.icon-button { flex: 0 0 var(--rail-row-min); width: var(--rail-row-min); height: var(--rail-row-min); color: var(--text-3); opacity: 0; pointer-events: none; }
+.space-tree-entry:hover .space-mote-edit, .space-tree-entry:focus-within .space-mote-edit { opacity: 1; pointer-events: auto; }
 .space-tree button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 /* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
    小字跟在标题之后而不是它下面，且只有真的有话说时才在场——本机 host 不占位。 */
 .project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
-.project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 500; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.space-topics-row .project-rail-row__identity strong, .space-folders-row .project-rail-row__identity strong { font-weight: 600; }
 .project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */

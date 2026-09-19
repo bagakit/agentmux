@@ -104,6 +104,7 @@ function session(
   return {
     id,
     kind: 'agent',
+    agentSessionUpdatedAt: 1,
     providerId: 'codex',
     executorId: 'codex',
     capabilities: {
@@ -237,7 +238,7 @@ describe('Project Rail selection and running signals', () => {
     expect(markup).not.toContain('1 Running')
   })
 
-  it('uses the same icon plus number structure for working and idle', () => {
+  it('keeps the most relevant icon plus number compact while retaining the complete accessible summary', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [
       session('a1', '/alpha', 'working'),
@@ -248,7 +249,8 @@ describe('Project Rail selection and running signals', () => {
     const working = markup.match(/project-activity__metric--working[\s\S]*?<strong>([^<]*)<\/strong>/)?.[1]
     const idle = markup.match(/project-activity__metric--idle[\s\S]*?<strong>([^<]*)<\/strong>/)?.[1]
     expect(working).toBe('2')
-    expect(idle).toBe('1')
+    expect(idle).toBeUndefined()
+    expect(markup).toContain('2 Working · 1 Idle')
   })
 
   it('shares the row icon slot while giving Topics its own identity', () => {
@@ -257,8 +259,8 @@ describe('Project Rail selection and running signals', () => {
     const projectRows = [...markup.matchAll(/<button[^>]+class="project-rail-row(?:"| )[^>]*>[\s\S]*?<\/button>/g)]
       .map((match) => match[0])
       .filter((row) => row.includes('project-rail-row__identity'))
-    expect(projectRows).toHaveLength(5)
-    const regularRows = projectRows.filter((row) => !row.includes('aria-label="Topics overview"') && !row.includes('space-mote-row'))
+    expect(projectRows).toHaveLength(6)
+    const regularRows = projectRows.filter((row) => row.includes('data-workspace-id='))
     expect(regularRows).toHaveLength(3)
     expect(regularRows.every((row) => row.includes('project-rail-row__icon'))).toBe(true)
     expect(rowFor(markup, 'Topics overview')).toContain('lucide-notebook-text')

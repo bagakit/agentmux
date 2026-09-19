@@ -1,7 +1,8 @@
-import { Bolt, Flame, Shield, Sparkles } from 'lucide-react'
+import { Bolt, Flame, Shield } from 'lucide-react'
+import { MoteIcon } from './MoteIcon'
 import type { AgentAvatarBadge } from '../../../shared/contracts'
 
-const BADGE_ICONS = { spark: Sparkles, bolt: Bolt, shield: Shield, flame: Flame } as const
+const BADGE_ICONS = { spark: MoteIcon, bolt: Bolt, shield: Shield, flame: Flame } as const
 
 export function AgentAvatarBadgeIcon({ badge, size = 8 }: { badge: AgentAvatarBadge; size?: number }) {
   const Icon = BADGE_ICONS[badge]
