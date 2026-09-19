@@ -1098,6 +1098,7 @@ export class RuntimeController {
         const status = await host.client.statusAgent(loop.agentSessionId)
         return {
           session: status.session,
+          observation: status.observation,
           tickId,
           now
         }
