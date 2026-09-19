@@ -29,6 +29,7 @@ const critical = [join(oldArtifacts, 'manifest.json'), join(oldArtifacts, 'bin/c
 const inputsBefore = Object.fromEntries(await Promise.all(critical.map(async (p) => [p, await sha(p)])))
 const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-install-proof-"))
 const previousEnv = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const previousState = process.env.AGENTMUX_STATE_DIRECTORY
 const records = [], cleanupErrors = []
 let failure
 const relative = 'Contents/Resources/app/node_modules/@agentmux/core'
@@ -58,6 +59,7 @@ async function scenario(name) {
   const backup = join(directory, 'Trash/PrivateAgentMux.previous.app')
   const runtimeDir = join(directory, 'runtime'), socket = join(runtimeDir, 'ctxmux.sock'), state = join(runtimeDir, 'state')
   process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDir
+  process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDir, 'state')
   const old = await app(current, false); await app(next, true)
   await mkdir(runtimeDir); await mkdir(dirname(backup), { recursive: true })
   if (name === 'no-listener') {
@@ -229,6 +231,8 @@ try {
 finally {
   if (previousEnv === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = previousEnv
+  if (previousState === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+  else process.env.AGENTMUX_STATE_DIRECTORY = previousState
   let rootRemoved = false
   if (cleanupErrors.length === 0) { await rm(root, { recursive: true, force: true }); rootRemoved = true }
   const inputsAfter = Object.fromEntries(await Promise.all(critical.map(async (p) => [p, await sha(p)])))

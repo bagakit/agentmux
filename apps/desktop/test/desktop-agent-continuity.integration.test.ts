@@ -38,6 +38,7 @@ const agentSessionRestartWorker = fileURLToPath(new URL('./fixtures/agent-sessio
 const roots: string[] = []
 const runtimeDirectories: string[] = []
 const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const originalStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 let activeRuntime: RuntimeController | undefined
 let activeSessionControl: SessionControl | undefined
 let activePid: number | undefined
@@ -171,6 +172,8 @@ afterEach(async () => {
   }
   if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
+  if (originalStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+  else process.env.AGENTMUX_STATE_DIRECTORY = originalStateDirectory
 
   for (const runtimeDirectory of runtimeDirectories.splice(0)) {
     try {
@@ -196,11 +199,12 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     const runtimeDirectory = join(root, 'runtime')
     runtimeDirectories.push(runtimeDirectory)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'state')
     const storePath = join(root, 'sessions.json')
     const runWorker = async (mode: string, runId?: string) => {
       const result = await execFileAsync(process.execPath, [
         terminalSizeRestartWorker, mode, root, storePath, ...(runId ? [runId] : [])
-      ], { env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory }, timeout: 15_000 })
+      ], { env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state') }, timeout: 15_000 })
       return JSON.parse(result.stdout.trim()) as {
         clientPid: number; daemonInstance: string
         run: { runId: string; pid: number; cols: number; rows: number; state: string }
@@ -256,11 +260,12 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     const runtimeDirectory = join(root, 'runtime')
     runtimeDirectories.push(runtimeDirectory)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'state')
     const storePath = join(root, 'sessions.json')
     const worker = async (mode: string, runId?: string) => {
       const result = await execFileAsync(process.execPath, [agentSessionRestartWorker, mode, root,
         storePath, fakeCodexFixture, ...(runId ? [runId] : [])], {
-        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory }, timeout: 25_000
+        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state') }, timeout: 25_000
       })
       return JSON.parse(result.stdout.trim())
     }
@@ -298,6 +303,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     const runtimeDirectory = join(root, 'runtime')
     runtimeDirectories.push(runtimeDirectory)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'state')
     const sessionStorePath = join(root, 'agent-sessions.json')
     const workspace = join(root, 'workspace')
     await mkdir(workspace, { recursive: true, mode: 0o700 })

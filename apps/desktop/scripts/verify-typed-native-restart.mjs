@@ -30,7 +30,7 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'patches/@xterm__xterm@6.1.0-beta.303.patch'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 let client
 await fs.mkdir(evidence, { recursive: true })
 try {
@@ -64,6 +64,7 @@ try {
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
+    process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
     process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
     client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
     receipt.runtimeIdentity = client.runtimeIdentity()
@@ -85,6 +86,7 @@ finally {
   try {
     if (!client) {
       process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
+      process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
       process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
       // A failed build has no Runtime to stop and must not create one during cleanup.
       if (receipt.phases.length > 0) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })

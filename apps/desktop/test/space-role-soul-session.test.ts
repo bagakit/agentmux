@@ -54,7 +54,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-soul-session-'))); roots.push(root)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'folder' }
   const topics = new ScratchTopics()
   const template = new AgentProviderRegistry().get('codex')
