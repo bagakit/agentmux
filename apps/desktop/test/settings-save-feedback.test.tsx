@@ -62,7 +62,7 @@ it('keeps an unsaved SSH host across cloned configuration and saves the original
   expect(onSave).toHaveBeenCalledWith([
     composerConfig.hosts[0],
     expect.objectContaining({ kind: 'ssh', hostname: 'host.example.test', label: 'Remote host' })
-  ], composerConfig.workspaces)
+  ], composerConfig.workspaces, { hosts: composerConfig.hosts, workspaces: composerConfig.workspaces })
 })
 
 it('keeps prompt edits across cloned saved arrays', async () => {
