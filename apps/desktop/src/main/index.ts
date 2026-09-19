@@ -31,7 +31,7 @@ import { windowOpenOutcome, windowSecurityWebPreferences } from './window-securi
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
-import { summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
+import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const startupAttemptId = randomUUID()
@@ -279,7 +279,14 @@ function startPrimaryInstance(): void {
         // advance the renderer generation and reject healthy Session Attachments that are
         // already in flight, leaving their Regions stuck on Connecting.
         reportStartupStage('before-load-file')
-        await window.loadFile(packagedRendererPath, probeQuery ? { query: probeQuery } : undefined)
+        const recoverySeed = process.env.AGENTMUX_DESKTOP_RECOVERY_REPORT
+          ? process.env.AGENTMUX_DESKTOP_RECOVERY_SEED
+          : undefined
+        const releaseSeed = recoverySeed
+          ? await installRecoverySeedBeforeLoad(window.webContents, packagedRendererPath, recoverySeed)
+          : undefined
+        try { await window.loadFile(packagedRendererPath, probeQuery ? { query: probeQuery } : undefined) }
+        finally { await releaseSeed?.() }
         reportStartupStage('after-load-file')
       } else {
         await rendererUpdates.initialize()
@@ -289,10 +296,8 @@ function startPrimaryInstance(): void {
     }
     const rendererLoadedAtMs = Date.now()
     if (process.env.AGENTMUX_DESKTOP_RECOVERY_REPORT) {
-      // This is a read-only report over the same Renderer localStorage and Core Session store used by
-      // normal startup. The first isolated launch may seed a fixture after normal hydration, then exits
-      // without letting the unload writer replace it; no probe-only layout or Session owner is introduced.
-      const recoverySeed = process.env.AGENTMUX_DESKTOP_RECOVERY_SEED
+      // The explicit private seed entered before the first application script. This report only reads
+      // the real hydrated workbench; normal persistence and ordinary exit remain active.
       await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
           const deadline = Date.now() + 20_000
           const check = () => {
@@ -302,12 +307,6 @@ function startPrimaryInstance(): void {
           }
           check()
         })`)
-      if (recoverySeed) {
-        await window.webContents.executeJavaScript(
-          `localStorage.setItem('agentmux-workbench-v1', ${JSON.stringify(recoverySeed)});`
-        )
-        await window.webContents.session.flushStorageData()
-      }
       const storage = await window.webContents.executeJavaScript(
         "localStorage.getItem('agentmux-workbench-v1')"
       ) as string | null
@@ -354,10 +353,7 @@ function startPrimaryInstance(): void {
       })}\n`, { mode: 0o600 })
       await rename(temporaryReadyPath, readyPath)
       if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
-        // `app.quit()` lets the Renderer unload handler flush its in-memory default over the probe seed.
-        // The isolated seed is already flushed above, so exit immediately for this probe-only launch.
-        if (process.env.AGENTMUX_DESKTOP_RECOVERY_SEED) app.exit(0)
-        else app.quit()
+        app.quit()
         return
       }
     }

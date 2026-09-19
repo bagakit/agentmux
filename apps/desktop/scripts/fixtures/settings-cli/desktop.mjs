@@ -49,7 +49,7 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
     }
     const readyFile = join(root, `ready-${label}.json`), report = join(root, 'seed-report.json')
     const executable = packagedApplication ? join(packagedApplication, 'Contents/MacOS/AgentMux') : require('electron')
-    const args = ['--inspect-brk=0', ...(packagedApplication ? [] : [join(desktopRoot, 'out/main/index.js')]), '--remote-debugging-port=0']
+    const args = ['--inspect-brk=0', ...(packagedApplication ? [] : [join(desktopRoot, 'out/main/index.js')]), '--remote-debugging-port=0', `--user-data-dir=${environment.AGENTMUX_DESKTOP_USER_DATA}`]
     const child = spawn(executable, args, {
       cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, ...environment, AGENTMUX_DESKTOP_READY_FILE: readyFile,
@@ -76,7 +76,7 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
       line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")') ? [index] : []
     ))
     assert.equal(anchors.length, 1, 'Private home isolation needs the exact compiled home boundary')
-    const breakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
+    const breakpoint = await main.call('Debugger.setBreakpointByUrl', { urlRegex: mainPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', lineNumber: anchors[0] })
     await main.call('Runtime.runIfWaitingForDebugger')
     let paused = await waitFor(`${label} bootstrap pause`, () => main.pauses.shift())
     if (!paused.hitBreakpoints?.includes(breakpoint.breakpointId)) {
@@ -102,7 +102,7 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
     }
     await main.call('Debugger.resume')
     const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
-    const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json())
+    const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(5_000) })).json())
       .find(item => item.type === 'page' && item.url.startsWith('file:')))
     const cdp = await connectCdp(target.webSocketDebuggerUrl, connections)
     await cdp.call('Runtime.enable'); await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })

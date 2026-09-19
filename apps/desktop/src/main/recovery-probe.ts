@@ -1,10 +1,40 @@
 /**
- * Small, read-only projections used by the real Electron restart probe.
+ * The explicit private seed and read-only projections used by the real Electron restart probe.
  *
  * The probe must inspect the same durable records the application reads. It must not create a second
- * layout or Session store just for verification, so this module only parses the persisted Zustand
- * projection and the Core-owned Session store and returns identity-bearing summaries.
+ * layout or Session store just for verification. The seed is delivered before application scripts;
+ * reports read the same persisted Zustand projection and Core-owned Session store.
  */
+
+import type { WebContents } from 'electron'
+import { pathToFileURL } from 'node:url'
+
+/** Only the explicit private recovery launch calls this, before loading the product document. */
+export async function installRecoverySeedBeforeLoad(
+  contents: Pick<WebContents, 'loadURL' | 'debugger'>,
+  rendererFile: string,
+  seed: string
+): Promise<() => Promise<void>> {
+  // CDP needs an initialized target. This blank document has no application scripts or Store.
+  await contents.loadURL('about:blank')
+  const debuggerOwner = contents.debugger
+  debuggerOwner.attach('1.3')
+  try {
+    await debuggerOwner.sendCommand('Page.enable')
+    const { identifier } = await debuggerOwner.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+      source: `if (window === top && location.href.split(/[?#]/, 1)[0] === ${JSON.stringify(pathToFileURL(rendererFile).href)}) {
+        localStorage.setItem('agentmux-workbench-v1', ${JSON.stringify(seed)});
+      }`
+    })
+    return async () => {
+      try { await debuggerOwner.sendCommand('Page.removeScriptToEvaluateOnNewDocument', { identifier }) }
+      finally { if (debuggerOwner.isAttached()) debuggerOwner.detach() }
+    }
+  } catch (error) {
+    if (debuggerOwner.isAttached()) debuggerOwner.detach()
+    throw error
+  }
+}
 
 export type RecoveryWorkbenchSummary = {
   storagePresent: boolean
