@@ -929,6 +929,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - 决定发送、Host 接受、Provider 消费/新一轮开始分别记录，不能观察时标 unknown。结果未知不自动重发；检查与最小回执持久保存，界面重载不得造成双发。
 - 应用退出或休眠期间不承诺调度；恢复后仅重新检查一次，不集中补发漏掉的周期。配置不依赖模型内部 Cron、调用者 shell 环境、临时终端或 UI 定时器。同一精确目标至多一个活动循环；接管内部 /loop 时提示用户停用旧循环，不声称可以自动检测和删除它。
 - 可选绑定 Feature Tracker 等只读任务来源。无绑定时可设置截止时间/触发上限，只称定时续行，不能证明业务完成。Tracker 全部 Task done 但未 closeout 仍未完成；closeout 是待推进工作。archived 表示完成，discarded/transferred 表示终止或转交，不能都显示业务成功。依赖阻塞与任务来源不可读必须分别说明。
+- 任务来源由用户显式绑定 root、Feature ID 和公开脚本；每次仅核一项公开 owner receipt，不重算 Task frontier。全部 Task done 待收口只暂停并说明，归档才可称业务完成；终止、转交、不可读不冒充成功。来源检查不改变旧未知输入操作，人工输入保持可用。
 - 无可运行项时展示阻塞原因，不空发相同提示。空转提醒必须有任务适配器声明的进展证据；token、输出量、一次测试通过不能单独证明完成。
 - 暂不包含自动批准权限、多 Agent DAG、模型切换、部署或成本优化。现有 Core 输入与生命周期 API 是唯一执行边界，续行策略由 Host 持有，不下沉到 ctxmux。
 - 观察界面见 [Surface density](agentmux-surface-density.md#持续推进观察界面)。评估与验收建议见 [AFTERTIME intake](../reviews/continuous-progress.md)。
