@@ -1,15 +1,15 @@
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, type AppConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 
-function equal(a: unknown, b: unknown): boolean {
+export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
   if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
   if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => equal(value, b[index]))
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => configValuesEqual(value, b[index]))
   }
   const left = a as Record<string, unknown>, right = b as Record<string, unknown>
   const keys = Object.keys(left)
-  return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && equal(left[key], right[key]))
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && configValuesEqual(left[key], right[key]))
 }
 
 function effective(path: string, value: unknown): unknown {
@@ -31,8 +31,8 @@ export class ConfigConflict extends Error {
 /** Apply only authored differences; this is an internal edit, never a public path setter. */
 export function applyConfigEdit(current: AppConfig, before: AppConfig, after: AppConfig): AppConfig {
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
-    if (equal(effective(path, expected), effective(path, requested))) return actual
-    if (equal(effective(path, actual), effective(path, requested))) return actual
+    if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
+    if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     if (Array.isArray(expected) && Array.isArray(requested) && Array.isArray(actual) &&
         (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts')) {
       type RecordWithId = { id: string }
@@ -58,7 +58,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
       }
       return result
     }
-    if (!equal(effective(path, actual), effective(path, expected))) throw new ConfigConflict(path)
+    if (!configValuesEqual(effective(path, actual), effective(path, expected))) throw new ConfigConflict(path)
     return requested
   }
   return merge(current, before, after, '') as AppConfig

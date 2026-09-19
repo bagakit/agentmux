@@ -153,10 +153,10 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
     await api.config.save({ ...current, notifications }, { ...current, notifications: expected })
   }
 
-  async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[]): Promise<void> {
+  async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    await api.config.save({ ...current, hosts, workspaces }, current)
+    await api.config.save({ ...current, hosts, workspaces }, { ...current, ...expected })
   }
 
   async function saveBrowser(browser: BrowserConfig): Promise<void> {
