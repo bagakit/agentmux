@@ -1,3 +1,4 @@
+import { observeAgent } from '@agentmux/core'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -12,6 +13,7 @@ describe('ContinuousProgressLoopManager', () => {
     const observe = async (_loop: unknown, tickId: string) => ({
       session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w',
         run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: completedAt } },
+      observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: completedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now),
       tickId, now
     })
     const send = async () => {
@@ -62,6 +64,7 @@ describe('ContinuousProgressLoopManager', () => {
 const observedDone = async (_loop: unknown, tickId: string) => ({
   session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w',
     run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 } },
+  observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 1 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 0),
   tickId, now: 0
 })
 it('restores an interrupted claim as unknown and resumes using the original operation identity', async () => {
