@@ -461,7 +461,7 @@ describe('revision-aware file save Store', () => {
     })
 
     let close: Promise<boolean> | undefined
-    let reopen: Promise<void> | undefined
+    let reopen: Promise<boolean> | undefined
     let triggered = false
     const unsubscribe = useAppStore.subscribe((state) => {
       if (triggered || !state.documents[key]) return

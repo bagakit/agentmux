@@ -586,7 +586,7 @@ export function TerminalView({
                 link: match,
                 local: workspaceIsLocalRef.current,
                 openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
-                openFile: (link) => openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId)
+                openFile: async (link) => { await openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId) }
               }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
