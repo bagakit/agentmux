@@ -6,6 +6,7 @@ import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, agentPromptConditi
 const [root, mode] = process.argv.slice(2)
 assert.ok(mode === 'counter' || mode === 'restore')
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(root, 'runtime')
+process.env.AGENTMUX_STATE_DIRECTORY = path.join(root, 'durable')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(root, 'messages.ndjson')
 const file = path.join(root, 'partial-sessions.json'), id = 'actual-native-partial-prompt'
 const clients = [], store = new AgentMuxFileAgentSessionStore(file)

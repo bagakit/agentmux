@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
+import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
@@ -1736,8 +1736,7 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 export function defaultAgentMuxAgentSessionStorePath(): string {
   // The process that owns the durable location (the desktop, which knows Electron userData) tells every
   // other process — including the CLI each Agent runs — where the store lives. Core must not import Electron
-  // or re-derive userData, so it learns the path only from this variable. Absent it, fall back to the
-  // machine-level runtime temp directory: the same location the daemon socket/state use.
+  // or re-derive userData. Without an explicit Store, Core owns its user-level durable location.
   const injected = process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()
   if (injected) {
     if (!isAbsolute(injected)) {
@@ -1748,7 +1747,7 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
     }
     return resolve(injected)
   }
-  return join(defaultAgentMuxRuntimeDirectory(), 'agent-sessions.json')
+  return join(defaultAgentMuxStateDirectory(), 'agent-sessions.json')
 }
 
 const requireNative = createRequire(import.meta.url)

@@ -9,12 +9,13 @@ const execFileAsync = promisify(execFile)
 const coreEntry = process.env.AGENTMUX_CORE_ENTRY
 const daemonPath = process.env.AGENTMUX_DAEMON_PATH
 const runtimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const stateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 const workload = process.env.AGENTMUX_RUN_KERNEL_WORKLOAD
 const workspace = process.env.AGENTMUX_RELIABILITY_WORKSPACE
 const sourceCommit = process.env.AGENTMUX_SOURCE_COMMIT
 const trackedDiffClean = process.env.AGENTMUX_TRACKED_DIFF_CLEAN
 assert.ok(
-  coreEntry && daemonPath && runtimeDirectory && workload && workspace &&
+  coreEntry && daemonPath && runtimeDirectory && stateDirectory && workload && workspace &&
   sourceCommit && (trackedDiffClean === '0' || trackedDiffClean === '1')
 )
 
@@ -65,7 +66,7 @@ async function daemonProcesses() {
     if (
       !command.includes(daemonPath) ||
       !command.includes(`--socket ${socketPath}`) ||
-      !command.includes(`--state-dir ${runtimeDirectory}/state`)
+      !command.includes(`--state-dir ${stateDirectory}/ctxmux`)
     ) return []
     return [Number(match[1])]
   })

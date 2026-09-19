@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -18,7 +18,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
   'AgentMux packaged-runtime reliability and resource composition',
   () => {
     it('bounds 16 Runs, slow replay, churn, daemon crash, and cleanup through public Core APIs', async () => {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-reliability-"))
+      const root = await mkdtemp(fixturePath("tmp/agentmux-reliability-"))
       roots.push(root)
       const runtimeDirectory = join(root, 'runtime')
       const workspace = join(root, 'workspace')
@@ -38,7 +38,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         maxBuffer: 4 * 1024 * 1024,
         env: {
           ...process.env,
-          AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+          AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'durable'),
           AGENTMUX_CORE_ENTRY: resolve(repositoryRoot, 'packages/core/dist/index.js'),
           AGENTMUX_DAEMON_PATH: resolve(
             repositoryRoot,

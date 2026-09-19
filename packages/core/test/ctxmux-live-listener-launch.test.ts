@@ -16,6 +16,7 @@ describe('the selected live listener is preserved when Hello cannot be accepted'
   it('does not launch another daemon when Hello fails before any Runtime identity is returned', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-live-hello-'))
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root)
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
     fixture.spawn.mockClear()
     fixture.runtimeInfo.mockRejectedValue(new Error('incompatible public Hello'))
     const server = createServer((socket) => socket.on('error', () => {}))
@@ -35,6 +36,7 @@ describe('the selected live listener is preserved when Hello cannot be accepted'
   it('still reaches the existing launch owner when the selected socket is proven absent', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-dead-hello-'))
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root)
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
     fixture.spawn.mockClear()
     fixture.runtimeInfo.mockRejectedValue(new Error('socket absent'))
     try {

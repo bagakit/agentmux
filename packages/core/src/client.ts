@@ -94,7 +94,7 @@ import {
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller, type AgentManagedHookInspection } from './managed-hook-installer.js'
-import { defaultAgentMuxMessageQueuePath, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
+import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
   type AgentMuxRuntimeProjection,
@@ -390,9 +390,10 @@ export function terminalEnvironment(
     PATH: [dirname(AGENTMUX_CLI_PATH), inheritedPath].filter(Boolean).join(delimiter),
     AGENTMUX_ENV: '1',
     AGENTMUX_CLI: AGENTMUX_CLI_PATH,
+    AGENTMUX_STATE_DIRECTORY: defaultAgentMuxStateDirectory(),
     // Tell every process AgentMux spawns where the Agent Session store lives, so the CLI an Agent runs
-    // resolves sessions out of the SAME file this Client writes — not the temp default it would otherwise
-    // reach. The path's authority is whoever constructed the store (the desktop points it at userData).
+    // resolves sessions out of the SAME file this Client writes rather than another default scope.
+    // The path's authority is whoever constructed the store (the desktop points it at userData).
     ...(agentSessionStorePath ? {
       AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath
     } : {}),
@@ -1423,6 +1424,10 @@ export class AgentMuxClient {
       arch: process.arch,
       supported: process.platform === 'darwin' && process.arch === 'arm64',
       ctxmux: {
+        state: {
+          configuredDirectory: this.kernel.stateDirectory,
+          servingDirectory: this.kernel.runtimeOwnership === 'owned' ? this.kernel.stateDirectory : null
+        },
         serving: {
           buildIdentity: identity.buildIdentity,
           protocolVersion: identity.protocolVersion,
