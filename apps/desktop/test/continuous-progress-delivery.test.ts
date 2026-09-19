@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { expect, it, vi } from 'vitest'
-import { AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
+import { observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
 const signal = new AbortController().signal
 const loop: ContinuousProgressLoop = { loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'next',
@@ -10,7 +10,7 @@ function fixture(state: 'done' | 'working' = 'done', runId = 'r', observedAt = 1
     kind: 'agent' as const, executorId: 'codex', retiredRuns: [],  createdAt: 1, updatedAt: 1,
     agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), run: { runId },
     semanticStatus: { state, source: 'native-hook' as const, observedAt }
-  }, tickId: 't', now: 1 })), submitPrompt: vi.fn(async () => {}) }
+  }, observation: observeAgent({ process: 'running', status: { state, source: 'native-hook', observedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 1), tickId: 't', now: 1 })), submitPrompt: vi.fn(async () => {}) }
 }
 it.each(['working', 'new-run', 'new-completion', 'paused'] as const)('abandons an old claim after %s', async (changed) => {
   const runtime = fixture(changed === 'working' ? 'working' : 'done', changed === 'new-run' ? 'r2' : 'r', changed === 'new-completion' ? 2 : 1)
