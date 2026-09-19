@@ -126,7 +126,7 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   vi.stubEnv('CODEX_HOME', join(directory, 'private-codex'))
-  daemon = spawn(binary, ['--socket', join(directory, 'ctxmux.sock'), '--state-dir', join(directory, 'state')], { stdio: 'ignore' })
+  daemon = spawn(binary, ['--socket', join(directory, 'ctxmux.sock'), '--state-dir', join(directory, 'state', 'ctxmux')], { stdio: 'ignore' })
   await writeFile(join(import.meta.dirname, '../../../.tmp/continuation-join/owned-processes.json'), JSON.stringify({daemonPid:daemon.pid,directory,childPid:null}))
   sdk = new CtxmuxClient({ socketPath: join(directory, 'ctxmux.sock') })
   await vi.waitFor(async () => { expect(daemon.exitCode).toBeNull(); expect((await sdk.runtimeInfo()).protocolGeneration).toBe(18) }, { timeout: 5000 })
