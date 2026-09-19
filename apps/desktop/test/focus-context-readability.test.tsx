@@ -17,7 +17,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); draws.counts = {}
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), { sessions } = await api.sessions.snapshot(), base = sessions[0]!
-  useAppStore.setState({ config, sessions: ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({ ...base, id, label: 'Codex · demo', status: { ...base.status, state: (['done', 'working', 'running', 'waiting', 'error'] as const)[i]!, observedAt: 1 } })), timelines: { a: timeline('a', [event('1', 'user_message', 'Repair scrolling'), event('2', 'assistant_message', 'Scrolling repaired and checked')]), b: timeline('b', [event('3', 'user_message', 'Measure frame latency')]) }, agentNames: {}, tabs: {}, providerCatalog: [], agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  useAppStore.setState({ config, sessions: ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({ ...base, id, label: 'Codex · demo', status: { source: base.status.source, state: (['done', 'working', 'running', 'waiting', 'error'] as const)[i]!, observedAt: 1 } })), timelines: { a: timeline('a', [event('1', 'user_message', 'Repair scrolling'), event('2', 'assistant_message', 'Scrolling repaired and checked')]), b: timeline('b', [event('3', 'user_message', 'Measure frame latency')]) }, agentNames: {}, tabs: {}, providerCatalog: [], agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
@@ -34,7 +34,7 @@ it('shows distinguishable task names, real result content and explicit idle/unkn
 it('invalidates a completed result on a new prompt and authoritative working state, while retaining the Run', async () => {
   const run = useAppStore.getState().sessions[0]!.control.run
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, a: timeline('a', [...state.timelines.a!.items, event('4', 'user_message', 'Now inspect loading')]) } })))
-  expect(row('a').dataset.bucket).toBe('idle'); expect(row('a').textContent).toContain('Now inspect loading')
+  expect(row('a').dataset.bucket).toBe('idle'); expect(row('a').textContent).toContain('Prompt · Now inspect loading')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'a' ? { ...s, status: { ...s.status, state: 'working' } } : s) })))
   expect(row('a').dataset.bucket).toBe('working'); expect(useAppStore.getState().sessions[0]!.control.run).toBe(run)
 })
