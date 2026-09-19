@@ -10,6 +10,9 @@ import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/co
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
+import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
+import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
+import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig } from '../src/shared/contracts'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
@@ -42,6 +45,7 @@ import { registerIpc } from '../src/main/ipc'
 const dom = composerDOM()
 const remote = { id: 'ssh-draft', kind: 'ssh' as const, label: 'Saved remote', hostname: 'private.invalid' }
 let disk: ConfigStore, runtime: RuntimeController, dispose: () => Promise<void>, config: AppConfig
+let progressLoops: ContinuousProgressLoopManager
 let publications: AppConfig[], sender: EventEmitter & { id: number; isDestroyed: () => boolean; send: (channel: string, value: unknown) => void; mainFrame: { framesInSubtree: [] } }
 async function invoke<T>(channel: string, ...values: unknown[]): Promise<T> {
   const handler = ipc.handlers.get(channel)
@@ -55,6 +59,9 @@ beforeEach(async () => {
   // The fixture is initialized explicitly; no unrelated default Topics bootstrap is exercised.
   vi.spyOn(disk, 'get').mockResolvedValue(config)
   runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(ipc.directory, 'loops.json')),
+    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
+    undefined, (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal))
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() }
   vi.spyOn(runtime, 'prepare').mockResolvedValue(preparation)
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
@@ -65,11 +72,11 @@ beforeEach(async () => {
     } })
   ipc.handlers.clear()
   dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: disk, runtime, scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   useAppStore.setState({ config, hostChecks: {}, checkHost: vi.fn(async () => {}), providerCatalog: await api.providers.list() })
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await invoke<AppConfig>('config:save', next, expected))
 })
-afterEach(async () => { await dispose?.(); await runtime?.dispose(); await rm(ipc.directory, { recursive: true, force: true }) })
+afterEach(async () => { await dispose?.(); await progressLoops?.stop(); await runtime?.dispose(); await rm(ipc.directory, { recursive: true, force: true }) })
 const mount = () => dom.render(<SettingsPanel onClose={() => {}} initialSection="hosts" />)
 function input(field = 'Label', index = 0): HTMLInputElement {
   const labels = [...dom.container.querySelectorAll<HTMLLabelElement>('.host-edit-grid label')]
