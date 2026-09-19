@@ -12,7 +12,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
-const path = '/Users/test/.agentmux/pasted/shot.png'
+const path = 'home//.agentmux/pasted/shot.png'
 function editor(): Editor {
   const element = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')
   expect(element).not.toBeNull()
@@ -112,4 +112,20 @@ it('capture inserts into the selection rather than appending after the whole dra
   await dom.click('.composer-tool--mode')
   await dom.click('[aria-label="Capture a screen region"]')
   expect(dom.draft()).toBe(`alpha @${path} `)
+})
+
+it.each([false, true])('screenshot success preserves existing attachments and edits made while selecting in Agent/Launcher %s', async (launcher) => {
+  let captured!: (path: string) => void
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((done) => { captured = done }))
+  vi.spyOn(api.ui, 'readPastedImage').mockResolvedValue(null)
+  await mount(launcher)
+  await act(async () => editor().commands.insertContentAt(editor().state.doc.content.size - 1, ' @/repo/existing.png '))
+  await select(7, 9)
+  if (!launcher) await dom.click('.composer-tool--mode')
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(dom.container.querySelector('.tiptap')?.getAttribute('contenteditable')).toBe('true')
+  await act(async () => { editor().commands.insertContentAt(1, 'new '); editor().commands.setTextSelection(1) })
+  await act(async () => captured(path))
+  expect(dom.draft(launcher ? 'region' : 'agent-1')).toBe(`new alpha @${path} ega @/repo/existing.png `)
+  expect(editor().state.selection.from).toBe(1)
 })

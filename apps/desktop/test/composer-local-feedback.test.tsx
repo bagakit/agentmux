@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { EventEmitter } from 'node:events'
+import type { Editor } from '@tiptap/core'
 import { expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
@@ -9,7 +11,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, MAX_AGENT_STEER_QUEUE_ENTRIES, executorDetectionKey } from '../src/renderer/src/store'
 import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
 const failure = () => dom.container.querySelector('.composer-mailbox .composer-notice, .composer-feedback')
@@ -251,4 +253,164 @@ it('an old A request cannot overwrite the new A error after A→B→A', async ()
   expect(failure()?.textContent).toContain('Current A failure')
   await act(async () => reject(new Error('Old A failure late')))
   expect(failure()?.textContent).toContain('Current A failure')
+})
+
+async function switchCaptureTarget(target: 'Provider' | 'Workspace' | 'Region', back = false) {
+  if (target === 'Provider') return back ? selectCodex() : selectClaude()
+  if (target === 'Workspace') {
+    await act(async () => useAppStore.setState((state) => ({ tabs: { ...state.tabs,
+      launcher: { ...state.tabs.launcher!, workspaceId: back ? 'workspace' : 'workspace-other' }
+    } })))
+    return
+  }
+  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId={back ? 'region' : 'region-other'} visible={false} />)
+}
+it.each(['Provider', 'Workspace', 'Region'] as const)('late screenshot after %s changes does not attach to either draft', async (target) => {
+  let capture!: (path: string) => void
+  const request = vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((done) => { capture = done }))
+  await twoProviderLauncher()
+  await act(async () => useAppStore.setState((state) => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
+    { ...state.config!.workspaces[0]!, id: 'workspace-other', name: 'Other project', path: '/other' }
+  ] }, agentComposerDrafts: { region: 'Launch draft @/repo/old.png ', 'region-other': 'Other draft @/repo/other.png ' } })))
+  const editor = dom.container.querySelector('.tiptap')
+  expect(editor).not.toBeNull()
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(request).toHaveBeenCalledTimes(1)
+  await switchCaptureTarget(target)
+  // These targets keep the same real editor mounted: keyed destruction cannot mask this regression.
+  expect(dom.container.querySelector('.tiptap')).toBe(editor)
+  await act(async () => capture('/repo/late.png'))
+  expect(dom.draft('region')).toBe('Launch draft @/repo/old.png ')
+  expect(dom.draft('region-other')).toBe('Other draft @/repo/other.png ')
+  expect(failure()).toBeNull()
+  expect(useAppStore.getState().error).toBeNull()
+})
+it.each(['Provider', 'Workspace', 'Region'] as const)('old screenshot cannot attach after %s A→B→A', async (target) => {
+  let capture!: (path: string) => void
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((done) => { capture = done }))
+  await twoProviderLauncher()
+  await act(async () => useAppStore.setState((state) => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
+    { ...state.config!.workspaces[0]!, id: 'workspace-other', name: 'Other project', path: '/other' }
+  ] }, agentComposerDrafts: { region: 'Current A @/repo/old.png ', 'region-other': 'Current B' } })))
+  await dom.click('[aria-label="Capture a screen region"]')
+  await switchCaptureTarget(target)
+  await switchCaptureTarget(target, true)
+  await act(async () => capture('/repo/late-old-a.png'))
+  expect(dom.draft('region')).toBe('Current A @/repo/old.png ')
+  expect(dom.draft('region-other')).toBe('Current B')
+  expect(failure()).toBeNull()
+})
+it('an unmounted Launcher screenshot cannot write into the remounted draft', async () => {
+  let capture!: (path: string) => void
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((done) => { capture = done }))
+  await launcher()
+  await dom.click('[aria-label="Capture a screen region"]')
+  await dom.render(null)
+  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
+  expect(dom.container.querySelector('.tiptap')).not.toBeNull()
+  await act(async () => capture('/repo/unmounted.png'))
+  expect(dom.draft('region')).toBe('Launch draft')
+  expect(failure()).toBeNull()
+})
+it('keyed Session editor destruction keeps a late screenshot out of both Sessions', async () => {
+  let capture!: (path: string) => void
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((done) => { capture = done }))
+  await act(async () => useAppStore.setState({ sessions: [composerSession(), composerSession('agent-2')],
+    agentComposerDrafts: { 'agent-1': 'Original @/repo/old.png ', 'agent-2': 'Second @/repo/other.png ' } }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const oldEditor = dom.container.querySelector<HTMLElement & { editor: { isDestroyed: boolean } }>('.tiptap')!.editor
+  expect(oldEditor).toBeDefined()
+  await dom.click('.composer-tool--mode')
+  await dom.click('[aria-label="Capture a screen region"]')
+  await dom.render(<AgentSessionComposer sessionId="agent-2" />)
+  await vi.waitFor(() => expect(oldEditor.isDestroyed).toBe(true))
+  expect(dom.container.querySelector('.tiptap')).not.toBeNull()
+  await act(async () => capture('/repo/old-session.png'))
+  expect(dom.draft('agent-1')).toBe('Original @/repo/old.png ')
+  expect(dom.draft('agent-2')).toBe('Second @/repo/other.png ')
+  expect(failure()).toBeNull()
+})
+it.each([false, true])('screenshot failure and explicit Retry retain text, old attachments and newer edits in Session/Launcher %s', async (isLauncher) => {
+  const capture = vi.spyOn(api.ui, 'captureScreenshot').mockRejectedValueOnce(new Error('Screenshot could not be saved')).mockResolvedValueOnce('/repo/new-shot.png')
+  vi.spyOn(api.ui, 'readPastedImage').mockResolvedValue(null)
+  if (isLauncher) await launcher()
+  else await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const id = isLauncher ? 'region' : 'agent-1'
+  await act(async () => useAppStore.getState().setAgentComposerDraft(id, 'Keep body @/repo/old-shot.png '))
+  if (!isLauncher) await dom.click('.composer-tool--mode')
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(failure()?.textContent).toContain('Screenshot could not be saved')
+  expect(dom.draft(id)).toBe('Keep body @/repo/old-shot.png ')
+  const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
+  expect(editor).toBeDefined()
+  expect(editor.isEditable).toBe(true)
+  await act(async () => { editor.commands.insertContentAt(1, 'Edited '); editor.commands.setTextSelection(editor.state.doc.content.size - 1) })
+  expect(dom.draft(id)).toBe('Edited Keep body @/repo/old-shot.png ')
+  await dom.click(retry)
+  expect(capture).toHaveBeenCalledTimes(2)
+  expect(dom.draft(id)).toBe('Edited Keep body @/repo/old-shot.png @/repo/new-shot.png ')
+  expect(failure()).toBeNull()
+  expect(useAppStore.getState().error).toBeNull()
+})
+it('a late old-target capture error cannot overwrite the current target error or create an old Retry', async () => {
+  let reject!: (error: Error) => void
+  const capture = vi.spyOn(api.ui, 'captureScreenshot').mockImplementationOnce(() => new Promise((_yes, no) => { reject = no }))
+    .mockRejectedValueOnce(new Error('Current target capture failed'))
+  await twoProviderLauncher()
+  await dom.click('[aria-label="Capture a screen region"]')
+  await selectClaude()
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(capture).toHaveBeenCalledTimes(2)
+  expect(failure()?.textContent).toContain('Current target capture failed')
+  await act(async () => reject(new Error('Old capture failed late')))
+  expect(failure()?.textContent).toContain('Current target capture failed')
+  expect(dom.draft('region')).toBe('Launch draft')
+})
+it('the real Main owner reports a finite unknown in the mounted service window, retains ownership and recovers on late close', async () => {
+  const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: ReturnType<typeof vi.fn> }
+  child.stderr = new EventEmitter()
+  child.kill = vi.fn(() => true)
+  const spawn = vi.fn(() => child)
+  const remove = vi.fn(async () => {})
+  const files = { mkdir: async () => {}, stat: async () => ({ size: 12, isFile: () => true }), rm: remove }
+  const electron = { systemPreferences: { getMediaAccessStatus: () => 'unknown' } }
+  vi.doMock('node:child_process', () => ({ spawn, default: { spawn } }))
+  vi.doMock('node:fs/promises', () => ({ ...files, default: files }))
+  vi.doMock('electron', () => ({ ...electron, default: electron }))
+  try {
+    const { captureComposerScreenshot } = await import('../src/main/composer-screenshot')
+    const capture = vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => captureComposerScreenshot('/home'))
+    await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+    await act(async () => useAppStore.getState().setAgentComposerDraft('agent-1', 'Kept body @/repo/old.png '))
+    await dom.click('.composer-tool--mode')
+    vi.useFakeTimers()
+    await dom.click('[aria-label="Capture a screen region"]')
+    expect(spawn).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(122_000))
+    expect(failure()?.textContent).toMatch(/cannot confirm.*exited/i)
+    expect(dom.draft()).toBe('Kept body @/repo/old.png ')
+    expect(useAppStore.getState().error).toBeNull()
+    const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
+    expect(editor).toBeDefined()
+    expect(editor.isEditable).toBe(true)
+    await act(async () => editor.commands.insertContentAt(1, 'Still typing '))
+    await dom.click(retry)
+    expect(failure()?.textContent).toMatch(/already in progress|not yet confirmed/i)
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledTimes(0)
+    await act(async () => { child.emit('close', 0, null) })
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledTimes(1)
+    await dom.click(retry)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    await act(async () => { child.emit('close', 0, null) })
+    expect(capture).toHaveBeenCalledTimes(3)
+    expect(dom.draft()).toMatch(/^Still typing @\/home\/\.agentmux\/pasted\/screen-.+\.png Kept body @\/repo\/old\.png $/)
+    expect(failure()).toBeNull()
+  } finally {
+    vi.useRealTimers()
+    vi.doUnmock('node:child_process')
+    vi.doUnmock('node:fs/promises')
+    vi.doUnmock('electron')
+  }
 })

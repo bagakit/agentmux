@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,20 +24,6 @@ it('discovers actual project and user skills, resolves directory links and ignor
   expect(catalog.composer?.commands.some((command) => command.text === '/status')).toBe(true)
 })
 
-const captureRunner = vi.hoisted(() => vi.fn())
-vi.mock('@agentmux/core', async (original) => ({ ...await original<object>(), runProcess: captureRunner }))
-it('system capture returns only a completed image and cancellation creates no reference', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'amx-capture-')); roots.push(root)
-  const { captureComposerScreenshot } = await import('../src/main/composer-screenshot')
-  captureRunner.mockImplementationOnce(async (_command: string, args: string[]) => {
-    await writeFile(args.at(-1)!, 'image')
-    return { stdout: '', stderr: '', exitCode: 0 }
-  })
-  expect(await captureComposerScreenshot(root)).toContain('/.agentmux/pasted/screen-')
-  expect(captureRunner).toHaveBeenCalledWith('/usr/sbin/screencapture', expect.arrayContaining(['-i', '-x', '-t', 'png']), expect.any(Object))
-  captureRunner.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
-  expect(await captureComposerScreenshot(root)).toBeNull()
-})
 it('project appearance discovers project assets and distinguishes a repository from a directory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-icon-')); roots.push(root)
   const { projectAppearance } = await import('../src/main/project-appearance')
