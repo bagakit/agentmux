@@ -7,18 +7,20 @@ import type {
 } from '@agentmux/core'
 import type {
   DesktopControlCancellation,
+  DesktopControlRequest, DesktopControlResult,
   DesktopControlResponse
 } from '../shared/contracts.js'
+import type { ContinuousProgressInputRequest, ContinuousProgressInputResult } from '../shared/continuous-progress.js'
 
 type PendingControl = {
-  resolve(value: AgentMuxControlResult): void
+  resolve(value: DesktopControlResult): void
   reject(error: Error): void
   timeout: NodeJS.Timeout
 }
 
 type DesktopControlTransport = {
   isAvailable(): boolean
-  sendRequest(request: AgentMuxControlRequest): void
+  sendRequest(request: DesktopControlRequest): void
   sendCancellation(cancellation: DesktopControlCancellation): void
 }
 
@@ -41,14 +43,18 @@ export class DesktopControlIpcBridge {
 
   constructor(private readonly transport: DesktopControlTransport) {}
 
-  async execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> {
+  execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+  execute(request: ContinuousProgressInputRequest, signal?: AbortSignal): Promise<ContinuousProgressInputResult>
+  async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {
     if (!this.transport.isAvailable()) {
       throw bridgeError('CONTROL_UNAVAILABLE', 'Desktop Control owner is unavailable.')
     }
     if (this.pending.has(request.requestId)) {
       throw bridgeError('CONTROL_REQUEST_CONFLICT', 'Desktop Control request ID is already pending.')
     }
-    return await new Promise((resolve, reject) => {
+    if (signal?.aborted) throw bridgeError('CONTROL_UNAVAILABLE', 'Automatic input observation was cancelled.')
+    const abort = () => this.cancel(request.requestId, bridgeError('CONTROL_UNAVAILABLE', 'Automatic input observation was cancelled.'))
+    try { return await new Promise<DesktopControlResult>((resolve, reject) => {
       // 预算与判据都取 core 的那一处（agentMuxControlTimeoutMs）：这条 IPC 路与 CLI→daemon 的 socket
       // 路是同一个请求的两条到达方式，等待方不同而预算必须相同。此前两侧各手抄 2_000/60_000，且
       // 「哪些操作算慢」在这里被内联展开成四项析取——加一个慢操作时只改 core 的人会得到一个全绿的
@@ -58,8 +64,9 @@ export class DesktopControlIpcBridge {
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, agentMuxControlTimeoutMs(request.operation))
+      }, agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation))
       this.pending.set(request.requestId, { resolve, reject, timeout })
+      signal?.addEventListener('abort', abort, { once: true })
       try {
         this.transport.sendRequest(request)
       } catch (error) {
@@ -70,7 +77,7 @@ export class DesktopControlIpcBridge {
           { cause: error }
         ))
       }
-    })
+    }) } finally { signal?.removeEventListener('abort', abort) }
   }
 
   accept(response: DesktopControlResponse): boolean {

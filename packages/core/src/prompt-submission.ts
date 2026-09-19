@@ -107,7 +107,8 @@ export class AgentPromptSubmissionCoordinator {
     expectedCompletionId?: string,
     signal?: AbortSignal,
     allowUncertainTurn = false,
-    renderSignal?: AbortSignal
+    renderSignal?: AbortSignal,
+    expectedInputByte?: number
   ): Promise<void> {
     try {
       await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -158,7 +159,7 @@ export class AgentPromptSubmissionCoordinator {
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
             (previous?.submissionId === submissionId || previous &&
@@ -192,7 +193,8 @@ export class AgentPromptSubmissionCoordinator {
     expectedCompletionId?: string,
     signal?: AbortSignal,
     allowUncertainTurn = false,
-    renderSignal?: AbortSignal
+    renderSignal?: AbortSignal,
+    expectedInputByte?: number
   ): Promise<void> {
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       if (current.pendingInteraction) throw new AgentMuxError(
@@ -202,6 +204,9 @@ export class AgentPromptSubmissionCoordinator {
       if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
       assertInteraction(current)
       if (expectedCompletionId === undefined) return
+      if (expectedInputByte === undefined) throw new AgentMuxError('Automatic prompt admission is missing its input fence.', 'INVALID_AGENT_PROMPT')
+      if (run.acceptedInputBytes === null) throw new AgentMuxError('Automatic input fence is unconfirmed; the terminal remains available.', 'CTXMUX_INPUT_CURSOR_MISSING')
+      if (run.acceptedInputBytes !== expectedInputByte) throw new AgentMuxError('Human input changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }

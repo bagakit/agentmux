@@ -35,6 +35,7 @@ import type {
   ExecutorDetection,
   AgentLaunchResult,
   AgentLaunchInput,
+  AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AppConfig,
   HostCheckResult,
@@ -1036,7 +1037,7 @@ export class RuntimeController {
     prompt: string,
     operationId: string,
     condition: AgentPromptCondition,
-    automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal },
+    automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     authorAgentSessionId?: string,
     choice?: { allowUncertainTurn: true }
   ): Promise<void> {
@@ -1061,7 +1062,7 @@ export class RuntimeController {
           agentSessionId: control.agentSessionId,
           ...capturedCondition,
           operationId,
-          ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
+          ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {})
@@ -1091,22 +1092,25 @@ export class RuntimeController {
     })
   }
 
+  private progressInputObserver: ((control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>) | undefined
+  setContinuousProgressInputObserver(observer: (control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>): () => void {
+    this.progressInputObserver = observer
+    return () => { if (this.progressInputObserver === observer) this.progressInputObserver = undefined }
+  }
+
   /** Read the authoritative session facts used by the durable progress loop immediately before delivery. */
-  async observeContinuousProgress(loop: { agentSessionId: string }, tickId: string, now: number) {
-    for (const host of this.hosts.values()) {
-      try {
-        const status = await host.client.statusAgent(loop.agentSessionId)
-        return {
-          session: status.session,
-          observation: status.observation,
-          tickId,
-          now
-        }
-      } catch {
-        // The session may belong to another host; continue searching without guessing by layout.
-      }
+  async observeContinuousProgress(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, tickId: string, now: number, signal?: AbortSignal) {
+    const host = this.hosts.get(loop.hostId)
+    if (!host) throw new AgentMuxError('Continuous progress target host is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const status = await host.client.statusAgent(loop.agentSessionId)
+    if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId ||
+        status.session.workspacePath !== loop.workspacePath) {
+      throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
     }
-    throw new AgentMuxError('Continuous progress target session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const observer = this.progressInputObserver
+    if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
+    const inputOccupied = await observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal)
+    return { session: status.session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
   }
 
   async respondInteraction(

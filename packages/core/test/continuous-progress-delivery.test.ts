@@ -1,11 +1,11 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { observeAgent } from '../src/agent-status-freshness.js'
 import { decideContinuousProgress, type ContinuousProgressObservation } from '../src/continuous-progress.js'
 
 const base = (overrides: Partial<ContinuousProgressObservation> = {}): ContinuousProgressObservation => ({
-  session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: upstreamFixturePath("w"), run: { runId: 'r' }, semanticStatus: { state: 'done', source: 'native-hook', observedAt: 100 } },
-  observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 100 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 100),
+  session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: fixturePath("w"), run: { runId: 'r' }, semanticStatus: { state: 'done', source: 'native-hook', observedAt: 100 } },
+  inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 100 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 100),
   tickId: 'tick', now: 100, ...overrides
 })
 

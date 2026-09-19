@@ -19,7 +19,8 @@ import type {
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import { applyConfigEdit } from '../../../shared/config-edit'
-import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
+import type { AgentCatalogEntry } from '@agentmux/core'
+import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
@@ -226,9 +227,9 @@ function mockRetainedReplay(control: SessionControl, afterByte: number): Session
 }
 
 const mockControlListeners = new Set<(
-  request: AgentMuxControlRequest,
+  request: DesktopControlRequest,
   signal: AbortSignal
-) => AgentMuxControlResult | Promise<AgentMuxControlResult>>()
+) => DesktopControlResult | Promise<DesktopControlResult>>()
 
 const mockTimelines: Record<string, AgentTimelineSnapshot> = {
   'session-codex': {
@@ -743,6 +744,13 @@ const mockApi: AgentMuxDesktopApi = {
       mockControlListeners.add(listener)
       return () => mockControlListeners.delete(listener)
     }
+  },
+  continuousProgress: {
+    list: async () => [],
+    create: async () => { throw new Error('Continuous progress requires the Desktop host.') },
+    action: async () => { throw new Error('Continuous progress requires the Desktop host.') },
+    pauseForInput: async () => {},
+    onChanged: () => () => {}
   },
   sessions: {
     snapshot: async () => structuredClone(mockSnapshot),
