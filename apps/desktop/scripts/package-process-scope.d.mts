@@ -22,3 +22,24 @@ export function classifyApplicationProcesses(
   psStdout: string,
   bundle: { executable: string; helperRoot: string }
 ): { serving: number[]; crashReporter: number[] }
+
+export interface ApplicationProcessObservation {
+  pid: number
+  ppid: number
+  birth: string
+}
+
+/** 同一次 OS 观察的完整出生/父链事实；command 只用于 scope 分类。 */
+export function snapshotApplicationProcesses(
+  psStdout: string,
+  bundle: { executable: string; helperRoot: string }
+): { serving: number[]; crashReporter: number[]; processes: ApplicationProcessObservation[] }
+
+/** 激活后 serving 必须归属于实际新 Main，旧 owner 仍在时不得签收。 */
+export function assertApplicationActivationOwnership(input: {
+  previous: ApplicationProcessObservation[]
+  beforeLaunch: ApplicationProcessObservation[]
+  current: ApplicationProcessObservation[]
+  serving: number[]
+  mainPid: number
+}): ApplicationProcessObservation[]
