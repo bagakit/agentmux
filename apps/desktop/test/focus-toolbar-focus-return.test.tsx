@@ -14,7 +14,7 @@ const selected: FocusContext = {
   id: 'original-context', name: 'Original Focus context', detail: 'Review the original request', state: 'blocked', stateLabel: 'Blocked',
   bucket: 'attention', kind: 'agent', providerId: null, hostId: 'local', topicId: null, workspaceId: 'original-workspace',
   workspaceName: 'Original workspace', workspacePath: '/fixture/original', workspace: undefined,
-  liveAgent: true, actionable: true, lastActivityAt: null
+  liveAgent: true, actionable: true, lastActivityAt: null, processState: 'running'
 }
 let root: Root, container: HTMLDivElement, destination: HTMLButtonElement, review: ReturnType<typeof vi.fn>
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
