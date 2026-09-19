@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
@@ -8,6 +8,9 @@ import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
+let disposeBootstrap: (() => void) | undefined
+beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
+afterAll(() => disposeBootstrap?.())
 const session = () => ({ ...composerSession(), terminalPromptDelivery: {
   state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
   submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: 1
@@ -196,6 +199,7 @@ it.each(['queued', 'restoring'] as const)('shows exact nonempty %s, deferred, fa
 
 it('explicit mailbox Send retries the real Store with the same exact operation and Run while keeping old work paused', async () => {
   const pending: AgentSteerQueueEntry = { operationId: 'restored-intent', runId: 'run-agent-1',
+    promptCondition: { expectedRun: composerSession().control.run, afterSubmissionId: null },
     text: 'Keep the exact restored request', status: 'deferred', errorCode: 'AGENT_EXECUTION_NOT_REQUESTED',
     error: 'Queued before restart. Choose Send to execute this message.' }
   const old: AgentSteerQueueEntry = { operationId: 'old-intent', runId: 'old-run',
@@ -223,7 +227,7 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
     [composerSession().control, pending.text, pending.operationId]
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([
-    { operationId: pending.operationId, runId: pending.runId, text: pending.text, status: 'deferred',
+    { operationId: pending.operationId, runId: pending.runId, promptCondition: pending.promptCondition, text: pending.text, status: 'deferred',
       error: 'Provider is still preparing. Diagnostic: private-helper=93' }, old
   ])
   expect(mailbox().querySelector('.composer-outbox li')?.textContent).toContain('Provider is still preparing.')

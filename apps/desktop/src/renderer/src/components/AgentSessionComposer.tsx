@@ -29,7 +29,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useComposerFeedback } from './ComposerFeedback'
 import { errorIdentity } from '../lib/error-presentation'
-import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 
@@ -226,32 +226,12 @@ export function AgentSessionComposer({
     }, { separate: true })
   }
 
-  const notices: ServiceNoticeItem[] = []
-  for (const [id, outcome] of [
-    ['connection', agentSessionServiceOutcome(session)],
-    ['delivery', agentPromptDeliveryServiceOutcome(session)]
-  ] as const) {
-    const notice = serviceNoticeToRender(classifyServiceNotice(outcome))
-    if (notice) notices.push({ id, notice })
-  }
-
-  const queueProblem = queuedEntries.find((entry) => entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
-    session?.kind === 'agent' && (!steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState)))
-  if (queueProblem) notices.push({ id: 'queue', notice: { kind: 'process-degraded', notice: {
-    step: queueProblem.status === 'restoring' && sendingId === queueProblem.operationId
-      ? 'Restoring the Agent before execution' : 'A queued message has not been sent',
-    mode: errorIdentity(queueProblem.error ?? (queueProblem.status === 'restoring'
-      ? 'Your message is kept while its Session is restored and the Run binding is saved.'
-      : 'The bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.')),
-    restore: 'Your message is kept. Open the outbox to inspect, retry, copy or remove it.'
-  } } })
+  const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId)
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
-  const inbox = useServiceNotices(sessionId, notices.map((item) => ({ ...item,
-    ...(session?.kind === 'agent' ? { occurrence: session.control.run.runId } : {})
-  })), session?.kind === 'agent')
+  const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
     <AgentComposer key={sessionId}

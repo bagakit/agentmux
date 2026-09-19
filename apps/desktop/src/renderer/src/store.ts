@@ -5974,13 +5974,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async respondInteraction(sessionId, response) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
-    try {
-      await api.sessions.respondInteraction(session.control, response)
-      await get().flushAgentSteerQueue(sessionId)
-    } catch (error) {
-      get().reportError(error)
-      throw error
-    }
+    // Each mounted answer surface owns its local failure. A rejected answer is not a new
+    // window-level Agent error, and a late result must not paint onto another request.
+    await api.sessions.respondInteraction(session.control, response)
+    await get().flushAgentSteerQueue(sessionId)
   },
   async setPosture(sessionId, modeId) {
     // A fire-and-forget SET: Core resolves the Provider's declared keystroke and writes it in-band. We

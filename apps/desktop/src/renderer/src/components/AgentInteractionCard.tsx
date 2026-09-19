@@ -5,6 +5,7 @@ import type {
   AgentMuxInteractionResponse
 } from '@agentmux/core'
 import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan'
+import { presentError } from '../lib/error-presentation'
 
 /**
  * Agent 卡点的渲染层——只画，不判。
@@ -28,12 +29,16 @@ export function AgentInteractionCard({
   onRespond(response: AgentMuxInteractionResponse): Promise<void>
 }) {
   const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
   const unavailable = disabled || submitting || Boolean(responseUnavailableReason)
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
     if (unavailable) return
     setSubmitting(true)
+    setFailure(null)
     try {
       await onRespond(response)
+    } catch (error) {
+      setFailure(presentError(error))
     } finally {
       setSubmitting(false)
     }
@@ -41,7 +46,7 @@ export function AgentInteractionCard({
 
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
   if (reason) return (
-    <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" role="status">
+      <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" data-request-id={request.id} role="status">
       <div className="agent-interaction__heading">
         <ShieldAlert size={15} />
         <div><strong>Answer in terminal</strong><span>{reason}</span></div>
@@ -59,7 +64,7 @@ export function AgentInteractionCard({
     // 否则塌回紧凑动作行。判据与「答的是什么」同住一处，不在这里重算。
     const { choices, allows, rejects, scoped, dismiss } = permissionPlan(request)
     return (
-      <section className="agent-interaction" aria-label="Agent permission request">
+      <section className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
         <div className="agent-interaction__heading">
           <ShieldAlert size={15} />
           <div>
@@ -68,6 +73,7 @@ export function AgentInteractionCard({
           </div>
         </div>
         {request.toolInput ? <pre>{request.toolInput}</pre> : null}
+        {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} Choose an option to retry.</p> : null}
         {scoped ? (
           <div className="agent-interaction__grants">
             {allows.map(({ option, response }) => (
@@ -121,7 +127,7 @@ export function AgentInteractionCard({
 
   const { question, choices, dismiss } = questionPlan(request)
   return (
-    <section className="agent-interaction" aria-label="Agent question">
+    <section className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
       <div className="agent-interaction__heading">
         <HelpCircle size={15} />
         <div>
@@ -129,6 +135,7 @@ export function AgentInteractionCard({
           <span>{question.prompt}</span>
         </div>
       </div>
+      {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} Choose an option to retry.</p> : null}
       <div className="agent-interaction__options">
         {choices.map(({ option, response }) => (
           <button
