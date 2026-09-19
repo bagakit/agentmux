@@ -4002,10 +4002,10 @@ export class AgentMuxClient {
     // 里面什么都不做：没有字节被接受，游标不推进，也不占一次 operationId。
     if (data.length === 0) {
       return await this.serializeAgentInput(requestedSession, async (session, run) => {
-        const cursor = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes ?? 0
+        const cursor = run.acceptedInputBytes
         return {
           runId: session.run.runId,
-          appliedByteRange: { startByte: cursor, endByte: cursor },
+          appliedByteRange: cursor === null ? null : { startByte: cursor, endByte: cursor },
           acceptedThroughByte: cursor
         }
       })
@@ -4016,7 +4016,9 @@ export class AgentMuxClient {
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
-      const expectedByte = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
+      // This lane already read the current Run. Another public Client may have
+      // accepted input since our last ACK; that local cursor cannot start new bytes.
+      const expectedByte = run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
