@@ -7,6 +7,7 @@ import type {
   SessionSnapshot
 } from '../../../shared/contracts'
 import { runInterruptionFact } from '../../../shared/contracts'
+import { configValuesEqual } from '../../../shared/config-edit'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptPredecessor } from '@agentmux/core/prompt-condition'
@@ -616,80 +617,80 @@ export function projectRuntimeEvent(
     return { state: { ...state, sessions } }
   }
   if (core.type === 'agent-session') {
-    return { state: {
-      ...state,
-      sessions: state.sessions.map((item) => item.kind === 'agent' &&
-        acceptsAgentSessionTransition(item, core.session)
-        ? (() => {
-            const {
-              pendingInteraction: _pendingInteraction,
-              interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
-              semanticStatus: _semanticStatus,
-              terminalCapability: _terminalCapability,
-              terminalPromptDelivery: _terminalPromptDelivery,
-              terminalOutputChannel: _terminalOutputChannel,
-              turnUsage: _turnUsage,
-              ...current
-            } = item
-            const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
-            return {
-              ...current,
-              providerId: core.session.providerId,
-              hostId: core.session.hostId,
-              workspacePath: core.session.workspacePath,
-              updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
-              agentSessionUpdatedAt: core.session.updatedAt,
-              promptSubmissionPredecessor: agentPromptPredecessor(core.session),
-              // Mirror the Core fact independently of the display freshness gate below.
-              // An accepted snapshot may clear an idle epoch without a new observation.
-              ...(core.session.semanticStatus
-                ? { semanticStatus: structuredClone(core.session.semanticStatus) }
-                : {}),
-              ...(core.session.terminalCapability
-                ? { terminalCapability: structuredClone(core.session.terminalCapability) }
-                : {}),
-              ...(core.session.terminalPromptDelivery
-                ? { terminalPromptDelivery: structuredClone(core.session.terminalPromptDelivery) }
-                : {}),
-              ...(core.session.terminalOutputChannel
-                ? { terminalOutputChannel: structuredClone(core.session.terminalOutputChannel) }
-                : {}),
-              // 最近一 turn 的真实用量随收尾事件的 agent-session 快照到达 —— 权威镜像 Core：带就复制、
-              // 缺就丢弃（destructure 把陈旧值从 ...current 里剔掉）。缺一条条件复制，live 路径就永远读不到
-              // 真数、状态栏卡在等待记号「—」；只加复制不加 destructure，则 Core 侧清空（读 transcript 失败
-              // 那一轮）永远传不到 UI，上一轮的数字会一直挂在「Last turn」标签下。两半必须成对。
-              ...(core.session.turnUsage
-                ? { turnUsage: structuredClone(core.session.turnUsage) }
-                : {}),
-              // status 走 observedAt 严格单调门禁，与核心侧 persistSemanticStatus 的 `>` 同口径。
-              // agent-session 是「会话快照」：同一条 semanticStatus 会随任意会话变更（终端能力降级、
-              // prompt 投递清理等约十处）被反复重发，其 observedAt 不变。若无门禁，一条被本地衰减为
-              // running（衰减刻意保留 observedAt）的状态会被这类陈旧重发按原 observedAt 又贴回 working，
-              // 闪一帧再被重新衰减；一条滞后的旧快照也会盖掉更新的状态。要求严格新于当前观测才套用：
-              // 真正的新证据 observedAt 一定更大、照常点亮，同 observedAt 的重发一律跳过。
-              // 同样不许洗掉 `disconnected`（见上面 agent-status arm 的完整论证）：掉线不改 processState，
-              // 所以 running 这个条件挡不住它——一条随会话快照重发的 semanticStatus 会把 disconnected 洗成
-              // 正常态。`disconnected` 只由 process-state 清，语义状态不是它的解除手。
-              ...(core.session.semanticStatus &&
-                item.processState === 'running' &&
-                item.status.state !== 'disconnected' &&
-                core.session.semanticStatus.observedAt > item.status.observedAt
-                ? { status: structuredClone(core.session.semanticStatus) }
-                : {}),
-              ...(core.session.pendingInteraction
-                ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }
-                : {}),
-              ...(reason ? { interactionResponseUnavailableReason: reason } : {}),
-              control: {
-                kind: 'agent' as const,
-                hostId: core.session.hostId,
-                agentSessionId: core.session.agentSessionId,
-                run: { ...core.session.run }
-              }
-            }
-          })()
-        : item)
-    } }
+    const item = existingEventSession
+    if (!item || item.kind !== 'agent' || !acceptsAgentSessionTransition(item, core.session)) return { state }
+    const {
+      pendingInteraction: _pendingInteraction,
+      interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
+      semanticStatus: _semanticStatus,
+      terminalCapability: _terminalCapability,
+      terminalPromptDelivery: _terminalPromptDelivery,
+      terminalOutputChannel: _terminalOutputChannel,
+      turnUsage: _turnUsage,
+      ...current
+    } = item
+    const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
+    const next = {
+      ...current,
+      providerId: core.session.providerId,
+      hostId: core.session.hostId,
+      workspacePath: core.session.workspacePath,
+      updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
+      agentSessionUpdatedAt: core.session.updatedAt,
+      promptSubmissionPredecessor: agentPromptPredecessor(core.session),
+      // Mirror the Core fact independently of the display freshness gate below.
+      // An accepted snapshot may clear an idle epoch without a new observation.
+      ...(core.session.semanticStatus
+        ? { semanticStatus: structuredClone(core.session.semanticStatus) }
+        : {}),
+      ...(core.session.terminalCapability
+        ? { terminalCapability: structuredClone(core.session.terminalCapability) }
+        : {}),
+      ...(core.session.terminalPromptDelivery
+        ? { terminalPromptDelivery: structuredClone(core.session.terminalPromptDelivery) }
+        : {}),
+      ...(core.session.terminalOutputChannel
+        ? { terminalOutputChannel: structuredClone(core.session.terminalOutputChannel) }
+        : {}),
+      // 最近一 turn 的真实用量随收尾事件的 agent-session 快照到达 —— 权威镜像 Core：带就复制、
+      // 缺就丢弃（destructure 把陈旧值从 ...current 里剔掉）。缺一条条件复制，live 路径就永远读不到
+      // 真数、状态栏卡在等待记号「—」；只加复制不加 destructure，则 Core 侧清空（读 transcript 失败
+      // 那一轮）永远传不到 UI，上一轮的数字会一直挂在「Last turn」标签下。两半必须成对。
+      ...(core.session.turnUsage
+        ? { turnUsage: structuredClone(core.session.turnUsage) }
+        : {}),
+      // status 走 observedAt 严格单调门禁，与核心侧 persistSemanticStatus 的 `>` 同口径。
+      // agent-session 是「会话快照」：同一条 semanticStatus 会随任意会话变更（终端能力降级、
+      // prompt 投递清理等约十处）被反复重发，其 observedAt 不变。若无门禁，一条被本地衰减为
+      // running（衰减刻意保留 observedAt）的状态会被这类陈旧重发按原 observedAt 又贴回 working，
+      // 闪一帧再被重新衰减；一条滞后的旧快照也会盖掉更新的状态。要求严格新于当前观测才套用：
+      // 真正的新证据 observedAt 一定更大、照常点亮，同 observedAt 的重发一律跳过。
+      // 同样不许洗掉 `disconnected`（见上面 agent-status arm 的完整论证）：掉线不改 processState，
+      // 所以 running 这个条件挡不住它——一条随会话快照重发的 semanticStatus 会把 disconnected 洗成
+      // 正常态。`disconnected` 只由 process-state 清，语义状态不是它的解除手。
+      ...(core.session.semanticStatus &&
+        item.processState === 'running' &&
+        item.status.state !== 'disconnected' &&
+        core.session.semanticStatus.observedAt > item.status.observedAt
+        ? { status: structuredClone(core.session.semanticStatus) }
+        : {}),
+      ...(core.session.pendingInteraction
+        ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }
+        : {}),
+      ...(reason ? { interactionResponseUnavailableReason: reason } : {}),
+      control: {
+        kind: 'agent' as const,
+        hostId: core.session.hostId,
+        agentSessionId: core.session.agentSessionId,
+        run: { ...core.session.run }
+      }
+    }
+    // Compare this one plain-data projection, including removed optional facts. An equal timestamp
+    // is not equality; a rejected/equal projection must not notify the Session collection.
+    if (configValuesEqual(item, next)) return { state }
+    const sessions = state.sessions.slice()
+    sessions[state.sessions.indexOf(item)] = next
+    return { state: { ...state, sessions } }
   }
   // Interaction events announce observations, including additional native requests.
   // Only the authoritative agent-session record chooses the current answerable request.
