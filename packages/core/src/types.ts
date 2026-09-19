@@ -246,8 +246,8 @@ export type AgentMuxRunInputAck = AgentMuxRunRef & {
   appliedByteRange: {
     startByte: number
     endByte: number
-  }
-  acceptedThroughByte: number
+  } | null
+  acceptedThroughByte: number | null
 }
 
 export type AgentMuxRunAppliedSize = AgentMuxRunRef & {
