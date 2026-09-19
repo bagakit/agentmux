@@ -3,14 +3,17 @@ import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
+import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
+import { TERMINAL_REPLAY_BATCH_BYTES } from '../src/renderer/src/lib/terminal-replay'
+import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 type FixtureTerminal = BrowserTerminal & {
   refresh: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   written: string[]
+  parsed: string[]
 }
 type FixtureWebgl = {
   disposed: ReturnType<typeof vi.fn>
@@ -21,9 +24,8 @@ const fixture = vi.hoisted(() => ({
   terminals: [] as FixtureTerminal[],
   webgl: [] as FixtureWebgl[],
   receive: null as ((event: RuntimeEvent) => void) | null,
-  attach: vi.fn(),
+  attach: vi.fn<typeof import('../src/renderer/src/lib/api').api.sessions.attach>(),
   detach: vi.fn(),
-  acknowledge: vi.fn(),
   unsubscribe: vi.fn(),
   blockFirstWrite: false,
   releaseWrite: null as (() => void) | null,
@@ -36,14 +38,18 @@ vi.mock('@xterm/xterm', async () => {
     element: HTMLElement | undefined = undefined
     refresh = vi.fn()
     written: string[] = []
+    parsed: string[] = []
     constructor(options: ConstructorParameters<typeof Terminal>[0]) {
       super(options)
       this.dispose = vi.fn(() => super.dispose())
       fixture.terminals.push(this as unknown as FixtureTerminal)
     }
     write(data: string | Uint8Array, callback?: () => void) {
-      this.written.push(typeof data === 'string' ? data : new TextDecoder().decode(data))
+      const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+      this.written.push(text)
       super.write(data, () => {
+        // The pinned parser completed these bytes. This is no native acknowledgement.
+        this.parsed.push(text)
         if (fixture.blockFirstWrite) {
           fixture.blockFirstWrite = false
           fixture.releaseWrite = () => callback?.()
@@ -91,7 +97,6 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
   detach: fixture.detach,
-  acknowledge: fixture.acknowledge,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
     fixture.receive = receive
     return fixture.unsubscribe
@@ -109,6 +114,8 @@ vi.mock('../src/renderer/src/store', () => {
 })
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
   TerminalViewportSynchronizer: class {
+    constructor(private readonly options: ConstructorParameters<typeof import('../src/renderer/src/lib/terminal-viewport-sync').TerminalViewportSynchronizer>[0]) {}
+    acceptOwnerSize(size: { cols: number; rows: number }) { this.options.applyOwnerGrid?.(size) }
     beginReplay() {}
     endReplay() {}
     setInteractiveResize() {}
@@ -129,6 +136,19 @@ const session: SessionSnapshot = {
   kind: 'terminal', providerId: null,
   control: { kind: 'terminal', hostId: 'local', runId: 'run-retained', run: { runId: 'run-retained' } }
 }
+function replayAttachment(data: string): SessionAttachResult {
+  const dataBytes = new TextEncoder().encode(data)
+  return {
+    attachmentId: 'attachment-retained',
+    session: { ...session, latestOutputBytes: dataBytes.byteLength },
+    currentSize: { cols: 80, rows: 24 },
+    // Retained-byte hydration from an unobserved origin; no checkpoint is invented.
+    terminal: { type: 'unknown', reason: 'origin_unknown' },
+    resizeRevision: 0, gap: null,
+    replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0,
+      endByte: dataBytes.byteLength, dataBytes, data }]
+  }
+}
 const linkOrigin = { workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }
 let root: Root | null = null
 
@@ -146,10 +166,8 @@ beforeEach(() => {
     if (delay === 6_000) fixture.reveal = callback as () => void
     return original(callback, delay, ...args)
   })
-  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [{ data: 'before ', dataBytes: new TextEncoder().encode('before '), endByte: 7 }] })
+  fixture.attach.mockResolvedValue(replayAttachment('before '))
   fixture.detach.mockResolvedValue(undefined)
-  fixture.acknowledge.mockResolvedValue(undefined)
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -167,20 +185,44 @@ const retained = Array.from({ length: 2_000 }, (_,i) => `retained-${String(i).pa
 
 async function mountReplay(blockFirstWrite: boolean) {
   fixture.blockFirstWrite = blockFirstWrite
-  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [{ data: retained, dataBytes: new TextEncoder().encode(retained), endByte: retained.length }] })
+  const attached = replayAttachment(retained)
+  expect(attached.replay).toHaveLength(1)
+  expect(attached.replay[0]!.dataBytes.byteLength).toBeGreaterThan(TERMINAL_REPLAY_BATCH_BYTES)
+  fixture.attach.mockResolvedValue(attached)
   await act(async () => root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible={true} autoFocus={false} linkOrigin={linkOrigin} />))
   expect(fixture.terminals).toHaveLength(1)
   return fixture.terminals[0]!
 }
-async function awaitHandoff() {
-  await act(async () => await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, retained.length)))
+async function awaitHandoff(lateLive = '') {
+  await act(async () => await vi.waitFor(() => {
+    expect(fixture.terminals).toHaveLength(1)
+    expect(fixture.terminals[0]!.parsed.join('')).toBe(retained + lateLive)
+    expect(readTerminalViewObservation({ regionId: linkOrigin.regionId, sessionId: session.id,
+      runId: session.control.run.runId })?.liveReady).toBe(true)
+  }))
+  // Exact, nonempty history identity, beyond just a large scrollback count.
+  const buffer = fixture.terminals[0]!.buffer.active
+  expect(Array.from({ length: 2_000 }, (_, i) => buffer.getLine(i)?.translateToString(true)))
+    .toEqual(retained.split('\r\n').slice(0, -1))
+}
+function liveOutput(data: string): RuntimeEvent {
+  const run = session.control.run
+  const dataBytes = new TextEncoder().encode(data)
+  const startByte = new TextEncoder().encode(retained).byteLength
+  return { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run, dataBytes, data,
+    evidence: { source: 'terminal-output', observedAt: 2, run,
+      outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } }
 }
 
 it('keeps the line read after overdue partial reveal when the remaining replay completes', async () => {
   const terminal = await mountReplay(true)
   await act(async () => await vi.waitFor(() => expect(fixture.releaseWrite).not.toBeNull()))
   expect(terminal.buffer.active.baseY).toBeGreaterThan(100)
+  expect(terminal.parsed.join('')).toBe(retained.slice(0, TERMINAL_REPLAY_BATCH_BYTES))
+  const lateLive = 'late-live-after-replay\r\n'
+  expect(fixture.receive).not.toBeNull()
+  await act(async () => fixture.receive!(liveOutput(lateLive)))
+  expect(terminal.parsed.join('')).not.toContain(lateLive)
   expect(fixture.reveal).not.toBeNull()
   const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6_000)
   await act(async () => fixture.reveal!())
@@ -191,7 +233,8 @@ it('keeps the line read after overdue partial reveal when the remaining replay c
   expect(line).toContain('retained-00005')
   expect(terminal.buffer.active.viewportY).toBe(5)
   await act(async () => fixture.releaseWrite!())
-  await awaitHandoff()
+  await awaitHandoff(lateLive)
+  expect(terminal.buffer.active.getLine(2_000)?.translateToString(true)).toBe('late-live-after-replay')
   expect(terminal.buffer.active.viewportY).toBe(5)
   expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)?.translateToString(true)).toBe(line)
   expect(terminal.buffer.active.baseY).toBeGreaterThan(1_900)
