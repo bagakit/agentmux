@@ -210,7 +210,7 @@ try {
   receipt.inputsBefore=await inputs(); receipt.source={commit:(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim(),tree:(await exec('git',['rev-parse','HEAD^{tree}'],{cwd:repositoryRoot})).stdout.trim()}
   const fixtureRoot=join(root,'original-native');await cp(oldArtifacts,fixtureRoot,{recursive:true})
   const oldDaemon=join(fixtureRoot,'bin/ctxmuxd');receipt.originalNativeSha256=hash(await readFile(oldDaemon));receipt.bundleNativeSha256=hash(await readFile(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd')));assert.notEqual(receipt.originalNativeSha256,receipt.bundleNativeSha256)
-  daemon=spawn(oldDaemon,['--socket',socketPath,'--state-dir',join(runtimeDirectory,'state')],{detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon)
+  daemon=spawn(oldDaemon,['--socket',socketPath,'--state-dir',join(runtimeDirectory,'state','ctxmux')],{detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon)
   let daemonError;daemon.on('error',error=>{daemonError=error});daemon.stderr.on('data',()=>{});await own(daemon)
   sdk=new CtxmuxClient({socketPath});const originalRuntime=await waitFor('original public Native',async()=>{if(daemonError)throw daemonError;try{return await sdk.runtimeInfo()}catch{return null}});receipt.originalRuntime=originalRuntime;receipt.daemonPid=daemon.pid
   const executable=join(root,'private-agent.sh');await writeFile(executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.159.2'; exit 0; fi\nstty -echo -icanon\nprintf 'Private Agent ready\\r\\n'\nexec /bin/cat\n",{mode:0o700})

@@ -178,7 +178,7 @@ async function inputs() {
 try {
   await Promise.all([mkdir(home,{recursive:true}),mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(runtimeDirectory,{recursive:true}),mkdir(join(home,'codex'),{recursive:true})])
   receipt.inputsBefore = await inputs()
-  daemon = spawn(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'), ['--socket',socketPath,'--state-dir',join(runtimeDirectory,'state')], {detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon);daemon.stderr.on('data',()=>{});await own(daemon.pid)
+  daemon = spawn(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'), ['--socket',socketPath,'--state-dir',join(runtimeDirectory,'state','ctxmux')], {detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon);daemon.stderr.on('data',()=>{});await own(daemon.pid)
   sdk = new CtxmuxClient({socketPath});receipt.runtime = await waitFor('public private Runtime',async()=>{try{return await sdk.runtimeInfo()}catch{return null}});receipt.daemonPid=daemon.pid
   const executable=join(root,'private-agent.sh');await writeFile(executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.159.2'; exit 0; fi\nstty -echo -icanon\nprintf 'Private Agent ready\\r\\n'\nexec /bin/cat\n",{mode:0o700})
   creator=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})

@@ -314,7 +314,7 @@ describe('public Hook native identity survives a new Client and Desktop durable 
     const daemonEnv = Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('AGENTMUX_')))
     expect(Object.keys(daemonEnv).filter(name=>name.startsWith('AGENTMUX_'))).toEqual([])
     // Own child and exact namespace: cleanup never selects an installed daemon or user Session.
-    const daemon = spawn(daemonPath,['--socket',join(runtime,'ctxmux.sock'),'--state-dir',join(runtime,'state'),'--readiness-fd','3'],
+    const daemon = spawn(daemonPath,['--socket',join(runtime,'ctxmux.sock'),'--state-dir',join(runtime,'state','ctxmux'),'--readiness-fd','3'],
       {env:daemonEnv,stdio:['ignore','ignore','ignore','pipe']})
     const daemonExit = once(daemon,'exit')
     let first: Awaited<ReturnType<typeof connectLocalAgentMux>> | undefined

@@ -56,7 +56,7 @@ async function app(appPath, candidate) {
 async function scenario(name) {
   const directory = join(root, name), current = join(directory, 'Applications/PrivateAgentMux.app'), next = join(directory, 'Applications/.PrivateAgentMux.next.app')
   const backup = join(directory, 'Trash/PrivateAgentMux.previous.app')
-  const runtimeDir = join(directory, 'runtime'), socket = join(runtimeDir, 'ctxmux.sock'), state = join(runtimeDir, 'state')
+  const runtimeDir = join(directory, 'runtime'), socket = join(runtimeDir, 'ctxmux.sock'), state = join(runtimeDir, 'state', 'ctxmux')
   process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDir
   process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDir, 'state')
   const old = await app(current, false); await app(next, true)

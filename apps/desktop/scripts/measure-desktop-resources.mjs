@@ -26,7 +26,7 @@ const workspace = measuredWorkspaces[0].path
 const reportPath = join(directory, 'report.json')
 const entry = resolve(import.meta.dirname, '../out/main/index.js')
 const socketPath = join(runtimeDirectory, 'ctxmux.sock')
-const stateDirectory = join(runtimeDirectory, 'state')
+const stateDirectory = join(runtimeDirectory, 'state', 'ctxmux')
 
 async function pathExists(path) {
   try {

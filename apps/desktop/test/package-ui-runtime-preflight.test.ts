@@ -44,10 +44,10 @@ async function app(path: string): Promise<void> {
   await writeFile(join(core, 'package.json'), JSON.stringify({ type: 'module' }))
   await symlink(join(corePath, 'vendor'), join(core, 'vendor'), 'dir')
   await writeFile(join(core, 'dist/index.js'), `export { assertAgentMuxRuntimeCompatibility } from ${JSON.stringify(pathToFileURL(join(corePath, 'dist/index.js')).href)};`)
-  await writeFile(join(core, 'dist/runtime-paths.js'), `export const defaultCtxmuxSocketPath=()=>${JSON.stringify(socket)};export const defaultCtxmuxStateDirectory=()=>${JSON.stringify(join(runtimeDirectory, 'state'))};`)
+  await writeFile(join(core, 'dist/runtime-paths.js'), `export const defaultCtxmuxSocketPath=()=>${JSON.stringify(socket)};export const defaultCtxmuxStateDirectory=()=>${JSON.stringify(join(runtimeDirectory, 'state', 'ctxmux'))};`)
 }
 function launchDaemon(): Promise<void> {
-  daemon = spawn(join(vendor, 'bin/ctxmuxd'), ['--socket', socket, '--state-dir', join(runtimeDirectory, 'state'), '--readiness-fd', '3'],
+  daemon = spawn(join(vendor, 'bin/ctxmuxd'), ['--socket', socket, '--state-dir', join(runtimeDirectory, 'state', 'ctxmux'), '--readiness-fd', '3'],
     { detached: true, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   daemon.stderr!.on('data', bytes => records.push({ stderr: String(bytes).slice(0, 1024) }))
   return new Promise((done, reject) => {

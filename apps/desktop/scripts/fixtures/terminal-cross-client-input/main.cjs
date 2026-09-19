@@ -10,7 +10,7 @@ const handles=[];function handle(c,fn){ipcMain.handle(c,fn);handles.push(c)}
 async function exactRun(){return (await client.listRuns()).find(r=>r.runId===run.runId)}
 app.whenReady().then(async()=>{try{
  const core=await import(pathToFileURL(corePath).href),{RuntimeController}=await import(pathToFileURL(controllerPath).href)
- daemon=spawn(binaryPath,['--socket',path.join(privateRoot,'runtime','ctxmux.sock'),'--state-dir',path.join(privateRoot,'runtime','state')],{env:process.env,stdio:['ignore','ignore','pipe']});owned.push(daemon);daemon.on('error',e=>{result.spawnError=String(e)});let diagnostics='';daemon.stderr.on('data',d=>{diagnostics+=d.toString();result.diagnostics=diagnostics.slice(-2000)})
+ daemon=spawn(binaryPath,['--socket',path.join(privateRoot,'runtime','ctxmux.sock'),'--state-dir',path.join(privateRoot,'runtime','state','ctxmux')],{env:process.env,stdio:['ignore','ignore','pipe']});owned.push(daemon);daemon.on('error',e=>{result.spawnError=String(e)});let diagnostics='';daemon.stderr.on('data',d=>{diagnostics+=d.toString();result.diagnostics=diagnostics.slice(-2000)})
  await wait('private socket',async()=>fs.stat(path.join(privateRoot,'runtime','ctxmux.sock')).then(()=>true,()=>false),Boolean)
  creator=new core.AgentMuxClient({store:new core.AgentMuxMemoryAgentSessionStore()});await creator.connect();result.runtime=creator.runtimeIdentity()
  run=await creator.createTerminal({workspacePath:privateRoot,command:'/usr/bin/python3',args:[programPath,privateRoot],cols:180,rows:45});result.runBefore=run

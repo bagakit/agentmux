@@ -266,7 +266,7 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
       const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
       if (!match || !match[2]!.includes('/ctxmuxd ') ||
         !match[2]!.includes(`--socket ${join(runtime, 'ctxmux.sock')}`) ||
-        !match[2]!.includes(`--state-dir ${join(runtime, 'state')}`)) continue
+        !match[2]!.includes(`--state-dir ${join(runtime, 'state', 'ctxmux')}`)) continue
       try { process.kill(Number(match[1]), 'SIGTERM') }
       catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error }
     }
