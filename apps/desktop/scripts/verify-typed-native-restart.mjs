@@ -10,7 +10,7 @@ import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe
 const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/typed-native-restart')
-const evidence = path.join(root, '.tmp/typed-native-restart/last')
+const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/typed-native-restart/last'))
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')

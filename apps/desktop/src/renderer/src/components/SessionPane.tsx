@@ -483,6 +483,7 @@ export function SessionPane({
           ) : null}
           {session.pendingInteraction ? (
             <AgentInteractionCard
+              key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
               request={session.pendingInteraction}
               responseUnavailableReason={session.interactionResponseUnavailableReason}
               onOpenTerminal={() => {
