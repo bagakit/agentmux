@@ -38,7 +38,7 @@ Provider 完整性（Session 分析、对话模式与 trace 观察）的行为�
 
 ### Agent 输入行密度
 
-- `AGENT INPUT` 行保持单行基线：左侧显示 Agent 用户名，右侧用弱化的小字号承载 Executor/Provider 与短 Session 标识；名称过长以省略号收窄，完整信息由 tooltip/读屏补全。
+- Agent 身份位置按交互合同《Agent Region 关闭与身份入口》。Region 顶部单行基线：名字为主，Executor/Provider 与短 Session 标识弱化；长名字省略，X 与 More 的完整命中区先保留。身份/动作行给原 22px X 留出上下余量，不挤小控件、不盖原生正文；输入区仅保留原输入模式与动作密度。
 - Terminal/Activity 视图切换使用一个 28px 左右的图标按钮，不使用常驻的双按钮分段控件；图标只表达下一步动作，焦点环和 tooltip 保留可发现性。
 - Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
 

@@ -9,15 +9,18 @@ const terminalCss = readFileSync(join(renderer, 'styles', 'terminal.css'), 'utf8
 const agentCss = readFileSync(join(renderer, 'styles', 'agent.css'), 'utf8')
 
 describe('terminal content and input layers', () => {
-  it('keeps PTY output in a bounded canvas and gives the Agent input its own terminal-mode rail', () => {
+  it('keeps PTY output in a bounded canvas and keeps one Agent identity above the native view and an independent terminal-mode input', () => {
     expect(sessionPane).toContain('className="agent-terminal-stage"')
     expect(terminalView).toContain('className={`terminal-view__xterm ${hydrating ? \'terminal-view__xterm--hydrating\' : \'\'}`}')
     expect(sessionPane).toContain("data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}")
-    expect(sessionPane).toContain('className="agent-input-stack__rail"')
+    expect(sessionPane).toContain('<AgentRegionHeader')
+    expect(sessionPane).not.toContain('className="agent-input-stack__rail"')
     expect(sessionPane).toContain('Agent input')
     expect(sessionPane).toContain('agentInputIdentity')
-    expect(sessionPane).toContain('agentInputSessionId')
-    expect(sessionPane).toContain('Agent input for')
+    expect(sessionPane).toContain('sessionId={session.id}')
+    const identity = readFileSync(join(renderer, 'components', 'AgentRegionHeader.tsx'), 'utf8')
+    expect(identity).toContain('className="agent-region-header"')
+    expect(identity).toContain('Session ${sessionId}')
   })
 
   it('pins the geometry and separation rules that prevent terminal output from colliding with the composer', () => {

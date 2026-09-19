@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
+import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -52,6 +53,16 @@ const probe = {
     const { tabs, sessions, agentComposerDrafts } = useAppStore.getState()
     return { tab: tabs[tabId], sessions: sessions.map(session => ({ id: session.id, control: session.control })),
       draft: agentComposerDrafts[originals[1]!.id], events: [...events] }
+  },
+  observe() {
+    probe.mode('terminal')
+    generation += 1
+    flushSync(() => root.render(<React.Fragment key={generation}>
+      <SessionPane sessionId={originals[0]!.id} surfaceKind="agent" interactiveResize={false} visible readOnly
+        linkOrigin={{ workspaceId, tabId, regionId: targetId }} />
+      <span hidden data-region-actions-generation={generation} />
+    </React.Fragment>))
+    return generation
   }
 }
 Object.assign(window, { regionActions: probe })

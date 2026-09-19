@@ -469,7 +469,7 @@ export function agentDisplayName(facts: AgentNameFacts): string {
     userName: facts.userName,
     launchName: facts.launchName,
     firstPrompt: facts.firstPrompt,
-    fallback: facts.fallbackLabel
+    fallback: facts.fallbackLabel.trim() || facts.providerLabel
   }).name
 }
 
