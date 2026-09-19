@@ -8,7 +8,11 @@ export type ContinuousProgressTarget = {
   workspacePath: string
 }
 
+/** Host-selected read-only source locator; Core does not interpret its business lifecycle. */
+export type ContinuousProgressTaskSource = { root: string; ownerId: string; readerPath: string }
+
 export type ContinuousProgressLoop = ContinuousProgressTarget & {
+  taskSource?: ContinuousProgressTaskSource
   loopId: string
   intervalMs: number
   prompt: string
@@ -44,14 +48,14 @@ export class ContinuousProgressScheduler {
 
   list(): ContinuousProgressLoop[] { return [...this.loops.values()].map((loop) => ({ ...loop })) }
 
-  create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string }): ContinuousProgressLoop {
+  create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
     if ([...this.loops.values()].some((loop) => loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
-    const loop: ContinuousProgressLoop = { loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: 'active' }
+    const loop: ContinuousProgressLoop = { loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: 'active', ...(input.taskSource ? { taskSource: { ...input.taskSource } } : {}) }
     this.loops.set(loop.loopId, loop)
     return { ...loop }
   }

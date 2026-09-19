@@ -1,4 +1,4 @@
-import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
+import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { AgentSessionControl } from './contracts'
 
 export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
@@ -14,7 +14,7 @@ export type ContinuousProgressInputResult = {
 }
 export type ContinuousProgressApi = {
   list(target: ContinuousProgressTarget): Promise<ContinuousProgressLoop[]>
-  create(target: ContinuousProgressTarget, intervalMs: number, prompt: string): Promise<ContinuousProgressLoop>
+  create(target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource): Promise<ContinuousProgressLoop>
   action(target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check'): Promise<ContinuousProgressLoop>
   pauseForInput(control: AgentSessionControl): Promise<void>
   onChanged(listener: (loop: ContinuousProgressLoop) => void): () => void
