@@ -6,12 +6,13 @@ import { join } from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
+import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
   AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
+import { AgentHookServer } from '../../../packages/core/src/hook-server'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
@@ -46,6 +47,7 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 
@@ -54,7 +56,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-live-terminal /> }))
 const initial = useAppStore.getState()
 let dir: string, core: AgentMuxClient, runtime: RuntimeController, topics: ScratchTopics
-let config: AppConfig, disposeIpc: (() => Promise<void>) | undefined, root: Root, container: HTMLDivElement
+let config: AppConfig, disposeIpc: (() => Promise<void>) | undefined, disposeStore: (() => void) | undefined, root: Root, container: HTMLDivElement
 let starts: any[], runs: Map<string, any>, writes: string[], topicId: string, destroyed: boolean
 let kernel: any
 const failures: unknown[] = []
@@ -80,6 +82,9 @@ beforeEach(async () => {
   const durable = new AgentMuxMemoryAgentSessionStore()
   core = new AgentMuxClient({ store: durable, providers: [provider] })
   const inner = core as any
+  // Use the actual listener on an OS-assigned private port; parallel private proofs may hash to
+  // the same fixed Hook port despite using different isolated Runtime directories.
+  inner.hookServer = new AgentHookServer((event, signal) => inner.acceptHookEvent(event, signal), 0)
   inner.connected = true
   await inner.registry.load('local')
   vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: provider.id, installed: true,
@@ -117,11 +122,13 @@ beforeEach(async () => {
     session: { flushStorageData: vi.fn() } })
   disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as unknown as ConfigStore,
+    progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
     scratchTopics: topics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
   })
+  disposeStore = await useAppStore.getState().initialize()
   const tab = createWorkbenchTab(launcherId, { regionId, kind: 'launcher', workspaceId: workspace.id }, topicId)
   useAppStore.setState({ ...initial, config, activeWorkspaceId: workspace.id, tabs: { [launcherId]: tab },
     layouts: { [workspace.id]: createWorkspaceLayout('projection-group', [launcherId]) },
@@ -130,7 +137,8 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove()
+  await act(async () => root?.unmount()); container?.remove()
+  disposeStore?.(); disposeStore = undefined
   const results = await Promise.allSettled([disposeIpc?.(), runtime.dispose()])
   disposeIpc = undefined
   useAppStore.setState(initial, true); bridge.invoke.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
@@ -241,6 +249,69 @@ it('true creation rejection cleans only its prepared identity and keeps the laun
   await expect(useAppStore.getState().launchAgent('fixture', 'keep draft', 'projection-group', { tabId: launcherId, regionId })).rejects.toThrow('actual start rejected')
   expect(useAppStore.getState().tabs[launcherId]?.regions[regionId]?.kind).toBe('launcher')
   expect(useAppStore.getState().agentComposerDrafts[regionId]).toBe('keep draft')
+})
+it('Native persistence refusal is visible through actual creation while the original workbench and input survive', async () => {
+  const sibling = await launchDirect('existing-healthy')
+  expect(sibling.session).toMatchObject({ id: 'existing-healthy', processState: 'running' })
+  useAppStore.setState({ sessions: [sibling.session!] })
+  useAppStore.getState().setAgentComposerDraft(regionId, 'keep new Agent draft')
+  const before = useAppStore.getState()
+  const refusal = new AgentMuxError('ctxmux durable state rejected a mutation: ctxmux durable state is corrupt: WAL exceeds 16 MiB', 'CTXMUX_persistence')
+  const attempts: unknown[] = []
+  kernel.start = async (input: unknown) => { attempts.push(input); throw refusal }
+  const stop = vi.spyOn(core, 'stopAgent')
+
+  await expect(useAppStore.getState().launchAgent('fixture', 'keep new Agent draft', 'projection-group',
+    { tabId: launcherId, regionId })).rejects.toBe(refusal)
+  const state = useAppStore.getState()
+  expect(attempts).toHaveLength(1)
+  expect(state.tabs[launcherId]!.regions[regionId]).toEqual({ regionId, kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID })
+  expect(state.layouts).toEqual(before.layouts)
+  expect(state.agentComposerDrafts[regionId]).toBe('keep new Agent draft')
+  expect(state.sessions).toEqual([sibling.session])
+  expect(state.dirtyDocuments).toBe(before.dirtyDocuments)
+  expect(state.documents).toBe(before.documents)
+  expect(state.error).toBe(refusal.message)
+  expect(state.errorNoticeContext).toBeNull()
+  expect([...runs.keys()]).toEqual(['projection-run-1'])
+  expect(stop).not.toHaveBeenCalled()
+  await api.sessions.write(sibling.session!.control, 'still available', 'user')
+  expect(writes).toEqual(['still available'])
+  await act(async () => root.render(<TransientErrorNotice error={state.error} dismissed={state.errorDismissed}
+    lastError={state.lastError} onDismiss={state.dismissError} onReopen={state.reopenError} />))
+  expect(container.querySelector('[role="status"]')?.getAttribute('aria-live')).toBe('polite')
+  expect(container.textContent).toContain(refusal.message)
+})
+it('Native persistence refusal during original Session recovery retains the same Session, Region and draft', async () => {
+  const id = await launch()
+  const session = useAppStore.getState().sessions[0]!
+  if (session.kind !== 'agent') throw new Error('Expected actual Core Agent')
+  const inner = core as any
+  await inner.registry.put({ ...inner.registry.get(id), nativeHandle: {
+    kind: 'provider', providerId: 'projection-fixture', sessionId: 'verified-private-handle'
+  } })
+  runs.get(session.control.run.runId).state = { type: 'exited', exitCode: 0 }
+  await useAppStore.getState().refreshSession(id)
+  useAppStore.getState().setAgentComposerDraft(id, 'keep recovered Session draft')
+  const before = useAppStore.getState()
+  const refusal = new AgentMuxError('ctxmux durable state rejected a mutation: ctxmux durable state is corrupt: WAL exceeds 16 MiB', 'CTXMUX_persistence')
+  const attempts: unknown[] = []
+  kernel.start = async (input: unknown) => { attempts.push(input); throw refusal }
+  const stop = vi.spyOn(core, 'stopAgent')
+
+  await useAppStore.getState().recoverSession(id)
+  const state = useAppStore.getState()
+  expect(attempts).toHaveLength(1)
+  expect(state.tabs).toBe(before.tabs)
+  expect(state.layouts).toBe(before.layouts)
+  expect(state.sessions).toBe(before.sessions)
+  expect(state.agentComposerDrafts[id]).toBe('keep recovered Session draft')
+  expect(state.error).toBe(refusal.message)
+  expect(state.errorNoticeContext).toBeNull()
+  expect(core.agentSession(id)).toMatchObject({ agentSessionId: id, run: session.control.run,
+    nativeHandle: { kind: 'provider', providerId: 'projection-fixture', sessionId: 'verified-private-handle' } })
+  expect([...runs.keys()]).toEqual([session.control.run.runId])
+  expect(stop).not.toHaveBeenCalled()
 })
 it('sender disappearance keeps the existing explicit cancellation boundary using the accepted Run', async () => {
   destroyed = true
