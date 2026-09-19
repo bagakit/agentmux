@@ -16,6 +16,21 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
 const exec = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 
+
+async function stopPrivateRuntime(runtime: string): Promise<void> {
+  const daemon = fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
+  const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
+    return match && match[2]!.startsWith(daemon + ' ') &&
+      match[2]!.includes('--socket ' + join(runtime, 'ctxmux.sock') + ' ') &&
+      match[2]!.includes('--state-dir ' + join(runtime, 'durable', 'ctxmux') + ' ') ? [Number(match[1])] : []
+  })
+  for (const pid of await owned()) process.kill(pid, 'SIGTERM')
+  const deadline = Date.now() + 5000
+  while ((await owned()).length && Date.now() < deadline) await new Promise(done => setTimeout(done, 25))
+  expect(await owned()).toEqual([])
+}
+
 async function seedSessions(path: string, ids: readonly string[], capability?: string): Promise<void> {
   const store = new AgentMuxFileAgentSessionStore(path)
   for (const agentSessionId of ids) {
@@ -62,7 +77,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     const outputs: Array<Record<string, any>> = []
     for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab']]) {
       const result = await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
-        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed'
+        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed'
       } })
       outputs.push(JSON.parse(result.stdout) as Record<string, any>)
     }
@@ -71,7 +86,7 @@ it('real CLI send retains managed authors for every target without inventing an 
       [{ kind: 'region', regionId: 'region' }, undefined, 'actual mail'],
       [{ kind: 'tab', tabId: 'tab' }, undefined, 'actual mail']
     ])
-    const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
+    const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
     await exec(cli, ['send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
     expect(requests.at(-1)).toMatchObject({ operation: 'send', text: 'human mail' })
     expect(requests.at(-1)).not.toHaveProperty('caller')
@@ -98,6 +113,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     expect(requests.filter((request) => request.operation === 'open.agent')).toHaveLength(2)
   } finally {
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })
@@ -122,7 +138,7 @@ it('real CLI retries the same messageId across new processes with the original d
   } }, join(runtime, 'control.sock'))
   await server.start()
   try {
-    const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' }
+    const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' }
     const first = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
     const second = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
     const firstPayload = JSON.parse(first.stdout) as { result: { receiptId: string; messageId: string } }
@@ -131,6 +147,7 @@ it('real CLI retries the same messageId across new processes with the original d
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })
@@ -180,7 +197,7 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     host.on('end', () => socket.end())
   })
   await new Promise<void>(resolve => proxy.listen(endpoint, resolve))
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
+  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
     AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '', AGENTMUX_AGENT_CAPABILITY: '' }
   const args = ['send', '--to-session', 'recipient', '--message-id', 'lost-control-ack', '--text', 'original exact body']
   try {
@@ -211,6 +228,7 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => proxy.close(() => resolve()))
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })
@@ -251,7 +269,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     throw new AgentMuxError('Captured resolved command.', 'CONTROL_FAILED')
   } }, join(runtime, 'control.sock'))
   await server.start()
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
     AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: '' }
   try {
     for (const selector of [compactId.slice(0, 8), compactId, longId.slice(0, 8)]) {
@@ -319,6 +337,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     await expect(stat(join(runtime, 'ctxmux.sock'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 }, 60000)
@@ -344,7 +363,7 @@ it('capability proof alone supplies the managed author; missing, forged and supe
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
   await server.start()
-  const baseEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+  const baseEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
     AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' }
   const send = async (proof: string, selector = 'reci') => await exec(cli, ['send', '--to-session', selector, '--text', 'verified body'], {
     env: { ...baseEnv, AGENTMUX_AGENT_CAPABILITY: proof }, timeout: 15000
@@ -373,6 +392,7 @@ it('capability proof alone supplies the managed author; missing, forged and supe
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 }, 60000)
@@ -400,7 +420,7 @@ it('real CLI consumes a --leading canonical Session ID verbatim and still reject
     return { operation: 'send', agentSessionId: canonical }
   } }, join(runtime, 'control.sock'))
   await server.start()
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
     AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined }
   try {
     await exec(cli, ['send', '--to-session', canonical, '--text', 'canonical body'], { env, timeout: 15000 })
@@ -416,6 +436,7 @@ it('real CLI consumes a --leading canonical Session ID verbatim and still reject
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })

@@ -1533,7 +1533,7 @@ async function ownedDaemonPids(runtimeDirectory) {
   return parseOwnedDaemonProcesses(ps, {
     daemonPath,
     socketPath: join(runtimeDirectory, 'ctxmux.sock'),
-    stateDirectory: join(runtimeDirectory, 'state')
+    stateDirectory: join(process.env.AGENTMUX_STATE_DIRECTORY, 'ctxmux')
   })
 }
 
@@ -1694,6 +1694,7 @@ export async function runBenchmark(options) {
   const socketName = `agentmux-benchmark-${runId.slice(0, 8)}`
   const hadRuntimeDirectory = Object.hasOwn(process.env, 'AGENTMUX_RUNTIME_DIRECTORY')
   const previousRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+  const previousStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
   const emergencyPids = new Set()
   const cleanup = { agentmux: null, tmux: null, fixtures: null, daemon: null, rootRemoved: false, errors: [] }
   let config = null
@@ -1719,6 +1720,7 @@ export async function runBenchmark(options) {
       mkdir(tmuxDirectory, { recursive: true, mode: 0o700 })
     ])
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(root, 'agentmux-state')
     config = benchmarkConfiguration(options.mode)
     cpuProbe = await buildProcessRusageProbe(root)
     const { AgentMuxClient } = await import(pathToFileURL(join(packageRoot, 'dist', 'index.js')).href)
@@ -1857,6 +1859,8 @@ export async function runBenchmark(options) {
     } finally {
       if (hadRuntimeDirectory) process.env.AGENTMUX_RUNTIME_DIRECTORY = previousRuntimeDirectory
       else delete process.env.AGENTMUX_RUNTIME_DIRECTORY
+      if (previousStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+      else process.env.AGENTMUX_STATE_DIRECTORY = previousStateDirectory
     }
   }
   result.manifest.endedAt = new Date().toISOString()

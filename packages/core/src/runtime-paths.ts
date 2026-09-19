@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 // with this digest; changing an artifact must not change the Runtime's address.
 export const CTXMUX_MANIFEST_SHA256 = '220590d1c7d7a26501fdcce09c161d46f636b7dca98cdcc915e3c4822e81944c'
 
-// The already deployed host namespace is durable, independent of artifact identity.
-// Keep the existing address so upgrades reach the same listener, state and healthy Runs.
+// A stable host namespace, independent of artifact identity. The short endpoint can be
+// recreated; persistent state uses the same namespace under the user's durable directory.
 const CTXMUX_RUNTIME_ID = '1e19b1caf5c6ddd1aa8b5cac'
 
 export function defaultAgentMuxRuntimeDirectory(): string {
@@ -29,8 +29,18 @@ export function defaultCtxmuxSocketPath(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'ctxmux.sock')
 }
 
+export function defaultAgentMuxStateDirectory(): string {
+  const override = process.env.AGENTMUX_STATE_DIRECTORY?.trim()
+  if (override) {
+    if (!isAbsolute(override)) throw new Error('AGENTMUX_STATE_DIRECTORY must be an absolute path.')
+    return resolve(override)
+  }
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 'user'
+  return join(homedir(), '.agentmux', 'state', `amx-${uid}-${CTXMUX_RUNTIME_ID}`)
+}
+
 export function defaultCtxmuxStateDirectory(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'state')
+  return join(defaultAgentMuxStateDirectory(), 'ctxmux')
 }
 
 export function defaultAgentMuxControlSocketPath(): string {

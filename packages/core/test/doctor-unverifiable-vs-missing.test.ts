@@ -29,6 +29,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   arch: 'arm64',
   supported: true,
   ctxmux: {
+    state: { configuredDirectory: '/fixture/future', servingDirectory: null },
     serving: { buildIdentity: 'ctxmux-fixture', protocolVersion: 12, instanceId: 'daemon-fixture', sourceCommit: null },
     bundled: { version: '0.1.0', sourceCommit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7', artifactPlatform: 'darwin-arm64' },
     ready: true,

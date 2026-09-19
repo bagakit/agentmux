@@ -252,6 +252,7 @@ describe('public durable delivery consumer', () => {
     vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', '')
     vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', '')
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
     const implicit = new AgentMuxClient() as unknown as ConsumerInternals
     cleanups.push(async () => await (implicit as unknown as AgentMuxClient).dispose())
     expect(implicit.messageQueue.path).toBe(join(homedir(), '.agentmux', 'state', 'global-messages.ndjson'))
@@ -313,7 +314,7 @@ describe('actual built agentmux deliveries CLI', () => {
     const queuePath = join(root, 'global-messages.ndjson')
     const storePath = join(root, 'sessions.json')
     const env: NodeJS.ProcessEnv = {
-      PATH: process.env.PATH, CODEX_HOME: home, AGENTMUX_RUNTIME_DIRECTORY: runtime,
+      PATH: process.env.PATH, CODEX_HOME: home, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'),
       AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath
     }
     for (const [key, value] of Object.entries(env)) if (value !== undefined) vi.stubEnv(key, value)

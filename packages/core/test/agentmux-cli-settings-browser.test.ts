@@ -38,7 +38,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   async function run(args: readonly string[], input?: string | Buffer) {
     return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [cli, ...args], { cwd: root,
-        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined },
+        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined },
         stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       const timer = setTimeout(() => { child.kill(); reject(new Error('Browser settings CLI did not finish.')) }, 5_000)

@@ -19,7 +19,7 @@ const out = join(base, '.tmp/agent-launch-projection-proof')
 await mkdir(out, { recursive: true })
 const root = await mkdtemp('/tmp/amx-created-projection-')
 await mkdir(join(root, 'home'), { mode: 0o700 })
-const env = { ...process.env, CODEX_HOME: join(root, 'home'), AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+const env = { ...process.env, CODEX_HOME: join(root, 'home'), AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
 for (const name of ['AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_HOOK_TOKEN', 'AGENTMUX_HOOK_URL']) delete env[name]
 const critical = [fileURLToPath(import.meta.url), join(base, 'apps/desktop/scripts/probe-process.mjs'),

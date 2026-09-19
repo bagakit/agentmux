@@ -24,7 +24,7 @@ const capture = async () => Object.fromEntries(await Promise.all(critical.map(as
   createHash('sha256').update(await readFile(path)).digest('hex')])))
 const before = await capture()
 const environment = { ...process.env, CODEX_HOME: join(root, 'home'),
-  AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
+  AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
 for (const name of ['AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY',
   'AGENTMUX_HOOK_URL', 'AGENTMUX_HOOK_TOKEN']) delete environment[name]
 const worker = join(root, 'worker.mjs')

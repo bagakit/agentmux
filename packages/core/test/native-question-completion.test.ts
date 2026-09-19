@@ -360,7 +360,7 @@ describe('native successful question completion owns only an exact unclaimed que
     const env = { ...process.env }
     for (const key of Object.keys(env)) if (key.startsWith('AGENTMUX_')) delete env[key]
     Object.assign(env, {
-      AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
       AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'),
       AGENTMUX_AGENT_SESSION_STORE: path
     })

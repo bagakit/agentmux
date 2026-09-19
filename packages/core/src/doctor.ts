@@ -1,6 +1,6 @@
 import type { AgentMuxClient } from './client.js'
 import { runtimeStorageUsage, type RuntimeStorageUsage } from './runtime-storage-usage.js'
-import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry } from './types.js'
+import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry, AgentMuxRuntimeDiagnostics } from './types.js'
 
 /**
  * 探测结果的四态。
@@ -156,7 +156,9 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       ...(options.commandOverrides?.[entry.id] === undefined ? {} : { command: options.commandOverrides[entry.id] })
     }), phase: 'pre-connect' as const
   })))
-  const observeStorage = () => runtimeStorageUsage().then(
+  const observeStorage = (runtime: AgentMuxRuntimeDiagnostics | null) => runtime === null || runtime.ctxmux.state.servingDirectory === null
+    ? Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified' })
+    : runtimeStorageUsage(runtime.ctxmux.state.servingDirectory).then(
     (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null }),
     (error: unknown) => ({
       runtimeStorage: null,
@@ -187,7 +189,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         action: null
       },
       runtime,
-      ...await observeStorage(),
+      ...await observeStorage(runtime),
       runtimeAction: !runtime.supported
         ? 'Use Node 24 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
         : !runtime.ctxmux.ready
@@ -225,7 +227,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
       },
       runtime: null,
-      ...await observeStorage(),
+      ...await observeStorage(null),
       runtimeAction: null,
       hosts: {
         local: {

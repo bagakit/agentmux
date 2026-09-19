@@ -43,6 +43,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
   await mkdir(workspacePath)
   isolation.homedir = join(root, 'home')
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', path)
   const providerId = `synthetic-${mode}`
@@ -252,7 +253,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
       const expected = await store.load()
       const env = { ...process.env }
       for (const key of Object.keys(env)) if (key.startsWith('AGENTMUX_')) delete env[key]
-      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
         AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'), AGENTMUX_AGENT_SESSION_STORE: path })
       const script = `
         import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';

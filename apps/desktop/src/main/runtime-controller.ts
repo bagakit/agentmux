@@ -350,15 +350,20 @@ export class RuntimeController {
   /** Observe already-connected owners; this never reconnects, stops, attaches, or removes a Run. */
   async resourceUsageObservation(): Promise<RuntimeUsage[]> {
     const hosts = [...this.hosts]
-    const storage = hosts.some(([, host]) => host.executionHost.kind === 'local')
-      ? runtimeStorageUsage().then(
-        (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null }),
-        (error: unknown) => ({
-          runtimeStorage: null,
-          runtimeStorageUnavailable: error instanceof Error ? error.message : String(error)
-        })
-      )
-      : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable' })
+    const storage = new Map<string, Promise<Pick<RuntimeUsage, 'runtimeStorage' | 'runtimeStorageUnavailable'>>>()
+    const observeStorage = async (client: AgentMuxClient) => {
+      try {
+        const directory = (await client.runtimeDiagnostics()).ctxmux.state.servingDirectory
+        if (directory === null) return { runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified' }
+        if (!storage.has(directory)) storage.set(directory, runtimeStorageUsage(directory).then(
+          (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null }),
+          (error: unknown) => ({ runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error) })
+        ))
+        return await storage.get(directory)!
+      } catch (error) {
+        return { runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error) }
+      }
+    }
     return await Promise.all(hosts.map(async ([hostId, { client, executionHost }]): Promise<RuntimeUsage> => {
       const [resources, endpoint] = await Promise.all([
         client.runtimeResourceSnapshot().then(
@@ -366,7 +371,7 @@ export class RuntimeController {
           (error: unknown) => ({ resources: null, unavailable: error instanceof Error ? error.message : String(error) })
         ),
         executionHost.kind === 'local'
-          ? storage
+          ? observeStorage(client)
           : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable' })
       ])
       return {

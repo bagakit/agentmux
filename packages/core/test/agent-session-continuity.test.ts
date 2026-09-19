@@ -377,9 +377,10 @@ async function continuityHarness(options: {
   await mkdir(runtime)
   for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime)
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(workspacePath, 'durable'))
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', join(workspacePath, 'sessions.json'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(workspacePath, 'messages.ndjson'))
-  for (const key of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH']) {
+  for (const key of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH']) {
     expect(process.env[key]?.startsWith(workspacePath + '/')).toBe(true)
   }
   const store = new AgentMuxMemoryAgentSessionStore()

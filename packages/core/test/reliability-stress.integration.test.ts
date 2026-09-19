@@ -37,7 +37,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         maxBuffer: 4 * 1024 * 1024,
         env: {
           ...process.env,
-          AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+          AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'durable'),
           AGENTMUX_CORE_ENTRY: resolve(repositoryRoot, 'packages/core/dist/index.js'),
           AGENTMUX_DAEMON_PATH: resolve(
             repositoryRoot,

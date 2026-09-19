@@ -14,6 +14,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   arch: 'arm64',
   supported: true,
   ctxmux: {
+    state: { configuredDirectory: '/fixture/future', servingDirectory: null },
     serving: { buildIdentity: 'ctxmux-fixture', protocolVersion: 12, instanceId: 'daemon-fixture', sourceCommit: null },
     bundled: { version: '0.1.0', sourceCommit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7', artifactPlatform: 'darwin-arm64' },
     ready: true,
@@ -72,7 +73,9 @@ describe('AgentMux doctor', () => {
       await writeFile(join(root, `amx-${UID}-${'a'.repeat(24)}`, 'old-state'), 'x'.repeat(4096))
       await writeFile(join(current, 'state.sqlite3'), 'x'.repeat(2048))
       process.env.AGENTMUX_RUNTIME_DIRECTORY = current
-      const report = await diagnoseAgentMux({ client: client() })
+      const report = await diagnoseAgentMux({ client: client({ runtimeDiagnostics: async () => ({
+        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: '/future/default', servingDirectory: current } }
+      }) }) })
       expect(report.runtimeStorage).toEqual({ path: current, bytes: 2048 })
       expect(report.runtimeStorageUnavailable).toBeNull()
       expect(report.ok).toBe(true)
@@ -83,7 +86,9 @@ describe('AgentMux doctor', () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
     try {
       process.env.AGENTMUX_RUNTIME_DIRECTORY = join(root, 'missing')
-      const report = await diagnoseAgentMux({ client: client() })
+      const report = await diagnoseAgentMux({ client: client({ runtimeDiagnostics: async () => ({
+        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: '/future/default', servingDirectory: join(root, 'missing') } }
+      }) }) })
       expect(report.runtimeStorage).toBeNull()
       expect(report.runtimeStorageUnavailable).toContain('ENOENT')
       expect(report.ok).toBe(true)
@@ -92,7 +97,7 @@ describe('AgentMux doctor', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
-  it('keeps disk observation distinct from an unavailable Runtime', async () => {
+  it('does not claim a configured directory belongs to an unavailable Runtime', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
     try {
       await writeFile(join(root, 'state.sqlite3'), 'x'.repeat(1024))
@@ -100,8 +105,8 @@ describe('AgentMux doctor', () => {
       const report = await diagnoseAgentMux({
         client: client({ connect: vi.fn(async () => { throw new Error('owner receipt mismatch') }) })
       })
-      expect(report.runtimeStorage).toEqual({ path: root, bytes: 1024 })
-      expect(report.runtimeStorageUnavailable).toBeNull()
+      expect(report.runtimeStorage).toBeNull()
+      expect(report.runtimeStorageUnavailable).toBe('Current Runtime state directory is unverified')
       expect(report.host.error).toBe('owner receipt mismatch')
     } finally { await rm(root, { recursive: true, force: true }) }
   })

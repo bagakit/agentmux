@@ -112,7 +112,7 @@ async function fixture() {
     async function failSend() {
       const result = await execute(process.execPath, [cli, 'send', '--to-session', stored.agentSessionId,
         '--text', '  original message\n第二行  ', '--message-id', 'original-message'], {
-        env: { ...env, HOME: root, AGENTMUX_RUNTIME_DIRECTORY: root,
+        env: { ...env, HOME: root, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
           AGENTMUX_AGENT_SESSION_STORE: store.path, AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') },
         timeout: 10_000, maxBuffer: 256 * 1024
       }).then(() => { throw new Error('CLI unexpectedly accepted the blocked prompt.') }, error => {

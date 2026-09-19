@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runtimeStorageUsage } from '../src/runtime-storage-usage.js'
 
 const roots: string[] = []
-const originalDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const originalDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 afterEach(async () => {
-  if (originalDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
-  else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalDirectory
+  if (originalDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+  else process.env.AGENTMUX_STATE_DIRECTORY = originalDirectory
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -34,7 +34,7 @@ describe('selected Runtime disk observation', () => {
 
   it('uses the configured Runtime selection, even when its directory has no derived-version name', async () => {
     const { selected } = await fixture()
-    process.env.AGENTMUX_RUNTIME_DIRECTORY = selected
+    process.env.AGENTMUX_STATE_DIRECTORY = selected
     expect(await runtimeStorageUsage()).toEqual({ path: selected, bytes: 2059 })
   })
 

@@ -210,7 +210,8 @@ an upgrade moves it and a recomputed copy would go stale silently.
 This command does not connect. It answers the same way whether or not an owner is currently
 listening, because a client needs the address before it can dial. "Nobody is listening right
 now" is a different question — ask 'agentmux doctor' for that. AGENTMUX_RUNTIME_DIRECTORY
-relocates the whole runtime root, and the answer follows it.
+selects the short endpoint root, and the answer follows it. AGENTMUX_STATE_DIRECTORY
+independently selects durable state; neither override implies the other.
 `],
   ['inspect', `Inspect one exact owner identity without changing focus
 

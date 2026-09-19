@@ -14,6 +14,7 @@ import {
 import type { AgentMuxStoredAgentSession, AgentTimelineItem } from '../src/types.js'
 import {
   defaultAgentMuxRuntimeDirectory,
+  defaultAgentMuxStateDirectory,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
 } from '../src/runtime-paths.js'
@@ -790,8 +791,7 @@ describe('semantic session persistence boundary', () => {
 })
 
 describe('durable session identity root', () => {
-  // 宿主 AgentMux.app 会注入 AGENTMUX_AGENT_SESSION_STORE 覆盖默认路径，抹掉这里断言的 runtime 回退分支。
-  // 剥掉它让 defaultAgentMuxAgentSessionStorePath() 走 fallback，测完还原，不动断言本身。
+  // 测默认durable来源，不让宿主注入的显式Store盖过默认选择；测完还原。
   let previousStoreOverride: string | undefined
   beforeEach(() => {
     previousStoreOverride = process.env.AGENTMUX_AGENT_SESSION_STORE
@@ -846,16 +846,15 @@ describe('durable session identity root', () => {
     }
   })
 
-  it('keeps the ctxmux socket and state in the machine-level runtime temp directory', () => {
-    // BOUNDARY: the daemon's socket/state are ephemeral machine-level runtime; moving them would change
-    // the daemon adopt path. They must stay under the temp runtime directory, not follow the session file.
+  it('keeps the short ctxmux endpoint separate from durable Native and semantic state', () => {
     const runtimeDirectory = defaultAgentMuxRuntimeDirectory()
+    const stateDirectory = defaultAgentMuxStateDirectory()
     const temporaryRoot = process.platform === 'darwin' ? '/private/tmp' : tmpdir()
     expect(runtimeDirectory.startsWith(temporaryRoot)).toBe(true)
     expect(defaultCtxmuxSocketPath().startsWith(runtimeDirectory)).toBe(true)
-    expect(defaultCtxmuxStateDirectory().startsWith(runtimeDirectory)).toBe(true)
-    // The default (unfixed) session store path is exactly the temp location this task moves off of.
-    expect(defaultAgentMuxAgentSessionStorePath().startsWith(runtimeDirectory)).toBe(true)
+    expect(stateDirectory).not.toBe(runtimeDirectory)
+    expect(defaultCtxmuxStateDirectory()).toBe(join(stateDirectory, 'ctxmux'))
+    expect(defaultAgentMuxAgentSessionStorePath()).toBe(join(stateDirectory, 'agent-sessions.json'))
   })
 
   it('reads only its own path — no migration, no fallback to the old temp location', async () => {
@@ -865,19 +864,24 @@ describe('durable session identity root', () => {
     const durableRoot = await mkdtemp(join(tmpdir(), 'agentmux-durable-only-'))
     const legacyRuntime = await mkdtemp(join(tmpdir(), 'agentmux-legacy-runtime-'))
     const previousOverride = process.env.AGENTMUX_RUNTIME_DIRECTORY
+    const previousStateOverride = process.env.AGENTMUX_STATE_DIRECTORY
     process.env.AGENTMUX_RUNTIME_DIRECTORY = legacyRuntime
+    process.env.AGENTMUX_STATE_DIRECTORY = durableRoot
     try {
-      const oldTempPath = defaultAgentMuxAgentSessionStorePath()
+      const oldTempPath = join(legacyRuntime, 'agent-sessions.json')
       expect(oldTempPath.startsWith(legacyRuntime)).toBe(true)
       const legacy = new AgentMuxFileAgentSessionStore(oldTempPath)
       await legacy.compareAndSwap(null, storedSession())
       await expect(legacy.load()).resolves.toHaveLength(1)
 
-      const durable = new AgentMuxFileAgentSessionStore(join(durableRoot, 'agent-sessions.json'))
+      const durable = new AgentMuxFileAgentSessionStore()
+      expect(durable.path).toBe(join(durableRoot, 'agent-sessions.json'))
       await expect(durable.load()).resolves.toEqual([])
     } finally {
       if (previousOverride === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
       else process.env.AGENTMUX_RUNTIME_DIRECTORY = previousOverride
+      if (previousStateOverride === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+      else process.env.AGENTMUX_STATE_DIRECTORY = previousStateOverride
       await rm(durableRoot, { recursive: true, force: true })
       await rm(legacyRuntime, { recursive: true, force: true })
     }

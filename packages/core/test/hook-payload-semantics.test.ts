@@ -85,6 +85,7 @@ async function harness(profile: Profile) {
   const path = join(root, 'sessions.json'), workspacePath = join(root, 'workspace')
   isolation.homedir = join(root, 'home')
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
   const store = new AgentMuxFileAgentSessionStore(path)
   await store.compareAndSwap(null, seed(profile, workspacePath))
@@ -158,7 +159,7 @@ async function harness(profile: Profile) {
       const expected = await new AgentMuxFileAgentSessionStore(path).load()
       const env = { ...process.env }
       for (const key of Object.keys(env)) if (key.startsWith('AGENTMUX_')) delete env[key]
-      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
         AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'), AGENTMUX_AGENT_SESSION_STORE: path })
       const script = `
         import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';

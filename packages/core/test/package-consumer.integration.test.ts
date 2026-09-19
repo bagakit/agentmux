@@ -542,6 +542,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       const runtimeEnvironment = {
         ...ambientFreeEnvironment,
         NO_COLOR: '1',
+        AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+        AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'private-durable'),
         AGENTMUX_TEST_UID: testUid,
         NODE_OPTIONS: [
           process.env.NODE_OPTIONS,

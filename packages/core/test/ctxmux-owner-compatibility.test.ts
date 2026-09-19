@@ -31,6 +31,7 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'amx-ownership-'))
   directories.push(directory)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'durable'))
   vi.spyOn(CtxmuxClient.prototype, 'runtimeInfo').mockResolvedValue(structuredClone(runtime))
   vi.spyOn(CtxmuxClient.prototype, 'list').mockResolvedValue([])
   return { directory, adapter: new CtxmuxRunAdapter() }
@@ -67,6 +68,9 @@ describe('Runtime compatibility independent of launch provenance', () => {
       expect(client.runtimeIdentity()).toEqual({ hostId: 'local', ownership: 'unverified', processId: null,
         buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration, instanceId: runtime.daemonInstanceId })
       const diagnostics = await client.runtimeDiagnostics()
+      expect(diagnostics.ctxmux.state).toEqual({
+        configuredDirectory: join(directory, 'durable', 'ctxmux'), servingDirectory: null
+      })
       expect(diagnostics.ctxmux.serving).toEqual({ buildIdentity: runtime.buildId,
         protocolVersion: runtime.protocolGeneration, instanceId: runtime.daemonInstanceId, sourceCommit: null })
       expect(diagnostics.ctxmux.bundled).toEqual({ version: CTXMUX_VERSION, sourceCommit: CTXMUX_COMMIT, artifactPlatform: 'darwin-arm64' })

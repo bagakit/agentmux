@@ -58,7 +58,7 @@ describe('settings CLI over the public Control socket', () => {
   })
 
   async function run(args: readonly string[]) {
-    const options = { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root,
+    const options = { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
       AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } }
     try {
       const output = await exec(process.execPath, [cli, ...args], options)

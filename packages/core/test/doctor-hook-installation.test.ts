@@ -13,7 +13,8 @@ let root: string
 let client: AgentMuxClient
 let installer: AgentManagedHookInstaller
 const runtime: AgentMuxRuntimeDiagnostics = { nodeVersion: '24.0.0', platform: 'darwin', arch: 'arm64', supported: true,
-  ctxmux: { serving: { buildIdentity: 'fixture', protocolVersion: 17, instanceId: 'fixture', sourceCommit: null }, bundled: { version: '0.1.0', sourceCommit: 'c168c0ab9cd849bfade68461b62684982c71f688', artifactPlatform: 'darwin-arm64' }, ready: true,
+  ctxmux: {
+    state: { configuredDirectory: '/fixture/future', servingDirectory: null }, serving: { buildIdentity: 'fixture', protocolVersion: 17, instanceId: 'fixture', sourceCommit: null }, bundled: { version: '0.1.0', sourceCommit: 'c168c0ab9cd849bfade68461b62684982c71f688', artifactPlatform: 'darwin-arm64' }, ready: true,
     capabilities: { transport: 'local-unix', orderedOutputBytes: true, boundedReplay: true, recoverableInput: true, resize: true, interrupt: true, completeStop: true } } }
 
 beforeEach(async () => {

@@ -19,6 +19,7 @@ const runtimeDirectories: string[] = []
 const createdCodexSessions: Array<{ command: string; sessionId: string; cwd: string }> = []
 const activeAgentSessions: Array<{ store: AgentMuxFileAgentSessionStore; agentSessionId: string }> = []
 const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const originalStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 const ctxmuxDaemon = fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
 
 async function stopOwnedTestDaemon(runtimeDirectory: string): Promise<void> {
@@ -99,6 +100,8 @@ afterEach(async () => {
   }
   if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
+  if (originalStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+  else process.env.AGENTMUX_STATE_DIRECTORY = originalStateDirectory
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Real Codex E2E session cleanup failed.')
 }, 30_000)
@@ -142,6 +145,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     const runtimeDirectory = join(root, 'runtime')
     runtimeDirectories.push(runtimeDirectory)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'durable')
     const invocationId = root.slice(root.lastIndexOf('-') + 1)
     const agentSessionId = `real-codex-${invocationId}`
     const workspace = join(root, 'workspace')

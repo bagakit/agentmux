@@ -55,6 +55,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
   await mkdir(workspacePath)
   isolation.homedir = join(root, 'home')
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', path)
   const providerId = `synthetic-${mode}-${shape}`
@@ -276,7 +277,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
       expect(expected).toHaveLength(1)
       const env = { ...process.env }
       for (const key of Object.keys(env)) if (key.startsWith('AGENTMUX_')) delete env[key]
-      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
         AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'), AGENTMUX_AGENT_SESSION_STORE: path })
       const script = `
         import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';
@@ -302,7 +303,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
       const { hookBindingId: _binding, hookToken: _token, ...publicSession } = recoveryFacts(expected[0]!)
       expect(restored.publicSessions.map(recoveryFacts)).toEqual([publicSession])
       expect([restored.starts, restored.stops]).toEqual([0, 0])
-      expect(restored.env).toEqual({ AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+      expect(restored.env).toEqual({ AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
         AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'queue.ndjson'), AGENTMUX_AGENT_SESSION_STORE: path })
       client = await connect()
     }, close }

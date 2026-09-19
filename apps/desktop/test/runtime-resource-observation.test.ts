@@ -226,6 +226,7 @@ describe('existing RuntimeController resource observation owner', () => {
     fixture.storage.mockResolvedValue(runtimeRow.runtimeStorage)
     const client = {
       runtimeResourceSnapshot: vi.fn(async () => resources),
+      runtimeDiagnostics: vi.fn(async () => ({ ctxmux: { state: { configuredDirectory: '/fixture/future', servingDirectory: '/fixture/current' } } })),
       connect: vi.fn(() => { throw new Error('resource observation must not activate Runtime') }),
       stopTerminal: vi.fn(), remove: vi.fn()
     }
@@ -237,7 +238,7 @@ describe('existing RuntimeController resource observation owner', () => {
     const rows = await controller.resourceUsageObservation()
     expect(rows).toEqual([{ ...runtimeRow, hostId: 'local' }, { ...runtimeRow, hostId: 'other-local' }])
     expect(fixture.storage).toHaveBeenCalledOnce()
-    expect(fixture.storage).toHaveBeenCalledWith()
+    expect(fixture.storage).toHaveBeenCalledWith('/fixture/current')
     expect(client.runtimeResourceSnapshot).toHaveBeenCalledTimes(2)
     expect(client.connect).not.toHaveBeenCalled()
     expect(client.stopTerminal).not.toHaveBeenCalled()
@@ -246,8 +247,9 @@ describe('existing RuntimeController resource observation owner', () => {
 
   it('a per-host Runtime failure and storage error leave the other host inventory intact', async () => {
     fixture.storage.mockRejectedValue(new Error('directory observation failed'))
-    const good = { runtimeResourceSnapshot: async () => resources }
-    const bad = { runtimeResourceSnapshot: async () => { throw new Error('disconnected') } }
+    const runtimeDiagnostics = async () => ({ ctxmux: { state: { configuredDirectory: '/fixture/future', servingDirectory: '/fixture/current' } } })
+    const good = { runtimeResourceSnapshot: async () => resources, runtimeDiagnostics }
+    const bad = { runtimeResourceSnapshot: async () => { throw new Error('disconnected') }, runtimeDiagnostics }
     const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
     Object.assign(controller, { hosts: new Map([
       ['working', { executionHost: { kind: 'local' }, client: good }],
@@ -260,6 +262,23 @@ describe('existing RuntimeController resource observation owner', () => {
     expect(rows[1]).toMatchObject({ hostId: 'failed', resources: null, unavailable: 'disconnected',
       runtimeStorage: null, runtimeStorageUnavailable: 'directory observation failed' })
     expect(fixture.storage).toHaveBeenCalledOnce()
-    expect(fixture.storage).toHaveBeenCalledWith()
+    expect(fixture.storage).toHaveBeenCalledWith('/fixture/current')
+  })
+
+  it('does not measure configured future state when a healthy listener binding is unknown', async () => {
+    const client = {
+      runtimeResourceSnapshot: vi.fn(async () => resources),
+      runtimeDiagnostics: vi.fn(async () => ({ ctxmux: { state: { configuredDirectory: '/fixture/future', servingDirectory: null } } })),
+      connect: vi.fn(), stopTerminal: vi.fn(), remove: vi.fn()
+    }
+    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    Object.assign(controller, { hosts: new Map([['local', { executionHost: { kind: 'local' }, client }]]) })
+    expect(await controller.resourceUsageObservation()).toEqual([{
+      ...runtimeRow, runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified'
+    }])
+    expect(fixture.storage).not.toHaveBeenCalled()
+    expect(client.connect).not.toHaveBeenCalled()
+    expect(client.stopTerminal).not.toHaveBeenCalled()
+    expect(client.remove).not.toHaveBeenCalled()
   })
 })
