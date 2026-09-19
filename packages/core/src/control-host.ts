@@ -28,6 +28,10 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxControlSettingEntry,
+  type AgentMuxControlSettingsResourceRequest,
+  type AgentMuxControlSettingsResourceKind,
+  type AgentMuxControlSettingsResourceItem,
+  AGENTMUX_CONTROL_MAX_MESSAGE_BYTES,
   type AgentMuxControlDemandUpdateRequest,
   AGENTMUX_DEMAND_PRIORITIES,
   AGENTMUX_DEMAND_STATUSES,
@@ -48,13 +52,14 @@ import {
   type AgentMuxTerminalViewObservation
 } from './control.js'
 import { AgentMuxError } from './errors.js'
+import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
-const MAX_MESSAGE_BYTES = 256 * 1024
+const MAX_MESSAGE_BYTES = AGENTMUX_CONTROL_MAX_MESSAGE_BYTES
 const MAX_ID_BYTES = 512
 const MAX_TAB_REGIONS = 64
 const MAX_EXECUTORS = 128
@@ -247,6 +252,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (isSettingsResourceOperation(source.operation)) return settingsResourceRequest(source)
   if (source.operation === 'inspect.client') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
@@ -738,6 +744,60 @@ function settingsFields(source: Record<string, unknown>, allowed: readonly strin
   }
 }
 
+function resourceKind(value: unknown, code: string): AgentMuxControlSettingsResourceKind {
+  if (value !== 'executors' && value !== 'prompts') throw new AgentMuxError('Settings resource is invalid.', code)
+  return value
+}
+
+function isSettingsResourceOperation(operation: AgentMuxControlRequest['operation']): operation is AgentMuxControlSettingsResourceRequest['operation'] {
+  return operation.startsWith('settings.resource.')
+}
+
+function settingsResourceRequest(source: Record<string, unknown>): AgentMuxControlSettingsResourceRequest {
+  const code = 'INVALID_CONTROL_REQUEST', operation = source.operation
+  const common = ['schemaVersion', 'requestId', 'operation', 'resource']
+  const fields = operation === 'settings.resource.list' ? common : operation === 'settings.resource.add'
+    ? [...common, 'id', 'value'] : operation === 'settings.resource.update'
+      ? [...common, 'id', 'changes', 'expected'] : operation === 'settings.resource.remove'
+        ? [...common, 'id', 'expected'] : [...common, 'id']
+  settingsResourceEnvelope(source, fields, code)
+  const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+    requestId: id(source.requestId, 'Control request ID is invalid.', code), resource: resourceKind(source.resource, code) }
+  let request: AgentMuxControlSettingsResourceRequest
+  if (operation === 'settings.resource.list') request = { ...base, operation }
+  else {
+    const resourceId = id(source.id, 'Settings resource ID is invalid.', code)
+    if (operation === 'settings.resource.get') request = { ...base, operation, id: resourceId }
+    else if (operation === 'settings.resource.add') {
+      const value = settingsResourceRecord(source.value, code)
+      if (Object.hasOwn(value, 'id')) throw new AgentMuxError('Resource ID must occur only in the envelope.', code)
+      request = { ...base, operation, id: resourceId, value }
+    } else {
+      const expected = Object.hasOwn(source, 'expected') ? { expected: settingsResourceRecord(source.expected, code) } : {}
+      if (operation === 'settings.resource.remove') request = { ...base, operation, id: resourceId, ...expected }
+      else {
+        const changes = settingsResourceRecord(source.changes, code)
+        if (Object.keys(changes).length === 0) throw new AgentMuxError('Resource changes are empty.', code)
+        request = { ...base, operation: 'settings.resource.update', id: resourceId, changes, ...expected }
+      }
+    }
+  }
+  settingsResourceBudget(request, code)
+  return request
+}
+
+function resourceItem(value: unknown): AgentMuxControlSettingsResourceItem {
+  const code = 'CONTROL_PROTOCOL_ERROR', source = settingsResourceEnvelope(value, ['id', 'value'], code)
+  const fields = settingsResourceRecord(source.value, code)
+  if (Object.hasOwn(fields, 'id')) throw new AgentMuxError('Resource ID must occur only in the item envelope.', code)
+  return { id: id(source.id, 'Settings resource item ID is invalid.', code), value: fields }
+}
+
+function resourceReceipt(receipt: AgentMuxControlSuccessReceipt): AgentMuxControlSuccessReceipt {
+  settingsResourceBudget(receipt, 'CONTROL_PROTOCOL_ERROR')
+  return receipt
+}
+
 function settingEntry(value: unknown): AgentMuxControlSettingEntry {
   const source = object(value, 'Setting entry is invalid.', 'CONTROL_PROTOCOL_ERROR')
   settingsFields(source, ['key', 'kind', 'value', 'default', 'enum'], 'CONTROL_PROTOCOL_ERROR')
@@ -769,6 +829,37 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (isSettingsResourceOperation(operation)) {
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
+    const code = 'CONTROL_PROTOCOL_ERROR', resource = resourceKind(result.resource, code)
+    if (operation === 'settings.resource.list') {
+      settingsResourceEnvelope(result, ['resource', 'items', 'partial'], code)
+      if (result.partial !== true || !Array.isArray(result.items) || Object.getPrototypeOf(result.items) !== Array.prototype ||
+        Reflect.ownKeys(result.items).length !== result.items.length + 1) throw new AgentMuxError('Resource list is invalid.', code)
+      const items = Array.from({ length: result.items.length }, (_, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(result.items, String(index))
+        if (!descriptor?.enumerable || !('value' in descriptor)) throw new AgentMuxError('Resource list is invalid.', code)
+        return resourceItem(descriptor.value)
+      })
+      if (new Set(items.map(item => item.id)).size !== items.length) throw new AgentMuxError('Resource item IDs are not unique.', code)
+      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { resource, items, partial: true } })
+    }
+    if (operation === 'settings.resource.remove') {
+      settingsResourceEnvelope(result, ['resource', 'id', 'removed'], code)
+      if (result.removed !== true) throw new AgentMuxError('Resource removal is invalid.', code)
+      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+        result: { resource, id: id(result.id, 'Resource ID is invalid.', code), removed: true } })
+    }
+    if (operation === 'settings.resource.get') {
+      settingsResourceEnvelope(result, ['resource', 'item'], code)
+      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { resource, item: resourceItem(result.item) } })
+    }
+    settingsResourceEnvelope(result, ['resource', 'item', 'changed'], code)
+    if (typeof result.changed !== 'boolean') throw new AgentMuxError('Resource commit is invalid.', code)
+    const body = { resource, item: resourceItem(result.item), changed: result.changed }
+    if (operation === 'settings.resource.add') return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: body })
+    return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: 'settings.resource.update', result: body })
+  }
   if (operation === 'inspect.client') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,

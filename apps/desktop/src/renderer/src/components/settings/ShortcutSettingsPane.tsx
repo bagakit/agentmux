@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 // 走 `/provider-id` 窄子路径而不是根 barrel：这是 renderer 里少有的对 core 的**值**导入（别处都是
 // `import type`，编译期就擦掉了）。根 barrel 会 re-export `agent-native-locator.js`，那个文件 import
@@ -10,6 +9,7 @@ import { resolveComposerShortcuts } from '../../../../shared/composer-shortcut-l
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
+import { useResourceDrafts } from './use-resource-drafts'
 
 /**
  * 本地 prompt 库的设置页。
@@ -23,14 +23,14 @@ import { agentProviderLabel } from '../AgentProviderIcon'
  */
 export function ShortcutSettingsPane({ config, onSave }: {
   config: AppConfig
-  onSave: (prompts: ComposerShortcut[]) => Promise<void>
+  onSave: (prompts: ComposerShortcut[], expected: ComposerShortcut[]) => Promise<void>
 }) {
-  const saved = JSON.stringify(resolveComposerShortcuts(config))
-  const [drafts, setDrafts] = useState<ComposerShortcut[]>(() => JSON.parse(saved))
+  const resource = useResourceDrafts(Object.fromEntries(resolveComposerShortcuts(config).map((prompt) => [prompt.id, prompt])))
+  const drafts = Object.values(resource.value)
+  const setDrafts = (update: (current: ComposerShortcut[]) => ComposerShortcut[]) => resource.setValue((current) =>
+    Object.fromEntries(update(Object.values(current)).map((prompt) => [prompt.id, prompt])))
   const saveState = useSettingsSave()
-  const dirty = JSON.stringify(drafts) !== saved
-  // A config save elsewhere may replace array references without changing these prompts.
-  useEffect(() => setDrafts(JSON.parse(saved) as ComposerShortcut[]), [saved])
+  const dirty = resource.dirty
 
   function update(id: string, patch: Partial<ComposerShortcut>): void {
     setDrafts((current) => current.map((prompt) => prompt.id === id ? { ...prompt, ...patch } : prompt))
@@ -67,12 +67,15 @@ export function ShortcutSettingsPane({ config, onSave }: {
       : ''
 
   async function save(): Promise<void> {
-    await saveState.run(() => onSave(drafts.map((prompt) => ({
+    const submitted = resource.beginSave()
+    const normalized = Object.values(submitted.value).map((prompt) => ({
       ...prompt,
       keyword: prompt.keyword.trim(),
       label: prompt.label.trim() || prompt.keyword.trim(),
       body: prompt.body
-    }))))
+    }))
+    const committed = await saveState.run(() => onSave(normalized, Object.values(submitted.expected)))
+    submitted.finish(committed ? Object.fromEntries(normalized.map((prompt) => [prompt.id, prompt])) : undefined)
   }
 
   return (
@@ -99,6 +102,9 @@ export function ShortcutSettingsPane({ config, onSave }: {
                 >
                   <option value="">Every Agent</option>
                   {BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}
+                  {prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId)
+                    ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option>
+                    : null}
                 </select>
                 <small>Leave this on Every Agent unless the wording only makes sense for one of them.</small>
               </label>

@@ -2674,7 +2674,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
-    if (request.operation === 'settings.get' || request.operation === 'settings.set') {
+    if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
+        request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
+        request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
+        request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
     const input = () => {
