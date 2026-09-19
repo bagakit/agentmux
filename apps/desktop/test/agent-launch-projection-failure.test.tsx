@@ -68,6 +68,7 @@ beforeEach(async () => {
   await mkdir(join(dir, 'home'), { mode: 0o700 })
   vi.stubEnv('CODEX_HOME', join(dir, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(dir, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
   starts = []; runs = new Map(); writes = []; destroyed = false
   const template = new AgentProviderRegistry().get('codex')
@@ -272,7 +273,7 @@ it('Native persistence refusal is visible through actual creation while the orig
   expect(state.dirtyDocuments).toBe(before.dirtyDocuments)
   expect(state.documents).toBe(before.documents)
   expect(state.error).toBe(refusal.message)
-  expect(state.errorNoticeContext).toBeNull()
+  expect(state.errorNoticeContext).toEqual({ kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId: launcherId } })
   expect([...runs.keys()]).toEqual(['projection-run-1'])
   expect(stop).not.toHaveBeenCalled()
   await api.sessions.write(sibling.session!.control, 'still available', 'user')
@@ -307,7 +308,8 @@ it('Native persistence refusal during original Session recovery retains the same
   expect(state.sessions).toBe(before.sessions)
   expect(state.agentComposerDrafts[id]).toBe('keep recovered Session draft')
   expect(state.error).toBe(refusal.message)
-  expect(state.errorNoticeContext).toBeNull()
+  expect(state.errorNoticeContext).toEqual({ kind: 'indeterminate', subject: session.control,
+    lifecycle: { step: 'resume', subject: session.control, lastProcessState: 'exited' } })
   expect(core.agentSession(id)).toMatchObject({ agentSessionId: id, run: session.control.run,
     nativeHandle: { kind: 'provider', providerId: 'projection-fixture', sessionId: 'verified-private-handle' } })
   expect([...runs.keys()]).toEqual([session.control.run.runId])

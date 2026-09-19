@@ -6,6 +6,7 @@ import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/c
 import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { sessionServiceNotices } from '../lib/session-service-notices'
+import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices() {
@@ -18,6 +19,8 @@ export function GlobalSystemNotices() {
   const selectSession = useAppStore((state) => state.selectSession)
   const queues = useAppStore((state) => state.agentSteerQueues)
   const sending = useAppStore((state) => state.agentSteerInFlight)
+  const lifecycleFailure = useAppStore(state => state.errorNoticeContext?.lifecycle)
+  const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
   const id = useId()
   const [open, setOpen] = useState(false)
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
@@ -44,9 +47,14 @@ export function GlobalSystemNotices() {
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
-  const sessionNotices = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id])
+  const sessionNotices: ServiceNoticeItem[] = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id],
+    { message: lifecycleMessage, failure: lifecycleFailure })
     .map(item => ({ ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
       action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
+  if (lifecycleMessage && lifecycleFailure?.step === 'launch') sessionNotices.push({
+    id: JSON.stringify(['launch', lifecycleFailure.regionId]),
+    notice: agentLifecycleFailureNotice(lifecycleFailure, lifecycleMessage)
+  })
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
   const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)

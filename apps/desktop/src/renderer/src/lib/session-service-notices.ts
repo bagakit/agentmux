@@ -4,12 +4,18 @@ import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queu
 import { errorIdentity } from './error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
+import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'
 
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
-export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string): ServiceNoticeItem[] {
+export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
+  lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }): ServiceNoticeItem[] {
   if (session?.kind !== 'agent') return []
   const notices: ServiceNoticeItem[] = []
   const identity = [session.hostId, session.id, session.control.run.runId]
+  if (lifecycleError?.message && lifecycleError.failure && lifecycleFailureBelongsTo(lifecycleError.failure, { subject: session.control })) {
+    notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),
+      notice: agentLifecycleFailureNotice(lifecycleError.failure, lifecycleError.message) })
+  }
   for (const [id, outcome] of [
     ['connection', agentSessionServiceOutcome(session)],
     ['delivery', agentPromptDeliveryServiceOutcome(session)]

@@ -8,6 +8,7 @@ import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
+import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
 import {
@@ -298,6 +299,7 @@ export type HostCheckState = {
 export type ErrorNoticeContext = {
   kind: ServiceNoticeKind
   subject?: AgentSessionControl
+  lifecycle?: AgentLifecycleFailure
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -5023,6 +5025,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
     const sessionId = mintAgentSessionId()
+    const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
+      ? state.errorNoticeContext : null
     const pendingSurface: AgentWorkbenchSurface = {
       regionId,
       kind: 'agent',
@@ -5142,6 +5146,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (names?.agentName) get().renameAgent(sessionId, names.agentName)
       if (names?.tabName) get().renameTab(tabId, names.tabName)
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+      if (priorFailure && get().errorNoticeContext === priorFailure) {
+        set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+      }
     } catch (error) {
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
         set((current) => discardPendingAgentLaunch(current, sessionId))
@@ -5152,7 +5159,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return
       }
       set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId))
-      get().reportError(error)
+      get().reportError(error, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
       throw error
     }
   },
@@ -6043,6 +6050,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
     const current = before.sessions.find((item) => item.id === sessionId)
     if (!current) return
+    const priorFailure = current.kind === 'agent' && lifecycleFailureBelongsTo(before.errorNoticeContext?.lifecycle, { subject: current.control })
+      ? before.errorNoticeContext : null
     try {
       let recovery: SessionRecoveryResult
       try {
@@ -6056,6 +6065,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (recovery.kind === 'retired') {
         set((state) => removeSessionProjection(state, sessionId))
+        if (priorFailure && get().errorNoticeContext === priorFailure) {
+          set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+        }
         return
       }
       if (
@@ -6091,6 +6103,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ownerStillCurrent
       ) {
         set((state) => projectRecoveredSession(state, sessionId, session))
+        if (priorFailure && get().errorNoticeContext === priorFailure) {
+          set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+        }
         return session
       }
       // Agent continuity belongs to its durable Core Session. A closed view does not own or
@@ -6108,7 +6123,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     } catch (error) {
       if (operationId) throw error
-      get().reportError(error)
+      const live = get().sessions.find(item => item.id === sessionId)
+      if (!live || !sessionOwnsControl(live, current.control)) return
+      get().reportError(error, current.kind === 'agent' ? {
+        kind: 'indeterminate', subject: current.control,
+        lifecycle: { step: 'resume', subject: current.control, lastProcessState: current.processState }
+      } : undefined)
     }
   },
   async stopSession(sessionId) {
@@ -6297,6 +6317,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       && previousSubject?.hostId === subject?.hostId
       && previousSubject?.agentSessionId === subject?.agentSessionId
       && previousSubject?.run.runId === subject?.run.runId
+      && current.errorNoticeContext?.lifecycle?.step === context?.lifecycle?.step
+      && (current.errorNoticeContext?.lifecycle?.step !== 'launch' ||
+        context?.lifecycle?.step === 'launch' && current.errorNoticeContext.lifecycle.regionId === context.lifecycle.regionId)
       && errorIdentity(current.lastError) === errorIdentity(message)) return
     set({ error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false })
   },
