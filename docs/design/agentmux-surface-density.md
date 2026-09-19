@@ -580,6 +580,7 @@ styles/
 - 展开轻量面板：目标与工作目录、任务链接、执行/循环两种状态、带来源时间的最近活动、最近/下次检查及倒计时、最近决定和回执、最近 5–10 条事件。无活动来源显示未知，暂停不显示伪倒计时。
 - 暂停、恢复、停止循环、立即检查、设置和任务记录保持可达；停止循环与中断 Agent 的标签必须区分。错误有对象、原因和可操作入口，不出现无解释的空白面板。
 - 草稿或队列占用、输入栅栏变动与观察未知的暂停原因沿同一循环行展开，不另建输入状态面；行为见交互合同与 [输入占用评审](../reviews/continuous-progress-input-occupancy.md)。
+- 可选任务来源在现展开面板显示绑定身份和最近核验结果；显式 root、Feature ID、公开脚本沿同一设置面输入，不新增任务看板。完成与未知语言见 [任务来源合同](../reviews/continuous-progress-task-source.md)。
 - 调度、投递与完成规则只由 [Desktop interaction](agentmux-desktop-interaction.md#内置任务持续推进aftertime-使用需求) 定义。
 
 ### Session 重启恢复状态
