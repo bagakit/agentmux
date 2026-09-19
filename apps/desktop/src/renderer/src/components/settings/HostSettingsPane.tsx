@@ -1,5 +1,6 @@
 import { CheckCircle2, ChevronDown, LoaderCircle, Monitor, Plus, RadioTower, Trash2, XCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useResourceDrafts } from './use-resource-drafts'
 import type { AppConfig, HostConfig, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -7,19 +8,24 @@ import { ConfirmationDialog } from '../ConfirmationDialog'
 
 export function HostSettingsPane({ config, onSave }: {
   config: AppConfig
-  onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[]) => Promise<void>
+  onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
-  const [hosts, setHosts] = useState<HostConfig[]>(() => structuredClone(config.hosts))
+  const resource = useResourceDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])))
+  // Host order belongs to the existing config array; a record's integer-like keys must not reorder it.
+  function orderedHosts(records: Record<string, HostConfig>): HostConfig[] {
+    const ids = new Set([...config.hosts.map((host) => host.id), ...Object.keys(records)])
+    return [...ids].flatMap((id) => Object.hasOwn(records, id) ? [records[id]!] : [])
+  }
+  const hosts = orderedHosts(resource.value)
+  const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
+    Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   const saveState = useSettingsSave()
   const { saving } = saveState
-  const savedHosts = JSON.stringify(config.hosts)
-  const dirty = JSON.stringify(hosts) !== savedHosts
+  const dirty = resource.dirty
   const checks = useAppStore((state) => state.hostChecks)
   const checkHost = useAppStore((state) => state.checkHost)
   const sessions = useAppStore((state) => state.sessions)
-
-  useEffect(() => setHosts(JSON.parse(savedHosts) as HostConfig[]), [savedHosts])
 
   function update(id: string, patch: Partial<SshHostConfig>): void {
     setHosts((current) => current.map((host) => host.id === id && host.kind === 'ssh' ? { ...host, ...patch } : host))
@@ -45,12 +51,15 @@ export function HostSettingsPane({ config, onSave }: {
   }
 
   async function save(nextHosts = hosts, nextWorkspaces = config.workspaces): Promise<boolean> {
-    return saveState.run(async () => {
+    const submitted = resource.beginSave(Object.fromEntries(nextHosts.map((host) => [host.id, host])))
+    const committed = await saveState.run(async () => {
       if (nextHosts.some((host) => host.kind === 'ssh' && (!host.label.trim() || !host.hostname.trim()))) {
         throw new Error('Every SSH host needs a name and hostname.')
       }
-      await onSave(nextHosts, nextWorkspaces)
+      await onSave(nextHosts, nextWorkspaces, { hosts: orderedHosts(submitted.expected), workspaces: config.workspaces })
     })
+    submitted.finish(committed ? submitted.value : undefined)
+    return committed
   }
 
   async function confirmRemove(): Promise<void> {
@@ -59,7 +68,7 @@ export function HostSettingsPane({ config, onSave }: {
     const nextHosts = hosts.filter((host) => host.id !== target.id)
     const nextWorkspaces = config.workspaces.filter((workspace) => workspace.hostId !== target.id)
     if (await save(nextHosts, nextWorkspaces)) {
-      setHosts(nextHosts)
+      setHosts((current) => current.filter((host) => host.id !== target.id))
       setRemoveRequest(null)
     }
   }
