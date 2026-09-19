@@ -118,7 +118,7 @@ function agentFallbackLabel(
   config: AppConfig,
   session: { executorId: AgentExecutorId; providerId: AgentProviderId; hostId: string; workspacePath: string }
 ): string {
-  const configuredExecutor = config.executors[session.executorId]
+  const configuredExecutor = Object.hasOwn(config.executors, session.executorId) ? config.executors[session.executorId] : undefined
   const executorLabel = configuredExecutor?.providerId === session.providerId
     ? configuredExecutor.label
     : session.executorId
@@ -133,7 +133,7 @@ function requireSessionExecutor(
   config: AppConfig,
   session: { executorId: AgentExecutorId; providerId: AgentProviderId }
 ): AppConfig['executors'][AgentExecutorId] {
-  const executor = config.executors[session.executorId]
+  const executor = Object.hasOwn(config.executors, session.executorId) ? config.executors[session.executorId] : undefined
   if (!executor) throw new Error(`Missing Agent Executor configuration: ${session.executorId}`)
   if (executor.providerId !== session.providerId) {
     throw new Error(
@@ -311,6 +311,8 @@ export class RuntimeController {
   private readonly rendererGenerations = new Map<number, number>()
   private readonly hostLifecycleOperations = new Map<string, Set<Promise<void>>>()
   private readonly hostReconfigurationReservations = new Set<string>()
+  private readonly executorConfigReservations = new Set<string>()
+  private readonly admittedExecutorLaunches = new Map<string, number>()
   private readonly terminalInputCursors = new Map<string, number>()
   private readonly terminalInputTails = new Map<string, Promise<void>>()
   private readonly terminalColorQueryRemainders = new Map<string, string>()
@@ -525,7 +527,7 @@ export class RuntimeController {
   }
 
   async detect(executorId: AgentExecutorId, hostId: string, config: AppConfig): Promise<ExecutorDetection> {
-    const executor = config.executors[executorId]
+    const executor = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
     if (!executor) throw new Error(`Missing Agent Executor configuration: ${executorId}`)
     const client = await this.connectedClient(hostId)
     return {
@@ -618,9 +620,64 @@ export class RuntimeController {
     }
   }
 
+  /** Only dangerous template identity edits consult references; ordinary settings never wait here. */
+  async reserveExecutorConfigEdit(current: AppConfig, next: AppConfig): Promise<() => void> {
+    const changed = [...new Set([...Object.keys(current.executors), ...Object.keys(next.executors)])].filter((id) =>
+      !Object.hasOwn(current.executors, id) || !Object.hasOwn(next.executors, id) ||
+      current.executors[id]!.providerId !== next.executors[id]!.providerId)
+    if (!changed.length) return () => {}
+    for (const id of changed) this.executorConfigReservations.add(id)
+    const release = () => { for (const id of changed) this.executorConfigReservations.delete(id) }
+    try {
+      for (const id of changed) {
+        const existing = Object.hasOwn(current.executors, id) ? current.executors[id]! : undefined
+        const requested = Object.hasOwn(next.executors, id) ? next.executors[id]! : undefined
+        if (existing && requested && existing.providerId !== requested.providerId) {
+          throw Object.assign(new Error(`Executor “${id}” has a fixed Provider. Choose a new Executor identity.`), { code: 'SETTING_IDENTITY_IMMUTABLE' })
+        }
+        if (!requested && (this.admittedExecutorLaunches.get(id) ?? 0) > 0) {
+          throw Object.assign(new Error(`Executor “${id}” is used by an admitted launch. Keep this template until its launch completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
+        }
+      }
+      // This store is the Core authority, including disconnected and stopped Sessions.
+      // No host connection, Timeline or busy/visible filter participates in this decision.
+      const sessions = await loadAgentSessions(this.agentSessionStore)
+      for (const id of changed) {
+        const references = sessions.filter((session) => session.executorId === id)
+        const requested = Object.hasOwn(next.executors, id) ? next.executors[id]! : undefined
+        if (!requested && (references.length > 0 || (this.admittedExecutorLaunches.get(id) ?? 0) > 0)) {
+          throw Object.assign(new Error(`Executor “${id}” is used by a retained Session or an admitted launch. Keep this template to preserve History and continuity.`), { code: 'SETTING_RESOURCE_IN_USE' })
+        }
+        if (requested && references.some((session) => session.providerId !== requested.providerId)) {
+          throw Object.assign(new Error(`Executor “${id}” belongs to a different Provider in a retained Session. Choose a new Executor identity.`), { code: 'SETTING_IDENTITY_IMMUTABLE' })
+        }
+      }
+      return release
+    } catch (cause) {
+      release()
+      if (cause && typeof cause === 'object' && 'code' in cause &&
+          (cause.code === 'SETTING_RESOURCE_IN_USE' || cause.code === 'SETTING_IDENTITY_IMMUTABLE')) throw cause
+      throw Object.assign(new Error(`Cannot verify Executor references; this template change was not saved. ${cause instanceof Error ? cause.message : String(cause)}`), { code: 'SETTING_RESOURCE_REFERENCES_UNKNOWN' })
+    }
+  }
+
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
+    if (this.executorConfigReservations.has(request.executorId)) {
+      throw Object.assign(new Error(`Executor “${request.executorId}” is being changed. Retry this new launch after its save completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
+    }
+    this.admittedExecutorLaunches.set(request.executorId, (this.admittedExecutorLaunches.get(request.executorId) ?? 0) + 1)
+    try {
+      return await this.launchAdmittedAgent(request, config)
+    } finally {
+      const remaining = this.admittedExecutorLaunches.get(request.executorId)! - 1
+      if (remaining) this.admittedExecutorLaunches.set(request.executorId, remaining)
+      else this.admittedExecutorLaunches.delete(request.executorId)
+    }
+  }
+
+  private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
-      const executor = config.executors[request.executorId]
+      const executor = Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
       if (!executor) throw new Error(`Missing Agent Executor configuration: ${request.executorId}`)
       const client = await this.connectedClient(request.hostId)
       let preparedTopic: PreparedScratchAgentTopic | null = null

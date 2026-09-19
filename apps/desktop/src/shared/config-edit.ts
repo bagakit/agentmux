@@ -33,6 +33,11 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
+    // Environment is one literal launch value, never a merge of independently authored keys.
+    if (/^executors\.[^.]+\.env$/.test(path)) {
+      if (!configValuesEqual(actual, expected)) throw new ConfigConflict(path)
+      return requested
+    }
     if (Array.isArray(expected) && Array.isArray(requested) && Array.isArray(actual) &&
         (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts')) {
       type RecordWithId = { id: string }
@@ -52,9 +57,10 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
       const live = actual as Record<string, unknown>, old = expected as Record<string, unknown>, next = requested as Record<string, unknown>
       const result = { ...live }
       for (const key of new Set([...Object.keys(old), ...Object.keys(next)])) {
-        const value = merge(live[key], old[key], next[key], path ? `${path}.${key}` : key)
+        const own = (record: Record<string, unknown>) => Object.hasOwn(record, key) ? record[key] : undefined
+        const value = merge(own(live), own(old), own(next), path ? `${path}.${key}` : key)
         if (value === undefined) delete result[key]
-        else result[key] = value
+        else Object.defineProperty(result, key, { value, enumerable: true, configurable: true, writable: true })
       }
       return result
     }

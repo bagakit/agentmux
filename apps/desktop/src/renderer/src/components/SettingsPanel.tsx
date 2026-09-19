@@ -135,10 +135,10 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   const section = SECTIONS.find((candidate) => candidate.id === active) ?? SECTIONS[0]!
   const groupTitle = GROUPS.find((group) => group.id === section.group)?.title ?? 'Configuration'
 
-  async function saveExecutors(executors: Record<string, AgentExecutorConfig>): Promise<void> {
+  async function saveExecutors(executors: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    await api.config.save({ ...current, executors }, current)
+    await api.config.save({ ...current, executors }, { ...current, executors: expected })
   }
 
   async function saveAppearance(appearance: AppearanceConfig, expected: AppearanceConfig): Promise<void> {
@@ -173,10 +173,10 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
 
   // 空列表照样写：`[]` 是「用户把默认那两条都删了」这个事实。写成按长度判会让删光静默变回默认，
   // 而缺席不回填这条纪律的全部意义就是删掉即永久没有。
-  async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[]): Promise<void> {
+  async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[], expected: ComposerShortcut[]): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    await api.config.save({ ...current, composerShortcuts }, current)
+    await api.config.save({ ...current, composerShortcuts }, { ...current, composerShortcuts: expected })
   }
 
   return (
