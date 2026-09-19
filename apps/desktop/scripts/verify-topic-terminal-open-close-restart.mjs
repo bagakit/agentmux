@@ -27,7 +27,7 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 let client
 await fs.mkdir(evidence, { recursive: true })
 try {
@@ -61,6 +61,7 @@ try {
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
+    process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
     process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
     client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
     const runs = (await client.listRuns()).filter(run => run.state === 'running')
@@ -81,6 +82,7 @@ finally {
   try {
     if (!client) {
       process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
+      process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
       process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
       // A failed build has no Runtime to stop and must not create one during cleanup.
       if (receipt.phases.length > 0) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
