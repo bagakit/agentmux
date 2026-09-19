@@ -46,49 +46,97 @@ export function SpaceTopicsTree({ workspace }: { workspace: WorkspaceRecord }) {
 
   return (
     <nav className="space-topics-tree" aria-label="Topics">
-      {[topics?.find((topic) => topic.id === PMO_TEAMS_TOPIC_ID) ?? { id: PMO_TEAMS_TOPIC_ID, title: 'Mote' }, ...motes].map((mote) => (
-        <div key={mote.id} className="project-rail-row-shell">
-          <button type="button" className={`project-rail-row space-mote-row${activeWorkspaceId === workspace.id && current === mote.id ? ' project-rail-row--active' : ''}`}
-            aria-label={`Open ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : `Mote · ${mote.title}`}`} onClick={() => void openMote(mote.id)}>
-            <span className="project-rail-row__icon"><Sparkles size={14} /></span>
-            <span className="project-rail-row__identity"><strong>{mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : mote.title}</strong></span>
-          </button>
-          <button type="button" className="icon-button" aria-label={`Edit ${mote.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : mote.title} SOUL.md`}
-            title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(mote.id, true)}><NotebookPen size={12} /></button>
-          {'readError' in mote && mote.readError ? <div className="new-tab-error" role="alert">{mote.title}: {mote.readError}. Its work surface is retained.</div> : null}
-        </div>
-      ))}
+      {[topics?.find((topic) => topic.id === PMO_TEAMS_TOPIC_ID) ?? { id: PMO_TEAMS_TOPIC_ID, title: 'Mote' }, ...motes].map((mote) => {
+        const defaultMote = mote.id === PMO_TEAMS_TOPIC_ID
+        const name = defaultMote ? 'Mote' : mote.title
+        const selected = activeWorkspaceId === workspace.id && current === mote.id
+        return (
+          <div key={mote.id} className="space-tree-entry">
+            <div className="project-rail-row-shell">
+              <span className="project-rail-row__collapse-spacer" aria-hidden="true" />
+              <button
+                type="button"
+                className={`project-rail-row space-mote-row${selected ? ' project-rail-row--active' : ''}`}
+                aria-label={`Open ${defaultMote ? name : `Mote · ${name}`}`}
+                aria-current={selected ? 'page' : undefined}
+                title={defaultMote ? name : `Mote · ${name}`}
+                onClick={() => void openMote(mote.id)}
+              >
+                <span className="project-rail-row__icon"><Sparkles size={14} /></span>
+                <span className="project-rail-row__identity"><strong>{name}</strong></span>
+              </button>
+              <button
+                type="button"
+                className="icon-button space-mote-edit"
+                aria-label={`Edit ${name} SOUL.md`}
+                title="Edit SOUL.md · New sessions use saved changes"
+                onClick={() => void openMote(mote.id, true)}
+              >
+                <NotebookPen size={12} />
+              </button>
+            </div>
+            {'readError' in mote && mote.readError ? (
+              <div className="new-tab-error" role="alert">{name}: {mote.readError}. Its work surface is retained.</div>
+            ) : null}
+          </div>
+        )
+      })}
       <div className="project-rail-row-shell">
-        <button type="button" className="project-rail-row__collapse"
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} Topics`} aria-expanded={!collapsed}
-          onClick={() => toggleGroup('space:topics')}>
+        <button
+          type="button"
+          className="project-rail-row__collapse"
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} Topics`}
+          aria-expanded={!collapsed}
+          onClick={() => toggleGroup('space:topics')}
+        >
           {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
         </button>
-        <button type="button" className={`project-rail-row${activeWorkspaceId === workspace.id ? ' project-rail-row--active' : ''}`}
-          aria-label="Topics overview" title={workspace.path} onClick={() => void openOverview()}>
+        <button
+          type="button"
+          className={`project-rail-row space-topics-row${activeWorkspaceId === workspace.id && !current ? ' project-rail-row--active' : ''}`}
+          aria-label="Topics overview"
+          title={workspace.path}
+          onClick={() => void openOverview()}
+        >
           <span className="project-rail-row__icon"><NotebookText size={14} /></span>
           <span className="project-rail-row__identity"><strong>Topics</strong></span>
           <small>{entries.length}</small>
         </button>
       </div>
-      {error ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
-      {collapsed ? null : orderedIds.map((id) => {
-        const topic = byId.get(id)!
-        const selected = activeWorkspaceId === workspace.id && current === id
-        return (
-          <div key={id} className="project-rail-entry" style={{ '--rail-depth': 1 } as CSSProperties}>
-            <button type="button" className={`project-rail-row space-topic-row${selected ? ' project-rail-row--active' : ''}`}
-              style={{ '--rail-depth': 1 } as CSSProperties} aria-label={`Open ${topic.title}`}
-              aria-current={selected ? 'page' : undefined} title={topic.readError ?? (topic.summary || topic.directoryPath)}
-              onClick={() => void openTopic(id, workspace.id).catch(reportError)}>
-              <span className="project-rail-row__icon"><NotebookText size={12} /></span>
-              <span className="project-rail-row__identity"><strong>{topic.title}</strong></span>
-              {pinned?.includes(id) ? <Pin size={10} aria-label="Pinned" /> : null}
-            </button>
-            {topic.readError ? <div className="new-tab-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
-          </div>
-        )
-      })}
+      {error ? (
+        <div className="new-tab-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div>
+      ) : null}
+      {!collapsed && orderedIds.length > 0 ? (
+        <div className="space-topic-children">
+          {orderedIds.map((id) => {
+            const topic = byId.get(id)!
+            const selected = activeWorkspaceId === workspace.id && current === id
+            return (
+              <div key={id} className="space-tree-entry">
+                <div className="project-rail-row-shell" style={{ '--rail-depth': 1 } as CSSProperties}>
+                  <span className="project-rail-row__collapse-spacer" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`project-rail-row space-topic-row${selected ? ' project-rail-row--active' : ''}`}
+                    style={{ '--rail-depth': 1 } as CSSProperties}
+                    aria-label={`Open ${topic.title}`}
+                    aria-current={selected ? 'page' : undefined}
+                    title={[topic.title, topic.readError ?? topic.summary, topic.directoryPath].filter(Boolean).join('\n')}
+                    onClick={() => void openTopic(id, workspace.id).catch(reportError)}
+                  >
+                    <span className="project-rail-row__icon"><NotebookText size={12} /></span>
+                    <span className="project-rail-row__identity"><strong>{topic.title}</strong></span>
+                    {pinned?.includes(id) ? <Pin size={10} aria-label="Pinned" /> : null}
+                  </button>
+                </div>
+                {topic.readError ? (
+                  <div className="new-tab-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
     </nav>
   )
 }
