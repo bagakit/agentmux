@@ -23,7 +23,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
-import { classifyApplicationProcesses } from './package-process-scope.mjs'
+import { snapshotApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient } from './package-runtime-upgrade.mjs'
 import {
   assertPackageIdentity,
@@ -498,11 +498,16 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
 }
 
 async function scopedProcesses(appPath) {
-  const canonicalAppPath = await realpath(appPath)
+  const canonicalAppPath = await realpath(appPath).catch(error => {
+    if (error.code === 'ENOENT') return resolve(appPath)
+    throw error
+  })
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const helperRoot = join(canonicalAppPath, 'Contents', 'Frameworks') + sep
-  const result = await run('ps', ['-axo', 'pid=,command='], { capture: true })
-  return classifyApplicationProcesses(result.stdout, { executable, helperRoot })
+  const result = await run('ps', ['-axo', 'pid=,ppid=,lstart=,command='], {
+    capture: true, timeoutMs: 5_000, env: { ...process.env, LC_ALL: 'C' }
+  })
+  return snapshotApplicationProcesses(result.stdout, { executable, helperRoot })
 }
 
 // The bundle's *serving* processes: main + renderer/GPU/utility helpers. A
@@ -916,9 +921,8 @@ async function quitInstalledApplication(appPath) {
  * 窗口跑的仍是旧代码。2026-09-01 实测：主进程 18:35 启动、安装 21:54，用户按新包的预期去点链接，
  * 看到的是三小时前那份的行为，三层磁盘验证一条都没能发现。
  *
- * 所以这里在 rename 之后重新拉起，并把新进程的 pid 打印出来当凭据：安装那步随后会断言"跑在已装
- * 路径上的每一个进程都在这份 pid 名单里"，也就是没有任何一个更早的实例活下来。热更新是我们自己的
- * 设计前提，重装就该走完这条路，不留"要不要重启"这种由调用方决定的开关。
+ * 所以这里在 rename 之后重新拉起。这里返回的是启动瞬间的观察，不是随后出现的 helper 的完整名单；
+ * 激活后的归属由实际 loaded Main、OS 出生事实和父子关系确认，并独立排除原 owner 仍存活的情况。
  */
 async function relaunchInstalledApplication(appPath) {
   await run('open', ['-a', appPath], { capture: false, timeoutMs: 60_000 })
@@ -1030,7 +1034,8 @@ export async function installApplication(appPath, { intent = installIntent, home
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
   let runtimeUpgrade = null, uiRuntime = null, before = null
   let native = { status: 'unchanged' }
-  const running = await processIdsForApplication(currentPath)
+  const previousScope = await scopedProcesses(currentPath)
+  const running = previousScope.serving
   try {
     if (running.length > 0) before = await qualifyUi(currentPath)
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
@@ -1114,6 +1119,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
     process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
     let relaunched, observed
+    const launchBaseline = await scopedProcesses(destination)
     try {
       relaunched = await launch(destination)
       observed = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
@@ -1131,13 +1137,13 @@ export async function installApplication(appPath, { intent = installIntent, home
       throw Object.assign(error, { transaction: result })
     }
     process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
-    // 交付判据：装完之后，跑在已装路径上的每一个进程都必须是**这次**拉起的。留下任何一个更早的
-    // 进程，就意味着"用户点的那个窗口"可能仍在服务上一份包——那正是这段代码存在的原因。
-    const survivors = (await processIdsForApplication(destination)).filter((pid) => !relaunched.includes(pid))
-    assert(
-      survivors.length === 0,
-      `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
-    )
+    const activatedScope = await scopedProcesses(destination)
+    const activatedOwners = assertApplicationActivationOwnership({
+      previous: previousScope.processes.filter(row => running.includes(row.pid)),
+      beforeLaunch: launchBaseline.processes, current: activatedScope.processes,
+      serving: activatedScope.serving, mainPid: observed.main.pid
+    })
+    process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
     if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
     return { intent, ui: { status: 'committed', main: observed.main, path: destination }, native }

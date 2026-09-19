@@ -15,8 +15,8 @@ import ts from 'typescript'
  *  - 退出旧实例必须在换目录**之前**（换完再退，用户的布局已经被新目录接管，且中间那段窗口里旧进程
  *    仍在写状态）；
  *  - 重新拉起必须在换目录**之后**；
- *  - 幸存者检查必须以"这次拉起的 pid"为白名单，否则它会把新进程自己算成幸存者而恒假，或者干脆
- *    谁都不算而恒真。
+ *  - 幸存者检查必须保原 owner 出生事实，并在实际激活后核新 Main 与后代归属；启动瞬间的 pid 名单
+ *    不是稍后出现的 helper 的完整集合。
  * 所以这里解析 AST，按语句在 `installApplication` 函数体里的**位置**来判。
  */
 
@@ -130,12 +130,24 @@ describe('installing must hand over a process running the new bundle', () => {
 
   it('fails loudly when a process from a previous installation survives', () => {
     const body = functionBody(SOURCE, 'installApplication')
-    const text = body.getText()
-    // 幸存者判据必须以"这次拉起的 pid"为白名单。少了这一侧，检查要么把新进程算成幸存者而恒假，
-    // 要么谁都不算而恒真——两种都让这条门失去意义。
-    expect(text).toMatch(/processIdsForApplication\(destination\)/)
-    expect(text).toMatch(/filter\(\(pid\)\s*=>\s*!relaunched\.includes\(pid\)\)/)
-    expect(text).toMatch(/assert\(\s*\n?\s*survivors\.length === 0/)
+    const calls: ts.CallExpression[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText() === 'assertApplicationActivationOwnership') calls.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(body)
+    expect(calls).toHaveLength(1)
+    const call = calls[0]!
+    expect(call.getStart()).toBeGreaterThan(newInstanceLaunchOffset(body))
+    expect(call.arguments).toHaveLength(1)
+    const argument = call.arguments[0]!
+    expect(ts.isObjectLiteralExpression(argument)).toBe(true)
+    if (!ts.isObjectLiteralExpression(argument)) throw new Error('Actual process facts must bind the activation check')
+    const bindings = Object.fromEntries(argument.properties.flatMap(property => ts.isPropertyAssignment(property)
+      ? [[property.name.getText(), property.initializer.getText()]] : []))
+    expect(bindings).toEqual({ previous: 'previousScope.processes.filter(row => running.includes(row.pid))',
+      beforeLaunch: 'launchBaseline.processes', current: 'activatedScope.processes', serving: 'activatedScope.serving',
+      mainPid: 'observed.main.pid' })
   })
 
   it('waits for the previous instance to actually disappear instead of trusting the quit request', () => {

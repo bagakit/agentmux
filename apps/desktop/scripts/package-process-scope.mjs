@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict'
+
 // Classify `ps -axo pid=,command=` output for one installed AgentMux bundle.
 //
 // Three install steps ask about that bundle's processes — "is anything still
@@ -59,4 +61,45 @@ export function classifyApplicationProcesses(psStdout, { executable, helperRoot 
     }
   }
   return { serving, crashReporter }
+}
+
+/** One OS observation; process commands are used for scope, not retained as output. */
+export function snapshotApplicationProcesses(psStdout, bundle) {
+  const rows = psStdout.split('\n').filter(line => line.trim()).map(line => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/.exec(line)
+    assert(match, 'Application process birth observation is unavailable.')
+    const pid = Number(match[1]), ppid = Number(match[2])
+    assert(Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(ppid) && ppid >= 0)
+    return { pid, ppid, birth: match[3].replace(/\s+/g, ' '), command: match[4] }
+  })
+  assert(rows.length > 0, 'The OS process observation is empty.')
+  return { ...classifyApplicationProcesses(rows.map(row => `${row.pid} ${row.command}`).join('\n'), bundle),
+    processes: rows.map(({ pid, ppid, birth }) => ({ pid, ppid, birth })) }
+}
+
+/** Late helpers belong to the observed new Main; a launch-time PID list is not an owner. */
+export function assertApplicationActivationOwnership({ previous, beforeLaunch, current, serving, mainPid }) {
+  const before = new Map(beforeLaunch.map(row => [row.pid, row]))
+  const after = new Map(current.map(row => [row.pid, row]))
+  for (const row of previous) {
+    assert(after.get(row.pid)?.birth !== row.birth,
+      `A previous application owner is still running (pid ${row.pid}). Its old image cannot be declared replaced.`)
+  }
+  const main = after.get(mainPid)
+  assert(main && main.birth && serving.includes(mainPid), 'The loaded Main has no current application process observation.')
+  assert(before.get(mainPid)?.birth !== main.birth, 'The loaded Main existed before candidate launch; new activation is unconfirmed.')
+  return serving.map(pid => {
+    const owner = after.get(pid)
+    assert(owner?.birth, `Application process birth is unavailable (pid ${pid}).`)
+    assert(before.get(pid)?.birth !== owner.birth, `Application process ${pid} existed before candidate launch; its new ownership is unconfirmed.`)
+    const visited = new Set()
+    let parent = owner
+    while (parent.pid !== mainPid) {
+      assert(!visited.has(parent.pid), `Application process ancestry is cyclic (pid ${pid}).`)
+      visited.add(parent.pid)
+      parent = after.get(parent.ppid)
+      assert(parent, `Application process ${pid} is not a confirmed descendant of the loaded Main.`)
+    }
+    return owner
+  })
 }

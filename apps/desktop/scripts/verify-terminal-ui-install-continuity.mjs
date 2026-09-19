@@ -116,7 +116,9 @@ async function launch(appPath) {
     executable: join(appPath, 'Contents/MacOS/AgentMux'), helperRoot: join(appPath, 'Contents/Frameworks') + '/'
   }).serving
   assert.ok(processes.includes(child.pid)); probe.servingPids = processes
-  return processes
+  // Match the actual platform launcher: it can return when only Main appears.
+  // The installer must independently qualify helpers that are present later.
+  return [child.pid]
 }
 async function quit(appPath, cleanup = false) {
   const probe = active; assert.equal(probe.appPath, appPath)
@@ -188,6 +190,7 @@ async function healthyInput(label) {
 }
 async function inputs() {
   const paths = ['apps/desktop/scripts/package-macos.mjs','apps/desktop/scripts/package-runtime-upgrade.mjs','apps/desktop/scripts/verify-terminal-ui-install-continuity.mjs',
+    'apps/desktop/scripts/package-process-scope.mjs','apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/src/shared/client-observation.ts','apps/desktop/src/main/client-observation.ts','apps/desktop/src/main/renderer-updates.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/renderer/src/store.ts',
     'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/core/src/ctxmux-run-adapter.ts','packages/core/src/runtime-paths.ts','pnpm-lock.yaml']
   async function visit(directory) { for (const entry of await readdir(directory, { withFileTypes: true })) { const path=join(directory,entry.name); if(entry.isDirectory())await visit(path);else if(entry.isFile())paths.push(path) } }
@@ -225,9 +228,14 @@ try {
     await exec('/bin/cp',['-cR',join(require.resolve('electron/package.json'),'../dist/Electron.app'),candidate],{timeout:30000})
     await brandApplication(candidate);await copyRuntimeApplication(candidate,receipt.source)
   }
-  await exec('/usr/bin/plutil',['-replace','CFBundleIdentifier','-string',`dev.agentmux.private-ui-${randomUUID()}`,join(candidate,'Contents/Info.plist')])
-  await exec('/usr/bin/codesign',['--force','--deep','--sign','-',candidate],{timeout:30000,maxBuffer:1024*1024})
-  await mkdir(join(home,'Applications'),{recursive:true});await exec('/usr/bin/ditto',[candidate,destination],{timeout:30000})
+  if (!candidateInput) {
+    await exec('/usr/bin/plutil',['-replace','CFBundleIdentifier','-string',`dev.agentmux.private-ui-${randomUUID()}`,join(candidate,'Contents/Info.plist')])
+    await exec('/usr/bin/codesign',['--force','--deep','--sign','-',candidate],{timeout:30000,maxBuffer:1024*1024})
+  }
+  // A complete prebuilt App keeps its official signed bytes. Direct executable
+  // launch and the product's pre-singleton owned userData isolate this fixture.
+  receipt.candidatePreparation = candidateInput ? 'official-signed-input' : 'private-branded-input'
+  await mkdir(join(home,'Applications'),{recursive:true});await exec('/bin/cp',['-cR',candidate,destination],{timeout:30000})
   server=createServer((request,response)=>{response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><title>Private Browser</title><h1>Private install Browser</h1>')});await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const pageUrl=`http://127.0.0.1:${server.address().port}/page`
   await launch(destination)
@@ -261,8 +269,17 @@ try {
     phase='ordinary-exit-before-cold-ui-only';await quit(destination)
     phase='actual-cold-ui-only-transaction'
     let coldQuitCalls=0
-    const coldResult=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,launch,
-      quit:async()=>{coldQuitCalls++;throw new Error('Cold installation must not request outgoing quit')}})
+    let coldResult, coldError
+    try {coldResult=await installApplication(candidate,{intent:'ui-only',homeDirectory:home,launch,
+      quit:async()=>{coldQuitCalls++;throw new Error('Cold installation must not request outgoing quit')}})}
+    catch(error){
+      coldError=error;receipt.coldUnexpectedFailure={message:error.message,transaction:error.transaction,nativeSignals,
+        loadedPid:active.child.pid,guiExitCode:active.child.exitCode,guiSignalCode:active.child.signalCode}
+      assert.equal(error.transaction?.ui.status,'unknown')
+      assert.deepEqual(await sdk.runtimeInfo(),originalRuntime)
+      receipt.coldUnexpectedFailure.input=await healthyInput('F')
+    }
+    assert.equal(coldError,undefined,'Actual cold GUI activation must accept its later new serving helpers')
     receipt.cold={result:coldResult,quitCalls:coldQuitCalls}
     assert.equal(coldQuitCalls,0);assert.equal(coldResult.ui.status,'unknown');assert.equal(coldResult.native.status,'deferred')
     assert.ok(coldResult.ui.reason.includes('Without an outgoing workbench observation'))
