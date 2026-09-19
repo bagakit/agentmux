@@ -1,21 +1,8 @@
 /**
- * 「这个 Agent 最近在干什么」——两个界面都要的一行人话。
- *
- * 消费面是**两个**（Project 活动菜单、资源面板），共三个调用点：`ProjectActivity.tsx` 的组标题行、
- * `project-activity-row.ts` 的菜单明细行、`resource-usage-panel.ts` 的资源行。此处原先写的是
- * 「四个界面（……、roster 明细行等）」——数错了，而且点名的 roster 明细行根本不消费它
- * （`AgentRoster.tsx` 里没有任何 `sessionRecentActivity`）。留着那句会让下一个人去找一个不存在的
- * 消费者，或者以为改这里要顾及四处。数目要么数一遍，要么别写。
- *
- * 此前有两份各答一半、互不共享、且会打架的派生：`projectSessionReason` 只走 pendingInteraction →
- * status.detail → 状态句；`stepTitle` 只把**一次**工具调用翻成 `Bash npm test`。都答不出用户真正问的
- * 「最近在**改**什么」——那条事实躺在时间轴最后一条 tool_call 里，整份 transcript 之外没人捞它。
- * 这个文件把它收成唯一一份，按优先级从「必须让用户行动」到「只剩裸状态」逐级下探。
- *
- * 纯函数：不碰 store、不读时钟（连 staleness 也不靠 `Date.now()`——见下方「新旧」的判定）。这样它
- * 可测、不随时间漂移。时间轴按需拉取（store.ts:273 / resyncTimeline），绝大多数 Session 多数时候**没有**
- * 时间轴——缺席必须如实退回到基于状态的答案，绝不返回空串，也绝不谎报一个「Idle」把「还没加载」
- * 伪装成「真的闲着」（原则 11 class 3：判不出就别猜着当真去做）。
+ * 「这个 Agent 最近在干什么」的共享事实解释。
+ * Topic、Project Activity、资源面板与 Focus 直接消费同一条优先级，工具参数复用 stepTitle。
+ * 启动 snapshot 和 live timeline 事件由既有 Core/Store 供给；这里不加载、不读时钟。
+ * 空记录或暂缺事实时只回当前状态说明，不把缺席伪装成 Idle。
  */
 
 import type { SessionSnapshot } from '../../../shared/contracts'
