@@ -19,15 +19,21 @@ const ROLE_LABELS: Record<AppProcessRole, string> = {
 
 function UsageRow({ row }: { row: UsagePanelRow }) {
   return (
-    <div className="resource-usage__row">
-      <span className="resource-usage__identity">
-        <strong className="resource-usage__name">{row.label}</strong>
-        <small className="resource-usage__context">{row.contextText} · {row.stateText}</small>
-        {row.activity ? <small className="resource-usage__activity">{row.activity}</small> : null}
-      </span>
-      <span className="resource-usage__metric">{row.cpuText}</span>
-      <span className="resource-usage__metric">{row.rssText}</span>
-    </div>
+    <details className="resource-usage__details" data-run-id={row.key}>
+      <summary className="resource-usage__row">
+        <span className="resource-usage__identity">
+          <strong className="resource-usage__name">{row.label} <small>· {row.processCount ?? '—'} {row.processCount === 1 ? 'process' : 'processes'}</small></strong>
+          <small className="resource-usage__context">{row.contextText} · {row.stateText}</small>
+          {row.activity ? <small className="resource-usage__activity">{row.activity}</small> : null}
+        </span>
+        <span className="resource-usage__metric">{row.cpuText}</span>
+        <span className="resource-usage__metric">{row.rssText}</span>
+      </summary>
+      <dl className="resource-usage__facts">
+        <dt>Root process · PID {row.rootPid}</dt><dd>{row.rootRssText}</dd>
+        <dt>Descendants · {row.descendantProcessCount ?? '—'} {row.descendantProcessCount === 1 ? 'process' : 'processes'}</dt><dd>{row.descendantsRssText}</dd>
+      </dl>
+    </details>
   )
 }
 
@@ -53,7 +59,7 @@ function RuntimeObservation({ runtime }: { runtime: RuntimeUsage }) {
         </dl>
       ) : null}
       <details className="resource-usage__details">
-        <summary>Runtime storage <span>{storage ? formatBytes(storage.bytes) : '—'}</span></summary>
+        <summary>Runtime storage · disk <span>{storage ? formatBytes(storage.bytes) : '—'}</span></summary>
         <p className="resource-usage__note">Retention and owners are observations, not a leak verdict.</p>
         {runtime.runtimeStorageUnavailable ? <p className="resource-usage__unavailable resource-usage__note">Storage unavailable: {runtime.runtimeStorageUnavailable}</p> : null}
         {storage ? (
@@ -121,6 +127,7 @@ export function ResourceUsagePanel() {
               <details className="resource-usage__details" open>
                 <summary>Agents <span>{snapshot ? `${rows.length} ${rows.length === 1 ? 'Run' : 'Runs'}` : '—'}</span></summary>
                 <p className="resource-usage__note">CPU: ps averaged reading · {CPU_WINDOW_SECONDS}s reading peak · {SAMPLE_TARGET_SECONDS}s sampling target</p>
+                <p className="resource-usage__note">RSS: Run root + attributed descendants; shared pages can count in multiple processes. Root may be a launcher.</p>
                 {snapshot?.unavailable ? <p className="resource-usage__unavailable resource-usage__note">Agent readings stale: {snapshot.unavailable}</p> : null}
                 {rows.length ? rows.map((row) => <UsageRow key={row.key} row={row} />) : <p className="resource-usage__note">{snapshot ? 'No agent processes' : 'Sampling…'}</p>}
               </details>

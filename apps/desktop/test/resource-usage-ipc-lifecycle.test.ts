@@ -5,6 +5,7 @@ import type { RuntimeController } from '../src/main/runtime-controller'
 import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
+import type { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 
 const fixture = vi.hoisted(() => ({
   handlers: new Map<string, (event: IpcMainInvokeEvent) => unknown>(),
@@ -71,11 +72,13 @@ beforeEach(async () => {
   }
   const runtime = {
     resourceSampler, setTerminalViewColors: vi.fn(), prepare: vi.fn().mockResolvedValue({}),
+    setContinuousProgressInputObserver: () => () => {},
     commit: vi.fn(), attach: () => () => {}
   } as unknown as RuntimeController
   dispose = await registerIpc({
     window: { webContents: new Sender(1) } as unknown as BrowserWindow,
     runtime,
+    progressLoops: { subscribe: () => () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => structuredClone(DEFAULT_CONFIG) } as unknown as ConfigStore,
     scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles

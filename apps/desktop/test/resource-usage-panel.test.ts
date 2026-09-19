@@ -106,17 +106,17 @@ describe('资源面板的读数', () => {
 describe('把采样配上 Agent 的名字', () => {
   it('按 runId 配名字', () => {
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 2, cpuPercent: 5, rssKib: 102_400 }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: 2, rootRssKib: 25_600, descendantsRssKib: 76_800, descendantProcessCount: 1, cpuPercent: 5, rssKib: 102_400 }] }),
       [agent('s1', 'run-1', 'Reviewer')]
     )
-    expect(rows).toEqual([{ key: 'run-1', label: 'Reviewer', cpuText: '5.0%', rssText: '100 MiB', contextText: 'claude · w', stateText: 'working' }])
+    expect(rows).toEqual([{ key: 'run-1', label: 'Reviewer', cpuText: '5.0%', rssText: '100 MiB', rootPid: 100, processCount: 2, rootRssText: '25 MiB', descendantsRssText: '75 MiB', descendantProcessCount: 1, contextText: 'claude · w', stateText: 'working' }])
   })
 
   it('配不上名字的 run 仍然显示', () => {
     // 它确实在吃资源。藏起来会让面板上的数与机器实际用量对不上，而对不上时
     // 用户无从判断是哪一边错了。
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'orphan-abcdef123', processCount: 1, cpuPercent: 1, rssKib: 1024 }] }),
+      snapshot({ runs: [{ runId: 'orphan-abcdef123', rootPid: 200, processCount: 1, rootRssKib: 1024, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 1, rssKib: 1024 }] }),
       []
     )
     expect(rows).toHaveLength(1)
@@ -131,17 +131,17 @@ describe('把采样配上 Agent 的名字', () => {
 
   it('进程已退出的 run 两个读数都是中性记号', () => {
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 0, cpuPercent: null, rssKib: null }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null, rssKib: null }] }),
       [agent('s1', 'run-1', 'Gone')]
     )
-    expect(rows[0]).toEqual({ key: 'run-1', label: 'Gone', cpuText: '—', rssText: '—', contextText: 'claude · w', stateText: 'working' })
+    expect(rows[0]).toEqual({ key: 'run-1', label: 'Gone', cpuText: '—', rssText: '—', rootPid: 100, processCount: null, rootRssText: '—', descendantsRssText: '—', descendantProcessCount: null, contextText: 'claude · w', stateText: 'working' })
   })
 })
 
 describe('「最近在改什么」这一行的诚实退化', () => {
   it('有时间轴时，把最近一条 tool_call 翻成人话', () => {
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 1, cpuPercent: 3, rssKib: 2048 }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: 1, rootRssKib: 2048, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 3, rssKib: 2048 }] }),
       [agent('s1', 'run-1', 'Reviewer')],
       { timelines: timeline('s1', [toolCall()]) }
     )
@@ -153,7 +153,7 @@ describe('「最近在改什么」这一行的诚实退化', () => {
     // 这是最常见的情形：时间轴按需拉取，多数 Session 此刻没有。空数组必须退回到只报状态，
     // 而不是把裸状态 'working' 重复成 activity——那会把"还没加载"伪装成"确实在做某事"。
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 1, cpuPercent: 3, rssKib: 2048 }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: 1, rootRssKib: 2048, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 3, rssKib: 2048 }] }),
       [agent('s1', 'run-1', 'Reviewer')]
     )
     expect(rows[0]!.label).toBe('Reviewer')
@@ -163,7 +163,7 @@ describe('「最近在改什么」这一行的诚实退化', () => {
 
   it('pendingInteraction 凌驾一切：卡在用户身上时那句就是 activity', () => {
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 1, cpuPercent: 3, rssKib: 2048 }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: 1, rootRssKib: 2048, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 3, rssKib: 2048 }] }),
       [agent('s1', 'run-1', 'Reviewer', {
         status: { state: 'waiting', observedAt: 0 },
         pendingInteraction: { kind: 'permission', title: 'Allow edit to config.ts?' }
@@ -177,7 +177,7 @@ describe('「最近在改什么」这一行的诚实退化', () => {
   it('Run 已结束时，一条已完成的 tool_call 不再冒充"正在干"', () => {
     // 新旧判定：complete 的那条只在 Session 仍活跃时才算最近。done 的 Session 落回状态答案。
     const rows = usagePanelRows(
-      snapshot({ runs: [{ runId: 'run-1', processCount: 0, cpuPercent: null, rssKib: null }] }),
+      snapshot({ runs: [{ runId: 'run-1', rootPid: 100, processCount: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null, rssKib: null }] }),
       [agent('s1', 'run-1', 'Reviewer', { status: { state: 'done', observedAt: 0 } } as Partial<SessionSnapshot>)],
       { timelines: timeline('s1', [toolCall({ status: 'complete' })]) }
     )

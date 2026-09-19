@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UsageSnapshot } from '../src/shared/contracts'
 import { ResourceUsagePanel } from '../src/renderer/src/components/ResourceUsagePanel'
+import { ProcessResourceSampler } from '../src/main/process-resource-sampler'
 
 const fixture = vi.hoisted(() => ({
   push: null as null | ((snapshot: UsageSnapshot) => void),
@@ -47,7 +48,7 @@ async function push(snapshot: UsageSnapshot) { await act(async () => fixture.pus
 function snapshot(): UsageSnapshot {
   return {
     observedAt: 1000,
-    runs: [{ runId: 'run-test-1234', processCount: 1, cpuPercent: 7, rssKib: 65536 }],
+    runs: [{ runId: 'run-test-1234', rootPid: 100, processCount: 1, rootRssKib: 65536, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 7, rssKib: 65536 }],
     app: { processCount: 3, cpuPercent: null, rssKib: 262144, unavailable: null, groups: [
       { role: 'main', processCount: 1, cpuPercent: null, rssKib: 131072 },
       { role: 'renderer', processCount: 1, cpuPercent: null, rssKib: 65536 },
@@ -69,6 +70,45 @@ function fact(label: string) {
 }
 
 describe('real resource panel observation', () => {
+  it('shows the same sampled Run root and descendants in the mounted resource disclosure', async () => {
+    const readTable = vi.fn(async () => `PID PPID RSS %CPU
+100 1 28672 1
+101 100 245760 2
+102 101 1048576 3
+103 101 32768 1
+200 1 8192 0`)
+    const sampler = new ProcessResourceSampler(readTable, () => 1000, () => [])
+    sampler.trackRun('large-run', 100)
+    sampler.trackRun('missing-run', 99999)
+    fixture.subscribe.mockImplementation((push) => sampler.subscribe(push))
+    try {
+      await open()
+      const large = panel()!.querySelector<HTMLDetailsElement>('[data-run-id="large-run"]')!
+      expect(large).not.toBeNull()
+      expect(large.open).toBe(false)
+      expect(large.querySelector('summary')?.textContent).toContain('4 processes')
+      expect(large.querySelector('summary')?.textContent).toContain('1.3 GiB')
+      expect([...large.querySelectorAll('dt')].map((term) => term.textContent))
+        .toEqual(['Root process · PID 100', 'Descendants · 3 processes'])
+      expect([...large.querySelectorAll('dd')].map((term) => term.textContent)).toEqual(['28 MiB', '1.3 GiB'])
+      large.open = true
+      large.querySelector('summary')!.focus()
+      expect(document.activeElement).toBe(large.querySelector('summary'))
+      const missing = panel()!.querySelector('[data-run-id="missing-run"]')!
+      expect(missing.querySelector('summary')?.textContent).toContain('— processes')
+      expect([...missing.querySelectorAll('dd')].map((term) => term.textContent)).toEqual(['—', '—'])
+      expect(missing.textContent).toContain('Descendants · — processes')
+      expect(panel()!.textContent).toContain('RSS: Run root + attributed descendants')
+      expect(panel()!.textContent).toContain('shared pages can count in multiple processes')
+      expect(panel()!.textContent).toContain('Root may be a launcher')
+      expect(readTable).toHaveBeenCalledTimes(1)
+      await act(async () => panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(panel()).toBeNull()
+    } finally {
+      sampler.dispose()
+    }
+  })
+
   it('separates app CPU, Runtime retention, selected storage and existing owners in the mounted product', async () => {
     await open()
     expect(panel()!.textContent).toContain('Observing Runtime…')
@@ -89,6 +129,7 @@ describe('real resource panel observation', () => {
     expect(storage.textContent).toContain('Selected Runtime')
     expect(storage.textContent).toContain('/runtime/current')
     expect(storage.textContent).toContain('4.0 MiB')
+    expect(storage.closest('details')?.querySelector('summary')?.textContent).toContain('Runtime storage · disk')
     expect(panel()!.querySelectorAll('.resource-usage__storage')).toHaveLength(1)
     expect(panel()!.textContent).toContain('Unattached Runs can still hold history')
     expect(panel()!.textContent).not.toContain('Startup directories')
@@ -99,7 +140,7 @@ describe('real resource panel observation', () => {
     expect(fact('Runtime subscriptions')).toBe('1')
     expect(panel()!.querySelectorAll('.resource-usage__list')).toHaveLength(1)
     const summaries = panel()!.querySelectorAll('summary')
-    expect(summaries).toHaveLength(4)
+    expect(summaries).toHaveLength(5)
     expect(summaries[0]!.parentElement?.tagName).toBe('DETAILS')
     // Native disclosures preserve the browser's keyboard focus semantics.
     summaries[0]!.focus()
