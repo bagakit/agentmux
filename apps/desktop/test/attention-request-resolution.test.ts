@@ -24,6 +24,11 @@ function session(id: string, pendingInteraction?: unknown): SessionSnapshot {
   } as unknown as SessionSnapshot
 }
 
+function completedSession(id: string): SessionSnapshot {
+  const completion = { state: 'done' as const, source: 'native-hook' as const, observedAt: 3 }
+  return { ...session(id), status: completion, semanticStatus: completion } as SessionSnapshot
+}
+
 const request = { kind: 'question', id: 'request-a', questions: [{ id: 'q', title: 'Choose', prompt: 'Choose one', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] }] }
 const replacement = { kind: 'question', id: 'request-b', questions: [{ id: 'q', title: 'New request', prompt: 'Choose the replacement', options: [{ id: 'next', label: 'Next' }] }] }
 
@@ -83,7 +88,7 @@ describe('attention request resolution boundaries', () => {
     await act(async () => reviewButton().click())
   }
 
-  it('waits for Core to clear the request before moving to the next Agent', async () => {
+  it('waits for Core to clear the request and report completion before moving to the next Agent', async () => {
     let resolveResponse!: () => void
     const response = new Promise<void>((resolve) => { resolveResponse = resolve })
     useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
@@ -95,9 +100,38 @@ describe('attention request resolution boundaries', () => {
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose one')
     expect(container.querySelector<HTMLButtonElement>('.agent-interaction button')?.disabled).toBe(true)
 
-    await act(async () => useAppStore.setState({ sessions: [session('a'), session('b', replacement)] }))
+    await act(async () => useAppStore.setState({ sessions: [completedSession('a'), session('b', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose the replacement')
+  })
+
+  it('keeps the answered Session while Core still reports waiting, then advances on its later completion', async () => {
+    const response = Promise.resolve()
+    useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
+    await openReview('a')
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    await act(async () => answer.click())
+    await act(async () => response)
+    expect(container.querySelector('[aria-label="Agent question"]')).not.toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('.agent-interaction button')?.disabled).toBe(true)
+
+    await act(async () => useAppStore.setState({ sessions: [session('a'), session('b', replacement)] }))
+    expect(useAppStore.getState().sessions).toHaveLength(2)
+    expect(useAppStore.getState().sessions[0]!.status.state).toBe('waiting')
+    expect(container.querySelector('.attention-request-panel')?.getAttribute('aria-label')).toBe('Request from a')
+    expect(container.querySelector('[aria-label="Agent question"]')).toBeNull()
+    expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Core has not exposed a typed request')
+    expect(container.querySelector('.attention-request-panel')?.textContent).not.toContain('All caught up')
+    expect(container.querySelector('.attention-request-panel')?.textContent).not.toContain('Choose the replacement')
+
+    await act(async () => useAppStore.setState({ sessions: [completedSession('a'), session('b', replacement)] }))
+    expect(useAppStore.getState().sessions).toHaveLength(2)
+    expect(container.querySelector('.attention-request-panel')?.getAttribute('aria-label')).toBe('Request from b')
+    expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose the replacement')
+    expect(container.querySelector('[aria-label="Agent question"]')).not.toBeNull()
+    const nextAnswer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction__options button')].find((button) => button.textContent === 'Next')
+    expect(nextAnswer).toBeDefined()
+    expect(nextAnswer!.disabled).toBe(false)
   })
 
   it('does not paint the next request when an old response rejects late', async () => {
@@ -107,7 +141,7 @@ describe('attention request resolution boundaries', () => {
     await openReview('a')
     const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
-    await act(async () => useAppStore.setState({ sessions: [session('a'), session('b', replacement)] }))
+    await act(async () => useAppStore.setState({ sessions: [completedSession('a'), session('b', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')
     rejectResponse(new Error('late old response failure'))
     await act(async () => response.catch(() => undefined))
