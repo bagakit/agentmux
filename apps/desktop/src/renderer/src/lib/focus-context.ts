@@ -8,7 +8,8 @@ import { regionDisplayNames, regionSurfaceLabel } from './region-display-name'
 import { isSessionSurface } from './workbench-surface-kinds'
 import { isNeedsYouState } from './attention-vocabulary'
 import { turnWorking } from './activity-working-state'
-import { clampStep, stepSummary } from './activity-step-summary'
+import { clampStep } from './activity-step-summary'
+import { sessionRecentActivity } from './session-recency'
 
 export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
 export type FocusContext = {
@@ -54,12 +55,15 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
       ? 'Run is alive · Connection status unknown' : session.processState === 'interrupted'
         ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
   } else if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
-  else if (pending) detail = session.pendingInteraction!.kind === 'permission' ? 'Review permission request' : 'Review request in context'
-  else if (latest?.kind === 'tool_call') detail = stepSummary(latest.toolName, latest.toolInput, 140, session.workspacePath) ?? latest.title
-  else if (latest?.content) detail = clampStep(latest.content.replace(/\s+/g, ' ').trim(), 'head', 140)
-  else if (latest) detail = latest.title
-  else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
-  else if (state === 'done') detail = 'Ready for another prompt · No result observed'
+  else {
+    const activity = sessionRecentActivity(session, items, session.workspacePath)
+    if (activity !== state) detail = activity
+    else if (session.kind === 'agent' && latest?.content && (latest.kind === 'user_message' || latest.kind === 'assistant_message')) {
+      const label = latest.kind === 'user_message' ? 'Prompt' : 'Response'
+      detail = `${label} · ${clampStep(latest.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
+    } else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
+    else if (state === 'done') detail = 'Ready for another prompt · No result observed'
+  }
   return { id: session.id, name, detail, state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt }
@@ -67,7 +71,8 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
-    && (a.kind !== 'terminal' || a.status.detail === b.status.detail && a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
+    && a.status.detail === b.status.detail
+    && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }

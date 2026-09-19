@@ -20,7 +20,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), { sessions } = await api.sessions.snapshot(), base = sessions[0]!
   useAppStore.setState({ config, mainSurface: 'workbench', agentNames: { working: 'Build the parser', attention: 'Review the change', result: 'Ready for review', idle: 'My current context' },
-    sessions: ['working', 'attention', 'result', 'idle', 'offline'].map((id, index) => ({ ...base, id, status: { ...base.status, state: ['working', 'waiting', 'done', 'running', 'disconnected'][index] as typeof base.status.state } })),
+    sessions: ['working', 'attention', 'result', 'idle', 'offline'].map((id, index) => ({ ...base, id, status: { source: base.status.source, observedAt: 1, state: ['working', 'waiting', 'done', 'running', 'disconnected'][index] as typeof base.status.state } })),
     timelines: { working: items('working', 'user_message', 'Compile the parser'), result: items('result', 'assistant_message', 'Parser tests pass') },
     agentFocus: { execution: { sessionId: 'idle', history: [] }, pmo: { sessionId: null } } })
   commits.mockClear()
@@ -35,12 +35,12 @@ it('opens a bounded live snapshot on hover, retaining the current context and pr
   expect(preview()?.querySelector('[data-preview-count="idle"]')?.textContent).toBe('1Idle')
   expect([...preview()!.querySelectorAll('[data-preview-session]')].map(row => row.getAttribute('data-preview-session'))).toEqual(['idle', 'attention', 'working'])
   expect(preview()?.textContent).toContain('ViewingMy current context'); expect(preview()?.textContent).toContain('1 disconnected')
-  expect(preview()?.textContent).toContain('Compile the parser'); expect(preview()?.textContent).toContain(useAppStore.getState().config!.workspaces[0]!.name)
+  expect(preview()?.textContent).toContain('Prompt · Compile the parser'); expect(preview()?.textContent).toContain(useAppStore.getState().config!.workspaces[0]!.name)
   expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('idle')
   expect(focus().hasAttribute('title')).toBe(false)
   expect(preview()?.querySelector('button, input, [tabindex]')).toBeNull()
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, working: 'Parser ready' }, sessions: state.sessions.map(s => s.id === 'attention' ? { ...s, status: { ...s.status, state: 'done' } } : s), timelines: { ...state.timelines, working: items('working', 'assistant_message', 'Compiled successfully') } })))
-  expect(preview()?.textContent).toContain('Parser ready'); expect(preview()?.textContent).toContain('Compiled successfully')
+  expect(preview()?.textContent).toContain('Parser ready'); expect(preview()?.textContent).toContain('Response · Compiled successfully')
   expect(preview()?.querySelector('[data-preview-count="attention"]')?.textContent).toBe('0Attention')
 })
 it('ignores unrelated bytes and detaches detailed preview when closed', async () => {
@@ -50,7 +50,7 @@ it('ignores unrelated bytes and detaches detailed preview when closed', async ()
   await leave(); expect(preview()).toBeNull(); const closed = commits.mock.calls.length
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, working: items('working', 'assistant_message', 'Changed while closed') } })))
   expect(commits.mock.calls.length).toBe(closed)
-  await hover(); expect(preview()?.textContent).toContain('Changed while closed')
+  await hover(); expect(preview()?.textContent).toContain('Response · Changed while closed')
 })
 it('keeps selected disconnected contexts count-only without changing the original focus', async () => {
   await act(async () => useAppStore.setState(state => ({
