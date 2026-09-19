@@ -150,6 +150,7 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 
 - Space 树对 Folder/Project 与 Topic 使用各自适合的内容来源。Folder/Project 表达打开的目录与实际项目事实；Topic 按识别规则自动发现，从该目录的 `topic.md` 读取人类可读标题、摘要等显示信息。Topic 不要求用户手动注册或绑定，发现与显示不依赖当前 Tab、Region 或 Session。
 - 用户进一步确认：「所有 Topic 默认就是 Space 树的一个默认一级节点，ICON 特殊；在 space 树中，每个 TOPIC 是其一个子节点」，并要求保留已经 polish 过的 Topics 列表页。Space 树默认提供一个用特殊图标识别的 Topics 一级节点，各 Topic 在其下自动显示为子节点；Topics 一级节点保留现有总览列表入口，树与列表使用同一 Topic 集合、选中与工作面事实。总览页的视觉与控件约束只定义在 surface-density《Project Rail 与 Topic 行密度》。
+- 用户要求优化 Space 左侧树的交互体验。Mote、Topics 与 Folders 在同一导航滚动区内保持可达，顶部创建和密度动作留在固定标题行；展开与收起只改变树的显示，不启动、停止或替换 Session。长标题可通过 hover 信息和可访问名称读全；名称打开对象，折叠动作与 Mote 人格编辑各自有完整命中区，键盘操作能清楚看到当前焦点。窄栏与短窗口继续保留原对象、选中、折叠和工作面事实。对齐、缩进及视觉节奏只定义在 surface-density《Project Rail 与 Topic 行密度》。
 - 树上的 `+` 必须明确区分打开已有目录与创建新 Topic。打开目录进入 Folder/Project；创建 Topic 形成独立的持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后自动可见可进入。
 - 显示信息读取失败属于流程状态：保留已有 Space 与工作面，在对应条目或服务窗明确说明问题。一个 Topic 的读取失败不能隐藏其他健康 Topic，也不能清空其已有 Tab/Region 或停止健康 Agent。
 
