@@ -115,8 +115,14 @@ export function AttentionRequestPanel({
       return
     }
     if (currentRequestId === undefined) {
-      clearSubmission(submitted)
       setActionError(null)
+      // Removing the answered typed request confirms that answer, not the Provider's semantic
+      // state. Keep this Session visible while Core still says it needs attention.
+      if (isNeedsYouState(session.status.state)) {
+        setCaughtUp(false)
+        return
+      }
+      clearSubmission(submitted)
       const next = nextAttentionSessionId(sessions.filter((item) => item.id !== activeSessionId), null)
       if (next) {
         setActiveSessionId(next)
