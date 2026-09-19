@@ -3,6 +3,7 @@ import { act, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, RuntimeEvent, RuntimeSnapshot, SessionSnapshot, SessionStatus } from '../src/shared/contracts'
+import type { AgentMuxAgentSession } from '@agentmux/core'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({
@@ -32,7 +33,7 @@ vi.mock('electron', () => ({
 import '../src/preload/index'
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
-import { useAppStore } from '../src/renderer/src/store'
+import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 
 const initial = useAppStore.getState()
 const config: AppConfig = {
@@ -45,7 +46,7 @@ const config: AppConfig = {
 const ids = Array.from({ length: 32 }, (_, i) => `private-agent-${i}`)
 function agent(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local',
-    workspacePath: '/private/projection', label: id, createdAt: 1, updatedAt: 1000,
+    workspacePath: '/private/projection', label: id, createdAt: 1, updatedAt: 1000, agentSessionUpdatedAt: 1000,
     processState: 'running', status: { state: 'working', source: 'native-hook', observedAt: 1000 },
     latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
@@ -85,6 +86,29 @@ function statusEvent(change: Partial<Extract<RuntimeEvent['event'], { type: 'age
   return { type: 'core', hostId: 'local', event: { type: 'agent-status', agentSessionId: ids[0]!,
     state: 'working', evidence: { source: 'native-hook', observedAt: 1000, run: { runId: `run-${ids[0]}` } }, ...change } }
 }
+function sessionEvent(change: Partial<AgentMuxAgentSession> = {}): RuntimeEvent {
+  return { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
+    kind: 'agent', agentSessionId: ids[0]!, providerId: 'codex', executorId: 'private', hostId: 'local',
+    workspacePath: '/private/projection', createdAt: 1, updatedAt: 1000,
+    run: { runId: `run-${ids[0]}` }, retiredRuns: [],
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1000 }, ...change
+  } } }
+}
+function resetMeasuredWork() {
+  // Drain the already-admitted startup state using its actual owner before counting semantic work.
+  prepareRendererUpdate()
+  commits = 0; collectionChanges = 0
+  const encoding = vi.spyOn(JSON, 'stringify')
+  const writes = vi.spyOn(window.localStorage, 'setItem')
+  return () => {
+    prepareRendererUpdate()
+    const persistedEncoding = encoding.mock.calls.filter(([value]) => value && typeof value === 'object' &&
+      'state' in value && value.state && typeof value.state === 'object' && 'restoredWorkbench' in value.state)
+    expect(persistedEncoding).toHaveLength(0)
+    expect(writes).not.toHaveBeenCalled()
+    encoding.mockRestore(); writes.mockRestore()
+  }
+}
 async function emit(event: RuntimeEvent) {
   const listeners = bridge.listeners.get(SESSION_EVENT_CHANNEL)
   expect(listeners?.size).toBe(1)
@@ -97,6 +121,12 @@ function expectUnrelatedUnchanged(previous: SessionSnapshot[]) {
   const current = useAppStore.getState().sessions
   expect(current.map(session => session.id)).toEqual(ids)
   for (let i = 1; i < ids.length; i++) expect(current[i]).toBe(previous[i])
+}
+function currentAgent() {
+  const item = useAppStore.getState().sessions[0]
+  expect(item?.id).toBe(ids[0])
+  if (!item || item.kind !== 'agent') throw new Error('Expected the initialized nonempty Agent projection')
+  return item
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -171,4 +201,78 @@ it('keeps disconnected Run projection untouched despite a newer valid Hook', asy
   expect(useAppStore.getState()).toBe(before)
   expect(useAppStore.getState().sessions[0]!.status).toEqual({ state: 'disconnected', source: 'run-process', observedAt: 1000, detail: 'Link unavailable' })
   expect({ collectionChanges, commits }).toEqual({ collectionChanges: 0, commits: 0 })
+})
+
+it('rejects old AgentSession snapshots and unproven Run replacement without collection or mounted work', async () => {
+  await mount()
+  const finishStorageControl = resetMeasuredWork(), before = useAppStore.getState()
+  for (let i = 0; i < 8; i++) {
+    await emit(sessionEvent({ updatedAt: 999 }))
+    await emit(sessionEvent({ updatedAt: 2000 + i, run: { runId: 'unproven-new-run' }, retiredRuns: [] }))
+  }
+  expect(useAppStore.getState()).toBe(before)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expectUnrelatedUnchanged(before.sessions)
+  expect({ collectionChanges, commits }).toEqual({ collectionChanges: 0, commits: 0 })
+  finishStorageControl()
+})
+
+it('repeated accepted AgentSession facts preserve references, notifications and persistent writer control', async () => {
+  await mount()
+  const usage = { outputTokens: 11, inputTokens: 12, totalTokens: 23, observedAt: 1000,
+    context: { usedTokens: 50, capacityTokens: 200 } }
+  const event = sessionEvent({ turnUsage: usage })
+  await emit(event)
+  expect(currentAgent().turnUsage).toEqual(usage)
+  const finishStorageControl = resetMeasuredWork(), before = useAppStore.getState()
+  for (let i = 0; i < 8; i++) await emit(structuredClone(event))
+  expect(useAppStore.getState()).toBe(before)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expectUnrelatedUnchanged(before.sessions)
+  expect({ collectionChanges, commits }).toEqual({ collectionChanges: 0, commits: 0 })
+  finishStorageControl()
+})
+
+it('same-clock real metadata changes and deletion replace only their related AgentSession', async () => {
+  await mount(); await emit(sessionEvent())
+  const finishStorageControl = resetMeasuredWork(), before = useAppStore.getState().sessions
+  const capability = { state: 'unknown' as const, mode: 'degraded' as const, reason: 'handshake-timeout' as const,
+    run: { runId: `run-${ids[0]}` }, observedAt: 1000 }
+  await emit(sessionEvent({ terminalCapability: capability }))
+  const changed = useAppStore.getState().sessions
+  expect(currentAgent().terminalCapability).toEqual(capability)
+  expect(changed[0]).not.toBe(before[0])
+  expect(changed[0]!.status).toBe(before[0]!.status)
+  expectUnrelatedUnchanged(before)
+  expect({ collectionChanges, commits }).toEqual({ collectionChanges: 1, commits: 1 })
+  await emit(sessionEvent())
+  expect(useAppStore.getState().sessions[0]).not.toBe(changed[0])
+  expect(useAppStore.getState().sessions[0]).not.toHaveProperty('terminalCapability')
+  expect(useAppStore.getState().sessions[0]!.status).toBe(before[0]!.status)
+  expectUnrelatedUnchanged(before)
+  expect({ collectionChanges, commits }).toEqual({ collectionChanges: 2, commits: 2 })
+  finishStorageControl()
+})
+
+it('proven AgentSession Run takeover and a newer clock remain reachable with unrelated items intact', async () => {
+  await mount(); await emit(sessionEvent())
+  const finishStorageControl = resetMeasuredWork(), before = useAppStore.getState().sessions
+  const oldRun = { ...before[0]!.control.run }, nextRun = { runId: 'proven-next-run' }
+  await emit(sessionEvent({ updatedAt: 1001, run: nextRun, retiredRuns: [oldRun] }))
+  const resumed = currentAgent()
+  expect(resumed.control).toEqual({ kind: 'agent', hostId: 'local', agentSessionId: ids[0], run: nextRun })
+  expect(resumed.agentSessionUpdatedAt).toBe(1001)
+  expect(resumed.status).toBe(before[0]!.status)
+  expectUnrelatedUnchanged(before)
+  await emit(sessionEvent({ updatedAt: 2000, run: nextRun, retiredRuns: [oldRun],
+    semanticStatus: { state: 'waiting', source: 'native-hook', observedAt: 2000, stateEnteredAt: 1500 } }))
+  expect(useAppStore.getState().sessions[0]!.status).toEqual({
+    state: 'waiting', source: 'native-hook', observedAt: 2000, stateEnteredAt: 1500
+  })
+  expect(container!.querySelector('.project-activity')!.getAttribute('aria-label')).toContain('1 Needs you')
+  expectUnrelatedUnchanged(before)
+  expect({ collectionChanges, commits }).toEqual({ collectionChanges: 2, commits: 2 })
+  // No input/recovery transport is admitted by a pure snapshot observation.
+  expect(bridge.calls.filter(channel => /^sessions:(write|paste|send|resume|reattach|stop)/.test(channel))).toEqual([])
+  finishStorageControl()
 })
