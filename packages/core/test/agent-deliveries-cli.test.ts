@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -427,7 +428,7 @@ describe('actual built agentmux deliveries CLI', () => {
     expect(after.run.pid).toBe(statusBefore.run.pid)
     expect(after.run.acceptedInputBytes).toBe(statusBefore.run.acceptedInputBytes)
     expect(after.run.state).toBe('running')
-    await client.submitAgentPrompt({ agentSessionId: 'reader-one', expectedRun: sessions[0]!.run,
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('reader-one')), agentSessionId: 'reader-one', expectedRun: sessions[0]!.run,
       operationId: 'healthy-typed-input', prompt: 'Synthetic input remains usable' })
     expect((await client.statusAgent('reader-one')).run.acceptedInputBytes).toBeGreaterThan(after.run.acceptedInputBytes)
     const oldCapability = credentials.get('reader-one')!.capability

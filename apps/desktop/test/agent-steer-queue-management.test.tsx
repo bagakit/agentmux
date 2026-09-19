@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
@@ -13,20 +13,37 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 const dom = composerDOM()
 const sessionId = 'agent-1'
 const clock = 1_790_832_000_000
+let disposeBootstrap: (() => void) | undefined
+beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
+afterAll(() => disposeBootstrap?.())
+beforeEach(() => {
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
+    if (!session) throw new Error('Private Session is missing')
+    return session
+  })
+})
 let dispose: (() => void) | undefined
+const inputGates: Array<() => void> = []
 beforeEach(() => useAppStore.setState({ agentSteerInFlight: {}, noticeReadReceipts: {},
   timelines: { [sessionId]: { agentSessionId: sessionId, revision: 0, items: [] } } }))
-afterEach(() => { dispose?.(); dispose = undefined; vi.useRealTimers() })
+afterEach(async () => {
+  for (const release of inputGates.splice(0)) release()
+  await useAppStore.getState().flushAgentSteerQueue(sessionId)
+  dispose?.(); dispose = undefined; vi.useRealTimers()
+})
 const queue = () => useAppStore.getState().agentSteerQueues[sessionId]!
 const texts = () => queue().map(entry => entry.text)
 const rows = () => [...dom.container.querySelectorAll<HTMLLIElement>('.composer-outbox li')]
 const rowTexts = () => rows().map(row => row.querySelector('span')?.textContent)
 function pending(id: string, overrides: Partial<AgentSteerQueueEntry> = {}): AgentSteerQueueEntry {
-  return { operationId: id, runId: `run-${sessionId}`, text: id, status: 'queued', ...overrides }
+  return { operationId: id, runId: `run-${sessionId}`, text: id, status: 'queued', promptCondition: null, ...overrides }
 }
 function gate() {
   let resolve!: () => void
-  return { promise: new Promise<void>(done => { resolve = done }), resolve: () => resolve() }
+  const promise = new Promise<void>(done => { resolve = done })
+  inputGates.push(() => resolve())
+  return { promise, resolve: () => resolve() }
 }
 async function openOutbox() {
   await dom.render(<AgentSessionComposer sessionId={sessionId} />)
@@ -70,8 +87,8 @@ it('records the actual first accepted time and creates no intent for refused adm
   expect(useAppStore.getState().enqueueAgentSteer(sessionId, 'second')).toBe(true)
   const admitted = queue()
   expect(admitted).toEqual([
-    { operationId: expect.any(String), enqueuedAt: clock, runId: `run-${sessionId}`, text: 'first', status: 'queued' },
-    { operationId: expect.any(String), enqueuedAt: clock + 90_000, runId: `run-${sessionId}`, text: 'second', status: 'queued' }
+    { operationId: expect.any(String), enqueuedAt: clock, runId: `run-${sessionId}`, text: 'first', status: 'queued', promptCondition: null },
+    { operationId: expect.any(String), enqueuedAt: clock + 90_000, runId: `run-${sessionId}`, text: 'second', status: 'queued', promptCondition: null }
   ])
   expect(admitted[0]!.operationId).not.toBe(admitted[1]!.operationId)
   const rejected = vi.fn()
@@ -128,15 +145,17 @@ it('lets the real consumer read edited tails after acknowledgement without movin
   const held = gate()
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => held.promise).mockResolvedValue()
   const drain = useAppStore.getState().flushAgentSteerQueue(sessionId)
-  await Promise.resolve()
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
   expect(submit.mock.calls.map(call => call[1])).toEqual(['head'])
+  const preparedHead = queue()[0]!
+  expect(preparedHead).toMatchObject({ ...admitted[0], promptCondition: { expectedRun: { runId: `run-${sessionId}` }, afterSubmissionId: null } })
   await openOutbox()
   expect(rowTexts()).toEqual(['head', 'second', 'last'])
   expect(moveButton('head', 'down').disabled).toBe(true)
   expect(moveButton('second', 'up').disabled).toBe(true)
   await move('last', 'up')
-  expect(queue()).toEqual([admitted[0], admitted[2], admitted[1]])
-  expect(queue()[0]).toBe(admitted[0])
+  expect(queue()).toEqual([preparedHead, admitted[2], admitted[1]])
+  expect(queue()[0]).toBe(preparedHead)
   useAppStore.getState().moveAgentSteer(sessionId, admitted[0]!.operationId, 'down')
   useAppStore.getState().moveAgentSteer(sessionId, admitted[2]!.operationId, 'up')
   expect(texts()).toEqual(['head', 'last', 'second'])
@@ -153,7 +172,7 @@ it('fences the in-flight identity at any array position and leaves invalid moves
   const held = gate()
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => held.promise).mockResolvedValue()
   const drain = useAppStore.getState().flushAgentSteerQueue(sessionId)
-  await Promise.resolve()
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
   expect(useAppStore.getState().agentSteerInFlight[sessionId]).toBe('head')
   await openOutbox()
   expect(rowTexts()).toEqual(['old-run', 'head', 'tail', 'last'])
@@ -164,9 +183,9 @@ it('fences the in-flight identity at any array position and leaves invalid moves
   for (const [id, direction] of [['old-run', 'up'], ['old-run', 'down'], ['head', 'up'], ['head', 'down'], ['tail', 'up'], ['last', 'down'], ['gone', 'up']] as const) {
     useAppStore.getState().moveAgentSteer(sessionId, id, direction)
   }
-  expect(queue()).toEqual([old, head, tail, last])
+  expect(queue()).toEqual([old, { ...head, promptCondition: { expectedRun: { runId: `run-${sessionId}` }, afterSubmissionId: null } }, tail, last])
   await move('last', 'up')
-  expect(queue()).toEqual([old, head, last, tail])
+  expect(queue()).toEqual([old, { ...head, promptCondition: { expectedRun: { runId: `run-${sessionId}` }, afterSubmissionId: null } }, last, tail])
   await act(async () => { held.resolve(); await drain })
   expect(submit.mock.calls.map(call => call[1])).toEqual(['head', 'last', 'tail'])
   expect(queue()).toEqual([old])
@@ -218,7 +237,7 @@ it('retains the first time when an actual refusal is retried at a later clock', 
   await useAppStore.getState().flushAgentSteerQueue(sessionId)
   now.mockReturnValue(clock + 180_000)
   await useAppStore.getState().sendQueuedAgentSteer(sessionId, admitted.operationId)
-  expect(queue()).toEqual([{ ...admitted, status: 'deferred', error: 'busy again' }])
+  expect(queue()).toEqual([{ ...admitted, promptCondition: { expectedRun: { runId: `run-${sessionId}` }, afterSubmissionId: null }, status: 'deferred', error: 'busy again' }])
   expect(submit.mock.calls.map(call => call[2])).toEqual([admitted.operationId, admitted.operationId])
   expect(queue()[0]!.enqueuedAt).toBe(clock)
 })
@@ -235,7 +254,7 @@ it('preserves first admission time through real restoration, once-only binding a
   vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('busy after restoration'))
   now.mockReturnValue(clock + 180_000)
   await useAppStore.getState().flushAgentSteerQueue(sessionId)
-  expect(queue()).toEqual([{ ...admitted, runId: 'revived-run', status: 'deferred', error: 'busy after restoration' }])
+  expect(queue()).toEqual([{ ...admitted, promptCondition: { expectedRun: { runId: 'revived-run' }, afterSubmissionId: null }, runId: 'revived-run', status: 'deferred', error: 'busy after restoration' }])
   expect(recover).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ agentSessionId: sessionId }), '/repo', admitted.operationId)
 })
 

@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -90,8 +91,8 @@ async function ingressClient(
 describe('durable mailbox attribution', () => {
   it('records actual input author only after delivery and retains it through store reopen', async () => {
     const { client, store, writes } = await ingressClient()
-    await client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'agent-send', prompt: 'Review this', authorAgentSessionId: 'reviewer' })
-    await client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'user-send', prompt: 'Continue' })
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'agent-send', prompt: 'Review this', authorAgentSessionId: 'reviewer' })
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'user-send', prompt: 'Continue' })
     expect(writes).toEqual(['Review this\r', 'Continue\r'])
     const reopened = new AgentMuxFileAgentSessionStore(store.path)
     const timeline = await reopened.loadTimeline(AGENT_SESSION_ID)
@@ -104,7 +105,7 @@ describe('durable mailbox attribution', () => {
   it('never claims delivery or creates an inbox item when submission fails', async () => {
     const { client, store, writes, setRunState } = await ingressClient()
     setRunState('exited')
-    await expect(client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'failed', prompt: 'Late', authorAgentSessionId: 'reviewer' })).rejects.toThrow()
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'failed', prompt: 'Late', authorAgentSessionId: 'reviewer' })).rejects.toThrow()
     expect(writes).toEqual([])
     expect((await store.loadTimeline(AGENT_SESSION_ID)).items).toEqual([])
   })

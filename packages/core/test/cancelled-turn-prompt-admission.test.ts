@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -51,7 +52,10 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     hostId: 'local', workspacePath, run: { runId }, retiredRuns: [],
     hookBindingId: 'b'.repeat(43), hookToken: token, createdAt: 1, updatedAt: 1,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 },
-    promptCompletionAdmission: { submissionId: 'prior', operationId: 'prior-input', startByte: 0, endByte: 10 },
+    // This fixture starts after a known prior Input receipt. Its cursor alone is
+    // not a receipt; explicitly preserve that owning fact in the current schema.
+    promptCompletionAdmission: { submissionId: 'prior', operationId: 'prior-input', startByte: 0, endByte: 10,
+      acknowledged: true },
     ...(receiptTime === undefined ? {} : { updatedAt: 200,
       semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: 200 },
       ...(receiptTime === null ? {
@@ -116,7 +120,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     for (const stream of streams) stream.push({ type: 'output', chunk })
   }
   output(`${frameStart}\u001b[22;1H› \u001b[22;3H${frameEnd}`)
-  const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
+  const receipts = new Map<string, { start_byte: number; end_byte: number; data: string; unknown?: true }>()
   const recoverableInput = vi.fn(async (op: {
     daemonInstance: string; operationKey: string; runId: string; expectedByte: number; data: string
   }) => {
@@ -125,14 +129,18 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     const existing = receipts.get(op.operationKey)
     if (existing) {
       expect([op.expectedByte, op.data]).toEqual([existing.start_byte, existing.data])
+      if (existing.unknown) throw new AgentMuxError('Synthetic partial acceptance without receipt', 'CTXMUX_io', 'unknown')
       return { run: run(), receipt: existing }
     }
     expect(op.expectedByte).toBe(cursor)
     if (partialFailure) {
       partialFailure = false
+      // Native retains this exact unknown operation. Rejoining it is not a new
+      // dispatch, and a later turn-end cannot turn partial bytes into a receipt.
+      receipts.set(op.operationKey, { start_byte: cursor, end_byte: cursor + Buffer.byteLength(op.data), data: op.data, unknown: true })
       cursor += 1
       writes.push(op.data.slice(0, 1))
-      throw new Error('Synthetic partial acceptance without receipt')
+      throw new AgentMuxError('Synthetic partial acceptance without receipt', 'CTXMUX_io', 'unknown')
     }
     const receipt = { start_byte: cursor, end_byte: cursor + Buffer.byteLength(op.data), data: op.data }
     cursor = receipt.end_byte
@@ -218,6 +226,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
       expect((await stored()).hookReceipt).toEqual(receipt)
     },
     send: (operationId: string, prompt: string, expectedCompletionId?: string) => client.submitAgentPrompt({
+      ...agentPromptCondition(client.agentSession(sessionId)),
       agentSessionId: sessionId, operationId, prompt, ...(expectedCompletionId ? { expectedCompletionId } : {}) }),
     failPartial: () => { partialFailure = true },
     failHookSnapshot: () => { snapshotFailure = true },
@@ -426,7 +435,7 @@ describe('manual admission after native cancellation', () => {
       expect(await h.feed('notice', { reason: 'cancelled' })).toBe(204)
       expect((await h.stored()).pendingInteraction?.request).toMatchObject({ kind: 'question', nativeToolCallId: 'choice-1' })
       await expect(h.send('pending-choice', 'later')).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
-      await expect(h.client.submitAgentPrompt({ agentSessionId: sessionId, operationId: 'old-run', prompt: 'later', expectedRun: { runId: 'retired-run' } }))
+      await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(sessionId)), agentSessionId: sessionId, operationId: 'old-run', prompt: 'later', expectedRun: { runId: 'retired-run' } }))
         .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
       expect(h.writes).toEqual([])
       expect(h.recoverableInput).not.toHaveBeenCalled()
@@ -442,12 +451,18 @@ describe('manual admission after native cancellation', () => {
       h.failPartial()
       await expect(h.send('partial', 'hello')).rejects.toThrow('Synthetic partial acceptance without receipt')
       expect(h.writes).toEqual(['h'])
+      const originalAdmission = (await h.stored()).promptCompletionAdmission
+      expect(originalAdmission).toMatchObject({ submissionId: 'partial', acknowledged: false })
       expect(await h.feed('signal', { extra: { category: 'turn', reason: 'halt' } })).toBe(204)
-      await expect(h.send('replacement', 'again')).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+      await expect(h.send('replacement', 'again')).rejects.toMatchObject({ code: 'CTXMUX_io', detail: 'unknown' })
+      expect((await h.stored()).promptCompletionAdmission).toEqual(originalAdmission)
       await h.reopen()
-      await expect(h.send('replacement-after-restart', 'again')).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+      await expect(h.send('replacement-after-restart', 'again')).rejects.toMatchObject({ code: 'CTXMUX_io', detail: 'unknown' })
+      expect((await h.stored()).promptCompletionAdmission).toEqual(originalAdmission)
       expect(h.writes).toEqual(['h'])
-      expect(h.recoverableInput).toHaveBeenCalledOnce()
+      expect(h.recoverableInput).toHaveBeenCalledTimes(3)
+      expect(h.start).not.toHaveBeenCalled()
+      expect(h.stop).not.toHaveBeenCalled()
     } finally { await h.close() }
   })
 

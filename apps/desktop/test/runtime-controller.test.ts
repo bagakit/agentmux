@@ -158,6 +158,7 @@ const runtimeFixture = vi.hoisted(() => {
       createdAt: 1,
       updatedAt: 2
     }))
+    readonly refreshAgentSession = vi.fn(async () => this.agentSession())
     readonly agentSessions = vi.fn((): AgentMuxAgentSession[] => [])
     readonly submitAgentPrompt = vi.fn(async (_input: AgentMuxAgentPromptInput) => {})
     readonly respondAgentInteraction = vi.fn(async () => {})
@@ -243,6 +244,7 @@ const runtimeFixture = vi.hoisted(() => {
 
 vi.mock('@agentmux/core', async () => {
   const { agentInteractionResponseUnavailableReason } = await import('@agentmux/core/agent-interaction-state')
+  const { agentPromptPredecessor, validateAgentPromptCondition } = await import('@agentmux/core/prompt-condition')
   class AgentMuxError extends Error {
     readonly code: string
     readonly detail?: string
@@ -256,6 +258,8 @@ vi.mock('@agentmux/core', async () => {
   return {
     AgentMuxError,
     agentInteractionResponseUnavailableReason,
+    agentPromptPredecessor,
+    validateAgentPromptCondition,
     AgentMuxClient: runtimeFixture.FakeClient,
     AgentMuxMemoryAgentSessionStore: class {},
     connectLocalAgentMux: runtimeFixture.connectClient,
@@ -276,6 +280,7 @@ import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
   async loadRetiredRuns() { return [] },
+  async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
   async loadRetiredAgentSessions() { return [] },
   async compareAndSwap() {},
   async reserveLifecycle() {},
@@ -871,9 +876,9 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await controller.submitPrompt(control, 'hello', 'message-op', undefined, 'reviewer')
+    await controller.submitPrompt(control, 'hello', 'message-op', { expectedRun: control.run, afterSubmissionId: null }, undefined, 'reviewer')
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
-    expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({
+    expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({ afterSubmissionId: null,
       agentSessionId: 'agent-1',
       expectedRun: control.run,
       prompt: 'hello',
@@ -935,10 +940,10 @@ describe('RuntimeController configuration transaction', () => {
     bridge.submitAgentPrompt.mockImplementation(async (input) => await core.submitAgentPrompt(input))
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: original.run }
     try {
-      await expect(controller.submitPrompt(control, 'bound text', 'bound-operation'))
+      await expect(controller.submitPrompt(control, 'bound text', 'bound-operation', { expectedRun: control.run, afterSubmissionId: null }))
         .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
       expect(bridge.submitAgentPrompt).toHaveBeenCalledWith({ agentSessionId: 'agent-1',
-        expectedRun: original.run, operationId: 'bound-operation', prompt: 'bound text' })
+        expectedRun: original.run, afterSubmissionId: null, operationId: 'bound-operation', prompt: 'bound text' })
       expect(writes).toEqual([])
       expect(core.agentSession('agent-1').promptCompletionAdmission).toBeUndefined()
       expect((await privateStore.loadTimeline('agent-1')).items).toEqual([])
@@ -956,10 +961,10 @@ describe('RuntimeController configuration transaction', () => {
     client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
     const signal = new AbortController().signal
-    await controller.submitPrompt(control, 'next', 'original', { completionId: '["run-1",1]', isCurrent: () => true, signal })
-    expect(client.submitAgentPrompt).toHaveBeenCalledWith({ agentSessionId: 'agent-1', operationId: 'original', prompt: 'next',
+    await controller.submitPrompt(control, 'next', 'original', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', isCurrent: () => true, signal })
+    expect(client.submitAgentPrompt).toHaveBeenCalledWith({ afterSubmissionId: null, agentSessionId: 'agent-1', operationId: 'original', prompt: 'next',
       expectedRun: control.run, expectedCompletionId: '["run-1",1]', signal })
-    await expect(controller.submitPrompt(control, 'next', 'stopped', { completionId: '["run-1",1]', isCurrent: () => false, signal }))
+    await expect(controller.submitPrompt(control, 'next', 'stopped', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', isCurrent: () => false, signal }))
       .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
   })
@@ -970,13 +975,13 @@ describe('RuntimeController configuration transaction', () => {
     const running = agentStatusFixture()
     client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
-    await controller.submitPrompt(control, 'first', 'original', undefined, undefined, { allowUncertainTurn: true })
-    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', operationId: 'original',
+    await controller.submitPrompt(control, 'first', 'original', { expectedRun: control.run, afterSubmissionId: null }, undefined, undefined, { allowUncertainTurn: true })
+    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ afterSubmissionId: null, agentSessionId: 'agent-1', operationId: 'original',
       expectedRun: control.run, prompt: 'first', allowUncertainTurn: true })
-    await controller.submitPrompt(control, 'second', 'other')
-    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ agentSessionId: 'agent-1', expectedRun: control.run,
+    await controller.submitPrompt(control, 'second', 'other', { expectedRun: control.run, afterSubmissionId: null })
+    expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ afterSubmissionId: null, agentSessionId: 'agent-1', expectedRun: control.run,
       operationId: 'other', prompt: 'second' })
-    await controller.submitPrompt(control, 'auto', 'automatic', {
+    await controller.submitPrompt(control, 'auto', 'automatic', { expectedRun: control.run, afterSubmissionId: null }, {
       completionId: '["run-1",1]', isCurrent: () => true, signal: new AbortController().signal
     }, undefined, { allowUncertainTurn: true })
     expect(client.submitAgentPrompt.mock.calls.at(-1)?.[0]).not.toHaveProperty('allowUncertainTurn')
@@ -1019,7 +1024,7 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    const rejection = await controller.submitPrompt(control, 'steer mid-turn').then(
+    const rejection = await controller.submitPrompt(control, 'steer mid-turn', 'test-prompt-operation', { expectedRun: control.run, afterSubmissionId: null }).then(
       () => { throw new Error('submitPrompt resolved but should have rejected') },
       (error: unknown) => error
     )
@@ -1028,7 +1033,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(error.code).toBe(code)
     expect(error.detail).toBe(detail)
     expect(error.message).toMatch(expected)
-    expect(error.message).toContain(`Diagnostic: ${detail}`)
+    expect(error.message).toContain(`Diagnostic: code=${code} ${detail}`)
     // User content is never copied into Core detail or the classified message.
     expect(error.message).not.toContain('steer mid-turn')
   })
@@ -1052,7 +1057,7 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Run has ended.*resume the Agent/i)
+    await expect(controller.submitPrompt(control, 'hello', 'test-prompt-operation', { expectedRun: control.run, afterSubmissionId: null })).rejects.toThrow(/Run has ended.*resume the Agent/i)
   })
 
   it('keeps delivery conflict independent of semantic turn completion', async () => {
@@ -1081,7 +1086,7 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Another message is still being delivered/i)
+    await expect(controller.submitPrompt(control, 'hello', 'test-prompt-operation', { expectedRun: control.run, afterSubmissionId: null })).rejects.toThrow(/Another message is still being delivered/i)
   })
 
   it('forwards a typed interaction response with the exact Session Run fence', async () => {
@@ -1120,7 +1125,7 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await expect(controller.submitPrompt(control, 'continue')).rejects.toMatchObject({
+    await expect(controller.submitPrompt(control, 'continue', 'test-prompt-operation', { expectedRun: control.run, afterSubmissionId: null })).rejects.toMatchObject({
       code: 'SESSION_NOT_RUNNING'
     })
     expect(client.resumeAgent).not.toHaveBeenCalled()

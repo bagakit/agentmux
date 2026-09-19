@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -230,7 +231,7 @@ describe('payload-dependent Hook contributions', () => {
       expect(cancelled.semanticStatus).toEqual(waiting)
       expect(cancelled.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-4', run: { runId },
         outputCursorBytes: 123, observedAt: cancelled.hookReceipt!.observedAt })
-      await expect(h.client.submitAgentPrompt({ agentSessionId, operationId: 'cancel-is-not-success',
+      await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(agentSessionId)),  agentSessionId, operationId: 'cancel-is-not-success',
         prompt: 'Synthetic automatic prompt', expectedCompletionId: JSON.stringify([runId, cancelled.hookReceipt!.observedAt]) }))
         .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
       expect(await h.feed('PostToolUse')).toBe(204)

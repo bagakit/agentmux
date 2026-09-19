@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -239,7 +240,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(output).toContain('AGENTMUX_REAL_CODEX_READY')
     const firstPreExit = await client.statusAgent(created.agentSessionId)
     expect(firstPreExit.run.acceptedInputBytes).toBe(5)
-    await client.submitAgentPrompt({
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(created.agentSessionId)),
       agentSessionId: created.agentSessionId,
       operationId: `real-codex-exit-${invocationId}`,
       prompt: '/exit'
@@ -328,7 +329,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     const resumedPromptAcceptedInputBytes = 5
     const resumedPreExit = await client.statusAgent(resumed.agentSessionId)
     expect(resumedPreExit.run.acceptedInputBytes).toBe(resumedPromptAcceptedInputBytes)
-    await client.submitAgentPrompt({
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(resumed.agentSessionId)),
       agentSessionId: resumed.agentSessionId,
       operationId: `real-codex-resumed-exit-${invocationId}`,
       prompt: '/exit'

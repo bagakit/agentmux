@@ -14,7 +14,7 @@ export const composerConfig: AppConfig = {
 export function composerSession(id = 'agent-1', providerId = 'codex'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
     id, kind: 'agent', providerId, executorId: providerId, hostId: 'local', workspacePath: '/repo',
-    label: providerId, createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
+    promptSubmissionPredecessor: null, agentSessionUpdatedAt: 1, label: providerId, createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }

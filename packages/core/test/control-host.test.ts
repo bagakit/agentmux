@@ -176,10 +176,10 @@ describe('Control protocol', () => {
       senderSessionId: 'caller', senderRunId: null, recipientSessionId: 'recipient', recipientRunId: null,
       body: 'body'
     } as const
-    expect(parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toMatchObject({ message })
-    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-spoof', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('sender')
-    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-2', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'other' }, message })).toThrow('sender')
-    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toThrow('recipient')
+    expect(parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toMatchObject({ message })
+    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-spoof', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('sender')
+    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-2', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'other' }, message })).toThrow('sender')
+    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toThrow('recipient')
   })
 
   it('keeps open content and destinations as closed discriminated unions', () => {
@@ -874,14 +874,14 @@ describe('external Control control', () => {
       content: { kind: 'new-agent', executorId: 'codex' },
       destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'agent-left' } }
     }, path)).resolves.toMatchObject({ operation: 'open.agent', result: { region: { tabId: 'tab-main' } } })
-    await expect(requestAgentMuxControl({
+    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'send',
       operation: 'send',
       target: { kind: 'tab', tabId: 'tab-main' },
       text: 'Continue'
     }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: 'semantic-1' } })
-    await expect(requestAgentMuxControl({
+    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'invalid-candidates',
       operation: 'send',
@@ -905,7 +905,7 @@ describe('external Control control', () => {
       }
     }, path)
     await server.start()
-    await requestAgentMuxControl({
+    await requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'utf8-send',
       operation: 'send',
@@ -937,7 +937,7 @@ describe('external Control control', () => {
       server.listen(path, resolve)
     })
 
-    await expect(requestAgentMuxControl({
+    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'expected-request',
       operation: 'send',
@@ -995,6 +995,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       resume: 'long',
       stop: 'long',
       // 只读或只动本地状态的。
+      'inspect.client': 'short',
       'inspect.tab': 'short',
       'inspect.region': 'short',
       focus: 'short',
@@ -1272,7 +1273,7 @@ describe('Browser 进度订阅：一问多答是独立的一支，一问一答�
     }, path)
     await server.start()
 
-    const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one' }
+    const request = {promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one' }
     // 一条连接上塞两条请求：第二条是尾随数据，必须被拒，而且**execute 一次都不许跑**——放宽检查的
     // 实现会把第一条执行掉（甚至两条都执行），这里的计数当场变。
     const raw = await new Promise<string>((resolve, reject) => {

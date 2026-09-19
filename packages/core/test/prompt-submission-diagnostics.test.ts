@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
@@ -55,22 +56,26 @@ function run(acceptedInputBytes = 0): CtxmuxAdapterRun {
 }
 
 async function coordinatorFixture(stored = session()) {
-  const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
+  const store = new AgentMuxMemoryAgentSessionStore()
+  const registry = new AgentMuxAgentSessionRegistry(store)
   await registry.put(stored)
   const currentRun = run()
+  let cursor = 0
   const kernel = {
     identity: () => ({ daemonInstanceId: 'daemon-1', protocolVersion: 1, buildIdentity: 'test' }),
     // 降级路径（confirmRenderOrDegrade）先向 daemon 要权威 Run 状态确认 Agent 还活着。缺了它，任何
     // 走到降级的变异都会炸成 `kernel.status is not a function`——那是**红在 fixture 缺口**，不是红在
     // 断言上，于是变异「被杀」的结论是假的。给它一条 running 的真回答，降级路径才真的跑起来。
-    status: vi.fn(async () => run()),
-    input: vi.fn(async (_runId: string, operation: { expectedByte: number; data: string }) => ({
-      run: run(operation.expectedByte + Buffer.byteLength(operation.data)),
+    status: vi.fn(async () => run(cursor)),
+    input: vi.fn(async (_runId: string, operation: { expectedByte: number; data: string }) => {
+      cursor = Math.max(cursor, operation.expectedByte + Buffer.byteLength(operation.data))
+      return {
+      run: run(cursor),
       appliedByteRange: {
         startByte: operation.expectedByte,
         endByte: operation.expectedByte + Buffer.byteLength(operation.data)
       }
-    }))
+    } })
   }
   // 形参表**从生产类型派生**，不手抄：下面那条 #628 守卫要从调用记录里读第 5 个实参（options），
   // 而 `vi.fn(async () => 1)` 会把 calls 的元组类型定成 `[]`，于是 `[4]` 是越界下标——vitest 只转译
@@ -82,6 +87,7 @@ async function coordinatorFixture(stored = session()) {
   }
   const publisher = new AgentMuxClientEventPublisher()
   const coordinator = new AgentPromptSubmissionCoordinator({
+    store,
     kernel: kernel as never,
     providers: new AgentProviderRegistry(),
     registry,
@@ -104,7 +110,7 @@ describe('prompt readiness refusal diagnostics', () => {
     else delete stored.terminalPromptReadiness!.readyThroughByte
     const { coordinator, currentRun, kernel, registry, screenEvidence } = await coordinatorFixture(stored)
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
-    await coordinator.submitInputPlan(stored, currentRun, 'submission-new', 'hello', plan)
+    await coordinator.submitInputPlan(stored, currentRun, 'submission-new', 'hello', plan, agentPromptCondition(stored))
     expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['hello', '\r'])
     expect(screenEvidence.wait).toHaveBeenCalledTimes(1)
     expect(registry.get('agent-1').terminalPromptSubmission?.readinessEvidence).toBeUndefined()
@@ -137,12 +143,12 @@ describe('prompt readiness refusal diagnostics', () => {
     const { coordinator, currentRun, kernel } = await coordinatorFixture(stored)
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('must remain private')
 
-    await coordinator.submitInputPlan(stored, currentRun, 'submission-contender', 'must remain private', plan, undefined, undefined, true)
+    await coordinator.submitInputPlan(stored, currentRun, 'submission-contender', 'must remain private', plan, agentPromptCondition(stored), undefined, undefined, true)
     expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['must remain private', '\r'])
 
   })
 
-  it('takes over an unsubmitted claim after restart only when CtxMux has accepted no payload bytes', async () => {
+  it('recovers the original intent before admitting a new prompt even with a zero cursor', async () => {
     const original = session()
     const fixture = await coordinatorFixture(original)
     const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
@@ -165,7 +171,7 @@ describe('prompt readiness refusal diagnostics', () => {
       fixture.currentRun,
       'submission-old',
       'old draft',
-      firstPlan
+      firstPlan, agentPromptCondition(original)
     )).rejects.toThrow('app stopped before submit')
 
     const stranded = fixture.registry.get(original.agentSessionId)
@@ -184,17 +190,17 @@ describe('prompt readiness refusal diagnostics', () => {
       'submission-new',
       'after restart',
       nextPlan,
-      undefined,
+      agentPromptCondition(stranded), undefined,
       undefined,
       true
     )
 
-    expect(restarted.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['after restart', '\r'])
+    expect(restarted.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['old draft', '\r', 'after restart', '\r'])
     expect(restarted.registry.get(original.agentSessionId).terminalPromptSubmission?.submissionId).toBe('submission-new')
-    expect(restarted.registry.get(original.agentSessionId).terminalPromptReadiness?.consumedBySubmissionId).toBe('submission-new')
+    expect(restarted.registry.get(original.agentSessionId).terminalPromptReadiness?.consumedBySubmissionId).toBe('submission-old')
   })
 
-  it('keeps the busy guard when CtxMux has already accepted the submit byte', async () => {
+  it('keeps the original claim when its exact Native receipt remains unavailable', async () => {
     const original = session()
     const fixture = await coordinatorFixture(original)
     const firstPlan = new AgentProviderRegistry().get('codex').planPromptInput('old draft')
@@ -217,7 +223,7 @@ describe('prompt readiness refusal diagnostics', () => {
       fixture.currentRun,
       'submission-old',
       'old draft',
-      firstPlan
+      firstPlan, agentPromptCondition(original)
     )).rejects.toThrow('receipt persistence interrupted')
     const stranded = fixture.registry.get(original.agentSessionId)
     const claim = stranded.terminalPromptSubmission
@@ -229,9 +235,10 @@ describe('prompt readiness refusal diagnostics', () => {
       run(acceptedThroughSubmit),
       'submission-new',
       'after restart',
-      nextPlan
-    )).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
-    expect(fixture.kernel.input).toHaveBeenCalledTimes(2)
+      nextPlan, agentPromptCondition(stranded)
+    )).rejects.toThrow('receipt persistence interrupted')
+    expect(fixture.kernel.input).toHaveBeenCalledTimes(3)
+    expect(fixture.registry.get(original.agentSessionId).promptCompletionAdmission?.submissionId).toBe('submission-old')
   })
 
   it('reports non-sensitive submission facts when another two-phase prompt is in flight', async () => {
@@ -255,10 +262,10 @@ describe('prompt readiness refusal diagnostics', () => {
     })
     const current = original as AgentMuxAgentSession
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('secret prompt must not leak')
-    const first = coordinator.submitInputPlan(current, currentRun, 'submission-1', 'secret prompt must not leak', plan)
+    const first = coordinator.submitInputPlan(current, currentRun, 'submission-1', 'secret prompt must not leak', plan, agentPromptCondition(current))
     await payloadObserved
 
-    const refusal = await coordinator.submitInputPlan(current, currentRun, 'submission-2', 'another secret prompt', plan)
+    const refusal = await coordinator.submitInputPlan(current, currentRun, 'submission-2', 'another secret prompt', plan, agentPromptCondition(current))
       .then(() => null, (error: unknown) => error as AgentMuxError)
     expect(refusal).toBeInstanceOf(AgentMuxError)
     expect(refusal).toMatchObject({
@@ -313,6 +320,7 @@ describe('assertSubmission 的字节游标顺序对账', () => {
    */
   async function submittedFixture() {
     const stored = session()
+    stored.terminalPromptReadiness!.outputCursorBytes = 4
     const fixture = await coordinatorFixture(stored)
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
     await fixture.coordinator.submitInputPlan(
@@ -320,7 +328,7 @@ describe('assertSubmission 的字节游标顺序对账', () => {
       fixture.currentRun,
       'submission-1',
       'hello',
-      plan
+      plan, agentPromptCondition(stored as AgentMuxAgentSession)
     )
     const persisted = fixture.registry.get('agent-1').terminalPromptSubmission
     expect(persisted, '前置：一次成功的提交必须留下 submission 记录').toBeDefined()
@@ -337,14 +345,17 @@ describe('assertSubmission 的字节游标顺序对账', () => {
     mutate: (submission: NonNullable<AgentMuxStoredAgentSession['terminalPromptSubmission']>) => void
   ) {
     const { coordinator, registry, currentRun, plan, stored } = await submittedFixture()
+    // Isolated Coordinator fault injection: normal Store validation already rejects
+    // these corrupt records. This test specifically verifies the phase assertion.
     const corrupted = registry.get('agent-1')
     mutate(corrupted.terminalPromptSubmission!)
+    vi.spyOn(registry, 'refresh').mockResolvedValue(corrupted)
     return await coordinator.submitInputPlan(
       stored as AgentMuxAgentSession,
       currentRun,
       'submission-1',
       'hello',
-      plan
+      plan, agentPromptCondition(stored as AgentMuxAgentSession)
     ).then(() => null, (error: unknown) => error as AgentMuxError)
   }
 
@@ -357,7 +368,7 @@ describe('assertSubmission 的字节游标顺序对账', () => {
     // 「CtxMux 游标不能落在已落盘的阶段收据之前」先响。那是正当行为，不是本条要守的事；把它写成
     // 「必须完全通过」会让这条自检钉住一个假前提，然后为了让它绿而去改判据——方向正好反了。
     const refusal = await refusalAfterCorrupting(() => {})
-    expect(refusal?.code, '未损坏的重进不该报 OPERATION_CONFLICT').not.toBe('AGENT_PROMPT_OPERATION_CONFLICT')
+    expect(refusal, '未损坏的重进应正常复用已确认收据').toBeNull()
   })
 
   it('readyThroughByte 落在就绪 epoch 的游标之前时被拒（确认空到的字节不可能早于 epoch 建立时）', async () => {
@@ -467,7 +478,7 @@ describe('prompt readiness observation', () => {
       currentRun,
       'submission-after-observation',
       'hello',
-      plan
+      plan, agentPromptCondition(registry.get('agent-1') as AgentMuxAgentSession)
     )
     expect(kernel.input, '观察落盘之后，两阶段投递必须真的发出去').toHaveBeenCalledTimes(2)
   })
@@ -477,7 +488,7 @@ describe('prompt readiness observation', () => {
     const { coordinator, currentRun, kernel, registry, screenEvidence } = await coordinatorFixture(stored)
     screenEvidence.wait.mockRejectedValue(new AgentMuxError('History evicted', 'OUTPUT_GAP'))
     const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
-    await coordinator.submitInputPlan(stored, currentRun, 'without-observation', 'hello', plan)
+    await coordinator.submitInputPlan(stored, currentRun, 'without-observation', 'hello', plan, agentPromptCondition(stored))
     expect(kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['hello', '\r'])
     expect(registry.get('agent-1').terminalPromptDelivery).toMatchObject({ state: 'unverified', reason: 'screen-evidence-gap' })
     expect(registry.get('agent-1').terminalPromptSubmission?.readinessEvidence).toBeUndefined()
@@ -547,7 +558,7 @@ describe('prompt readiness observation', () => {
       renderFixture.currentRun,
       'submission-render-budget',
       'hello',
-      plan
+      plan, agentPromptCondition(renderFixture.registry.get('agent-1') as AgentMuxAgentSession)
     )
     const renderCall = renderFixture.screenEvidence.wait.mock.calls.at(-1)
     // 在场自证：没走到渲染确认这条路时，下面的比较会在 undefined 上恒真地过去。
@@ -608,7 +619,7 @@ describe('渲染确认途中几何变了：重建屏幕再看，而不是把这�
       fixture.currentRun,
       'submission-geometry-retry',
       'hello',
-      plan
+      plan, agentPromptCondition(fixture.registry.get('agent-1') as AgentMuxAgentSession)
     )).resolves.toBeUndefined()
 
     expect(waits, '几何变化之后没有重建屏幕再看一眼——这次提交被白白记成未验证').toBe(2)
@@ -630,10 +641,10 @@ it('rejects a stale automatic completion at the durable input claim, while leavi
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: 2 }))
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]'))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan, undefined, undefined, true)
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), undefined, undefined, true)
   expect(fixture.kernel.input.mock.calls.map(([, operation]) => operation.data)).toEqual(['next', '\r'])
 })
 
@@ -641,7 +652,7 @@ it('checks cancellation at the durable claim, after any input queue wait', async
   const stored = session(); const fixture = await coordinatorFixture(stored)
   const cancelled = new AbortController(); cancelled.abort()
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, undefined, cancelled.signal))
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), undefined, cancelled.signal))
     .rejects.toMatchObject({ code: 'AGENT_PROMPT_CANCELLED' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
   expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission).toBeUndefined()
@@ -650,14 +661,14 @@ it('reconciles an admitted automatic operation after its completion changes with
   const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
   const fixture = await coordinatorFixture(stored)
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
   const calls = fixture.kernel.input.mock.calls.length
   expect(calls).toBe(2)
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
   expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
-  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'other-auto', 'next', plan, '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'other-auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]'))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
 })
@@ -676,13 +687,13 @@ it('recovers a lost acknowledgement after submit was accepted and the Agent is w
   const update = fixture.registry.update.bind(fixture.registry)
   const spy = vi.spyOn(fixture.registry, 'update').mockImplementationOnce(update)
     .mockRejectedValueOnce(new Error('receipt persistence interrupted'))
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')).rejects.toThrow('receipt persistence interrupted')
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')).rejects.toThrow('receipt persistence interrupted')
   spy.mockRestore()
   expect(cursor).toBe(5)
   expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(false)
   await update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(cursor), 'auto', 'next', plan, '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(cursor), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
   expect(accepted.size).toBe(2)
   expect(cursor).toBe(5)
   expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(true)
@@ -693,12 +704,12 @@ it('does not continue a partially accepted old transaction into a pending intera
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
   // Persist a real claim, then interrupt before either byte phase is accepted.
   fixture.kernel.input.mockRejectedValueOnce(new Error('connection interrupted'))
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'same-op', 'next', plan)).rejects.toThrow('connection interrupted')
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'same-op', 'next', plan, agentPromptCondition(stored))).rejects.toThrow('connection interrupted')
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     pendingInteraction: { request: { id: 'permission', agentSessionId: 'agent-1', kind: 'permission', title: 'Allow?', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }], evidence: { source: 'native-hook', observedAt: 1, run: { runId: 'run-1' }, hookReceiptId: 'permission' } } } as never,
     updatedAt: Date.now() }))
   fixture.kernel.input.mockClear()
-  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(0), 'same-op', 'next', plan))
+  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(0), 'same-op', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId))))
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
 })
@@ -708,31 +719,31 @@ it.each(['single-phase', 'two-phase'] as const)('consumes done atomically for ma
   const fixture = await coordinatorFixture(stored)
   const plan = kind === 'single-phase' ? { kind: 'single-phase' as const, data: 'next\r' }
     : new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'manual-1', 'next', plan)
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'manual-1', 'next', plan, agentPromptCondition(stored))
   const afterManual = fixture.registry.get(stored.agentSessionId)
   expect(afterManual.semanticStatus?.state).toBe('done')
   expect(afterManual.promptCompletionAdmission).toMatchObject({ completionId: '["run-1",1]', startByte: 0, endByte: 5 })
   const writes = fixture.kernel.input.mock.calls.length
   expect(writes).toBe(kind === 'single-phase' ? 1 : 2)
-  await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, agentPromptCondition(afterManual), '["run-1",1]'))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes)
-  await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan, undefined, undefined, true)
+  await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan, agentPromptCondition(afterManual), undefined, undefined, true)
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 2)
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(10), 'auto-new', 'next', plan, '["run-1",2]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(10), 'auto-new', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",2]')
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 3)
 })
 it('reuses the original single-phase operation and byte range after an unknown outcome', async () => {
   const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
   const fixture = await coordinatorFixture(stored)
   const plan = { kind: 'single-phase' as const, data: 'next\r' }
-  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')
   const first = fixture.kernel.input.mock.calls[0]!
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
   expect(fixture.kernel.input.mock.calls).toEqual([first, first])
   expect(fixture.registry.get(stored.agentSessionId).promptCompletionAdmission).toMatchObject({ startByte: 0, endByte: 5 })
 })

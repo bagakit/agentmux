@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -877,7 +878,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     })
 
     // 恢复成「验证失败即抛错」的旧行为时，这里第一个变红：提交被我们自己的证据链挡住了。
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-gap',
       prompt: 'hello'
@@ -908,7 +909,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     const { client, inputs, events } = await promptClient({
       observeOutput: silentObservation
     })
-    const submitting = client.submitAgentPrompt({
+    const submitting = client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-timeout',
       prompt: 'hello'
@@ -936,7 +937,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
           : promptRun({ type: 'exited', code: 1, signal: null })
       }
     })
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-exited',
       prompt: 'hello'
@@ -953,7 +954,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     const { client, inputs, events, observeCalls } = await promptClient({
       input: 'reject'
     })
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-rejected',
       prompt: 'hello'
@@ -981,7 +982,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     // 告示必须先在 store 往返里活下来——normalizer 把它丢掉的话，这里就红了。
     expect(client.agentSession('prompt-agent').terminalPromptDelivery).toEqual(degraded)
 
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-verified',
       prompt: 'hello'
@@ -1007,7 +1008,7 @@ describe('prompt 受据合并与崩溃恢复', () => {
       observeOutput: () => renderedComposerObservation('hello')
     })
     const baseline = casWrites()
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-coalesced',
       prompt: 'hello'
@@ -1041,7 +1042,7 @@ describe('prompt 受据合并与崩溃恢复', () => {
         return renderedComposerObservation('hello')
       }
     })
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-recover',
       prompt: 'hello'
@@ -1054,7 +1055,7 @@ describe('prompt 受据合并与崩溃恢复', () => {
     expect(midway.terminalPromptSubmission?.payload.acknowledged).toBe(false)
 
     // 同一 operationId 重试：payload 重放拿到幂等回执（字节不重复写），交付走完并一次性落盘受据。
-    await expect(client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-recover',
       prompt: 'hello'

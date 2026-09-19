@@ -440,3 +440,13 @@ it('shows interrupted prompt screen confirmation honestly without claiming a ter
   expect(notice?.notice.step).toContain('Screen confirmation was interrupted')
   expect(notice?.notice.mode).toContain('Prompt input continued without full screen confirmation')
 })
+
+it('keeps an unknown prompt beside a healthy terminal without claiming delivery succeeded', () => {
+  const session = { ...agentSession({ state: 'working', processState: 'running' }), terminalPromptDelivery: {
+    state: 'unverified' as const, mode: 'degraded' as const, reason: 'input-unconfirmed' as const,
+    submissionId: 'original-input', run: { runId: 'r' }, observedAt: 30
+  } } as SessionSnapshot
+  const notice = serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))
+  expect(notice?.kind).toBe('process-degraded')
+  expect(notice?.notice.mode).toBe('Delivery is unknown. The original message is kept; retry continues the same input. The terminal remains available.')
+})

@@ -28,7 +28,8 @@ import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
-import { appendGlobalMessage, recordGlobalMessageDelivery, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
+import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery, recordGlobalMessageDeliveryIssue, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
+import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseSettingsCommand } from './settings-cli.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
@@ -736,12 +737,23 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   try {
-    const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, ...(owner && capability ? { caller: { ...owner, capability } } : {}), message: queued.envelope })
+    const promptCondition = await prepareGlobalMessagePrompt(queued.messageId, async envelope => {
+      if (!envelope.recipientSessionId) throw new AgentMuxError('Message has no exact recipient Session.', 'MESSAGE_RECIPIENT_MISMATCH')
+      // This existing Control projection carries Core facts for every Host. A local
+      // Client must not substitute its Store or Run for a remote recipient's owner.
+      const active = await requestAgentMuxControl({ ...requestBase(), requestId: randomUUID(), operation: 'list.active-agents',
+        agentSessionId: envelope.recipientSessionId })
+      if (active.operation !== 'list.active-agents') throw new AgentMuxError('Agent Session facts are unavailable.', 'CONTROL_PROTOCOL_ERROR')
+      const recipient = active.result.agents.find(agent => agent.agentSessionId === envelope.recipientSessionId)
+      return validateAgentPromptCondition(recipient?.promptCondition)
+    })
+    const receipt = await requestAgentMuxControl({ ...request, operation: 'send', target, text: body, promptCondition,
+      ...(owner && capability ? { caller: { ...owner, capability } } : {}), message: queued.envelope })
     const delivered = await recordGlobalMessageDelivery(queued.messageId, 'delivered')
     printSuccess(receipt.operation, { ...receipt.result, messageId: delivered.messageId, queueId: delivered.queueId, receiptId: delivered.receiptId, envelope: delivered.envelope, delivery: delivered.delivery })
     return 0
   } catch (error) {
-    await recordGlobalMessageDelivery(queued.messageId, 'failed', Date.now(), error instanceof Error ? error.message : String(error)).catch(() => {})
+    await recordGlobalMessageDeliveryIssue(queued.messageId, 'Delivery is unconfirmed: ' + (error instanceof Error ? error.message : String(error))).catch(() => {})
     throw error
   }
 }

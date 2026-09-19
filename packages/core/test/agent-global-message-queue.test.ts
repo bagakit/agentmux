@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile, utimes } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readFile, writeFile, utimes } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -43,6 +43,126 @@ async function queue(options: ConstructorParameters<typeof DurableAgentMuxMessag
 }
 
 describe('Core-owned durable A2A global message queue', () => {
+  it('saves one first prompt condition in the existing journal across competing instances and restart', async () => {
+    const first = await queue()
+    const message = await first.append(input({ messageId: 'prompt-intent' }))
+    expect(message.promptCondition).toBeNull()
+    const capture = vi.fn(async () => ({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'predecessor' }))
+    const other = new DurableAgentMuxMessageQueue(first.path)
+    const later = vi.fn(async () => ({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'later-admission' }))
+    expect(await Promise.all([first.preparePrompt(message.messageId, capture), other.preparePrompt(message.messageId, later)]))
+      .toEqual([{ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'predecessor' },
+        { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'predecessor' }])
+    expect(capture).toHaveBeenCalledOnce()
+    expect(later).toHaveBeenCalledOnce()
+    later.mockClear()
+    await first.recordDeliveryIssue(message.messageId, 'Control ACK lost', 200)
+    const reopened = new DurableAgentMuxMessageQueue(first.path)
+    expect(await reopened.preparePrompt(message.messageId, later)).toEqual({
+      expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'predecessor' })
+    expect(later).not.toHaveBeenCalled()
+    const journal = await reopened.readJournal()
+    expect(journal.map(record => record.kind)).toEqual(['message', 'prompt-condition', 'delivery-issue'])
+    expect((await reopened.listAfter())[0]).toMatchObject({ envelope: message.envelope,
+      promptCondition: { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'predecessor' } })
+  })
+
+  it('does not prepare a historical message with no proof that it preceded the first RPC', async () => {
+    const durable = await queue()
+    const message = await durable.append(input({ messageId: 'historical' }))
+    const records = await durable.readJournal()
+    const first = records[0]
+    expect(first?.kind).toBe('message')
+    if (first?.kind !== 'message') throw new Error('Expected the actual original message record')
+    const { promptCondition: _condition, ...historical } = first
+    await writeFile(durable.path, JSON.stringify(historical) + '\n')
+    const reopened = new DurableAgentMuxMessageQueue(durable.path)
+    const capture = vi.fn(async () => ({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null }))
+    await expect(reopened.preparePrompt(message.messageId, capture)).rejects.toMatchObject({
+      code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
+    expect(capture).not.toHaveBeenCalled()
+    expect(await reopened.readJournal()).toEqual([historical])
+    expect((await reopened.listAfter())[0]?.envelope).toEqual(message.envelope)
+  })
+
+  it('retains an unprepared message when capture fails before any possible RPC', async () => {
+    const durable = await queue()
+    const message = await durable.append(input({ messageId: 'not-dispatched' }))
+    await expect(durable.preparePrompt(message.messageId, async () => { throw new Error('Snapshot unavailable') }))
+      .rejects.toThrow('Snapshot unavailable')
+    expect((await durable.listAfter())[0]?.promptCondition).toBeNull()
+    expect(await durable.readJournal()).toHaveLength(1)
+    expect(await durable.preparePrompt(message.messageId, async () => ({
+      expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null
+    }))).toEqual({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null })
+    expect((await durable.readJournal()).map(record => record.kind)).toEqual(['message', 'prompt-condition'])
+  })
+
+  it('keeps unrelated writes available during observation and preserves the first saved condition', async () => {
+    const durable = await queue(), peer = new DurableAgentMuxMessageQueue(durable.path)
+    const message = await durable.append(input({ messageId: 'slow-target' }))
+    let release!: () => void, observed!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { observed = resolve })
+    const first = durable.preparePrompt(message.messageId, async () => {
+      observed(); await gate
+      return { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'earlier-read' }
+    })
+    await started
+    let accepted = false
+    const other = peer.append(input({ messageId: 'unrelated-message', operationId: 'unrelated-operation' })).then(receipt => {
+      accepted = true; return receipt
+    })
+    try {
+      await vi.waitFor(() => expect(accepted).toBe(true))
+      const winner = { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: 'first-saved' }
+      expect(await peer.preparePrompt(message.messageId, async () => winner)).toEqual(winner)
+      release()
+      expect(await first).toEqual(winner)
+      const records = await durable.readJournal()
+      expect(records.filter(record => record.kind === 'prompt-condition')).toEqual([
+        expect.objectContaining({ messageId: message.messageId, condition: winner })])
+      expect((await durable.listAfter()).map(record => record.envelope.messageId)).toEqual(['slow-target', 'unrelated-message'])
+    } finally { release(); await Promise.allSettled([first, other]) }
+  })
+
+  it('preserves original intent and the last proven state across unknown Control outcomes', async () => {
+    const durable = await queue()
+    const message = await durable.append(input({ messageId: 'control-uncertain' }))
+    const condition = await durable.preparePrompt(message.messageId, async () => ({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null }))
+    await durable.recordDeliveryIssue(message.messageId, 'Control ACK missing', 100)
+    await durable.recordDeliveryIssue(message.messageId, 'Retry result unknown\nControl reply closed', 200)
+    const reopened = new DurableAgentMuxMessageQueue(durable.path)
+    expect(await reopened.listAfter()).toEqual([{ sequence: message.sequence, envelope: message.envelope,
+      promptCondition: condition, delivery: { state: 'queued', at: message.envelope.createdAt, reason: 'Retry result unknown\nControl reply closed' } }])
+    expect((await reopened.readJournal()).filter(record => record.kind === 'delivery-issue')).toEqual([
+      { kind: 'delivery-issue', sequence: 3, messageId: message.messageId, at: 100, reason: 'Control ACK missing' },
+      { kind: 'delivery-issue', sequence: 4, messageId: message.messageId, at: 200, reason: 'Retry result unknown\nControl reply closed' }
+    ])
+    const queuedBytes = await readFile(durable.path, 'utf8')
+    await expect(reopened.recordDeliveryIssue(message.messageId, 'Invalid diagnostic time', Number.NaN)).rejects.toMatchObject({
+      code: 'MESSAGE_ENVELOPE_INVALID' })
+    expect(await readFile(durable.path, 'utf8')).toBe(queuedBytes)
+    const delivered = await reopened.recordDelivery(message.messageId, 'delivered', 300)
+    expect(delivered.delivery).toEqual({ state: 'delivered', at: 300 })
+    const before = await readFile(durable.path, 'utf8')
+    expect(await durable.recordDeliveryIssue(message.messageId, 'Late failed Control response', 400)).toEqual(delivered)
+    expect(await durable.recordDelivery(message.messageId, 'delivered', 500)).toEqual(delivered)
+    expect(await readFile(durable.path, 'utf8')).toBe(before)
+    expect((await durable.listAfter())[0]?.promptCondition).toEqual(condition)
+  })
+
+  it('refuses an invalid delivery transition before changing the durable journal', async () => {
+    const durable = await queue()
+    const message = await durable.append(input({ messageId: 'terminal-delivery' }))
+    await durable.recordDelivery(message.messageId, 'failed', 100, 'A proven terminal failure')
+    const before = await readFile(durable.path, 'utf8')
+    await expect(durable.recordDelivery(message.messageId, 'delivered', 200)).rejects.toMatchObject({
+      code: 'AGENT_DELIVERY_STATE_INVALID' })
+    expect(await readFile(durable.path, 'utf8')).toBe(before)
+    expect(await new DurableAgentMuxMessageQueue(durable.path).listAfter()).toEqual(await durable.listAfter())
+  })
+
   it('uses a durable Core state location separate from the ctxmux artifact endpoint by default', () => {
     expect(defaultAgentMuxMessageQueuePath()).not.toContain(defaultAgentMuxRuntimeDirectory())
     expect(defaultAgentMuxMessageQueuePath()).toMatch(/global-messages\.ndjson$/u)

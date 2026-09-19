@@ -39,7 +39,7 @@ const labels = ['healthy', 'recent', 'expired', 'unknown', 'working', 'missing',
 const firstSliceOnly = process.argv.includes('--first-slice')
 const deadline = Date.now() + 300_000
 const sourceFiles = ['packages/core/src/client.ts', 'packages/core/src/agent-session-id.ts', 'packages/core/src/agent-session-identity.ts', 'packages/core/src/agent-semantic-state.ts',
-  'packages/core/src/agent-session-store.ts', 'packages/core/src/types.ts', 'packages/core/src/prompt-submission.ts',
+  'packages/core/src/agent-session-store.ts', 'packages/core/src/types.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/agent-prompt-condition.ts',
   'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/idle-agent-restore-policy.ts',
   'apps/desktop/src/renderer/src/components/SessionPane.tsx']
@@ -463,12 +463,15 @@ try {
   }
   await selectTab(first.cdp, 'expired'); await assertNoExtraAgents(startupCounts)
   for (const label of labels.filter(label => !['recent', 'missing'].includes(label))) assert.equal((await nativeRun(fixture[label].run)).applied_input_bytes, initialRuns[label].applied_input_bytes)
-  const healthyControl = await first.cdp.evaluate(`(async()=>{const s=await window.agentmux.sessions.snapshot();const a=s.sessions.find(v=>v.id===${JSON.stringify(fixture.healthy.agentSessionId)});if(!a)throw Error('Missing healthy Session');return a.control})()`)
+  const healthySession = await first.cdp.evaluate(`(async()=>{const s=await window.agentmux.sessions.snapshot();const a=s.sessions.find(v=>v.id===${JSON.stringify(fixture.healthy.agentSessionId)});if(!a)throw Error('Missing healthy Session');return await window.agentmux.sessions.refresh(a.control)})()`)
+  const healthyControl = healthySession.control
+  const healthyCondition = core.validateAgentPromptCondition({ expectedRun: healthyControl.run,
+    afterSubmissionId: healthySession.promptSubmissionPredecessor })
   const healthyOperation = randomUUID()
-  await first.cdp.evaluate(`window.agentmux.sessions.submitPrompt(${JSON.stringify(healthyControl)},'Healthy input despite isolated history failures',${JSON.stringify(healthyOperation)})`)
+  await first.cdp.evaluate(`window.agentmux.sessions.submitPrompt(${JSON.stringify(healthyControl)},'Healthy input despite isolated history failures',${JSON.stringify(healthyOperation)},${JSON.stringify(healthyCondition)})`)
   const healthyAfter = await nativeRun(fixture.healthy.run); assert.ok(healthyAfter.applied_input_bytes > healthy.applied_input_bytes); assert.equal(healthyAfter.pid, healthy.pid)
   receipts.push({ phase, counts: startupCounts, healthyPid: healthy.pid, ended, repeatedDoneEpochPreserved: true,
-    history: { source: firstNative.source, initialIds: firstNative.ids, olderIds: older.ids, wheels }, healthyInputBytes: [healthy.applied_input_bytes, healthyAfter.applied_input_bytes] })
+    healthyCondition, history: { source: firstNative.source, initialIds: firstNative.ids, olderIds: older.ids, wheels }, healthyInputBytes: [healthy.applied_input_bytes, healthyAfter.applied_input_bytes] })
 
   if (firstSliceOnly) {
     // Fast environment/UI falsification before precise crash checkpoints. This result is explicitly
@@ -543,6 +546,8 @@ try {
   const atAckState = await surface(second.cdp, ackPause.frameId)
   const atAckEntry = atAckState.queues[fixture.expired.agentSessionId]?.find(item => item.operationId === bindingLocals.operationId)
   assert.ok(atAckEntry); assert.equal(atAckEntry.runId, bindingLocals.runId)
+  const originalCondition = core.validateAgentPromptCondition(atAckEntry.promptCondition)
+  assert.equal(originalCondition.expectedRun.runId, bindingLocals.runId)
   const ackSession = await currentStored('expired'), claim = ackSession.terminalPromptSubmission
   assert.ok(claim); assert.equal(claim.submissionId, bindingLocals.operationId); assert.equal(claim.run.runId, bindingLocals.runId)
   assert.equal(claim.payload.acknowledged, true); assert.equal(claim.submit.acknowledged, true)
@@ -572,7 +577,7 @@ try {
   assert.equal(messages.length, 1); assert.equal(messages[0].content, prompt)
   assert.equal((await nativeRun(ackSession.run)).applied_input_bytes, acknowledged.applied_input_bytes)
   // Public Main-to-Core exact Run retry; do not reconstruct a queue already resolved by history.
-  await third.cdp.evaluate(`window.agentmux.sessions.submitPrompt(${JSON.stringify(exactSession.control)},${JSON.stringify(prompt)},${JSON.stringify(bindingLocals.operationId)})`)
+  await third.cdp.evaluate(`window.agentmux.sessions.submitPrompt(${JSON.stringify(exactSession.control)},${JSON.stringify(prompt)},${JSON.stringify(bindingLocals.operationId)},${JSON.stringify(originalCondition)})`)
   assert.equal((await nativeRun(ackSession.run)).applied_input_bytes, acknowledged.applied_input_bytes)
   await assertNoExtraAgents({ ...startupCounts, expired: 2 })
   receipts.push({ phase, exactRunId: bindingLocals.runId, exactOperationId: bindingLocals.operationId,

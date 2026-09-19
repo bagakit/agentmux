@@ -3,6 +3,7 @@ import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
+import { validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
 import type { AgentMuxMessageTarget } from './control.js'
@@ -48,6 +49,8 @@ export type DurableAgentMuxMessage = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
+  /** null proves this new journal intent has not yet crossed a prompt RPC. Absence is unknown. */
+  readonly promptCondition?: AgentPromptCondition | null
 }
 
 export type AgentMuxDeliveryReader = {
@@ -77,6 +80,7 @@ export type AgentMuxMessageReceipt = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
+  readonly promptCondition?: AgentPromptCondition | null
 }
 
 export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' | 'messageId'> & {
@@ -100,7 +104,9 @@ export type AgentMuxMessageQueueOptions = {
 const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null }
+  | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
+  | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
   | { readonly kind: 'consumer-check'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
   | { readonly kind: 'consumer-ack'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
@@ -314,9 +320,28 @@ export class DurableAgentMuxMessageQueue {
     this.nextSequence = Math.max(this.nextSequence, record.sequence + 1)
     if (record.kind === 'message') {
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
-      const message = { sequence: record.sequence, envelope, delivery: Object.freeze({ state: 'queued' as const, at: envelope.createdAt }) }
+      const message = { sequence: record.sequence, envelope, delivery: Object.freeze({ state: 'queued' as const, at: envelope.createdAt }),
+        ...(record.promptCondition === null ? { promptCondition: null } : {}) }
       this.messages.set(envelope.messageId, message)
       this.operations.set(envelope.operationId, envelope.messageId)
+      return
+    }
+    if (record.kind === 'prompt-condition') {
+      const current = this.messages.get(record.messageId)
+      if (!current || current.promptCondition !== null) throw new AgentMuxError(
+        'Message prompt condition is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      const condition = validateAgentPromptCondition(record.condition)
+      if (current.envelope.recipientRunId !== null && current.envelope.recipientRunId !== condition.expectedRun.runId) {
+        throw new AgentMuxError('Message prompt targets another Run.', 'MESSAGE_RECIPIENT_MISMATCH')
+      }
+      this.messages.set(record.messageId, { ...current, promptCondition: condition })
+      return
+    }
+    if (record.kind === 'delivery-issue') {
+      const current = this.messages.get(record.messageId)
+      if (!current || current.delivery.state !== 'queued') throw new AgentMuxError(
+        'Message delivery issue contradicts its confirmed receipt.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      this.messages.set(record.messageId, { ...current, delivery: { ...current.delivery, reason: record.reason } })
       return
     }
     if (record.kind === 'delivery') {
@@ -397,7 +422,7 @@ export class DurableAgentMuxMessageQueue {
       }
       const maxMessages = this.options.maxMessages ?? DEFAULT_MAX_MESSAGES
       const maxBytes = this.options.maxBytes ?? DEFAULT_MAX_BYTES
-      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope }
+      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null }
       const encodedBytes = Buffer.byteLength(`${JSON.stringify(record)}\n`)
       if (this.messages.size >= maxMessages || this.bytes + encodedBytes > maxBytes) throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
       await this.appendRecord(record)
@@ -410,9 +435,51 @@ export class DurableAgentMuxMessageQueue {
       await this.ensureLoaded()
       const current = this.messages.get(nonEmpty(messageId, 'Message id'))
       if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
+      if (current.delivery.state === state) return this.receipt(current)
+      advanceDelivery(current.delivery, state, at)
       const record: JournalDelivery = { kind: 'delivery', sequence: this.nextSequence, messageId, state, at, ...(reason === undefined ? {} : { reason }) }
       await this.appendRecord(record)
       return this.receipt(this.messages.get(messageId)!)
+    })
+  }
+
+  /** An unavailable Control receipt does not establish terminal failure or erase a known delivery. */
+  async recordDeliveryIssue(messageId: string, reason: string, at = Date.now()): Promise<AgentMuxMessageReceipt> {
+    return this.withLock(async () => {
+      const current = this.messages.get(nonEmpty(messageId, 'Message id'))
+      if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
+      if (current.delivery.state !== 'queued') return this.receipt(current)
+      await this.appendRecord({ kind: 'delivery-issue', sequence: this.nextSequence, messageId,
+        at: finiteTimestamp(at, 'Delivery issue time'), reason })
+      return this.receipt(this.messages.get(messageId)!)
+    })
+  }
+
+  /** The existing journal owns the first condition even if a Control response is lost. */
+  async preparePrompt(messageId: string, capture: (envelope: AgentMuxMessageEnvelope) => Promise<AgentPromptCondition>): Promise<AgentPromptCondition> {
+    const original = await this.withLock(async () => {
+      const current = this.messages.get(nonEmpty(messageId, 'Message id'))
+      if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
+      if (current.promptCondition === undefined) throw new AgentMuxError(
+        'This message has no original prompt delivery condition. Its delivery is unknown; it will not be prepared as a new message.',
+        'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+      const condition = current.promptCondition
+      return { envelope: structuredClone(current.envelope), condition: condition === null ? null : structuredClone(condition) }
+    })
+    if (original.condition !== null) return original.condition
+    // Observation is not a journal mutation. A slow target must not hold the global
+    // writer while unrelated messages append; the second scope keeps the first binding.
+    const candidate = validateAgentPromptCondition(await capture(original.envelope))
+    return this.withLock(async () => {
+      const current = this.messages.get(messageId)
+      if (!current || current.promptCondition === undefined) throw new AgentMuxError(
+        'The original message condition can no longer be confirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+      if (current.promptCondition !== null) return structuredClone(current.promptCondition)
+      if (current.envelope.recipientRunId !== null && current.envelope.recipientRunId !== candidate.expectedRun.runId) {
+        throw new AgentMuxError('Message recipient Run changed before preparation.', 'MESSAGE_RECIPIENT_MISMATCH')
+      }
+      await this.appendRecord({ kind: 'prompt-condition', sequence: this.nextSequence, messageId, condition: candidate })
+      return structuredClone(candidate)
     })
   }
 
@@ -480,7 +547,8 @@ export class DurableAgentMuxMessageQueue {
       messageId: message.envelope.messageId,
       sequence: message.sequence,
       envelope: structuredClone(message.envelope),
-      delivery: { ...message.delivery }
+      delivery: { ...message.delivery },
+      ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) })
     }
   }
 }
@@ -491,4 +559,16 @@ export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, pat
 
 export async function recordGlobalMessageDelivery(messageId: string, state: Exclude<AgentDeliveryState, 'queued'>, at = Date.now(), reason?: string, path = defaultAgentMuxMessageQueuePath()): Promise<AgentMuxMessageReceipt> {
   return await new DurableAgentMuxMessageQueue(path).recordDelivery(messageId, state, at, reason)
+}
+
+export async function prepareGlobalMessagePrompt(messageId: string,
+  capture: (envelope: AgentMuxMessageEnvelope) => Promise<AgentPromptCondition>, path = defaultAgentMuxMessageQueuePath()
+): Promise<AgentPromptCondition> {
+  return await new DurableAgentMuxMessageQueue(path).preparePrompt(messageId, capture)
+}
+
+export async function recordGlobalMessageDeliveryIssue(messageId: string, reason: string, at = Date.now(),
+  path = defaultAgentMuxMessageQueuePath()
+): Promise<AgentMuxMessageReceipt> {
+  return await new DurableAgentMuxMessageQueue(path).recordDeliveryIssue(messageId, reason, at)
 }

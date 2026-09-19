@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
   AgentMuxControlServer,
+  agentPromptCondition,
   AgentMuxFileAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
@@ -415,8 +416,10 @@ assert.equal(initialInteraction?.kind, 'permission')
 assert.equal(codexFirstEvents.some((event) => (
   event.type === 'interaction' && event.request.id === initialInteraction.id
 )), true)
+const packedPromptCondition0 = agentPromptCondition(codexFirst.agentSession(codex.agentSessionId))
 await assert.rejects(
   codexFirst.submitAgentPrompt({
+    ...packedPromptCondition0,
     agentSessionId: codex.agentSessionId,
     operationId: 'packed-prompt-while-interaction-pending',
     prompt: 'must-not-bypass-permission'
@@ -606,7 +609,8 @@ const controlServer = new AgentMuxControlServer({
             ]
           })
         }
-        await controlClient.submitAgentPrompt({ agentSessionId: targetId, operationId: request.requestId, prompt: request.text })
+        await controlClient.submitAgentPrompt({
+    ...request.promptCondition, agentSessionId: targetId, operationId: request.requestId, prompt: request.text })
         return { operation: request.operation, agentSessionId: targetId }
       }
       if (request.operation === 'interrupt') {
@@ -797,8 +801,10 @@ try {
   }, null, 2)}`)
 }
 const oversizedPrompt = 'x'.repeat(64 * 1024 + 1)
+const packedPromptCondition1 = agentPromptCondition(codexSecond.agentSession(codex.agentSessionId))
 await assert.rejects(
   codexSecond.submitAgentPrompt({
+    ...packedPromptCondition1,
     agentSessionId: codex.agentSessionId,
     operationId: 'packed-codex-oversized-prompt',
     prompt: oversizedPrompt
@@ -809,7 +815,9 @@ await waitFor('ready prompt epoch after long input', () => {
   const readiness = codexSecond.agentSession(codex.agentSessionId).terminalPromptReadiness
   return readiness?.readyThroughByte === undefined ? null : readiness
 })
+const packedPromptCondition2 = agentPromptCondition(codexSecond.agentSession(codex.agentSessionId))
 await codexSecond.submitAgentPrompt({
+    ...packedPromptCondition2,
   agentSessionId: codex.agentSessionId,
   operationId: 'packed-codex-exit',
   prompt: 'exit'
@@ -817,8 +825,10 @@ await codexSecond.submitAgentPrompt({
 await waitFor('Codex Run exit', async () => (
   (await codexSecond.statusAgent(codex.agentSessionId)).run.state === 'exited'
 ))
+const packedPromptCondition3 = agentPromptCondition(codexSecond.agentSession(codex.agentSessionId))
 await assert.rejects(
   codexSecond.submitAgentPrompt({
+    ...packedPromptCondition3,
     agentSessionId: codex.agentSessionId,
     operationId: 'packed-codex-after-exit',
     prompt: 'must-not-reach-exited-run'
@@ -892,7 +902,9 @@ assert.deepEqual(
   continuityTimelineAfter.items.filter((item) => item.kind === 'user_message').map((item) => item.content),
   continuityTimelineBefore.items.filter((item) => item.kind === 'user_message').map((item) => item.content)
 )
+const packedPromptCondition4 = agentPromptCondition(continuityClient.agentSession(codex.agentSessionId))
 await continuityClient.submitAgentPrompt({
+    ...packedPromptCondition4,
   agentSessionId: codex.agentSessionId,
   operationId: 'packed-continuity-exit',
   prompt: 'exit'
@@ -909,6 +921,7 @@ let failedResumeRetiredRuns = []
 const resumeRollbackStore = {
   load: async () => await resumeRollbackDelegate.load(),
   loadRetiredRuns: async () => await resumeRollbackDelegate.loadRetiredRuns(),
+  withPromptSubmission: (id, operation) => resumeRollbackDelegate.withPromptSubmission(id, operation),
   loadRetiredAgentSessions: async () => await resumeRollbackDelegate.loadRetiredAgentSessions(),
   compareAndSwap: async (...args) => await resumeRollbackDelegate.compareAndSwap(...args),
   reserveLifecycle: async (reservation) => await resumeRollbackDelegate.reserveLifecycle(reservation),
@@ -1034,7 +1047,9 @@ await assert.rejects(
   cli(['inspect', '--run', codex.run.runId]),
   (error) => error?.stderr?.includes('STALE_AGENT_SESSION_BINDING')
 )
+const packedPromptCondition5 = agentPromptCondition(codexThird.agentSession(resumed.agentSessionId))
 await codexThird.submitAgentPrompt({
+    ...packedPromptCondition5,
   agentSessionId: resumed.agentSessionId,
   operationId: 'packed-codex-resumed-exit',
   prompt: 'exit'
@@ -1110,8 +1125,10 @@ assert.equal(pendingInitialReadiness?.readyThroughByte, undefined)
 await waitFor('fake Codex waiting before initial composer', () => (
   output(noStopEvents, noStop.run.runId).includes('codex-controlled-ready-pending')
 ))
+const packedPromptCondition6 = agentPromptCondition(noStopClient.agentSession(noStop.agentSessionId))
 await assert.rejects(
   noStopClient.submitAgentPrompt({
+    ...packedPromptCondition6,
     agentSessionId: noStop.agentSessionId,
     operationId: 'packed-no-stop-too-early',
     prompt: 'must-not-reach-pty-before-composer'
@@ -1146,7 +1163,9 @@ const readyInitialReadiness = await waitFor('post-handshake empty initial compos
 })
 assert.equal(readyInitialReadiness.source, 'initial-composer')
 assert.ok(readyInitialReadiness.readyThroughByte > readyInitialReadiness.outputCursorBytes)
+const packedPromptCondition7 = agentPromptCondition(noStopReconnected.agentSession(noStop.agentSessionId))
 await noStopReconnected.submitAgentPrompt({
+    ...packedPromptCondition7,
   agentSessionId: noStop.agentSessionId,
   operationId: 'packed-no-stop-turn-zero',
   prompt: 'turn-zero'
@@ -1154,8 +1173,10 @@ await noStopReconnected.submitAgentPrompt({
 await waitFor('Turn 0 prompt submitted without native Stop', () => (
   output(noStopReconnectedEvents, noStop.run.runId).includes('codex-submit:turn-zero:accepted')
 ))
+const packedPromptCondition8 = agentPromptCondition(noStopReconnected.agentSession(noStop.agentSessionId))
 await assert.rejects(
   noStopReconnected.submitAgentPrompt({
+    ...packedPromptCondition8,
     agentSessionId: noStop.agentSessionId,
     operationId: 'packed-no-stop-second-prompt',
     prompt: 'must-not-reuse-initial-readiness'
@@ -1238,8 +1259,10 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
+const packedPromptCondition9 = agentPromptCondition(initialAssistantClient.agentSession(initialAssistant.agentSessionId))
 await assert.rejects(
   initialAssistantClient.submitAgentPrompt({
+    ...packedPromptCondition9,
     agentSessionId: initialAssistant.agentSessionId,
     operationId: 'packed-initial-assistant-too-early',
     prompt: 'must-not-reach-pty'
@@ -1276,8 +1299,10 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
+const packedPromptCondition10 = agentPromptCondition(preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId))
 await assert.rejects(
   preHandshakeComposerClient.submitAgentPrompt({
+    ...packedPromptCondition10,
     agentSessionId: preHandshakeComposer.agentSessionId,
     operationId: 'packed-pre-handshake-composer-too-early',
     prompt: 'must-require-post-handshake-frame'
@@ -1321,8 +1346,10 @@ await promptedNoStopClient.writeAgent({ agentSessionId: promptedNoStop.agentSess
 await waitFor('prompted Run empty composer', () => (
   output(promptedNoStopEvents, promptedNoStop.run.runId).includes('codex-composer-ready-frame')
 ))
+const packedPromptCondition11 = agentPromptCondition(promptedNoStopClient.agentSession(promptedNoStop.agentSessionId))
 await assert.rejects(
   promptedNoStopClient.submitAgentPrompt({
+    ...packedPromptCondition11,
     agentSessionId: promptedNoStop.agentSessionId,
     operationId: 'packed-prompted-no-stop-submit',
     prompt: 'must-wait-for-native-stop'
@@ -1361,8 +1388,10 @@ await argsPromptClient.writeAgent({ agentSessionId: argsPrompt.agentSessionId, e
 await waitFor('args-prompt Run empty composer', () => (
   output(argsPromptEvents, argsPrompt.run.runId).includes('codex-composer-ready-frame')
 ))
+const packedPromptCondition12 = agentPromptCondition(argsPromptClient.agentSession(argsPrompt.agentSessionId))
 await assert.rejects(
   argsPromptClient.submitAgentPrompt({
+    ...packedPromptCondition12,
     agentSessionId: argsPrompt.agentSessionId,
     operationId: 'packed-args-prompt-no-stop-submit',
     prompt: 'must-wait-for-native-stop'
@@ -1396,7 +1425,9 @@ const firstNativeReadiness = await waitFor('first native Stop readiness', () => 
     : null
 })
 const staleHookContender = await connectLocalAgentMux()
+const packedPromptCondition13 = agentPromptCondition(staleHookContender.agentSession(staleHookSession.agentSessionId))
 await staleHookContender.submitAgentPrompt({
+    ...packedPromptCondition13,
   agentSessionId: staleHookSession.agentSessionId,
   operationId: 'packed-stale-hook-owner-submit',
   prompt: 'cross-client-hook'
@@ -1422,7 +1453,9 @@ assert.equal(
     .terminalPromptSubmission?.submit.acknowledged,
   true
 )
+const packedPromptCondition14 = agentPromptCondition(staleHookContender.agentSession(staleHookSession.agentSessionId))
 await staleHookContender.submitAgentPrompt({
+    ...packedPromptCondition14,
   agentSessionId: staleHookSession.agentSessionId,
   operationId: 'packed-stale-hook-contender-second-submit',
   prompt: 'cross-client-hook-second'
@@ -1473,8 +1506,10 @@ const pendingAfterCursor = await waitFor('native Stop boundary before composer f
 ))
 assert.equal(pendingAfterCursor.source, 'native-stop')
 assert.equal(pendingAfterCursor.readyThroughByte, undefined)
+const packedPromptCondition15 = agentPromptCondition(afterCursorClient.agentSession(afterCursor.agentSessionId))
 await assert.rejects(
   afterCursorClient.submitAgentPrompt({
+    ...packedPromptCondition15,
     agentSessionId: afterCursor.agentSessionId,
     operationId: 'packed-after-too-early',
     prompt: 'too-early'
@@ -1492,13 +1527,17 @@ const readyAfterCursor = await waitFor('composer frame after captured Stop curso
 })
 assert.ok(readyAfterCursor.readyThroughByte > readyAfterCursor.outputCursorBytes)
 const afterCursorContender = await connectLocalAgentMux()
+const packedPromptCondition17 = agentPromptCondition(afterCursorContender.agentSession(afterCursor.agentSessionId))
+const packedPromptCondition16 = agentPromptCondition(afterCursorClient.agentSession(afterCursor.agentSessionId))
 const nativeStopConcurrentResults = await Promise.allSettled([
   afterCursorClient.submitAgentPrompt({
+    ...packedPromptCondition16,
     agentSessionId: afterCursor.agentSessionId,
     operationId: 'packed-after-exit-owner',
     prompt: 'exit'
   }),
   afterCursorContender.submitAgentPrompt({
+    ...packedPromptCondition17,
     agentSessionId: afterCursor.agentSessionId,
     operationId: 'packed-after-exit-contender',
     prompt: 'exit'
@@ -1549,8 +1588,10 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
+const packedPromptCondition18 = agentPromptCondition(assistantMarkerClient.agentSession(assistantMarker.agentSessionId))
 await assert.rejects(
   assistantMarkerClient.submitAgentPrompt({
+    ...packedPromptCondition18,
     agentSessionId: assistantMarker.agentSessionId,
     operationId: 'packed-assistant-marker-too-early',
     prompt: 'must-not-reach-pty'
@@ -1593,13 +1634,17 @@ assert.equal(
   'initial-composer'
 )
 const concurrentContender = await connectLocalAgentMux()
+const packedPromptCondition20 = agentPromptCondition(concurrentContender.agentSession(concurrent.agentSessionId))
+const packedPromptCondition19 = agentPromptCondition(concurrentOwner.agentSession(concurrent.agentSessionId))
 const concurrentResults = await Promise.allSettled([
   concurrentOwner.submitAgentPrompt({
+    ...packedPromptCondition19,
     agentSessionId: concurrent.agentSessionId,
     operationId: 'packed-concurrent-owner',
     prompt: 'owner-wins-or-loses'
   }),
   concurrentContender.submitAgentPrompt({
+    ...packedPromptCondition20,
     agentSessionId: concurrent.agentSessionId,
     operationId: 'packed-concurrent-contender',
     prompt: 'contender-wins-or-loses'
@@ -1659,6 +1704,7 @@ const replacementReadiness = await waitFor('native Stop replaces crash submissio
 })
 assert.equal(replacementReadiness.readyThroughByte, undefined)
 await promptRecovered.submitAgentPrompt({
+    ...promptCrashCheckpoint.promptCondition,
   agentSessionId: promptCrashCheckpoint.agentSessionId,
   operationId: promptCrashCheckpoint.operationId,
   prompt: 'crash-between-phases'
@@ -1741,6 +1787,7 @@ assert.equal(
   promptSubmitBeforeAckCrashCheckpoint.submitRange.endByte
 )
 await promptSubmitBeforeAckRecovered.submitAgentPrompt({
+    ...promptSubmitBeforeAckCrashCheckpoint.promptCondition,
   agentSessionId: promptSubmitBeforeAckCrashCheckpoint.agentSessionId,
   operationId: promptSubmitBeforeAckCrashCheckpoint.operationId,
   prompt: 'crash-between-phases'

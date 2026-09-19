@@ -39,7 +39,7 @@ function agent(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
     kind: 'agent', providerId: 'codex', executorId: 'codex',
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     hostId: 'local', workspacePath: '/repo', label: id,
-    createdAt: 1, updatedAt: 1, processState: 'running',
+    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, promptSubmissionPredecessor: null, processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
@@ -102,6 +102,11 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
   const { recipient } = seedStore('mailbox-recipient')
   const { capability } = await seedCoreSessionStore(sessionStorePath)
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
+    if (!session) throw new Error('Private Session is missing')
+    return session
+  })
 
   // Exercise the same Core capability and Session/Run binding used by main IPC before handing the
   // request to the renderer Control executor. The CLI child reads this durable store through the
@@ -168,6 +173,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
     await expect(requestAgentMuxControl({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'forged-source-label', operation: 'send',
       target: { kind: 'agent-session', agentSessionId: recipient.id }, text: cliMessage.body,
+      promptCondition: { expectedRun: recipient.control.run, afterSubmissionId: null },
       caller: { agentSessionId: 'caller-cli', capability },
       message: { ...cliMessage, messageId: 'forged-source-label-message', sender: { kind: 'agent-session', agentSessionId: 'different-agent' } }
     }, sock)).rejects.toMatchObject({ code: 'MESSAGE_SENDER_MISMATCH' })
@@ -179,6 +185,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
       operation: 'send',
       target: { kind: 'agent-session', agentSessionId: recipient.id },
       text: cliMessage.body,
+      promptCondition: { expectedRun: recipient.control.run, afterSubmissionId: null },
       caller: { agentSessionId: 'caller-cli', capability },
       message: { ...cliMessage, messageId: 'test-run-mismatch', recipientRunId: badRunId }
     })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
@@ -210,7 +217,7 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
   const terminalId = 'terminal-session-only'
   const terminal: Extract<SessionSnapshot, { kind: 'terminal' }> = {
     id: terminalId, kind: 'terminal', providerId: null, hostId: 'local', workspacePath: '/repo',
-    label: 'Terminal', createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+    label: 'Terminal', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, promptSubmissionPredecessor: null, processState: 'running', latestOutputBytes: 0,
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     control: { kind: 'terminal', hostId: 'local', runId: 'terminal-run', run: { runId: 'terminal-run' } }
   }

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
+  agentPromptPredecessor,
+  validateAgentPromptCondition,
+  type AgentPromptCondition,
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
@@ -242,6 +245,7 @@ function projectSession(
       ...(subject.agentSession.terminalPromptDelivery
         ? { terminalPromptDelivery: structuredClone(subject.agentSession.terminalPromptDelivery) }
         : {}),
+      promptSubmissionPredecessor: agentPromptPredecessor(subject.agentSession),
       ...(subject.agentSession.terminalOutputChannel
         ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
         : {}),
@@ -973,18 +977,18 @@ export class RuntimeController {
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,
-    // The correlation key for this ONE attempt. A retry of the same prompt passes the SAME id so Core
-    // recognizes the idempotent replay (prompt-submission.ts:186) instead of gating it BUSY; a new prompt
-    // passes a fresh id. The `?? randomUUID()` is a per-call fallback for callers that do not correlate
-    // (only test callers) — it is never a STABLE default, so a caller that omits it can never make two
-    // distinct attempts collide on one id.
-    operationId?: string,
+    operationId: string,
+    condition: AgentPromptCondition,
     automation?: { completionId: string; isCurrent(): boolean; signal: AbortSignal },
     authorAgentSessionId?: string,
     choice?: { allowUncertainTurn: true }
   ): Promise<void> {
+    const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
+      if (control.run.runId !== capturedCondition.expectedRun.runId) {
+        throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
+      }
       const status = await client.statusAgent(control.agentSessionId)
       if (status.run.runId !== control.run.runId) {
         throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
@@ -998,8 +1002,8 @@ export class RuntimeController {
         }
         await client.submitAgentPrompt({
           agentSessionId: control.agentSessionId,
-          expectedRun: control.run,
-          operationId: operationId ?? randomUUID(),
+          ...capturedCondition,
+          operationId,
           ...(automation ? { expectedCompletionId: automation.completionId, signal: automation.signal } : {}),
           prompt,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
@@ -1112,8 +1116,10 @@ export class RuntimeController {
   }
 
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
+    const client = await this.connectedClient(control.hostId)
+    if (control.kind === 'agent') await client.refreshAgentSession(control.agentSessionId, control.run)
     return await this.sessionByTarget(
-      await this.connectedClient(control.hostId),
+      client,
       control.kind === 'agent'
         ? { kind: 'agent-session', agentSessionId: control.agentSessionId }
         : { kind: 'terminal-run', runId: control.runId },

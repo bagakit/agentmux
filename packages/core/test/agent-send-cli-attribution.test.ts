@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createConnection, createServer, type Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
@@ -35,6 +36,15 @@ it('real CLI send retains managed authors for every target without inventing an 
   const requests: AgentMuxControlRequest[] = []
   const delivered: string[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'list.active-agents') {
+      const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
+      return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
+        agentSessionId: session.agentSessionId, promptCondition: { expectedRun: session.run,
+          afterSubmissionId: session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId! },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt
+      })) }
+    }
     requests.push(request)
     if (request.operation === 'inspect.region') return { operation: 'inspect.region', region: {
       kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } }
@@ -98,6 +108,15 @@ it('real CLI retries the same messageId across new processes with the original d
   const sessionStorePath = join(runtime, 'sessions.json')
   await seedSessions(sessionStorePath, ['recipient'])
   const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'list.active-agents') {
+      const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
+      return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
+        agentSessionId: session.agentSessionId, promptCondition: { expectedRun: session.run,
+          afterSubmissionId: session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId! },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt
+      })) }
+    }
     if (request.operation === 'send') return { operation: 'send', agentSessionId: 'recipient' }
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
@@ -111,6 +130,86 @@ it('real CLI retries the same messageId across new processes with the original d
     expect(secondPayload.result).toMatchObject({ receiptId: firstPayload.result.receiptId, messageId: 'stable-id' })
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
+    await server.stop()
+    await rm(runtime, { recursive: true, force: true })
+  }
+})
+
+it.each([false, true])('cold CLI retry after a lost Control ACK retains the first condition (later admission: %s)', async laterAdmission => {
+  const runtime = await mkdtemp('/tmp/amux-mail-ack-')
+  const sessionStorePath = join(runtime, 'sessions.json'), queuePath = join(runtime, 'messages.ndjson')
+  const upstream = join(runtime, 'host.sock'), endpoint = join(runtime, 'control.sock')
+  await seedSessions(sessionStorePath, ['recipient'])
+  const store = new AgentMuxFileAgentSessionStore(sessionStorePath)
+  const sends: Extract<AgentMuxControlRequest, { operation: 'send' }>[] = []
+  let reads = 0
+  const server = new AgentMuxControlServer({ execute: async request => {
+    if (request.operation === 'list.active-agents') {
+      reads += 1
+      expect(request.agentSessionId).toBe('recipient')
+      const session = (await store.load())[0] as AgentMuxStoredAgentSession
+      return { operation: request.operation, agents: [{ agentSessionId: session.agentSessionId,
+        promptCondition: { expectedRun: session.run, afterSubmissionId: session.promptCompletionAdmission?.submissionId ?? null },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running', status: 'active', updatedAt: session.updatedAt }] }
+    }
+    if (request.operation !== 'send') throw new Error('Unexpected private Control operation')
+    sends.push(request)
+    if (sends.length > 1 && laterAdmission) throw new AgentMuxError('The historical message is unknown.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+    return { operation: 'send', agentSessionId: 'recipient' }
+  } }, upstream)
+  await server.start()
+  const sockets = new Set<Socket>()
+  let loseAck = true
+  // The proxy drops the actual response bytes after the public executor returns.
+  // No test exception stands in for the lost Control ACK.
+  const proxy = createServer({ allowHalfOpen: true }, socket => {
+    const host = createConnection(upstream)
+    for (const peer of [socket, host]) { sockets.add(peer); peer.on('error', () => peer.destroy()); peer.on('close', () => sockets.delete(peer)) }
+    let wire = '', operation: string | undefined
+    socket.on('data', data => {
+      wire += data.toString()
+      if (wire.includes('\n')) operation = (JSON.parse(wire) as { operation: string }).operation
+      host.write(data)
+    })
+    socket.on('end', () => host.end())
+    host.on('data', data => {
+      if (loseAck && operation === 'send') { loseAck = false; socket.destroy(); host.destroy() }
+      else socket.write(data)
+    })
+    host.on('end', () => socket.end())
+  })
+  await new Promise<void>(resolve => proxy.listen(endpoint, resolve))
+  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
+    AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '', AGENTMUX_AGENT_CAPABILITY: '' }
+  const args = ['send', '--to-session', 'recipient', '--message-id', 'lost-control-ack', '--text', 'original exact body']
+  try {
+    await expect(exec(cli, args, { env, timeout: 15000 })).rejects.toMatchObject({ stderr: expect.stringContaining('CONTROL_') })
+    expect(sends).toHaveLength(1)
+    const first = sends[0]!
+    expect(first.promptCondition).toEqual({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null })
+    const original = (await store.load())[0] as AgentMuxStoredAgentSession
+    const later = { ...original, updatedAt: 2, promptCompletionAdmission: {
+      submissionId: 'later-message', operationId: 'later-native-input', startByte: 0, endByte: 1, acknowledged: true } }
+    if (laterAdmission) await store.compareAndSwap(original, later)
+    const retry = exec(cli, args, { env, timeout: 15000 })
+    if (laterAdmission) await expect(retry).rejects.toMatchObject({ stderr: expect.stringContaining('AGENT_PROMPT_INPUT_UNCONFIRMED') })
+    else expect(JSON.parse((await retry).stdout).result.delivery).toMatchObject({ state: 'delivered' })
+    expect(sends).toHaveLength(2)
+    expect(sends.map(request => [request.message?.messageId, request.text, request.promptCondition])).toEqual([
+      ['lost-control-ack', 'original exact body', first.promptCondition],
+      ['lost-control-ack', 'original exact body', first.promptCondition]
+    ])
+    expect(reads).toBe(1)
+    expect(await store.load()).toEqual([laterAdmission ? later : original])
+    const messages = await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ promptCondition: first.promptCondition,
+      envelope: { messageId: 'lost-control-ack', body: 'original exact body' },
+      delivery: laterAdmission ? { state: 'queued', reason: expect.stringContaining('unconfirmed') } : { state: 'delivered' } })
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>(resolve => proxy.close(() => resolve()))
     await server.stop()
     await rm(runtime, { recursive: true, force: true })
   }
@@ -138,6 +237,15 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
   expect(compactId).toMatch(/^[A-Za-z0-9_-]{16}$/u)
   const requests: AgentMuxControlRequest[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'list.active-agents') {
+      const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
+      return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
+        agentSessionId: session.agentSessionId, promptCondition: { expectedRun: session.run,
+          afterSubmissionId: session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId! },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt
+      })) }
+    }
     requests.push(request)
     if (request.operation === 'send') return { operation: 'send', agentSessionId: compactId }
     throw new AgentMuxError('Captured resolved command.', 'CONTROL_FAILED')
@@ -223,6 +331,15 @@ it('capability proof alone supplies the managed author; missing, forged and supe
   await seedSessions(sessionStorePath, ['sender', 'recipient'], capability)
   const requests: AgentMuxControlRequest[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'list.active-agents') {
+      const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
+      return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
+        agentSessionId: session.agentSessionId, promptCondition: { expectedRun: session.run,
+          afterSubmissionId: session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId! },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt
+      })) }
+    }
     requests.push(request)
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
@@ -269,6 +386,15 @@ it('real CLI consumes a --leading canonical Session ID verbatim and still reject
   await seedSessions(sessionStorePath, [canonical])
   const requests: AgentMuxControlRequest[] = []
   const server = new AgentMuxControlServer({ execute: async (request) => {
+    if (request.operation === 'list.active-agents') {
+      const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
+      return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
+        agentSessionId: session.agentSessionId, promptCondition: { expectedRun: session.run,
+          afterSubmissionId: session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId! },
+        projectId: null, projectName: null, workspacePath: session.workspacePath, providerId: session.providerId,
+        executorId: session.executorId, processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt
+      })) }
+    }
     requests.push(request)
     if (request.operation === 'interrupt') return { operation: 'interrupt', agentSessionId: canonical }
     return { operation: 'send', agentSessionId: canonical }

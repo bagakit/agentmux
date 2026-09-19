@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
@@ -43,7 +44,7 @@ async function harness(singlePhase = false) {
   }
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(120)
   const send = (operationId: string, prompt: string, allowUncertainTurn = false) =>
-    client.submitAgentPrompt({ agentSessionId: 'a', operationId, prompt, allowUncertainTurn })
+    client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('a')), agentSessionId: 'a', operationId, prompt, allowUncertainTurn })
   const complete = async (observedAt: number) => inner.registry.update('a', { runId: 'r' },
     (current: AgentMuxStoredAgentSession) => ({ ...current, updatedAt: Math.max(current.updatedAt, observedAt),
       semanticStatus: { state: 'done', source: 'native-hook', observedAt } }))
@@ -81,7 +82,7 @@ it('uses each native completion once and does not let automation bypass a consum
     expect(h.writes).toEqual(['hello', '\r', 'next', '\r'])
     expect(h.client.agentSession('a').terminalPromptDelivery).toBeUndefined()
     await expect(h.send('unknown', 'later')).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
-    await expect(h.client.submitAgentPrompt({ agentSessionId: 'a', operationId: 'auto', prompt: 'auto',
+    await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('a')), agentSessionId: 'a', operationId: 'auto', prompt: 'auto',
       allowUncertainTurn: true, expectedCompletionId: JSON.stringify(['r', 200])
     })).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(h.writes).toEqual(['hello', '\r', 'next', '\r'])

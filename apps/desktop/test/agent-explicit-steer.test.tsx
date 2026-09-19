@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore,
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore, agentPromptCondition,
   type AgentMuxControlRequest, type AgentMuxMessageEnvelope, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
@@ -41,6 +41,7 @@ import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { composerSession } from './helpers/composer-dom-fixture'
 
@@ -48,9 +49,11 @@ const ID = 'explicit-steer-agent', RUN = `run-${ID}`
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement, client: AgentMuxClient, runtime: RuntimeController
 let disposeIpc: (() => Promise<void>) | undefined
+let disposeStore: (() => void) | undefined
 let gates: { resolve(): void }[] = []
 let nativeRunId: string
 let writes: string[], holdInput: ((data: string) => Promise<void>) | undefined
+let loseSubmitAck: boolean
 
 function deferred() {
   let resolve!: () => void
@@ -75,7 +78,7 @@ async function settled() {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  writes = []; holdInput = undefined; nativeRunId = RUN; gates = []
+  writes = []; holdInput = undefined; loseSubmitAck = false; nativeRunId = RUN; gates = []
   const store = new AgentMuxMemoryAgentSessionStore()
   const durable: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: ID, providerId: 'codex', executorId: 'codex', hostId: 'local',
@@ -105,6 +108,7 @@ beforeEach(async () => {
     cursor = op.expectedByte + Buffer.byteLength(op.data)
     const receipt = { run: nativeRun(), appliedByteRange: { startByte: op.expectedByte, endByte: cursor } }
     accepted.set(op.operationId, receipt)
+    if (loseSubmitAck && op.data === '\r') { loseSubmitAck = false; throw new Error('Input ACK lost after acceptance') }
     return receipt
   }
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(120)
@@ -128,6 +132,10 @@ beforeEach(async () => {
   })
   const session = { ...composerSession(ID), workspacePath: durable.workspacePath,
     status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  disposeStore = await useAppStore.getState().initialize()
   useAppStore.setState({ config, sessions: [session], timelines: {}, agentComposerDrafts: {},
     agentSteerQueues: {}, agentSteerInFlight: {}, noticeReadReceipts: {}, error: null })
   container = document.createElement('div'); document.body.append(container)
@@ -140,6 +148,7 @@ afterEach(async () => {
   await settled()
   await act(async () => root.unmount())
   container.remove()
+  disposeStore?.(); disposeStore = undefined
   await disposeIpc?.(); disposeIpc = undefined
   await runtime.dispose()
   useAppStore.setState(initial, true)
@@ -157,11 +166,11 @@ it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an
   expect(writes).toEqual(['first explicit steer', '\r', 'second explicit steer', '\r'])
   expect(queue()).toEqual([ordinary])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.filter(call => call[2] !== 'ordinary queued message').map(call => [call[2], call[5]])).toEqual([
+  expect(submits.filter(call => call[2] !== 'ordinary queued message').map(call => [call[2], call[6]])).toEqual([
     ['first explicit steer', { allowUncertainTurn: true }],
     ['second explicit steer', { allowUncertainTurn: true }]
   ])
-  expect(submits.filter(call => call[2] === 'ordinary queued message').map(call => call[5])).toEqual(Array(4).fill(undefined))
+  expect(submits.filter(call => call[2] === 'ordinary queued message').map(call => call[6])).toEqual(Array(4).fill(undefined))
   expect(submits[2]?.[3]).not.toBe(ordinary.operationId)
   expect(client.agentSession(ID).run).toEqual({ runId: RUN })
   expect(client.agentSession(ID).terminalPromptDelivery?.reason).toBe('turn-end-unconfirmed')
@@ -184,13 +193,13 @@ it('retains multiple exact explicit intents arriving while an earlier real Core 
   expect(queue()).toEqual([])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
   expect(submits.map(call => call[3])).toEqual(pending.map(entry => entry.operationId))
-  expect(submits.map(call => call[5])).toEqual(Array(3).fill({ allowUncertainTurn: true }))
+  expect(submits.map(call => call[6])).toEqual(Array(3).fill({ allowUncertainTurn: true }))
 })
 
 it('the sole queued Send retries its exact paused operation without an additional Continue action', async () => {
-  const first = { operationId: 'paused-exact-op', runId: RUN, text: 'restored explicit retry', status: 'deferred' as const,
+  const first = { operationId: 'paused-exact-op', runId: RUN, text: 'restored explicit retry', status: 'deferred' as const, promptCondition: null,
     errorCode: 'AGENT_EXECUTION_NOT_REQUESTED', error: 'Waiting for explicit execution.' }
-  const second = { operationId: 'untouched-op', runId: RUN, text: 'other paused message', status: 'deferred' as const,
+  const second = { operationId: 'untouched-op', runId: RUN, text: 'other paused message', status: 'deferred' as const, promptCondition: null,
     errorCode: 'AGENT_EXECUTION_NOT_REQUESTED', error: 'Waiting for explicit execution.' }
   await act(async () => useAppStore.setState({ agentSteerQueues: { [ID]: [first, second] } }))
   const outbox = container.querySelector<HTMLElement>('[role="tab"][id$="-outbox-tab"]')
@@ -204,7 +213,7 @@ it('the sole queued Send retries its exact paused operation without an additiona
   expect(writes).toEqual(['restored explicit retry', '\r'])
   expect(queue()).toEqual([second])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[3], call[5]])).toEqual([['paused-exact-op', { allowUncertainTurn: true }]])
+  expect(submits.map(call => [call[3], call[6]])).toEqual([['paused-exact-op', { allowUncertainTurn: true }]])
 })
 
 it('does not lend explicit authorization to a queue-only message admitted during its receipt', async () => {
@@ -222,7 +231,7 @@ it('does not lend explicit authorization to a queue-only message admitted during
   expect(writes).toEqual(['explicit only', '\r'])
   expect(queue()).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.filter(call => call[2] === 'bare Enter stays queued').map(call => call[5])).toEqual([undefined])
+  expect(submits.filter(call => call[2] === 'bare Enter stays queued').map(call => call[6])).toEqual([undefined])
 })
 
 it('retains exact Run and permission boundaries even for explicit input', async () => {
@@ -257,7 +266,7 @@ it('keeps a newly explicit healthy replacement Run intent when the old pending r
   const inner = client as any
   await inner.registry.update(ID, { runId: RUN }, (current: AgentMuxStoredAgentSession) => {
     const { terminalPromptSubmission: _submission, terminalPromptDelivery: _delivery,
-      terminalPromptReadiness: _readiness, ...rest } = current
+      terminalPromptReadiness: _readiness, promptCompletionAdmission: _admission, ...rest } = current
     return { ...rest, run: { runId: nativeRunId }, retiredRuns: [...current.retiredRuns, { runId: RUN }], updatedAt: 2 }
   })
   const session = useAppStore.getState().sessions[0]!
@@ -272,7 +281,7 @@ it('keeps a newly explicit healthy replacement Run intent when the old pending r
   expect(writes).toEqual(['old Run awaiting', 'new Run explicit', '\r'])
   expect(queue()).toEqual([expect.objectContaining({ operationId: oldEntry.operationId, runId: RUN, status: 'deferred' })])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[1].run.runId, call[3], call[5]])).toEqual([
+  expect(submits.map(call => [call[1].run.runId, call[3], call[6]])).toEqual([
     [RUN, oldEntry.operationId, { allowUncertainTurn: true }],
     [nativeRunId, newEntry.operationId, { allowUncertainTurn: true }]
   ])
@@ -295,7 +304,7 @@ it('a synchronous subscriber Send at final in-flight clear starts a live owner r
     expect(admitted).toBe(true)
     expect(queue()).toEqual([])
     const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-    expect(submits.map(call => [call[2], call[5]])).toEqual([
+    expect(submits.map(call => [call[2], call[6]])).toEqual([
       ['first finalizing steer', { allowUncertainTurn: true }],
       ['subscriber explicit steer', { allowUncertainTurn: true }]
     ])
@@ -320,7 +329,7 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
   expect(writes).toEqual(['default awaiting explicit choice', '\r'])
   expect(queue()).toEqual([])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[3], call[5]])).toEqual([
+  expect(submits.map(call => [call[3], call[6]])).toEqual([
     [entry.operationId, undefined], [entry.operationId, { allowUncertainTurn: true }]
   ])
 })
@@ -340,7 +349,7 @@ it('Control send steers its exact message through registered Main and public Cor
   const request: AgentMuxControlRequest = {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-first-request', operation: 'send',
     target: { kind: 'agent-session', agentSessionId: ID }, text: message.body,
-    caller: { agentSessionId: ID }, message
+    caller: { agentSessionId: ID }, message, promptCondition: agentPromptCondition(client.agentSession(ID))
   }
   // This begins after the existing Control author validation. No submit method is mocked:
   // Store -> product preload -> registered IPC -> RuntimeController -> public Core all execute.
@@ -354,7 +363,7 @@ it('Control send steers its exact message through registered Main and public Cor
   if (session?.kind !== 'agent') throw new Error('The fixture Agent is missing')
   const control = session.control
   const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt' && call[3] === message.messageId)
-  expect(calls).toEqual([['sessions:submitPrompt', control, prompt, message.messageId, ID, { allowUncertainTurn: true }]])
+  expect(calls).toEqual([['sessions:submitPrompt', control, prompt, message.messageId, request.promptCondition, ID, { allowUncertainTurn: true }]])
   expect(client.agentSession(ID).terminalPromptDelivery).toMatchObject({
     reason: 'turn-end-unconfirmed', submissionId: message.messageId
   })
@@ -374,11 +383,91 @@ it('Control send steers its exact message through registered Main and public Cor
     })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
   })
   expect(writes).toEqual(accepted)
-  await expect(runtime.submitPrompt(control, 'default is still gated', 'control-default'))
+  await expect(runtime.submitPrompt(control, 'default is still gated', 'control-default', agentPromptCondition(client.agentSession(ID))))
     .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
-  await expect(runtime.submitPrompt(control, 'automatic is still gated', 'control-auto',
+  await expect(runtime.submitPrompt(control, 'automatic is still gated', 'control-auto', agentPromptCondition(client.agentSession(ID)),
     { completionId: 'not-an-observed-completion', isCurrent: () => true, signal: new AbortController().signal },
     undefined, { allowUncertainTurn: true }))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(writes).toEqual(accepted)
+})
+
+
+it.each([false, true])('real Core receipt preserves a later Composer draft (lost ACK: %s)', async lostAck => {
+  const gate = deferred()
+  const text = `original exact intent ${lostAck}`
+  holdInput = async data => { if (data === text) await gate.promise }
+  loseSubmitAck = lostAck
+  await draft(text); await enter('metaKey')
+  await vi.waitFor(() => expect(writes).toEqual([text]))
+  const entry = queue()[0]!
+  await draft('later unsent draft')
+  gate.resolve(); await settled()
+  expect(writes).toEqual([text, '\r'])
+  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('later unsent draft')
+  expect(container.querySelector('[contenteditable="true"]')?.textContent).toBe('later unsent draft')
+  if (lostAck) {
+    expect(queue()).toEqual([{ ...entry, status: 'deferred', error: expect.stringContaining('Input ACK lost') }])
+    await act(async () => useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId))
+    expect(writes).toEqual([text, '\r'])
+    const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
+    expect(calls.map(call => call[3])).toEqual([entry.operationId, entry.operationId])
+  }
+  expect(queue()).toEqual([])
+  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('later unsent draft')
+  expect(client.agentSession(ID)).toMatchObject({ run: { runId: RUN }, semanticStatus: { state: 'working' } })
+})
+
+it('two preload consumers preserve their original conditions instead of rebinding the waiting message', async () => {
+  const gate = deferred()
+  holdInput = async data => { if (data === 'IPC client one') await gate.promise }
+  const session = useAppStore.getState().sessions[0]!
+  if (session.kind !== 'agent') throw new Error('Missing Agent')
+  const condition = agentPromptCondition(client.agentSession(ID))
+  const send = (text: string, operationId: string) => bridge.api!.sessions.submitPrompt(
+    session.control, text, operationId, condition, undefined, { allowUncertainTurn: true })
+  const first = send('IPC client one', 'ipc-one')
+  await vi.waitFor(() => expect(writes).toEqual(['IPC client one']))
+  const second = send('IPC client two', 'ipc-two').then(() => null, error => error)
+  await vi.waitFor(() => expect(bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')).toHaveLength(2))
+  expect(writes).toEqual(['IPC client one'])
+  gate.resolve(); await first
+  expect(await second).toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
+  expect(writes).toEqual(['IPC client one', '\r'])
+  expect(client.agentSession(ID).promptCompletionAdmission?.submissionId).toBe('ipc-one')
+  await bridge.api!.sessions.submitPrompt(session.control, 'new explicit client two intent', 'ipc-two-new',
+    agentPromptCondition(client.agentSession(ID)), undefined, { allowUncertainTurn: true })
+  expect(writes).toEqual(['IPC client one', '\r', 'new explicit client two intent', '\r'])
+  expect(client.agentSession(ID).run).toEqual({ runId: RUN })
+  expect(container.querySelector('[contenteditable="true"]')).not.toBeNull()
+})
+
+
+it('Core refuses the final Enter when a new permission arrived during render, retaining the exact outbox and later draft', async () => {
+  const gate = deferred(), started = deferred()
+  vi.mocked((client as any).screenEvidence.wait).mockImplementationOnce(async () => {
+    started.resolve(); await gate.promise; return 120
+  })
+  await draft('prompt before permission'); await enter('metaKey'); await started.promise
+  const entry = queue()[0]!
+  await draft('next draft stays editable')
+  const pending = { request: {
+    kind: 'permission', id: 'late-product-permission', agentSessionId: ID, title: 'Later permission',
+    options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }],
+    evidence: { source: 'native-hook', observedAt: 200, run: { runId: RUN }, hookReceiptId: 'late-product-permission' }
+  } }
+  await (client as any).registry.update(ID, { runId: RUN }, (current: AgentMuxStoredAgentSession) => ({
+    ...current, pendingInteraction: pending, updatedAt: Math.max(current.updatedAt, 200)
+  }))
+  gate.resolve(); await settled()
+  expect(writes).toEqual(['prompt before permission'])
+  expect(queue()).toEqual([{ ...entry, status: 'deferred', error: 'Answer the pending Agent interaction before submitting another prompt.' }])
+  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('next draft stays editable')
+  expect(container.querySelector('[contenteditable="true"]')?.textContent).toBe('next draft stays editable')
+  expect(client.agentSession(ID).pendingInteraction).toEqual(pending)
+  // The outbox refusal is scoped to Prompt. Original Run and explicit native input remain usable.
+  const ack = await client.writeAgent({ agentSessionId: ID, expectedRun: { runId: RUN }, data: 'n\r', source: 'user' })
+  expect(ack.runId).toBe(RUN)
+  expect(writes).toEqual(['prompt before permission', 'n\r'])
+  expect(client.agentSession(ID).pendingInteraction?.request).toEqual(pending.request)
 })

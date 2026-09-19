@@ -29,6 +29,7 @@ import {
 import {
   AgentMuxControlServer,
   AgentMuxError,
+  type AgentPromptCondition,
   type AgentExecutorId,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
@@ -702,8 +703,8 @@ export async function registerIpc(args: {
   handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string) => {
     await args.runtime.paste(session, text, terminalData)
   })
-  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) => {
-    await args.runtime.submitPrompt(session, prompt, operationId, undefined, authorAgentSessionId, choice)
+  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) => {
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, authorAgentSessionId, choice)
   })
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,

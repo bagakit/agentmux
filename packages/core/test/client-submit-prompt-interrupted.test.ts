@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -130,7 +131,7 @@ async function submitClient(
 describe('submitAgentPrompt during screen replacement', () => {
   it('finishes the original accepted prompt and persists a visible degradation instead of leaving it busy', async () => {
     const fixture = await submitClient(READY_READINESS)
-    const input = { agentSessionId: AGENT_SESSION_ID, operationId: 'op-1', prompt: 'ship it' }
+    const input = {...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'op-1', prompt: 'ship it' }
     const submitted = fixture.client.submitAgentPrompt(input)
     await vi.waitFor(() => expect(fixture.observeCalls()).toBe(1))
     fixture.discardEvidence()
@@ -151,7 +152,7 @@ describe('submitAgentPrompt during screen replacement', () => {
 
   it.each(['exited', 'unknown'] as const)('does not send Enter if the authoritative Run becomes %s', async (state) => {
     const fixture = await submitClient(READY_READINESS)
-    const submitted = fixture.client.submitAgentPrompt({
+    const submitted = fixture.client.submitAgentPrompt({ ...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)),
       agentSessionId: AGENT_SESSION_ID, operationId: 'op-dead', prompt: 'ship it'
     }).then(() => null, (error: unknown) => error)
     await vi.waitFor(() => expect(fixture.observeCalls()).toBe(1))
@@ -168,12 +169,12 @@ describe('submitAgentPrompt during screen replacement', () => {
   it('continues explicitly without a Stop, including a fresh client over the persisted Session', async () => {
     const fixture = await submitClient(UNOBSERVED_READINESS)
     vi.spyOn(fixture.state.screenEvidence, 'wait').mockResolvedValue(20)
-    const first = { agentSessionId: AGENT_SESSION_ID, operationId: 'op-2', prompt: 'first steer' }
+    const first = {...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'op-2', prompt: 'first steer' }
     await fixture.client.submitAgentPrompt(first)
     const persisted = fixture.client.agentSessions()[0]!
     expect(persisted.terminalPromptSubmission?.submit.acknowledged).toBe(true)
     expect(persisted.terminalPromptSubmission?.readinessEvidence).toBeUndefined()
-    await fixture.client.submitAgentPrompt({ ...first, operationId: 'op-3', prompt: 'second steer', allowUncertainTurn: true })
+    await fixture.client.submitAgentPrompt({ ...first, ...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), operationId: 'op-3', prompt: 'second steer', allowUncertainTurn: true })
     expect(fixture.writes).toEqual(['first steer', '\r', 'second steer', '\r'])
     const last = fixture.client.agentSessions()[0]!
     const restored = await submitClient(UNOBSERVED_READINESS)
@@ -181,7 +182,7 @@ describe('submitAgentPrompt during screen replacement', () => {
     await registry.put({ ...storedSession(UNOBSERVED_READINESS), ...last })
     restored.state.kernel.status = async () => runProjection(Buffer.byteLength(fixture.writes.join('')))
     vi.spyOn(restored.state.screenEvidence, 'wait').mockResolvedValue(30)
-    await restored.client.submitAgentPrompt({ ...first, operationId: 'op-4', prompt: 'after restart', allowUncertainTurn: true })
+    await restored.client.submitAgentPrompt({ ...first, ...agentPromptCondition(restored.client.agentSession(AGENT_SESSION_ID)), operationId: 'op-4', prompt: 'after restart', allowUncertainTurn: true })
     expect(restored.writes).toEqual(['after restart', '\r'])
     await fixture.client.dispose()
     await restored.client.dispose()
@@ -190,10 +191,10 @@ describe('submitAgentPrompt during screen replacement', () => {
 
 it('cancels a prompt queued behind another submission before Core claims new bytes', async () => {
   const fixture = await submitClient(READY_READINESS)
-  const first = fixture.client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'first', prompt: 'first' })
+  const first = fixture.client.submitAgentPrompt({ ...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'first', prompt: 'first' })
   await vi.waitFor(() => expect(fixture.observeCalls()).toBe(1))
   const controller = new AbortController()
-  const queued = fixture.client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID, operationId: 'queued', prompt: 'cancelled', signal: controller.signal })
+  const queued = fixture.client.submitAgentPrompt({ ...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'queued', prompt: 'cancelled', signal: controller.signal })
     .then(() => null, (error: unknown) => error)
   controller.abort()
   fixture.discardEvidence(); await first

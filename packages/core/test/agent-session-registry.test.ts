@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
@@ -49,6 +49,45 @@ describe('semantic session registry concurrency', () => {
       .toBeUndefined()
   })
 
+  it('refreshes the target binding from another Client without writing or replacing unrelated projections', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore()
+    const reader = new AgentMuxAgentSessionRegistry(store), writer = new AgentMuxAgentSessionRegistry(store)
+    await reader.put(session())
+    const unrelated = { ...session('unrelated-run'), agentSessionId: 'unrelated',
+      hookBindingId: 'unrelated-hook', hookToken: 'unrelated-token' }
+    await reader.put(unrelated)
+    const cachedUnrelated = reader.get('unrelated')
+    await writer.load('local')
+    await writer.update('semantic-1', { runId: 'run-1' }, current => ({ ...current,
+      updatedAt: 200, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 200 } }))
+    const writes = vi.spyOn(store, 'compareAndSwap')
+    try {
+      await expect(reader.refresh('semantic-1', { runId: 'run-1' })).resolves.toMatchObject({
+        semanticStatus: { state: 'working', observedAt: 200 }
+      })
+      expect(writes).not.toHaveBeenCalled()
+      expect(reader.get('unrelated')).toBe(cachedUnrelated)
+      expect(reader.list().map(value => [value.agentSessionId, value.run.runId])).toEqual([
+        ['semantic-1', 'run-1'], ['unrelated', 'unrelated-run']
+      ])
+    } finally { writes.mockRestore() }
+  })
+
+  it('keeps the known binding when an empty Store read cannot confirm it', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore()
+    const registry = new AgentMuxAgentSessionRegistry(store)
+    await registry.put(session())
+    const known = registry.get('semantic-1')
+    const read = vi.spyOn(store, 'load').mockResolvedValueOnce([])
+    try {
+      await expect(registry.refresh('semantic-1', { runId: 'run-1' }))
+        .rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' })
+      expect(registry.get('semantic-1')).toBe(known)
+      expect(registry.list()).toEqual([known])
+      await expect(registry.refresh('semantic-1', { runId: 'run-1' })).resolves.toEqual(known)
+    } finally { read.mockRestore() }
+  })
+
   it('merges serialized control-state updates from the latest CAS value', async () => {
     const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
     await registry.put(session())
@@ -89,6 +128,7 @@ describe('semantic session registry concurrency', () => {
     const transitionEntered = new Promise<void>((resolve) => { enteredTransition = resolve })
     const transitionRelease = new Promise<void>((resolve) => { releaseTransition = resolve })
     const store: AgentMuxAgentSessionStore = {
+      withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
@@ -132,6 +172,7 @@ describe('semantic session registry concurrency', () => {
     const released = new Promise<void>((resolve) => { releaseActive = resolve })
     let compareCalls = 0
     const store: AgentMuxAgentSessionStore = {
+      withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },

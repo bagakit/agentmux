@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
@@ -99,7 +100,7 @@ async function fixture(singlePhase = false) {
     await store.compareAndSwap(previous, next)
     if (refreshRegistry) await current.inner.registry.load('local')
   }
-  const input = { agentSessionId: 'bound-agent', expectedRun: { runId: 'original-run' }, operationId: 'bound-operation', prompt: 'hello' }
+  const input = { ...agentPromptCondition(current.client.agentSession('bound-agent')), agentSessionId: 'bound-agent', expectedRun: { runId: 'original-run' }, operationId: 'bound-operation', prompt: 'hello' }
   return { ...current, store, run, writes, input, replace, freshClient: setup,
     beforeStatus: (callback?: () => Promise<void>) => { beforeStatus = callback },
     beforeAck: (callback?: () => Promise<void>) => { beforeAck = callback } }
@@ -139,10 +140,10 @@ describe('conditional exact Run prompt admission', () => {
     expect(restored.client.agentSession('bound-agent').promptCompletionAdmission).toBeUndefined()
   })
 
-  it.each([false, true])('deliberately selects the current Run for a fresh Session-addressed operation (single phase=%s)', async (singlePhase) => {
+  it.each([false, true])('captures the current Run for a fresh Session-addressed operation (single phase=%s)', async (singlePhase) => {
     const h = await fixture(singlePhase)
     await h.replace()
-    await h.client.submitAgentPrompt({ agentSessionId: 'bound-agent', operationId: 'fresh-operation', prompt: 'fresh' })
+    await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('bound-agent')), agentSessionId: 'bound-agent', operationId: 'fresh-operation', prompt: 'fresh' })
     expect(h.writes.map(({ runId, data }) => ({ runId, data }))).toEqual(singlePhase
       ? [{ runId: 'replacement-run', data: 'fresh\r' }]
       : [{ runId: 'replacement-run', data: 'fresh' }, { runId: 'replacement-run', data: '\r' }])
@@ -169,7 +170,7 @@ describe('conditional exact Run prompt admission', () => {
     const h = await fixture(singlePhase)
     h.beforeStatus(async () => { h.beforeStatus(); await h.replace('replacement-run', false) })
     await expect(h.client.submitAgentPrompt(h.input)).rejects.toMatchObject({
-      code: singlePhase ? 'STALE_AGENT_SESSION' : 'AGENT_PROMPT_READINESS_CONFLICT'
+      code: 'STALE_AGENT_SESSION'
     })
     expect(h.writes).toEqual([])
     const durable = (await loadAgentSessions(h.store))[0]!

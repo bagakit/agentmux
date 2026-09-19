@@ -174,6 +174,31 @@ async function withRetiredRing(
 }
 
 describe('semantic session persistence boundary', () => {
+  it.each(['memory', 'file'] as const)('excludes only the active Prompt callback and releases success/failure (%s)', async kind => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-prompt-store-scope-'))
+    const path = join(root, 'sessions.json')
+    const owner = kind === 'memory' ? new AgentMuxMemoryAgentSessionStore() : new AgentMuxFileAgentSessionStore(path)
+    const contender = kind === 'memory' ? owner : new AgentMuxFileAgentSessionStore(path)
+    const entered: string[] = []
+    try {
+      await owner.withPromptSubmission('same-session', async () => {
+        entered.push('owner')
+        const result = await contender.withPromptSubmission('same-session', async () => {
+          entered.push('contender')
+        }).then(() => null, error => error)
+        expect(result).toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+        expect(await contender.withPromptSubmission('other-session', async () => {
+          entered.push('other-session'); return 'other-result'
+        })).toBe('other-result')
+      })
+      expect(entered).toEqual(['owner', 'other-session'])
+      await expect(owner.withPromptSubmission('same-session', async () => {
+        throw new Error('Deliberate callback failure')
+      })).rejects.toThrow('Deliberate callback failure')
+      expect(await contender.withPromptSubmission('same-session', async () => 42)).toBe(42)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('rejects retired File Store schemas without rewriting or migrating them', async () => {
     const root = await mkdtemp('/tmp/agentmux-retired-store-')
     try {
@@ -684,7 +709,8 @@ describe('semantic session persistence boundary', () => {
     const store: AgentMuxAgentSessionStore = {
       async load() { return [storedSession(), storedSession()] },
       async loadRetiredRuns() { return [] },
-      async loadRetiredAgentSessions() { return [] },
+      async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
+  async loadRetiredAgentSessions() { return [] },
       async compareAndSwap() {},
       async reserveLifecycle() {},
       async claimStaleLifecycles() { return [] },

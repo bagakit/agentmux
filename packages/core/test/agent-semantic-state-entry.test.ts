@@ -1,3 +1,4 @@
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -89,7 +90,7 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
   const stored = async () => (await loadAgentSessions(store))[0]!
   return { client, inner, store, writes, events, feed, stored,
     beforeAck: (callback?: () => Promise<void>) => { beforeAck = callback },
-    submit: (operationId: string) => client.submitAgentPrompt({ agentSessionId: 'entry-agent', operationId, prompt: 'hello' })
+    submit: (operationId: string) => client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('entry-agent')), agentSessionId: 'entry-agent', operationId, prompt: 'hello' })
   }
 }
 

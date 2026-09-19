@@ -35,7 +35,8 @@ function store(values: readonly unknown[]): AgentMuxAgentSessionStore {
   return {
     async load() { return values },
     async loadRetiredRuns() { return [] },
-    async loadRetiredAgentSessions() { return [] },
+    async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
+  async loadRetiredAgentSessions() { return [] },
     async compareAndSwap() {},
     async reserveLifecycle() {},
     async claimStaleLifecycles() { return [] },
