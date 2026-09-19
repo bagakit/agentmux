@@ -84,6 +84,7 @@ export async function captureComposerScreenshot(home: string): Promise<string | 
       if (observationTimer) clearTimeout(observationTimer)
       try {
         let reason = firstFailure
+        if (reason) reason += ` Actual close: code ${code}, signal ${signal}.`
         if (!reason && signal) reason = `The screen selector ended with signal ${signal}.`
         if (!reason && code === null) reason = 'The screen selector ended with no exit code.'
         if (!reason && code !== 0) reason = `The screen selector failed with exit code ${code}.`

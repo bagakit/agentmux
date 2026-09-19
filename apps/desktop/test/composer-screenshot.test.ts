@@ -96,6 +96,37 @@ it('a child error is not exit evidence; even repeated kill errors retain the own
   child.emit('close', 0, null)
   await next.request
 })
+it('retains the first child error and the actual null-code signal close as separate facts', async () => {
+  const { request } = await started()
+  const failure = request.catch((error: Error) => error)
+  child.emit('error', new Error('Child unavailable'))
+  await remainsBusy()
+  child.emit('close', null, 'SIGTERM')
+  const error = await failure
+  expect(error).toBeInstanceOf(Error)
+  expect((error as Error).message).toContain('The screen selector failed: Child unavailable.')
+  expect((error as Error).message).toContain('Actual close: code null, signal SIGTERM.')
+  expect(native.stat).toHaveBeenCalledTimes(0)
+  expect(native.rm).toHaveBeenCalledTimes(1)
+  const next = await started()
+  expect(native.spawn).toHaveBeenCalledTimes(2)
+  child.emit('close', 0, null)
+  await next.request
+})
+it('retains timeout and the actual late successful close without returning its image', async () => {
+  const { request } = await started()
+  const failure = request.catch((error: Error) => error)
+  await vi.advanceTimersByTimeAsync(120_000)
+  expect(child.kill.mock.calls).toEqual([['SIGTERM']])
+  await remainsBusy()
+  child.emit('close', 0, null)
+  const error = await failure
+  expect(error).toBeInstanceOf(Error)
+  expect((error as Error).message).toContain('The screen selector timed out.')
+  expect((error as Error).message).toContain('Actual close: code 0, signal null.')
+  expect(native.stat).toHaveBeenCalledTimes(0)
+  expect(native.rm).toHaveBeenCalledTimes(1)
+})
 it('timeout requests TERM then KILL once, returns finite unknown without close and releases only after a late close', async () => {
   const { request } = await started()
   const failure = expect(request).rejects.toThrow(/cannot confirm.*exited/i)
