@@ -101,7 +101,7 @@ async function stopOwnedTestDaemon(runtimeDirectory: string): Promise<void> {
     maxBuffer: 4 * 1024 * 1024
   })
   const socketPath = join(runtimeDirectory, 'ctxmux.sock')
-  const stateDir = join(runtimeDirectory, 'state')
+  const stateDir = join(runtimeDirectory, 'state', 'ctxmux')
   const pids = processes.stdout.split('\n').flatMap((line) => {
     const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
     if (!match) return []
