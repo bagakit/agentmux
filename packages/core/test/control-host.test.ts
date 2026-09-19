@@ -1008,6 +1008,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'list.active-agents': 'short',
       'settings.get': 'short',
       'settings.set': 'short',
+      'settings.browser.links.list': 'short',
+      'settings.browser.links.forget': 'short',
       'settings.resource.list': 'short',
       'settings.resource.get': 'short',
       'settings.resource.add': 'short',

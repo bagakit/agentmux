@@ -276,6 +276,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   browser: {
+    forgetAppLinkScheme: (scheme, expected) => ipcRenderer.invoke('browser:forgetAppLinkScheme', scheme, expected),
     create: (id: string, url: string) => ipcRenderer.invoke('browser:create', id, url),
     navigate: (id: string, url: string) => ipcRenderer.invoke('browser:navigate', id, url),
     back: (id: string) => ipcRenderer.invoke('browser:back', id),

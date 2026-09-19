@@ -260,6 +260,11 @@ export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 
 /** Host-owned preferences. Core transports scalar facts without owning their keys or defaults. */
 export type AgentMuxControlSettingsGetRequest = RequestBase & { operation: 'settings.get'; target?: string }
 export type AgentMuxControlSettingsSetRequest = RequestBase & { operation: 'settings.set'; key: string; value: string }
+export type AgentMuxControlSettingsBrowserLinkEntry = { scheme: string; choice: string }
+export type AgentMuxControlSettingsBrowserLinksRequest = RequestBase & (
+  | { operation: 'settings.browser.links.list' }
+  | { operation: 'settings.browser.links.forget'; scheme: string }
+)
 export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts'
 export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
@@ -503,6 +508,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlListActiveAgentsRequest
   | AgentMuxControlSettingsGetRequest
   | AgentMuxControlSettingsSetRequest
+  | AgentMuxControlSettingsBrowserLinksRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
@@ -591,6 +597,8 @@ export type AgentMuxControlResult =
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
   | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry }
+  | { operation: 'settings.browser.links.list'; entries: AgentMuxControlSettingsBrowserLinkEntry[] }
+  | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
   | AgentMuxControlSettingsResourceResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
@@ -798,6 +806,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.active-agents': 'short',
   'settings.get': 'short',
   'settings.set': 'short',
+  'settings.browser.links.list': 'short',
+  'settings.browser.links.forget': 'short',
   'settings.resource.list': 'short',
   'settings.resource.get': 'short',
   'settings.resource.add': 'short',

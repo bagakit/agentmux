@@ -1,6 +1,7 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useEffect, useState } from 'react'
-import type { BrowserConfig } from '../../../../shared/contracts'
+import { useState } from 'react'
+import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
+import { useSettingDraft } from './use-setting-draft'
 
 /**
  * Agent 驱动浏览器的总开关。
@@ -13,18 +14,18 @@ import type { BrowserConfig } from '../../../../shared/contracts'
  * 只做一个开关，不做权限分级：`BrowserConfig.agentAutomation` 本身就是总开关，开了就是全套页面
  * 能力可用。在这里摆一排分项开关，会造出一份与主进程实际检查不符的第二事实源。
  */
-export function BrowserSettingsPane({ browser, onSave }: {
+export function BrowserSettingsPane({ browser, onSave, onForget }: {
   browser: BrowserConfig
-  onSave: (browser: BrowserConfig) => Promise<void>
+  onSave: (enabled: boolean, expected: boolean) => Promise<void>
+  onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
   const saved = browser.agentAutomation === true
-  const [enabled, setEnabled] = useState(saved)
+  const draft = useSettingDraft(saved)
   const saveState = useSettingsSave()
 
-  useEffect(() => setEnabled(saved), [saved])
-
   async function save(): Promise<void> {
-    await saveState.run(() => onSave({ ...browser, agentAutomation: enabled }))
+    const submitted = draft.beginSave()
+    submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
 
   return (
@@ -35,8 +36,8 @@ export function BrowserSettingsPane({ browser, onSave }: {
         <label className="browser-automation-toggle">
           <input
             type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled(event.target.checked)}
+            checked={draft.value}
+            onChange={(event) => draft.setValue(event.target.checked)}
           />
           <span>
             <strong>Let agents interact with browser pages</strong>
@@ -44,8 +45,8 @@ export function BrowserSettingsPane({ browser, onSave }: {
           </span>
         </label>
       </section>
-      <AppLinkSchemes browser={browser} onSave={onSave} />
-      <SettingsSaveBar save={saveState} dirty={enabled !== saved} label="Save browser" onSave={() => void save()} />
+      <AppLinkSchemes browser={browser} onForget={onForget} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save browser" onSave={() => void save()} />
     </div>
   )
 }
@@ -61,9 +62,9 @@ export function BrowserSettingsPane({ browser, onSave }: {
  * 一个都没记过时整节不渲染：摆一张空表说"这里会列出你的选择"，是在给一个尚不存在的东西留位置。
  * 用户第一次回答之后它自己出现——那时它才有内容可看。
  */
-function AppLinkSchemes({ browser, onSave }: {
+function AppLinkSchemes({ browser, onForget }: {
   browser: BrowserConfig
-  onSave: (browser: BrowserConfig) => Promise<void>
+  onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const saveState = useSettingsSave()
@@ -76,12 +77,10 @@ function AppLinkSchemes({ browser, onSave }: {
    * 删的是键本身，不是写一个别的值：缺席、`'allow'`、`'deny'` 是三档，把「忘掉」写成
    * `'deny'` 会把「下次问我」变成「永远别开」——两件不一样的事。
    */
-  async function forget(scheme: string): Promise<void> {
+  async function forget(scheme: string, expected: AppLinkSchemeChoice): Promise<void> {
     setBusy(scheme)
     try {
-      const next = { ...(browser.appLinkSchemes ?? {}) }
-      delete next[scheme]
-      await saveState.run(() => onSave({ ...browser, appLinkSchemes: next }))
+      await saveState.run(() => onForget(scheme, expected))
     } finally {
       setBusy(null)
     }
@@ -104,7 +103,7 @@ function AppLinkSchemes({ browser, onSave }: {
               className="small-button"
               type="button"
               disabled={busy !== null}
-              onClick={() => void forget(scheme)}
+              onClick={() => void forget(scheme, choice)}
             >{busy === scheme ? 'Forgetting…' : 'Forget'}</button>
           </li>
         ))}

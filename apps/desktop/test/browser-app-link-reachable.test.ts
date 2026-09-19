@@ -97,7 +97,7 @@ describe('应用链接：拒绝点名的位置真的到得了', () => {
 
     // 改的必须是主进程真正读的那个字段。列一张好看的表却写回别处，用户点了 Forget 也没用。
     expect(section, '这一节没碰 appLinkSchemes——列的不是主进程读的那份').toContain('appLinkSchemes')
-    expect(section, '改了不落盘，关掉设置就回来了').toContain('onSave')
+    expect(section, '忘记操作没有交给配置 owner').toContain('onForget')
 
     // 承重：这一节里必须有一个**自己的**能点的东西。判据只在这一段内，不在整个文件——
     // 整文件判时，上面自动化那一节的 Save 按钮会把「Forget 被整个删掉」喂成绿的（实测存活过）。
@@ -107,10 +107,15 @@ describe('应用链接：拒绝点名的位置真的到得了', () => {
     // 承重：**Forget 必须删掉那个键**，不是写一个别的值。缺席 / 'allow' / 'deny' 是三档，
     // 把「忘掉」实现成 `'deny'` 会把「下次问我」变成「永远别开」——那是另一件事，而且用户再也
     // 撤不回来了。一个写成 deny 的实现在界面上看起来完全一样。
-    expect(section, 'Forget 没有删键——「忘掉」被实现成了别的档位').toMatch(/delete\s+next\[scheme\]/u)
+    const intent = read('../src/shared/browser-settings.ts')
+    expect(intent, 'Forget 业务意图不见了').toContain('export function applyAppLinkForget')
+    expect(intent, 'Forget 没有删键——「忘掉」被实现成了别的档位').toMatch(/delete\s+next\[scheme\]/u)
 
     // 反向的一半：删完得真的存回去。只在本地 state 里删掉，界面会刷新，盘上纹丝不动。
-    expect(section, '删了键却没把新的那份存回 config').toMatch(/onSave\(\{[^}]*appLinkSchemes:\s*next/u)
+    expect(section, '没有提交显示答案的精确意图').toContain('onForget(scheme, expected)')
+    const main = read('../src/main/settings-browser-control.ts')
+    expect(main, 'Forget 没进入唯一 Main owner').toContain('await owner.update(')
+    expect(main, 'Main 没消费 Forget 意图').toContain('applyAppLinkForget(current, scheme, expected)')
   })
 
   it('一个都没记过时这一节不渲染——不给尚不存在的东西留一张空表', () => {
@@ -123,7 +128,8 @@ describe('应用链接：拒绝点名的位置真的到得了', () => {
     // 所以判据是「壳渲染了这个 pane」+「pane 里有这张表」——后者由上面几条负责。
     const shell = read('../src/renderer/src/components/SettingsPanel.tsx')
     expect(shell, 'BrowserSettingsPane 没被 SettingsPanel 渲染，这一节点不进去')
-      .toMatch(/active === 'browser' \? <BrowserSettingsPane/u)
+      .toMatch(/pane === 'browser' \? <BrowserSettingsPane/u)
+    expect(shell, 'UI 没把 Forget 接到公开窄入口').toContain('onForget={api.browser.forgetAppLinkScheme}')
   })
 })
 
