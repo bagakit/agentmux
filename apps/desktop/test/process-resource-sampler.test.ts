@@ -88,7 +88,7 @@ describe('rollUpSubtrees', () => {
   it('把整棵子树归到 run 上，含根进程自己', () => {
     const usage = rollUpSubtrees(rows, [{ key: 'run-a', pid: 100 }])
     // 100 + 101 + 102 + 103 = 4 个进程，15500 KiB，8.5%
-    expect(usage.get('run-a')).toEqual({ processCount: 4, rssKib: 15500, cpuPercent: 8.5 })
+    expect(usage.get('run-a')).toEqual({ processCount: 4, rssKib: 15500, rootRssKib: 10000, descendantsRssKib: 5500, descendantProcessCount: 3, cpuPercent: 8.5 })
   })
 
   it('两个不相干的 run 各算各的', () => {
@@ -97,7 +97,7 @@ describe('rollUpSubtrees', () => {
       { key: 'run-b', pid: 200 }
     ])
     expect(usage.get('run-a')?.rssKib).toBe(15500)
-    expect(usage.get('run-b')).toEqual({ processCount: 1, rssKib: 8000, cpuPercent: 4 })
+    expect(usage.get('run-b')).toEqual({ processCount: 1, rssKib: 8000, rootRssKib: 8000, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 4 })
   })
 
   it('共享祖先按注册顺序只归第一个，不重复计数', () => {
@@ -116,9 +116,9 @@ describe('rollUpSubtrees', () => {
       { key: 'inner', pid: 101 },
       { key: 'outer', pid: 100 }
     ])
-    expect(reversed.get('inner')).toEqual({ processCount: 2, rssKib: 2500, cpuPercent: 1.5 })
+    expect(reversed.get('inner')).toEqual({ processCount: 2, rssKib: 2500, rootRssKib: 2000, descendantsRssKib: 500, descendantProcessCount: 1, cpuPercent: 1.5 })
     // outer 剩下 100 与 102（101/103 已被 inner 认领）。
-    expect(reversed.get('outer')).toEqual({ processCount: 2, rssKib: 13000, cpuPercent: 7 })
+    expect(reversed.get('outer')).toEqual({ processCount: 2, rssKib: 13000, rootRssKib: 10000, descendantsRssKib: 3000, descendantProcessCount: 1, cpuPercent: 7 })
 
     // 无论顺序如何，两者之和都不超过整棵树的实际用量——这才是"不重复计数"的判据。
     const wholeTree = 10000 + 2000 + 3000 + 500
@@ -375,6 +375,29 @@ describe('ProcessResourceSampler', () => {
       expect(latest()?.runs.find((run) => run.runId === 'run-a')?.rssKib).toBe(12_000)
       // 混成一个数就没法回答"是谁在吃"。
       expect(latest()?.app).toMatchObject({ processCount: 1, rssKib: 4096, cpuPercent: null })
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('publishes root and uniquely owned descendant RSS from the same nonempty sample', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sampler, watch, latest } = harness({ table: async () => TABLE })
+      sampler.trackRun('inner', 101)
+      sampler.trackRun('outer', 100)
+      sampler.trackRun('claimed', 103)
+      sampler.trackRun('missing', 99999)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs).toEqual([
+        { runId: 'inner', rootPid: 101, processCount: 2, rssKib: 2500, rootRssKib: 2000, descendantsRssKib: 500, descendantProcessCount: 1, cpuPercent: 1.5 },
+        { runId: 'outer', rootPid: 100, processCount: 2, rssKib: 13000, rootRssKib: 10000, descendantsRssKib: 3000, descendantProcessCount: 1, cpuPercent: 7 },
+        { runId: 'claimed', rootPid: 103, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null },
+        { runId: 'missing', rootPid: 99999, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null }
+      ])
       stop()
       sampler.dispose()
     } finally {

@@ -22,6 +22,11 @@ export type UsagePanelRow = {
   label: string
   cpuText: string
   rssText: string
+  rootPid: number
+  processCount: number | null
+  rootRssText: string
+  descendantsRssText: string
+  descendantProcessCount: number | null
   contextText: string
   stateText: string
   /**
@@ -144,6 +149,11 @@ export function usagePanelRows(
       label: contextByRunId.get(run.runId)?.label ?? run.runId.slice(0, 8),
       cpuText: formatCpu(run.cpuPercent),
       rssText: formatRss(run.rssKib),
+      rootPid: run.rootPid,
+      processCount: run.processCount,
+      rootRssText: formatRss(run.rootRssKib),
+      descendantsRssText: formatRss(run.descendantsRssKib),
+      descendantProcessCount: run.descendantProcessCount,
       contextText: contextByRunId.get(run.runId)?.context ?? 'Unknown project',
       stateText: contextByRunId.get(run.runId)?.state ?? 'unknown',
       ...(activity && session && activity !== session.status.state ? { activity } : {})

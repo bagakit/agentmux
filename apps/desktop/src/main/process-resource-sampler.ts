@@ -253,7 +253,7 @@ export class ProcessResourceSampler {
     const roots = [...this.runPids].map(([runId, pid]) => ({ key: runId, pid }))
     const usage = rows ? rollUpSubtrees(rows, roots) : null
     const runs: RunUsage[] = usage ? [] : this.latest?.runs ?? []
-    for (const { key: runId } of usage ? roots : []) {
+    for (const { key: runId, pid } of usage ? roots : []) {
       const subtree = usage!.get(runId) ?? null
       const history = this.samples.get(runId) ?? []
       const next = subtree
@@ -265,7 +265,16 @@ export class ProcessResourceSampler {
         : []
       this.samples.set(runId, next)
       const { cpuPercent, rssKib } = aggregateUsage(next, observedAt)
-      runs.push({ runId, processCount: subtree?.processCount ?? 0, cpuPercent, rssKib })
+      runs.push({
+        runId,
+        rootPid: pid,
+        processCount: subtree?.processCount ?? null,
+        rootRssKib: subtree?.rootRssKib ?? null,
+        descendantsRssKib: subtree?.descendantsRssKib ?? null,
+        descendantProcessCount: subtree?.descendantProcessCount ?? null,
+        cpuPercent,
+        rssKib
+      })
     }
 
     this.latest = {

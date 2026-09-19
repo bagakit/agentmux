@@ -25,6 +25,11 @@ export type SubtreeUsage = {
   /** 这棵子树里的进程数，含根进程自己。 */
   processCount: number
   rssKib: number
+  /** Core 报告的 Run 根 PID 本身；可能是启动 wrapper，不猜 native CLI。 */
+  rootRssKib: number
+  /** Only descendants claimed by this Run in the same process-table sample. */
+  descendantsRssKib: number
+  descendantProcessCount: number
   cpuPercent: number
 }
 
@@ -95,7 +100,15 @@ export function rollUpSubtrees(
       stack.push(...(childrenByParent.get(current) ?? []))
     }
     // 根进程本身被前一个 root 认领掉时，这个 run 一个进程都没剩下——如实报"不可用"。
-    result.set(key, processCount === 0 ? null : { processCount, rssKib, cpuPercent })
+    const rootRssKib = byPid.get(pid)!.rssKib
+    result.set(key, processCount === 0 ? null : {
+      processCount,
+      rssKib,
+      rootRssKib,
+      descendantsRssKib: rssKib - rootRssKib,
+      descendantProcessCount: processCount - 1,
+      cpuPercent
+    })
   }
   return result
 }
@@ -182,9 +195,15 @@ export function pruneSamples(
 /** 一个 run 现在吃多少资源。`null` 表示不可用（进程已退出、采样失败、还没采到）。 */
 export type RunUsage = {
   runId: string
-  processCount: number
+  /** Root PID from the existing Core process-state observation, not a guessed executable. */
+  rootPid: number
+  /** null when the root is absent or already attributed to another Run. */
+  processCount: number | null
   cpuPercent: number | null
   rssKib: number | null
+  rootRssKib: number | null
+  descendantsRssKib: number | null
+  descendantProcessCount: number | null
 }
 
 export type AppProcessRole = 'main' | 'renderer' | 'browser' | 'gpu' | 'utility' | 'other'
