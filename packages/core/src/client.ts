@@ -21,9 +21,8 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { releaseSubagentRoster } from './hook-normalizer.js'
+import { nativeHookHasSubagentSubject, releaseSubagentRoster } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn } from './agent-hook-event.js'
-import { USAGE_FINALIZATION_EVENTS } from './agent-hook-command.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
   hookEventUpdatesSemanticStatus,
@@ -4211,11 +4210,13 @@ export class AgentMuxClient {
     if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
+    // Unknown outcome ends a known main turn; an ordinary unknown observation stays neutral.
+    // Use this same decision for the durable status and published semantic status below.
     const updatesSemanticStatus = hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))
-    )
+    ) && (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
     // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
     //
     // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线
@@ -4245,7 +4246,7 @@ export class AgentMuxClient {
       agentSessionId: session.agentSessionId,
       run: { ...session.run },
       eventName: normalized.eventName,
-      ...(normalized.lifecycleEvent ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
+      ...(normalized.lifecycleEvent !== undefined ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
@@ -4283,7 +4284,7 @@ export class AgentMuxClient {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
         hookReceipt: persistedReceipt,
-        ...(normalized.semanticState === 'unknown' || !updatesSemanticStatus
+        ...(!updatesSemanticStatus
           ? {}
           : { semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, normalized.status) }),
         ...(normalized.lifecycleEvent === 'turn-end'
@@ -4301,13 +4302,16 @@ export class AgentMuxClient {
         // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
         // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。
         // 1) 本条回执带 usage → 用新的（fresh number wins）。
-        // 2) 无 usage 且属收尾事件（USAGE_FINALIZATION_EVENTS = Stop/StopFailure，两侧共用 SSOT）→ 清掉：
+        // 2) 无 usage 且原生主主体贡献真实主轮 turn-end → 清掉；子主体与 provisional Stop 不清主用量：
+        //    已知子任务收口可贡献聚合成功，但其用量缺席不能替代主轮读取失败，须保留真实 parent 样本。
         //    收尾本该带用量，它没带说明这一 turn 的用量读取失败（读 transcript 失败/竞态截断/记录落在
         //    256KiB 窗口外），把上一 turn 的数字继续挂在「Last turn」标签下是撒谎，清掉让 UI 落回等待记号「—」。
         // 3) 无 usage 且是 mid-turn 事件 → 保留上一 turn 的值：迟到的不带 usage 事件不该抹掉刚采到的那一 turn。
         ...(normalized.turnUsage
           ? { turnUsage: normalized.turnUsage }
-          : USAGE_FINALIZATION_EVENTS.has(normalized.eventName)
+          : normalized.lifecycleEvent === 'turn-end' && !nativeHookHasSubagentSubject(
+              provider.hook, normalized.eventName, envelope.payload ?? {}
+            )
             ? {}
             : current.turnUsage
               ? { turnUsage: current.turnUsage }

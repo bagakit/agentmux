@@ -360,8 +360,9 @@ export function resolveHookEventName(
  */
 export function canonicalHookLifecycleEvent(
   rawEventName: string | undefined,
-  declaredLifecycleEvent?: AgentHookLifecycleEvent
+  declaredLifecycleEvent?: AgentHookLifecycleEvent | null
 ): AgentHookLifecycleEvent | undefined {
+  if (declaredLifecycleEvent === null) return undefined
   if (declaredLifecycleEvent !== undefined) return declaredLifecycleEvent
   if (!rawEventName) return undefined
   return AGENT_HOOK_LIFECYCLE_DIALECT[rawEventName]
@@ -403,7 +404,7 @@ export function rawEventNamesForLifecycle(
  */
 export function eventNamesCanReopenTurn(
   rawEventNames: Iterable<string>,
-  declaredLifecycleEvent?: AgentHookLifecycleEvent
+  declaredLifecycleEvent?: AgentHookLifecycleEvent | null
 ): boolean {
   for (const raw of rawEventNames) {
     const canonical = canonicalHookLifecycleEvent(raw, declaredLifecycleEvent)

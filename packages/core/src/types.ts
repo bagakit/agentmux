@@ -502,7 +502,8 @@ export type AgentHookReceipt = {
   run: AgentMuxRunRef
   eventName: string
   /** Provider-normalized lifecycle; unknown stays absent and the raw eventName is retained. */
-  lifecycleEvent?: AgentHookLifecycleEvent
+  /** Null explicitly withholds lifecycle; undefined retains native-name semantics. */
+  lifecycleEvent?: AgentHookLifecycleEvent | null
   observedAt: number
   outputCursorBytes?: number
 }
@@ -1201,8 +1202,9 @@ export type NormalizedHookEvent = {
    * 缺席是一等公民的事实，读作「Core 对这条事件没有 canonical 语义」：此时 `semanticState` 仍由
    * Provider 自己的 `rules` 给出（多半是 `unknown`），绝不因为归一化失败就伪造 `working`/`done`。
    * 缺席时 `eventName` 里的原始名就是诊断线索。
+   * null 明确不声明生命周期，持久化后也不从原始名字补回。
    */
-  lifecycleEvent?: AgentHookLifecycleEvent
+  lifecycleEvent?: AgentHookLifecycleEvent | null
   semanticState: AgentSemanticState
   status: AgentStatus
   timeline: AgentTimelineMutation[]
