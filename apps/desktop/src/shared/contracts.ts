@@ -1,5 +1,6 @@
 import type {
   AgentCatalogEntry,
+  AgentPromptCondition,
   AgentMuxAgentSession,
   AgentMuxAgentContinuityResult,
   AgentMuxAgentContinuityConflictReason,
@@ -899,6 +900,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
+      /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */
+      promptSubmissionPredecessor?: string | null | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
       terminalOutputChannel?: AgentTerminalOutputChannelState
       pendingInteraction?: AgentMuxInteractionRequest
@@ -1432,7 +1435,7 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId?: string, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse

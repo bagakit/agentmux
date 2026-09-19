@@ -1,4 +1,4 @@
-import { AgentMuxError, decideContinuousProgress, type ContinuousProgressLoop } from '@agentmux/core'
+import { AgentMuxError, decideContinuousProgress, validateAgentPromptCondition, type ContinuousProgressLoop } from '@agentmux/core'
 import type { RuntimeController } from './runtime-controller.js'
 
 /** Revalidate the durable claim immediately before crossing the typed input boundary. */
@@ -10,9 +10,10 @@ export async function deliverContinuousProgress(
   const decision = decideContinuousProgress(observation)
   if (!isCurrent() || !loop.pendingCompletion) return 'skipped'
   if (loop.lastOutcome !== 'unknown' && (decision.kind !== 'send' || decision.completionId !== loop.pendingCompletion.id)) return 'skipped'
+  const condition = validateAgentPromptCondition(loop.pendingCompletion.condition)
   try {
     await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId,
-      hostId: observation.session.hostId, run: observation.session.run }, loop.prompt, operationId,
+      hostId: observation.session.hostId, run: condition.expectedRun }, loop.prompt, operationId, condition,
     { completionId: loop.pendingCompletion.id, isCurrent, signal })
     return 'sent'
   } catch (error) {

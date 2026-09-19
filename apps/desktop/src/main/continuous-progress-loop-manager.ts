@@ -1,4 +1,4 @@
-import { ContinuousProgressScheduler, decideContinuousProgress, type ContinuousProgressLoop, type ContinuousProgressObservation } from '@agentmux/core'
+import { ContinuousProgressScheduler, agentPromptCondition, decideContinuousProgress, type ContinuousProgressLoop, type ContinuousProgressObservation } from '@agentmux/core'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
@@ -65,7 +65,8 @@ export class ContinuousProgressLoopManager {
           if (decision.kind === 'send') {
             // A pending operation is retried only by explicit resume and keeps its identity.
             // If the observed completion changed, the old claim has no authority to send.
-            if (!pending) pending = { id: decision.completionId, operationId: claim.tickId }
+            if (!pending) pending = { id: decision.completionId, operationId: claim.tickId,
+              condition: agentPromptCondition(observation.session) }
             if (pending.id === decision.completionId) {
               this.patch(claim.loop.loopId, { pendingCompletion: pending })
               await this.store.save(this.scheduler.list())

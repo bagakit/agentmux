@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
+import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
@@ -209,6 +210,7 @@ function parseControlActiveAgents(value: unknown): AgentMuxControlActiveAgent[] 
     if (status !== 'active' && status !== 'idle' && status !== 'unknown') throw new AgentMuxError('Control Agent status is invalid.', 'CONTROL_PROTOCOL_ERROR')
     return {
       agentSessionId: id(source.agentSessionId, 'Control Agent Session id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      ...(source.promptCondition === undefined ? {} : { promptCondition: validateAgentPromptCondition(source.promptCondition) }),
       projectId: source.projectId === null ? null : id(source.projectId, 'Control Agent project id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
       projectName: source.projectName === null ? null : text(source.projectName, 'Control Agent project name', 'CONTROL_PROTOCOL_ERROR'),
       workspacePath: text(source.workspacePath, 'Control Agent workspace path', 'CONTROL_PROTOCOL_ERROR'),
@@ -331,13 +333,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (message?.recipient.kind === 'agent-session' && target.kind === 'agent-session' && message.recipient.agentSessionId !== target.agentSessionId) {
       throw new AgentMuxError('Message recipient does not match the Control target.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, text: text(source.text, 'Message text'), ...(owner ? { caller: owner } : {}), ...(message ? { message } : {}) }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
+      text: text(source.text, 'Message text'), promptCondition: validateAgentPromptCondition(source.promptCondition),
+      ...(owner ? { caller: owner } : {}), ...(message ? { message } : {}) }
   }
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
   if (source.operation === 'list.projects' || source.operation === 'list.active-agents') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...(source.operation === 'list.active-agents' && source.agentSessionId !== undefined
+        ? { agentSessionId: id(source.agentSessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') } : {}) }
   }
   if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }

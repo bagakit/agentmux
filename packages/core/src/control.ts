@@ -2,6 +2,7 @@ import { AgentMuxError } from './errors.js'
 import type { AgentExecutorId, AgentProviderId } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
+import type { AgentPromptCondition } from './agent-prompt-condition.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -42,6 +43,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'LAUNCHER_REGION_REQUIRED',
   'AGENT_NOT_FOUND',
   'INVALID_AGENT_PROMPT',
+  'AGENT_PROMPT_INPUT_UNCONFIRMED',
   'AGENT_SESSION_STILL_RUNNING',
   'AGENT_RESUME_UNAVAILABLE',
   'AGENT_RESUME_UNSUPPORTED',
@@ -149,6 +151,8 @@ export type AgentMuxControlProject = {
 
 export type AgentMuxControlActiveAgent = {
   agentSessionId: string
+  /** Core Session snapshot condition; absence is unknown, never an empty admission. */
+  promptCondition?: AgentPromptCondition
   projectId: string | null
   projectName: string | null
   workspacePath: string
@@ -224,7 +228,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; caller?: AgentMuxControlCaller; message?: AgentMuxMessageEnvelope
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; caller?: AgentMuxControlCaller; message?: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: { kind: 'tab'; tabId: string } | { kind: 'region'; regionId: string }
@@ -245,7 +249,7 @@ export type AgentMuxControlPromoteRegionRequest = RequestBase & {
 }
 export type AgentMuxControlListAgentsRequest = RequestBase & { operation: 'list.agents' }
 export type AgentMuxControlListProjectsRequest = RequestBase & { operation: 'list.projects' }
-export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 'list.active-agents' }
+export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 'list.active-agents'; agentSessionId?: string }
 /** Host-owned preferences. Core transports scalar facts without owning their keys or defaults. */
 export type AgentMuxControlSettingsGetRequest = RequestBase & { operation: 'settings.get'; target?: string }
 export type AgentMuxControlSettingsSetRequest = RequestBase & { operation: 'settings.set'; key: string; value: string }

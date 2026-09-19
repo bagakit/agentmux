@@ -1,5 +1,6 @@
 import {
   AgentMuxFileAgentSessionStore,
+  agentPromptCondition,
   connectLocalAgentMux
 } from '@agentmux/core'
 
@@ -30,6 +31,7 @@ const crash = async (next, submission, phase) => {
       agentSessionId: next.agentSessionId,
       runId: next.run.runId,
       operationId: submission.submissionId,
+      promptCondition,
       payloadRange: submission.payload.inputByteRange,
       submitRange: submission.submit.inputByteRange
     })}\n`, () => process.exit(exitCode))
@@ -39,6 +41,7 @@ const crash = async (next, submission, phase) => {
 const base = new AgentMuxFileAgentSessionStore()
 let crashArmed = false
 const store = {
+  withPromptSubmission: (id, operation) => base.withPromptSubmission(id, operation),
   async load() { return await base.load() },
   async loadRetiredRuns() { return await base.loadRetiredRuns() },
   async loadRetiredAgentSessions() { return await base.loadRetiredAgentSessions() },
@@ -108,8 +111,10 @@ if (client.agentSession(session.agentSessionId).terminalPromptReadiness?.readyTh
     }
   })
 }
+const promptCondition = agentPromptCondition(client.agentSession(session.agentSessionId))
 crashArmed = true
 await client.submitAgentPrompt({
+  ...promptCondition,
   agentSessionId: session.agentSessionId,
   operationId: submissionId,
   prompt: 'crash-between-phases'

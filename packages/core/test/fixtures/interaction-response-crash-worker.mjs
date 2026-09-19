@@ -10,6 +10,7 @@ const base = new AgentMuxFileAgentSessionStore()
 let client
 let crashArmed = false
 const store = {
+  withPromptSubmission: (id, operation) => base.withPromptSubmission(id, operation),
   async load() { return await base.load() },
   async loadRetiredRuns() { return await base.loadRetiredRuns() },
   async loadRetiredAgentSessions() { return await base.loadRetiredAgentSessions() },

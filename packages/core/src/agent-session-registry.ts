@@ -274,6 +274,30 @@ export class AgentMuxAgentSessionRegistry {
     }, signal)
   }
 
+  /** Refresh one binding without replacing unrelated Sessions or writing an unchanged record. */
+  async refresh(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> {
+    return await this.enqueue(agentSessionId, async () => {
+      const previous = this.get(agentSessionId)
+      const current = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === agentSessionId)
+      if (!current) {
+        throw new AgentMuxError(
+          'The current Session record could not be confirmed. Its Run is kept; refresh the Store before retrying this prompt.',
+          'AGENT_SESSION_STORE_READ_UNCONFIRMED'
+        )
+      }
+      if (current.hostId !== previous.hostId) {
+        throw new AgentMuxError('Agent Session Host changed before prompt Input.', 'STALE_AGENT_SESSION')
+      }
+      this.assertAvailable(current)
+      this.forget(previous)
+      this.remember(current)
+      if (!sameRun(current.run, expectedRun)) {
+        throw new AgentMuxError('Agent Session changed before prompt Input.', 'STALE_AGENT_SESSION')
+      }
+      return this.get(agentSessionId)
+    })
+  }
+
   async delete(agentSessionId: string, expectedCurrentRun?: AgentMuxRunRef): Promise<void> {
     await this.enqueue(agentSessionId, async (signal) => {
       const session = this.get(agentSessionId)

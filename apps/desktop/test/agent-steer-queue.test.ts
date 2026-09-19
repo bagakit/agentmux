@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -7,18 +7,27 @@ import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 /**
  * T-008: a retry of the SAME prompt must reach Core with the SAME `operationId`, so the idempotent
  * same-id continuation Core already implements (prompt-submission.ts:186) becomes reachable from the
- * product. The id is a per-attempt correlation key carried on the steer-queue entry — never persisted,
- * never a store invariant. This pins the three properties the change turns on:
+ * product. The id and first condition remain on the durable steer-queue entry through restart and retry. This pins the three properties the change turns on:
  *   (a) a retry of the same prompt reaches core with the same operationId
  *   (b) two different prompts get different ids
  *   (c) the steer queue keeps an entry's id stable across a FAILED flush and its retry
  */
 
 const initial = useAppStore.getState()
+let dispose: (() => void) | undefined
+beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
+afterAll(() => dispose?.())
+beforeEach(() => {
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
+    if (!session) throw new Error('Private Session is missing')
+    return session
+  })
+})
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
 
 function runningAgent(id = 's') {
-  return { id, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'r' } }, status: { state: 'working', observedAt: 1 }, processState: 'running' }
+  return { id, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'r' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
 }
 
 describe('steer queue operationId correlation (T-008)', () => {
@@ -38,7 +47,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     await useAppStore.getState().flushAgentSteerQueue('s')
     // Retained, and marked `deferred` — NOT `failed`. This used to assert `failed`, which was the defect
     // written down: a healthy Agent's message judged dead because OUR readiness probe had not completed.
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ ...admitted, status: 'deferred', error: 'busy' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ ...admitted, promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, status: 'deferred', error: 'busy' }])
 
     // The whole point of `deferred`: the next runtime event retries on its own. No user action, no
     // "Send now" click. This assertion used to read `expect(ids).toHaveLength(1)` — i.e. it pinned the
@@ -125,7 +134,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     // 这份形状没有任何东西是靠内存引用活着的。
     const persisted = JSON.parse(JSON.stringify({
       's': [
-        { operationId: 'op-live', runId: 'r', text: '重启前排的', status: 'queued' },
+        { operationId: 'op-live', runId: 'r', promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, text: '重启前排的', status: 'queued' },
         // 对着旧 run 的那条：不许静默投进当前 run（它不是写给这个 run 的），也不许替用户删掉。
         { operationId: 'op-stale', runId: 'old-run', text: '写给上一个 run 的', status: 'queued' }
       ]

@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -19,7 +19,22 @@ import { ComposerOutbox } from '../src/renderer/src/components/ComposerOutbox'
  */
 
 const initial = useAppStore.getState()
-afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
+let dispose: (() => void) | undefined
+beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
+afterAll(() => { dispose?.() })
+let releasePending: (() => void) | undefined
+beforeEach(() => {
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
+    if (!session) throw new Error('Private projected Session is unavailable')
+    return structuredClone(session)
+  })
+})
+afterEach(async () => {
+  releasePending?.(); releasePending = undefined
+  await useAppStore.getState().flushAgentSteerQueue('s')
+  useAppStore.setState(initial, true); vi.restoreAllMocks()
+})
 
 function agent(id: string, runId: string, processState = 'running') {
   return {
@@ -27,11 +42,116 @@ function agent(id: string, runId: string, processState = 'running') {
     kind: 'agent',
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId } },
     status: { state: 'working', observedAt: 1 },
-    processState
+    processState,
+    promptSubmissionPredecessor: null
   }
 }
 
 describe('renderer routes every send through Core, retaining nothing of Core’s job', () => {
+  it('binds each queue tail at its first dispatch, after the preceding admission', async () => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never] })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _text, operationId) => {
+      useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: operationId } as never] })
+    })
+    expect(useAppStore.getState().enqueueAgentSteer('s', 'head')).toBe(true)
+    expect(useAppStore.getState().enqueueAgentSteer('s', 'tail')).toBe(true)
+    const original = structuredClone(useAppStore.getState().agentSteerQueues.s!)
+    expect(original.map(entry => entry.promptCondition)).toEqual([null, null])
+    await useAppStore.getState().flushAgentSteerQueue('s')
+    expect(submit.mock.calls.map(call => [call[2], call[3]])).toEqual([
+      [original[0]!.operationId, { expectedRun: { runId: 'r' }, afterSubmissionId: null }],
+      [original[1]!.operationId, { expectedRun: { runId: 'r' }, afterSubmissionId: original[0]!.operationId }]
+    ])
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+  })
+
+  it('saves the first condition before IPC and retains it after lost ACK and later admission', async () => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never], agentComposerDrafts: { s: 'original' } })
+    const commit = vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
+      const entry = useAppStore.getState().agentSteerQueues.s?.[0]
+      if (entry) expect(entry.promptCondition).toEqual({ expectedRun: { runId: 'r' }, afterSubmissionId: null })
+    })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(async (_control, _text, operationId) => {
+      expect(commit).toHaveBeenCalled()
+      expect(useAppStore.getState().agentSteerQueues.s?.[0]?.promptCondition).toEqual({
+        expectedRun: { runId: 'r' }, afterSubmissionId: null })
+      useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: operationId } as never] })
+      throw new Error('ACK lost after Host acceptance')
+    }).mockRejectedValue(new Error('Historical delivery is unknown'))
+    expect(useAppStore.getState().send('s', 'original')).toBe(true)
+    await useAppStore.getState().flushAgentSteerQueue('s')
+    const intent = structuredClone(useAppStore.getState().agentSteerQueues.s![0]!)
+    useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: 'later-admission' } as never] })
+    useAppStore.getState().setAgentComposerDraft('s', 'new unsent draft')
+    await useAppStore.getState().sendQueuedAgentSteer('s', intent.operationId)
+    expect(submit.mock.calls.map(call => [call[2], call[3]])).toEqual([
+      [intent.operationId, intent.promptCondition], [intent.operationId, intent.promptCondition]
+    ])
+    expect(api.sessions.refresh).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().agentSteerQueues.s![0]).toMatchObject({
+      operationId: intent.operationId, promptCondition: intent.promptCondition, text: 'original' })
+    expect(useAppStore.getState().agentComposerDrafts.s).toBe('new unsent draft')
+    expect(useAppStore.getState().sessions.map(session => [session.id, session.control.run.runId])).toEqual([['s', 'r']])
+  })
+
+  it('restores a bound intent without preparing it against newer Core facts', async () => {
+    useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: 'newer' } as never],
+      agentSteerQueues: { s: [{ operationId: 'restored', runId: 'r', text: 'kept', status: 'deferred',
+        promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: 'original-predecessor' } }] } })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    await useAppStore.getState().sendQueuedAgentSteer('s', 'restored')
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), 'kept', 'restored', {
+      expectedRun: { runId: 'r' }, afterSubmissionId: 'original-predecessor'
+    }, undefined, { allowUncertainTurn: true })
+    expect(api.sessions.refresh).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+  })
+
+  it('keeps an historical intent with missing conditions unknown instead of sending it anew', async () => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never],
+      agentSteerQueues: { s: [{ operationId: 'historical', runId: 'r', text: 'kept', status: 'deferred' }] } })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    await useAppStore.getState().sendQueuedAgentSteer('s', 'historical')
+    expect(submit).not.toHaveBeenCalled()
+    expect(api.sessions.refresh).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ operationId: 'historical', runId: 'r', text: 'kept',
+      status: 'deferred', error: expect.stringContaining('original message delivery condition is unknown') }])
+    expect(useAppStore.getState().sessions.map(session => [session.id, session.processState])).toEqual([['s', 'running']])
+  })
+
+  it('prepares again after a first pre-admission BUSY, while keeping the operation and text', async () => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never] })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Another owner is active'), { code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+    }).mockResolvedValue()
+    expect(useAppStore.getState().send('s', 'kept')).toBe(true)
+    await useAppStore.getState().flushAgentSteerQueue('s')
+    const intent = useAppStore.getState().agentSteerQueues.s![0]!
+    expect(intent.promptCondition).toBeNull()
+    useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: 'other-owner-admitted' } as never] })
+    await useAppStore.getState().sendQueuedAgentSteer('s', intent.operationId)
+    expect(submit.mock.calls.map(call => [call[2], call[3]])).toEqual([
+      [intent.operationId, { expectedRun: { runId: 'r' }, afterSubmissionId: null }],
+      [intent.operationId, { expectedRun: { runId: 'r' }, afterSubmissionId: 'other-owner-admitted' }]
+    ])
+    expect(api.sessions.refresh).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+  })
+
+  it('does not use a later BUSY to refresh a previously unknown intent', async () => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never] })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(new Error('ACK is unknown'))
+      .mockRejectedValue(Object.assign(new Error('Another owner is active'), { code: 'AGENT_PROMPT_SUBMISSION_BUSY' }))
+    expect(useAppStore.getState().send('s', 'kept')).toBe(true)
+    await useAppStore.getState().flushAgentSteerQueue('s')
+    const intent = structuredClone(useAppStore.getState().agentSteerQueues.s![0]!)
+    useAppStore.setState({ sessions: [{ ...agent('s', 'r'), promptSubmissionPredecessor: 'newer' } as never] })
+    await useAppStore.getState().sendQueuedAgentSteer('s', intent.operationId)
+    expect(submit.mock.calls.map(call => call[3])).toEqual([intent.promptCondition, intent.promptCondition])
+    expect(useAppStore.getState().agentSteerQueues.s![0]!.promptCondition).toEqual(intent.promptCondition)
+    expect(api.sessions.refresh).toHaveBeenCalledOnce()
+  })
+
   it('a successful send reaches Core once and then clears the queue (no renderer-side second machine)', async () => {
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
@@ -54,8 +174,40 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     expect(useAppStore.getState().send('s', 'retry me')).toBe(true)
     await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s?.[0]?.status).toBe('deferred'))
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'r', text: 'retry me', status: 'deferred', error: 'link dropped' }
+      { operationId: expect.any(String), promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, runId: 'r', text: 'retry me', status: 'deferred', error: 'link dropped', enqueuedAt: expect.any(Number) }
     ])
+  })
+
+  it.each(['accepted', 'unknown'] as const)('a late %s receipt retains the edited draft and the queued intent identity', async result => {
+    useAppStore.setState({ sessions: [agent('s', 'r') as never], agentComposerDrafts: { s: 'original' } })
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve; releasePending = resolve })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(async () => {
+      await pending
+      if (result === 'unknown') throw new Error('Input result is unknown')
+    })
+    expect(useAppStore.getState().send('s', 'original')).toBe(true)
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
+    const entry = useAppStore.getState().agentSteerQueues.s![0]!
+    // Composer owns clearing its unchanged draft at admission; Store owns only delivery.
+    expect(useAppStore.getState().agentComposerDrafts.s).toBe('original')
+    useAppStore.getState().setAgentComposerDraft('s', 'new unsent draft')
+    const drain = useAppStore.getState().flushAgentSteerQueue('s')
+    release(); await drain
+    expect(useAppStore.getState().agentComposerDrafts.s).toBe('new unsent draft')
+    if (result === 'accepted') expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+    else {
+      expect(useAppStore.getState().agentSteerQueues.s).toEqual([
+        { ...entry, status: 'deferred', error: 'Input result is unknown' }
+      ])
+      submit.mockResolvedValue(undefined)
+      await useAppStore.getState().sendQueuedAgentSteer('s', entry.operationId)
+      expect(submit.mock.calls.map(call => call[2])).toEqual([entry.operationId, entry.operationId])
+      expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+    }
+    expect(useAppStore.getState().agentComposerDrafts.s).toBe('new unsent draft')
+    expect(useAppStore.getState().sessions.map(session => [session.id, session.control.run.runId, session.status.state]))
+      .toEqual([['s', 'r', 'working']])
   })
 
   it('auto-retries a deferred item and an explicit Send now reuses the SAME operationId', async () => {
@@ -85,9 +237,9 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     expect(new Set(ids).size).toBe(1)
   })
 
-  it('two concurrent clients’ distinct prompts each get their own operationId and both are sent', async () => {
-    // Each renderer holds its OWN client-local queue; distinct prompts must both reach Core with distinct
-    // ids (correct — they are different messages). This models the two-entry case in one store.
+  it('two distinct entries in the same queue keep distinct operationIds', async () => {
+    // This is one Store queue. Separate public Core instances are exercised in the Core gate;
+    // actual Control/Composer consumers are exercised in agent-explicit-steer.test.tsx.
     useAppStore.setState({ sessions: [agent('s', 'r') as never] })
     const ids: string[] = []
     vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_c, _p, operationId) => { ids.push(operationId!) })
@@ -117,7 +269,7 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     // with the new run → red.
     expect(submit).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), runId: 'run-1', text: 'stale', status: 'queued' }
+      { operationId: expect.any(String), promptCondition: null, runId: 'run-1', text: 'stale', status: 'queued', enqueuedAt: expect.any(Number) }
     ])
   })
 })
@@ -129,10 +281,11 @@ describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at 
     }))
   }
 
-  it('a live run promises delivery-in-order; it never claims the Agent replied or accepted', () => {
+  it('a live Run offers explicit delivery without claiming Provider consumption', () => {
     const markup = render(true)
     expect(markup).toContain('queued for delivery')
-    expect(markup).toContain('Messages for the current Run are sent in order as soon as the Agent can accept them.')
+    expect(markup).toContain('Send explicitly steers this message, including during the current turn.')
+    expect(markup).toContain('It does not send the other queued messages.')
     // "queued for delivery" is Host-accepted intent, NOT proof the Provider consumed anything.
     // MUTATION: change the deliverable-branch copy in ComposerOutbox.tsx to say "replied"/"accepted" —
     // this pair splits → red.
@@ -146,7 +299,8 @@ describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at 
     expect(markup).toContain('Not sent')
     // MUTATION: collapse the two branches to one optimistic label (ComposerOutbox.tsx) — a
     // non-deliverable queue would read "queued for delivery" → red.
-    expect(markup).toContain('this message targets a Run that is no longer available here')
+    expect(markup).toContain('the bound Run is unavailable or changed')
+    expect(markup).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
     expect(markup).toContain('<span>a</span>')
     expect(markup).toContain('<span>b</span>')
   })

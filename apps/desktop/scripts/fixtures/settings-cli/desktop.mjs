@@ -41,14 +41,16 @@ export async function connectCdp(url, connections) {
   return cdp
 }
 
-export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor }) {
+export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor, packagedApplication }) {
   const require = createRequire(join(desktopRoot, 'package.json'))
   return async function launch(label, seed) {
     for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) {
       assert.equal(process.env[name], undefined, `Private launch inherited ${name}`)
     }
     const readyFile = join(root, `ready-${label}.json`), report = join(root, 'seed-report.json')
-    const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+    const executable = packagedApplication ? join(packagedApplication, 'Contents/MacOS/AgentMux') : require('electron')
+    const args = ['--inspect-brk=0', ...(packagedApplication ? [] : [join(desktopRoot, 'out/main/index.js')]), '--remote-debugging-port=0']
+    const child = spawn(executable, args, {
       cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, ...environment, AGENTMUX_DESKTOP_READY_FILE: readyFile,
         ...(seed ? { AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed), AGENTMUX_DESKTOP_RECOVERY_REPORT: report,

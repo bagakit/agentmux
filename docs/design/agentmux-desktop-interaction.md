@@ -1879,8 +1879,15 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 ### 跨重启的 Prompt 投递凭据
 
 - Prompt 两阶段投递的持久化 claim 是去重与恢复记录，不是把下一条 Prompt 永久挡在门外的许可闸。应用重启后重新接入同一个仍为 `running` 的 Run 时，旧 claim 未确认本身不得触发 Resume、Retire 或删除健康 Session。
-- 恢复新 Prompt 时必须以 CtxMux 的权威 `acceptedInputBytes` 判断旧投递是否已经把字节交给 daemon：游标仍在旧 claim 的起点时，可以在保留去重记录的前提下由新 `submissionId` 接管；游标已经越过起点时，保留占用并如实说明正在进行的旧投递。不能用猜测的 TTL 或语义状态代替这个字节事实。
-- 旧 claim 被接管后，新的提交必须重新建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容仍走原有幂等续做，冲突内容仍拒绝。任何恢复流程失败都要保留可见工作面和健康 Session。
+- 两个公开 `AgentMuxClient` 实例共享同一受支持 Session Store/Run，以及两个 Control/Renderer 经同一 Core owner 发送，都必须保有唯一在途 Prompt 投递 owner。另一 Client 看不到本实例内存记录，不代表旧 owner 已结束；活跃 claim 不能被替换。投递前须重新读取当前 Session/Run 与待答边界，普通 Prompt 不冒充交互回答。精确绑定当前 Session/Run/request 的人类回答不等待可选的 Prompt 渲染观察；结束该观察不取消已派发的 Native Input，也不替请求补完成或批准。
+- Core 投递 scope 释放或进程退出，不代表 Native Input 已终结；游标仍在旧 claim 起点也不能证明旧输入将来不会写入。首次投递前须在现 admission 保存原始 bytes、key、range、daemon incarnation 与两阶段意图，冷恢复只按原 tuple 接续既有 recoverableInput，不能从 digest 或变化后的 Provider 计划重建输入。unknown/partial 保留原 operation、内容、工作面与原生输入能力，并说明待核实原因；缺 tuple 如实 unknown。不同消息接管须有真实 not_applied 或其他终局事实，证明旧请求已无未来写资格；不能猜 TTL、PID 或语义状态，不能留下无法自行恢复的永久 BUSY。
+- 两阶段 Prompt 的正文已接受、提交未派发时，人工输入可能占用旧提交范围。恢复须核对原提交的终局；不能把正文已接受改成整条消息未投递，也不能因为已终结的提交阶段让后续消息永久卡住。无法确认的部分仍保留原消息与原生输入能力。
+- 新的提交建立自己的两阶段字节范围与 readiness 观察；同一 `submissionId` 和相同内容按原冻结输入幂等续做，冲突内容拒绝。旧 ACK 只属于原 Session/Run/operation，不清新 claim、请求或草稿；Host accepted 不冒充 Provider consumed。任何恢复流程失败都要保留可见工作面和健康 Session。
+- 普通 Prompt 的意图在首次可能执行的 RPC 前，从 exact Core Session/Run 事实捕获显式 admission 前驱条件，与 operationId、原正文和原 Run 一起先保存，再发送；未派发的 queue tail 不在 enqueue 时提前绑定。`null` 仅表示已确认没有 admission，缺字段、不可读事实或现记录缺逻辑身份均是 unknown。重试、丢 ACK、冷恢复和跨客户端不换前驱或 Run；MessageTool/CLI 也在现有消息 journal 中保留第一次条件，不能由 Main 每次发送时补最新值。
+- 首次条件读取只刷新精确目标 Session 的持久事实，不以进程状态代替 admission，不顺带探测、投影或恢复其它 Session。Mote 浮窗和任务入口的消息复用现发件列表；入队表示保留意图，不能把它称为 Agent 已经收到或执行。 浮窗交接被拒时保留未交接文字及原因，只报告一次，不因重渲染反复交接或修改焦点。 目标事实读取的等待不得占住全局消息写通道，阻挡其它 Session 的消息；两个客户端准备同一消息时，只有首次保存的条件有效。
+- 消息回执只有已成立的状态转换才能写入 durable journal；被拒的转换不得留下无法重放的记录，也不得覆盖该消息已有的投递事实。
+- 控制链路报错或丢回执只说明该次投递无法确认，不据此把消息标为终局 failed。消息保留最后已确认的状态及未确认原因；取得真实回执后消除该提醒。迟到的报错不能降低另一客户端已确认的投递事实。 未确认原因是普通文本，保留换行；诊断时间必须有效，不能改写最后已确认状态的时间。同状态回执保持原值，不因重试刷新时间或原因。
+- Core 在现同 Session 独占 scope 中，先核条件再写 claim：当前是本 operation 且原 tuple 完整时继续恢复；当前仍是捕获的前驱时才允许首次 admission；已是其它后续 operation 则具名 unknown，零新派发、不改后续事实。只有真实证明该意图尚未 admission 且没有原在途执行，才能重新准备首次条件；timeout、丢 ACK、unknown 和零游标均不证明这一点。某个旧操作 unknown 不禁用整个健康 Session，新显式意图与 raw 仍可用。
 - 一个仍能接受输入的 Agent 必须有明确可达的发送路径。回合结束回执缺失不能把 readiness 变成永久许可闸；无法确认回合边界时说明风险，人工显式发送按「Cmd+Enter 直接 steer」执行；自动消费仍不能猜测空输入框等于回合已结束。已被接受但未确认的 Prompt 使用原 operation identity 续做，不重新发送正文；排队消息不因无关 Runtime 事件反复提交。
 
 ### Hook 配置隔离与非 AgentMux 会话

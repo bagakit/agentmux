@@ -275,13 +275,16 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
     'screen-evidence-gap': 'Screen confirmation from retained terminal output',
     'prompt-render-timeout': 'Confirming the prompt on screen',
     'screen-evidence-replaced': 'Screen confirmation was interrupted',
-    'turn-end-unconfirmed': 'Confirming the previous turn ended'
+    'turn-end-unconfirmed': 'Confirming the previous turn ended',
+    'input-unconfirmed': 'Confirming the original prompt input'
   }
   return {
     completed: false,
     step: {
       label: steps[session.terminalPromptDelivery.reason],
-      degradedMode: session.terminalPromptDelivery.reason === 'turn-end-unconfirmed'
+      degradedMode: session.terminalPromptDelivery.reason === 'input-unconfirmed'
+        ? 'Delivery is unknown. The original message is kept; retry continues the same input. The terminal remains available.'
+        : session.terminalPromptDelivery.reason === 'turn-end-unconfirmed'
         ? 'You chose to submit while the previous turn may still be running. Delivery as a new turn is not confirmed.'
         : session.terminalPromptDelivery.reason === 'screen-evidence-gap'
         ? 'Earlier terminal output is no longer retained. Prompt input continued without full screen confirmation.'

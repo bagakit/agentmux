@@ -8,6 +8,7 @@ let claimedStopOperation = null
 const store = {
   load: async () => await delegate.load(),
   loadRetiredRuns: async () => await delegate.loadRetiredRuns(),
+  withPromptSubmission: (id, operation) => delegate.withPromptSubmission(id, operation),
   loadRetiredAgentSessions: async () => await delegate.loadRetiredAgentSessions(),
   compareAndSwap: async (expected, next) => await delegate.compareAndSwap(expected, next),
   reserveLifecycle: async (reservation) => await delegate.reserveLifecycle(reservation),
