@@ -907,6 +907,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### 重启后的 Tab/Region 与 Session 恢复
 - 重启恢复必须先还原持久化的 Workbench Tab、Region、分屏树、顺序和焦点，再把其中的 Agent/Terminal Region 按其稳定 session identity attach 到仍由 Runtime 持有的 Run；不得因为 Runtime 尚未返回首个 snapshot 就创建第二个 session 或把 Region 清空。
+- 完整产品的私有恢复验收必须在首次 hydrate 前提供真实非空持久化输入，并确认它进入实际工作面、正常退出后仍可恢复；不能在 hydrate 后补写 seed，再把即时读回或后续人工修补当作重启保留的证明。普通写入与恢复流程保持原行为。
 - “session 仍在运行”与“界面尚未重新 attach”必须是两个独立状态。健康 Runtime 只允许显示连接中/待同步告示，不得把它翻译成“在其他应用打开”并要求用户手动 resume。
 - 只有 Core 明确确认原 Run 已退出且 Provider native handle 可恢复时，才显示 resume/restart 出口；恢复失败必须保留原 Tab/Region 拓扑和可解释的服务窗告示。
 
