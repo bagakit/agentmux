@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  installRecoverySeedBeforeLoad,
   recoveryIdentityMatches,
   summarizeRecoverySessionStore,
   summarizeRecoveryStorage
@@ -105,5 +106,44 @@ describe('real Electron recovery receipt projections', () => {
     expect(source).toContain('differentPid: first.report.pid !== second.report.pid')
     expect(source).toContain('sameRuntimeDirectory: first.report.runtimeDirectory === second.report.runtimeDirectory')
     expect(source).not.toContain('generation')
+  })
+})
+
+
+describe('private recovery seed first document owner', () => {
+  it('initializes the target and enables Page before registering the first application script', async () => {
+    const calls: string[] = []
+    let source = ''
+    const debuggerOwner = {
+      attach: vi.fn(() => calls.push('attach')),
+      isAttached: () => true,
+      detach: vi.fn(() => calls.push('detach')),
+      sendCommand: vi.fn(async (method: string, params?: { source?: string }) => {
+        calls.push(method)
+        if (params?.source) source = params.source
+        return { identifier: 'actual-owner-script' }
+      })
+    }
+    const release = await installRecoverySeedBeforeLoad({
+      loadURL: vi.fn(async (url: string) => { calls.push(url) }),
+      debugger: debuggerOwner as unknown as Electron.Debugger
+    }, '/tmp/seed-owner/index.html', storage())
+    expect(calls).toEqual(['about:blank', 'attach', 'Page.enable', 'Page.addScriptToEvaluateOnNewDocument'])
+    expect(source).toContain('localStorage.setItem')
+    expect(source).toContain('file:///tmp/seed-owner/index.html')
+    expect(source).toContain(JSON.stringify(storage()))
+    await release()
+    expect(calls).toEqual(['about:blank', 'attach', 'Page.enable', 'Page.addScriptToEvaluateOnNewDocument', 'Page.removeScriptToEvaluateOnNewDocument', 'detach'])
+    expect(debuggerOwner.sendCommand).toHaveBeenLastCalledWith('Page.removeScriptToEvaluateOnNewDocument', { identifier: 'actual-owner-script' })
+  })
+
+  it('detaches its own debugger when registration fails instead of navigating with an unconfirmed seed', async () => {
+    const detach = vi.fn()
+    const debuggerOwner = { attach: vi.fn(), isAttached: () => true, detach,
+      sendCommand: vi.fn(async () => { throw new Error('Registration rejected') }) }
+    await expect(installRecoverySeedBeforeLoad({ loadURL: vi.fn(async () => {}),
+      debugger: debuggerOwner as unknown as Electron.Debugger }, '/tmp/seed-owner/index.html', storage()))
+      .rejects.toThrow('Registration rejected')
+    expect(detach).toHaveBeenCalledOnce()
   })
 })
