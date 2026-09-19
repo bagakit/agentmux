@@ -93,7 +93,7 @@ async function main() {
       env: {
         ...process.env,
         AGENTMUX_DESKTOP_USER_DATA: userData,
-        AGENTMUX_RUNTIME_DIRECTORY: runtimeRoot,
+        AGENTMUX_RUNTIME_DIRECTORY: runtimeRoot, AGENTMUX_STATE_DIRECTORY: join(runtimeRoot, 'state'),
         AGENTMUX_DESKTOP_READY_FILE: readyFile,
         AGENTMUX_DESKTOP_FILE_EDITING_REPORT: fileEditingReport
       },

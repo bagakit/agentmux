@@ -16,7 +16,7 @@ const root = await mkdtemp(probeRoot ? join(probeRoot, 'seed-order-') : '/tmp/am
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace')
 const workspaceId = 'seed-order-workspace', tabId = 'seed-order-tab', agentRegionId = 'seed-order-agent', fileRegionId = 'seed-order-file'
 const groupId = 'seed-order-group', scratchGroupId = 'seed-order-scratch', draft = 'Unsent seed draft stays with the original Session'
-const environment = { HOME: privateHome, CODEX_HOME: join(privateHome, 'codex'), AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const environment = { HOME: privateHome, CODEX_HOME: join(privateHome, 'codex'), AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson') }
 const previous = new Map(Object.keys(environment).map(name => [name, process.env[name]]))
 const children = new Set(), connections = new Set(), deadline = Date.now() + 110_000

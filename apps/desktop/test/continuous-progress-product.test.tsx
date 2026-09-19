@@ -69,7 +69,7 @@ beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'amx-progress-product-'))
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   writes = []; requests = []; observations = []; cursor = 0; now = 0; ended = false
   corruptReply = false; dropReply = false; afterInputObservation = undefined
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()

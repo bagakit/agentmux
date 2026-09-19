@@ -25,7 +25,7 @@ const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser
 const children = new Set(), connections = new Set()
 const deadline = Date.now() + 120_000
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
-const fixtureEnvironment = { HOME: privateHome, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const fixtureEnvironment = { HOME: privateHome, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 let phase = 'prepare', failure, first, second, server
 async function waitFor(label, read, budget = 20_000) {

@@ -54,6 +54,7 @@ app.whenReady().then(async () => {
     const env = { ...process.env }
     for (const name of Object.keys(env)) if (name.startsWith('AGENTMUX_')) delete env[name]
     env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    env.AGENTMUX_STATE_DIRECTORY = path.join(runtimeDirectory, 'state')
     env.ELECTRON_RUN_AS_NODE = '1'
     const inspect = async () => {
       const { stdout } = await execFileAsync(process.execPath, [path.join(path.dirname(coreFile), 'agentmux.js'),

@@ -30,7 +30,7 @@ const userData = join(privateRoot, 'user-data'), runtimeDirectory = join(private
 const workspacePath = join(privateRoot, 'workspace'), tracePath = join(privateRoot, 'executor.ndjson')
 const wrapper = join(workspacePath, 'private-executor.sh'), unavailable = join(workspacePath, 'missing-executor')
 const store = new core.AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json'))
-const keys = ['CODEX_HOME', 'AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_DESKTOP_USER_DATA']
+const keys = ['CODEX_HOME', 'AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_DESKTOP_USER_DATA']
 const previousEnvironment = new Map(keys.map(key => [key, process.env[key]]))
 const children = new Set(), fixture = {}, receipts = [], ownedRunProcesses = new Map()
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false, remaining: null }
@@ -351,7 +351,7 @@ try {
   assert.ok(nativeCommand.startsWith('/'))
   nativeBefore = hash(await readFile(nativeCommand))
   // Private home is established BEFORE any Core connect/create/repair or native fixture preparation.
-  privateEnvironment = { CODEX_HOME: join(privateRoot, 'codex-home'), AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+  privateEnvironment = { CODEX_HOME: join(privateRoot, 'codex-home'), AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
     AGENTMUX_MESSAGE_QUEUE_PATH: join(privateRoot, 'messages.ndjson'), AGENTMUX_DESKTOP_USER_DATA: userData }
   Object.assign(process.env, privateEnvironment)
   nativeFixture = await prepareNativeFixture({ root: privateRoot, nativeCommand })

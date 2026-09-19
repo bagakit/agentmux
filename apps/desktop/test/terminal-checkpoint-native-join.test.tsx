@@ -124,7 +124,7 @@ beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'amx-native-join-'))
   await mkdir(join(directory, 'private-codex'), { mode: 0o700 })
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   vi.stubEnv('CODEX_HOME', join(directory, 'private-codex'))
   daemon = spawn(binary, ['--socket', join(directory, 'ctxmux.sock'), '--state-dir', join(directory, 'state')], { stdio: 'ignore' })
   await writeFile(join(import.meta.dirname, '../../../.tmp/continuation-join/owned-processes.json'), JSON.stringify({daemonPid:daemon.pid,directory,childPid:null}))

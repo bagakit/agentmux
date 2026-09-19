@@ -26,9 +26,9 @@ const children = new Set(), connections = new Set()
 const deadline = Date.now() + 240_000
 const receipt = { schema: 'agentmux.branch-compare-restart.v1', completeGate: false, executedSlices: [], cleanup: {} }
 let phase = 'prepare', failure, first, second, client, session, runIdentity
-const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
+const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 const dirtyContent = 'Unsaved Monaco body must survive branch comparison and normal restart\n'
-const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
 async function git(...args) { return (await exec('git', ['-C', workspacePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 })).stdout }
@@ -297,7 +297,7 @@ try {
   receipt.fixture={ancestor,baseOid,targetOid,nextOid,longPath}; receipt.gitBeforeAgentSetup=await gitFacts()
   const executable=join(root,'private-cat.sh')
   await writeFile(executable,'#!/bin/sh\numask 077\nstty -echo -icanon\nprintf "Private branch isolation cat ready\\n"\nexec /bin/cat\n',{mode:0o700})
-  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
   client=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
   session=await client.createAgent({createOperationId:randomUUID(),executorId:'probe',providerId:'codex',commandOverride:executable,workspacePath,env:{CODEX_HOME:codexHome},injectAgentMuxGuide:false,cols:100,rows:30})
   const originalRun=(await client.listRuns()).find(run=>run.runId===session.run.runId);assert.equal(originalRun?.state,'running');assert.ok(Number.isFinite(originalRun.acceptedInputBytes));runIdentity=await processIdentity(originalRun.pid);assert.ok(runIdentity?.group>1)

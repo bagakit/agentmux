@@ -26,7 +26,7 @@ const runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'work
 const destination = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate/AgentMux.app')
 const failedCandidate = join(root, 'failed/AgentMux.app'), unrestoredCandidate = join(root, 'unrestored/AgentMux.app'), socketPath = join(runtimeDirectory, 'ctxmux.sock')
 const oldArtifacts = process.env.AGENTMUX_VERIFY_PREVIOUS_ARTIFACTS ?? join(repositoryRoot, '.tmp/ctxmux-wal-capacity-worktree/.tmp/wal-release-artifacts')
-const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), CODEX_HOME: join(home, 'codex') }
 const environmentBefore = new Map(Object.keys(fixtureEnvironment).map(key => [key, process.env[key]]))
 const children = new Set(), connections = new Set(), owners = new Map(), probes = []

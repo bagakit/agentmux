@@ -253,7 +253,7 @@ async function main() {
         // isolated directory; otherwise an already-running desktop instance owns the
         // single-instance lock and the probe exits before writing a report.
         AGENTMUX_DESKTOP_USER_DATA: userData,
-        AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+        AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
         AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
         AGENTMUX_DESKTOP_RESOURCE_IDENTITY: JSON.stringify({
           agentmuxCommit: sourceCommit.stdout.trim(),

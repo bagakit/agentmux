@@ -22,8 +22,8 @@ const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?
 const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
-const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
+const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
 const deadline = Date.now() + 110_000
@@ -192,7 +192,7 @@ try {
   const rendererIdentity = await compiledRendererIdentity()
   // Provider Hook installation occurs even for a synthetic command. Parent Core setup and every
   // Electron child must share this private home rather than touching the user's native CLI config.
-  Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+  Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
     AGENTMUX_MESSAGE_QUEUE_PATH: fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
   await mkdir(topicsPath, { recursive: true })

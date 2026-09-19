@@ -184,13 +184,13 @@ if (process.argv.includes('--version')) { console.log('private-native-fixture 1'
 const f = JSON.parse(await readFile(process.env.AMX_IDENTITY_FIXTURE, 'utf8'))
 const args = process.argv.slice(2)
 const trace = entry => appendFile(f.trace, JSON.stringify(entry)+'\n')
-const allowedAgentMuxEnv = new Set(['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE',
+const allowedAgentMuxEnv = new Set(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE',
   'AGENTMUX_ENV','AGENTMUX_CLI','AGENTMUX_HOOK_URL','AGENTMUX_HOOK_TOKEN','AGENTMUX_AGENT_SESSION_ID','AGENTMUX_PROVIDER_ID',
   'AGENTMUX_EXECUTOR_ID','AGENTMUX_LIFECYCLE_OPERATION_ID','AGENTMUX_AGENT_CAPABILITY','AGENTMUX_USAGE_TRANSCRIPT_FORMAT'])
 for (const name of Object.keys(process.env).filter(name=>name.startsWith('AGENTMUX_'))) {
   if (!allowedAgentMuxEnv.has(name)) throw new Error('unexpected inherited AgentMux context: '+name)
 }
-for (const name of ['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE']) {
+for (const name of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE']) {
   if (!process.env[name]?.startsWith(f.root+'/')) throw new Error('non-private fixture path: '+name)
 }
 if (args.includes('app-server')) {
@@ -298,11 +298,11 @@ describe('public Hook native identity survives a new Client and Desktop durable 
     // is spawned. The public Core installs fresh Run credentials after these private path guards.
     for (const name of Object.keys(process.env).filter(name=>name.startsWith('AGENTMUX_'))) vi.stubEnv(name,undefined)
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY',runtime)
-    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH',join(root,'messages.ndjson'))
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(runtime, 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH',join(root,'messages.ndjson'))
     vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE',storePath)
     expect(Object.keys(process.env).filter(name=>name.startsWith('AGENTMUX_')).sort()).toEqual([
-      'AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_RUNTIME_DIRECTORY'])
-    for (const name of ['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE']) {
+      'AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_STATE_DIRECTORY'])
+    for (const name of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE']) {
       expect(process.env[name]?.startsWith(root+'/')).toBe(true)
     }
     fixtureHome.path = join(root,'home')

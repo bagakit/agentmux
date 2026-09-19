@@ -68,7 +68,7 @@ try {
   receipt.compiledBefore=await hashes([...await collect(path.join(coreRoot,'dist')),preload,controller,...await collect(path.join(privateRoot,'renderer'))])
   assert.ok(Object.keys(receipt.compiledBefore).length>0)
   await Promise.all(['home','codex','runtime','user-data','session-data'].map(name=>fs.mkdir(path.join(privateRoot,name),{recursive:true,mode:0o700})))
-  const env={...process.env,HOME:path.join(privateRoot,'home'),CODEX_HOME:path.join(privateRoot,'codex'),AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'messages.ndjson')};delete env.ELECTRON_RUN_AS_NODE
+  const env={...process.env,HOME:path.join(privateRoot,'home'),CODEX_HOME:path.join(privateRoot,'codex'),AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'), AGENTMUX_STATE_DIRECTORY: path.join(path.join(privateRoot,'runtime'), 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'messages.ndjson')};delete env.ELECTRON_RUN_AS_NODE
   child=spawn(require('electron'),[path.join(fixture,'main.cjs'),privateRoot,path.join(privateRoot,'renderer/index.html'),core,preload,controller,binary,path.join(fixture,'program.py')],{cwd:root,env,detached:true,stdio:['ignore','ignore','pipe']})
   receipt.pid=child.pid;const log=[];child.stderr.on('data',data=>log.push(data.toString()))
   const exit=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}))})

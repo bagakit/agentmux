@@ -102,7 +102,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'amux-executor-references-'))
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
-    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
     store = new AgentMuxMemoryAgentSessionStore()
     retained = record('retained')
     await store.compareAndSwap(null, retained)

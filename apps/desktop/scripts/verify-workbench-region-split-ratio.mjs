@@ -17,7 +17,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex'), delay = 
 const root = await mkdtemp('/tmp/amx-split-ratio-'), home = join(root, 'home'), userData = join(root, 'user-data')
 const runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), workspaceId = 'private-split-ratio'
 const socketPath = join(runtimeDirectory, 'ctxmux.sock'), deadline = Date.now() + 180000
-const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), CODEX_HOME: join(home, 'codex') }
 const environmentBefore = new Map(Object.keys(fixtureEnvironment).map(key => [key, process.env[key]]))
 const cwdEnv = { ...process.env, ...fixtureEnvironment }

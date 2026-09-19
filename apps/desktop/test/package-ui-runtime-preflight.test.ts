@@ -22,6 +22,7 @@ const plans: any[] = []
 const ownedRuns: any[] = []
 const records: Record<string, unknown>[] = []
 const oldRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const oldStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 const oldQueue = process.env.AGENTMUX_MESSAGE_QUEUE_PATH
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true } catch { return false } }
 async function wait<T>(read: () => Promise<T>, predicate: (value: T) => boolean): Promise<T> {
@@ -70,6 +71,7 @@ beforeAll(async () => {
   runtimeDirectory = join(root, 'runtime'); socket = join(runtimeDirectory, 'ctxmux.sock')
   await mkdir(runtimeDirectory); await mkdir(join(root, 'codex'))
   process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+  process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'state')
   process.env.AGENTMUX_MESSAGE_QUEUE_PATH = join(root, 'messages.jsonl')
   const unpacked = join(root, 'sdk'); await mkdir(unpacked)
   await exec('/usr/bin/tar', ['-xzf', join(vendor, 'ctxmux-sdk-0.0.0.tgz'), '-C', unpacked])
@@ -124,6 +126,7 @@ afterAll(async () => {
   if (daemon) await stopDaemon().catch(error => errors.push(String(error)))
   for (const run of ownedRuns) if (alive(run.pid)) errors.push(`Owned private child remains: ${run.pid}`)
   if (oldRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY; else process.env.AGENTMUX_RUNTIME_DIRECTORY = oldRuntimeDirectory
+  if (oldStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY; else process.env.AGENTMUX_STATE_DIRECTORY = oldStateDirectory
   if (oldQueue === undefined) delete process.env.AGENTMUX_MESSAGE_QUEUE_PATH; else process.env.AGENTMUX_MESSAGE_QUEUE_PATH = oldQueue
   records.push({ cleanupErrors: errors, nativeSignalsDuringPreflight: 0, userRuntimeTouched: false })
   if (process.env.AGENTMUX_PREFLIGHT_PROOF_LOG) await writeFile(process.env.AGENTMUX_PREFLIGHT_PROOF_LOG, JSON.stringify(records, null, 2) + '\n')

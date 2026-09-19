@@ -124,7 +124,7 @@ async function launch(label, seed) {
   const execution = await runProbeProcess(electronExecutable, [entry], {
     temporaryRoot, cwd: desktopRoot, timeoutMs: 60_000,
     env: {
-      ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+      ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
       AGENTMUX_DESKTOP_RECOVERY_REPORT: reportFile, ...(seed ? { AGENTMUX_DESKTOP_RECOVERY_SEED: seed } : {}),
       AGENTMUX_DESKTOP_READY_FILE: readyFile, AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1'
     }

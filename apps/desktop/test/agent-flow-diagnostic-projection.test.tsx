@@ -133,7 +133,8 @@ function workface() {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   dir = await mkdtemp(join(tmpdir(), 'amx-flow-diagnostic-'))
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'));
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(dir, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
   bridge.handlers.clear(); bridge.listeners.clear(); events = []; wire = []; writes = []
   semanticTime = 1_000
   // A fixed clock gives the mutation and copied control the same freshness inputs.

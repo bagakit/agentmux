@@ -21,8 +21,8 @@ const root = await mkdtemp('/tmp/amx-state-time-')
 const userData=join(root,'user-data'), privateHome=join(root,'home'), runtimeDirectory=join(root,'runtime')
 const workspacePath=join(root,'workspace'), codexHome=join(privateHome,'codex')
 const workspaceId='private-state-time', workspaceName='Private state time'
-const fixtureEnvironment={AGENTMUX_DESKTOP_USER_DATA:userData,AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'),CODEX_HOME:codexHome}
-const initialEnvironment=new Map(['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
+const fixtureEnvironment={AGENTMUX_DESKTOP_USER_DATA:userData,AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'),CODEX_HOME:codexHome}
+const initialEnvironment=new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
 const children=new Set(),childIdentities=new Map(),connections=new Set(),runIdentities=new Map(),sessions=new Map()
 const deadline=Date.now()+180_000
 const receipt={schema:'agentmux.agent-state-time-restart.v1',completeGate:false,syntheticProducer:true,executedSlices:[],cleanup:{}}
@@ -215,7 +215,7 @@ async function sameRuns(cdp) {
 try {
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true}),mkdir(privateHome,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
-  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
   const executable=join(root,'private-cat.sh')
   await writeFile(executable,`#!/bin/sh\numask 077\nprintf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${root}/binding-'"$AGENTMUX_AGENT_SESSION_ID".json\nstty -echo -icanon\nprintf 'Private state time cat ready\\n'\nexec /bin/cat\n`,{mode:0o700})
   receipt.fixture={executableSha256:digest(await readFile(executable)),syntheticPty:true,syntheticNativeHook:true}

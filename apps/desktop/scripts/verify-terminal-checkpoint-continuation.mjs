@@ -21,8 +21,8 @@ const exec = promisify(execFile), digest = bytes => createHash('sha256').update(
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const root = await mkdtemp('/tmp/amx-checkpoint-desktop-')
 const userData = join(root, 'user-data'), privateHome = join(root, 'home'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), codexHome = join(root, 'codex-home')
-const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA:userData, AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'), CODEX_HOME:codexHome }
-const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
+const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA:userData, AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'), CODEX_HOME:codexHome }
+const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
 const connections = new Set(), children = new Set(), runs = [], phases = []
 const receipt = { schema:'agentmux.terminal-checkpoint-desktop.v1',passed:false,cleanup:{},phases,limitations:[
  'Actual release18 Generic private PTY and production Desktop path; no user Run, model call or native Agent CLI behavior is implied.',
@@ -340,7 +340,7 @@ async function identity() {
 try {
  receipt.before=await identity()
  await Promise.all([userData,privateHome,runtimeDirectory,workspacePath,codexHome].map(path=>mkdir(path,{recursive:true,mode:0o700})))
- Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+ Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
  await writeFile(join(root,'terminal-program.py'),python,{mode:0o700})
  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private Runtime'}],executors:{},
  workspaces:[{id:'checkpoint-fixture',name:'Private checkpoint fixture',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}}}))

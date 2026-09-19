@@ -47,8 +47,8 @@ globalThis.fetch=async (input,options={}) => {
 const workspaceId = 'settings-cli-workspace', tabId = 'settings-cli-tab', groupId = 'settings-cli-group'
 const agentRegionId = 'settings-cli-agent', fileRegionId = 'settings-cli-file'
 const environment = { HOME: privateHome, CODEX_HOME: codexHome, AGENTMUX_DESKTOP_USER_DATA: userData,
-  AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson') }
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
+  AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson') }
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 const receipt = { schema: 'agentmux.settings-resources-cli-desktop-proof.v1', passed: false, cli: [], facts: {}, cleanup: {},
   fixture: { userData, privateHome, runtimeDirectory, workspacePath, topicsPath, syntheticPty: true } }
 let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, resources, store, originalSession, originalHistory
@@ -187,7 +187,7 @@ try {
   const executable=join(workspacePath,'private-cat.sh'), splitFile=join(workspacePath,'split.txt')
   await writeFile(executable,'#!/bin/sh\nprintf "Private settings proof PTY\\n"\nexec /bin/cat\n',{mode:0o700})
   await writeFile(splitFile,'The original file Region stays present.\n')
-  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory,AGENTMUX_MESSAGE_QUEUE_PATH:environment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:environment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
   store=new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))
   client=await connectLocalAgentMux({store})
   session=await client.createAgent({createOperationId:randomUUID(),executorId:'probe',providerId:'codex',commandOverride:executable,

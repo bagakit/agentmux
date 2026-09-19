@@ -61,7 +61,7 @@ try {
   await symlink(join(desktopRoot, 'node_modules/@agentmux/core'), join(root, 'node_modules/@agentmux/core'))
   await copyFile(new URL('../../../packages/core/test/fixtures/prompt-store-lock-worker.mjs', import.meta.url), worker)
   const environment = { HOME: privateHome, CODEX_HOME: join(privateHome, 'codex'),
-    AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+    AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: path.join(root, 'runtime', 'state'),
     AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
   const launch = desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor,
     packagedApplication: appPath })

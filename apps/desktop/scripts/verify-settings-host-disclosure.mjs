@@ -105,7 +105,7 @@ if (!process.argv.includes('--driver')) {
   const root = option('--probe-root'), evidence = option('--evidence'), mode = option('--mode'); assert.ok(root && evidence); assert.ok(['new', 'saved'].includes(mode))
   const privateHome = join(root, 'home'), userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspace = join(root, 'workspace')
   const environment = { HOME: privateHome, CODEX_HOME: join(privateHome, 'codex'), AGENTMUX_DESKTOP_USER_DATA: userData,
-    AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
+    AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
   const previous = new Map(Object.keys(environment).map(name => [name, process.env[name]])), owned = []
   const register = record => { assert.ok(record && record.pid > 1 && record.group > 1); owned.push(record); writeFileSync(join(root, 'owned-processes.next'), JSON.stringify(owned)); renameSync(join(root, 'owned-processes.next'), join(root, 'owned-processes.json')) }
   const children = new class extends Set { add(child) {

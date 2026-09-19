@@ -142,7 +142,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
       timeout: 15000,
       env: {
         ...process.env,
-        AGENTMUX_RUNTIME_DIRECTORY: runtime,
+        AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'),
         AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
         AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
         AGENTMUX_ENV: '1',
@@ -192,7 +192,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
     const jsonBody = '{"messageId":"explicit-author-body","nested":{"text":"keep exactly"}}'
     const send = async (body: string, managed: boolean, suppliedCapability = capability) => await exec(cli, ['send', '--to-session', 'mailbox-rec', '--text', body], {
       timeout: 15000,
-      env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
+      env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
         AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: managed ? '1' : '',
         AGENTMUX_AGENT_SESSION_ID: 'caller-cli', AGENTMUX_AGENT_CAPABILITY: suppliedCapability }
     })
@@ -230,7 +230,7 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
     return await useAppStore.getState().executeControl(request)
   } }, join(runtime, 'control.sock'))
   await server.start()
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
     AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: '' }
   const run = async (args: string[]) => JSON.parse((await exec(cli, args, { env, timeout: 15000 })).stdout)
   try {

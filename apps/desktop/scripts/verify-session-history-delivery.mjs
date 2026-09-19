@@ -25,6 +25,7 @@ const userData = join(temporaryRoot, 'user-data')
 const runtimeDirectory = join(temporaryRoot, 'runtime')
 const workspacePath = join(temporaryRoot, 'workspace')
 const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const originalStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
 const probeDigest = hash(await readFile(import.meta.filename))
 const children = new Set()
 let client
@@ -83,7 +84,7 @@ async function launch(label) {
   const readyFile = join(temporaryRoot, `ready-${label}.json`)
   const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+    env: { ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
       AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
   children.add(child)
@@ -131,7 +132,7 @@ async function seedWorkbench(seed) {
   const reportPath = join(temporaryRoot, 'seed-report.json')
   const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js')], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'ignore'],
-    env: { ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
+    env: { ...process.env, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
       AGENTMUX_DESKTOP_RECOVERY_REPORT: reportPath, AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed),
       AGENTMUX_DESKTOP_READY_FILE: join(temporaryRoot, 'seed-ready.json'), AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }
   })
@@ -254,6 +255,7 @@ async function compiledCandidate() {
 try {
   candidateBefore = await compiledCandidate()
   process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+  process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'state')
   await mkdir(userData, { recursive: true })
   await mkdir(workspacePath, { recursive: true })
   const located = await execFileAsync('which', [process.env.AGENTMUX_HISTORY_NATIVE_COMMAND ?? 'codex'], { timeout: 10_000 })
@@ -364,6 +366,8 @@ try {
   } finally {
     if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
     else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
+    if (originalStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+    else process.env.AGENTMUX_STATE_DIRECTORY = originalStateDirectory
   }
 }
 const receipt = { schema: 'agentmux.native-history-delivery.v1', ...result, phase,

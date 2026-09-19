@@ -86,7 +86,7 @@ describe('desktop resource probe contract', () => {
       "mkdtemp(join(tmpdir(), 'agentmux-desktop-resource-'))",
       "mkdtemp('/tmp/amx-desktop-resource-')",
       'AGENTMUX_DESKTOP_USER_DATA',
-      'AGENTMUX_RUNTIME_DIRECTORY',
+      'AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY',
       'AGENTMUX_DESKTOP_RESOURCE_REPORT',
       'resource-probe.ts',
       '20_000',
