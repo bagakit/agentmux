@@ -38,6 +38,7 @@ export function terminalTheme(themeId: TerminalThemeId): Readonly<ITheme> {
 
 const TERMINAL_BASE_OPTIONS = Object.freeze({
   allowProposedApi: true,
+  scrollOnUserInput: false,
   cursorBlink: true,
   cursorStyle: 'block',
   cursorInactiveStyle: 'outline',
