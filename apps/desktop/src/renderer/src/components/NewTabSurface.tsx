@@ -226,6 +226,7 @@ export function NewTabSurface({
   async function captureComposerScreenshot(): Promise<void> {
     await insertionRef.current?.insert(async () => {
       const path = await api.ui.captureScreenshot()
+      if (!feedback.isCurrent()) return null
       return path ? appendFileReferences('', [path]) : null
     }, { separate: true })
   }
