@@ -158,7 +158,8 @@ finally {
   try { await quit() } catch (error) { failures.push(`Quit: ${error.message}`) }
   for (const connection of connections) connection.close()
   for (const child of children) {
-    if (child.pid && child.exitCode === null && child.signalCode === null) {
+    // A clean Main exit can leave its detached Runtime and Crashpad descendants.
+    if (child.pid) {
       try { await stopProbeProcesses(child.pid, root) } catch (error) { failures.push(`Private child: ${error.message}`) }
     }
   }
