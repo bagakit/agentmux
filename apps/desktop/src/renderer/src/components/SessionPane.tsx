@@ -20,6 +20,7 @@ import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from './ConversationMessage'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
@@ -358,6 +359,8 @@ export function SessionPane({
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
       {launchNotice}
+      {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }}
+        busy={recovering} retry={() => void recover()} /> : null}
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
           <div className="agent-terminal-stage">

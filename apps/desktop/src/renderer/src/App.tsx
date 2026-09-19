@@ -64,6 +64,7 @@ function DesktopApp() {
   const lastError = useAppStore((state) => state.lastError)
   const errorDismissed = useAppStore((state) => state.errorDismissed)
   const errorNoticeKind = useAppStore((state) => state.errorNoticeContext?.kind ?? 'indeterminate')
+  const lifecycleError = useAppStore((state) => state.errorNoticeContext?.lifecycle !== undefined)
   const dismissError = useAppStore((state) => state.dismissError)
   const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
@@ -347,9 +348,9 @@ function DesktopApp() {
           </div>
         <div className="main-shell__notices">
           <TransientErrorNotice
-            error={error}
+            error={lifecycleError ? null : error}
             dismissed={errorDismissed}
-            lastError={lastError}
+            lastError={lifecycleError ? null : lastError}
             kind={errorNoticeKind}
             onDismiss={dismissError}
             onReopen={reopenError}

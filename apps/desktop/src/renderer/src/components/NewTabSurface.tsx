@@ -25,6 +25,8 @@ import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { AgentComposerTools } from './AgentComposerTools'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
+import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
+import { lifecycleFailureBelongsTo } from '../lib/agent-lifecycle-feedback'
 
 export function NewTabSurface({
   tabGroupId,
@@ -192,7 +194,13 @@ export function NewTabSurface({
     try {
       await action()
     } catch (cause) {
-      setError(presentError(cause))
+      if (kind === 'agent' && regionId && tabId) {
+        const state = useAppStore.getState()
+        if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return
+        if (state.error !== presentError(cause) || !lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })) {
+          state.reportError(cause, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
+        }
+      } else setError(presentError(cause))
     } finally {
       setBusy(null)
     }
@@ -462,6 +470,7 @@ export function NewTabSurface({
           </DropdownMenu.Content></DropdownMenu.Portal>
         </DropdownMenu.Root> : null}
       </div>
+      {regionId ? <AgentLifecycleFeedback owner={{ regionId }} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
 
       <div className="launch-surface__alt">
