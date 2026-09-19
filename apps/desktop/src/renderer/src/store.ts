@@ -681,7 +681,7 @@ type AppState = {
     location?: { line: number; column?: number },
     workspaceId?: string,
     openAsText?: boolean
-  ): Promise<void>
+  ): Promise<boolean>
   /**
    * 给一个已在板上、但还没有文档的文件面装上它的文档。
    *
@@ -1986,6 +1986,10 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   return entry.operationId
 }
+
+// File data requests are shared; display intent belongs to each explicit caller.
+let fileOpenIntentVersion = 0
+let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
@@ -3925,7 +3929,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 同 createNote：把开头解析出来的那一个显式传下去。下面 regionId 是按这个 workspaceId 派生的，
     // 若 openFile 自己重读活动 Workspace，两者就会指向不同的 Workspace——文件在 A 打开、diff 模式
     // 却切到了 B 的 Region（或谁的都不是）。
-    await get().openFile(path, undefined, undefined, workspaceId)
+    const opening = get().openFile(path, undefined, undefined, workspaceId)
+    const intentVersion = fileOpenIntentVersion
+    const mayReveal = await opening
     const tabId = fileTabId(workspaceId, path)
     const regionId = initialWorkbenchRegionId(tabId)
     const state = get(), tab = state.tabs[tabId], layout = state.layouts[workspaceId]
@@ -3936,9 +3942,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
     // A later navigation owns the screen while the file producer is pending.
     if (
+      mayReveal && intentVersion === fileOpenIntentVersion &&
       state.mainSurface === navigation.mainSurface &&
       state.activeWorkspaceId === navigation.activeWorkspaceId &&
-      state.agentFocus === navigation.agentFocus
+      state.agentFocus.execution.sessionId === navigation.agentFocus.execution.sessionId &&
+      state.agentFocus.pmo.sessionId === navigation.agentFocus.pmo.sessionId
     ) {
       set({
         activeWorkspaceId: workspaceId, mainSurface: 'workbench',
@@ -4378,9 +4386,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
     // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
-    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
-    const layout = workspaceId ? get().layouts[workspaceId] : undefined
-    if (!workspaceId || !layout) return
+    const navigation = get()
+    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
+    const layout = workspaceId ? navigation.layouts[workspaceId] : undefined
+    if (!workspaceId || !layout) return false
+    const intentVersion = ++fileOpenIntentVersion
+    fileOpenNavigationUnsubscribe?.()
+    const selectedLayout = navigation.activeWorkspaceId ? navigation.layouts[navigation.activeWorkspaceId] : undefined
+    const selectedGroupId = selectedLayout?.activeGroupId
+    const selectedTabId = selectedLayout ? findGroup(selectedLayout, selectedLayout.activeGroupId)?.activeTabId : undefined
+    const selectedRegionId = selectedTabId ? navigation.tabs[selectedTabId]?.layout.activeRegionId : undefined
+    let cancelled = false
+    const unsubscribe = useAppStore.subscribe(function observeFileNavigation(state) {
+      const currentLayout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
+      const currentTabId = currentLayout ? findGroup(currentLayout, currentLayout.activeGroupId)?.activeTabId : undefined
+      const currentRegionId = currentTabId ? state.tabs[currentTabId]?.layout.activeRegionId : undefined
+      if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId ||
+        state.agentFocus.execution.sessionId !== navigation.agentFocus.execution.sessionId ||
+        state.agentFocus.pmo.sessionId !== navigation.agentFocus.pmo.sessionId ||
+        currentLayout?.activeGroupId !== selectedGroupId || currentTabId !== selectedTabId || currentRegionId !== selectedRegionId) {
+        cancelled = true
+        releaseNavigation()
+      }
+    })
+    fileOpenNavigationUnsubscribe = unsubscribe
+    const releaseNavigation = () => {
+      unsubscribe()
+      if (fileOpenNavigationUnsubscribe === unsubscribe) fileOpenNavigationUnsubscribe = undefined
+    }
+    const mayReveal = () => intentVersion === fileOpenIntentVersion && !cancelled
+    const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
     // 与下面目录分支同一个「不进 Monaco」的形状，但判据是纯字符串（扩展名），所以在读之前就分叉：
     // 二进制 `.webloc` 走 `files.read` 的 `toString('utf8')` 会被破坏，取 URL 必须走 main 侧字节 +
@@ -4388,33 +4423,42 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 打开——诚实失败，不静默丢。`openAsText` 是「查看源码」入口：显式绕过这条分支回到文本路径（§2.6）。
     const bookmarkKind = openAsText ? null : bookmarkKindForPath(path)
     if (bookmarkKind) {
-      const bookmark = await api.files.readBookmark(workspaceId, path)
-      if (bookmark?.url) {
-        // 把书签来历带进 Browser 面：供「查看源码」按钮显示与灰不灰（binary 那档不给，§2.7）。
-        await get().createBrowser(tabGroupId ?? layout.activeGroupId, undefined, bookmark.url, {
-          path,
-          binary: bookmark.binary
-        })
-        return
+      try {
+        const bookmark = await api.files.readBookmark(workspaceId, path)
+        if (bookmark?.url) {
+          if (!mayReveal()) return false
+          releaseNavigation()
+          set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
+          // 把书签来历带进 Browser 面：供「查看源码」按钮显示与灰不灰（binary 那档不给，§2.7）。
+          await get().createBrowser(tabGroupId ?? layout.activeGroupId, undefined, bookmark.url, {
+            path,
+            binary: bookmark.binary
+          })
+          return false
+        }
+      } catch (error) {
+        releaseNavigation()
+        throw error
       }
     }
-    const key = documentKey(workspaceId, path)
-    // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
-    // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
-    // for both paths means re-clicking a `:line` link on an open file re-reveals that line.
-    if (location) {
-      set((state) => ({
-        documentRevealTargets: { ...state.documentRevealTargets, [key]: location }
-      }))
-    }
     try {
+      // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
+      // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
+      // for both paths means re-clicking a `:line` link on an open file re-reveals that line.
+      if (location) {
+        set((state) => ({
+          documentRevealTargets: { ...state.documentRevealTargets, [key]: location }
+        }))
+      }
       const existing = get().documents[key]
       if (existing) {
+        if (!mayReveal()) return false
+        releaseNavigation()
         const targetGroupId = tabGroupId ?? layout.activeGroupId
         const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
         const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
         set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, topicId))
-        return
+        return intentVersion === fileOpenIntentVersion
       }
       while (!get().documents[key]) {
         let request = fileOpenRequests.get(key)
@@ -4427,15 +4471,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               await api.files.observe(workspaceId, path)
               const result = await api.files.read(workspaceId, path)
               if (result.status === 'directory') {
-                // A clicked path can be a directory (detection is pure-string and cannot know), and
-                // a directory is not a document. Reveal it in the file tree — the same behaviour the
-                // explorer already gives a directory click — and surface the Files dock so the reveal
-                // is visible even when the click came from a terminal or a chat message.
+                // The shared producer owns the verdict, not any caller's navigation.
                 await api.files.unobserve(workspaceId, path)
-                get().updateFileExplorerState(workspaceId, (current) =>
-                  revealFileExplorerPath(current, path))
-                set({ workspaceTool: 'files-branches', toolsOpen: true, mainSurface: 'workbench' })
-                return false
+                return 'directory' as const
               }
               if (result.status !== 'read') {
                 await api.files.unobserve(workspaceId, path)
@@ -4452,10 +4490,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 await api.files.unobserve(workspaceId, path)
                 return false
               }
-              const targetGroupId = tabGroupId ?? currentLayout.activeGroupId
-              const activeTabId = findGroup(currentLayout, targetGroupId)?.activeTabId
-              const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
-              set((state) => reduceFileOpened(state, workspaceId, path, result.document, tabGroupId, topicId))
+              const targetGroupId = tabGroupId ?? (findGroup(currentLayout, layout.activeGroupId)
+                ? layout.activeGroupId : currentLayout.activeGroupId)
+              const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
+              const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
+              // Shared reads own data/placement, never a caller's later navigation. Each caller
+              // below decides whether it still owns the latest uncancelled display intent.
+              set((state) => {
+                const opened = reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, topicId)
+                const placed = opened.layouts[workspaceId]!
+                return {
+                  ...opened,
+                  lastActiveFileByWorkspace: state.lastActiveFileByWorkspace,
+                  layouts: { ...opened.layouts, [workspaceId]: {
+                    ...placed, activeGroupId: currentLayout.activeGroupId,
+                    groups: placed.groups.map((group) => {
+                      const selected = findGroup(currentLayout, group.id)
+                      return selected ? { ...group, activeTabId: selected.activeTabId, recentTabIds: selected.recentTabIds } : group
+                    })
+                  } }
+                }
+              })
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
@@ -4471,12 +4526,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           fileOpenRequests.set(key, request)
         }
         const opened = await request
-        if (!opened || get().documents[key]) return
-        if (!joinedRequest) return
+        if (opened === 'directory') {
+          if (mayReveal()) {
+            releaseNavigation()
+            get().updateFileExplorerState(workspaceId, (current) => revealFileExplorerPath(current, path))
+            set({ activeWorkspaceId: workspaceId, workspaceTool: 'files-branches', toolsOpen: true, mainSurface: 'workbench' })
+          }
+          return false
+        }
+        if (!opened) return false
+        const state = get(), currentLayout = state.layouts[workspaceId]
+        if (state.documents[key] && currentLayout) {
+          if (!mayReveal()) return false
+          releaseNavigation()
+          const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
+          const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
+          set((current) => reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, topicId))
+          return intentVersion === fileOpenIntentVersion
+        }
+        if (!joinedRequest) return false
       }
+      return false
     } catch (error) {
       get().reportError(error)
+      return false
     } finally {
+      releaseNavigation()
       // 「跳到第 N 行」是一次性的，而它的存放位置**会被复用**：key 是 `ws\0path`，确定性的。
       // 上面那次写入排在所有失败出口之前（必须如此——已开着的文件重点一次链接也要重新跳），
       // 而这个方法有四个失败出口（目录分支、读失败、lifetime 作废、layout 没了），任何一个

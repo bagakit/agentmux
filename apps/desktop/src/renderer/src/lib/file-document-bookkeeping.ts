@@ -38,7 +38,8 @@ export const fileReadInFlightCounts = new Map<string, number>()
 export const fileInvalidationSequences = new Map<string, number>()
 export const fileSaveTails = new Map<string, Promise<void>>()
 export const workspaceFileMutationTails = new Map<string, Promise<void>>()
-export const fileOpenRequests = new Map<string, Promise<boolean>>()
+// Shared data verdicts: a document, a directory, or a failed read; no UI activation permission.
+export const fileOpenRequests = new Map<string, Promise<boolean | 'directory'>>()
 
 export function fileSurface(tab: WorkbenchTab | undefined, regionId?: string): FileWorkbenchSurface | null {
   if (!tab) return null
