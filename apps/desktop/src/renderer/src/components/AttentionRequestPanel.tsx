@@ -5,8 +5,10 @@ import { useAppStore } from '../store'
 import { nextAttentionSessionId } from '../lib/agent-attention'
 import { presentError } from '../lib/error-presentation'
 import { AgentInteractionCard } from './AgentInteractionCard'
+import { isNeedsYouState } from '../lib/attention-vocabulary'
 
 type SubmittedInteraction = {
+  hostId: string
   requestId: string
   runId: string | undefined
 }
@@ -45,6 +47,7 @@ export function AttentionRequestPanel({
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [activeSessionId, setActiveSessionId] = useState(sessionId)
   const [submitted, setSubmitted] = useState<SubmittedInteraction | null>(null)
+  const submittedRef = useRef<SubmittedInteraction | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [caughtUp, setCaughtUp] = useState(false)
 
@@ -66,9 +69,23 @@ export function AttentionRequestPanel({
   useEffect(() => {
     setActiveSessionId(sessionId)
     setSubmitted(null)
+    submittedRef.current = null
     setActionError(null)
     setCaughtUp(false)
   }, [sessionId])
+
+  function clearSubmission(claim: SubmittedInteraction): boolean {
+    if (submittedRef.current !== claim) return false
+    submittedRef.current = null
+    setSubmitted(null)
+    return true
+  }
+
+  // Local answer errors belong to the card that produced them, even after its attempt ended.
+  useEffect(() => {
+    setActionError(null)
+    setCaughtUp(false)
+  }, [activeSessionId, session?.hostId, session?.kind === 'agent' ? session.control.run.runId : undefined, request?.id])
 
   // Focus the first useful action when a request changes. Do not steal focus from an action inside
   // this panel while the Store is merely repainting a Session status.
@@ -86,14 +103,19 @@ export function AttentionRequestPanel({
   useEffect(() => {
     if (!submitted) return
     if (!session || session.kind !== 'agent') {
-      setSubmitted(null)
+      clearSubmission(submitted)
       setActionError('This Session is temporarily unavailable. Its request was not marked complete.')
       return
     }
     const currentRequestId = session.pendingInteraction?.id
     const currentRunId = session.pendingInteraction ? interactionRunId(session, session.pendingInteraction) : runIdFor(session)
+    if (session.hostId !== submitted.hostId || currentRunId !== submitted.runId) {
+      clearSubmission(submitted)
+      setActionError('The Session or Run changed. Showing its current request without confirming the old answer.')
+      return
+    }
     if (currentRequestId === undefined) {
-      setSubmitted(null)
+      clearSubmission(submitted)
       setActionError(null)
       const next = nextAttentionSessionId(sessions.filter((item) => item.id !== activeSessionId), null)
       if (next) {
@@ -107,7 +129,7 @@ export function AttentionRequestPanel({
       return
     }
     if (currentRequestId !== submitted.requestId || currentRunId !== submitted.runId) {
-      setSubmitted(null)
+      clearSubmission(submitted)
       setActionError('The request changed while it was being answered. Showing the current request.')
     }
   }, [activeSessionId, session, sessions, submitted, onSessionChange])
@@ -122,13 +144,15 @@ export function AttentionRequestPanel({
 
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
     if (!session || session.kind !== 'agent' || !request || submitted) return
-    const claim = { requestId: request.id, runId: interactionRunId(session, request) }
+    const claim = { hostId: session.hostId, requestId: request.id, runId: interactionRunId(session, request) }
+    submittedRef.current = claim
     setSubmitted(claim)
     setActionError(null)
     setCaughtUp(false)
     try {
       await respondInteraction(activeSessionId, response)
     } catch (error) {
+      if (submittedRef.current !== claim) return
       // A replacement can arrive at the same time as a rejected old response. Read the latest
       // projection before deciding whether this was an answer failure or a stale target.
       const latest = useAppStore.getState().sessions.find((item) => item.id === activeSessionId)
@@ -137,12 +161,12 @@ export function AttentionRequestPanel({
       if (!latest || !latestRequest) {
         // The Store already confirmed the old request (or the Session disappeared while recovering).
         // Do not let a late promise rejection paint an error onto the next request.
-        setSubmitted(null)
-      } else if (latestRequest.id !== claim.requestId || latestRunId !== claim.runId) {
-        setSubmitted(null)
+        clearSubmission(claim)
+      } else if (latest.hostId !== claim.hostId || latestRequest.id !== claim.requestId || latestRunId !== claim.runId) {
+        clearSubmission(claim)
         setActionError('The request changed before the answer was accepted. Showing the current request.')
       } else {
-        setSubmitted(null)
+        clearSubmission(claim)
         setActionError(presentError(error))
       }
     }
@@ -175,10 +199,11 @@ export function AttentionRequestPanel({
   }
 
   const submitting = submitted !== null
+  const resolved = !request && !isNeedsYouState(session.status.state)
   return (
     <aside ref={panelRef} className="attention-request-panel" aria-label={`Request from ${session.label}`} tabIndex={-1} onKeyDown={handleKeyDown}>
       <header className="attention-request-panel__header">
-        <div><span>Needs you</span><strong>{session.label}</strong><small>{session.workspacePath}</small></div>
+        <div><span>{request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small>{session.workspacePath}</small></div>
         <div className="attention-request-panel__actions">
           <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={12} /> Open Session</button>
           <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>
@@ -189,9 +214,17 @@ export function AttentionRequestPanel({
         <div className="attention-request-panel__empty" role="status" tabIndex={-1}>
           <CheckCircle2 size={15} aria-hidden="true" /> <span>All caught up. No other Agent is waiting for you.</span>
         </div>
+      ) : resolved ? (
+        <div className="attention-request-panel__empty" role="status">No current request. This view follows the same Core facts as the Session.</div>
       ) : request ? (
         <AgentInteractionCard
+          key={JSON.stringify([session.hostId, session.id, session.control.run.runId, request.id])}
           request={request}
+          responseUnavailableReason={session.interactionResponseUnavailableReason}
+          onOpenTerminal={() => {
+            useAppStore.getState().setViewMode(session.id, 'terminal')
+            selectSession(session.id)
+          }}
           disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting}
           onRespond={respond}
         />

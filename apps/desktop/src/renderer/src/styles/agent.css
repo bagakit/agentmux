@@ -220,6 +220,7 @@
 .agent-interaction__heading span { color: var(--text-2); font-size: var(--fs-meta); }
 .agent-interaction pre { max-height: 84px; margin:var(--sp-4) 0 0; padding:var(--sp-3) var(--sp-4); overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-interaction__options { display: grid; gap:var(--sp-2); margin-top:var(--sp-4); }
+.agent-interaction__error { margin: var(--sp-3) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
 .agent-interaction__options button { display: grid; gap:var(--sp-1); padding:var(--sp-3) var(--sp-4); text-align: left; }
 .agent-interaction__options small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .agent-interaction__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-4); }

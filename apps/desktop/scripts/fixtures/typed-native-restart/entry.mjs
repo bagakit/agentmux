@@ -1,6 +1,9 @@
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '../../../src/renderer/src/App'
+import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
+import { AttentionRequestPanel } from '../../../src/renderer/src/components/AttentionRequestPanel'
+import { summarizeAgentAttention } from '../../../src/renderer/src/lib/agent-attention'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
@@ -58,6 +61,29 @@ window.nativeState = () => {
 window.nativeLiveReady = () => readTerminalViewObservation({ regionId: identity.regionId, sessionId: identity.sessionId, runId: identity.run.runId })?.liveReady === true
 window.nativeFlush = async () => { prepareRendererUpdate(); await request('flush') }
 window.nativeActivity = () => useAppStore.getState().setViewMode(identity.sessionId, 'activity')
+window.nativeReviewHere = () => {
+  useAppStore.setState(state => ({ mainSurface: 'agents', agentFocus: {
+    ...state.agentFocus, execution: { sessionId: identity.sessionId, history: [] }
+  } }))
+}
+let extraRoot
+window.nativeObserveExtra = session => {
+  useAppStore.setState(state => ({ sessions: [...state.sessions.filter(one => one.id !== session.id), session] }))
+  const host = document.createElement('div')
+  host.id = 'private-extra-consumers'
+  document.body.append(host)
+  extraRoot = createRoot(host)
+  extraRoot.render(createElement('div', null,
+    createElement(AttentionRequestPanel, { sessionId: session.id, onClose() {} }),
+    createElement(SessionPane, { sessionId: session.id, surfaceKind: 'agent', interactiveResize: false, visible: false,
+      linkOrigin: { workspaceId: workspace.id, tabGroupId: 'native-group' } })))
+}
+window.nativeExtraState = id => {
+  const state = useAppStore.getState()
+  return { session: state.sessions.find(one => one.id === id), needsYou: summarizeAgentAttention(state.sessions).needsYou,
+    cards: [...document.querySelectorAll('#private-extra-consumers .agent-interaction')].map(card => card.dataset.requestId) }
+}
+window.nativeCloseExtra = () => { extraRoot.unmount(); document.getElementById('private-extra-consumers').remove() }
 window.nativeRespond = () => useAppStore.getState().respondInteraction(identity.sessionId,
   { kind: 'permission', requestId: useAppStore.getState().sessions.find(one => one.id === identity.sessionId).pendingInteraction.id,
     decision: { outcome: 'selected', optionId: 'allow-once' } })

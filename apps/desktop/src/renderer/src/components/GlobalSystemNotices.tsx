@@ -5,6 +5,7 @@ import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-no
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
 import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { sessionServiceNotices } from '../lib/session-service-notices'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices() {
@@ -15,6 +16,8 @@ export function GlobalSystemNotices() {
   const displacedIds = useAppStore((state) => state.displacedAgentSessionIds)
   const loading = useAppStore((state) => state.loading)
   const selectSession = useAppStore((state) => state.selectSession)
+  const queues = useAppStore((state) => state.agentSteerQueues)
+  const sending = useAppStore((state) => state.agentSteerInFlight)
   const id = useId()
   const [open, setOpen] = useState(false)
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
@@ -41,7 +44,11 @@ export function GlobalSystemNotices() {
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
-  const inboxes = [environmentInbox, ownershipInbox, displacedInbox]
+  const sessionNotices = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id])
+    .map(item => ({ ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
+      action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
+  const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
+  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -56,7 +63,7 @@ export function GlobalSystemNotices() {
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, displacedInbox])
+  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox])
   return <div className="global-system-notices">
     <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
@@ -77,7 +84,8 @@ export function GlobalSystemNotices() {
       {inboxes.map((inbox, index) => <div key={index}>
         {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">
           <ServiceWindowNotice notice={item.notice} />
-          {item.action ? <button type="button" className="small-button global-system-notices__action" onClick={item.action.run}>{item.action.label}</button> : null}
+          {item.action ? <button type="button" className="small-button global-system-notices__action" onClick={item.action.run}
+            popoverTarget={id} popoverTargetAction="hide">{item.action.label}</button> : null}
         </div>)}
       </div>)}
       {!available ? <p>Waiting for Runtime status.</p> : notices.length === 0 ? <p>No current system notices.</p> : null}

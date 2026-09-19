@@ -84,6 +84,31 @@ app.whenReady().then(async () => {
     if (phase === 'seed') {
       assert.equal(calls.filter(call => call.operation === 'launch').length, 1)
       assert.equal(result.initial.session.interactionResponseUnavailableReason, undefined, 'Protocol replies cannot mark a request unconfirmed')
+      // A second private Agent proves the non-defining Core caller and both live projections.
+      // Its observed Provider Stop clears attention; a resolved input ACK alone is not enough.
+      const extra = await runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0].path }, config as any)
+      let extraSession: any
+      const deadline = Date.now() + 15000
+      do {
+        extraSession = (await runtime.snapshot(config as any)).sessions.find((one: any) => one.id === extra.session.id)
+        if (extraSession?.pendingInteraction) break
+        await delay(30)
+      } while (Date.now() < deadline)
+      assert.ok(extraSession?.pendingInteraction)
+      await win.webContents.executeJavaScript(`window.nativeObserveExtra(${JSON.stringify(extraSession)}); true`)
+      const extraState = () => win.webContents.executeJavaScript(`window.nativeExtraState(${JSON.stringify(extraSession.id)})`)
+      await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 2`)
+      const before = await extraState()
+      await runtime.respondInteraction(extraSession.control, { kind: 'permission', requestId: extraSession.pendingInteraction.id,
+        decision: { outcome: 'selected', optionId: 'allow-once' } })
+      await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 0 && window.nativeExtraState(${JSON.stringify(extraSession.id)}).session.status.state === "done"`)
+      const after = await extraState()
+      assert.equal(after.needsYou, before.needsYou - 1)
+      assert.equal(after.session.pendingInteraction, undefined)
+      assert.equal(after.session.processState, 'running')
+      result.otherViewAnswer = { before, after }
+      await win.webContents.executeJavaScript('window.nativeCloseExtra(); true')
+      await client().stopAgent(extraSession.id, extraSession.control.run)
       armed = true
       await win.webContents.executeJavaScript('window.terminals.find(one=>one.element?.isConnected).focus(); true')
       await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
@@ -104,6 +129,19 @@ app.whenReady().then(async () => {
     assert.notEqual(result.typedAttempt, 'accepted', 'Unknown native handling cannot approve an old request')
     result.afterTyped = (await client().listRuns()).find((run: any) => run.runId === ids.run.runId).acceptedInputBytes
     assert.equal(result.afterTyped, result.beforeTyped, 'The rejected typed grant must write zero bytes')
+    await win.webContents.executeJavaScript('window.nativeReviewHere(); true')
+    await until('document.querySelector(".focus-toolbar__review")')
+    await win.webContents.executeJavaScript('document.querySelector(".focus-toolbar__review").click(); true')
+    await until(`document.querySelector(".attention-request-panel [aria-label='Agent interaction needs native confirmation']")`)
+    result.attentionView = await win.webContents.executeJavaScript('({text:document.querySelector(".attention-request-panel").textContent, requestId:document.querySelector(".attention-request-panel .agent-interaction").dataset.requestId})')
+    assert.equal(result.attentionView.requestId, result.initial.session.pendingInteraction.id)
+    assert.ok(result.attentionView.text.includes(result.initial.session.interactionResponseUnavailableReason ?? 'delivery is unknown'))
+    await fs.writeFile(path.join(evidence, `${phase}-attention.png`), (await win.capturePage()).toPNG())
+    await win.webContents.executeJavaScript('[...document.querySelectorAll(".attention-request-panel button")].find(one=>one.textContent==="Open terminal").click(); true')
+    await until('document.querySelector("[data-agent-surface-mode=terminal]") && window.nativeLiveReady()')
+    result.afterAttentionNavigation = await state()
+    assert.equal(result.afterAttentionNavigation.session.id, ids.sessionId)
+    assert.equal(result.afterAttentionNavigation.session.control.run.runId, ids.run.runId)
     await win.webContents.executeJavaScript('window.nativeActivity(); true')
     await until('document.querySelector("[data-agent-surface-mode=activity]") && [...document.querySelectorAll(".agent-interaction button")].some(one=>one.textContent==="Open terminal")')
     await win.webContents.executeJavaScript('[...document.querySelectorAll(".agent-interaction button")].find(one=>one.textContent==="Open terminal").click(); true')
