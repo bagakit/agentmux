@@ -41,7 +41,7 @@ export async function connectCdp(url, connections) {
   return cdp
 }
 
-export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor, packagedApplication }) {
+export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor, packagedApplication, beforeRuntimePrepare }) {
   const require = createRequire(join(desktopRoot, 'package.json'))
   return async function launch(label, seed) {
     for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) {
@@ -87,7 +87,20 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
     const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
       expression: `(() => { app.setPath('home', ${JSON.stringify(privateHome)}); return app.getPath('home') })()`, returnByValue: true })
     assert.equal(isolated.exceptionDetails, undefined); assert.equal(isolated.result.value, privateHome)
-    await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId }); await main.call('Debugger.resume')
+    await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
+    if (beforeRuntimePrepare) {
+      // An explicit private fixture seam; ordinary launches still execute the original preparation.
+      const preparationAnchors = (await readFile(mainPath, 'utf8')).split('\n').flatMap((line, index) =>
+        line.includes('args.runtime.commit(await args.runtime.prepare(config))') ? [index] : [])
+      assert.equal(preparationAnchors.length, 1)
+      const preparation = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: preparationAnchors[0] })
+      await main.call('Debugger.resume')
+      const frame = await waitFor(`${label} private preparation boundary`, () => main.pauses.shift())
+      assert.ok(frame.hitBreakpoints?.includes(preparation.breakpointId))
+      await beforeRuntimePrepare(main, frame.callFrames[0].callFrameId)
+      await main.call('Debugger.removeBreakpoint', { breakpointId: preparation.breakpointId })
+    }
+    await main.call('Debugger.resume')
     const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
     const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json())
       .find(item => item.type === 'page' && item.url.startsWith('file:')))

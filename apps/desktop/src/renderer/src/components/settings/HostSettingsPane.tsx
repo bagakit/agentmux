@@ -93,17 +93,11 @@ export function HostSettingsPane({ config, onSave }: {
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
               </header>
               {host.kind === 'ssh' ? (
-                <details className="host-edit-disclosure" open={!host.hostname}>
-                  <summary>Edit connection <ChevronDown size={13} /></summary>
-                  <div className="host-edit-grid">
-                    <label><span>Label</span><input value={host.label} onChange={(event) => update(host.id, { label: event.target.value })} /></label>
-                    <label><span>Hostname</span><input value={host.hostname} onChange={(event) => update(host.id, { hostname: event.target.value })} placeholder="dev.example.com" /></label>
-                    <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? update(host.id, { user: event.target.value }) : clear(host.id, 'user')} placeholder="optional" /></label>
-                    <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? update(host.id, { port: Number(event.target.value) }) : clear(host.id, 'port')} placeholder="22" /></label>
-                    <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? update(host.id, { identityFile: event.target.value }) : clear(host.id, 'identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-                    <p className="field-hint host-edit-grid__wide">Remote agent sessions are not available yet. You can save and test this connection.</p>
-                  </div>
-                </details>
+                <HostConnectionFields
+                  host={host}
+                  onChange={(patch) => update(host.id, patch)}
+                  onClear={(field) => clear(host.id, field)}
+                />
               ) : null}
               {sessionCount > 0 ? <p className="field-hint">{sessionCount} running session{sessionCount === 1 ? '' : 's'} must be stopped before this host can be changed or removed.</p> : null}
             </section>
@@ -124,5 +118,27 @@ export function HostSettingsPane({ config, onSave }: {
         onConfirm={() => void confirmRemove()}
       />
     </div>
+  )
+}
+
+function HostConnectionFields({ host, onChange, onClear }: {
+  host: SshHostConfig
+  onChange: (patch: Partial<SshHostConfig>) => void
+  onClear: (field: 'user' | 'port' | 'identityFile') => void
+}) {
+  // The keyed Host card owns this component's lifetime; field and check updates keep its choice.
+  const [open, setOpen] = useState(() => !host.hostname)
+  return (
+    <details className="host-edit-disclosure" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>Edit connection <ChevronDown size={13} /></summary>
+      <div className="host-edit-grid">
+        <label><span>Label</span><input value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
+        <label><span>Hostname</span><input value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="dev.example.com" /></label>
+        <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="optional" /></label>
+        <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="22" /></label>
+        <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
+        <p className="field-hint host-edit-grid__wide">Remote agent sessions are not available yet. You can save and test this connection.</p>
+      </div>
+    </details>
   )
 }
