@@ -45,6 +45,12 @@ export type AgentMuxRuntimeDiagnostics = {
   arch: string
   supported: boolean
   ctxmux: {
+    state: {
+      /** The directory a future cold activation would select. */
+      configuredDirectory: string
+      /** Proven current listener binding; null when launch provenance is unverified. */
+      servingDirectory: string | null
+    }
     /** The connected listener's public identity, never the package's identity. */
     serving: Pick<AgentMuxRuntimeIdentity, 'buildIdentity' | 'protocolVersion' | 'instanceId'> & {
       /** The public Runtime contract does not supply source provenance. */

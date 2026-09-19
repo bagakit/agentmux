@@ -1,33 +1,6 @@
-import { tmpdir as upstreamFixtureTmpdir } from 'node:os'
-import { join as upstreamFixtureJoin, parse as upstreamFixtureParse, sep as upstreamFixtureSep } from 'node:path'
-import { pathToFileURL as upstreamFixturePathToFileURL } from 'node:url'
-const upstreamFixtureRoot = upstreamFixtureJoin(upstreamFixtureTmpdir(), 'agentmux-fixtures');
-const upstreamFixtureDayMilliseconds = 24 * 60 * 60 * 1_000;
-/** Preserve lexical path cases while deriving the absolute root from this Host. */
-function upstreamFixturePath(relative) {
-    const temporary = relative.replace(/^(?:private\/)?tmp\//u, '');
-    const base = temporary === relative ? upstreamFixtureRoot : upstreamFixtureTmpdir();
-    return base + upstreamFixtureSep + temporary.replaceAll('/', upstreamFixtureSep);
-}
-/** Deterministic time from Unix zero and explicit relative units. */
-function upstreamFixtureEpoch(days, seconds = 0, milliseconds = 0) {
-    return days * upstreamFixtureDayMilliseconds + seconds * 1_000 + milliseconds;
-}
-function upstreamFixtureDay(days, separator = '-') {
-    return new Date(upstreamFixtureEpoch(days)).toISOString().slice(0, 10).replaceAll('-', separator);
-}
-function upstreamFixtureClock(hour, minute, second, milliseconds) {
-    const units = second === undefined ? [hour, minute] : [hour, minute, second];
-    const clock = units.map(value => String(value).padStart(2, '0')).upstreamFixtureJoin(':');
-    return milliseconds === undefined ? clock : clock + '.' + milliseconds;
-}
-function upstreamFixtureFileUrl(relative) {
-    return upstreamFixturePathToFileURL(upstreamFixturePath(relative)).href;
-}
-/** A short Host-rooted display path keeps captured terminal rows within their viewport. */
-function upstreamFixtureDisplayPath(relative) {
-    return upstreamFixtureJoin(upstreamFixtureParse(upstreamFixtureTmpdir()).root, relative);
-}
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixtureRootPath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, open, readFile, rm, stat } from 'node:fs/promises'
@@ -1482,21 +1455,21 @@ async function environmentManifest(mode, cpuObserver) {
       endpointClock: 'clock_gettime:CLOCK_MONOTONIC_RAW',
       sourceSha256: 'a6462fe49e4bb1316a4a2ab5dbdc9fa3430041885e350db212f94f6d857e2612',
       binarySha256: '021b2bd3351a35985fcdf7a6aed34be70f480d9027327ca14c054b26d365b9c9',
-      compiler: '/Library/Developer/CommandLineTools/usr/bin/clang',
+      compiler: fixtureRootPath("Library/Developer/CommandLineTools/usr/bin/clang"),
       compilerVersion: [
         'Apple clang version 21.0.0 (clang-2100.0.123.102)',
         'Target: arm64-apple-darwin25.3.0',
         'Thread model: posix',
-        'InstalledDir: /Library/Developer/CommandLineTools/usr/bin'
+        ("InstalledDir: " + (fixtureRootPath("Library/Developer/CommandLineTools/usr/bin")))
       ].join('\n'),
-      sdkPath: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk',
+      sdkPath: fixtureRootPath("Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"),
       sdkVersion: '26.4',
       compileEnvironment: {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         LANG: 'C',
         LC_ALL: 'C',
         TZ: 'UTC0',
-        SDKROOT: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk'
+        SDKROOT: fixtureRootPath("Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
       }
     }
   }
@@ -1563,7 +1536,7 @@ async function ownedDaemonPids(runtimeDirectory) {
   return parseOwnedDaemonProcesses(ps, {
     daemonPath,
     socketPath: join(runtimeDirectory, 'ctxmux.sock'),
-    stateDirectory: join(runtimeDirectory, 'state')
+    stateDirectory: join(process.env.AGENTMUX_STATE_DIRECTORY, 'ctxmux')
   })
 }
 
@@ -1718,12 +1691,13 @@ export async function runBenchmark(options) {
   if (!(await commandAvailable('tmux'))) throw new Error('tmux is required for the frozen baseline')
   const startedAt = new Date().toISOString()
   const runId = randomUUID()
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-benchmark-"))
+  const root = await mkdtemp(fixtureRootPath("tmp/agentmux-benchmark-"))
   const runtimeDirectory = join(root, 'agentmux-runtime')
   const tmuxDirectory = join(root, 'tmux')
   const socketName = `agentmux-benchmark-${runId.slice(0, 8)}`
   const hadRuntimeDirectory = Object.hasOwn(process.env, 'AGENTMUX_RUNTIME_DIRECTORY')
   const previousRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+  const previousStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
   const emergencyPids = new Set()
   const cleanup = { agentmux: null, tmux: null, fixtures: null, daemon: null, rootRemoved: false, errors: [] }
   let config = null
@@ -1749,6 +1723,7 @@ export async function runBenchmark(options) {
       mkdir(tmuxDirectory, { recursive: true, mode: 0o700 })
     ])
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
+    process.env.AGENTMUX_STATE_DIRECTORY = join(root, 'agentmux-state')
     config = benchmarkConfiguration(options.mode)
     cpuProbe = await buildProcessRusageProbe(root)
     const { AgentMuxClient } = await import(pathToFileURL(join(packageRoot, 'dist', 'index.js')).href)
@@ -1887,6 +1862,8 @@ export async function runBenchmark(options) {
     } finally {
       if (hadRuntimeDirectory) process.env.AGENTMUX_RUNTIME_DIRECTORY = previousRuntimeDirectory
       else delete process.env.AGENTMUX_RUNTIME_DIRECTORY
+      if (previousStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
+      else process.env.AGENTMUX_STATE_DIRECTORY = previousStateDirectory
     }
   }
   result.manifest.endedAt = new Date().toISOString()
@@ -1901,7 +1878,7 @@ export async function runBenchmark(options) {
 }
 
 function printHelp() {
-  process.stdout.write(("Usage:\n  pnpm benchmark:daemon-cutover -- --round <1|2>\n  pnpm benchmark:daemon-cutover:smoke -- --round 1 --output " + (upstreamFixturePath("tmp/result.json")) + "\n"))
+  process.stdout.write(("Usage:\n  pnpm benchmark:daemon-cutover -- --round <1|2>\n  pnpm benchmark:daemon-cutover:smoke -- --round 1 --output " + (fixtureRootPath("tmp/result.json")) + "\n"))
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)

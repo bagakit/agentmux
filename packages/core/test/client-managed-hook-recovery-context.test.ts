@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveManagedHookPlan } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
@@ -36,13 +37,13 @@ const transcript = process.env.AMX_HOOK_TEST_TRANSCRIPT
 const nativeId = process.env.AMX_HOOK_TEST_NATIVE_ID
 const provider = process.env.AGENTMUX_PROVIDER_ID
 const config = provider === 'pi' ? process.env.PI_CODING_AGENT_DIR : process.env.OPENCODE_CONFIG_DIR
-for (const path of [trace, transcript, config, process.env.AGENTMUX_RUNTIME_DIRECTORY,
+for (const path of [trace, transcript, config, process.env.AGENTMUX_RUNTIME_DIRECTORY, process.env.AGENTMUX_STATE_DIRECTORY,
   process.env.AGENTMUX_AGENT_SESSION_STORE, process.env.AGENTMUX_MESSAGE_QUEUE_PATH]) {
   assert.equal(path.startsWith(root + '/'), true)
 }
 const allowed = ['AGENTMUX_AGENT_SESSION_ID','AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_AGENT_CAPABILITY',
   'AGENTMUX_CLI','AGENTMUX_ENV','AGENTMUX_EXECUTOR_ID','AGENTMUX_HOOK_TOKEN','AGENTMUX_HOOK_URL',
-  'AGENTMUX_LIFECYCLE_OPERATION_ID','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_PROVIDER_ID','AGENTMUX_RUNTIME_DIRECTORY']
+  'AGENTMUX_LIFECYCLE_OPERATION_ID','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_PROVIDER_ID','AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_STATE_DIRECTORY']
 const agentMuxKeys = Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_')).sort()
 assert.deepEqual(agentMuxKeys, allowed.sort())
 assert.equal(['pi', 'opencode'].includes(provider), true)
@@ -125,10 +126,11 @@ async function withPrivateRuntime(run: (fixture: {
   await writeFile(cliPath, cli, { mode: 0o700 })
   for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime)
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'durable'))
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', storePath)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   expect(Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_')).sort()).toEqual([
-    'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_RUNTIME_DIRECTORY'
+    'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY'
   ])
   for (const path of [homedir(), runtime, storePath, process.env.AGENTMUX_MESSAGE_QUEUE_PATH!]) {
     expect(path.startsWith(root + '/')).toBe(true)
@@ -137,7 +139,7 @@ async function withPrivateRuntime(run: (fixture: {
   const defaultPlan = resolveManagedHookPlan('pi', workspace, {})!
   expect(defaultPlan.mutations).toHaveLength(1)
   expect(defaultPlan.mutations[0]!.path.startsWith(root + '/')).toBe(true)
-  const daemon = spawn(resolve('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'), [
+  const daemon = spawn(fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)), [
     '--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(runtime, 'state'), '--readiness-fd', '3'
   ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] })
   const exited = once(daemon, 'exit')

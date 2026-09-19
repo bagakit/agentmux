@@ -6,6 +6,7 @@ import path from 'node:path'
 import { AgentMuxError, AgentMuxFileAgentSessionStore, connectLocalAgentMux, agentPromptCondition } from '@agentmux/core'
 const [root, mode] = process.argv.slice(2)
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(root, 'runtime')
+process.env.AGENTMUX_STATE_DIRECTORY = path.join(root, 'durable')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(root, 'messages.ndjson')
 const file = path.join(root, 'native-sessions.json')
 const store = new AgentMuxFileAgentSessionStore(file)
