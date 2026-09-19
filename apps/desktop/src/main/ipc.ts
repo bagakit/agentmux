@@ -1,5 +1,5 @@
 import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress.js'
-import type { ContinuousProgressTarget } from '@agentmux/core'
+import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
@@ -740,11 +740,11 @@ export async function registerIpc(args: {
     await args.progressLoops.start()
     return args.progressLoops.list().filter(loop => progressTargetMatches(loop, target))
   })
-  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string) => {
+  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
     const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
     if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Clear them before enabling automatic progress.')
-    return await args.progressLoops.create({ ...target, intervalMs, prompt })
+    return await args.progressLoops.create({ ...target, intervalMs, prompt, ...(taskSource !== undefined ? { taskSource } : {}) })
   })
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
     requireTrustedSender('continuousProgress:action', event)

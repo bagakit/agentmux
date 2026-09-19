@@ -50,6 +50,7 @@ import { deliverContinuousProgress } from '../src/main/continuous-progress-deliv
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { privateTracker } from './helpers/continuous-progress-tracker'
 import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/continuous-progress'
 import { CONTROL_REQUEST_CHANNEL } from '../src/shared/contracts'
 
@@ -121,7 +122,7 @@ beforeEach(async () => {
   disposeIpc = await registerIpc({ window: { webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
-  bridge.invoke.mockImplementation((channel: string, ...values: unknown[]) => {
+  bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
   })
@@ -137,8 +138,11 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await act(async () => root?.unmount()); container?.remove(); disposeStore?.(); disposeStore = undefined
+  useAppStore.setState(initial, true)
+  window.dispatchEvent(new Event('pagehide'))
+  await api.ui.requestStorageFlush()
   const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
-  disposeIpc = undefined; useAppStore.setState(initial, true)
+  disposeIpc = undefined
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true })
   expect(cleanup.filter(r => r.status === 'rejected')).toEqual([])
@@ -147,6 +151,7 @@ const target = () => ({ hostId: session.hostId, agentSessionId: session.agentSes
 async function create() { return await api.continuousProgress.create(target(), 60_000, 'continue the assigned work') }
 async function click(label: string) {
   const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull()
+  await vi.waitFor(() => expect(button!.disabled).toBe(false))
   await act(async () => button!.click())
 }
 it('mounts the existing Composer leaf and real create/pause/resume/check/stop routes, with no second target work', async () => {
@@ -158,7 +163,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   })
   await act(async () => form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await vi.waitFor(() => expect(manager.list()).toHaveLength(1))
-  expect(container.textContent).toContain('active')
+  await vi.waitFor(() => expect(container.textContent).toContain('active'))
   expect(manager.list()[0]).toMatchObject(target())
   await click('Pause continuous progress'); expect(manager.list()[0]!.status).toBe('paused')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume continuous progress"]')).not.toBeNull())
@@ -248,3 +253,42 @@ it('keeps a late create result on its original workspace while the same Session 
   expect(writes).toEqual([])
   } finally { release() }
 })
+
+
+it('binds an explicit real Tracker through the mounted leaf and IPC, keeping done distinct from archived completion', async () => {
+  const sourceRoot = join(directory, 'private-tracker'); await mkdir(sourceRoot)
+  const tracker = await privateTracker(sourceRoot), binding = await tracker.create('mounted-source')
+  await tracker.run('start-task', '--feature', binding.ownerId, '--task', 'T-001')
+  const form = container.querySelector('form')!; expect(form).not.toBeNull()
+  const checkbox = form.querySelector<HTMLInputElement>('input[type="checkbox"]')!; expect(checkbox).not.toBeNull()
+  await act(async () => checkbox.click())
+  async function type(selector: string, value: string) {
+    const input = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!; expect(input).not.toBeNull()
+    await act(async () => {
+      const prototype = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  await type('textarea', 'continue the assigned work')
+  await type('[aria-label="Tracker root"]', binding.root)
+  await type('[aria-label="Feature ID"]', binding.ownerId)
+  await type('[aria-label="Public Tracker script"]', binding.readerPath)
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(manager.list()).toHaveLength(1))
+  expect(manager.list()[0]!.taskSource).toEqual(binding)
+  await vi.waitFor(() => expect(container.textContent).toContain(binding.ownerId))
+  await tracker.run('run-task-gate', '--feature', binding.ownerId, '--task', 'T-001')
+  await tracker.run('finish-task', '--feature', binding.ownerId, '--task', 'T-001', '--result', 'done')
+  await click('Check continuous progress now')
+  await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('paused'))
+  await vi.waitFor(() => expect(container.textContent).toContain('closeout is still required'))
+  expect(container.textContent).not.toContain('business complete')
+  expect(requests).toEqual([])
+  await tracker.run('closeout-feature', '--feature', binding.ownerId, '--mode', 'archive', '--execute', ...tracker.closeoutArgs)
+  await click('Resume continuous progress')
+  await click('Check continuous progress now')
+  await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('stopped'))
+  await vi.waitFor(() => expect(container.textContent).toContain('business complete (archived)'))
+  expect(requests).toEqual([])
+}, 30_000)

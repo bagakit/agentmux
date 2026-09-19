@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -11,6 +11,7 @@ import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-ada
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { privateTracker } from './helpers/continuous-progress-tracker'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery.js'
 
 type Input = Parameters<CtxmuxRunAdapter['input']>[1]
@@ -199,4 +200,101 @@ describe('continuous progress uses the public ingress and shared observation', (
     expect(restarted.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: pending?.id })
     expect(restarted.list()[0]?.pendingCompletion).toBeUndefined()
   })
+})
+
+
+async function trackerLoop(f: Awaited<ReturnType<typeof fixture>>) {
+  const owner = await loopOwner(f), manager = owner.make()
+  const root = await mkdtemp(join(tmpdir(), 'agentmux-task-source-')); directories.push(root)
+  const tracker = await privateTracker(root), source = await tracker.create('bound')
+  await owner.store.save((await owner.store.load()).map(loop => ({ ...loop, taskSource: source })))
+  await tracker.run('start-task', '--feature', source.ownerId, '--task', 'T-001')
+  return { ...owner, manager, tracker, source }
+}
+
+describe('the Main loop consumes one explicit public task source', () => {
+  it('pauses all-tasks-done pending closeout and completes only the publicly archived Feature', async () => {
+    const f = await fixture(), bound = await trackerLoop(f)
+    await bound.tracker.run('run-task-gate', '--feature', bound.source.ownerId, '--task', 'T-001')
+    await bound.tracker.run('finish-task', '--feature', bound.source.ownerId, '--task', 'T-001', '--result', 'done')
+    await bound.manager.start(); await bound.manager.check()
+    expect(bound.manager.list()).toHaveLength(1)
+    expect(bound.manager.list()[0]).toMatchObject({ status: 'paused', taskSource: bound.source, lastOutcome: 'skipped' })
+    expect(bound.manager.list()[0]!.lastDecision).toContain('closeout is still required')
+    expect(bound.manager.list()[0]!.lastDecision).not.toContain('business complete')
+    expect(f.requests).toEqual([])
+    await bound.tracker.run('closeout-feature', '--feature', bound.source.ownerId, '--mode', 'archive', '--execute', ...bound.tracker.closeoutArgs)
+    await bound.manager.resume('private-loop'); await bound.manager.checkNow('private-loop')
+    expect(bound.manager.list()[0]).toMatchObject({ status: 'stopped', taskSource: bound.source, lastOutcome: 'skipped' })
+    expect(bound.manager.list()[0]!.lastDecision).toContain('business complete (archived)')
+    expect(f.requests).toEqual([])
+  }, 30_000)
+
+  it('keeps genuine blocked and unreadable source facts separate and leaves manual input available', async () => {
+    const f = await fixture(), bound = await trackerLoop(f)
+    await bound.tracker.run('finish-task', '--feature', bound.source.ownerId, '--task', 'T-001', '--result', 'blocked', '--blocked-reason-class', 'external_blocker', '--blocked-reason', 'Private dependency unavailable', '--blocked-owner', 'Private test', '--blocked-resume-when', 'Private dependency available')
+    await bound.manager.start(); await bound.manager.check()
+    expect(bound.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'skipped' })
+    expect(bound.manager.list()[0]!.lastDecision).toContain('external_blocker: Private dependency unavailable')
+    await bound.manager.stop()
+    const stored = (await bound.store.load()).map(loop => ({ ...loop, status: 'active' as const, taskSource: { ...bound.source, ownerId: 'f-missing' } }))
+    await bound.store.save(stored)
+    const restarted = bound.make(); await restarted.start(); await restarted.checkNow('private-loop')
+    expect(restarted.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
+    expect(restarted.list()[0]!.lastDecision).not.toContain('business complete')
+    expect(f.requests).toEqual([])
+    await f.runtime.write({ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, 'manual still works', 'user')
+    expect(f.writes).toEqual(['manual still works'])
+  }, 30_000)
+
+  it('stops discarded and transferred sources without success or replacing the binding', async () => {
+    const f = await fixture(), bound = await trackerLoop(f)
+    await bound.tracker.run('finish-task', '--feature', bound.source.ownerId, '--task', 'T-001', '--result', 'cancelled', '--cancel-reason', 'Private cancellation')
+    await bound.tracker.run('discard-feature', '--feature', bound.source.ownerId, '--reason', 'cancelled', ...bound.tracker.closeoutArgs)
+    await bound.manager.start(); await bound.manager.check()
+    expect(bound.manager.list()[0]).toMatchObject({ status: 'stopped', taskSource: bound.source })
+    expect(bound.manager.list()[0]!.lastDecision).toContain('discarded; not business success')
+    const next = await bound.tracker.create('transfer'), replacement = await bound.tracker.create('replacement', true, next.ownerId)
+    await bound.tracker.run('transfer-feature', '--feature', next.ownerId, '--replacement', replacement.ownerId, ...bound.tracker.closeoutArgs)
+    const loop = await bound.manager.create({ ...bound.manager.list()[0]!, intervalMs: 10, prompt: 'continue', taskSource: next })
+    await bound.manager.checkNow(loop.loopId)
+    expect(bound.manager.list().at(-1)).toMatchObject({ status: 'stopped', taskSource: next })
+    expect(bound.manager.list().at(-1)!.lastDecision).toContain('transferred; not business success')
+    expect(bound.manager.list().at(-1)!.lastDecision).toContain(replacement.ownerId)
+    expect(f.requests).toEqual([])
+  }, 30_000)
+
+  it('keeps an unpublished proposal and wrong-owner source uncertain without deriving a new frontier', async () => {
+    const f = await fixture(), bound = await trackerLoop(f)
+    const unplanned = await bound.tracker.create('unplanned', false)
+    await bound.store.save((await bound.store.load()).map(loop => ({ ...loop, taskSource: unplanned })))
+    await bound.manager.start(); await bound.manager.check()
+    expect(bound.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', taskSource: unplanned })
+    expect(bound.manager.list()[0]!.lastDecision).toContain('missing persisted owner receipt')
+    await bound.manager.stop()
+    // A broken selected reader returns a genuine public receipt for a different Feature.
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+    const proxy = join(bound.source.root, 'wrong-reader.sh')
+    await writeFile(proxy, `exec /bin/bash ${quote(bound.source.readerPath)} get-owner-receipt --root ${quote(bound.source.root)} --feature ${quote(bound.source.ownerId)} --json\n`)
+    const wrong = { ...unplanned, readerPath: proxy }
+    await bound.store.save((await bound.store.load()).map(loop => ({ ...loop, status: 'active' as const, taskSource: wrong })))
+    const restarted = bound.make(); await restarted.start(); await restarted.checkNow('private-loop')
+    expect(restarted.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', taskSource: wrong })
+    expect(restarted.list()[0]!.lastDecision).toContain('identity, version or lifecycle is unconfirmed')
+    expect(f.requests).toEqual([])
+  }, 30_000)
+
+  it('does not let source unavailability cancel or rebuild a frozen unknown operation', async () => {
+    const f = await fixture(), bound = await trackerLoop(f)
+    f.loseNextAck(); await bound.manager.start(); await bound.manager.check()
+    const pending = bound.manager.list()[0]?.pendingCompletion
+    expect(pending).toBeDefined(); expect(f.requests).toHaveLength(1)
+    await bound.manager.stop()
+    await bound.store.save((await bound.store.load()).map(loop => ({ ...loop, taskSource: { ...bound.source, ownerId: 'f-missing' } })))
+    const restarted = bound.make(); await restarted.start(); await restarted.resume('private-loop'); await restarted.checkNow('private-loop')
+    expect(f.requests[1]).toEqual(f.requests[0])
+    expect(f.writes).toEqual(['continue the assigned task', '\r'])
+    expect(restarted.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent' })
+    expect(restarted.list()[0]?.pendingCompletion).toBeUndefined()
+  }, 30_000)
 })
