@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
@@ -143,7 +144,7 @@ beforeEach(() => {
 afterEach(async()=>{await act(async()=>root.unmount());document.body.replaceChildren();vi.restoreAllMocks();vi.unstubAllGlobals()})
 function action(text:string){const found=Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(item=>item.textContent?.trim()===text);expect(found).toBeDefined();return found!}
 function historyEntries() {
-  return Array.from(document.querySelectorAll<HTMLButtonElement>('button')).filter(item => item.textContent?.trim() === 'Conversation history')
+  return Array.from(document.querySelectorAll<HTMLElement>('.agent-region-menu [role="menuitem"]')).filter(item => item.textContent?.trim() === 'Conversation history')
 }
 
 it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line boundary'] as const)(
@@ -160,8 +161,9 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
     await act(async () => await vi.waitFor(() => expect(fixture.acknowledge).toHaveBeenCalledWith(session.control, startByte + dataBytes.length)))
     expect(fixture.terminals).toHaveLength(1)
     const terminal = fixture.terminals[0]!
+    await agentHistoryMenuEntry()
     expect(historyEntries()).toHaveLength(1)
-    expect(historyEntries()[0]?.classList.contains('terminal-history-action')).toBe(true)
+    expect(historyEntries()[0]?.closest('.agent-region-menu')).not.toBeNull()
     if (state === 'retained read failure') {
       fixture.replay.mockResolvedValue({ run: session.control.run, replay: [], gap: null })
       const later = new TextEncoder().encode('Later live output')
@@ -189,8 +191,9 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
     } else {
       expect(document.querySelector('.terminal-replay-gap')).toBeNull()
     }
+    await agentHistoryMenuEntry()
     expect(historyEntries()).toHaveLength(1)
-    expect(historyEntries()[0]?.classList.contains('terminal-history-action')).toBe(true)
+    expect(historyEntries()[0]?.closest('.agent-region-menu')).not.toBeNull()
     expect(fixture.historyPage).not.toHaveBeenCalled()
     fixture.write.mockClear(); fixture.resize.mockClear(); fixture.detach.mockClear()
     await act(async () => historyEntries()[0]!.click())
@@ -201,6 +204,7 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
     expect(terminal.dispose).not.toHaveBeenCalled()
     expect(fixture.write).not.toHaveBeenCalled(); expect(fixture.resize).not.toHaveBeenCalled(); expect(fixture.detach).not.toHaveBeenCalled()
     await act(async () => action('Terminal').click())
+    await agentHistoryMenuEntry()
     expect(historyEntries()).toHaveLength(1)
     expect(document.querySelector('[aria-label="Conversation history"]')).toBeNull()
     expect(fixture.terminals).toEqual([terminal])
@@ -215,7 +219,7 @@ it('history open/live output/return keeps the actual xterm parser, Session and h
   expect(fixture.terminals).toHaveLength(1)
   const terminal=fixture.terminals[0]!
   fixture.resize.mockClear();fixture.write.mockClear();fixture.detach.mockClear();fixture.acknowledge.mockClear()
-  await act(async()=>action('Conversation history').click())
+  await openAgentHistory()
   expect(document.body.textContent).toContain('Persisted conversation entry')
   expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(session.control,undefined)
   expect(fixture.write).not.toHaveBeenCalled();expect(fixture.resize).not.toHaveBeenCalled();expect(fixture.detach).not.toHaveBeenCalled()

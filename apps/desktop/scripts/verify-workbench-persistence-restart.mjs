@@ -19,6 +19,7 @@ const exec = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
 const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
+const receiptPath = process.argv.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
 const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
@@ -31,10 +32,12 @@ const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
 const regionCloseProof = process.argv.includes('--close-region')
+const identityMenuProof = process.argv.includes('--identity-menu')
+const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
-let client, session, producer, failure, result, ownedRunProcess
+let client, session, producer, failure, result, ownedRunProcess, seedReport
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -119,6 +122,7 @@ async function seedWorkbench(seed) {
   } finally { cdp.close() }
   assert.equal(child.exitCode, 0)
   const report = JSON.parse(await readFile(reportPath, 'utf8'))
+  seedReport = report
   assert.deepEqual(report.workbench.tabIds, [tabId]); assert.equal(report.workbench.drafts[session.agentSessionId], oldDraft)
   children.delete(child)
 }
@@ -137,12 +141,15 @@ async function surface(cdp) {
       editorText: editor?.innerText, splitPercent: panel ? Number(panel.getAttribute('data-panel-size')) : null,
       tabs: visible('[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
       regions: visible('[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
-      activeRegions: visible('.workbench-region--active[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort() }
+      activeRegions: visible('.workbench-region--active[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
+      ${identityMenuProof ? `identity: {name:document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header strong')?.textContent,
+        stored:state.agentNames[${JSON.stringify(session.agentSessionId)}],more:visible('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more').length},` : ''}
+    }
   })()`)
 }
 
 async function key(cdp, key, code) {
-  const windowsVirtualKeyCode = key === 'Enter' ? 13 : key === 'ArrowLeft' ? 37 : undefined
+  const windowsVirtualKeyCode = key === 'Enter' ? 13 : key === 'ArrowLeft' ? 37 : key === 'Escape' ? 27 : undefined
   await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode,
     ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) })
   await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
@@ -226,6 +233,7 @@ try {
       { id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
   const seed = { version: 1, state: { activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+    ...(identityMenuProof ? { agentNames: { [session.agentSessionId]: identityName } } : {}),
     agentFocus: { execution: { sessionId: session.agentSessionId, history: [{ sessionId: session.agentSessionId, focusedAt: 1 }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { [session.agentSessionId]: oldDraft },
     agentSteerQueues: { [session.agentSessionId]: [
@@ -245,6 +253,7 @@ try {
   await delay(600) // Establish the pre-edit hydrated baseline, never flush a post-edit value.
   const before = await surface(first.cdp)
   assert.deepEqual(before.tabs, [tabId]); assert.deepEqual(before.regions, [agentRegionId, fileRegionId].sort())
+  if(identityMenuProof) assert.deepEqual(before.identity,{name:identityName,stored:identityName,more:1})
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
   assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
   assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
@@ -379,6 +388,18 @@ try {
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
+  if(identityMenuProof){
+    assert.deepEqual(restored.identity,before.identity,'The original Agent name and More return from the same durable Session facts')
+    await activateButton(second.cdp,`document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
+    const entries=await waitFor('restored actual More items',()=>second.cdp.evaluate(`(()=>{const menu=document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]');return menu&&[...menu.querySelectorAll('[role="menuitem"]')].map(item=>item.textContent.trim())})()`))
+    assert.ok(entries.length>0);assert.ok(entries.includes('Copy Region Address'));assert.ok(entries.includes('Conversation history'))
+    await key(second.cdp,'Escape','Escape')
+    await waitFor('restored menu dismissed',()=>second.cdp.evaluate(`!document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')`))
+    // Radix FocusScope restores focus from its deferred unmount callback, after the Portal disappears.
+    const triggerReturned=await waitFor('Escape restores original More trigger',()=>second.cdp.evaluate(`document.activeElement===document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`),3_000)
+    assert.equal(triggerReturned,true)
+    result.identityMenu={passed:true,before:before.identity,restored:restored.identity,entries,escapeReturned:true}
+  }
   second.cdp.close(); process.kill(-second.child.pid, 'SIGKILL')
   await waitFor('second private exit', () => second.child.signalCode !== null || second.child.exitCode !== null, 5_000); children.delete(second.child)
   client = await connectLocalAgentMux({ store })
@@ -425,13 +446,14 @@ try {
   if (cleanupErrors.length) { failure ??= cleanupErrors[0]; cleanup.errors = cleanupErrors.map(error => error.message) }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
-const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, passed: !failure,
+const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, passed: !failure,
   failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
 try {
   await mkdir(join(repositoryRoot, '.tmp'), { recursive: true })
   await writeFile(join(repositoryRoot, '.tmp/workbench-persistence-last-crash.json'), `${JSON.stringify(receipt)}\n`)
+  if (receiptPath) await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`)
 } catch (error) {
   failure ??= error
   receipt.passed = false

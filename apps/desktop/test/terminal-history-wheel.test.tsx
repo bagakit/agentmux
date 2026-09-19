@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
@@ -255,7 +256,7 @@ it('does not call unknown, unverified, recent or non-done state long idle', asyn
     await render(current)
     expect(container.querySelector('[aria-label="Conversation history"]')).toBeNull()
     expect(container.textContent).toContain('Ready to restore')
-    expect(Array.from(container.querySelectorAll('button'), b => b.textContent?.trim())).toContain('Conversation history')
+    expect((await agentHistoryMenuEntry(container)).textContent?.trim()).toBe('Conversation history')
   }
   expect(history).not.toHaveBeenCalled(); expect(attach).not.toHaveBeenCalled(); noExecution()
 })
@@ -286,7 +287,7 @@ it('keeps a failed inline reader beside the draft and restore action without exe
 
 it('keeps explicit records reachable for active Agents and returns to the original Terminal', async () => {
   const terminal = await ready()
-  await act(async () => button('Conversation history').click())
+  await openAgentHistory(container)
   expect(history).toHaveBeenCalledExactlyOnceWith(session.control, undefined)
   expect(container.textContent).toContain('Private record latest')
   await act(async () => button('Terminal').click())

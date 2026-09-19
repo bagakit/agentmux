@@ -15,4 +15,3 @@
 .session-history__notice { color: var(--amber); border-bottom: 1px solid var(--line-soft); }
 .session-history__notice > span { flex: 1; min-width: 0; }
 .session-history__empty { color: var(--text-3); font-size: var(--fs-body); }
-.terminal-history-action { position: absolute; z-index: 36; top: var(--sp-3); right: var(--region-close-clearance, var(--sp-3)); }

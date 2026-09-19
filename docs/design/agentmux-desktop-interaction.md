@@ -53,19 +53,20 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 
 - 用户反馈：「右上角 Conversation history 好像占关闭位置，与画面中间按钮重复；这个位置应显示 Agent 名字和功能菜单」。首先必须恢复 Region 的基本关闭能力：多 Region 时，原 Region 关闭按钮始终可见、可点击且键盘可达；Terminal、显式 History、待恢复记录与流程告示都不能遮挡它的完整命中区。Tab 关闭成功不能代替 Region 关闭验收。
 - History 只保留一个应用入口，使用现有记录阅读与返回 owner，不争用关闭位置。中间的 `Full-screen history` 是 TerminalView 的阅读边界状态告示，不是第二个手动入口，须保留其诚实边界。CLI 原生画面不冒充另一应用按钮，也不能靠遮盖正文掩饰重复内容 owner。
-- Region 的完整方向是紧凑的 Agent 语义显示名与既有功能菜单，关闭保持在固定、可发现的位置；名称使用现有 Session 身份事实，不新增状态或厂商分支。关闭遮挡修复可独立交付，不等待完整 Header 编排。
+- Region 顶部只保留同一紧凑身份/动作行，消费现有 Agent 语义显示名与 Session 事实；用户名称、first prompt、Session label、Provider label 沿既有名字 owner 派生，完整身份沿现 tooltip/可访问名称。Terminal、Activity、显式 History、冷态内联记录与只读观察共用这一位置；无 Agent 的 Terminal/File/Browser 不制造 Agent 身份。输入区不复制第二名称或身份条，不能覆盖 CLI 第一行。固定 X 与显式 More 留出稳定空间，长名字先收窄。关闭遮挡修复可独立交付，不等待完整 Header 编排。
+- History 进入 More 单一应用入口，继续由原读取与返回 owner 控制；复制地址、分割、交换、移至新 Tab 复用原精确 Region 回调，菜单不从当前焦点猜目标、不另建动作注册表、地址格式、配置或后台查询。打开、悬停或关闭菜单/tooltip 不改变终端容器尺寸、权威 PTY 尺寸或 xterm 实例；工作量随本格相关事实增长。
 - 关闭继续走现有精确 Tab/Region、未保存确认与资源处理 owner；同一 Session 的视图切换、History、冷态内联记录及服务窗不另建 Terminal、Session 或 Run。正常与恢复状态、窄分屏、记录面和进程重启后都保持这一合同；无关 Session 不产生额外处理。
 
 ### Agent 输入行与视图切换
 
-- Agent 输入区的顶部行同时承担“这是哪个 Agent/Session”和“当前工作面是什么”的定位职责。主名称使用用户为该 Agent 设置的显示名（例如 `/name` 的结果），旁边以弱化元信息显示 Executor/Provider 与可辨认的 Session 标识；长文本必须截断，完整值放在 tooltip 与可访问名称中。
+- Agent/Session 的单一身份位置归《Agent Region 关闭与身份入口》：Region 顶部标明正在观察哪个 Agent，输入区不再复制名称与身份条。输入区继续表达输入模式与输入动作；Message Tools 保留现有 Agent 头像及其完整提示/可访问名称，让用户辨认消息接收者。
 - Terminal 与 Activity 只保留一个紧凑的图标切换按钮。按钮的图标、tooltip 和可访问名称说明点击后将进入的视图；切换沿用同一个 Session 的 `viewMode`，不创建第二个 Terminal、Activity 或 Session。
 - Scratch Topic 点击的成功条件是右侧存在可见的 Tab、Region 和内容面。若布局、会话或启动流程暂时不可用，原位置保留可操作的加载/失败表面与重试动作；不得以空白工作面表示正在加载或失败。
 
 ## 设计哲学
 
 - AgentMux 是 Agent-first、terminal-first 的桌面 Client。Agent 状态、用户输入、终端输出和恢复动作必须靠近它们影响的 View。
-- 同一信息只在最合适的位置显示一次。Tab 拥有会话名称和状态；低频 ID、Host 和时间进入 tooltip 或 context menu；Activity 拥有最近消息。
+- 同一信息只在最合适的位置显示一次。Tab 保留工作面上下文，Region 标明其中 Agent 的身份；低频 ID、Host 和时间进入 tooltip 或 context menu；Activity 拥有最近消息。
 - 界面层级由 Surface、明度、局部高光和紧凑密度建立，不靠连续边框、重复标题或极小字号制造“专业感”。
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。

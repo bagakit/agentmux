@@ -16,6 +16,7 @@ async function waitFor(expression) {
 }
 async function click(expression) {
   const point = await evaluate(`(() => {const e=${expression};if(!e)throw new Error('Missing target');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', ...point, buttons:0 })
   for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
 }
 async function seed(mode) {
@@ -37,6 +38,26 @@ async function painted() {
 const visible = expression => `(() => { const node=${expression}; if(!node)return false;const r=node.getBoundingClientRect(),s=getComputedStyle(node);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility==='visible'&&Number(s.opacity)>0 })()`
 const target = 'document.querySelector(\'[data-workbench-region-id="region-actions-target"]\')'
 const close = `${target}?.querySelector('.workbench-region__close')`
+const more = `${target}?.querySelector('.agent-region-header__more')`
+const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="region-actions-target"]')`
+const history = `${menu} && [...${menu}.querySelectorAll('[role="menuitem"]')].find(item=>item.textContent.trim()==='Conversation history')`
+async function escape() {
+  for (const type of ['keyDown','keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key:'Escape', code:'Escape', windowsVirtualKeyCode:27 })
+  await waitFor(`!${menu}`)
+}
+async function disclose() {
+  if(!await evaluate(`${more}.dataset.state==='open'`)){
+    await evaluate(`${more}.focus()`)
+    for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40})
+  }
+  await waitFor(`${menu}?.dataset.state==='open' && ${visible(`${menu}?.querySelector('[role="menuitem"]')`)}`);await painted()
+  await waitFor(`${menu}?.dataset.state==='open'`)
+  return evaluate(`(()=>{const menu=${menu};const entries=[...menu.querySelectorAll('[role="menuitem"]')];
+    if(entries.length===0)throw new Error('The actual More menu is empty');const h=${history};if(!h)return {historyActions:0,historyHits:[]};
+    const b=h.getBoundingClientRect();return {historyActions:entries.filter(item=>item.textContent.trim()==='Conversation history').length,
+      historyHits:[[.5,.5],[.1,.1],[.9,.1],[.1,.9],[.9,.9]].map(([x,y])=>document.elementFromPoint(b.x+b.width*x,b.y+b.height*y)?.closest('[role="menuitem"]')===h)}})()`)
+}
+async function readHistory() {await disclose();await click(history);await waitFor(visible(`${target}.querySelector('.session-history:not(.session-history--inline)')`))}
 const geometry = `(() => {
   const region=${target}, button=${close};if(!region||!button)throw new Error('Missing real Region/close');
   const r=region.getBoundingClientRect(),b=button.getBoundingClientRect();
@@ -44,11 +65,10 @@ const geometry = `(() => {
   return { regionWidth:r.width,button:{x:b.x,y:b.y,width:b.width,height:b.height},
     hits:points.map(p=>({ ...p,hit:document.elementFromPoint(p.x,p.y)?.closest('.workbench-region__close')===button,
       actual:document.elementFromPoint(p.x,p.y)?.className })),
-    historyActions:region.querySelectorAll('.terminal-history-action').length,
-    historyHits: (()=>{const h=region.querySelector('.terminal-history-action');if(!h)return [];const b=h.getBoundingClientRect();return [[.5,.5],[.1,.1],[.9,.1],[.1,.9],[.9,.9]].map(([x,y])=>document.elementFromPoint(b.x+b.width*x,b.y+b.height*y)?.closest('.terminal-history-action')===h)})(),
+    moreHits: (()=>{const h=${more};if(!h)throw new Error('Missing More');const b=h.getBoundingClientRect();return [[.5,.5],[.1,.1],[.9,.1],[.1,.9],[.9,.9]].map(([x,y])=>document.elementFromPoint(b.x+b.width*x,b.y+b.height*y)?.closest('.agent-region-header__more')===h)})(),
     inline:!!region.querySelector('.session-history--inline'),notice:!!region.querySelector('.agent-launch-notice'),
     noticeClear: (()=>{const n=region.querySelector('.agent-launch-notice');return !n||n.querySelector('.service-window').getBoundingClientRect().right<=b.left})(),
-    searchClear: (()=>{const s=region.querySelector('.terminal-search'),h=region.querySelector('.terminal-history-action');
+    searchClear: (()=>{const s=region.querySelector('.terminal-search'),h=${more};
       if(!s||!h)return null;const a=s.getBoundingClientRect(),d=h.getBoundingClientRect();return a.top>=d.bottom||a.right<=d.left||a.left>=d.right})(),
     search: (()=>{const search=region.querySelector('.terminal-search');if(!search)return null;
       const measure=node=>{const b=node.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height,contained:b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom,
@@ -71,8 +91,7 @@ app.whenReady().then(async () => {
       await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: 740, deviceScaleFactor: 1, mobile: false })
       await waitFor(visible(close))
       if (mode === 'history') {
-        await click(`${target}.querySelector('.terminal-history-action')`)
-        await waitFor(visible(`${target}.querySelector('.session-history:not(.session-history--inline)')`))
+        await readHistory()
       }
       if (mode === 'cold') await waitFor(visible(`${target}.querySelector('.session-history--inline')`))
       if (mode === 'search') {
@@ -82,8 +101,10 @@ app.whenReady().then(async () => {
         await waitFor(visible(`${target}.querySelector('.terminal-search')`))
       }
       result.stage.step='paint'
+      const initialPaint=await painted()
+      const historyFacts=await disclose();await escape()
       const paint = await painted()
-      const frame = { width, mode, paint, ...await evaluate(geometry) }
+      const frame = { width, mode, initialPaint,paint, ...historyFacts,...await evaluate(geometry) }
       result.frames.push(frame)
       const png=(await win.webContents.capturePage()).toPNG()
       frame.pngSha256=createHash('sha256').update(png).digest('hex')
@@ -94,6 +115,7 @@ app.whenReady().then(async () => {
       assert.ok(frame.regionWidth > 250 && frame.button.width === 22 && frame.button.height === 22, 'Real dimensions: ' + JSON.stringify(frame))
       assert.equal(frame.hits.length, 5, 'Every real target must provide center and four inset corner witnesses')
       assert.ok(frame.hits.every(point => point.hit), 'The entire Close split target must own its points: ' + JSON.stringify(frame))
+      assert.equal(frame.moreHits.length,5);assert.ok(frame.moreHits.every(Boolean),'The More trigger must own its center and inset corners')
       assert.equal(frame.historyActions, ['history', 'cold'].includes(frame.mode) ? 0 : 1)
       assert.equal(frame.historyHits.length,frame.historyActions?5:0)
       if(frame.historyActions)assert.ok(frame.historyHits.every(hit=>hit),'The History action must own its center and inset corner hit areas')
@@ -110,7 +132,7 @@ app.whenReady().then(async () => {
     for (const mode of ['terminal', 'history', 'cold']) {
       await seed(mode === 'history' ? 'terminal' : mode)
       await waitFor(visible(close))
-      if (mode === 'history') { await click(`${target}.querySelector('.terminal-history-action')`); await waitFor(visible(`${target}.querySelector('.session-history')`)) }
+      if (mode === 'history') await readHistory()
       if (mode === 'cold') await waitFor(visible(`${target}.querySelector('.session-history--inline')`))
       await painted()
       const before = await evaluate('regionActions.facts()')

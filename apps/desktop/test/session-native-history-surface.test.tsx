@@ -6,6 +6,7 @@ import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 
 const fixture = vi.hoisted(() => ({
   historyPage: vi.fn(), write: vi.fn(), clipboard: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
@@ -70,7 +71,7 @@ async function wheelUp() {
 
 it('opens native history in the actual SessionPane while keeping the original Terminal and composer mounted', async () => {
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
-  await act(async () => button('Conversation history').click())
+  await openAgentHistory(container)
   expect(fixture.historyPage).toHaveBeenCalledWith(control,undefined)
   expect(container.querySelector('[aria-label="Conversation history"]')).not.toBeNull()
   expect(container.textContent).toContain('body latest')
@@ -88,7 +89,7 @@ it('keeps the native history entry reachable when the Agent Run is unavailable',
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
   expect(fixture.historyPage).not.toHaveBeenCalled()
-  await act(async () => button('Conversation history').click())
+  await openAgentHistory(container)
   expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(control, undefined)
   expect(container.textContent).toContain('body latest')
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
@@ -97,7 +98,7 @@ it('keeps the native history entry reachable when the Agent Run is unavailable',
   await act(async () => button('Resume').click())
   expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
   await act(async () => button('Session').click())
-  expect(button('Conversation history')).toBeDefined()
+  expect(await agentHistoryMenuEntry(container)).toBeDefined()
   expect(fixture.terminalMount).not.toHaveBeenCalled()
   await act(async () => button('Resume').click())
   expect(fixture.state.recoverSession.mock.calls).toEqual([[session.id], [session.id]])
@@ -112,7 +113,7 @@ it('keeps a missing Run readable with a direct restore action when the independe
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
   expect(fixture.historyPage).not.toHaveBeenCalled()
-  await act(async () => button('Conversation history').click())
+  await openAgentHistory(container)
   expect(container.textContent).toContain('Idle time is unknown')
   expect(container.textContent).toContain('History read failed: Native reader unavailable')
   expect(button('Resume')).toBeDefined()
