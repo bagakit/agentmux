@@ -160,6 +160,7 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 - PMO 等特殊 Agent 以带预制的 Topic 组织，复用 Topic 的耐久目录、Wiki、资料、产出与铭牌，以及 Folder/Topic 共用的 Space 管理能力。预制负责特殊身份、默认上下文与产品入口，不建立另一套 Space、Topic、Agent 或 Run 生命周期。
 - 特殊 Agent 的入口、Space 树条目与已有工作面必须指向同一个持久 Space；打开、收起、恢复或切换入口不创建第二个 Topic 或 Session。现有 PMO 的身份、职责和执行焦点约束继续见《PMO teams topic 名称与职责》与《执行 Agent 焦点历史与 PMO 上下文隔离》。
 - 普通 Topic 不继承特殊预制的角色。特殊身份属于产品预制，与执行它的 Provider/Executor 区分；实际 Agent Session 仍通过 Core 的公开能力启动与恢复。
+- 用户补充：「现在 mote 的图标太过制式，一看就是 AI 生成，应该生成一个更有质感的 icon svg」，并希望项目其他地方用于表示 AI 的同类图标「都换掉」。Mote 的持久产品身份使用独立矢量标记；新建工作面、技能和权限动作按各自含义表达，不能把所有 AI 相关入口都替换成 Mote 身份。Provider 官方标识与真实运行状态继续沿原 owner；具体字形、尺寸与替换范围只定义在密度 SSOT《控件语言》。
 - 用户确认：「每个 PMO 都有全局负责的能力，如果不是这样，用 topic 就够了」。这一类带持久人格的产品对象具有跨 Folder/Topic 全局负责的能力；其职责不被自身 Topic 目录或当前选中 Space 限定。用户同时确认「稳定身份和 session 不绑定」：产品身份在没有运行 Session、Session 结束、更换或恢复时仍然存在，不能用某一次 Session 的身份代替持久角色身份。
 
 用户进一步明确：「就像 topic 创建时会带有知识管理结构，这种 agent 创建的时候可以带有 soul，甚至可以是 topic 的超集（当前 PMO Team 其实就是这么设计）」，随后澄清：「我说的 soul 是类似 openclaw 和 hermes 的 SOUL.md」。Agent Space 可以作为 Topic 的超集：保留 Topic 的知识管理与协作者结构，创建时额外带有具体可读、可编辑的 `SOUL.md` 等特殊预制。`SOUL.md` 表达这位 Agent 的持久人格、价值取向、沟通方式与行为边界，和当前执行它的 Session、Run、Provider/Executor 身份区分；更换或恢复执行会话不能把这些耐久内容丢掉，也不能用模板覆盖用户已经编辑的内容。
