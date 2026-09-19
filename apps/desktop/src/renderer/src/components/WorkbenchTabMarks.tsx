@@ -1,4 +1,4 @@
-import { Bot, FileCode2, GitCompareArrows, Globe2, Sparkles, SquareTerminal } from 'lucide-react'
+import { Bot, FileCode2, GitCompareArrows, Globe2, PanelsTopLeft, SquareTerminal } from 'lucide-react'
 import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
 import { AgentAvatar } from './AgentAvatar'
 
@@ -28,7 +28,7 @@ export function WorkbenchTabMarks({ marks }: { marks: WorkbenchTabMark[] }) {
  * 一个标记画成哪个图标。
  *
  * 为什么是 `switch` + `default` 里的 never 断言、而不是一条 if 链加裸兜底：实测给 `WorkbenchTabMark`
- * 加一个种类时，原先那条 if 链让 tsc **一个错都不报**——新种类静默走进兜底，画成 launcher 的星星，与
+ * 加一个种类时，原先那条 if 链让 tsc **一个错都不报**——新种类静默走进兜底，画成 launcher 的创建图标，与
  * 「未知」不可区分。而映射的另一半（`surfaceMark` 的 surface→mark）本来就被 tsc 守着（显式返回类型 +
  * strict，加 surface 种类会报 TS2366）。两侧都由编译器守，这两份清单才不会漂。
  *
@@ -56,7 +56,7 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
         ? <Bot size={12} className="workbench-tab__driving-mark"><title>Agent driving</title></Bot>
         : <Globe2 size={12} />
     case 'launcher':
-      return <Sparkles size={12} />
+      return <PanelsTopLeft size={12} />
     default: {
       const unhandled: never = mark
       throw new Error(`Unhandled workbench tab mark: ${JSON.stringify(unhandled)}`)

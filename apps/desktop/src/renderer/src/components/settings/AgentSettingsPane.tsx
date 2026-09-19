@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  WandSparkles,
+  ShieldOff,
   XCircle
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -268,7 +268,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
                     <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable --effort high" rows={3} /></label>
                     <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
-                    {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><WandSparkles size={13} /> Enable YOLO</button></div> : null}
+                    {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ShieldOff size={13} /> Enable YOLO</button></div> : null}
                   </div>
                 </details>
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
@@ -279,7 +279,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
         })}
       </div>
       {executors.length === 0 ? <p className="settings-resource-empty">No executors yet. Add one to choose a provider.</p> : matchCount === 0 ? <p className="settings-resource-empty" role="status">No executors match “{filter.query}”.</p> : null}
-      {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ChevronDown size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><WandSparkles size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
+      {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ChevronDown size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ShieldOff size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
     </div>
   )

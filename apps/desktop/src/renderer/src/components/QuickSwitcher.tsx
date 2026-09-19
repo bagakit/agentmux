@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { CornerDownLeft, FileCode2, Globe2, Search, Sparkles, SquareTerminal } from 'lucide-react'
+import { CornerDownLeft, FileCode2, Globe2, Search, PanelsTopLeft, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { attentionAccentFor } from '../lib/attention-event'
 import {
@@ -27,7 +27,7 @@ function KindGlyph({ item }: { item: QuickSwitchItem }) {
     return <SquareTerminal size={13} />
   }
   // Non-session tab rows: file / browser / launcher get their own quiet kind glyph.
-  if (item.title === 'New Tab') return <Sparkles size={13} />
+  if (item.title === 'New Tab') return <PanelsTopLeft size={13} />
   return item.subtitle.includes('://') ? <Globe2 size={13} /> : <FileCode2 size={13} />
 }
 

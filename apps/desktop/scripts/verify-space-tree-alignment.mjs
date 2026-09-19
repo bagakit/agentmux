@@ -10,7 +10,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/space-tree-alignment')
-const proof = path.resolve(process.argv[2] ?? path.join(root, '.tmp/space-tree-alignment'))
+const proof = path.resolve(process.argv[2] ?? path.join(root, '.tmp/space-tree-navigation'))
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-space-tree-'))
@@ -32,9 +32,9 @@ try {
   assert.ok(Object.keys(result.inputs).some(file => file.endsWith('/SpaceTopicsTree.tsx')))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   result.exit = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 25000 })
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 35000 })
   result.native = JSON.parse(await fs.readFile(path.join(privateRoot, 'native.json'), 'utf8'))
-  for (const name of ['default.png', 'compact.png', 'dense.png', 'narrow.png', 'scrolled.png', 'collapsed.png']) {
+  for (const name of ['default.png', 'compact.png', 'dense.png', 'narrow.png', 'scrolled.png', 'collapsed.png', 'found.png', 'no-results.png', 'restored.png']) {
     await fs.copyFile(path.join(privateRoot, name), path.join(proof, name)).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
   assert.equal(result.exit.timedOut, false)
