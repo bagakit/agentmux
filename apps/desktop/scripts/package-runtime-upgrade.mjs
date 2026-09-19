@@ -41,8 +41,9 @@ async function extractSdk(artifact, directory) {
   return join(directory, 'package/dist/index.js')
 }
 
-async function inspect(sdk, socket, core) {
-  const { stdout } = await exec(process.execPath, [script, '--inspect', sdk, socket, ...(core ? [core] : [])], {
+async function inspect(sdk, socket, core, runIds) {
+  const { stdout } = await exec(process.execPath, [script, '--inspect', sdk, socket,
+    ...(core ? [core] : []), ...(runIds ? [JSON.stringify(runIds)] : [])], {
     timeout: 10_000, maxBuffer: 1024 * 1024,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
@@ -51,7 +52,7 @@ async function inspect(sdk, socket, core) {
 
 // Only metadata leaves the bounded helper process. It owns any sockets it opens;
 // terminating that helper on a deadline cannot signal the daemon or a Run.
-async function inspectPublicRuntime(sdkPath, socketPath, corePath) {
+async function inspectPublicRuntime(sdkPath, socketPath, corePath, runIds) {
   const sdk = await import(pathToFileURL(sdkPath).href)
   const client = new sdk.CtxmuxClient({ socketPath })
   const runtime = await client.runtimeInfo()
@@ -61,16 +62,13 @@ async function inspectPublicRuntime(sdkPath, socketPath, corePath) {
     const { assertAgentMuxRuntimeCompatibility } = await import(pathToFileURL(corePath).href)
     assertAgentMuxRuntimeCompatibility(runtime)
   }
-  if (corePath) {
-    process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime, running: [] }))
-    return
-  }
+  const scope = runIds === undefined ? null : new Set(runIds)
   const running = []
   let cursor = null
-  do {
+  if (scope === null || scope.size > 0) do {
     const page = await client.listPage(cursor, 128)
     for (const summary of page.runs) {
-      if (summary.state.type !== 'running') continue
+      if (summary.state.type !== 'running' || (scope && !scope.has(summary.id))) continue
       const run = await client.status(summary.id)
       if (run.state.type === 'running') running.push({ id: run.id, pid: run.pid, backend: run.backend,
         acceptedInputBytes: run.applied_input_bytes, outputBytes: run.latest_output_bytes,
@@ -162,20 +160,16 @@ export async function prepareUiRuntime(currentApp, candidateApp, observation) {
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-install-sdk-'))
   try {
     const newSdk = await extractSdk(candidate, join(temporary, 'candidate'))
-    const before = await inspect(newSdk, old.socketPath, join(candidateApp, coreRelative, 'dist/index.js'))
-    if (observation !== null) {
-      const observed = parseDesktopClientObservation(observation)
+    const observed = observation === null ? null : parseDesktopClientObservation(observation)
+    const ids = observed ? [...new Set(observed.workbench.tabs.flatMap(tab => tab.regions.flatMap(region =>
+      (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' ? [region.control.run.runId] : [])))] : []
+    // Durable history references remain in the full observation. Only current
+    // Native running summaries in this exact workface are preservation pins.
+    const before = await inspect(newSdk, old.socketPath, candidate.corePath, ids)
+    if (observed) {
       const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
       fail(local && local.instanceId === before.runtime.daemonInstanceId && local.buildIdentity === before.runtime.buildId &&
         local.protocolVersion === before.runtime.protocolGeneration, 'The GUI and selected listener do not report the same serving Runtime.')
-      const ids = [...new Set(observed.workbench.tabs.flatMap(tab => tab.regions.flatMap(region =>
-        (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' ? [region.control.run.runId] : [])))]
-      const { stdout } = await exec(process.execPath, [script, '--status', newSdk, old.socketPath, JSON.stringify(ids)], {
-        timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-      })
-      const statuses = JSON.parse(stdout)
-      fail(statuses.length === ids.length, 'The original workbench Run metadata is incomplete.')
-      before.running = statuses.filter(entry => entry.state.type === 'running')
     }
     // Cold observation has no outgoing Region -> Run baseline. The helper's
     // empty inventory must not be reported as proof that original Runs survived.
@@ -326,7 +320,8 @@ if (process.argv[1] && resolve(process.argv[1]) === script) {
   const sdk = await import(pathToFileURL(process.argv[3]).href)
   const runtime = await new sdk.CtxmuxClient({ socketPath: process.argv[4] }).runtimeInfo()
   process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime }))
-} else if (process.argv[2] === '--inspect') await inspectPublicRuntime(process.argv[3], process.argv[4], process.argv[5])
+} else if (process.argv[2] === '--inspect') await inspectPublicRuntime(process.argv[3], process.argv[4], process.argv[5],
+  process.argv[6] === undefined ? undefined : JSON.parse(process.argv[6]))
   else if (process.argv[2] === '--status') {
     const { CtxmuxClient } = await import(pathToFileURL(process.argv[3]).href)
     const client = new CtxmuxClient({ socketPath: process.argv[4] })
