@@ -100,7 +100,8 @@ import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
-import { CONFIG_CHANGED_CHANNEL } from '../shared/contracts.js'
+import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
+import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
@@ -267,6 +268,9 @@ export async function registerIpc(args: {
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
+    if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
+      return await executeSettingsBrowserControl(request, configOwner)
+    }
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
@@ -792,6 +796,12 @@ export async function registerIpc(args: {
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string) => await args.runtime.recoverSession(session, config, workspacePath, operationId))
   handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
+  handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
+    if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {
+      throw Object.assign(new Error('The displayed app-link choice is required.'), { code: 'INVALID_SETTING_VALUE' })
+    }
+    await forgetBrowserAppLink(configOwner, scheme, expected)
+  })
   handle('browser:create', async (id: string, url: string) => await browsers.create(id, url))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))

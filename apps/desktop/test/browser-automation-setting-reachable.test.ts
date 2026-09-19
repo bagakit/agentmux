@@ -77,15 +77,17 @@ describe('Agent 浏览器自动化开关：拒绝点名的位置真的到得了'
     expect(pane, '改了不落盘，关掉设置就没了').toContain('onSave')
 
     // 闸门读的是 `!== true`，所以面里写回去的必须是布尔本身，不是"有没有这个字段"。
-    expect(pane, '写回的不是 checkbox 的当前值').toMatch(/agentAutomation:\s*enabled/u)
+    expect(pane, 'checkbox 没有提交布尔草稿').toContain('draft.setValue(event.target.checked)')
+    expect(pane, '保存没带原始编辑期望').toContain('onSave(submitted.value, submitted.expected)')
 
     // 这一节必须真的被壳挂上去——文件存在但没人渲染，等于没有。
     const shell = read('../src/renderer/src/components/SettingsPanel.tsx')
     expect(shell, 'BrowserSettingsPane 没被 SettingsPanel 渲染，这一节点不进去').toMatch(
-      /active === 'browser' \? <BrowserSettingsPane/u
+      /pane === 'browser' \? <BrowserSettingsPane/u
     )
     // 而且它保存时走的必须是 config.browser 那一支，不是把别的字段写回去。
-    expect(shell, '保存没写到 config.browser').toMatch(/api\.config\.save\(\{ \.\.\.current, browser \}\)/u)
+    expect(shell, '保存没写到 config.browser').toContain('{ ...current, browser: { ...current.browser, agentAutomation } }')
+    expect(shell, '保存丢掉了原始编辑期望').toContain('{ ...current, browser: { ...current.browser, agentAutomation: expected } }')
   })
 
   /**

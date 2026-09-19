@@ -1478,6 +1478,8 @@ export type AgentMuxDesktopApi = {
     subscribe(listener: (snapshot: UsageSnapshot) => void): () => void
   }
   browser: {
+    /** Forget only the answer displayed on this row; a newer answer is a conflict. */
+    forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
     create(id: string, url: string): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>

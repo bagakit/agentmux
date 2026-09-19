@@ -105,6 +105,32 @@ the CLI never writes configuration files. A timeout does not prove a commit: rea
 deciding what to do next.`
 }
 
+const SETTINGS_AUTHORITY = `Settings use the current Unix user's local configuration authority. Explicitly enabling
+browser automation expands browser access; it does not establish human approval or bypass
+Profile approval, control handoff, or native app-link choices.`
+
+const BROWSER_LINKS_HELP = `Read or forget remembered native app-link choices
+
+Usage:
+  agentmux settings browser links list
+  agentmux settings browser links forget <literal scheme>
+  agentmux settings browser links forget --input <file|->
+
+List returns entries (scheme and choice) with the exact stored strings, including an empty
+list. Forget deletes the current answer when the running host processes the command; it
+returns the exact scheme and changed. An absent answer is unchanged and the next link asks
+again. This is not a comparison with a previous list snapshot. There is no choice setter.
+
+One positional scheme is literal data, including --help, --input, empty strings, spaces and
+colons. Only the alternative --input <file|-> shape reads bounded UTF-8 JSON locally, with
+exactly {"scheme": string}. Use JSON for stored keys that argv cannot represent, such as NUL.
+Do not mix carriers or add fields/options. The host receives the string, never the file path.
+
+No managed Agent caller or open View is required. An unavailable host returns CONTROL_UNAVAILABLE;
+the CLI never writes configuration files. A timeout does not establish whether Forget committed;
+list before deciding the next action.
+${SETTINGS_AUTHORITY}`
+
 const HELP = new Map<string, string>([
   ['settings', `Read or change host-owned settings
 
@@ -112,6 +138,9 @@ Usage:
   agentmux settings get [target]
   agentmux settings set <key> <value>
   agentmux settings executors|prompts list|get|add|update|remove [arguments]
+  agentmux settings browser links list
+  agentmux settings browser links forget <literal scheme>
+  agentmux settings browser links forget --input <file|->
 
 The running Desktop host owns setting keys, legal values and defaults. Get returns the
 supported entries with their current value, default, scalar kind and optional enum; partial
@@ -122,7 +151,13 @@ No Agent caller or open View is required. The Desktop host must be running: an u
 host returns CONTROL_UNAVAILABLE; the CLI never writes its configuration files directly.
 Success and failure use versioned JSON receipts. Set reports the committed entry only after
 persistence succeeds. A timeout does not prove whether a write committed; read before deciding
-what to do next. Run settings executors --help or settings prompts --help for resource input.`],
+what to do next. Run settings executors --help or settings prompts --help for resource input,
+or settings browser links --help for remembered link choices.
+${SETTINGS_AUTHORITY}`],
+  ['settings.browser', BROWSER_LINKS_HELP],
+  ['settings.browser.links', BROWSER_LINKS_HELP],
+  ['settings.browser.links.list', BROWSER_LINKS_HELP],
+  ['settings.browser.links.forget', BROWSER_LINKS_HELP],
   ['settings.executors', resourceHelp('executors')],
   ['settings.prompts', resourceHelp('prompts')],
   ['settings.resource.list', resourceHelp('executors|prompts')],
@@ -145,7 +180,8 @@ The running Desktop host validates and persists the value before returning its c
 entry. Unsupported keys return UNSUPPORTED_SETTING; invalid values return INVALID_SETTING_VALUE.
 No Agent caller or View is required. An unavailable host returns CONTROL_UNAVAILABLE without
 writing any configuration file. A timeout does not establish a committed result: inspect
-settings get before deciding what to do next.`],
+settings get before deciding what to do next.
+${SETTINGS_AUTHORITY}`],
   ['whoami', `Report your own coordinates and available capabilities
 
 Usage:
@@ -814,6 +850,9 @@ agentmux settings executors|prompts get <id>
 agentmux settings executors|prompts add <id> --input <file|->
 agentmux settings executors|prompts update <id> --input <file|->
 agentmux settings executors|prompts remove <id> [--input <file|->]
+agentmux settings browser links list
+agentmux settings browser links forget <literal scheme>
+agentmux settings browser links forget --input <file|->
 \`\`\`
 
 Read the running host's supported entries before setting a value. Each entry reports its
@@ -822,6 +861,13 @@ are not yet exposed. Use the returned exact keys and legal values. Success repor
 committed entry after persistence. No managed Agent caller or open View is required.
 An offline host returns CONTROL_UNAVAILABLE; never substitute direct configuration-file
 writes. A timeout does not prove whether a write committed: read before deciding the next action.
+${SETTINGS_AUTHORITY}
+
+Browser links list returns exact scheme/choice entries. Forget atomically deletes the answer
+current when the owner processes it; an absent answer is unchanged and the next link asks again.
+There is no allow/deny setter or list-snapshot comparison. A single scheme argument is literal
+data, even --help or --input. Alternatively supply exactly {"scheme": string} through bounded
+UTF-8 JSON file/stdin, including stored NUL keys that argv cannot represent. Never mix carriers.
 
 For resources, add input is a field object with its ID only in the positional argument. Update
 input is {"changes": {...}, "expected": {...}} with nonempty changes and optional expected;

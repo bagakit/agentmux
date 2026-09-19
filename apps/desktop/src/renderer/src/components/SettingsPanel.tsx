@@ -2,7 +2,7 @@ import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown, Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import type { AgentExecutorConfig, AppConfig, AppearanceConfig, BrowserConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentExecutorConfig, AppConfig, AppearanceConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
@@ -159,10 +159,13 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
     await api.config.save({ ...current, hosts, workspaces }, { ...current, ...expected })
   }
 
-  async function saveBrowser(browser: BrowserConfig): Promise<void> {
+  async function saveBrowser(agentAutomation: boolean, expected: boolean): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
-    await api.config.save({ ...current, browser }, current)
+    await api.config.save(
+      { ...current, browser: { ...current.browser, agentAutomation } },
+      { ...current, browser: { ...current.browser, agentAutomation: expected } }
+    )
   }
 
   async function saveCopyPathsAsAbsolute(copyPathsAsAbsolute: boolean, expected: boolean): Promise<void> {
@@ -236,7 +239,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
           {pane === 'general' ? <GeneralSettingsPane /> : null}
           {pane === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {pane === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
-          {pane === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} /> : null}
+          {pane === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} /> : null}
           {pane === 'copy-paths' ? <CopyPathsSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
           {pane === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
           {pane === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}

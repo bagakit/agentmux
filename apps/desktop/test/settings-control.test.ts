@@ -46,7 +46,7 @@ describe('Main Settings owner', () => {
     ['appearance.appAppearance', 'system ', 'INVALID_SETTING_VALUE'],
     ['copyPathsAsAbsolute', '1', 'INVALID_SETTING_VALUE'],
     ['copyPathsAsAbsolute', 'TRUE', 'INVALID_SETTING_VALUE'],
-    ['browser.agentAutomation', 'true', 'UNSUPPORTED_SETTING'],
+    ['browser.agentAutomation', 'TRUE', 'INVALID_SETTING_VALUE'],
     ['browser.appLinkSchemes.custom', 'allow', 'UNSUPPORTED_SETTING'],
     ['hosts.local.kind', 'ssh', 'UNSUPPORTED_SETTING']
   ])('rejects %s=%s without changing disk, Runtime or public facts', async (key, value, code) => {

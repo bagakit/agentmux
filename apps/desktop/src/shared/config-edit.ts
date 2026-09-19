@@ -13,7 +13,7 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
-  if (path === 'copyPathsAsAbsolute') return value ?? false
+  if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
   if (path === 'appearance.terminalFontSize') return value ?? TERMINAL_FONT_SIZE_DEFAULT
   if (path === 'notifications.mode') return value ?? DEFAULT_NOTIFICATION_MODE_ID
