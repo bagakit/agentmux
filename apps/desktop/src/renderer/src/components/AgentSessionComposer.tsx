@@ -85,6 +85,8 @@ export function AgentSessionComposer({
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useAppStore((state) => state.config?.executors)
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
+  const lifecycleFailure = useAppStore(state => state.errorNoticeContext?.lifecycle)
+  const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const setViewMode = useAppStore((state) => state.setViewMode)
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
@@ -226,7 +228,8 @@ export function AgentSessionComposer({
     }, { separate: true })
   }
 
-  const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId)
+  const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
+    { message: lifecycleMessage, failure: lifecycleFailure })
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
