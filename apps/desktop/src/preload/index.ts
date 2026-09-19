@@ -1,3 +1,6 @@
+import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress'
+import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
+import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
@@ -194,7 +197,7 @@ const api: AgentMuxPreloadApi = {
   },
   control: {
     onRequest(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, request: AgentMuxControlRequest): void => {
+      const wrapped = (_event: Electron.IpcRendererEvent, request: DesktopControlRequest): void => {
         listener(request)
       }
       ipcRenderer.on(CONTROL_REQUEST_CHANNEL, wrapped)
@@ -211,6 +214,17 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off(CONTROL_CANCEL_CHANNEL, cancel)
     },
     respond: (response: DesktopControlResponse) => ipcRenderer.send(CONTROL_RESPONSE_CHANNEL, response)
+  },
+  continuousProgress: {
+    list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
+    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt),
+    action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => ipcRenderer.invoke('continuousProgress:action', target, loopId, action),
+    pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('continuousProgress:pauseForInput', control),
+    onChanged(listener: (loop: ContinuousProgressLoop) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, loop: ContinuousProgressLoop): void => listener(loop)
+      ipcRenderer.on(CONTINUOUS_PROGRESS_CHANGED, wrapped)
+      return () => ipcRenderer.off(CONTINUOUS_PROGRESS_CHANGED, wrapped)
+    }
   },
   sessions: {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),

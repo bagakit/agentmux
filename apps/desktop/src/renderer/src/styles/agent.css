@@ -377,6 +377,13 @@
 
 /* 连续推进面板：一条状态告示 + 一排控制键，语汇沿用紧邻的 .service-window（Surface 填充 + elevation，
    不描边——描边会与 Composer 争同一条边界）。状态用文字表达，控制键是无底色的图标键，同 .icon-button。 */
+.continuous-progress-control { color: var(--text-2); font-size: var(--fs-meta); padding: var(--sp-1) var(--sp-3); }
+.continuous-progress-control > summary { cursor: pointer; }
+.continuous-progress-control__target { display: block; overflow-wrap: anywhere; }
+.continuous-progress-control form { display: grid; gap: var(--sp-2); }
+.continuous-progress-control label { display: grid; gap: var(--sp-1); }
+.continuous-progress-control input, .continuous-progress-control textarea { width: 100%; min-width: 0; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); }
+.continuous-progress-control .continuous-progress-panel { margin: 0; padding: var(--sp-2) 0; background: transparent; box-shadow: none; }
 .continuous-progress-panel { margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4); display: grid; gap:var(--sp-2); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
 .continuous-progress-panel__summary { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap:var(--sp-2) var(--sp-4); }
 .continuous-progress-panel__summary strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }

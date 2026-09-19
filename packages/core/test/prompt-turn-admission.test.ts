@@ -83,7 +83,7 @@ it('uses each native completion once and does not let automation bypass a consum
     expect(h.client.agentSession('a').terminalPromptDelivery).toBeUndefined()
     await expect(h.send('unknown', 'later')).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
     await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('a')), agentSessionId: 'a', operationId: 'auto', prompt: 'auto',
-      allowUncertainTurn: true, expectedCompletionId: JSON.stringify(['r', 200])
+      allowUncertainTurn: true, expectedCompletionId: JSON.stringify(['r', 200]), expectedInputByte: (await h.client.statusAgent('a')).run.acceptedInputBytes
     })).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(h.writes).toEqual(['hello', '\r', 'next', '\r'])
   } finally { await h.client.dispose() }

@@ -10,8 +10,9 @@ export type ContinuousProgressObservation = {
   now: number
   lastTickId?: string
   lastCompletionId?: string
-  userInputRevision?: number
-  submittedInputRevision?: number
+  /** Candidate only; the final nullable Native fence authorizes new admission. */
+  inputByte: number
+  inputOccupied: boolean
 }
 
 export type ContinuousProgressDecision =
@@ -27,7 +28,7 @@ export type ContinuousProgressDecision =
 export function decideContinuousProgress(observation: ContinuousProgressObservation): ContinuousProgressDecision {
   const { session, observation: current } = observation
   if (observation.lastTickId === observation.tickId) return { kind: 'skip', reason: 'duplicate-tick' }
-  if (observation.userInputRevision !== undefined && observation.submittedInputRevision !== undefined && observation.userInputRevision !== observation.submittedInputRevision) {
+  if (observation.inputOccupied) {
     return { kind: 'skip', reason: 'user-input-changed' }
   }
   if (current.process !== 'running') return { kind: 'skip', reason: 'unknown-status' }

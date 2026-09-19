@@ -1,18 +1,25 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 
-export type ContinuousProgressLoop = {
-  loopId: string
+export type ContinuousProgressTarget = {
+  hostId: string
   agentSessionId: string
+  providerId: string
+  workspacePath: string
+}
+
+export type ContinuousProgressLoop = ContinuousProgressTarget & {
+  loopId: string
   intervalMs: number
   prompt: string
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
-  pendingCompletion?: { id: string; operationId: string; condition?: AgentPromptCondition }
+  pendingCompletion?: { id: string; operationId: string; condition?: AgentPromptCondition; inputByte?: number }
   lastCompletionId?: string
   lastTickId?: string
   lastOutcome?: 'sent' | 'skipped' | 'unknown'
   lastTickAt?: number
+  lastDecision?: string
 }
 
 export type ContinuousProgressSchedulerOptions = {
@@ -37,16 +44,19 @@ export class ContinuousProgressScheduler {
 
   list(): ContinuousProgressLoop[] { return [...this.loops.values()].map((loop) => ({ ...loop })) }
 
-  create(input: { agentSessionId: string; intervalMs: number; prompt: string }): ContinuousProgressLoop {
+  create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string }): ContinuousProgressLoop {
+    if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
-    if ([...this.loops.values()].some((loop) => loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
+    if ([...this.loops.values()].some((loop) => loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
-    const loop: ContinuousProgressLoop = { loopId: this.id(), agentSessionId: input.agentSessionId, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: 'active' }
+    const loop: ContinuousProgressLoop = { loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: 'active' }
     this.loops.set(loop.loopId, loop)
     return { ...loop }
   }
+
+  requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
   pause(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'paused' }) }
   resume(loopId: string): ContinuousProgressLoop {

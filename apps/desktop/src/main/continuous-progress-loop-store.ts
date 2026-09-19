@@ -7,6 +7,7 @@ const FILE = 'continuous-progress-loops.json'
 
 /** Durable main-process storage for loop configuration; renderer never owns scheduler truth. */
 export class ContinuousProgressLoopStore {
+  private writes: Promise<void> = Promise.resolve()
   constructor(private readonly path: string) {}
   static forUserData(userDataPath: string): ContinuousProgressLoopStore {
     return new ContinuousProgressLoopStore(join(userDataPath, FILE))
@@ -15,13 +16,21 @@ export class ContinuousProgressLoopStore {
     try {
       const raw = JSON.parse(await readFile(this.path, 'utf8')) as unknown
       if (!Array.isArray(raw)) throw new Error('Continuous progress loop store must contain an array.')
-      return raw.filter((item): item is ContinuousProgressLoop => Boolean(item && typeof item === 'object' && typeof (item as any).loopId === 'string' && typeof (item as any).agentSessionId === 'string'))
+      for (const item of raw) {
+        if (!item || typeof item !== 'object' || !['loopId', 'hostId', 'agentSessionId', 'providerId', 'workspacePath', 'prompt'].every(key => typeof item[key] === 'string' && item[key].trim()) ||
+            !Number.isFinite(item.intervalMs) || item.intervalMs <= 0 || !Number.isFinite(item.nextCheckAt) ||
+            !['active', 'paused', 'stopped'].includes(item.status)) throw new Error('Continuous progress configuration is unconfirmed. Its stored records are kept; review the loop configuration.')
+      }
+      return raw as ContinuousProgressLoop[]
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw error
     }
   }
   async save(loops: readonly ContinuousProgressLoop[]): Promise<void> {
-    await durableWriteFile(this.path, `${JSON.stringify(loops, null, 2)}\n`)
+    const content = `${JSON.stringify(loops, null, 2)}\n`
+    const write = this.writes.then(() => durableWriteFile(this.path, content))
+    this.writes = write.catch(() => {})
+    await write
   }
 }

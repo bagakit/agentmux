@@ -119,13 +119,13 @@ async function harness(profile: Profile) {
   const status = vi.fn(async (id: string) => { expect(id).toBe(runId); return run })
   const clients: AgentMuxClient[] = [], events: AgentMuxClientEvent[] = []
   async function connect() {
-    const adapter = new CtxmuxRunAdapter()
+    const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(path), providers: [provider] })
+    // Keep the constructor's one adapter: prompt/readiness owners retain this same instance.
+    const adapter = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
     // Only the SDK transport is controlled. Public connect restores the real durable registry,
     // Run projection, authenticated Hook binding, HTTP listener and Client admission owners.
     Object.assign(adapter, { client: { list: async () => [{ id: runId }], status, start: create, input, stop },
       runtime: { daemonInstanceId: 'synthetic-daemon' } })
-    const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(path), providers: [provider] })
-    Object.assign(client, { kernel: adapter })
     clients.push(client)
     client.onEvent(event => events.push(event))
     await client.connect()
@@ -232,7 +232,7 @@ describe('payload-dependent Hook contributions', () => {
       expect(cancelled.terminalPromptReadiness).toEqual({ source: 'native-stop', id: 'receipt-4', run: { runId },
         outputCursorBytes: 123, observedAt: cancelled.hookReceipt!.observedAt })
       await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(agentSessionId)),  agentSessionId, operationId: 'cancel-is-not-success',
-        prompt: 'Synthetic automatic prompt', expectedCompletionId: JSON.stringify([runId, cancelled.hookReceipt!.observedAt]) }))
+        prompt: 'Synthetic automatic prompt', expectedInputByte: 0, expectedCompletionId: JSON.stringify([runId, cancelled.hookReceipt!.observedAt]) }))
         .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
       expect(await h.feed('PostToolUse')).toBe(204)
       expect((await h.stored()).semanticStatus).toEqual(waiting)

@@ -1,3 +1,6 @@
+import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress.js'
+import type { ContinuousProgressTarget } from '@agentmux/core'
+import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
@@ -136,6 +139,7 @@ export async function registerIpc(args: {
   window: BrowserWindow
   configStore: ConfigStore
   runtime: RuntimeController
+  progressLoops: ContinuousProgressLoopManager
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
   environmentWarning?: string
@@ -233,6 +237,18 @@ export async function registerIpc(args: {
     isAvailable: () => acceptingControl && !args.window.isDestroyed() && !args.window.webContents.isDestroyed(),
     sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
+  })
+  const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {
+    const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: randomUUID(), control }, signal)
+    if (result.operation !== 'continuous-progress.observeInput' || result.control.kind !== 'agent' ||
+        result.control.hostId !== control.hostId || result.control.agentSessionId !== control.agentSessionId ||
+        result.control.run.runId !== control.run.runId || typeof result.occupied !== 'boolean') {
+      throw new Error('User input observation did not match this Session and Run. Automatic progress is paused.')
+    }
+    return result.occupied
+  })
+  const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
+    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONTINUOUS_PROGRESS_CHANGED, loop)
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
@@ -713,13 +729,48 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })
+  const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
+    loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
+  handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
+    requireTrustedSender('continuousProgress:list', event)
+    await args.progressLoops.start()
+    return args.progressLoops.list().filter(loop => progressTargetMatches(loop, target))
+  })
+  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string) => {
+    requireTrustedSender('continuousProgress:create', event)
+    const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
+    if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Clear them before enabling automatic progress.')
+    return await args.progressLoops.create({ ...target, intervalMs, prompt })
+  })
+  handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
+    requireTrustedSender('continuousProgress:action', event)
+    await args.progressLoops.start()
+    const loop = args.progressLoops.list().find(loop => loop.loopId === loopId && progressTargetMatches(loop, target))
+    if (!loop) throw new Error('This loop does not belong to the requested target.')
+    if (action === 'pause') return await args.progressLoops.pause(loopId)
+    if (action === 'stop') return await args.progressLoops.stopLoop(loopId)
+    if (action !== 'resume' && action !== 'check') throw new Error('Unknown continuous progress action.')
+    const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
+    if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Automatic progress remains paused.')
+    return action === 'resume' ? await args.progressLoops.resume(loopId) : await args.progressLoops.checkNow(loopId)
+  })
+  const pauseUserProgress = (session: SessionControl, reason: string): void => {
+    if (session.kind === 'agent') void args.progressLoops.pauseTarget(session, reason).catch(error => console.error('Continuous progress pause could not be saved:', error))
+  }
+  handleWithEvent('continuousProgress:pauseForInput', async (event, control: AgentSessionControl) => {
+    requireTrustedSender('continuousProgress:pauseForInput', event)
+    await args.progressLoops.pauseTarget(control, 'Paused for your draft or queued message. Resume explicitly after sending or clearing it.')
+  })
   handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => {
+    if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
     await args.runtime.write(session, data, source)
   })
   handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string) => {
+    if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
     await args.runtime.paste(session, text, terminalData)
   })
   handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) => {
+    pauseUserProgress(session, 'Paused for your message.')
     await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, authorAgentSessionId, choice)
   })
   handle('sessions:respondInteraction', async (
@@ -734,13 +785,13 @@ export async function registerIpc(args: {
   handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
     await args.runtime.resumeSession(session, prompt, operationId, config)
   ))
-  handle('sessions:interrupt', async (session: SessionControl) => await args.runtime.interrupt(session))
+  handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string) => await args.runtime.recoverSession(session, config, workspacePath, operationId))
-  handle('sessions:stop', async (session: SessionControl) => await args.runtime.stopSession(session))
+  handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
   handle('browser:create', async (id: string, url: string) => await browsers.create(id, url))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
@@ -907,6 +958,8 @@ export async function registerIpc(args: {
       () => {
         acceptingControl = false
         ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)
+        disposeProgressInput()
+        disposeProgressChanges()
         controlBridge.dispose()
       },
       async () => await control.stop(),

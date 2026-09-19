@@ -1,3 +1,4 @@
+import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
 import type {
   AgentCatalogEntry,
   AgentPromptCondition,
@@ -1007,8 +1008,11 @@ export type ExecutorDetection = {
   availability: AgentMuxExecutorProbeOutcome
 }
 
+export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest
+export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult
+
 export type DesktopControlResponse =
-  | { requestId: string; ok: true; result: AgentMuxControlResult }
+  | { requestId: string; ok: true; result: DesktopControlResult }
   | { requestId: string; ok: false; error: AgentMuxControlError }
 
 export type DesktopControlCancellation = {
@@ -1416,10 +1420,11 @@ export type AgentMuxDesktopApi = {
   }
   control: {
     onRequest(listener: (
-      request: AgentMuxControlRequest,
+      request: DesktopControlRequest,
       signal: AbortSignal
-    ) => AgentMuxControlResult | Promise<AgentMuxControlResult>): () => void
+    ) => DesktopControlResult | Promise<DesktopControlResult>): () => void
   }
+  continuousProgress: ContinuousProgressApi
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
@@ -1553,7 +1558,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }
   control: {
-    onRequest(listener: (request: AgentMuxControlRequest) => void): () => void
+    onRequest(listener: (request: DesktopControlRequest) => void): () => void
     onCancellation(listener: (cancellation: DesktopControlCancellation) => void): () => void
     respond(response: DesktopControlResponse): void
   }

@@ -961,10 +961,10 @@ describe('RuntimeController configuration transaction', () => {
     client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
     const signal = new AbortController().signal
-    await controller.submitPrompt(control, 'next', 'original', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', isCurrent: () => true, signal })
+    await controller.submitPrompt(control, 'next', 'original', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', inputByte: 0, isCurrent: () => true, signal })
     expect(client.submitAgentPrompt).toHaveBeenCalledWith({ afterSubmissionId: null, agentSessionId: 'agent-1', operationId: 'original', prompt: 'next',
-      expectedRun: control.run, expectedCompletionId: '["run-1",1]', signal })
-    await expect(controller.submitPrompt(control, 'next', 'stopped', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', isCurrent: () => false, signal }))
+      expectedRun: control.run, expectedCompletionId: '["run-1",1]', expectedInputByte: 0, signal })
+    await expect(controller.submitPrompt(control, 'next', 'stopped', { expectedRun: control.run, afterSubmissionId: null }, { completionId: '["run-1",1]', inputByte: 0, isCurrent: () => false, signal }))
       .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
   })

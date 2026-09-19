@@ -13,7 +13,7 @@ describe('ContinuousProgressLoopManager', () => {
     const observe = async (_loop: unknown, tickId: string) => ({
       session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w',
         run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: completedAt } },
-      observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: completedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now),
+      inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: completedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now),
       tickId, now
     })
     const send = async () => {
@@ -24,7 +24,7 @@ describe('ContinuousProgressLoopManager', () => {
     const manager = new ContinuousProgressLoopManager(store, send, () => now, observe)
     const restarted = new ContinuousProgressLoopManager(store, send, () => now, observe)
     try {
-      await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
+      await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
       await manager.start(); await manager.check()
       expect(calls).toBe(1)
       now = 10; await manager.check(); expect(calls).toBe(1)
@@ -38,10 +38,10 @@ describe('ContinuousProgressLoopManager', () => {
   it('loads durable loops and never retries an unknown tick', async () => {
     const dir = await mkdtemp(join('/tmp', 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     let now = 0; let calls = 0
-    const seed = new ContinuousProgressLoopManager(store, async () => 'unknown', () => now)
+    const seed = new ContinuousProgressLoopManager(store, async () => 'unknown', () => now, observedDone)
     // seed through the public scheduler-independent store contract
-    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'x', nextCheckAt: 0, status: 'active' }])
-    const manager = new ContinuousProgressLoopManager(store, async () => { calls++; return 'unknown' }, () => now)
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'x', nextCheckAt: 0, status: 'active' }])
+    const manager = new ContinuousProgressLoopManager(store, async () => { calls++; return 'unknown' }, () => now, observedDone)
     await manager.start(); await manager.check(now); await manager.check(now)
     expect(calls).toBe(1); await manager.stop(); await seed.stop(); await rm(dir, { recursive: true, force: true })
   })
@@ -51,8 +51,8 @@ describe('ContinuousProgressLoopManager', () => {
     const dir = await mkdtemp(join('/tmp', 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     let now = 0; let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve })
     let didEnter!: () => void; const entered = new Promise<void>((resolve) => { didEnter = resolve })
-    const manager = new ContinuousProgressLoopManager(store, async () => { didEnter(); await gate; return 'unknown' }, () => now)
-    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'x', nextCheckAt: 0, status: 'active' }])
+    const manager = new ContinuousProgressLoopManager(store, async () => { didEnter(); await gate; return 'unknown' }, () => now, observedDone)
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'x', nextCheckAt: 0, status: 'active' }])
     await manager.start(); const pending = manager.check(now)
     await entered
     const persisted = await store.load(); expect(persisted[0]?.lastTickId).toBeTruthy(); expect(persisted[0]?.nextCheckAt).toBe(10)
@@ -64,7 +64,7 @@ describe('ContinuousProgressLoopManager', () => {
 const observedDone = async (_loop: unknown, tickId: string) => ({
   session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w',
     run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 } },
-  observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 1 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 0),
+  inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 1 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 0),
   tickId, now: 0
 })
 it('restores an interrupted claim as unknown and resumes using the original operation identity', async () => {
@@ -78,8 +78,8 @@ it('restores an interrupted claim as unknown and resumes using the original oper
     return 'sent'
   }, () => now, observedDone)
   try {
-    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'next', nextCheckAt: 0,
-      status: 'active', pendingCompletion: { id: '["r",1]', operationId: 'original-operation' } }])
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'next', nextCheckAt: 0,
+      status: 'active', pendingCompletion: { inputByte: 0, id: '["r",1]', operationId: 'original-operation' } }])
     await manager.start(); await manager.check()
     expect(manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
     expect(operations).toEqual([])
@@ -102,7 +102,7 @@ it.each(['pause', 'stopLoop'] as const)('does not send after %s while observatio
   const manager = new ContinuousProgressLoopManager(store, async () => { calls++; return 'sent' }, () => 0,
     async (loop, tickId) => { enter(); await gate; return observedDone(loop, tickId) })
   try {
-    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
     await manager.start(); const checking = manager.check(); await entered
     await manager[action]('l'); release(); await checking
     expect(calls).toBe(0)
@@ -121,7 +121,7 @@ it('propagates pause cancellation to an already queued Core submission', async (
     return 'skipped'
   }, () => 0, observedDone)
   try {
-    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'next', nextCheckAt: 0, status: 'active' }])
     await manager.start(); const checking = manager.check(); await entered
     await manager.pause('l'); release(); await checking
     expect(bytes).toBe(0)

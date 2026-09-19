@@ -5,7 +5,7 @@ describe('ContinuousProgressScheduler', () => {
   it('creates, claims once per interval, and advances the next check', () => {
     let now = 1000
     const s = new ContinuousProgressScheduler({ now: () => now, id: (() => { let n = 0; return () => `id-${++n}` })() })
-    const loop = s.create({ agentSessionId: 'a', intervalMs: 100, prompt: 'Continue' })
+    const loop = s.create({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 100, prompt: 'Continue' })
     expect(s.due()).toEqual([])
     now = 1100
     const claim = s.claimTick(loop.loopId)
@@ -17,7 +17,7 @@ describe('ContinuousProgressScheduler', () => {
   it('persists lifecycle through restore and pause/resume/stop', () => {
     let now = 0
     const a = new ContinuousProgressScheduler({ now: () => now, id: () => 'loop' })
-    const loop = a.create({ agentSessionId: 'a', intervalMs: 10, prompt: 'x' })
+    const loop = a.create({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'x' })
     const b = new ContinuousProgressScheduler({ now: () => now, id: () => 'tick' }); b.restore(a.list())
     expect(b.pause(loop.loopId).status).toBe('paused')
     now = 100
@@ -28,7 +28,7 @@ describe('ContinuousProgressScheduler', () => {
   it('recovers one overdue tick without replaying missed periods', () => {
     let now = 0
     const s = new ContinuousProgressScheduler({ now: () => now, id: (() => { let n = 0; return () => `id-${++n}` })() })
-    s.create({ agentSessionId: 'a', intervalMs: 10, prompt: 'x' })
+    s.create({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: '/w', intervalMs: 10, prompt: 'x' })
     now = 1000
     expect(s.recover()).toHaveLength(1)
     expect(s.recover()).toHaveLength(0)

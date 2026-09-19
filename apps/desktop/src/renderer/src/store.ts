@@ -1,3 +1,4 @@
+import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
 import { sessionPresentationById } from './lib/session-presentation'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
@@ -1993,6 +1994,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     text: text.trim(),
     status: 'queued'
   }
+  void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
   useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   return entry.operationId
 }
@@ -2096,9 +2098,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeControl = api.control.onRequest((request, signal) => (
-      get().executeControl(request, signal)
-    ))
+    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'continuous-progress.observeInput'
+      ? readContinuousProgressInput(get(), request, signal) : get().executeControl(request, signal))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -5711,6 +5712,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setAgentComposerDraft(sessionId, text) {
+    const state = get(), session = sessionPresentationById(state.sessions).get(sessionId)
+    if (!state.agentComposerDrafts[sessionId]?.trim() && text.trim() && session?.kind === 'agent') {
+      void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
+    }
     set((state) => ({
       agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text }
     }))
@@ -5725,15 +5730,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   appendAgentComposerDraft(sessionId, text) {
     if (!text.trim()) return
-    set((state) => {
-      const current = state.agentComposerDrafts[sessionId] ?? ''
-      return {
-        agentComposerDrafts: {
-          ...state.agentComposerDrafts,
-          [sessionId]: `${current}${current.trim() ? '\n\n' : ''}${text}`
-        }
-      }
-    })
+    const current = get().agentComposerDrafts[sessionId] ?? ''
+    get().setAgentComposerDraft(sessionId, `${current}${current.trim() ? '\n\n' : ''}${text}`)
   },
   clearAgentComposerDraftIfUnchanged(sessionId, expectedText) {
     set((state) => {

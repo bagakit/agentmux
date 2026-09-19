@@ -76,12 +76,13 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
   })
   vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
   const runtime = new RuntimeController(store)
+  runtime.setContinuousProgressInputObserver(async () => false)
   // Already-connected host I/O seam; no connect/start/attach is performed.
   ;(runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })
   return { store, client, state, runtime, session, writes, requests,
     end: () => { ended = true }, loseNextAck: () => { loseAck = true },
     status: () => client.statusAgent(session.agentSessionId),
-    observe: (tickId = 'tick') => runtime.observeContinuousProgress({ agentSessionId: session.agentSessionId }, tickId, Date.now()) }
+    observe: (tickId = 'tick') => runtime.observeContinuousProgress({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, tickId, Date.now()) }
 }
 
 async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop: ContinuousProgressLoop, tickId: string, now: number) => Promise<ContinuousProgressObservation>) {
@@ -94,7 +95,7 @@ async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop
       () => now, observe ?? ((loop, tickId, time) => f.runtime.observeContinuousProgress(loop, tickId, time)))
     managers.push(manager); return manager
   }
-  await store.save([{ loopId: 'private-loop', agentSessionId: f.session.agentSessionId,
+  await store.save([{ loopId: 'private-loop', hostId: 'local', agentSessionId: f.session.agentSessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath,
     intervalMs: 10, prompt: 'continue the assigned task', nextCheckAt: 0, status: 'active' }])
   return { store, make, at: (value: number) => { now = value } }
 }

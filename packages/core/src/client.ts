@@ -204,6 +204,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   allowUncertainTurn?: boolean
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
   expectedCompletionId?: string
+  /** New automatic admission only: final Native cursor must equal this observed input fence. */
+  expectedInputByte?: number
   /** Cancellation before admission; an already claimed input transaction finishes or reconciles. */
   signal?: AbortSignal
   agentSessionId: string
@@ -2639,6 +2641,10 @@ export class AgentMuxClient {
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
     this.requireConnected()
     const content = input.prompt
+    if (input.expectedInputByte !== undefined && (input.expectedCompletionId === undefined ||
+        !Number.isSafeInteger(input.expectedInputByte) || input.expectedInputByte < 0)) {
+      throw new AgentMuxError('Automatic prompt admission requires its completion and finite input fence together.', 'INVALID_AGENT_PROMPT')
+    }
     if (!content.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(content)
     // send 是纯用户话：出站文本经唯一出口产出，但不加 amux 信封——用户原文逐字节透传。
@@ -2657,7 +2663,7 @@ export class AgentMuxClient {
     const renderObservation = new AbortController()
     await this.serializeAgentInput(session, async (current, run) => {
       await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal)
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte)
     }, renderObservation)
     await this.recordPromptAfterSideEffect(
       session,

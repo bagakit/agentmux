@@ -85,7 +85,7 @@ function startPrimaryInstance(): void {
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined,
-    (loop, tickId, now) => runtime.observeContinuousProgress(loop, tickId, now)
+    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal)
   )
   void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
   const configStore = new ConfigStore()
@@ -231,7 +231,7 @@ function startPrimaryInstance(): void {
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles,
+    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, scratchTopics, workspaceFiles,
       loadedPackage: await loadedPackage, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')

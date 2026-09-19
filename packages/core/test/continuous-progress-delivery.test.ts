@@ -4,7 +4,7 @@ import { decideContinuousProgress, type ContinuousProgressObservation } from '..
 
 const base = (overrides: Partial<ContinuousProgressObservation> = {}): ContinuousProgressObservation => ({
   session: { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: '/w', run: { runId: 'r' }, semanticStatus: { state: 'done', source: 'native-hook', observedAt: 100 } },
-  observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 100 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 100),
+  inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: 100 }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 100),
   tickId: 'tick', now: 100, ...overrides
 })
 
