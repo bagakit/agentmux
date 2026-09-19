@@ -6,7 +6,7 @@ export async function deliverContinuousProgress(
   runtime: Pick<RuntimeController, 'observeContinuousProgress' | 'submitPrompt'>,
   loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal
 ): Promise<'sent' | 'skipped'> {
-  const observation = await runtime.observeContinuousProgress(loop, operationId, Date.now())
+  const observation = await runtime.observeContinuousProgress(loop, operationId, Date.now(), signal)
   const decision = decideContinuousProgress(observation)
   if (!isCurrent() || !loop.pendingCompletion) return 'skipped'
   if (loop.lastOutcome !== 'unknown' && (decision.kind !== 'send' || decision.completionId !== loop.pendingCompletion.id)) return 'skipped'
@@ -14,7 +14,8 @@ export async function deliverContinuousProgress(
   try {
     await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId,
       hostId: observation.session.hostId, run: condition.expectedRun }, loop.prompt, operationId, condition,
-    { completionId: loop.pendingCompletion.id, isCurrent, signal })
+    { completionId: loop.pendingCompletion.id,
+      ...(loop.pendingCompletion.inputByte !== undefined ? { inputByte: loop.pendingCompletion.inputByte } : {}), isCurrent, signal })
     return 'sent'
   } catch (error) {
     if (error instanceof AgentMuxError && (error.code === 'AGENT_COMPLETION_CHANGED' || error.code === 'AGENT_PROMPT_CANCELLED')) return 'skipped'
