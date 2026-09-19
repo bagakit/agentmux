@@ -19,6 +19,11 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'UNSUPPORTED_SETTING',
   'INVALID_SETTING_VALUE',
   'CONFIG_CONFLICT',
+  'SETTING_RESOURCE_NOT_FOUND',
+  'SETTING_RESOURCE_EXISTS',
+  'SETTING_IDENTITY_IMMUTABLE',
+  'SETTING_RESOURCE_IN_USE',
+  'SETTING_RESOURCE_REFERENCES_UNKNOWN',
   'CALLER_NOT_OPEN',
   'TAB_NOT_OPEN',
   'REGION_NOT_OPEN',
@@ -253,6 +258,24 @@ export type AgentMuxControlListActiveAgentsRequest = RequestBase & { operation: 
 /** Host-owned preferences. Core transports scalar facts without owning their keys or defaults. */
 export type AgentMuxControlSettingsGetRequest = RequestBase & { operation: 'settings.get'; target?: string }
 export type AgentMuxControlSettingsSetRequest = RequestBase & { operation: 'settings.set'; key: string; value: string }
+export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts'
+export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
+  | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
+export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }
+export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
+export type AgentMuxControlSettingsResourceRequest = RequestBase & (
+  | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind }
+  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string }
+  | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; id: string; value: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; id: string; changes: AgentMuxControlSettingsResourceFields; expected?: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; expected?: AgentMuxControlSettingsResourceFields }
+)
+export type AgentMuxControlSettingsResourceResult =
+  | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind; items: AgentMuxControlSettingsResourceItem[]; partial: true }
+  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem }
+  | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
+  | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
+  | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; removed: true }
 export type AgentMuxControlSettingEntry =
   | { key: string; kind: 'string'; value: string; default: string; enum?: string[] }
   | { key: string; kind: 'boolean'; value: boolean; default: boolean; enum?: boolean[] }
@@ -478,6 +501,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlListActiveAgentsRequest
   | AgentMuxControlSettingsGetRequest
   | AgentMuxControlSettingsSetRequest
+  | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
@@ -565,6 +589,7 @@ export type AgentMuxControlResult =
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
   | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry }
+  | AgentMuxControlSettingsResourceResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
@@ -736,6 +761,7 @@ export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target
  */
 export const AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS = 2_000
 export const AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS = 60_000
+export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
 
 /**
  * 每个操作的等待预算档位——逐个写死，不许按前缀或形状推断。
@@ -770,6 +796,11 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.active-agents': 'short',
   'settings.get': 'short',
   'settings.set': 'short',
+  'settings.resource.list': 'short',
+  'settings.resource.get': 'short',
+  'settings.resource.add': 'short',
+  'settings.resource.update': 'short',
+  'settings.resource.remove': 'short',
   interrupt: 'short',
   resume: 'long',
   stop: 'long',

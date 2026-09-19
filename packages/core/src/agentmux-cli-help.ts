@@ -81,12 +81,37 @@ Options:
   --version, -V  Print version and exit.
   --help, -h     Show help.`
 
+function resourceHelp(resource: 'executors' | 'prompts' | 'executors|prompts'): string {
+  return `Read or commit host-owned ${resource}
+
+Usage:
+  agentmux settings ${resource} list
+  agentmux settings ${resource} get <id>
+  agentmux settings ${resource} add <id> --input <file|->
+  agentmux settings ${resource} update <id> --input <file|->
+  agentmux settings ${resource} remove <id> [--input <file|->]
+
+Input is bounded UTF-8 JSON, read locally from a file or stdin (-). Add takes a field object;
+the ID occurs only in the positional argument. Update takes {"changes": {...}, "expected": {...}}
+with nonempty changes and optional expected fields. Remove optionally takes {"expected": {...}}
+using a complete get value snapshot. Arrays and objects in a field replace that entire field.
+The running host owns legal fields, defaults, identities, references and persistence.
+
+IDs and input paths are literal data, including --help; no shell or environment expansion is
+performed. List returns items and partial scope, including an empty list. Get returns one item;
+add/update report the committed item and changed; remove reports the removed ID.
+No Agent caller or open View is required. An unavailable host returns CONTROL_UNAVAILABLE;
+the CLI never writes configuration files. A timeout does not prove a commit: read before
+deciding what to do next.`
+}
+
 const HELP = new Map<string, string>([
   ['settings', `Read or change host-owned settings
 
 Usage:
   agentmux settings get [target]
   agentmux settings set <key> <value>
+  agentmux settings executors|prompts list|get|add|update|remove [arguments]
 
 The running Desktop host owns setting keys, legal values and defaults. Get returns the
 supported entries with their current value, default, scalar kind and optional enum; partial
@@ -97,7 +122,10 @@ No Agent caller or open View is required. The Desktop host must be running: an u
 host returns CONTROL_UNAVAILABLE; the CLI never writes its configuration files directly.
 Success and failure use versioned JSON receipts. Set reports the committed entry only after
 persistence succeeds. A timeout does not prove whether a write committed; read before deciding
-what to do next.`],
+what to do next. Run settings executors --help or settings prompts --help for resource input.`],
+  ['settings.executors', resourceHelp('executors')],
+  ['settings.prompts', resourceHelp('prompts')],
+  ['settings.resource.list', resourceHelp('executors|prompts')],
   ['settings.get', `Read host-owned settings
 
 Usage: agentmux settings get [target]
@@ -780,6 +808,12 @@ send: the ownership transfer is a Core fact, not a phrase.
 agentmux settings get
 agentmux settings get <target>
 agentmux settings set <key> <value>
+agentmux settings executors list
+agentmux settings prompts list
+agentmux settings executors|prompts get <id>
+agentmux settings executors|prompts add <id> --input <file|->
+agentmux settings executors|prompts update <id> --input <file|->
+agentmux settings executors|prompts remove <id> [--input <file|->]
 \`\`\`
 
 Read the running host's supported entries before setting a value. Each entry reports its
@@ -788,6 +822,14 @@ are not yet exposed. Use the returned exact keys and legal values. Success repor
 committed entry after persistence. No managed Agent caller or open View is required.
 An offline host returns CONTROL_UNAVAILABLE; never substitute direct configuration-file
 writes. A timeout does not prove whether a write committed: read before deciding the next action.
+
+For resources, add input is a field object with its ID only in the positional argument. Update
+input is {"changes": {...}, "expected": {...}} with nonempty changes and optional expected;
+remove optionally takes {"expected": {...}} using the complete get value snapshot. Input is
+bounded UTF-8 JSON from the local file or stdin (-); the host receives fields, not a file path.
+The host owns legal fields and reference safety. IDs, paths and field values are literal data,
+including --help, spaces and environment expressions. Arrays and objects replace entire fields.
+Read after a timeout; never infer that a missing reply means a mutation did not commit.
 
 ## Runtime intents
 

@@ -92,7 +92,7 @@ it('saves common edits without dropping closed launch configuration and keeps im
   expect(card.querySelectorAll('.settings-executor-identity input, .settings-executor-identity select')).toHaveLength(0)
   await fill('#executor-settings-reviewer [data-executor-name]', 'Named review')
   await dom.click('.settings-pane-actions button')
-  expect(save).toHaveBeenCalledExactlyOnceWith({ ...config.executors, reviewer: { ...config.executors.reviewer, label: 'Named review' } })
+  expect(save).toHaveBeenCalledExactlyOnceWith({ ...config.executors, reviewer: { ...config.executors.reviewer, label: 'Named review' } }, config.executors)
   expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Changes saved')
 })
 
@@ -132,7 +132,7 @@ it('keeps edits and actionable failure feedback on a rejected save, then saves t
   expect(dom.container.querySelector<HTMLInputElement>('#executor-settings-reviewer [data-executor-name]')!.value).toBe('Keep this edit')
   expect(dom.container.querySelector<HTMLButtonElement>('.settings-pane-actions button')!.disabled).toBe(false)
   await dom.click('.settings-pane-actions button')
-  expect(save).toHaveBeenLastCalledWith({ ...config.executors, reviewer: { ...config.executors.reviewer, label: 'Keep this edit' } })
+  expect(save).toHaveBeenLastCalledWith({ ...config.executors, reviewer: { ...config.executors.reviewer, label: 'Keep this edit' } }, config.executors)
 })
 
 it('uses the complete grouped category picker and preserves executor drafts when changing sections', async () => {
@@ -170,7 +170,7 @@ it('changes explicit launch posture without splitting literal argv or trimming u
   await dom.click('#executor-settings-reviewer .settings-launch-action button')
   expect(save).toHaveBeenCalledExactlyOnceWith({ reviewer: { ...special.executors.reviewer,
     args: ['--model', 'review model', '--literal', 'a\'b"c', '', '--dangerously-bypass-approvals-and-sandbox']
-  } })
+  } }, special.executors)
 })
 
 it('appends an advanced argument without changing any existing literal argument', async () => {
@@ -184,7 +184,7 @@ it('appends an advanced argument without changing any existing literal argument'
   expect(before).toContain("'gpt 5'")
   await fill(selector, `${before}\n--effort high`)
   await dom.click('.settings-pane-actions button')
-  expect(save).toHaveBeenCalledExactlyOnceWith({ reviewer: { ...special.executors.reviewer, args: [...args, '--effort', 'high'] } })
+  expect(save).toHaveBeenCalledExactlyOnceWith({ reviewer: { ...special.executors.reviewer, args: [...args, '--effort', 'high'] } }, special.executors)
 })
 
 it('keeps invalid quoted arguments as a draft and reports both save and explicit launch-action failures', async () => {

@@ -20,6 +20,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { withYoloArgs } from '../../lib/executors'
+import { useResourceDrafts } from './use-resource-drafts'
 
 type ExecutorDraft = {
   label: string
@@ -31,34 +32,25 @@ type ExecutorDraft = {
   avatar?: AgentAvatarAppearance | undefined
 }
 
-function toDraft(config: AgentExecutorConfig, legacyAvatar?: AgentAvatarAppearance): ExecutorDraft {
+function toDraft(config: AgentExecutorConfig): ExecutorDraft {
   return {
     label: config.label,
     providerId: config.providerId,
     command: config.command,
     args: config.args.map(quote).join('\n'),
-    env: Object.entries(config.env).map(([name, value]) => `${name}=${value}`).join('\n'),
+    env: JSON.stringify(config.env, null, 2),
     injectAgentMuxGuide: config.injectAgentMuxGuide,
-    // Read the pre-Executor appearance by stable id into the draft so the settings card shows
-    // what the user already sees. A later explicit reset stores `{}` on the Executor, which
-    // wins over the preserved legacy record without deleting that durable record.
-    avatar: config.avatar ?? legacyAvatar
+    avatar: config.avatar
   }
 }
 
 function parseEnv(text: string): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [index, raw] of text.split('\n').entries()) {
-    const line = raw.trimStart()
-    if (!line.trim()) continue
-    const separator = line.indexOf('=')
-    const name = separator > 0 ? line.slice(0, separator).trim() : ''
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      throw new Error(`Environment line ${index + 1} must use NAME=value`)
-    }
-    env[name] = line.slice(separator + 1)
+  let env: unknown
+  try { env = JSON.parse(text) } catch { throw new Error('Environment must be a JSON object of string values.') }
+  if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string')) {
+    throw new Error('Environment must be a JSON object of string values.')
   }
-  return env
+  return env as Record<string, string>
 }
 
 function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDetections'][string] | undefined) {
@@ -74,8 +66,8 @@ function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDete
 function nextExecutorId(providerId: string, drafts: Readonly<Record<string, ExecutorDraft>>): string {
   const base = providerId.replace(/[^A-Za-z0-9_-]/g, '-') || 'agent'
   let suffix = 2
-  if (!drafts[base]) return base
-  while (drafts[`${base}-${suffix}`]) suffix += 1
+  if (!Object.hasOwn(drafts, base)) return base
+  while (Object.hasOwn(drafts, `${base}-${suffix}`)) suffix += 1
   return `${base}-${suffix}`
 }
 
@@ -100,7 +92,7 @@ export function parseExecutorArgs(text: string): string[] {
 export function AgentSettingsPane({ config, onSave, executorId }: {
   config: AppConfig
   executorId?: string | undefined
-  onSave: (executors: Record<string, AgentExecutorConfig>) => Promise<void>
+  onSave: (executors: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>) => Promise<void>
 }) {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
@@ -110,13 +102,12 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEditId, setPendingEditId] = useState<string | null>(null)
   const [hostId, setHostId] = useState(initialHost)
-  const [drafts, setDrafts] = useState<Record<string, ExecutorDraft>>(() =>
-    Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => [id, toDraft(executor, config.appearance.agentAvatars?.[id])]))
-  )
+  const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
+    [id, toDraft(executor)])))
+  const drafts = resource.value, setDrafts = resource.setValue
   const saveState = useSettingsSave()
   const { saving } = saveState
-  const [savedDrafts, setSavedDrafts] = useState(() => JSON.stringify(drafts))
-  const dirty = JSON.stringify(drafts) !== savedDrafts
+  const dirty = resource.dirty
   // Detection is a user-visible probe, not a subscription to every result update. Tying
   // this effect to the result map retries a failed probe forever (a failed native call
   // leaves one executor without a result, so every state update starts another probe).
@@ -179,22 +170,32 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   async function saveDrafts(makeDrafts: () => Record<string, ExecutorDraft>): Promise<void> {
     await saveState.run(async () => {
       const next = makeDrafts()
-      const executors = Object.fromEntries(Object.entries(next).map(([id, draft]) => {
-        const existing = config.executors[id]
-        assertExecutorProviderIdentity(id, existing, draft.providerId)
-        const original = existing ? toDraft(existing) : undefined
+      const decode = (records: Record<string, ExecutorDraft>) => Object.fromEntries(Object.entries(records).map(([id, draft]) => {
         return [id, {
           label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
           args: parseExecutorArgs(draft.args),
-          env: original?.env === draft.env ? existing!.env : parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
+          env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide,
           ...(draft.avatar ? { avatar: draft.avatar } : {})
         }]
       }))
+      const expected = decode(resource.expected)
+      const executors = decode(next)
+      for (const [id, executor] of Object.entries(executors)) {
+        assertExecutorProviderIdentity(id, Object.hasOwn(expected, id) ? expected[id] : undefined, executor.providerId)
+        // Preserve unchanged environment from its authored baseline, never from fresher props.
+        if (next[id]!.env === resource.expected[id]?.env) executor.env = expected[id]!.env
+      }
       if (Object.values(executors).some((executor) => !executor.label || !executor.command)) {
         throw new Error('Executor names and commands cannot be empty')
       }
-      await onSave(executors)
-      setSavedDrafts(JSON.stringify(next))
+      const submitted = resource.beginSave(next)
+      let committed = false
+      try {
+        await onSave(executors, expected)
+        committed = true
+      } finally {
+        submitted.finish(committed ? Object.fromEntries(Object.entries(executors).map(([id, executor]) => [id, toDraft(executor)])) : undefined)
+      }
     })
   }
 
@@ -204,7 +205,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
         const args = candidate === id || id === undefined ? withYoloArgs(draft.providerId, parseExecutorArgs(draft.args)) : null
         return [candidate, args ? { ...draft, args: args.map(quote).join('\n') } : draft]
       }))
-      setDrafts(next)
+      setDrafts(() => next)
       return next
     })
   }
@@ -215,7 +216,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
     const id = nextExecutorId(provider.id, drafts)
     setDrafts((current) => ({ ...current, [id]: {
       label: `${provider.label} ${Object.keys(current).length + 1}`, providerId: provider.id,
-      command: provider.executable, args: '', env: '', injectAgentMuxGuide: true
+      command: provider.executable, args: '', env: '{}', injectAgentMuxGuide: true
     } }))
     setFilter({ query: '', snapshot: [] })
     setPendingEditId(id)
@@ -237,23 +238,26 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
       <div className="agent-settings-list">
         {executors.map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
+          // Effective appearance is a projection; the editable baseline remains the Executor DTO.
+          const legacy = config.appearance.agentAvatars
+          const avatar = draft.avatar ?? (legacy && Object.hasOwn(legacy, id) ? legacy[id] : undefined)
           return (
             <details className="agent-settings-card" key={id} id={`executor-settings-${id}`} tabIndex={-1} hidden={!matches(id)}>
               <summary>
-                <span className="agent-provider-mark"><AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={draft.avatar ?? {}} size={20} /></span>
+                <span className="agent-provider-mark"><AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={avatar ?? {}} size={20} /></span>
                 <span><strong>{draft.label}</strong><small>{agentProviderLabel(draft.providerId)} · {id}</small></span>
                 <em className={`check-pill check-pill--${detection?.state ?? 'idle'}`}>{status.icon}{status.label}</em>
                 <ChevronDown className="settings-disclosure-icon" size={14} />
               </summary>
               <div className="agent-settings-fields">
                 <label><span>Name</span><input data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
-                {config.executors[id] ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
+                {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
                   <label><span>Provider</span><select value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
-                  <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={draft.avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...draft.avatar, tint: event.target.value })} /></label>
-                  <label>Icon<select aria-label={`${draft.label} avatar icon`} value={draft.avatar?.badge ?? ''} onChange={(event) => { const next = { ...draft.avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, Object.keys(next).length ? next : (config.appearance.agentAvatars?.[id] ? {} : undefined)) }}><option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}</select></label>
-                  <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!draft.avatar?.tint && !draft.avatar?.badge} onClick={() => updateAvatar(id, config.appearance.agentAvatars?.[id] ? {} : undefined)}>Reset</button>
+                  <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>
+                  <label>Icon<select aria-label={`${draft.label} avatar icon`} value={avatar?.badge ?? ''} onChange={(event) => { const next = { ...avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, next) }}><option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}</select></label>
+                  <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!avatar?.tint && !avatar?.badge} onClick={() => updateAvatar(id, {})}>Reset</button>
                 </div>
                 <details className="settings-launch-config">
                   <summary><span><strong>Launch configuration</strong><small>Command, arguments, and environment</small></span><ChevronDown size={14} /></summary>
@@ -262,7 +266,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
                     <label><span>Command</span><input value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                     <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable --effort high" rows={3} /></label>
-                    <label><span>Environment <small>NAME=value, one per line</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder="API_BASE=https://example.test" rows={3} /></label>
+                    <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
                     {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><WandSparkles size={13} /> Enable YOLO</button></div> : null}
                   </div>

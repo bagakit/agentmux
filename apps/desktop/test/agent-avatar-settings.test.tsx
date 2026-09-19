@@ -60,7 +60,7 @@ it('edits avatars in Executor templates and preserves both through save and reop
   await dom.click('[aria-label="Reset Codex avatar"]')
   expect(badges()).toEqual(['shield'])
   await dom.click('.settings-pane-actions button')
-  expect(config.executors.codex?.avatar).toBeUndefined()
+  expect(config.executors.codex?.avatar).toEqual({})
   expect(config.executors.review?.avatar).toEqual(appearances.review)
 })
 

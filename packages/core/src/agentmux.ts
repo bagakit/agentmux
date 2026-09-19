@@ -968,6 +968,10 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'settings' && (args[1] === 'executors' || args[1] === 'prompts')) {
+    return ['list', 'get', 'add', 'update', 'remove'].includes(args[2] ?? '') ? `settings.resource.${args[2]}`
+      : args[2] === undefined || args[2].startsWith('-') ? `settings.${args[1]}` : `settings.${args[1]}.${args[2]}`
+  }
   if (args[0] === 'open' && ['agent', 'terminal', 'browser'].includes(args[1] ?? '')) {
     return `${args[0]}.${args[1]}`
   }
@@ -983,7 +987,8 @@ function requestsHelp(args: readonly string[]): boolean {
   if (args[0] === 'settings') {
     const help = (value: string | undefined): boolean => value === '--help' || value === '-h'
     return (args.length === 2 && help(args[1])) ||
-      (args.length === 3 && (args[1] === 'get' || args[1] === 'set') && help(args[2]))
+      (args.length === 3 && (args[1] === 'get' || args[1] === 'set' || args[1] === 'executors' || args[1] === 'prompts') && help(args[2])) ||
+      (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3]))
   }
   return args.some((argument, index) => (
     (argument === '--help' || argument === '-h') &&
@@ -1081,7 +1086,7 @@ async function main(): Promise<number> {
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'settings') {
-    const receipt = await requestAgentMuxControl({ ...requestBase(), ...parseSettingsCommand(args.slice(1)) })
+    const receipt = await requestAgentMuxControl({ ...requestBase(), ...await parseSettingsCommand(args.slice(1)) })
     printSuccess(receipt.operation, receipt.result); return 0
   }
   if (args[0] === 'pmo') return await pmoCommand(args.slice(1))

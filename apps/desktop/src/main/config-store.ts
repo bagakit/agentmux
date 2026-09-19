@@ -36,15 +36,25 @@ const hostSchema = z.discriminatedUnion('kind', [
 ])
 
 const providerIds = new Set(BUILT_IN_AGENT_PROVIDERS.map((provider) => provider.id))
-const executorIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
+export const executorIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
 
-const executorSchema = z
+// Zod's record parser omits __proto__. Validate entries, then define every own key safely.
+const environmentSchema = z.unknown().transform((value, context) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Environment must be an object of string values' })
+    return z.NEVER
+  }
+  return Object.entries(value)
+}).pipe(z.array(z.tuple([z.string(), z.string()]))).transform((entries) => Object.fromEntries(entries))
+
+export const executorSchema = z
   .object({
     label: z.string().min(1),
     providerId: z.string().min(1),
     command: z.string().min(1),
     args: z.array(z.string()),
-    env: z.record(z.string(), z.string()),
+    env: environmentSchema,
     injectAgentMuxGuide: z.boolean(),
     avatar: z.object({
       tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
@@ -136,7 +146,7 @@ const notificationsSchema = z
  * （`BuiltInAgentProviderId | (string & {})`），用户可以配置自己的 Executor，把它钉成内置那 13 个
  * 会让绑定到自定义 Provider 的 prompt 整条判失败。
  */
-const composerShortcutSchema = z
+export const composerShortcutSchema = z
   .object({
     id: z.string().min(1),
     keyword: z.string().min(1),
@@ -1003,7 +1013,7 @@ export class ConfigStore {
         // than silently overwriting it. (The bytes are still preserved by the sidecar below.)
         const current = configSchema.parse(JSON.parse(previousText)) as AppConfig
         for (const [executorId, executor] of Object.entries(current.executors)) {
-          const next = config.executors[executorId]
+          const next = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
           if (next && next.providerId !== executor.providerId) {
             throw new Error(
               `Agent Executor ${executorId} is already bound to Provider ${executor.providerId}. ` +

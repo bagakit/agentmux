@@ -96,6 +96,7 @@ import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
+import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { CONFIG_CHANGED_CHANNEL } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
@@ -149,12 +150,24 @@ export async function registerIpc(args: {
     background: initialPalette.background
   })
   args.runtime.commit(await args.runtime.prepare(config))
+  let releaseExecutorConfigEdit: (() => void) | undefined
   const configOwner = new ConfigOwner({
     read: () => config,
-    save: async (next) => await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next: args.configStore.validate(next) }),
+    save: async (next) => {
+      const validated = args.configStore.validate(next)
+      const release = await args.runtime.reserveExecutorConfigEdit(config, validated)
+      try {
+        const saved = await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next: validated })
+        // Keep the reservation until the sole owner publishes the new authoritative config.
+        releaseExecutorConfigEdit = release
+        return saved
+      } catch (cause) { release(); throw cause }
+    },
     publish: (saved) => {
       const paletteChanged = saved.appearance.terminalTheme !== config.appearance.terminalTheme
       config = saved
+      releaseExecutorConfigEdit?.()
+      releaseExecutorConfigEdit = undefined
       if (paletteChanged) {
         const palette = terminalPalette(saved.appearance.terminalTheme)
         args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
@@ -238,6 +251,9 @@ export async function registerIpc(args: {
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
+    if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
+        request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
+        request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
     if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
       if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')
       await args.runtime.authorizeAgentMessage({
