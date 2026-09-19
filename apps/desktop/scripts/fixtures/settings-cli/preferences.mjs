@@ -173,7 +173,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
       facts.scalarMatrix[entry.key] = { default: entry.default, alternate, invalid, nochange: true }
     }
     assert.deepEqual(Object.keys(facts.scalarMatrix).sort(), supported.map(entry => entry.key).sort())
-    for (const name of ['browser.agentAutomation', 'browser.appLinkSchemes.privatesettings']) {
+    for (const name of ['browser.appLinkSchemes.privatesettings']) {
       const bytes = await readFile(configPath), count = await publications()
       const rejected = await command(['settings', 'set', name, 'true'], 1)
       assert.equal(rejected.error.code, 'UNSUPPORTED_SETTING')
@@ -279,7 +279,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     return facts
   }
 
-  async function verifyRestart(restoredProbe) {
+  async function verifyRestart(restoredProbe, expectedPermissions = facts.permissions) {
     probe = restoredProbe
     assert.deepEqual(values(await entries()), facts.restartValues)
     await section(probe, 'Appearance', 'appearance')
@@ -294,7 +294,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     const actualToolbar = await toolbarUI()
     assert.deepEqual(actualToolbar.items, vocabulary.toolbarOrder.map(name => ({ label: vocabulary.toolbarLabels[name], checked: facts.restartValues[`browser.toolbar.${name}`] })))
     assert.equal(await railUI(), facts.restartValues.projectRailDensity)
-    assert.deepEqual(await permissions(), facts.permissions)
+    assert.deepEqual(await permissions(), expectedPermissions)
     facts.restored = { values: await allValues(), notification, toolbar: actualToolbar, rail: await railUI() }
     await showSettings(true); await section(probe, 'Copy Paths', 'copy-paths')
   }

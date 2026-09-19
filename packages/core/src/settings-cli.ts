@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsGetRequest,
-  type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest } from './control.js'
+  type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
+  type AgentMuxControlSettingsBrowserLinksRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 
@@ -8,12 +9,14 @@ type SettingsCommand =
   | Omit<AgentMuxControlSettingsGetRequest, 'schemaVersion' | 'requestId'>
   | Omit<AgentMuxControlSettingsSetRequest, 'schemaVersion' | 'requestId'>
   | ResourceCommand
-type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
+  | WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>
+type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
 type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
 
 /** Positional scalar values are data, including literal --help and empty strings. */
 export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCommand> {
   if (args[0] === 'executors' || args[0] === 'prompts') return resourceCommand(args)
+  if (args[0] === 'browser') return browserLinksCommand(args)
   if (args[0] === 'get' && args.length <= 2) {
     const target = args[1]
     if (target?.startsWith('-')) throw invalid('settings get accepts a target, not options.')
@@ -24,7 +27,21 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (!key.trim() || key.startsWith('-')) throw invalid('A setting key is required.')
     return { operation: 'settings.set', key, value: args[2]! }
   }
-  throw invalid('Run agentmux settings --help for scalar and resource commands.')
+  throw invalid('Run agentmux settings --help for supported commands.')
+}
+
+async function browserLinksCommand(args: readonly string[]): Promise<WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>> {
+  if (args[1] === 'links' && args[2] === 'list' && args.length === 3) return { operation: 'settings.browser.links.list' }
+  if (args[1] === 'links' && args[2] === 'forget') {
+    // A single positional argument is always data, even --input, --help or an empty string.
+    if (args.length === 4) return { operation: 'settings.browser.links.forget', scheme: args[3]! }
+    if (args.length === 5 && args[3] === '--input') {
+      const envelope = settingsResourceEnvelope(await input(args[4]!), ['scheme'], 'INVALID_CLI_ARGUMENT')
+      if (!Object.hasOwn(envelope, 'scheme') || typeof envelope.scheme !== 'string') throw invalid('Browser link input requires exactly {"scheme": string}.')
+      return { operation: 'settings.browser.links.forget', scheme: envelope.scheme }
+    }
+  }
+  throw invalid('Run agentmux settings browser links --help for list and forget syntax.')
 }
 
 async function input(path: string): Promise<unknown> {

@@ -77,6 +77,9 @@ const settings: Setting[] = [
   enumSetting('projectRailDensity', PROJECT_RAIL_DENSITY_IDS, PROJECT_RAIL_DENSITY_DEFAULT,
     (config) => config.projectRailDensity ?? PROJECT_RAIL_DENSITY_DEFAULT,
     (config, projectRailDensity) => ({ ...config, projectRailDensity })),
+  booleanSetting('browser.agentAutomation', DEFAULT_CONFIG.browser.agentAutomation === true,
+    (config) => config.browser.agentAutomation === true,
+    (config, agentAutomation) => ({ ...config, browser: { ...config.browser, agentAutomation } })),
   ...BROWSER_TOOLBAR_ITEM_ORDER.map((item) => booleanSetting(`browser.toolbar.${item}`, DEFAULT_CONFIG.browser.toolbar[item],
     (config) => config.browser.toolbar[item],
     (config, shown) => ({ ...config, browser: { ...config.browser, toolbar: { ...config.browser.toolbar, [item]: shown } } })))
@@ -95,7 +98,7 @@ export async function executeSettingsControl(
 ): Promise<Extract<AgentMuxControlResult, { operation: 'settings.get' | 'settings.set' }>> {
   if (request.operation === 'settings.get') {
     const selected = request.target === undefined || request.target === '' ? settings :
-      request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser.toolbar'
+      request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser' || request.target === 'browser.toolbar'
       ? settings.filter((setting) => setting.key.startsWith(`${request.target}.`))
       : settings.filter((setting) => setting.key === request.target)
     if (!selected.length) throw unsupported(request.target ?? '')

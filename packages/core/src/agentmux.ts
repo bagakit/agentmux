@@ -31,6 +31,7 @@ import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './ag
 import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery, recordGlobalMessageDeliveryIssue, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseSettingsCommand } from './settings-cli.js'
+import { settingsResourceBudget } from './settings-resource-json.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -968,6 +969,10 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'settings' && args[1] === 'browser') {
+    if (args[2] === 'links') return args[3] === undefined || args[3].startsWith('-') ? 'settings.browser.links' : `settings.browser.links.${args[3]}`
+    return args[2] === undefined || args[2].startsWith('-') ? 'settings.browser' : `settings.browser.${args[2]}`
+  }
   if (args[0] === 'settings' && (args[1] === 'executors' || args[1] === 'prompts')) {
     return ['list', 'get', 'add', 'update', 'remove'].includes(args[2] ?? '') ? `settings.resource.${args[2]}`
       : args[2] === undefined || args[2].startsWith('-') ? `settings.${args[1]}` : `settings.${args[1]}.${args[2]}`
@@ -987,6 +992,9 @@ function requestsHelp(args: readonly string[]): boolean {
   if (args[0] === 'settings') {
     const help = (value: string | undefined): boolean => value === '--help' || value === '-h'
     return (args.length === 2 && help(args[1])) ||
+      (args.length === 3 && args[1] === 'browser' && help(args[2])) ||
+      (args.length === 4 && args[1] === 'browser' && args[2] === 'links' && help(args[3])) ||
+      (args.length === 5 && args[1] === 'browser' && args[2] === 'links' && args[3] === 'list' && help(args[4])) ||
       (args.length === 3 && (args[1] === 'get' || args[1] === 'set' || args[1] === 'executors' || args[1] === 'prompts') && help(args[2])) ||
       (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3]))
   }
@@ -1086,7 +1094,9 @@ async function main(): Promise<number> {
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'settings') {
-    const receipt = await requestAgentMuxControl({ ...requestBase(), ...await parseSettingsCommand(args.slice(1)) })
+    const request = { ...requestBase(), ...await parseSettingsCommand(args.slice(1)) }
+    settingsResourceBudget(request, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
     printSuccess(receipt.operation, receipt.result); return 0
   }
   if (args[0] === 'pmo') return await pmoCommand(args.slice(1))

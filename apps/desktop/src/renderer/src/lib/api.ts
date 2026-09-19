@@ -21,6 +21,7 @@ import { CONFIG_VERSION } from '../../../shared/contracts'
 import { applyConfigEdit } from '../../../shared/config-edit'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
+import { applyAppLinkForget } from '../../../shared/browser-settings'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
@@ -1010,6 +1011,12 @@ const mockApi: AgentMuxDesktopApi = {
     subscribe: () => () => {}
   },
   browser: {
+    forgetAppLinkScheme: async (scheme, expected) => {
+      const next = applyAppLinkForget(mockConfig, scheme, expected)
+      if (next === mockConfig) return
+      mockConfig = structuredClone(next)
+      for (const listener of configListeners) listener(structuredClone(mockConfig))
+    },
     create: async (id, url) => {
       const browser: BrowserSnapshot = {
         id,

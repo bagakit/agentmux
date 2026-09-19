@@ -253,6 +253,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
   if (isSettingsResourceOperation(source.operation)) return settingsResourceRequest(source)
+  if (source.operation === 'settings.browser.links.list' || source.operation === 'settings.browser.links.forget') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.browser.links.forget' ? ['scheme'] : [])], code)
+    if (source.operation === 'settings.browser.links.forget' && !Object.hasOwn(source, 'scheme')) throw new AgentMuxError('Browser link scheme is required.', code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId }
+    const request = source.operation === 'settings.browser.links.list' ? { ...base, operation: source.operation }
+      : { ...base, operation: source.operation, scheme: text(source.scheme, 'Browser link scheme', code) }
+    settingsResourceBudget(request, code)
+    return request
+  }
   if (source.operation === 'inspect.client') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
@@ -829,6 +839,27 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'settings.browser.links.list' || operation === 'settings.browser.links.forget') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    const fields = settingsResourceRecord(result, code)
+    settingsResourceBudget(source, code)
+    if (operation === 'settings.browser.links.list') {
+      settingsResourceEnvelope(fields, ['entries'], code)
+      if (!Object.hasOwn(fields, 'entries') || !Array.isArray(fields.entries)) throw new AgentMuxError('Browser link entries are invalid.', code)
+      const entries = fields.entries.map(value => {
+        const entry = settingsResourceEnvelope(value, ['scheme', 'choice'], code)
+        if (!Object.hasOwn(entry, 'scheme') || !Object.hasOwn(entry, 'choice')) throw new AgentMuxError('Browser link entry fields are required.', code)
+        return { scheme: text(entry.scheme, 'Browser link scheme', code), choice: text(entry.choice, 'Browser link choice', code) }
+      })
+      if (new Set(entries.map(entry => entry.scheme)).size !== entries.length) throw new AgentMuxError('Browser link schemes are duplicated.', code)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { entries } }
+    }
+    settingsResourceEnvelope(fields, ['scheme', 'changed'], code)
+    if (!Object.hasOwn(fields, 'scheme') || !Object.hasOwn(fields, 'changed') || typeof fields.changed !== 'boolean') throw new AgentMuxError('Browser link change is invalid.', code)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { scheme: text(fields.scheme, 'Browser link scheme', code), changed: fields.changed } }
+  }
   if (isSettingsResourceOperation(operation)) {
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
     const code = 'CONTROL_PROTOCOL_ERROR', resource = resourceKind(result.resource, code)

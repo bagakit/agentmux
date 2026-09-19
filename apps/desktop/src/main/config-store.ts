@@ -38,15 +38,18 @@ const hostSchema = z.discriminatedUnion('kind', [
 const providerIds = new Set(BUILT_IN_AGENT_PROVIDERS.map((provider) => provider.id))
 export const executorIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
 
-// Zod's record parser omits __proto__. Validate entries, then define every own key safely.
-const environmentSchema = z.unknown().transform((value, context) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Environment must be an object of string values' })
-    return z.NEVER
-  }
-  return Object.entries(value)
-}).pipe(z.array(z.tuple([z.string(), z.string()]))).transform((entries) => Object.fromEntries(entries))
+// Zod's record parser omits __proto__. Validate own entries, then define every key safely.
+function ownKeyRecordSchema(valueSchema: z.ZodType<string>, message: string) {
+  return z.unknown().transform((value, context) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message })
+      return z.NEVER
+    }
+    return Object.entries(value)
+  }).pipe(z.array(z.tuple([z.string(), valueSchema]))).transform((entries) => Object.fromEntries(entries))
+}
+const environmentSchema = ownKeyRecordSchema(z.string(), 'Environment must be an object of string values')
 
 export const executorSchema = z
   .object({
@@ -115,9 +118,9 @@ const browserSchema = z.object({
   /**
    * 用户对每个 scheme 记住的答案。`.optional()` 同 `agentAutomation`（既有磁盘 config 没有这个字段，
    * 写成必需会让 browser 整块判失败）——但这一个**不**回填：空对象与缺席语义完全一样（都是「一个
-   * 都没记过」），补一次盘只是白写。`z.record` 的值域收死成两档，别的字符串一律判失败。
+   * 都没记过」），补一次盘只是白写。逐 own key 校验值域，别的字符串一律判失败。
    */
-  appLinkSchemes: z.record(z.string(), z.enum(APP_LINK_SCHEME_CHOICES)).optional(),
+  appLinkSchemes: ownKeyRecordSchema(z.enum(APP_LINK_SCHEME_CHOICES), 'App-link choices must be an object').optional(),
   toolbar: z.object({
     selectElement: z.boolean(),
     screenshot: z.boolean(),

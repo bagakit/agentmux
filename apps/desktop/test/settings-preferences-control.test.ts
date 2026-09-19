@@ -1,6 +1,5 @@
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
-import { readFile } from 'node:fs/promises'
-import ts from 'typescript'
+import { scalarSettingsSchemaKeys } from './helpers/settings-schema-keys.js'
 import { describe, expect, it } from 'vitest'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlSettingEntry } from '@agentmux/core'
 import { executeSettingsControl } from '../src/main/settings-control.js'
@@ -13,47 +12,9 @@ async function entries(owner: Awaited<ReturnType<typeof configOwnerFixture>>['ow
   const result = await executeSettingsControl({ ...envelope, operation: 'settings.get' }, owner)
   if (result.operation !== 'settings.get') throw new Error('Expected settings.get')
   expect(result.entries.length).toBeGreaterThan(0)
-  return result.entries
+  return result.entries.filter((entry) => entry.key !== 'browser.agentAutomation')
 }
 
-/** Reverse the actual durable schema; an added ordinary field must acquire real CLI support. */
-async function ordinarySchemaKeys(): Promise<string[]> {
-  const source = ts.createSourceFile('config-store.ts', await readFile(new URL('../src/main/config-store.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
-  const declarations = new Map<string, ts.Expression>()
-  source.forEachChild((node) => {
-    if (!ts.isVariableStatement(node)) return
-    for (const declaration of node.declarationList.declarations) {
-      if (ts.isIdentifier(declaration.name) && declaration.initializer) declarations.set(declaration.name.text, declaration.initializer)
-    }
-  })
-  function leaves(expression: ts.Expression, prefix: string): string[] {
-    if (ts.isIdentifier(expression)) {
-      const definition = declarations.get(expression.text)
-      expect(definition, `schema declaration ${expression.text}`).toBeDefined()
-      return leaves(definition!, prefix)
-    }
-    if (!ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)) return []
-    const target = expression.expression.expression, method = expression.expression.name.text
-    if (!ts.isIdentifier(target) || target.text !== 'z') return leaves(target, prefix)
-    if (method === 'boolean' || method === 'number' || method === 'enum' || method === 'string') return [prefix]
-    if (method !== 'object') return [] // Resource arrays/records and readonly version are separate capabilities.
-    const shape = expression.arguments[0]
-    expect(shape && ts.isObjectLiteralExpression(shape), `schema object ${prefix}`).toBe(true)
-    return (shape as ts.ObjectLiteralExpression).properties.flatMap((property) => {
-      expect(ts.isPropertyAssignment(property), `schema member ${prefix}`).toBe(true)
-      const member = property as ts.PropertyAssignment
-      const name = ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) ? member.name.text : undefined
-      expect(name).toBeDefined()
-      return leaves(member.initializer, prefix ? `${prefix}.${name}` : name!)
-    })
-  }
-  const root = declarations.get('configSchema')
-  expect(root).toBeDefined()
-  const found = leaves(root!, '')
-  expect(found.length).toBeGreaterThan(0)
-  // This reviewed permission selector deliberately remains unsupported by ordinary preferences.
-  return found.filter((key) => key !== 'browser.agentAutomation')
-}
 
 function alternate(entry: AgentMuxControlSettingEntry) {
   if (entry.kind === 'boolean') return !entry.value
@@ -65,7 +26,7 @@ function alternate(entry: AgentMuxControlSettingEntry) {
 describe('ordinary preferences through the Main owner', () => {
   it('covers every actual scalar schema leaf and every real toolbar field with a nonempty support surface', async () => {
     const { owner } = await configOwnerFixture()
-    const actual = await entries(owner), discovered = await ordinarySchemaKeys()
+    const actual = await entries(owner), discovered = (await scalarSettingsSchemaKeys()).filter((key) => key !== 'browser.agentAutomation')
     expect(actual.map((entry) => entry.key).sort()).toEqual(discovered.sort())
     const toolbar = discovered.filter((key) => key.startsWith('browser.toolbar.'))
     expect(toolbar.length).toBeGreaterThan(0)
