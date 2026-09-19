@@ -1869,6 +1869,14 @@ PMO Teams 是固定产品工作面，不应只是完整 Workbench 的透明容�
 
 ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux Core 负责把目标 Run 与 AgentSession 组合成 Runtime Subject；Desktop 负责工作面恢复和服务窗。Runtime 暂时不可用或流程握手失败时，保留原 Tab、Region 和 Session 引用，明确显示失败步骤与恢复动作；只有 Core 给出终局 retired/unknown 事实时才移除投影。
 
+### P00：新建 Agent 与 resume 必须可用
+
+用户反馈「现在没有办法 resume 和启动新的 agent」，要求立即以 P00 优先级修复。新建与恢复必须到达当前配置指向的同一权威 Runtime、Agent Session Store 与 Provider；已活着的 Agent、原 Session 身份和工作面持续保留，不能靠另起空 Runtime、删除 Session 或重建 Tab 来获得表面成功。
+
+公开 Session 列表为空只有在权威读取完整成功且确认没有 Session 时才能表示空态。Host 尚未准备好、连接或 Store 读取失败、握手未完成都必须如实区分为未确认并说明具体失败步骤；空列表本身不能证明 Session 已退休或允许清空持久工作面。新建和 resume 的真实失败须保留原始错误与可重试动作，不能静默失败或无限停在启动中。
+
+我们的准备、探测或握手失败不能阻断底层仍能工作的 Agent。恢复后仍使用原 Session；健康旧 Run 可重新附着，明确结束且具备原生恢复条件的 Session 可沿公开 Core 语义恢复。未知不伪装为正常；服务窗的持续告示、恢复动作与保护边界沿《Session Attach 与 Runtime Projection 的边界》。修复必须实际证明新建、原 Session 续接及进程重启后的原工作面恢复，局部测试通过不等于用户现场已可用。
+
 ### 联邦 Runtime 与远端恢复边界
 
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
