@@ -1429,7 +1429,9 @@ export class RuntimeController {
           expectedByte,
           data
         })
-        this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
+        if (accepted.acceptedThroughByte !== null) {
+          this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
+        }
       } catch (error) {
         this.terminalInputCursors.delete(key)
         throw error
