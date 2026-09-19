@@ -64,7 +64,7 @@ export const TURN_REOPENING_EVENTS: readonly AgentHookLifecycleEvent[] = [
  * 要求」这句话变成好看的假话，而 Hermes 的闸门照旧 latch。
  */
 export function hookTurnPhaseAfter(
-  lifecycleEvent: AgentHookLifecycleEvent | undefined
+  lifecycleEvent: AgentHookLifecycleEvent | null | undefined
 ): HookTurnPhase | undefined {
   if (lifecycleEvent === 'turn-end') return 'turn-ended'
   // 开新一轮——这是唯一能把台账重新打开的两种事件，也是「不误伤下一轮工作」的那一半。
@@ -93,7 +93,7 @@ export function hookTurnPhaseAfter(
  */
 export function hookEventUpdatesSemanticStatus(
   phase: HookTurnPhase | undefined,
-  lifecycleEvent: AgentHookLifecycleEvent | undefined,
+  lifecycleEvent: AgentHookLifecycleEvent | null | undefined,
   providerCanReopenTurn = true
 ): boolean {
   if (phase !== 'turn-ended') return true

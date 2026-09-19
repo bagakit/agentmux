@@ -455,7 +455,7 @@ function nativeHandle(value: unknown): AgentNativeSessionHandle {
 function hookReceipt(value: unknown): AgentHookReceipt {
   const source = record(value, 'hookReceipt')
   const eventName = string(source.eventName, 'hookReceipt.eventName')
-  if (source.lifecycleEvent !== undefined && !isAgentHookLifecycleEvent(source.lifecycleEvent)) {
+  if (source.lifecycleEvent !== undefined && source.lifecycleEvent !== null && !isAgentHookLifecycleEvent(source.lifecycleEvent)) {
     throw new AgentMuxError('hookReceipt.lifecycleEvent is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const lifecycleEvent = canonicalHookLifecycleEvent(eventName, source.lifecycleEvent)
@@ -485,7 +485,7 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     agentSessionId: string(source.agentSessionId, 'hookReceipt.agentSessionId'),
     run: runRef(source.run),
     eventName,
-    ...(lifecycleEvent ? { lifecycleEvent } : {}),
+    ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
     ...(outputCursorBytes === undefined ? {} : { outputCursorBytes })
   }
@@ -493,7 +493,8 @@ function hookReceipt(value: unknown): AgentHookReceipt {
 
 function semanticStatus(value: unknown): AgentStatus {
   const source = record(value, 'semanticStatus')
-  if (!['working', 'waiting', 'blocked', 'done', 'error'].includes(String(source.state))) {
+  // Native unknown outcome uses the existing agentDisplayState(unknown) === running projection.
+  if (!['working', 'waiting', 'blocked', 'done', 'error', 'running'].includes(String(source.state))) {
     throw new AgentMuxError('semanticStatus.state is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (source.source !== 'native-hook' && source.source !== 'acp') {
