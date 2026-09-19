@@ -43,10 +43,11 @@ vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarch
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusNavigationPreview } from '../src/renderer/src/components/FocusNavigationPreview'
 import { FocusNavigationButton } from '../src/renderer/src/components/FocusNavigationButton'
+import { createTerminalFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement, workspaceId: string
-function terminal(id: string, workspacePath: string): SessionSnapshot {
+function terminal(id: string, workspacePath: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
   return { id, kind: 'terminal', providerId: null, hostId: 'local', workspacePath, label: 'Terminal · Same project', createdAt: 1, updatedAt: 1, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } }
 }
 function pair(tabId: string, left: string, right: string): WorkbenchTab {
@@ -72,7 +73,7 @@ beforeEach(async () => {
   let layout = createWorkspaceLayout('owner-group')
   for (const tabId of Object.keys(tabs)) layout = addTabPlacement(layout, 'owner-group', tabId)!
   const timeline: AgentTimelineSnapshot = { agentSessionId: 'agent', revision: 1, items: [{ id: 'prompt', agentSessionId: 'agent', kind: 'user_message', status: 'complete', source: 'native-hook', title: 'User message', content: 'Inspect the parser', createdAt: 1, updatedAt: 1 }] }
-  useAppStore.setState({ config, sessions: ['first', 'second', 'third', 'fourth'].map(id => terminal(id, workspace.path)).concat(agent), tabs, layouts: { [workspaceId]: layout }, activeWorkspaceId: workspaceId, providerCatalog: [], timelines: { agent: timeline }, agentNames: {}, closingWorkbenchViews: {}, mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  useAppStore.setState({ config, sessions: ['first', 'second', 'third', 'fourth'].map<SessionSnapshot>(id => terminal(id, workspace.path)).concat(agent), tabs, layouts: { [workspaceId]: layout }, activeWorkspaceId: workspaceId, providerCatalog: [], timelines: { agent: timeline }, agentNames: {}, closingWorkbenchViews: {}, mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   resetWork()
 })
@@ -176,6 +177,105 @@ it('keeps the known fallback when there is no original owner instead of inventin
   expect(title('unowned')).toBe('Terminal · Same project')
   expect(row('unowned').title).not.toContain('Region ')
   expect(Object.keys(useAppStore.getState().tabs)).toEqual(['original', 'neighbour', 'agent'])
+})
+
+it('keeps failed original terminals while excluding ended unowned history from both lanes and Preview', async () => {
+  const path = useAppStore.getState().config!.workspaces[0]!.path
+  const failed = { ...terminal('old-failed', path), processState: 'exited' as const, status: { state: 'error' as const, source: 'run-process' as const, observedAt: 1, detail: 'signal Killed: 9', exitCode: 1, exitReason: 'crashed' as const } }
+  const stopped = { ...failed, id: 'old-stopped', status: { ...failed.status, state: 'exited' as const, exitReason: 'user-stopped' as const } }
+  const interrupted = { ...failed, id: 'old-interrupted', processState: 'interrupted' as const, status: { state: 'disconnected' as const, source: 'run-process' as const, observedAt: 1, detail: 'The Runtime restarted and interrupted this Run.' } }
+  useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'first' && session.kind === 'terminal' ? { ...failed, id: 'first', control: session.control } : session).concat(failed, stopped, interrupted, terminal('live-unowned', path)) }))
+  const before = useAppStore.getState(), select = createTerminalFocusProjectionSelector(), projected = select(before)
+  expect(projected.contexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent', 'live-unowned'])
+  expect(projected.laneContexts.map(context => context.id)).toEqual(projected.contexts.map(context => context.id))
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(container.querySelectorAll('.focus-context')).toHaveLength(6)
+  expect(row('first').dataset.bucket).toBe('attention')
+  expect(row('first').textContent).toContain('signal Killed: 9 · Exit code 1')
+  expect(title('live-unowned')).toBe('Terminal · Same project')
+  await act(async () => row('first').click())
+  expect(container.querySelector('#focus-workspace-slot')?.getAttribute('data-focus-tab-id')).toBe('original')
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('first')
+  await act(async () => root.render(createElement(FocusNavigationPreview)))
+  expect(container.querySelector('[data-preview-count="attention"] b')?.textContent).toBe('1')
+  expect(container.querySelector('[data-preview-session="first"]')?.textContent).toContain('signal Killed: 9 · Exit code 1')
+  expect(container.querySelector('.focus-navigation-preview__header small')?.textContent).toBe('6 contexts')
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(Object.keys(before.tabs))
+  expect(useAppStore.getState().tabs.original!.regions).toBe(before.tabs.original!.regions)
+  expect(useAppStore.getState().tabs.original!.layout.root).toBe(before.tabs.original!.layout.root)
+  expect(useAppStore.getState().tabs.neighbour).toBe(before.tabs.neighbour)
+  expect(useAppStore.getState().sessions.map(session => session.control.run)).toEqual(before.sessions.map(session => session.control.run))
+})
+
+it('uses process liveness rather than a disconnected display label for unowned membership', async () => {
+  const path = useAppStore.getState().config!.workspaces[0]!.path
+  const live = { ...terminal('disconnected-live', path), status: { state: 'disconnected' as const, source: 'run-process' as const, observedAt: 1 } }
+  useAppStore.setState(state => ({ sessions: [...state.sessions, live], agentFocus: { ...state.agentFocus, execution: { sessionId: live.id, history: [] } } }))
+  const select = createTerminalFocusProjectionSelector()
+  expect(select(useAppStore.getState()).contexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent', 'disconnected-live'])
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(row(live.id).textContent).toContain('Run is alive · Connection status unknown')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === live.id ? { ...session, processState: 'interrupted' } : session) })))
+  expect(container.querySelector(`.focus-context[data-session-id="${live.id}"]`)).toBeNull()
+  expect(select(useAppStore.getState()).laneContexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent'])
+  await act(async () => root.render(createElement(FocusNavigationPreview)))
+  expect(container.querySelector('.focus-navigation-preview__header small')?.textContent).toBe('5 contexts')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === live.id ? { ...session, processState: 'running' } : session) })))
+  expect(container.querySelector('.focus-navigation-preview__header small')?.textContent).toBe('6 contexts')
+  expect(select(useAppStore.getState()).contexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent', 'disconnected-live'])
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(live.id)
+})
+
+it('keeps a held launching owner and restores ended membership from original durable references', async () => {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'first' ? { ...session, processState: 'exited', status: { ...session.status, state: 'error', exitCode: 1 } } : session),
+    tabs: { ...state.tabs, original: { ...state.tabs.original!, regions: { ...state.tabs.original!.regions, 'original-left': { ...state.tabs.original!.regions['original-left']!, phase: 'launching' } } } } }))
+  const select = createTerminalFocusProjectionSelector(), originalTabs = useAppStore.getState().tabs
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(row('first').textContent).toContain('Exit code 1')
+  expect(select(useAppStore.getState()).laneContexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent'])
+  await act(async () => useAppStore.setState(state => ({ tabs: Object.fromEntries(Object.entries(state.tabs).filter(([id]) => id !== 'original')) })))
+  expect(container.querySelector('[data-session-id="first"]')).toBeNull()
+  expect(row('second').textContent).toContain('Shell open')
+  const snapshot = structuredClone(useAppStore.getState().sessions)
+  await act(async () => useAppStore.setState({ sessions: snapshot }))
+  expect(container.querySelector('[data-session-id="first"]')).toBeNull()
+  await act(async () => useAppStore.setState({ tabs: originalTabs }))
+  expect(row('first').title).toContain('Region original-left')
+  expect(select(useAppStore.getState()).contexts.map(context => context.id)).toEqual(['first', 'second', 'third', 'fourth', 'agent'])
+  expect(useAppStore.getState().sessions).toBe(snapshot)
+})
+
+it('explains exit facts instead of old activity without guessing success or the signal sender', async () => {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'first' ? { ...session, processState: 'exited', status: { ...session.status, state: 'error', detail: 'signal Killed: 9', exitCode: 1, exitReason: 'crashed' } }
+    : session.id === 'second' ? { ...session, processState: 'exited', status: { ...session.status, state: 'exited', detail: 'signal SIGTERM', exitCode: 143, exitReason: 'user-stopped' } }
+      : session.id === 'third' ? { ...session, processState: 'exited', status: { ...session.status, state: 'exited', exitCode: 0, exitReason: 'unknown' } }
+        : session.id === 'fourth' ? { ...session, processState: 'exited', status: { ...session.status, state: 'exited', exitReason: 'unknown' } } : session),
+    timelines: { ...state.timelines, first: { agentSessionId: 'first', revision: 1, items: [{ id: 'old-tool', agentSessionId: 'first', kind: 'tool_call', status: 'complete', source: 'native-hook', title: 'Old activity', createdAt: 1, updatedAt: 1 }] } } }))
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(row('first').textContent).toContain('signal Killed: 9 · Exit code 1')
+  expect(row('first').textContent).not.toContain('Old activity')
+  expect(row('second').dataset.bucket).toBe('idle')
+  expect(row('second').textContent).toContain('Stopped by you · signal SIGTERM · Exit code 143')
+  expect(row('third').querySelector('small')?.textContent).toBe('Exited')
+  expect(row('third').textContent).toContain('Exit code 0')
+  expect(row('fourth').textContent).toContain('Process exited · Cause unknown')
+  expect(title('agent')).toBe('Inspect the parser')
+})
+
+it('updates only the affected row when exit facts change without a state transition', async () => {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'first' ? { ...session, processState: 'exited', status: { ...session.status, state: 'exited', exitCode: 0, exitReason: 'unknown' } } : session) }))
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(row('first').textContent).toContain('Exit code 0')
+  resetWork()
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'first' ? { ...session, status: { ...session.status, detail: 'signal SIGTERM', exitCode: 143, exitReason: 'user-stopped' } } : session) })))
+  expect(row('first').textContent).toContain('Stopped by you · signal SIGTERM · Exit code 143')
+  expect(work).toEqual({ members: [], numbers: [], commits: { first: 1 } })
+  expect(owning.reads).toEqual({ original: ['name'] })
+  resetWork()
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 10, status: { ...session.status, observedAt: 2 } })) })))
+  expect(work).toEqual({ members: [], numbers: [], commits: {} })
+  expect(owning.reads).toEqual({})
 })
 
 it('reuses the base Session cache for mixed-Tab labels without indexing unrelated bytes', async () => {

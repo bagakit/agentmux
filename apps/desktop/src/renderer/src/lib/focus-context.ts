@@ -13,6 +13,7 @@ import { clampStep, stepSummary } from './activity-step-summary'
 export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
 export type FocusContext = {
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
+  processState: SessionSnapshot['processState']
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
@@ -39,27 +40,34 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   const bucket = focusBucketForSession(session, Boolean(result))
   const stateLabel = state === 'error' ? 'Failed' : pending ? 'Request pending' : isNeedsYouState(state) ? (state === 'blocked' ? 'Blocked' : 'Needs reply')
     : state === 'done' ? 'Idle' : state === 'running' ? (session.kind === 'agent' ? 'Status unknown' : 'Shell open')
-    : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? 'Stopped' : state === 'starting' ? 'Starting' : 'Working'
+    : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? (session.kind === 'terminal' && session.status.exitReason !== 'user-stopped' ? 'Exited' : 'Stopped') : state === 'starting' ? 'Starting' : 'Working'
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const activityTimes = items.filter(item => item.kind !== 'lifecycle').map(item => item.updatedAt)
   const enteredAt = activityEntryTime(session)
   if (enteredAt !== undefined) activityTimes.push(enteredAt)
   const lastActivityAt = activityTimes.reduce<number | null>((last, time) => Number.isFinite(time) && time > 0 ? Math.max(last ?? 0, time) : last, null)
   let detail = 'No activity details observed'
-  if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
+  if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
+    const facts = [session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null,
+      session.status.detail?.trim(), session.status.exitCode === undefined ? null : `Exit code ${session.status.exitCode}`].filter(Boolean)
+    detail = facts.length ? facts.join(' · ') : session.processState === 'running'
+      ? 'Run is alive · Connection status unknown' : session.processState === 'interrupted'
+        ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
+  } else if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
   else if (pending) detail = session.pendingInteraction!.kind === 'permission' ? 'Review permission request' : 'Review request in context'
   else if (latest?.kind === 'tool_call') detail = stepSummary(latest.toolName, latest.toolInput, 140, session.workspacePath) ?? latest.title
   else if (latest?.content) detail = clampStep(latest.content.replace(/\s+/g, ' ').trim(), 'head', 140)
   else if (latest) detail = latest.title
   else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
   else if (state === 'done') detail = 'Ready for another prompt · No result observed'
-  return { id: session.id, name, detail, state, stateLabel, bucket, kind: session.kind, providerId: session.providerId,
+  return { id: session.id, name, detail, state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
+    && (a.kind !== 'terminal' || a.status.detail === b.status.detail && a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }
@@ -115,7 +123,7 @@ export function createFocusProjectionSelector() {
   return createFocusProjectionCache().select
 }
 
-/** Terminal names describe the original working surface; semantic facts and counts stay in the base selector. */
+/** Current Terminals retain their original working surface; ended unowned Runs remain in Runtime history. */
 export function createTerminalFocusProjectionSelector() {
   const { select: project, session: sessionForId } = createFocusProjectionCache()
   const members = new Map<string, { tab: WorkbenchTab; sessions: Array<{ sessionId: string; regionId: string }> }>()
@@ -158,10 +166,11 @@ export function createTerminalFocusProjectionSelector() {
     }
 
     const checked = new Map<string, Map<string, string>>()
-    const contextRows = base.contexts.map(context => {
-      if (context.kind !== 'terminal') return context
+    const contextRows = base.contexts.flatMap(context => {
+      if (context.kind !== 'terminal') return [context]
       const owner = owners.get(context.id), tab = owner ? input.tabs[owner.tabId] : undefined
-      if (!owner || !tab) { rows.delete(context.id); return context }
+      if (!owner && context.processState !== 'running') { rows.delete(context.id); return [] }
+      if (!owner || !tab) { rows.delete(context.id); return [context] }
       let regionNames = checked.get(tab.id)
       if (!regionNames) {
         const old = names.get(tab.id)
@@ -182,20 +191,23 @@ export function createTerminalFocusProjectionSelector() {
         checked.set(tab.id, regionNames)
       }
       const regionName = regionNames.get(owner.regionId)
-      if (!regionName) { rows.delete(context.id); return context }
+      if (!regionName) { rows.delete(context.id); return [context] }
       const old = rows.get(context.id)
-      if (old?.base === context && old.tab === tab && old.regionName === regionName && old.regionId === owner.regionId) return old.model
+      if (old?.base === context && old.tab === tab && old.regionName === regionName && old.regionId === owner.regionId) return [old.model]
       const name = tab.name ? `${tab.name} · ${regionName}` : regionName
       const originAddress = `Tab ${tab.id}\nRegion ${owner.regionId}`
       const model = old?.base === context && old.model.name === name && old.model.originAddress === originAddress ? old.model : { ...context, name, originAddress }
       rows.set(context.id, { base: context, tab, regionName, regionId: owner.regionId, model })
-      return model
+      return [model]
     })
     if (previousContexts !== base.contexts) {
       const retained = new Set(base.contexts.map(context => context.id))
       for (const id of rows.keys()) if (!retained.has(id)) rows.delete(id)
     }
-    result = { ...base, contexts: sameItems(result.contexts, contextRows) ? result.contexts : contextRows }
+    const visibleIds = new Set(contextRows.map(context => context.id))
+    const laneRows = base.laneContexts.filter(context => visibleIds.has(context.id))
+    result = { ...base, contexts: sameItems(result.contexts, contextRows) ? result.contexts : contextRows,
+      laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows }
     previousContexts = base.contexts
     previousTabs = input.tabs
     return result
