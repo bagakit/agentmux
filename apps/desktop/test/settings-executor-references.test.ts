@@ -42,6 +42,8 @@ vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: clas
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { ConfigStore } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
+import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 
 // Actual Runtime and Core admission, Store, input and Provider History execute. Only the
 // kernel transport and native Provider I/O are synthetic; no OS Run, App or install starts.
@@ -319,9 +321,11 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
     const sender = Object.assign(new EventEmitter(), { id: 779, isDestroyed: () => false, send: vi.fn(),
       mainFrame: { framesInSubtree: [] } })
+    const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'loops.json')),
+      async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Executor reference fixture') })
     ipc.handlers.clear()
     const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-      configStore: disk, runtime, scratchTopics: {} as ScratchTopics,
+      configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     const invoke = async (channel: string, ...values: unknown[]) => {
       const handler = ipc.handlers.get(channel)
@@ -374,6 +378,6 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       expect(await loadAgentSessions(store)).toEqual([retained])
       expect(kernel.start).not.toHaveBeenCalled()
       await assertHealthyPaths()
-    } finally { await dispose() }
+    } finally { await dispose(); await progressLoops.stop() }
   })
 })
