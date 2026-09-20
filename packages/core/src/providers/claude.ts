@@ -114,6 +114,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
 
 export function createClaudeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     catalog: catalog({
       composer: {"skillRoots": [".claude/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/cost", "description": "Session usage"}, {"text": "/context", "description": "Context usage"}]},

@@ -66,7 +66,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const attention = displayState ? attentionAccentFor(displayState) : null
   const Element = onOpen ? 'button' : 'span'
-  const statusLabel = displayState === 'running' ? 'Idle' : displayState === 'exited' ? 'Stopped' : displayState
+  const statusLabel = displayState === 'running' ? 'Status unknown' : displayState === 'exited' ? 'Stopped' : displayState
   const accessibleName = [name, statusLabel, count && count > 1 ? `${count} Agents` : null].filter(Boolean).join(' · ')
 
   function keepOpen() { clearTimeout(closeTimer.current) }

@@ -17,7 +17,7 @@ import {
 } from './agent-interaction.js'
 import { nativeHookHasSubagentSubject, normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
-import { createBuiltInAgentProviders, MANAGED_HOOK_PLAN_RESOLVERS } from './providers/index.js'
+import { createBuiltInAgentProviders } from './providers/index.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -40,6 +40,12 @@ import type {
 
 export type AgentExecutableProbe = {
   hasExecutable(executable: string): Promise<boolean>
+}
+
+export type AgentManagedHookPlanContext = {
+  workspacePath: string
+  env?: Readonly<Record<string, string>>
+  endpoint?: { url: string; token: string }
 }
 
 export type AgentProviderHookActivationContext = {
@@ -69,6 +75,8 @@ export type AgentProvider = {
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
+  /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
+  planManagedHooks?(context: AgentManagedHookPlanContext): AgentManagedHookPlan | null
   inspectHookActivation?(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation>
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
@@ -93,6 +101,7 @@ export type AgentProviderDefinition = {
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
+  planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   buildResumeArgs?: (
     sessionId: string,
@@ -153,7 +162,23 @@ export function splitLaunchPromptByDelivery(
     : { atLaunch: composed, deferred: '' }
 }
 
+/** Reject incomplete new contributions before they can replace a registered Provider. */
+function assertManagedHookContribution(contribution: {
+  catalog: Pick<AgentCatalogEntry, 'id' | 'hookStrategy'>
+  planManagedHooks?: AgentProvider['planManagedHooks']
+}): void {
+  const strategy = contribution.catalog.hookStrategy
+  const managed = strategy.kind === 'native' && strategy.installation === 'explicit-managed'
+  if (managed ? typeof contribution.planManagedHooks !== 'function' : contribution.planManagedHooks !== undefined) {
+    throw new AgentMuxError(
+      `Provider ${contribution.catalog.id} must declare managed Hook planning exactly when its Hook installation is explicit-managed.`,
+      'INVALID_AGENT_PROVIDER'
+    )
+  }
+}
+
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
+  assertManagedHookContribution(definition)
   const { catalog: catalogSeed } = definition
   if (definition.terminalHandshake && (!definition.terminalHandshake.query || !definition.terminalHandshake.response)) {
     throw new AgentMuxError('Agent terminal handshake bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
@@ -216,6 +241,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
+    ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = resolveAgentExecutable(commandOverride, catalog.executable)
@@ -334,15 +360,6 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   }
 }
 
-export function resolveManagedHookPlan(
-  providerId: AgentProviderId,
-  workspacePath: string,
-  env?: Readonly<Record<string, string>>,
-  endpoint?: { url: string; token: string }
-): AgentManagedHookPlan | null {
-  return MANAGED_HOOK_PLAN_RESOLVERS[providerId]?.(workspacePath, env, endpoint) ?? null
-}
-
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = createBuiltInAgentProviders(defineAgentProvider)
 
 export class AgentProviderRegistry {
@@ -353,13 +370,17 @@ export class AgentProviderRegistry {
   }
 
   register(provider: AgentProvider): void {
+    assertManagedHookContribution(provider)
     if (this.providers.has(provider.id)) {
       throw new AgentMuxError(`Agent provider already registered: ${provider.id}`, 'DUPLICATE_PROVIDER')
     }
     this.providers.set(provider.id, provider)
   }
 
-  replace(provider: AgentProvider): void { this.providers.set(provider.id, provider) }
+  replace(provider: AgentProvider): void {
+    assertManagedHookContribution(provider)
+    this.providers.set(provider.id, provider)
+  }
 
   unregister(id: AgentProviderId): void { this.providers.delete(id) }
 
@@ -393,12 +414,6 @@ export class AgentProviderRegistry {
   }
 }
 
-export {
-  createAntigravityManagedHookPlan,
-  createClaudeManagedHookPlan,
-  createCodexManagedHookPlan,
-  createHermesManagedHookPlan
-} from './providers/index.js'
 export {
   BRACKETED_PASTE_START,
   BRACKETED_PASTE_END,

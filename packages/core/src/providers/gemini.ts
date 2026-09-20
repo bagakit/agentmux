@@ -78,6 +78,7 @@ export function createGeminiManagedHookPlan(homeOverride?: string): AgentManaged
 
 export function createGeminiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: () => createGeminiManagedHookPlan(),
     catalog: catalog({
       id: 'gemini', label: 'Gemini', executable: 'gemini', expectedProcess: 'gemini',
       promptDelivery: 'flag-prompt-interactive',

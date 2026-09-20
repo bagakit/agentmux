@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxClient } from '../src/client.js'
 import { connectLocalAgentMux } from '../src/runtime-client.js'
@@ -136,7 +136,7 @@ async function withPrivateRuntime(run: (fixture: {
     expect(path.startsWith(root + '/')).toBe(true)
   }
   // Even an intentionally broken connect-time repair can write only the private default home.
-  const defaultPlan = resolveManagedHookPlan('pi', workspace, {})!
+  const defaultPlan = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: workspace, env: {} }) ?? null)!
   expect(defaultPlan.mutations).toHaveLength(1)
   expect(defaultPlan.mutations[0]!.path.startsWith(root + '/')).toBe(true)
   const daemon = spawn(fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)), [
@@ -159,7 +159,7 @@ async function withPrivateRuntime(run: (fixture: {
           AMX_HOOK_TEST_TRACE: trace, AMX_HOOK_TEST_TRANSCRIPT: transcript, AMX_HOOK_TEST_NATIVE_ID: `native-${id}` }
         // A non-operative endpoint is used only to guard the resolver's target before launch. The
         // installed plugin's credentials are issued by Core and checked through actual delivery.
-        const plan = resolveManagedHookPlan(providerId, workspace, env, { url: 'http://127.0.0.1/', token: 'path-guard' })!
+        const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: workspace, env: env, endpoint: { url: 'http://127.0.0.1/', token: 'path-guard' } }) ?? null)!
         expect(plan.mutations).toHaveLength(1)
         const target = plan.mutations[0]!.path
         expect(target.startsWith(root + '/')).toBe(true)

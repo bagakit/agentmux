@@ -10,7 +10,7 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 /**
  * OpenCode 投递的事件名。
  *
- * 证据是**上游自己的源码**（`home/proj/github/opencode`，本机可读），不是任何第三方项目的
+ * 证据是**上游自己的源码**（`home//proj/github/opencode`，本机可读），不是任何第三方项目的
  * 转述：事件联合体在 `packages/sdk/js/src/gen/types.gen.ts:704-736`（28 个成员），每个成员的形状是
  * `{ type, properties }`。下面的名字逐字取自那份生成类型，一个都不是推导出来的。
  *
@@ -200,6 +200,7 @@ export function createOpenCodeManagedHookPlan(
 
 export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ env, endpoint }) => endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null,
     catalog: catalog({
       id: 'opencode', label: 'OpenCode', executable: 'opencode', expectedProcess: 'opencode',
       promptDelivery: 'positional-argv',

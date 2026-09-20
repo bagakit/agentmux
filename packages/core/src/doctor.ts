@@ -70,8 +70,7 @@ export type AgentMuxDoctorReport = {
    *   `native-hook`，"or-acp" 部分是承诺不是事实。
    *
    * 这三条冒充逐-provider 事实的字面量已全部删除。逐家的真值权威由 `agents[]` 承载：hook 归属
-   * 看 `agents[].hook`（该 catalog 的 `hookStrategy`，SSOT 是 `providers/shared.ts` 的
-   * `HOOK_INSTALLATION_BY_PROVIDER`），permission 看 `agents[].permission`，acp 通路看
+   * 看 `agents[].hook`（该 Provider catalog 的 `hookStrategy`；managed 计划随同一对象贡献），permission 看 `agents[].permission`，acp 通路看
    * `agents[].acp`。若哪天需要"聚合安装态"这种视图，另建 axis，别再往这个已经被弄脏的坑里
    * 加第二份聚合。
    *

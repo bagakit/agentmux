@@ -76,6 +76,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
 
 export function createCodexProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
     catalog: catalog({
       composer: {"skillRoots": [".agents/skills", ".codex/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/status", "description": "Session and usage"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/diff", "description": "Review changes"}]},
       id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex',

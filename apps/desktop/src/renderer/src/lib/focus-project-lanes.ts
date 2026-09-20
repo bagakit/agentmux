@@ -25,6 +25,7 @@ export function focusProjectRoots(config: AppConfig | null) {
 export type FocusProjectLane = {
   id: string; workspaceId: string; projectId: string; name: string; path: string
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
+  projectWorkspaceId: string | null; summary: string | null
   activeAgentIds: string[]; contextIds: string[]
 }
 /** Preserve the last observed branch/path association when Git confirms its checkout was removed. */
@@ -56,7 +57,9 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     if (branch) labels.push(branch)
     if (topicId) labels.push(topic?.title || topicId)
     const id = JSON.stringify([workspaceId, row.workspacePath, topicId])
-    const lane = lanes.get(id) ?? { id, workspaceId, projectId, name: labels.join(' / '), labels, path: row.workspacePath, topicId, recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
+    const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
+      name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
+      path: row.workspacePath, topicId, recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)
     lanes.set(id, lane)

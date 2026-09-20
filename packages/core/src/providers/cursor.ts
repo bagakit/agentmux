@@ -171,6 +171,7 @@ function cursorTrustStamp(workspacePath: string): string {
 
 export function createCursorProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ workspacePath, env }) => createCursorManagedHookPlan(workspacePath, env),
     catalog: catalog({
       id: 'cursor', label: 'Cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
       promptDelivery: 'positional-argv',

@@ -1,10 +1,10 @@
-import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixtureClock, fixtureDay, fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
-import { BUILT_IN_AGENT_PROVIDERS, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry, BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 
 const directories: string[] = []
 
@@ -182,7 +182,7 @@ describe('explicit managed Hook installation', () => {
     // （九家写命令 + pi/opencode 两家写投递代码）。
     expect(managed.length).toBeGreaterThanOrEqual(11)
 
-    const workspacePath = upstreamFixturePath("tmp/agentmux-plan-stability")
+    const workspacePath = fixturePath("tmp/agentmux-plan-stability")
     // 每次都给 endpoint：写**投递代码**的那一族（opencode 的 JS 插件跑在 OpenCode 自己的进程里，
     // 读不到 AgentMux 注入 PTY 的环境变量）没有 endpoint 时会如实弃权返回 null——那是刻意设计，
     // 内联一个死 token 比不装更坏。不给 endpoint 的话它在这里是 null，而本条要守的是**恒定性**，
@@ -191,15 +191,15 @@ describe('explicit managed Hook installation', () => {
     const endpoint = { url: 'http://127.0.0.1:65535/hook', token: 'stable-token' }
     try {
       vi.useFakeTimers()
-      vi.setSystemTime(new Date(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z"))
+      vi.setSystemTime(new Date(fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z"))
       const before = Date.now()
-      const first = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+      const first = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
 
-      vi.setSystemTime(new Date(upstreamFixtureDay(551) + "T" + upstreamFixtureClock(12, 34, 56, "789") + "Z"))
+      vi.setSystemTime(new Date(fixtureDay(551) + "T" + fixtureClock(12, 34, 56, "789") + "Z"))
       // 挡板：假时钟必须真的动了。若 vitest 某天不再伪造 Date，上面两次取值会相同，
       // 这条判据就退化成「同一时刻调两次」——恒真。让那种失明响亮变红。
       expect(Date.now()).toBeGreaterThan(before)
-      const second = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+      const second = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
 
       for (const [index, provider] of managed.entries()) {
         // 声明了 explicit-managed 就必须真能解析出计划：解析器表漏一家会在这里露出来，
