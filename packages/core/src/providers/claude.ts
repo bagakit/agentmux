@@ -50,17 +50,24 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：Claude 一族的 stdin 负载带 `hook_event_name`（这也是 claude/codex 的配置都不带
   // `--event` 却照样能用的原因——事件名不在配置侧、在投递侧）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
+  subagentSubject: (payload) =>
+    (typeof payload.agent_id === 'string' && payload.agent_id.length > 0) ||
+    (typeof payload.agentId === 'string' && payload.agentId.length > 0),
   rules: [
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },
-    // `StopFailure` 与 `Stop` 同为收尾且互斥（报错收尾不发 `Stop`）——两条都必须判 done。
-    { events: ['Stop', 'StopFailure'], state: 'done' },
+    // Stop 与 SubagentStop 是 Claude Code 的决策前回调（可被其它 hook 否决或追加 context 继续），
+    // 不证明所有 hook 已收口或最终主轮/子轮成功完成；显式 opt out 声明 lifecycleEvent: null，
+    // 保持 unknown 状态与真实 service notice，绝不伪造主轮成功或 turn-end。
+    { events: ['Stop', 'SubagentStop'], state: 'unknown', lifecycleEvent: null },
+    // StopFailure 是真失败终态（报错收尾），归入 turn-end，语义状态为 error（真实失败，非 done）。
+    { events: ['StopFailure'], state: 'error' },
     { events: ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PreCompact'], state: 'working' }
   ],
   subagentTracking: {
     startEvents: ['SubagentStart'],
-    stopEvents: ['SubagentStop'],
-    mainStopEvents: ['Stop', 'StopFailure'],
+    stopEvents: [],
+    mainStopEvents: ['StopFailure'],
     idKeys: ['agent_id', 'agentId']
   },
   nativeHandle: {
