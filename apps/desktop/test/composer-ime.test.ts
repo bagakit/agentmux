@@ -357,7 +357,32 @@ describe('AgentComposer 接入 InlineComposer 的受控取值与草稿写回口'
 // 「谁能从外部写这张草稿」是 composer-composition.ts 顶部那段注释的事实基础：它据此断言组字期间
 // 那次覆盖今天不产生可见行为。事实变了而注释不变，就成了一段自信的谎（本仓记过 docs-manifests-rot）。
 // ---------------------------------------------------------------------------
+function draftAccesses(source: string): { reads: number; writes: number } {
+  const file = ts.createSourceFile('draft-source.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let reads = 0, writes = 0
+  const named = (node: ts.Expression, name: string): boolean =>
+    ts.isIdentifier(node) ? node.text === name : ts.isPropertyAccessExpression(node) && node.name.text === name
+  function visit(node: ts.Node): void {
+    if (ts.isElementAccessExpression(node) && named(node.expression, 'agentComposerDrafts')) reads += 1
+    if (ts.isCallExpression(node) && named(node.expression, 'setAgentComposerDraft')) writes += 1
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return { reads, writes }
+}
+
 describe('外部追加草稿只有一条路径', () => {
+  it('实际只读占用不写草稿，历史读旧值后拼接写回的形态仍正向命中', () => {
+    const observation = readFileSync(`${RENDERER_SRC}/lib/continuous-progress-input.ts`, 'utf8')
+    expect(draftAccesses(observation)).toEqual({ reads: 1, writes: 0 })
+    const duplicate = `function annotate(id: string, text: string) {
+      const current = state.agentComposerDrafts[id] ?? ''
+      state.setAgentComposerDraft(id, current + '\\n\\n' + text)
+    }`
+    expect(draftAccesses(duplicate)).toEqual({ reads: 1, writes: 1 })
+    expect(draftAccesses('// state.agentComposerDrafts[id]; state.setAgentComposerDraft(id, text)'))
+      .toEqual({ reads: 0, writes: 0 })
+  })
   /**
    * 追加 = 读当前草稿、拼上新内容、写回去。这个决定归 store 的 `appendAgentComposerDraft` 所有。
    *
@@ -378,19 +403,24 @@ describe('外部追加草稿只有一条路径', () => {
       'components/NewTabSurface.tsx'
     ])
     const offenders: string[] = []
-    let readers = 0
-    for (const file of sourceFiles(RENDERER_SRC)) {
+    let readers = 0, writers = 0
+    const files = sourceFiles(RENDERER_SRC)
+    expect(files.length, 'Renderer 来源为空，不能证明草稿 owner 唯一').toBeGreaterThan(0)
+    for (const file of files) {
       const relative = file.slice(RENDERER_SRC.length + 1)
       if (relative === 'store.ts') continue
       const source = readFileSync(file, 'utf8')
-      // 读旧值是追加的必要动作：没读过旧值就不可能是读-改-写。
-      if (!source.includes('agentComposerDrafts[')) continue
-      readers += 1
+      // 只读占用观察没有写入口。这里守 direct public setter，不声称通用别名数据流证明。
+      const access = draftAccesses(source)
+      readers += access.reads
+      writers += access.writes
+      if (access.reads === 0 || access.writes === 0) continue
       if (ALLOWED.has(relative)) continue
       offenders.push(relative)
     }
     // 非空见证：一处都没扫到时，下面那条 toEqual([]) 恒真——扫描根写错就是这个形状。
     expect(readers, '一处读 agentComposerDrafts 的地方都没扫到——这份扫描在空转').toBeGreaterThan(0)
+    expect(writers, '一处真实草稿 setter 调用都没扫到——写入口提取在空转').toBeGreaterThan(0)
     expect(
       offenders,
       '这些地方自己读草稿再拼回去，绕开了 store 的 appendAgentComposerDraft：' +
