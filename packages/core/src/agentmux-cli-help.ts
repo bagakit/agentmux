@@ -441,6 +441,13 @@ It runs as an async function body in an isolated subprocess, so \`await\` and \`
 work, and a runaway program cannot take AgentMux down with it. Page functions (${capabilityExamples()}, …)
 are injected into that subprocess; \`agentmux --skill\` lists them.
 Elements are addressed by the refs a snapshot hands you — never coordinates.
+\`snapshot(options)\` and \`snapshotText(options)\` accept \`scope: "page"|"viewport"\`,
+\`within\` (a unique CSS region in the main document), \`withinRef\` (an issued ref's actual document),
+\`interactiveOnly\`, and \`maxNodes\` (default 200, maximum 1000). Use either within or withinRef.
+Observation counts distinguish the full captured graph, scoped/matched nodes and returned nodes.
+Omitted documents are excluded by scope; missingFrames are failed reads. A small response does
+not mean fewer AX trees were captured. Each call replaces the prior snapshot, including snapshotText;
+use its newest refs. Superseded refs in the same run are refused rather than retargeted.
 
 A ref outlives the run that issued it: refs from an earlier \`browser run\`, even from before
 AgentMux restarted, are matched back onto the page by what they pointed at (role, name, and
@@ -812,8 +819,8 @@ moment anything reflows, and a stale coordinate clicks whatever moved into that 
 
 Refs survive the run that issued them — including across an AgentMux restart. A ref from an
 earlier run is matched back onto the page by what it pointed at (role, accessible name, and
-which one of the same-named), because the numbers themselves are re-issued from \`@e1\` on
-every snapshot and would otherwise silently address a different element. That recovery is by
+which one of the same-named), because numeric refs identify nodes within a captured graph rather
+than durable DOM identities. Every new snapshot supersedes the earlier refs in that run. Recovery is by
 appearance, not identity: on a reordered list or a page of same-named buttons it can land on a
 look-alike. So a run that leaned on one comes back \`indeterminate\` with a line naming which
 ref and why — check the page rather than assuming the action hit what you meant. Taking a
@@ -821,7 +828,8 @@ fresh \`snapshot()\` at the start of a run avoids the question entirely.
 
 One Browser is one page, so there are no tab functions — use \`gotoUrl\` to go elsewhere in it,
 and \`agentmux open browser\` when you want a second page. A snapshot's \`missingFrames\` lists
-what it could not read; an empty list is the only claim that the map is complete.
+what it could not read. Its observation metadata separately reports scope exclusions and truncation;
+an empty missingFrames list alone does not mean the returned observation covers the whole page.
 
 This needs Agent browser automation enabled in Settings › Browser — off by default. Read the
 receipt's \`outcome\`: \`indeterminate\` means you do NOT know what already happened, either

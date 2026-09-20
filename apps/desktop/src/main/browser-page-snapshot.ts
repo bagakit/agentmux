@@ -3,6 +3,7 @@ import type {
   BrowserPageNode,
   BrowserPageSnapshot
 } from '../shared/contracts.js'
+import { browserSnapshotNodeIdentity, parseBrowserSnapshotQuery, type BrowserSnapshotScopeFacts, type NormalizedBrowserSnapshotQuery } from './browser-snapshot-query.js'
 
 /**
  * 页面语义快照：把一页 DOM 走成一棵带 ref 的角色树，交给 Agent 指名操作。
@@ -234,7 +235,8 @@ const CURSOR_CLEANUP_EXPRESSION = 'delete window.__agentmuxClickable'
 
 async function findClickableElements(
   send: BrowserCdpSender,
-  known: Set<number>
+  known: Set<number>,
+  within?: { objectId: string; backendNodes: Set<number> }
 ): Promise<BrowserPageNode[]> {
   const evaluated = (await send('Runtime.evaluate', {
     expression: CURSOR_INTERACTIVE_EXPRESSION,
@@ -243,6 +245,12 @@ async function findClickableElements(
 
   const labels = JSON.parse(evaluated.result?.value ?? '[]') as string[]
   const found: BrowserPageNode[] = []
+  const membership = within ? (await send('Runtime.callFunctionOn', {
+    objectId: within.objectId,
+    functionDeclaration: 'function() { return window.__agentmuxClickable.map(element => this.contains(element)) }',
+    returnByValue: true
+  })) as { result?: { value?: boolean[] } } : null
+  if (within && !Array.isArray(membership?.result?.value)) throw new Error('The observation region could not be checked against clickable elements; retry snapshot().')
 
   for (let index = 0; index < labels.length; index += 1) {
     const handle = (await send('Runtime.evaluate', {
@@ -255,6 +263,7 @@ async function findClickableElements(
       node?: { backendNodeId?: number }
     }
     const backendNodeId = described.node?.backendNodeId
+    if (backendNodeId && membership?.result?.value?.[index] === true) within?.backendNodes.add(backendNodeId)
     // AX 树已经收了这个节点就不重复收——重复的 ref 会让 Agent 以为页面上有两个一样的东西。
     if (!backendNodeId || known.has(backendNodeId)) continue
     known.add(backendNodeId)
@@ -287,6 +296,65 @@ export type BrowserPageSnapshotInput = {
   navigationId: string
   /** frameId → 该 frame 的 sender。跨域 iframe 各有自己的 CDP session。 */
   frames?: Map<string, BrowserCdpSender>
+  query?: NormalizedBrowserSnapshotQuery
+  /** Resolved by the existing authorized-ref path, never a second ref registry. */
+  withinTarget?: { objectId: string; sessionId?: string }
+  /** Dispatch owns the run's monotonically increasing ref sequence. */
+  nextRef?: () => string
+}
+
+export type BrowserPageCapture = BrowserPageSnapshot & { scopeFacts: BrowserSnapshotScopeFacts }
+
+async function resolveWithinSelector(send: BrowserCdpSender, selector: string): Promise<string> {
+  const response = await send('Runtime.evaluate', {
+    expression: `(() => { const matches = document.querySelectorAll(${JSON.stringify(selector)}); if (matches.length !== 1) throw new Error('Observation within must match exactly one region; matched ' + matches.length); return matches[0] })()`,
+    returnByValue: false
+  }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
+  if (response.exceptionDetails || !response.result?.objectId) throw new Error('Observation within must be a valid CSS selector matching exactly one region in the main document. Inspect the page and retry snapshot().')
+  return response.result.objectId
+}
+
+function descendantBackendNodes(tree: AxNode[], rootBackendNodeId: number): Set<number> {
+  const root = tree.find((node) => node.backendDOMNodeId === rootBackendNodeId)
+  if (!root) throw new Error('The observation region is absent from the captured accessibility tree. Read an unscoped snapshot() or inspect it with js().')
+  const byId = indexById(tree)
+  const found = new Set<number>()
+  const visited = new Set<string>()
+  const pending = [root]
+  while (pending.length) {
+    const node = pending.pop()!
+    if (visited.has(node.nodeId)) continue
+    visited.add(node.nodeId)
+    if (node.backendDOMNodeId) found.add(node.backendDOMNodeId)
+    for (const id of node.childIds ?? []) {
+      const child = byId.get(id)
+      if (child) pending.push(child)
+    }
+  }
+  return found
+}
+
+async function viewportBackendNodes(send: BrowserCdpSender): Promise<{ visible: Set<number>; located: Set<number> }> {
+  const snapshot = await send('DOMSnapshot.captureSnapshot', { computedStyles: [], includeDOMRects: true }) as {
+    documents?: { scrollOffsetX?: number; scrollOffsetY?: number; nodes?: { backendNodeId?: number[] }; layout?: { nodeIndex?: number[]; bounds?: number[][] } }[]
+  }
+  const metrics = await send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight })', returnByValue: true }) as { result?: { value?: { width: number; height: number } } }
+  const document = snapshot.documents?.[0]
+  const size = metrics.result?.value
+  if (!document?.nodes?.backendNodeId || !document.layout?.nodeIndex || !document.layout.bounds || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) throw new Error('Viewport geometry could not be read. Use a page snapshot() or retry the viewport observation.')
+  const left = document.scrollOffsetX ?? 0
+  const top = document.scrollOffsetY ?? 0
+  const visible = new Set<number>()
+  const located = new Set<number>()
+  for (let index = 0; index < document.layout.nodeIndex.length; index += 1) {
+    const bounds = document.layout.bounds[index]
+    const backend = document.nodes.backendNodeId[document.layout.nodeIndex[index]!]
+    if (!bounds || !backend) continue
+    const [x, y, width, height] = bounds as [number, number, number, number]
+    located.add(backend)
+    if (width > 0 && height > 0 && x < left + size.width && x + width > left && y < top + size.height && y + height > top) visible.add(backend)
+  }
+  return { visible, located }
 }
 
 /**
@@ -298,45 +366,99 @@ export type BrowserPageSnapshotInput = {
  */
 export async function captureBrowserPageSnapshot(
   input: BrowserPageSnapshotInput
-): Promise<BrowserPageSnapshot> {
+): Promise<BrowserPageCapture> {
   const nodes: BrowserPageNode[] = []
   const missingFrames: BrowserPageFrameFailure[] = []
   let counter = 0
-  const nextRef = (): string => `@e${(counter += 1)}`
-
-  const mainNodes = await collectAxNodes(input.send)
-  const mainRoot = mainNodes[0]
-  if (mainRoot) walk(mainRoot, indexById(mainNodes), 0, nodes, nextRef)
-
-  // AX 树先走完，可点元素提升才知道哪些 backendNodeId 已经收过了。
-  const known = new Set(nodes.map((node) => node.backendNodeId))
-  for (const clickable of await findClickableElements(input.send, known)) {
-    nodes.push({ ...clickable, ref: nextRef() })
+  const nextRef = input.nextRef ?? (() => `@e${(counter += 1)}`)
+  const query = input.query ?? parseBrowserSnapshotQuery(undefined)
+  const work = { axTrees: 0, axNodes: 0, layoutTrees: 0, cdpCommands: 0 }
+  const counted = (sender: BrowserCdpSender): BrowserCdpSender => async (method, params) => {
+    work.cdpCommands += 1
+    return await sender(method, params)
   }
-
-  for (const [frameId, frameSend] of input.frames ?? new Map()) {
-    try {
-      const frameNodes = await collectAxNodes(frameSend)
-      const frameRoot = frameNodes[0]
-      if (!frameRoot) continue
-      const before = nodes.length
-      // iframe 内容从 depth 1 起，读起来就知道它嵌在父页面里。
-      walk(frameRoot, indexById(frameNodes), 1, nodes, nextRef)
-      // 这些节点的动作要发到 iframe 自己的 session，否则 backendNodeId 解不开。
-      for (let index = before; index < nodes.length; index += 1) {
-        nodes[index] = { ...nodes[index]!, sessionId: frameId }
-      }
-    } catch (error) {
-      // 静默跳过是原实现的做法，这里不跟。取不到就说出来：缺了哪个 frame、为什么。
-      missingFrames.push({ frameId, reason: error instanceof Error ? error.message : String(error) })
+  const mainSend = counted(input.send)
+  const frames = new Map([...input.frames ?? []].map(([id, sender]) => [id, counted(sender)]))
+  const scopedDocument = input.withinTarget?.sessionId ?? 'main'
+  const scopedSend = scopedDocument === 'main' ? mainSend : frames.get(scopedDocument)
+  if (!scopedSend) throw new Error('The observation document went away. Take a new snapshot().')
+  if (query.withinRef && !input.withinTarget) throw new Error('withinRef must be resolved through the authorized snapshot ref path.')
+  let regionObjectId = input.withinTarget?.objectId
+  let regionBackendNodeId: number | undefined
+  if (query.within) regionObjectId = await resolveWithinSelector(scopedSend, query.within)
+  try {
+    if (regionObjectId) {
+      const described = await scopedSend('DOM.describeNode', { objectId: regionObjectId }) as { node?: { backendNodeId?: number } }
+      regionBackendNodeId = described.node?.backendNodeId
+      if (!regionBackendNodeId) throw new Error('The observation region no longer has a DOM identity. Take a new snapshot().')
     }
-  }
+    let regionNodes: Set<number> | null = null
+    const collect = async (send: BrowserCdpSender): Promise<AxNode[]> => {
+      work.axTrees += 1
+      const tree = await collectAxNodes(send)
+      work.axNodes += tree.length
+      return tree
+    }
 
-  return {
-    url: input.url,
-    title: input.title,
-    navigationId: input.navigationId,
-    nodes,
-    missingFrames
+    const mainNodes = await collect(mainSend)
+    if (regionBackendNodeId && scopedDocument === 'main') regionNodes = descendantBackendNodes(mainNodes, regionBackendNodeId)
+    const mainRoot = mainNodes[0]
+    if (mainRoot) walk(mainRoot, indexById(mainNodes), 0, nodes, nextRef)
+
+    // AX 树先走完，可点元素提升才知道哪些 backendNodeId 已经收过了。
+    const known = new Set(nodes.map((node) => node.backendNodeId))
+    for (const clickable of await findClickableElements(mainSend, known, regionObjectId && scopedDocument === 'main' && regionNodes ? { objectId: regionObjectId, backendNodes: regionNodes } : undefined)) {
+      nodes.push({ ...clickable, ref: nextRef() })
+    }
+
+    for (const [frameId, frameSend] of frames) {
+      try {
+        const frameNodes = await collect(frameSend)
+        if (regionBackendNodeId && scopedDocument === frameId) regionNodes = descendantBackendNodes(frameNodes, regionBackendNodeId)
+        const frameRoot = frameNodes[0]
+        if (!frameRoot) continue
+        const before = nodes.length
+        // iframe 内容从 depth 1 起，读起来就知道它嵌在父页面里。
+        walk(frameRoot, indexById(frameNodes), 1, nodes, nextRef)
+        // 这些节点的动作要发到 iframe 自己的 session，否则 backendNodeId 解不开。
+        for (let index = before; index < nodes.length; index += 1) {
+          nodes[index] = { ...nodes[index]!, sessionId: frameId }
+        }
+      } catch (error) {
+        // 静默跳过是原实现的做法，这里不跟。取不到就说出来：缺了哪个 frame、为什么。
+        missingFrames.push({ frameId, reason: error instanceof Error ? error.message : String(error) })
+      }
+    }
+
+    if (regionBackendNodeId && !regionNodes) throw new Error('The requested observation document could not be read. Take an unscoped snapshot() to inspect missingFrames, then retry.')
+    const localScope = regionNodes !== null || query.scope === 'viewport'
+    const viewport = query.scope === 'viewport' ? await viewportBackendNodes(scopedSend) : null
+    if (viewport) work.layoutTrees += 1
+    const backendNodes = localScope ? new Set<string>() : null
+    let unlocated = 0
+    for (const node of nodes) {
+      if (!backendNodes || (node.sessionId ?? 'main') !== scopedDocument) continue
+      if (regionNodes && !regionNodes.has(node.backendNodeId)) continue
+      if (viewport && !viewport.located.has(node.backendNodeId)) { unlocated += 1; continue }
+      if (viewport && !viewport.visible.has(node.backendNodeId)) continue
+      backendNodes.add(browserSnapshotNodeIdentity(node))
+    }
+
+    return {
+      url: input.url,
+      title: input.title,
+      navigationId: input.navigationId,
+      nodes,
+      missingFrames,
+      scopeFacts: {
+        document: localScope ? scopedDocument : null,
+        backendNodes,
+        omittedFrames: localScope ? [...(scopedDocument === 'main' ? [] : ['main']), ...frames.keys()].filter((id) => id !== scopedDocument) : [],
+        unlocated,
+        work
+      }
+    }
+  } finally {
+    if (query.within && regionObjectId) await scopedSend('Runtime.releaseObject', { objectId: regionObjectId })
   }
 }

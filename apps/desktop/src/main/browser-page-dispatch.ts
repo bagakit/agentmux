@@ -1,7 +1,9 @@
-import type { BrowserPageSnapshot } from '../shared/contracts.js'
+import type { BrowserPageNode, BrowserPageSnapshot } from '../shared/contracts.js'
+import type { BrowserScopedSnapshot, BrowserSnapshotObservation } from '../shared/browser-snapshot-query.js'
 import type { BrowserReplayTarget } from '../shared/browser-operation.js'
 import type { BrowserCdpSession } from './browser-cdp-session.js'
-import { captureBrowserPageSnapshot } from './browser-page-snapshot.js'
+import { captureBrowserPageSnapshot, type BrowserPageCapture, type BrowserPageSnapshotInput } from './browser-page-snapshot.js'
+import { parseBrowserSnapshotQuery, projectBrowserSnapshot, type NormalizedBrowserSnapshotQuery } from './browser-snapshot-query.js'
 import { healRef, ledgerFromSnapshot, type BrowserRefLedger } from './browser-ref-ledger.js'
 import { resolveBrowserRef } from './browser-ref-resolve.js'
 import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
@@ -132,8 +134,13 @@ function refFailureError(failure: Awaited<ReturnType<typeof resolveBrowserRef>> 
  * 缩进表示结构，`@eN` 是可操作的把手。**缺失的 frame 附在末尾**——一张有洞的地图必须自己说明哪里
  * 有洞，否则 Agent 会把"没列出来"读成"页面上没有"。
  */
-export function renderBrowserSnapshotText(snapshot: BrowserPageSnapshot): string {
+export function renderBrowserSnapshotText(snapshot: BrowserPageSnapshot, observation?: BrowserSnapshotObservation): string {
   const lines = [`${snapshot.title} — ${snapshot.url}`]
+  if (observation) {
+    lines.push(`(observation ${observation.scope.kind}, document ${observation.scope.document ?? 'all discovered documents'}: ${observation.fullObserved} observed, ${observation.scoped} scoped, ${observation.matched} matched, ${observation.returned} returned; truncated=${observation.truncated})`)
+    if (observation.omittedFrames.length) lines.push(`(documents excluded by scope, not failed reads: ${observation.omittedFrames.join(', ')})`)
+    if (observation.unlocated) lines.push(`(${observation.unlocated} nodes omitted because their viewport location could not be established)`)
+  }
   for (const node of snapshot.nodes) {
     const indent = '  '.repeat(node.depth)
     const handle = node.ref === '' ? '' : `${node.ref} `
@@ -161,24 +168,34 @@ export function createBrowserPageDispatch(
   /**
    * **本轮真正交到 Agent 手里的那批 ref**，没交过任何一张快照时为 null。
    *
-   * 这是整个跨轮机制的判据，而且它不能退化成「有没有缓存快照」。ref 是按走查顺序现编的
-   * （每张快照都从 @e1 重新数），所以上一轮的 `@e3` 在这一轮的新快照里**照样存在、照样解得开**，
-   * 只是指着另一个元素。只看缓存在不在，这次误点从头到尾没有一处会报错。
-   * 记下"哪些 ref 是我这轮发出去的"，不在其中的一律走账本认领，不许撞进新快照的编号里。
+   * 完整身份图还包含被范围或预算裁掉的节点；它们的 ref 没有交付，不能被猜出来后使用。
+   * 本轮编号单调递增，旧快照已交付的 ref 明确过期；上一轮的编号预留，沿原账本有损认回。
+   * 不能把「完整图里存在」等同于「这轮授权了这个把手」。
    */
   let issued: Set<string> | null = null
+  const expired = new Set<string>()
+  let refCounter: number | null = null
   // 上一轮的账本**在任何快照落盘之前**读出来。晚一步读到的就是本轮自己刚写下的那份，
   // 于是跨轮自愈会静默退化成「永远认不出旧 ref」。
   const prior = context.readLedger()
 
-  async function takeSnapshot(): Promise<BrowserPageSnapshot> {
+  async function takeSnapshot(query?: NormalizedBrowserSnapshotQuery, withinTarget?: BrowserPageSnapshotInput['withinTarget'], onCapture?: (snapshot: BrowserPageCapture) => void): Promise<BrowserPageCapture> {
+    if (refCounter === null) {
+      const previous = await prior
+      // Reserve the prior run's names: publishing a new graph must not turn an
+      // earlier run's appearance-based ref into an unmarked identity match.
+      refCounter ??= Math.max(0, ...(previous?.entries ?? []).map((entry) => Number(/^@e(\d+)$/.exec(entry.ref)?.[1] ?? 0)))
+    }
     const info = context.pageInfo()
     const snapshot = await captureBrowserPageSnapshot({
       send: session.sendCommand,
       url: info.url,
       title: info.title,
       navigationId: info.navigationId,
-      frames: session.frames
+      frames: session.frames,
+      nextRef: () => `@e${(refCounter! += 1)}`,
+      ...(query ? { query } : {}),
+      ...(withinTarget ? { withinTarget } : {})
     })
     // 子 frame 的自动 attach 没建立起来时，跨域 iframe 一个都不会被枚举——于是 `missingFrames`
     // 是空的，因为它只在**尝试过**某个 frame 时才写入。空的 missingFrames 在 Agent 眼里就是
@@ -192,6 +209,8 @@ export function createBrowserPageDispatch(
           'was read. If this page embeds one, its contents are missing from this snapshot.'
       })
     }
+    if (context.pageInfo().navigationId !== info.navigationId) throw new Error('The page navigated during snapshot capture. Take a new snapshot() of the current page.')
+    onCapture?.(snapshot)
     current = snapshot
     return snapshot
   }
@@ -202,18 +221,32 @@ export function createBrowserPageDispatch(
    * 与 {@link takeSnapshot} 的区别只有一件事：**这些 ref 现在归本轮所有**。自愈内部那次取快照
    * 走的是前者——它的编号从没离开过这个进程，认领它等于把旧 ref 洗成新 ref。
    */
-  async function publishSnapshot(): Promise<BrowserPageSnapshot> {
-    const snapshot = await takeSnapshot()
-    issued = new Set(snapshot.nodes.filter((node) => node.ref !== '').map((node) => node.ref))
-    await context.writeLedger(ledgerFromSnapshot(snapshot))
-    return snapshot
+  async function publishSnapshot(query: NormalizedBrowserSnapshotQuery): Promise<BrowserScopedSnapshot> {
+    const work = { axTrees: 0, axNodes: 0, layoutTrees: 0, cdpCommands: 0 }
+    const recordCapture = (capture: BrowserPageCapture): void => {
+      for (const key of ['axTrees', 'axNodes', 'layoutTrees', 'cdpCommands'] as const) work[key] += capture.scopeFacts.work[key]
+    }
+    const within = query.withinRef ? await handleFor(query.withinRef, recordCapture) : undefined
+    const snapshot = await takeSnapshot(query, within ? { objectId: within.objectId, ...(within.node.sessionId ? { sessionId: within.node.sessionId } : {}) } : undefined, recordCapture)
+    // A prior-run withinRef can require an initial full capture for appearance
+    // recovery. Count that capture too instead of hiding its AX work.
+    snapshot.scopeFacts.work = work
+    const projected = projectBrowserSnapshot(snapshot, snapshot.scopeFacts, query)
+    for (const ref of issued ?? []) expired.add(ref)
+    issued = new Set(projected.nodes.filter((node) => node.ref !== '').map((node) => node.ref))
+    // Ordinals come from the full graph; only handles actually handed out go on
+    // disk. Computing nth after clipping would recover a same-named neighbour.
+    const ledger = ledgerFromSnapshot(snapshot)
+    ledger.entries = ledger.entries.filter((entry) => issued!.has(entry.ref))
+    await context.writeLedger(ledger)
+    return projected
   }
 
   /** 在一张指定的快照里把 ref 解成句柄。三类失败各自成话。 */
   async function handleIn(
     snapshot: BrowserPageSnapshot,
     ref: string
-  ): Promise<{ objectId: string; send: typeof session.sendCommand }> {
+  ): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode }> {
     const resolution = await resolveBrowserRef({
       snapshot,
       ref,
@@ -226,16 +259,17 @@ export function createBrowserPageDispatch(
     // 解开的那一刻 frame 还在，取 sender 时没了。这条极少发生，但不判就会变成一句
     // "cannot read property of undefined"——那看起来像我们的 bug，而不是页面变了。
     if (!send) throw new Error(`The frame holding ${ref} went away. Take a new snapshot().`)
-    return { objectId: resolution.objectId, send }
+    return { objectId: resolution.objectId, send, node: snapshot.nodes.find((node) => node.ref === ref)! }
   }
 
   /** 把 ref 解成可派发的句柄。本轮没发出过的 ref 交给账本认领，绝不撞进新快照的编号。 */
-  async function handleFor(ref: string): Promise<{ objectId: string; send: typeof session.sendCommand }> {
+  async function handleFor(ref: string, onCapture?: (snapshot: BrowserPageCapture) => void): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode }> {
+    if (expired.has(ref)) throw new Error(`${ref} was superseded by a later snapshot in this run. Use a ref from the latest snapshot().`)
     if (issued !== null && current !== null && issued.has(ref)) return await handleIn(current, ref)
 
     // 到这里说明这个 ref 不是本轮发出的：可能来自上一轮（甚至上次启动），也可能是拼错的。
     const ledger = await prior
-    const fresh = current ?? (await takeSnapshot())
+    const fresh = current ?? (await takeSnapshot(undefined, undefined, onCapture))
     if (!ledger) {
       // 两种"账本帮不上忙"要分开说，因为下一步不同：这一轮取过快照就说明 ref 确实不在页面上
       // （Agent 拼错了或记串了）；一次都没取过则是它在用一个更早的 ref，而更早的那批没留下来。
@@ -292,9 +326,11 @@ export function createBrowserPageDispatch(
     switch (name) {
       // ── 观察 ──────────────────────────────────────────────────────────
       case 'snapshot':
-        return await publishSnapshot()
-      case 'snapshotText':
-        return renderBrowserSnapshotText(await publishSnapshot())
+        return await publishSnapshot(parseBrowserSnapshotQuery(args[0]))
+      case 'snapshotText': {
+        const snapshot = await publishSnapshot(parseBrowserSnapshotQuery(args[0]))
+        return renderBrowserSnapshotText(snapshot, snapshot.observation)
+      }
       case 'pageInfo':
         return context.pageInfo()
       case 'captureScreenshot':
@@ -407,7 +443,7 @@ export function createBrowserPageDispatch(
         })
         // 等到了才认领这批 ref：轮询途中那些快照的编号从没离开过这里，认领它们等于把还没
         // 交给 Agent 的 ref 当成已交付的。
-        return await publishSnapshot()
+        return await publishSnapshot(parseBrowserSnapshotQuery(undefined))
       }
       case 'waitForLoad': {
         const timeoutMs = typeof args[0] === 'number' ? args[0] : DEFAULT_WAIT_MS
