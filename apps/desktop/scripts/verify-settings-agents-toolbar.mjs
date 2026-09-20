@@ -31,6 +31,7 @@ try {
   const imports=[...entryCSS.matchAll(/@import '([^']+)';/g)];assert.ok(imports.length>0)
   for(const match of imports)await bind(path.resolve(path.dirname(entryFile),match[1]))
   assert.ok(inputs.has(surfaceFile),'The actual surface CSS is imported by the real entry')
+  assert.equal(inputs.get(surfaceFile),hash(original),'The owning surface bytes match the bound source')
   for(const mode of ['control','basis-mutant','wrap-mutant','restored']) {
     const directory=path.join(evidence,mode);await fs.mkdir(directory);const output=path.join(privateRoot,mode)
     const mutated=mode.endsWith('-mutant'),selected=mode==='basis-mutant'?mutations.basis:mode==='wrap-mutant'?mutations.wrap:original
