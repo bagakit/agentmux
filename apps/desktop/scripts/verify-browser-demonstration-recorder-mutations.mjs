@@ -16,6 +16,7 @@ const digest = value => createHash('sha256').update(value).digest('hex')
 const evidence = path.join(root, 'docs/reviews/evidence/browser-task-capabilities-2026-10-03/t010-source')
 const isolated = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-recorder-mutations-'))
 const cases = [
+  ['capture-time-follows-slow-storage', 'const recordedAt = this.now()\n    const gesture = this.recentGesture(input.browserId, input.navigationId)\n    return this.change(async () => {', 'return this.change(async () => {\n      const recordedAt = this.now()\n      const gesture = this.recentGesture(input.browserId, input.navigationId)'],
   ['page-synthetic-event-accepted', 'input.isTrusted !== true', 'false'],
   ['native-input-not-required', "if (!gesture || !(input.kind === 'fill' ? FILL_INPUTS : CLICK_INPUTS).has(gesture.type)) return null", 'if (false) return null'],
   ['input-value-retained', 'args: [], ...(target ? { target } : {}),', 'args: (input.value ? [input.value] : []), ...(target ? { target } : {}),'],
@@ -43,7 +44,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   const baseline = await run('baseline-green')
   assert.equal(baseline.result.status, 0, baseline.log)
-  assert.match(baseline.log, /Tests\s+8 passed/, 'All actual regression tests must execute')
+  assert.match(baseline.log, /Tests\s+9 passed/, 'All actual regression tests must execute')
   for (const [name, before, after] of cases) {
     const occurrences = source.split(before).length - 1
     assert.ok(occurrences > 0, `Mutation anchor missing: ${name}`)
@@ -58,7 +59,7 @@ try {
   }
   const green = await run('restored-green')
   assert.equal(green.result.status, 0, green.log)
-  assert.match(green.log, /Tests\s+8 passed/, 'Restored source must execute all actual tests')
+  assert.match(green.log, /Tests\s+9 passed/, 'Restored source must execute all actual tests')
   receipt.green = { exit: green.result.status, log: green.file, sha256: green.sha256 }
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message } }

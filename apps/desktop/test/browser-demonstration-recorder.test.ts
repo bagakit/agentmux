@@ -90,6 +90,31 @@ describe('BrowserDemonstrationRecorder', () => {
     expect(JSON.stringify(s.store.document)).not.toContain('secret-')
   })
 
+  it('does not expire already captured human input while a durable write is slow', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const paused = new Promise<void>(resolve => { release = resolve })
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    class SlowStore extends MemoryStore {
+      override async save(document: BrowserDemonstrationDocument) {
+        if (document.drafts[0]?.revision === 2) { entered(); await paused }
+        await super.save(document)
+      }
+    }
+    const s = setup(new SlowStore())
+    await s.start(); s.native()
+    const click = s.event()
+    await waiting
+    s.time(1_010); s.native('char')
+    const fill = s.event({ kind: 'fill', target: { role: 'text input', name: 'Field', ordinal: 1, count: 1 } })
+    s.time(5_000); release()
+    await click; await fill
+    expect((await s.recorder.get(browserId))?.steps).toEqual([
+      expect.objectContaining({ method: 'click', recordedAt: 1_000 }),
+      expect.objectContaining({ method: 'fillInput', recordedAt: 1_010, inputKey: 'input-2' })
+    ])
+  })
+
   it('records navigation facts without claiming an unattributed navigation is a human action', async () => {
     const s = setup()
     await s.start()

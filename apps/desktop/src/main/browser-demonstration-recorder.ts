@@ -131,17 +131,19 @@ export class BrowserDemonstrationRecorder {
   /** Only call this from the Browser's native input listener while no Agent is driving it. */
   noteNativeInput(input: NativeInput): void {
     const draft = this.current(input.browserId)
-    if (draft?.status !== 'recording' || draft.navigationId !== input.navigationId || !NATIVE_INPUTS.has(input.type)) return
+    if (draft?.status !== 'recording' || !NATIVE_INPUTS.has(input.type)) return
     const at = input.at ?? this.now()
     if (!Number.isFinite(at)) return
     this.gestures.set(input.browserId, { navigationId: input.navigationId, type: input.type, at })
   }
 
   async recordBrowserDemonstration(input: BrowserDemonstrationEvent): Promise<BrowserDemonstrationDraft | null> {
+    // Attest at ingress; a slow durable write must not expire an already captured human event.
+    const recordedAt = this.now()
+    const gesture = this.recentGesture(input.browserId, input.navigationId)
     return this.change(async () => {
       const draft = this.current(input.browserId)
       if (draft?.status !== 'recording' || draft.navigationId !== input.navigationId || input.isTrusted !== true || (input.kind !== 'click' && input.kind !== 'fill')) return null
-      const gesture = this.recentGesture(input.browserId, input.navigationId)
       if (!gesture || !(input.kind === 'fill' ? FILL_INPUTS : CLICK_INPUTS).has(gesture.type)) return null
       const target = safeTarget(input.target)
       const previous = draft.steps.at(-1)
@@ -151,7 +153,7 @@ export class BrowserDemonstrationRecorder {
       if (draft.steps.length >= MAX_STEPS) return this.limit(draft)
       const sequence = draft.steps.length + 1
       draft.steps.push({
-        id: identity(this.makeId()), sequence, recordedAt: this.now(), navigationId: draft.navigationId,
+        id: identity(this.makeId()), sequence, recordedAt, navigationId: draft.navigationId,
         source: 'native-human', method: input.kind === 'fill' ? 'fillInput' : 'click', url: draft.url,
         args: [], ...(target ? { target } : {}),
         ...(input.kind === 'fill' ? { inputKey: `input-${sequence}` } : {}),
@@ -165,17 +167,18 @@ export class BrowserDemonstrationRecorder {
   }
 
   async navigated(input: BrowserDemonstrationNavigation): Promise<BrowserDemonstrationDraft | null> {
+    const recordedAt = this.now()
+    const gesture = this.recentGesture(input.browserId, input.fromNavigationId)
     return this.change(async () => {
       const draft = this.current(input.browserId)
       if (draft?.status !== 'recording' || draft.navigationId !== input.fromNavigationId) return null
-      const gesture = this.recentGesture(input.browserId, input.fromNavigationId)
       const human = input.origin === 'toolbar' && input.isTrusted === true
       const url = safeUrl(input.url)
       draft.navigationId = identity(input.navigationId)
       this.gestures.delete(input.browserId)
       if (draft.steps.length >= MAX_STEPS) return this.limit(draft)
       draft.steps.push({
-        id: identity(this.makeId()), sequence: draft.steps.length + 1, recordedAt: this.now(),
+        id: identity(this.makeId()), sequence: draft.steps.length + 1, recordedAt,
         navigationId: draft.navigationId, source: human ? 'native-human' : 'navigation',
         method: 'gotoUrl', url, args: url ? [url] : [],
         blockedReason: !human && !gesture ? 'Navigation provenance is unknown; inspect the destination before replay.'
