@@ -20,6 +20,8 @@
 @import './focus.css';
 @import './pmo-teams-topic.css';
 @import './browser.css';
+@import './browser-operation-surface.css';
+@import './browser-step-evidence.css';
 @import './agent.css';
 @import './agent-region-header.css';
 @import './session-connecting.css';

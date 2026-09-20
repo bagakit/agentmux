@@ -45,6 +45,8 @@ import type {
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
 
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
+import type { BrowserStepEvidenceRead } from './browser-step-evidence'
+export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
 import {
@@ -1516,6 +1518,7 @@ export type AgentMuxDesktopApi = {
      * 查不到答 `null`——那是一次成功的回答，不是错误：id 可能来自另一台机器，或早被日志轮转掉了。
      */
     getOperation(operationId: string): Promise<BrowserOperation | null>
+    getStepEvidence(operationId: string, sequence: number): Promise<BrowserStepEvidenceRead>
     /**
      * 停下一个在飞的操作，凭 operationId，**与哪个 Browser、哪条连接无关**。
      *

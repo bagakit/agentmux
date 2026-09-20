@@ -1,0 +1,16 @@
+.browser-step-evidence { padding: var(--sp-3); font-size: var(--fs-body); min-width: 0; }
+.browser-step-evidence header { display: flex; align-items: baseline; gap: var(--sp-2); }
+.browser-step-evidence header strong { min-width: 0; overflow-wrap: anywhere; }
+.browser-step-evidence header span, .browser-step-evidence__time, .browser-step-evidence__target { color: var(--text-2); }
+.browser-step-evidence p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+.browser-step-evidence__warning { color: var(--text-2); }
+.browser-step-evidence nav { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+.browser-step-evidence nav button { background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--text-2); padding: var(--sp-1) var(--sp-2); }
+.browser-step-evidence nav button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.browser-step-evidence button:focus-visible, .browser-step-evidence a:focus-visible, .browser-step-evidence summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.browser-step-evidence pre { overflow: auto; max-height: 24rem; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: inherit; }
+.browser-step-evidence img { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); }
+.browser-step-evidence summary { cursor: pointer; color: var(--text-2); }
+.browser-step-evidence dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-2); }
+.browser-step-evidence dt { color: var(--text-2); }
+.browser-step-evidence dd { margin: 0; overflow-wrap: anywhere; }
