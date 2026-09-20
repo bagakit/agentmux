@@ -481,6 +481,16 @@ Tab it sits in is marked too, so the takeover is a deliberate act, not a surpris
 see which Browser you are in without switching to it. A subsequent \`browser run\` stays refused
 until the person explicitly chooses Return to Agent (or an equivalent handoff control).
 
+Large JSON return values become a durable \`browser-result-artifact\` reference (8 MiB per value,
+64 MiB retained store). Small values up to 128 KiB, including undefined/null, return inline.
+Keep the original reference; its Workspace, Browser, operation and source must stay intact.
+Use \`return await readResult(reference, {offset: 0, maxBytes: 65536})\` in this Browser to read
+base64 bytes, totalBytes and nextOffset. Join decoded bytes then parse JSON. A navigation or
+restart does not require rerunning the original actions. Each read stays bounded; missing or
+evicted results are explicit. A Browser without a verified Workspace still runs small scripts;
+durable result capture is unavailable. If capture fails, actions may already have happened:
+inspect the page and do not automatically rerun the script.
+
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:
   completed      the program finished
@@ -488,10 +498,11 @@ including on failure), and \`outcome\`, which is one of four:
   stopped        we cut it off — the program is fine. Either its scale is (too slow, too much
                  output), or a person took the page back mid-run. Actions before that point
                  did happen; nothing after did. Run it again once the page is free.
-  indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for one of two reasons the message names:
+  indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for a reason the message names:
                  the process died partway (an action may already have been applied once), or a
                  ref from an earlier run was matched back by appearance and may have landed on a
-                 look-alike. Either way, look at the page before retrying — do not blind-retry.`],
+                 look-alike, or the actions ran but their result could not be retained.
+                 Look at the page before retrying — do not blind-retry.`],
   // 剩下四个 browser 子命令各有自己一条。`operationPath` 把 `browser <verb>` 拼成 `browser.<verb>`，
   // 所以少一条不是"退回上一级"，而是一句 "Unknown command"——一个真实存在的命令被 --help 说成不存在。
   // （`history` 与 `replay` 在此之前正是这个状态。）

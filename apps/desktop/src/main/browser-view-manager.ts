@@ -37,6 +37,8 @@ import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
 import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
+import { BrowserResultArtifactStore } from './browser-result-artifact.js'
+import type { BrowserResultContext } from '../shared/browser-result-artifact.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -50,6 +52,7 @@ import {
 
 type BrowserEntry = {
   id: string
+  readonly workspaceId: string | null
   view: WebContentsView
   profileId: string
   requestedUrl: string
@@ -245,12 +248,14 @@ function takeoverMessage(takeover: BrowserTakeover, refused?: string): string {
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
   id: string
+  workspaceId: string | null
   profileId: string
   requestedUrl: string
   viewport: BrowserViewport
 }
 
 type BrowserRestoreInput = {
+  workspaceId: string | null
   profileId: string
   viewport: BrowserViewport
 }
@@ -337,7 +342,8 @@ export class BrowserViewManager {
      */
     private readonly appLinks: AppLinkHost,
     private readonly operationJournal?: BrowserOperationJournal,
-    private readonly stepEvidence?: BrowserStepEvidenceStore
+    private readonly stepEvidence?: BrowserStepEvidenceStore,
+    private readonly resultArtifacts?: BrowserResultArtifactStore
   ) {}
 
   resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
@@ -359,15 +365,18 @@ export class BrowserViewManager {
     return [...pids]
   }
 
-  async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
     const existing = this.entries.get(id)
-    if (existing) return this.snapshot(existing)
-    if (this.releasedEntries.has(id)) return await this.restore(id)
+    if (existing) {
+      this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
+      return this.snapshot(existing)
+    }
+    if (this.releasedEntries.has(id)) return await this.restore(id, { workspaceId })
     const url = normalizeBrowserUrl(rawUrl)
     const profileId = this.profiles.defaultProfileId()
-    return await this.createEntry(id, url, profileId)
+    return await this.createEntry(id, url, profileId, 'responsive', workspaceId)
   }
 
   /**
@@ -387,6 +396,7 @@ export class BrowserViewManager {
     const requestedUrl = entry.requestedUrl
     const released: ReleasedBrowser = {
       id,
+      workspaceId: entry.workspaceId,
       profileId: entry.profileId,
       requestedUrl,
       viewport: entry.viewport
@@ -401,9 +411,14 @@ export class BrowserViewManager {
 
   /** Rebuild a previously released Browser native owner from its retained projection metadata. */
   async restore(id: string, input?: Partial<BrowserRestoreInput>): Promise<BrowserSnapshot> {
-    if (this.entries.has(id)) return this.snapshot(this.entries.get(id)!)
+    const existing = this.entries.get(id)
+    if (existing) {
+      this.assertWorkspaceBinding(existing.workspaceId, input?.workspaceId ?? null)
+      return this.snapshot(existing)
+    }
     const released = this.releasedEntries.get(id)
     if (!released) throw new Error(`Unknown released browser: ${id}`)
+    this.assertWorkspaceBinding(released.workspaceId, input?.workspaceId ?? null)
     const profileId = input?.profileId ?? released.profileId
     // The retained Main descriptor is the only authoritative URL while the native owner is gone.
     // Renderer tab.url can lag did-start-navigation, so accepting it here could restore an older
@@ -418,7 +433,7 @@ export class BrowserViewManager {
     this.resolvePartition(profileId)
     this.releasedEntries.delete(id)
     try {
-      const snapshot = await this.createEntry(id, url, profileId, viewport)
+      const snapshot = await this.createEntry(id, url, profileId, viewport, released.workspaceId)
       return snapshot
     } catch (error) {
       this.releasedEntries.set(id, { ...released, profileId, requestedUrl: url, viewport })
@@ -430,12 +445,14 @@ export class BrowserViewManager {
     id: string,
     url: string,
     profileId: string,
-    viewport: BrowserViewport = 'responsive'
+    viewport: BrowserViewport = 'responsive',
+    workspaceId: string | null = null
   ): Promise<BrowserSnapshot> {
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
     const view = this.createView(this.resolvePartition(profileId))
     const entry: BrowserEntry = {
       id,
+      workspaceId,
       view,
       profileId,
       requestedUrl: url,
@@ -673,6 +690,7 @@ export class BrowserViewManager {
    */
   async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
+    const resultNavigationId = entry.navigationId
     if (entry.humanControl) {
       // 带类型化的码，不是一句散文：调用方要能把「人在用这一页」与「出故障了」分开，并且知道恢复
       // 动作是**人明确交还控制**，不是重试。裸 Error 会让两者在机读侧长得一模一样。
@@ -779,7 +797,15 @@ export class BrowserViewManager {
     this.emit(entry)
     void this.showDriveBadge(entry, entry.view)
     try {
-      const run = await runBrowserScript({ code, signal: stopController.signal, onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation) })
+      const resultContext: BrowserResultContext = {
+        workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
+        navigationId: resultNavigationId
+      }
+      const run = await runBrowserScript({ code, signal: stopController.signal,
+        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation),
+        ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
+          await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
+      })
       // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
       // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
@@ -1103,6 +1129,9 @@ export class BrowserViewManager {
     }
     const dispatch = createBrowserPageDispatch({
       session,
+      ...(this.resultArtifacts ? { resultArtifacts: {
+        store: this.resultArtifacts, owner: { workspaceId: entry.workspaceId, browserId: entry.id }
+      } } : {}),
       pageInfo: () => {
         const view = requireLive()
         return {
@@ -1598,7 +1627,7 @@ export class BrowserViewManager {
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
       this.releasedEntries.set(entry.id, {
-        id: entry.id, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
+        id: entry.id, workspaceId: entry.workspaceId, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
       })
       if (!this.window.isDestroyed()) this.window.contentView.removeChildView(view)
       this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' })
@@ -1609,6 +1638,13 @@ export class BrowserViewManager {
     const entry = this.entries.get(id)
     if (!entry) throw new Error(`Unknown browser: ${id}`)
     return entry
+  }
+
+  private assertWorkspaceBinding(bound: string | null, requested: string | null): void {
+    // Unknown remains unknown; a recovery handshake never upgrades or replaces this owner's binding.
+    if (bound !== null && requested !== null && bound !== requested) {
+      throw new Error('This Browser belongs to another Workspace. Restore its original Workspace binding.')
+    }
   }
 
   private createView(partition: string): WebContentsView {

@@ -8,6 +8,8 @@ import { healRef, ledgerFromSnapshot, type BrowserRefLedger } from './browser-re
 import { resolveBrowserRef } from './browser-ref-resolve.js'
 import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
+import { readBrowserResultArtifact, type BrowserResultArtifactStore } from './browser-result-artifact.js'
+import type { BrowserResultArtifactReference, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -48,6 +50,8 @@ export type BrowserPageContext = {
   note(text: string): void
   /** Receives the semantic identity of the ref that is about to be acted on. */
   recordTarget?(target: BrowserReplayTarget): void
+  /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
+  resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
@@ -324,6 +328,16 @@ export function createBrowserPageDispatch(
 
   return async (name, args) => {
     switch (name) {
+      case 'readResult': {
+        if (!context.resultArtifacts) throw new Error('Durable result reading is unavailable for this Browser.')
+        const options = args[1]
+        if (options !== undefined && (options === null || typeof options !== 'object' || Array.isArray(options))) {
+          throw new TypeError('readResult options must contain offset and maxBytes.')
+        }
+        return await readBrowserResultArtifact(context.resultArtifacts.store,
+          args[0] as BrowserResultArtifactReference, context.resultArtifacts.owner,
+          options as BrowserResultReadOptions | undefined)
+      }
       // ── 观察 ──────────────────────────────────────────────────────────
       case 'snapshot':
         return await publishSnapshot(parseBrowserSnapshotQuery(args[0]))
