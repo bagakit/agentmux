@@ -19,6 +19,8 @@ const core = path.join(root, 'packages/core/dist/index.js')
 const receiptPath = path.join(root, '.tmp/terminal-live-scroll-last.json')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-live-read-'))
 await fs.mkdir(path.dirname(receiptPath), { recursive: true })
+const captureDirectory = await fs.mkdtemp(path.join(root, '.tmp/terminal-tool-trace-visual-'))
+await fs.mkdir(path.dirname(receiptPath), { recursive: true })
 const pkg = path.dirname(require.resolve('@xterm/xterm/package.json'))
 const electron = require('electron')
 const critical = [
@@ -27,6 +29,8 @@ const critical = [
   path.join(desktop, 'src/renderer/src/components/TerminalView.tsx'), path.join(desktop, 'src/renderer/src/components/SessionPane.tsx'),
   path.join(desktop, 'src/renderer/src/components/SessionHistoryView.tsx'), path.join(desktop, 'src/renderer/src/store.ts'),
   path.join(desktop, 'src/renderer/src/components/ConversationMessage.tsx'), path.join(desktop, 'src/renderer/src/styles/activity-conversation.css'),
+  path.join(desktop, 'src/renderer/src/components/ConversationToolTrace.tsx'), path.join(desktop, 'src/renderer/src/styles/conversation-tool-trace.css'),
+  path.join(desktop, 'src/renderer/src/lib/activity-step-summary.ts'), path.join(desktop, 'src/renderer/src/styles/index.css'),
   path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/renderer/src/lib/session-events.ts'),
   path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
   path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/session-history.css'),
@@ -86,7 +90,7 @@ lines.on('close',()=>{record({kind:'eof'});process.exit(0)})
 `
 const result = { schema: 'agentmux.terminal-live-scroll-delivery.v1', passed: false,
   sourceAndPackageBefore: null, sourceAndPackageAfter: null, distributionArtifacts: null,
-  nativeFixture: null, browser: null, exit: null, processRuns: [],
+  nativeFixture: null, browser: null, exit: null, processRuns: [], captureDirectory, captureOnly: true, aestheticReview: 'not-performed',
   cleanup: { remaining: null, rootRemoved: false, errors: [] }, physicalDeviceTested: false, userRunTouched: false,
   boundary: 'Two private actual Electron processes with CDP trusted input, product Store durable workbench initialization, SessionPane/preload/xterm and Core Provider reading over a synthetic native protocol. No Core connect/create, Agent Run, model or user home access; active missing VT state is not restored.' }
 let child, timer
@@ -100,6 +104,14 @@ try {
       ...(i % 2 ? { content: [{ type: 'text', text: `Private persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }] }
         : { text: `**Private persisted record ${i}.** ` + 'Synthetic readable native text. '.repeat(35) }) }
   }))
+  // Native source items pass through the real Provider parser and SessionHistoryView. The record
+  // count/identity and the original continuous-reading assertions remain unchanged.
+  items[60].item = { id: 'private-native-item-60', type: 'commandExecution', command: 'printf private-success',
+    status: 'completed', exitCode: 0, aggregatedOutput: 'Private successful tool output.\n'.repeat(16) }
+  items[62].item = { id: 'private-native-item-62', type: 'mcpToolCall', server: 'private_observation',
+    tool: 'inspect_nested_document_with_a_deliberately_long_semantic_tool_name',
+    arguments: { within: 'private-document', maxNodes: 25 }, status: 'failed',
+    error: { message: 'The private fixture document is unavailable. Review the observed page before retrying.\n'.repeat(12) } }
   await fs.writeFile(path.join(privateRoot, 'native-items.json'), JSON.stringify(items), { mode: 0o600 })
   await fs.writeFile(path.join(privateRoot, 'native-reader.mjs'), readerSource, { mode: 0o600 })
   result.nativeFixture = await hashes(['native-items.json', 'native-reader.mjs'].map(name => path.join(privateRoot, name)))
@@ -121,7 +133,7 @@ try {
   const env = { ...process.env, CODEX_HOME: path.join(privateRoot, 'codex-home') }
   delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['capture', 'restore']) {
-    child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, core, productPreload, phase],
+    child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, core, productPreload, phase, captureDirectory],
       { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
     result.pid = child.pid; childPids.push(child.pid)
     child.stderr.on('data', () => {})

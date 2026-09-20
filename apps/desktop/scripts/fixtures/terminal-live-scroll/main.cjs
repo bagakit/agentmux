@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs'), path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const [html, privateRoot, coreFile, productPreload, phase] = process.argv.slice(2)
+const [html, privateRoot, coreFile, productPreload, phase, captureDirectory] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -28,11 +28,14 @@ async function waitFor(read, predicate, message) {
   }
   throw new Error(message)
 }
-async function renderedFrame() {
+async function renderedFrame(label) {
   await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   const image = await win.webContents.capturePage()
   assert.equal(image.isEmpty(), false, 'The actual compositor must provide a rendered frame')
-  return { size: image.getSize(), sha256: createHash('sha256').update(image.toPNG()).digest('hex') }
+  const png = image.toPNG()
+  const file = path.join(captureDirectory, `${phase}-${label}.png`)
+  fs.writeFileSync(file, png)
+  return { file, size: image.getSize(), sha256: createHash('sha256').update(png).digest('hex') }
 }
 async function wheel(point, deltaY) {
   assert.ok(point, 'The actual target must have positive visible geometry')
@@ -120,7 +123,7 @@ app.whenReady().then(async () => {
       }
       assert.equal(stable, 3); assert.equal(before.mouse, 'none'); assert.equal(before.buffer.length, before.grid.rows)
       assert.equal(before.history, null); assert.deepEqual(before.errors, [])
-      result.before = { snapshot: before, counts: { ...counts } }; result.terminalFrame = await renderedFrame()
+      result.before = { snapshot: before, counts: { ...counts } }; result.terminalFrame = await renderedFrame('terminal')
       await wheel(before.terminalPoint, -240)
       const zero = await waitFor(info, x => x.wheels.length === 1, 'Actual zero-history wheel did not dispatch')
       assert.equal(zero.history, null, 'Active local top must never navigate to Provider records')
@@ -177,7 +180,7 @@ app.whenReady().then(async () => {
       assert.equal(counts.attach, 1); assert.equal(counts.detach, 1); assert.equal(counts.write, 1)
       assert.equal(result.before.snapshot.terminalAppearance.fontSize, Number.parseFloat(opened.expectedAppearance.fontSize))
     }
-    result.historyFrame = await renderedFrame()
+    result.historyFrame = await renderedFrame('history')
     const coldCounts = { ...counts }
     await wheel(opened.history.point, -240)
     const up = await waitFor(info, x => x.history?.scrollTop < opened.history.scrollTop, 'Actual inline records did not scroll upward')
@@ -191,6 +194,52 @@ app.whenReady().then(async () => {
     ])
     assert.deepEqual(down.errors, [])
     result.cold = { ...down, counts: { ...counts }, historyPages }
+    // Additional visual review consumes the exact production trace rendered from native source.
+    // It follows the original wheel proof so no extra gestures substitute for that acceptance.
+    const toolCounts = { ...counts }
+    const observeTools = () => win.webContents.executeJavaScript(`(() => {
+      const rows = Array.from(document.querySelectorAll('.conversation-tool-trace'));
+      const viewport = document.querySelector('.session-history__viewport');
+      return { rows: rows.map(row => ({kind:row.dataset.traceKind,callId:row.dataset.callId,status:row.dataset.status??null,
+        expanded:row.querySelector('button').getAttribute('aria-expanded'),text:row.querySelector('button').textContent})),
+        payloadCount:document.querySelectorAll('.conversation-tool-trace__payload').length,
+        window:{width:innerWidth,height:innerHeight},
+        viewport: viewport && {width:viewport.clientWidth,scrollWidth:viewport.scrollWidth,left:viewport.getBoundingClientRect().left,right:viewport.getBoundingClientRect().right},
+        focused:document.activeElement?.getAttribute('aria-expanded'),
+        focusVisible:document.activeElement?.matches(':focus-visible')??false };
+    })()`)
+    const tools = await waitFor(observeTools, x => x.rows.length === 4, 'Real native tool parts must reach the production trace')
+    assert.deepEqual(tools.rows.map(row => [row.kind,row.callId,row.status]), [
+      ['tool-call','private-native-item-60',null], ['tool-result','private-native-item-60',null],
+      ['tool-call','private-native-item-62',null], ['tool-result','private-native-item-62','failed'] ])
+    assert.equal(tools.payloadCount,0)
+    await win.webContents.executeJavaScript(`document.querySelector('[data-call-id="private-native-item-62"]').scrollIntoView({block:'center'})`)
+    result.toolVisual = { collapsed: { observation: tools, frame: await renderedFrame('tools-normal-collapsed') } }
+    await win.webContents.executeJavaScript(`document.querySelector('[data-call-id="private-native-item-60"]').scrollIntoView({block:'center'})`)
+    result.toolVisual.success = { observation: await observeTools(), frame: await renderedFrame('tools-normal-success-collapsed') }
+    win.setSize(720,640)
+    await waitFor(() => win.webContents.executeJavaScript('innerWidth'), x => x === 720, 'The narrow real Renderer must resize')
+    await win.webContents.executeJavaScript(`document.querySelector('[data-call-id="private-native-item-62"]').scrollIntoView({block:'center'})`)
+    const narrow = await observeTools()
+    assert.equal(narrow.payloadCount,0); assert.equal(narrow.viewport.scrollWidth,narrow.viewport.width)
+    assert.ok(narrow.viewport.width<tools.viewport.width,'The production reader must actually shrink in the narrow window')
+    assert.ok(narrow.viewport.left>=0&&narrow.viewport.right<=narrow.window.width,'Narrow capture cannot crop an oversized fixture container')
+    result.toolVisual.narrow = { observation: narrow, frame: await renderedFrame('tools-narrow-collapsed') }
+    const failedPoint = await win.webContents.executeJavaScript(`(() => { const e=document.querySelector('[data-call-id="private-native-item-62"][data-status="failed"] button');
+      e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2} })()`)
+    await click(failedPoint)
+    const expanded = await waitFor(observeTools, x => x.payloadCount === 1, 'Trusted click must mount only the failed result payload')
+    await win.webContents.executeJavaScript(`document.querySelector('[data-call-id="private-native-item-62"][data-status="failed"] button').scrollIntoView({block:'start'})`)
+    result.toolVisual.failedExpanded = { observation: expanded, frame: await renderedFrame('tools-narrow-failed-expanded') }
+    // Shift+Tab returns to the preceding actual tool call; Space must toggle it as a native button.
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32})
+    const keyboard = await waitFor(observeTools, x => x.focusVisible && x.focused === 'true' && x.payloadCount === 2, 'Native keyboard must open the preceding tool call with visible focus')
+    await win.webContents.executeJavaScript(`document.activeElement.scrollIntoView({block:'start'})`)
+    result.toolVisual.keyboard = { observation: keyboard, frame: await renderedFrame('tools-narrow-keyboard') }
+    assert.deepEqual(counts,toolCounts,'Inspecting native tool details cannot invoke lifecycle, history or input')
     await win.webContents.executeJavaScript('finishScroll()')
     await win.webContents.session.flushStorageData()
     result.afterUnmount = { ...counts }; result.passed = true
