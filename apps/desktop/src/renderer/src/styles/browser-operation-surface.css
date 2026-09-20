@@ -33,6 +33,11 @@
 .browser-rsi-timeline__header small, .browser-rsi-replay__header small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .browser-rsi-timeline__warning { display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--amber-text); background: var(--amber-bg); font-size: var(--fs-micro); line-height: 1.4; }
 .browser-rsi-timeline__warning svg { flex: none; margin-top: 1px; }
+.browser-rsi-notice { display: block; }
+.browser-rsi-notice__line { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.browser-rsi-notice__line > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.browser-rsi-notice__line > button { flex: none; min-height: 20px; padding-inline: var(--sp-2); }
+.browser-rsi-notice pre { max-height: 200px; overflow: auto; margin: var(--sp-2) 0 0; color: inherit; font: var(--fs-micro)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .browser-rsi-timeline__list, .browser-rsi-replay__steps { list-style: none; margin: 0; padding: var(--sp-1) var(--sp-2); }
 .browser-rsi-timeline__step { min-width: 0; margin-block: 1px; }
 .browser-rsi-timeline__step-button { min-width: 0; width: 100%; min-height: 30px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; text-align: left; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
