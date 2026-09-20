@@ -105,8 +105,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       saveHeight(drag.current.next); drag.current = null; setDraftHeight(null)
       document.body.style.cursor = ''; document.body.style.userSelect = ''
     }
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop); window.addEventListener('blur', stop)
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); window.removeEventListener('blur', stop); if (drag.current) { document.body.style.cursor = ''; document.body.style.userSelect = '' } }
+    const cancel = () => {
+      if (!drag.current) return
+      drag.current = null; setDraftHeight(null)
+      document.body.style.cursor = ''; document.body.style.userSelect = ''
+    }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', stop)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', stop); if (drag.current) { document.body.style.cursor = ''; document.body.style.userSelect = '' } }
   }, [maximum, minimum, saveHeight])
   const effectiveAnchor = anchor ?? now
   const range = useMemo(() => focusTimeWindow(effectiveAnchor, hours), [effectiveAnchor, hours])
