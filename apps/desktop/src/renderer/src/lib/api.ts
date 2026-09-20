@@ -700,7 +700,7 @@ const mockApi: AgentMuxDesktopApi = {
     // No file manager to reveal into, and no crash log here either — main writes it. `false` is the
     // same answer the desktop gives for "nothing recorded", and the caller already has to say that out
     // loud, so this needs no second wording.
-    revealCrashLog: async () => false,
+    revealCrashLog: async () => ({ path: '', outcome: 'check-failed', cause: { code: 'CONTROL_UNAVAILABLE', message: 'Crash log diagnostics require the Desktop host.' } }),
     // A browser tab has no OS notification channel we own, so this reports unsupported rather than
     // claiming delivery. The caller's contract already handles that by falling back to the in-window
     // signal, which is all a web view can honestly offer.

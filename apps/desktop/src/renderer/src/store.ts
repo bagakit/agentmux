@@ -2682,6 +2682,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
+    if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {
+      throw Object.assign(new Error('Crash log diagnostics belong to the Main owner.'), { code: 'CONTROL_FAILED' })
+    }
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
         request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' ||

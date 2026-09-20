@@ -48,6 +48,7 @@ Intents:
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents, projects, or active Agent Sessions from their owners.
   settings    Read or change preferences supported by the running Desktop host.
+  diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
   pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
   open        Open typed content at one exact spatial destination.
@@ -169,7 +170,24 @@ Exit 0 means the diagnostic request completed; inspect outcome to learn whether 
 was ready. This does not save configuration, start an Agent, or implement unsupported SSH.
 No managed caller or View is required. An offline Main fails without writing configuration.`
 
+const CRASH_LOG_HELP = `Inspect the Desktop crash log
+
+Usage:
+  agentmux diagnostics crash-log
+  agentmux diagnostics crash-log reveal
+
+The running Desktop host checks its fixed local path without reading log contents.
+Read returns path and outcome: present, absent or check-failed (with original cause).
+Exit 0 means the diagnostic completed, not that the Agent is healthy or no crash occurred.
+Reveal is explicit: success means requested, not that a file manager is visible.
+Absent, inaccessible or nonregular paths and failed requests return a typed error.
+No path, input file, managed Agent or View is required. Offline Main returns CONTROL_UNAVAILABLE;
+the CLI never reads the log directly. Configuration and running Agents are unchanged.`
+
 const HELP = new Map<string, string>([
+  ['diagnostics', CRASH_LOG_HELP],
+  ['diagnostics.crash-log.get', CRASH_LOG_HELP],
+  ['diagnostics.crash-log.reveal', CRASH_LOG_HELP],
   ['settings.hosts', HOSTS_HELP],
   ['settings.hosts.list', HOSTS_HELP],
   ['settings.hosts.test', HOSTS_HELP],
@@ -936,6 +954,18 @@ bounded UTF-8 JSON from the local file or stdin (-); the host receives fields, n
 The host owns legal fields and reference safety. IDs, paths and field values are literal data,
 including --help, spaces and environment expressions. Arrays and objects replace entire fields.
 Read after a timeout; never infer that a missing reply means a mutation did not commit.
+
+## Desktop diagnostics
+
+\`\`\`sh
+agentmux diagnostics crash-log
+agentmux diagnostics crash-log reveal
+\`\`\`
+
+Read the typed outcome, not just exit 0. The Desktop checks its fixed local path without
+reading contents. Only an explicit reveal requests the file manager; requested does not
+prove it is visible. No View or managed caller is required. Offline Main is unavailable;
+there is no direct-file fallback. Run diagnostics --help for diagnostic outcomes.
 
 ## Runtime intents
 

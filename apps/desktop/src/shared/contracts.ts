@@ -35,12 +35,15 @@ import type {
   AgentMuxControlBrowserOperation,
   AgentMuxControlRequest,
   AgentMuxControlResult,
+  AgentMuxControlCrashLogFact,
   AgentMuxExecutorProbeOutcome,
   AgentTimelineItem,
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions
 } from '@agentmux/core'
+export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
+
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -1393,7 +1396,7 @@ export type AgentMuxDesktopApi = {
      * rather than silently doing nothing. Reveal rather than an in-app viewer on purpose: the file is a
      * support artifact people attach to a report, and the OS file manager is where attaching happens.
      */
-    revealCrashLog(): Promise<boolean>
+    revealCrashLog(): Promise<CrashLogRevealResult>
     /**
      * Ask Desktop main to raise a native notification about one Agent Session.
      *

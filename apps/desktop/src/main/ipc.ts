@@ -9,7 +9,7 @@ import { captureComposerScreenshot } from './composer-screenshot.js'
 import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 /** The paste write and the pasted-image read share ONE extension whitelist and ONE byte cap
@@ -106,7 +106,7 @@ import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoi
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
-import { crashLogPath } from './crash-log.js'
+import { executeCrashLogControl, requestCrashLogReveal } from './crash-log-access.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
@@ -268,6 +268,7 @@ export async function registerIpc(args: {
       generation: () => args.runtime.rendererGeneration(args.window.webContents),
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
+    if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
     if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test') return await executeSettingsHostsControl(request, configOwner, args.runtime)
@@ -642,19 +643,7 @@ export async function registerIpc(args: {
   handle('ui:readPastedImage', (path: string) => readPastedImage(app.getPath('home'), path))
   handleWithEvent('ui:revealCrashLog', async (event) => {
     requireTrustedSender('ui:revealCrashLog', event)
-    // 崩溃证据一直在写，却从来没有读者——没人知道路径就等于没有。这里只做「在文件管理器里点出来」，
-    // 不做应用内查看器：这个文件的用途是附在一份反馈里，而附文件发生在文件管理器里。
-    //
-    // 不存在时返回 false 而不是静默成功。文件不存在是**好消息**（没崩过），但调用方必须能说出这句话
-    // ——按钮点下去什么都不发生，用户分不清是没崩过还是按钮坏了。
-    const path = crashLogPath()
-    try {
-      await stat(path)
-    } catch {
-      return false
-    }
-    shell.showItemInFolder(path)
-    return true
+    return await requestCrashLogReveal()
   })
   handleWithEvent('ui:notifyAgentAttention', async (event, input: AgentAttentionNotifyInput) => {
     requireTrustedSender('ui:notifyAgentAttention', event)
