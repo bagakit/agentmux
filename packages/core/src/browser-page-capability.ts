@@ -75,8 +75,8 @@ export type BrowserPageCapability = {
  * 计——它们能做任何事，漏掉任何一个都等于没拦。
  */
 export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
-  { name: 'snapshot', effect: 'observe', summary: 'read the page as a ref-addressable tree' },
-  { name: 'snapshotText', effect: 'observe', summary: 'read the page as text' },
+  { name: 'snapshot', effect: 'observe', summary: 'read a bounded ref tree with {scope: "page"|"viewport", within, withinRef, interactiveOnly, maxNodes}; includes counts, truncation, omitted documents and missing frames' },
+  { name: 'snapshotText', effect: 'observe', summary: 'read the same bounded observation as text, with refs and completeness; each call replaces the previous snapshot refs' },
   { name: 'pageInfo', effect: 'observe', summary: 'read the current url and title' },
   { name: 'captureScreenshot', effect: 'observe', summary: 'capture what the page looks like' },
   { name: 'elementContext', effect: 'observe', summary: 'read one element in full: selector, role, accessible name, attributes, sanitized html' },
