@@ -291,6 +291,7 @@ export type ExecutorDetectionState = {
 }
 export type HostCheckState = {
   state: Exclude<AsyncCheckState, 'missing'>
+  input?: HostConfig
   result?: HostCheckResult
   detail?: string
   observedAt?: number
@@ -2683,6 +2684,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async executeControl(request, signal) {
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
         request.operation === 'settings.workspaces.add' ||
+        request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
         request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
@@ -4390,19 +4392,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     )
   },
   async checkHost(host) {
+    const input = structuredClone(host)
     const requestId = (hostCheckRequestIds.get(host.id) ?? 0) + 1
     hostCheckRequestIds.set(host.id, requestId)
     set((state) => ({
-      hostChecks: { ...state.hostChecks, [host.id]: { state: 'checking' } }
+      hostChecks: { ...state.hostChecks, [host.id]: { state: 'checking', input } }
     }))
     try {
-      const result = await api.hosts.check(host)
+      const result = await api.hosts.check(input)
       if (hostCheckRequestIds.get(host.id) !== requestId) return
       set((state) => ({
         hostChecks: {
           ...state.hostChecks,
           [host.id]: {
-            state: result.ok ? 'ready' : 'error',
+            state: result.outcome === 'ready' ? 'ready' : 'error',
+            input: result.input,
             result,
             detail: result.detail,
             observedAt: Date.now()
@@ -4414,7 +4418,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((state) => ({
         hostChecks: {
           ...state.hostChecks,
-          [host.id]: { state: 'error', detail: presentError(error), observedAt: Date.now() }
+          [host.id]: { state: 'error', input, detail: presentError(error), observedAt: Date.now() }
         }
       }))
     }

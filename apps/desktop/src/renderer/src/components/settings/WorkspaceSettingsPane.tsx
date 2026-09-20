@@ -2,6 +2,7 @@ import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, Search, X } from 'luc
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
+import { currentHostCheck } from '../../lib/host-check'
 import { presentError } from '../../lib/error-presentation'
 import { configuredExecutors } from '../../lib/executors'
 import { executorDetectionKey, useAppStore } from '../../store'
@@ -25,7 +26,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const checkHost = useAppStore((state) => state.checkHost)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const launchAgent = useAppStore((state) => state.launchAgent)
-  const readyHosts = config.hosts.filter((host) => hostChecks[host.id]?.state === 'ready')
+  const readyHosts = config.hosts.filter((host) => currentHostCheck(hostChecks[host.id], host)?.state === 'ready')
   const checkingHosts = config.hosts.some((host) => !hostChecks[host.id] || hostChecks[host.id]?.state === 'checking')
   const executors = useMemo(() => configuredExecutors(config).map((executor) => ({
     ...executor,

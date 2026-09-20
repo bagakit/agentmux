@@ -20,7 +20,7 @@ import {
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 
-const hostSchema = z.discriminatedUnion('kind', [
+export const hostSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
   z
     .object({

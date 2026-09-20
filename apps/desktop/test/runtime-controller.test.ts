@@ -409,6 +409,51 @@ describe('RuntimeController configuration transaction', () => {
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
   })
 
+  it('checks with a fresh temporary client and releases it while the connected owner still accepts input', async () => {
+    const controller = await configuredController(), connected = runtimeFixture.FakeClient.instances[0]!
+    const connectedHost = controller.executionHost('local')
+    try {
+      expect(await controller.checkHost(localConfig.hosts[0]!)).toEqual({ detail: 'Runtime 0.1.0 · protocol 5' })
+      expect(runtimeFixture.FakeClient.instances).toHaveLength(2)
+      const temporary = runtimeFixture.FakeClient.instances[1]!
+      expect(temporary).not.toBe(connected); expect(temporary.dispose).toHaveBeenCalledOnce()
+      expect(runtimeFixture.createdHosts).toHaveLength(2)
+      expect(runtimeFixture.createdHosts[1]!.dispose).toHaveBeenCalledOnce()
+      expect(connected.dispose).not.toHaveBeenCalled(); expect(connected.stopTerminal).not.toHaveBeenCalled()
+      expect(connected.stopAgent).not.toHaveBeenCalled(); expect(connected.listRuns).not.toHaveBeenCalled()
+      expect(controller.executionHost('local')).toBe(connectedHost)
+      connected.listRuns.mockResolvedValue([{ runId: 'healthy-terminal', acceptedInputBytes: 0 }])
+      await controller.write({ kind: 'terminal', hostId: 'local', runId: 'healthy-terminal', run: { runId: 'healthy-terminal' } }, 'Still working', 'user')
+      expect(connected.writeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: 'healthy-terminal' }, expect.objectContaining({ data: 'Still working' }))
+      expect(temporary.writeTerminal).not.toHaveBeenCalled()
+    } finally { await controller.dispose() }
+  })
+
+  it('propagates temporary read and release failures after trying both client and Host cleanup', async () => {
+    const controller = await configuredController(), connected = runtimeFixture.FakeClient.instances[0]!
+    const connect = runtimeFixture.connectClient.getMockImplementation()!
+    try {
+      runtimeFixture.connectClient.mockImplementationOnce(async () => {
+        const client = await connect()
+        client.runtimeIdentity.mockImplementationOnce(() => { throw new Error('Identity read failed') })
+        return client
+      })
+      await expect(controller.checkHost(localConfig.hosts[0]!)).rejects.toThrow('Identity read failed')
+      expect(runtimeFixture.FakeClient.instances[1]!.dispose).toHaveBeenCalledOnce()
+      expect(runtimeFixture.createdHosts[1]!.dispose).toHaveBeenCalledOnce()
+      runtimeFixture.connectClient.mockImplementationOnce(async () => {
+        const client = await connect()
+        client.dispose.mockRejectedValueOnce(new Error('Client release failed'))
+        runtimeFixture.createdHosts.at(-1)!.dispose.mockRejectedValueOnce(new Error('Host release failed'))
+        return client
+      })
+      await expect(controller.checkHost(localConfig.hosts[0]!)).rejects.toThrow('Failed to dispose prepared Runtime hosts.')
+      expect(runtimeFixture.FakeClient.instances[2]!.dispose).toHaveBeenCalledOnce()
+      expect(runtimeFixture.createdHosts[2]!.dispose).toHaveBeenCalledOnce()
+      expect(connected.dispose).not.toHaveBeenCalled(); expect(controller.executionHost('local').id).toBe('local')
+    } finally { await controller.dispose() }
+  })
+
   // T-002 发现四态：detect 必须把探测的三态结局逐一透传，不折叠。check-failed（环境退化，没查成）
   // 与 missing（查成了，确实没装）是两件事——那次误报正是把前者显示成了后者。unknown（还没查）
   // 不是 detect 能得出的结论，由 store 的 checking 承载，故 detect 只透传三态。

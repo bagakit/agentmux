@@ -148,6 +148,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .check-pill--ready { color: var(--green); background: var(--green-bg); }
 .check-pill--missing, .check-pill--error { color: var(--red-text); background: var(--red-bg); }
 .check-pill--checking { color: var(--amber); }
+.check-pill--unsupported, .check-pill--check-failed { color: var(--text-2); background: var(--surface-3); }
 .icon-button--danger { color: var(--red); }
 
 @media (max-width: 1120px) {

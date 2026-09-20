@@ -123,6 +123,8 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'list.projects': true,
   'list.active-agents': true,
   'settings.get': true,
+  'settings.hosts.list': true,
+  'settings.hosts.test': true,
   'settings.set': true,
   'settings.browser.links.list': true,
   'settings.browser.links.forget': true,
