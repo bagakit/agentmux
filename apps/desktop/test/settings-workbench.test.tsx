@@ -18,7 +18,7 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
 beforeEach(() => {
-  useAppStore.setState({ hostChecks: { local: { state: 'ready', detail: 'Ready' } }, detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), loading: false, toolsOpen: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench' })
+  useAppStore.setState({ hostChecks: { local: { state: 'ready', input: composerConfig.hosts[0], detail: 'Ready' } }, detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), loading: false, toolsOpen: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench' })
 })
 async function input(selector: string, value: string) {
   const element = dom.container.querySelector<HTMLInputElement>(selector)!
