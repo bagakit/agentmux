@@ -51,9 +51,12 @@ export function ContinuousProgressControl({ session }: { session: Extract<Sessio
   const displayed = loop ?? loops.at(-1)
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
   return <details className="continuous-progress-control">
-    <summary>↻ Continuous progress{loop ? ` · ${loop.status}` : ''}</summary>
+    <summary><span className="continuous-progress-control__label">↻ Continuous progress</span>
+      {error || displayed?.lastOutcome === 'unknown' ? <span className="continuous-progress-control__status">Unconfirmed</span>
+        : loop ? <span className="continuous-progress-control__status">{loop.status}</span> : null}
+    </summary>
     <small className="continuous-progress-control__target">{agentProviderLabel(session.providerId)} · {target.hostId} · {target.agentSessionId}<br />{target.workspacePath}</small>
-    {error ? <p role="status">Automatic progress is unconfirmed. Manual input remains available. {error}</p> : null}
+    {error ? <p role="status">Automatic progress is unconfirmed. Manual input follows terminal readiness. {error}</p> : null}
     {displayed?.taskSource ? <small>Task source: {displayed.taskSource.ownerId}<br />{displayed.taskSource.root}<br />{displayed.taskSource.readerPath}</small> : null}
     {!loop && displayed?.lastDecision ? <p role="status">{displayed.lastDecision}</p> : null}
     {loop ? <ContinuousProgressPanel loop={{ loopId: loop.loopId, providerLabel: agentProviderLabel(session.providerId),
