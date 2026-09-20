@@ -74,9 +74,11 @@ async function identity() {
     ...rendererFiles.map(name => `apps/desktop/out/renderer/assets/${name}`),
     'packages/core/dist/index.js', 'packages/core/dist/control-host.js',
     'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/index.ts',
+    'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-step-evidence.ts',
     'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/lib/browser-state.ts',
     'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx', 'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
+    'apps/desktop/src/renderer/src/components/BrowserStepEvidence.tsx', 'apps/desktop/src/renderer/src/styles/browser-step-evidence.css',
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs']
@@ -165,8 +167,8 @@ async function nativePages(probe, urls) {
     const found=[];
     for(const url of expected){const matches=views.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL()===url);if(matches.length!==1)return null;
       const contents=matches[0].webContents, text=await contents.executeJavaScript('document.body.innerText');
-      if(!text.includes('Private recovery '+new URL(url).pathname.slice(1)))return null;
-      found.push({url,text,webContentsId:contents.id,bounds:matches[0].getBounds()});}
+      if(contents.isLoading()||!contents.getTitle()||!text.includes('Private recovery '+new URL(url).pathname.slice(1)))return null;
+      found.push({url,title:contents.getTitle(),text,webContentsId:contents.id,bounds:matches[0].getBounds()});}
     return found;
   })()`))
 }
@@ -175,7 +177,7 @@ async function actualWorkbench(probe, expected) {
     const value=await state(probe.cdp);if(!value)return null;
     const tab=value.tabs[expected.tabId];if(!tab||tab.layout.activeRegionId!==expected.focus)return null;
     const browserRegions=Object.values(tab.regions).filter(r=>r.kind==='browser');
-    return browserRegions.length===2&&expected.regions.every(e=>browserRegions.some(r=>r.browserId===e.browserId&&r.regionId===e.regionId&&r.url===e.url))?value:null
+    return browserRegions.length===2&&expected.regions.every(e=>browserRegions.some(r=>r.browserId===e.browserId&&r.regionId===e.regionId&&r.url===e.url&&r.title===e.title))?value:null
   })
   const inspected=await control('inspect.tab',{kind:'tab',tabId:expected.tabId}); assert.equal(inspected.operation,'inspect.tab');
   assert.deepEqual(inspected.result.tab.regions.map(r=>r.regionId).sort(),expected.regions.map(r=>r.regionId).sort())
@@ -189,6 +191,27 @@ async function resize(probe, width, height) {
     const win=BrowserWindow.getAllWindows()[0];win.setSize(${width},${height});return win.getSize() })()`)
   await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`innerWidth===${actual[0]}`))
   return actual
+}
+async function observeNativeFrameReady(probe, url) {
+  const attempts = []
+  receipt.visual.nativeFramePreflight = { captureOnly: true, attempts }
+  return waitFor('visible, loaded native page with a nonempty compositor frame', async () => {
+    const stage = await probe.cdp.evaluate(`(() => {const e=document.querySelector('[data-native-browser-stage]');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,visible:!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'};})()`)
+    const state = await probe.main.evaluate(`(async () => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];
+      const view=win.contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL()===${JSON.stringify(url)});
+      const window={visible:win.isVisible(),minimized:win.isMinimized(),focused:win.isFocused(),bounds:win.getBounds()};
+      if(!view)return {window,view:null};
+      const native={url:view.webContents.getURL(),visible:view.getVisible(),bounds:view.getBounds(),loading:view.webContents.isLoading()};
+      if(!window.visible||window.minimized||!native.visible||native.loading||!native.bounds.width||!native.bounds.height)return {window,view:native,frame:null};
+      try {const image=await view.webContents.capturePage();return {window,view:native,frame:{empty:image.isEmpty(),size:image.getSize()}};}
+      catch(error){return {window,view:native,frame:{error:String(error)}};}})()`)
+    const observation = { stage, ...state }
+    attempts.push(observation)
+    const bounds = state.view?.bounds
+    const insideStage = stage?.visible && bounds && bounds.x >= stage.x - 1 && bounds.y >= stage.y - 1 &&
+      bounds.x + bounds.width <= stage.x + stage.width + 1 && bounds.y + bounds.height <= stage.y + stage.height + 1
+    return insideStage && state.frame?.empty === false ? observation : null
+  }, 5_000)
 }
 async function capture(probe, label) {
   await probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -228,12 +251,19 @@ async function capture(probe, label) {
 async function reviewOperationRows(probe, browserId) {
   const operator={id:'private-browser-review',name:'Private Browser review'}
   const run=async code=>probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
-  const completed=await run('await snapshot({scope:"page",maxNodes:20}); await pageInfo(); return "private observed page";')
+  const completed=await run('await snapshot({scope:"page",maxNodes:20}); await pageInfo(); await captureScreenshot(); return "private observed page";')
   assert.equal(completed.outcome.kind,'completed')
   await click(probe.cdp,selectors('[aria-label="Open browser activity timeline"]'))
   await waitFor('real completed timeline',()=>probe.cdp.evaluate(`document.querySelectorAll('.browser-rsi-timeline__step').length>=2`))
   await resize(probe,1440,900);await capture(probe,'normal-completed-collapsed')
   await resize(probe,980,700);await capture(probe,'narrow-completed-collapsed')
+  await click(probe.cdp,selectors('.browser-rsi-timeline__step[data-sequence="1"] button'))
+  await waitFor('actual recorded page evidence',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.browser-step-evidence pre'))`))
+  await capture(probe,'narrow-recorded-page-evidence')
+  await click(probe.cdp,selectors('.browser-rsi-timeline__step[data-sequence="3"] button'))
+  await waitFor('actual recorded screenshot evidence',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.browser-step-evidence img')?.naturalWidth)`))
+  await click(probe.cdp,selectors('.browser-step-evidence details summary'))
+  await capture(probe,'narrow-recorded-screenshot-source')
   const failed=await run('await snapshot({scope:"page",maxNodes:20}); await click("not-a-recorded-ref");')
   assert.equal(failed.outcome.kind,'script-failed')
   await waitFor('real failed row',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.browser-rsi-timeline__step--failed'))`))
@@ -262,11 +292,15 @@ try {
   const initial=await waitFor('actual UI-created Browser Region',async()=>{const s=await state(first.cdp);if(!s)return null;return Object.values(s.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='browser'&&x.surface.workspaceId===workspaceId)})
   await first.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.surface.browserId)},${JSON.stringify(urls[0])})`)
   await waitFor('actual first page before visual operation',()=>nativePages(first,[urls[0]]))
+  // Observe genuine readiness; do not override the product's overlay/focus visibility decisions.
+  await observeNativeFrameReady(first,urls[0])
+  receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
   receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
   await control('focus',{kind:'region',regionId:initial.surface.regionId})
-  const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0]},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1]}]}
-  const pages=await nativePages(first,urls), before=await actualWorkbench(first,expected)
+  const pages=await nativePages(first,urls)
+  const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0],title:pages[0].title},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1],title:pages[1].title}]}
+  const before=await actualWorkbench(first,expected)
   // The ordinary product quit path itself is the acceptance boundary. No manual flush or seed.
   receipt.firstUi={expected,pages,...before};receipt.firstExit=await normalQuit(first)
   second=await launch('second');phase='actual-second-process-recovery'
