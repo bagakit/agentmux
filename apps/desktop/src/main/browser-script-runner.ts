@@ -1,5 +1,9 @@
 import { spawn } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
+import { BROWSER_RESULT_INLINE_BYTES, BROWSER_RESULT_MAX_BYTES, type BrowserResultArtifactReference } from '../shared/browser-result-artifact.js'
 
 /**
  * 在独立 Node 子进程里跑一段 Agent 写的脚本。
@@ -40,7 +44,7 @@ const READY = 'AGENTMUX_BROWSER_SCRIPT_READY'
  */
 export const BROWSER_PAGE_FUNCTION_NAMES = BROWSER_PAGE_CAPABILITY_NAMES
 
-/** 脚本没能跑完的三种结局。分开是因为它们对 Agent 意味着完全不同的下一步。 */
+/** 失败与结果不可用分别报告，它们对 Agent 意味着不同的下一步。 */
 export type BrowserScriptFailure =
   /** 脚本自己抛了（也包括语法错误）。Agent 要改的是脚本。 */
   | { kind: 'script-error'; message: string; stack?: string }
@@ -51,12 +55,15 @@ export type BrowserScriptFailure =
    * 而实际上要改的是脚本（少打点日志）。这跟 timeout 不报成 crashed 是同一条理由。
    */
   | { kind: 'output-limit'; capturedChars: number }
+  /** The script may have finished its actions, but its result could not be retained. Never rerun automatically. */
+  | { kind: 'result-unavailable'; message: string }
   /** 子进程非正常终止：堆爆（OOM）、被信号杀掉、非零退出。 */
   | { kind: 'crashed'; reason: string }
 
 export type BrowserScriptResult = {
   /** 脚本 console 输出，按发生顺序。超出上限会被截断，并在这里留下一条明说截断了的记录。 */
   logs: string[]
+  capture?: { stdoutBytes: number; peakBufferedBytes: number; resultBytes: number }
 } & ({ completed: true; value: unknown } | { completed: false; failure: BrowserScriptFailure })
 
 export type BrowserScriptRunInput = {
@@ -79,6 +86,8 @@ export type BrowserScriptRunInput = {
    * 而不是一个看起来像页面没响应的挂起。
    */
   onPageCall?: (name: string, args: unknown[]) => Promise<unknown>
+  /** Receives only this runner's private JSON result file; the callback binds its immutable Browser context. */
+  captureResultArtifact?: (sourcePath: string) => Promise<BrowserResultArtifactReference>
   /** Main-owned stop/hand-off signal. Aborting kills only this isolated script process. */
   signal?: AbortSignal
 }
@@ -110,6 +119,7 @@ const MAX_CAPTURED_BYTES = 1_000_000
  */
 const RUNNER_SOURCE = String.raw`
 import { inspect } from 'node:util'
+import { writeFile } from 'node:fs/promises'
 
 // 先把 IPC 句柄抢到闭包里，再从 process 上摘掉 send。
 // 注意 channel 不能动——Node 每次投递 inbound 消息都要读 process.channel。
@@ -153,6 +163,11 @@ function callHost(name, args) {
 
 function emit(record) {
   process.stdout.write(JSON.stringify(record) + '\n')
+}
+
+async function finish(record, code) {
+  await new Promise((resolve) => process.stdout.write(JSON.stringify(record) + '\n', resolve))
+  process.exit(code)
 }
 
 // 接管 console：脚本的输出是要回收给 Agent 的结果的一部分，不能散进 stdout 把帧冲烂。
@@ -206,17 +221,47 @@ try {
   fail('Script return value is not JSON-serializable: ' + (error?.message ?? String(error)))
 }
 
-emit(encoded === undefined ? { kind: 'result' } : { kind: 'result', encoded })
-process.exit(0)
+// Large return values are distinct from log flooding. Only a bounded marker crosses stdout.
+if (encoded !== undefined && Buffer.byteLength(encoded) > ${BROWSER_RESULT_INLINE_BYTES}) {
+  const destination = process.argv[3]
+  if (!destination || Buffer.byteLength(encoded) > ${BROWSER_RESULT_MAX_BYTES}) {
+    await finish({ kind: 'result-unavailable', message: !destination ? 'Durable result capture is unavailable for this Browser.' : 'The JSON result exceeds the ${BROWSER_RESULT_MAX_BYTES}-byte storage budget.' }, 1)
+  }
+  try {
+    await writeFile(destination, encoded, { mode: 0o600, flag: 'wx' })
+  } catch (error) {
+    await finish({ kind: 'result-unavailable', message: 'The result could not be captured: ' + (error?.message ?? String(error)) }, 1)
+  }
+  await finish({ kind: 'result-artifact' }, 0)
+} else await finish(encoded === undefined ? { kind: 'result' } : { kind: 'result', encoded }, 0)
 `
 
 /** 一条 stdout 帧。 */
 type RunnerRecord =
   | { kind: 'log'; text: string }
   | { kind: 'result'; encoded?: string }
+  | { kind: 'result-artifact' }
+  | { kind: 'result-unavailable'; message: string }
   | { kind: 'error'; message: string; stack?: string }
 
 export async function runBrowserScript(input: BrowserScriptRunInput): Promise<BrowserScriptResult> {
+  let directory: string | undefined
+  let setupFailure: string | undefined
+  if (input.captureResultArtifact) {
+    try { directory = await mkdtemp(join(tmpdir(), 'agentmux-browser-result-')) }
+    catch (error) { setupFailure = error instanceof Error ? error.message : String(error) }
+  }
+  // Capture setup failure must not block a healthy small script. Report it only if a large result needs storage.
+  const capture = { stdoutBytes: 0, peakBufferedBytes: 0, resultBytes: 0 }
+  try {
+    const result = await executeBrowserScript(input, directory ? join(directory, 'result.json') : '', capture, setupFailure)
+    return { ...result, capture }
+  } finally { if (directory) await rm(directory, { recursive: true, force: true }) }
+}
+
+async function executeBrowserScript(input: BrowserScriptRunInput, resultPath: string,
+  capture: NonNullable<BrowserScriptResult['capture']>,
+  setupFailure?: string): Promise<BrowserScriptResult> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const heapMb = input.heapMb ?? DEFAULT_HEAP_MB
 
@@ -235,7 +280,8 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
       // 名字始终注入，有没有页面能力由 runner 里的 sendToHost 决定。只在有能力时才注入的话，
       // 没能力时脚本会报 "click is not defined"——那看起来像 Agent 把名字写错了。
       JSON.stringify(BROWSER_PAGE_FUNCTION_NAMES),
-      input.onPageCall ? 'page' : 'no-page'
+      input.onPageCall ? 'page' : 'no-page',
+      resultPath
     ],
     // 第四条 'ipc' 就是页面调用的通道，与 stdout 分开走。
     { env: environment, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }
@@ -289,6 +335,7 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
 
   const logs: string[] = []
   let result: { value: unknown } | undefined
+  let artifactReported = false
   let scriptError: BrowserScriptFailure | undefined
   let captured = 0
   let truncated = false
@@ -306,8 +353,12 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
     }
     if (parsed.kind === 'log') logs.push(parsed.text)
     else if (parsed.kind === 'result') {
+      capture.resultBytes = parsed.encoded === undefined ? 0 : Buffer.byteLength(parsed.encoded)
       result = { value: parsed.encoded === undefined ? undefined : JSON.parse(parsed.encoded) }
-    } else {
+    } else if (parsed.kind === 'result-artifact') artifactReported = true
+    else if (parsed.kind === 'result-unavailable') {
+      scriptError = { kind: 'result-unavailable', message: setupFailure ?? parsed.message }
+    } else if (parsed.kind === 'error') {
       scriptError = {
         kind: 'script-error',
         message: parsed.message,
@@ -319,6 +370,7 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
   childStdout.setEncoding('utf8')
   childStdout.on('data', (chunk: string) => {
     captured += chunk.length
+    capture.stdoutBytes += Buffer.byteLength(chunk)
     if (captured > MAX_CAPTURED_BYTES) {
       if (!truncated) {
         truncated = true
@@ -328,6 +380,7 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
       return
     }
     pending += chunk
+    capture.peakBufferedBytes = Math.max(capture.peakBufferedBytes, Buffer.byteLength(pending))
     const lines = pending.split('\n')
     pending = lines.pop() ?? ''
     for (const line of lines) if (line !== '') record(line)
@@ -375,6 +428,16 @@ export async function runBrowserScript(input: BrowserScriptRunInput): Promise<Br
   if (scriptError) return { logs, completed: false, failure: scriptError }
   if (exit.spawnError) {
     return { logs, completed: false, failure: { kind: 'crashed', reason: exit.spawnError.message } }
+  }
+  if (exit.code === 0 && artifactReported) {
+    try {
+      if (!resultPath || !input.captureResultArtifact) throw new Error('No durable result capture is bound to this Browser.')
+      const reference = await input.captureResultArtifact(resultPath)
+      capture.resultBytes = reference.byteLength
+      return { logs, completed: true, value: reference }
+    } catch (error) {
+      return { logs, completed: false, failure: { kind: 'result-unavailable', message: error instanceof Error ? error.message : String(error) } }
+    }
   }
   if (exit.code === 0 && result) return { logs, completed: true, value: result.value }
 

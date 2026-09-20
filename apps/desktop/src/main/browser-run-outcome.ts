@@ -3,14 +3,15 @@ import type { BrowserOperationPhase } from '../shared/browser-operation.js'
 import type { BrowserScriptFailure } from './browser-script-runner.js'
 
 /**
- * 执行器的失败四分类 → 契约的结局四分类。
+ * 执行器的失败 → 契约的结局四分类。
  *
- * 两边都是四支，但**不是同一组四支**，所以必须有这一层翻译而不能直接透传：
+ * 两边不是同一组分类，所以必须有这一层翻译而不能直接透传：
  *   - `script-error` → `script-failed`：你的程序错了，去改程序。
  *   - `timeout` / `output-limit` → `stopped`：程序没错，是**我们**主动截断的（跑太久 / 打太多）。
  *     这两支在执行器那边分开是对的（一个改逻辑、一个改日志量），但对调用方是同一件事：
  *     "没让它跑完"。区别写进 message，不占一个结局档位。
  *   - `crashed` → `indeterminate`：进程非正常终止，**做到哪一步不知道**。
+ *   - `result-unavailable` → `indeterminate`：动作可能已完成，但结果未保全，不能自动重跑。
  *
  * 最后那一条是这层的全部理由。`crashed` 报成一次普通失败，调用方会重试——而页面上可能已经点过
  * 一次了。"分不清"必须是一等结局（AGENTS.md:32-52），它对调用方的含义是「先去看一眼页面，别重试」。
@@ -28,6 +29,7 @@ const OUTCOME_BY_FAILURE: Record<
   }),
   timeout: (failure) => ({ kind: 'stopped', message: describe(failure) }),
   'output-limit': (failure) => ({ kind: 'stopped', message: describe(failure) }),
+  'result-unavailable': (failure) => ({ kind: 'indeterminate', message: describe(failure) }),
   crashed: (failure) => ({ kind: 'indeterminate', message: describe(failure) })
 }
 
@@ -39,6 +41,9 @@ function describe(failure: BrowserScriptFailure): string {
   }
   if (failure.kind === 'output-limit') {
     return `The script was stopped after printing ${failure.capturedChars} characters. Log less.`
+  }
+  if (failure.kind === 'result-unavailable') {
+    return `${failure.message} Actions may already have been executed. Do not automatically rerun the script; inspect the page and recover the original result if available.`
   }
   return `${failure.reason} The page may have been partially changed — check it before running anything again.`
 }
