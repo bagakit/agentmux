@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
-import type { BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-operation.js'
+import type { BrowserReplayTarget } from '../shared/browser-operation.js'
+import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft, BrowserDemonstrationStep } from '../shared/browser-demonstration.js'
 
 export const BROWSER_DEMONSTRATION_FILE = 'browser-demonstration-drafts.json'
 const MAX_DRAFTS = 32
@@ -10,30 +11,10 @@ const MAX_STEPS = 128
 const MAX_TEXT = 240
 const MAX_URL = 2_048
 const NATIVE_INPUT_WINDOW_MS = 2_000
-const CLICK_INPUTS = new Set(['mouseDown', 'mouseUp', 'pointerDown', 'touchStart', 'keyDown', 'rawKeyDown'])
+const CLICK_INPUTS = new Set(['mouseDown', 'mouseUp', 'pointerDown', 'touchStart', 'keyDown', 'rawKeyDown', 'char'])
 const FILL_INPUTS = new Set(['keyDown', 'rawKeyDown', 'char'])
 const NATIVE_INPUTS = new Set([...CLICK_INPUTS, ...FILL_INPUTS])
 
-export type BrowserDemonstrationStep = BrowserReplayStep & {
-  id: string
-  sequence: number
-  recordedAt: number
-  navigationId: string
-  source: 'native-human' | 'navigation'
-}
-export type BrowserDemonstrationDraft = {
-  id: string
-  browserId: string
-  navigationId: string
-  url: string
-  revision: number
-  status: 'recording' | 'stopped' | 'interrupted'
-  startedAt: number
-  updatedAt: number
-  steps: BrowserDemonstrationStep[]
-  warning?: string
-}
-export type BrowserDemonstrationDocument = { version: 1; drafts: BrowserDemonstrationDraft[] }
 export interface BrowserDemonstrationStore {
   load(): Promise<BrowserDemonstrationDocument | null>
   save(document: BrowserDemonstrationDocument): Promise<void>
@@ -72,7 +53,7 @@ export type BrowserDemonstrationEvent = {
   kind: 'click' | 'fill'
   isTrusted: boolean
   /** Main supplies an AX identity only after verifying the actual event target. */
-  target?: BrowserReplayTarget
+  target?: BrowserReplayTarget | Promise<BrowserReplayTarget | undefined>
 }
 export type BrowserDemonstrationNavigation = {
   browserId: string
@@ -145,7 +126,8 @@ export class BrowserDemonstrationRecorder {
       const draft = this.current(input.browserId)
       if (draft?.status !== 'recording' || draft.navigationId !== input.navigationId || input.isTrusted !== true || (input.kind !== 'click' && input.kind !== 'fill')) return null
       if (!gesture || !(input.kind === 'fill' ? FILL_INPUTS : CLICK_INPUTS).has(gesture.type)) return null
-      const target = safeTarget(input.target)
+      // Capture attestation before AX work; resolving the actual target can take longer than a gesture.
+      const target = safeTarget(await input.target)
       const previous = draft.steps.at(-1)
       // No values are captured, so typing another character into this field adds no semantic fact.
       if (input.kind === 'fill' && previous?.method === 'fillInput' && previous.navigationId === input.navigationId &&

@@ -10,7 +10,15 @@ const root = path.resolve(import.meta.dirname, '../../..')
 const require = createRequire(path.join(root, 'package.json'))
 const main = 'apps/desktop/src/main/browser-demonstration-recorder.ts'
 const test = 'apps/desktop/test/browser-demonstration-recorder.test.ts'
-const originals = new Map(await Promise.all([main, test].map(async file => [file, await fs.readFile(path.join(root, file), 'utf8')])))
+const capture = 'apps/desktop/src/main/browser-demonstration-capture.ts'
+const surface = 'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx'
+const tests = [test, 'apps/desktop/test/browser-demonstration-capture.test.ts', 'apps/desktop/test/browser-demonstration-surface.test.tsx']
+const inputs = [main, capture, surface, ...tests,
+  'apps/desktop/src/main/browser-cdp-session.ts', 'apps/desktop/src/main/browser-page-snapshot.ts',
+  'apps/desktop/src/main/browser-snapshot-query.ts', 'apps/desktop/src/main/browser-selection-script.ts',
+  'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/browser-operation.ts',
+  'apps/desktop/src/shared/browser-step-evidence.ts', 'apps/desktop/src/shared/browser-snapshot-query.ts']
+const originals = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file), 'utf8')])))
 const source = originals.get(main)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const evidence = path.join(root, 'docs/reviews/evidence/browser-task-capabilities-2026-10-03/t010-source')
@@ -23,11 +31,25 @@ const cases = [
   ['restart-recording-resumes', "draft.status = 'interrupted'", "draft.status = 'recording'"],
   ['unread-history-overwritten', 'if (this.loadUnavailable) return', 'if (false) return'],
   ['unknown-navigation-claimed-human', "source: human ? 'native-human' : 'navigation'", "source: 'native-human'"],
-  ['step-budget-one-extra', 'draft.steps.length >= MAX_STEPS', 'draft.steps.length > MAX_STEPS']
-]
+  ['step-budget-one-extra', 'draft.steps.length >= MAX_STEPS', 'draft.steps.length > MAX_STEPS'],
+  ['target-proof-not-awaited', 'safeTarget(await input.target)', 'safeTarget(input.target)']
+].map(([name, before, after]) => [main, name, before, after])
+cases.push(
+  [capture, 'untrusted-event-enters-capture', 'if (event.isTrusted !== true) return;', 'if (false) return;'],
+  [capture, 'hover-triggers-observation', '!NATIVE_INPUTS.has(input.type)', 'false'],
+  [capture, 'backend-identity-guessed', 'candidate.backendNodeId === backendNodeId', 'candidate.backendNodeId > 0'],
+  [capture, 'ambiguous-target-approved', 'matches.length !== 1', 'matches.length < 1'],
+  [capture, 'isolated-world-unproven', 'response.result?.value === true', 'true'],
+  [capture, 'owner-not-released', 'this.session?.detach()', 'void 0'],
+  [capture, 'slow-start-reacquires-owner', 'if (generation !== this.generation) return draft', 'if (false) return draft'],
+  [capture, 'budget-stop-keeps-debugger', "if (draft && draft.status !== 'recording' && this.active) this.release()", 'void 0'],
+  [capture, 'event-budget-removed', 'state.events.length >= ${MAX_EVENTS}', 'false'],
+  [surface, 'blocked-reason-hidden', '{step.blockedReason ? <small', '{false ? <small'],
+  [surface, 'interrupted-claims-recording', "const recording = draft?.status === 'recording'", "const recording = draft !== null"]
+)
 const receipt = { passed: false, boundary: 'Actual implementation and actual regression tests copied into a private source root; no user process, source mutation or Browser evidence. Caller and native acceptance remain separate.', inputs: Object.fromEntries([...originals].map(([file, text]) => [file, digest(text)])), cases: [] }
 const run = async name => {
-  const result = spawnSync(process.execPath, [require.resolve('vitest/vitest.mjs'), 'run', test, '--root', isolated, '--maxWorkers=1'], { cwd: isolated, encoding: 'utf8', timeout: 30_000 })
+  const result = spawnSync(process.execPath, [require.resolve('vitest/vitest.mjs'), 'run', ...tests, '--root', isolated, '--maxWorkers=1'], { cwd: isolated, encoding: 'utf8', timeout: 30_000 })
   const log = `${result.stdout ?? ''}${result.stderr ?? ''}`
   const file = path.join(evidence, `${name}.log`)
   await fs.writeFile(file, log)
@@ -36,6 +58,7 @@ const run = async name => {
 try {
   await fs.mkdir(evidence, { recursive: true })
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
+  await fs.writeFile(path.join(isolated, 'vitest.config.mjs'), "export default { esbuild: { jsx: 'automatic' } }\n")
   await fs.symlink(path.join(root, 'node_modules'), path.join(isolated, 'node_modules'), 'dir')
   for (const [file, text] of originals) {
     await fs.mkdir(path.dirname(path.join(isolated, file)), { recursive: true })
@@ -44,22 +67,23 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   const baseline = await run('baseline-green')
   assert.equal(baseline.result.status, 0, baseline.log)
-  assert.match(baseline.log, /Tests\s+9 passed/, 'All actual regression tests must execute')
-  for (const [name, before, after] of cases) {
+  assert.match(baseline.log, /Tests\s+19 passed/, 'All actual regression tests must execute')
+  for (const [file, name, before, after] of cases) {
+    const source = originals.get(file)
     const occurrences = source.split(before).length - 1
     assert.ok(occurrences > 0, `Mutation anchor missing: ${name}`)
     const mutated = source.replaceAll(before, after)
-    await fs.writeFile(path.join(isolated, main), mutated)
+    await fs.writeFile(path.join(isolated, file), mutated)
     const red = await run(name)
     assert.ok(Number.isInteger(red.result.status) && red.result.status !== 0, `Mutation survived: ${name}`)
     assert.match(red.log, /AssertionError/, `Behavioral assertion must fail: ${name}`)
     assert.match(red.log, /Tests\s+[1-9]\d* failed/, `Failing tests must execute: ${name}`)
-    receipt.cases.push({ name, occurrences, redExit: red.result.status, log: red.file, sha256: red.sha256, mutatedSha256: digest(mutated) })
-    await fs.writeFile(path.join(isolated, main), source)
+    receipt.cases.push({ file, name, occurrences, redExit: red.result.status, log: red.file, sha256: red.sha256, mutatedSha256: digest(mutated) })
+    await fs.writeFile(path.join(isolated, file), source)
   }
   const green = await run('restored-green')
   assert.equal(green.result.status, 0, green.log)
-  assert.match(green.log, /Tests\s+9 passed/, 'Restored source must execute all actual tests')
+  assert.match(green.log, /Tests\s+19 passed/, 'Restored source must execute all actual tests')
   receipt.green = { exit: green.result.status, log: green.file, sha256: green.sha256 }
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message } }
