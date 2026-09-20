@@ -847,6 +847,14 @@ const mockApi: AgentMuxDesktopApi = {
         ...mockRetainedReplay(control, afterByte)
       }
     },
+    refreshAttachment: async (control, attachmentId, afterByte) => {
+      if (!attachmentId) return await mockApi.sessions.attach(control, afterByte)
+      const owned = mockAttachmentControls.get(attachmentId)
+      if (!owned || JSON.stringify(owned) !== JSON.stringify(control)) throw new Error('Attachment refresh requires its exact Session lease')
+      const result = await mockApi.sessions.attach(control, afterByte)
+      mockAttachmentControls.delete(result.attachmentId)
+      return { ...result, attachmentId }
+    },
     replay: async (attachmentId, afterByte) => {
       const control = mockAttachmentControls.get(attachmentId)
       if (!control) throw new Error('Session Attachment not found')

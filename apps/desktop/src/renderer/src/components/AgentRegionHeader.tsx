@@ -1,15 +1,17 @@
-import { History, MoreHorizontal } from 'lucide-react'
+import { History, MoreHorizontal, RotateCcw } from 'lucide-react'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { RegionMenuEntryView, useRegionMenuEntries } from './RegionContextMenu'
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, readOnly, onHistory }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, readOnly, onHistory, onRefreshObservation, refreshing = false }: {
   name: string
   executorLabel: string
   sessionId: string
   regionId: string | undefined
   readOnly: boolean
   onHistory: (() => void) | undefined
+  onRefreshObservation?: (() => void) | undefined
+  refreshing?: boolean
 }) {
   const entries = useRegionMenuEntries()
   return <header className="agent-region-header"
@@ -19,7 +21,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, re
     <span className="agent-region-header__meta" title={`${executorLabel}; Session ${sessionId}`}>
       {executorLabel} · {sessionId.slice(0, 8)}
     </span>
-    {onHistory || entries.length > 0 ? <DropdownMenu.Root>
+    {onHistory || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Root>
       <DropdownMenu.Trigger className="agent-region-header__more" title="More actions"
         aria-label={`More actions for ${name}`} onPointerDown={(event) => event.stopPropagation()}>
         <MoreHorizontal size={14} />
@@ -27,6 +29,9 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, re
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
         data-owner-region-id={regionId} data-agent-session-id={sessionId} side="bottom" align="end" sideOffset={4} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}>
+        {onRefreshObservation ? <DropdownMenu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
+          <RotateCcw size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+        </DropdownMenu.Item> : null}
         {onHistory ? <><DropdownMenu.Item className="tab-context-menu__item" onSelect={onHistory}>
           <History size={14} /><span>Conversation history</span>
         </DropdownMenu.Item>{entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}</> : null}
