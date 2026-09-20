@@ -62,6 +62,8 @@ app.whenReady().then(async () => {
             privacy:text(pane.querySelector('.settings-pane-actions > span')),buttons:Array.from(pane.querySelectorAll('button')).map(n=>({text:n.textContent,disabled:n.disabled,connected:n.isConnected,visible:n.checkVisibility(),rect:rect(n)})),
             status:rect(document.querySelector('.window-status-bar')),page:rect(document.querySelector('.settings-page'))};})()`)
         const image = `${width}-${query}.png`
+        // Geometry reads can start the newly mounted Pane's entrance animation. Wait after them.
+        await settle()
         fs.writeFileSync(path.join(evidence, image), (await win.webContents.capturePage()).toPNG())
         result.frames.push({ width, query, actual, searchHit, clearHit, image })
         assert.deepEqual(actual.nav, ['General'], 'General search reaches the original controls')
