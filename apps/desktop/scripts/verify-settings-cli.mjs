@@ -250,7 +250,10 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     client=await connectLocalAgentMux({store})
     session=await client.createAgent({createOperationId:randomUUID(),executorId:'probe',providerId:'codex',commandOverride:executable,
       workspacePath,env:{CODEX_HOME:codexHome,HOME:privateHome},injectAgentMuxGuide:false,cols:100,rows:30})
-    originalRun=(await client.listRuns()).find(run=>run.runId===session.run.runId)
+    originalRun=await waitFor('nonempty private Run output baseline',async()=>{
+      const run=(await client.listRuns()).find(value=>value.runId===session.run.runId)
+      return run?.state==='running' && run.latestOutputBytes>0 ? run : null
+    })
     assert.equal(originalRun?.state,'running'); assert.ok(originalRun.pid); assert.ok(Number.isFinite(originalRun.acceptedInputBytes))
     receipt.facts.originalRuntime=client.runtimeIdentity()
     ownedRunProcess=await runIdentity(originalRun.pid); assert.ok(ownedRunProcess)
@@ -452,13 +455,15 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     client=await connectLocalAgentMux({store})
     const run=(await client.listRuns()).find(value=>value.runId===session.run.runId)
     assert.equal(run?.state,'running'); assert.equal(run.pid,originalRun.pid)
+    assert.ok(Number.isFinite(run.latestOutputBytes)); assert.ok(run.latestOutputBytes>=originalRun.latestOutputBytes,'Settings and ordinary restart never move the original output cursor backward')
     assert.equal(run.acceptedInputBytes,originalRun.acceptedInputBytes,'Settings and restarting Desktop never write Agent input')
     assert.deepEqual(await runIdentity(run.pid),ownedRunProcess)
     receipt.facts.runtimeAfter=client.runtimeIdentity()
     assert.deepEqual(receipt.facts.runtimeAfter,receipt.facts.originalRuntime,'Settings diagnostics and Desktop restart preserve the exact Runtime identity')
     await client.writeTerminal(session.run,{ownerInstanceId:client.runtimeIdentity().instanceId,operationId:randomUUID(),expectedByte:run.acceptedInputBytes,data:'private-input-after-settings\r'})
     await waitFor('same Run accepts explicit input',async()=> (await client.listRuns()).find(value=>value.runId===session.run.runId)?.acceptedInputBytes>run.acceptedInputBytes)
-    receipt.facts.run={runId:session.run.runId,pid:run.pid,birth:ownedRunProcess.born,sameProcess:true,settingsWroteNoInput:true,privateInputAccepted:true}
+    receipt.facts.run={runId:session.run.runId,pid:run.pid,birth:ownedRunProcess.born,sameProcess:true,
+      outputBytesBefore:originalRun.latestOutputBytes,outputBytesAfterChecks:run.latestOutputBytes,settingsWroteNoInput:true,privateInputAccepted:true}
     receipt.identityAfter=await identity(); assert.deepEqual(receipt.identityAfter,receipt.identityBefore,'Actual source, bundles and CLI input changed during proof')
   } catch(error) {
     failure=error
