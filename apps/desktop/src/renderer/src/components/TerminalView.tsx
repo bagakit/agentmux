@@ -86,7 +86,7 @@ import {
 } from '../lib/terminal-reveal'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
-import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { TerminalServiceNotices } from './TerminalServiceNotices'
 import {
   OpenDestinationPopover,
   type OpenDestinationRequest
@@ -1584,18 +1584,12 @@ export function TerminalView({
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
-          {sessionObservationNotice || attachmentNotice || revealNotice || replayGeometryNotice || viewportSyncNotice || continuationNotice ? (
-            <div className="terminal-service-window">
-              <ServiceWindowNotice notice={attachmentNotice} />
-              <ServiceWindowNotice notice={sessionObservationNotice} />
-              <ServiceWindowNotice notice={revealNotice} />
-              <ServiceWindowNotice notice={replayGeometryNotice} />
-              <ServiceWindowNotice notice={viewportSyncNotice} />
-              <ServiceWindowNotice notice={continuationNotice} />
-              <button type="button" className="small-button" disabled={refreshingObservation}
-                onClick={() => void refreshObservationRef.current?.()}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button>
-            </div>
-          ) : null}
+          <TerminalServiceNotices reveal={revealNotice} replayGeometry={replayGeometryNotice}
+            viewportSync={viewportSyncNotice} continuation={continuationNotice}
+            duringReconnect={continuationAbsence?.duringReconnect ?? false}
+            attachment={attachmentNotice} sessionObservation={sessionObservationNotice}
+            refreshingObservation={refreshingObservation}
+            onRefreshObservation={() => void refreshObservationRef.current?.()} />
           {!hydrating && !historyReadFailure && (replayGap || runtimeHistoryGap) ? (
             <TerminalReplayGapNotice
               compact={!replayGap}

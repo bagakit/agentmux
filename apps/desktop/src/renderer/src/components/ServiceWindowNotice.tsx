@@ -12,15 +12,18 @@ import { serviceNoticeAriaLive, type RenderableServiceNotice } from '../lib/serv
  * 拿到 null 就渲染 null（healthy 与 agent-broken 都不由服务窗承载）——调用方把判定结果直接传进来。
  */
 export function ServiceWindowNotice({
-  notice
+  notice, summary
 }: {
   notice: RenderableServiceNotice | null
+  /** Concise three facts supplied by the same projection owner; original text stays in details. */
+  summary?: RenderableServiceNotice['notice']
 }) {
   if (!notice) return null
   // 分不清与流程降级用同一种告示形态，只以 data 属性区分语气：两者都不阻断、都不静默。
   // 音量不在这里挑——由判定层按 kind（承载存活判定）派生：降级/分不清轻声（polite），只有真正
   // 需要打断的那一档才 assertive。role 跟着音量走，保持 ARIA 语义一致（assertive⟺alert）。
   const ariaLive = serviceNoticeAriaLive(notice.kind)
+  const visible = summary ?? notice.notice
   return (
     <aside
       className="service-window"
@@ -32,9 +35,17 @@ export function ServiceWindowNotice({
         <Info size={14} />
       </span>
       <div className="service-window__body">
-        <strong className="service-window__step">{notice.notice.step}</strong>
-        <span className="service-window__mode">{notice.notice.mode}</span>
-        <span className="service-window__restore">{notice.notice.restore}</span>
+        <strong className="service-window__step">{visible.step}</strong>
+        <span className="service-window__mode">{visible.mode}</span>
+        <span className="service-window__restore">{visible.restore}</span>
+        {summary ? <details className="service-window__details">
+          <summary>Details</summary>
+          <div className="service-window__original" tabIndex={0} aria-label={`Complete details: ${notice.notice.step}`}>
+            <strong>{notice.notice.step}</strong>
+            <span>{notice.notice.mode}</span>
+            <span>{notice.notice.restore}</span>
+          </div>
+        </details> : null}
       </div>
     </aside>
   )
