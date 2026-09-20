@@ -14,7 +14,7 @@ const selected: FocusContext = {
   id: 'original-context', name: 'Original Focus context', detail: 'Review the original request', state: 'blocked', stateLabel: 'Blocked',
   bucket: 'attention', kind: 'agent', providerId: null, hostId: 'local', topicId: null, workspaceId: 'original-workspace',
   workspaceName: 'Original workspace', workspacePath: '/fixture/original', workspace: undefined,
-  liveAgent: true, actionable: true, lastActivityAt: null, processState: 'running'
+  liveAgent: true, actionable: true, lastActivityAt: null, processState: 'running', runId: 'original-run', workingEnteredAt: null
 }
 let root: Root, container: HTMLDivElement, destination: HTMLButtonElement, review: ReturnType<typeof vi.fn>
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
@@ -104,4 +104,64 @@ it('Rename blur commits through the existing owner and keeps the newly focused t
   expect(container.querySelector('[aria-label="Rename Focus context"]')).toBeNull()
   expect(identity()).toBeTruthy()
   expect(document.activeElement).toBe(destination)
+})
+
+it('a mouse-only hover after an identity keyboard Escape preserves the newly focused editor through Escape', async () => {
+  await open('keyboard'); await escapeMenu(); expect(document.activeElement).toBe(identity())
+  const editor = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  expect(editor).toBeTruthy(); editor.focus()
+  const more = trigger()
+  await act(async () => more.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true, pointerType: 'mouse', buttons: 0, button: 0 })))
+  await settle()
+  expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0)
+  expect(document.querySelector('[role="menu"]')).toBeTruthy()
+  expect(document.activeElement).toBe(editor)
+  await escapeMenu()
+  expect(document.activeElement).toBe(editor)
+})
+it('the identity ContextMenu key uses the controlled existing dropdown and restores the identity', async () => {
+  const origin=identity(); origin.focus()
+  await act(async () => origin.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ContextMenu' })))
+  await settle()
+  expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0)
+  await escapeMenu(); expect(document.activeElement).toBe(origin)
+})
+it('a mouse-only hover action keeps its selected destination without a second opening click', async () => {
+  const editor = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  expect(editor).toBeTruthy(); editor.focus()
+  await act(async () => trigger().dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true, pointerType: 'mouse', buttons: 0, button: 0 })))
+  await settle()
+  expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0)
+  expect(document.activeElement).toBe(editor)
+  await pick('Review request')
+  expect(review).toHaveBeenCalledTimes(1); expect(document.activeElement).toBe(destination)
+})
+
+it.each(['F10', 'ContextMenu'] as const)('natural hover close followed by identity %s opens a keyboard-operable focused menu', async key => {
+  const editor = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  expect(editor).toBeTruthy(); editor.focus()
+  const more=trigger()
+  await act(async () => more.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true, pointerType: 'mouse', buttons: 0, button: 0 })))
+  await settle()
+  const content=document.querySelector<HTMLElement>('[role="menu"]')!
+  expect(content).toBeTruthy(); expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0)
+  await act(async () => {
+    more.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', buttons: 0, relatedTarget: content }))
+    content.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0, relatedTarget: more }))
+    content.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', buttons: 0, relatedTarget: editor }))
+    await new Promise(resolve => setTimeout(resolve, 220))
+  })
+  await settle(); expect(document.querySelector('[role="menu"]')).toBeNull(); expect(document.activeElement).toBe(editor)
+  const origin=identity(); origin.focus()
+  await act(async () => origin.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, shiftKey: key==='F10' })))
+  await settle()
+  const keyboardMenu=document.querySelector<HTMLElement>('[role="menu"]')!
+  const items=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  expect(keyboardMenu).toBeTruthy(); expect(items.length).toBeGreaterThan(0)
+  expect([keyboardMenu,...items]).toContain(document.activeElement)
+  const initial=document.activeElement
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key:'ArrowDown' })))
+  await settle()
+  expect(items).toContain(document.activeElement)
+  expect(document.activeElement).not.toBe(initial)
 })

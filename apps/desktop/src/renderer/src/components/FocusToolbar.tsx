@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { ArrowUpRight, Inbox, MoreHorizontal, PanelRightClose, Pencil } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { findGroup } from '@agentmux/layout'
@@ -73,7 +73,7 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
     </ContextMenu.Root>}
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" onClick={onReview}><Inbox size={12} />Review</button> : null}
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label="Focus context actions" onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label="Focus context actions" onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
       <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     <button type="button" className="icon-button" aria-label="Close Focus workspace" onClick={onCloseWorkspace}><PanelRightClose size={14} /></button>

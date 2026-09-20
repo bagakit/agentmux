@@ -132,6 +132,7 @@ export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeo
       onCloseAutoFocus={(event) => {
         if (menu.hover.current) event.preventDefault()
         onCloseAutoFocus?.(event)
+        menu.hover.current = false
       }}
       onKeyDown={(event) => { menu.hover.current = false; onKeyDown?.(event) }}
     />
