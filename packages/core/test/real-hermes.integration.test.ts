@@ -1,11 +1,11 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixtureDay, fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AgentManagedHookInstaller, createHermesManagedHookPlan } from '../dist/index.js'
+import { AgentProviderRegistry, AgentManagedHookInstaller } from '../dist/index.js'
 
 const execFileAsync = promisify(execFile)
 const roots: string[] = []
@@ -43,7 +43,7 @@ describe.runIf(process.env.AGENTMUX_REAL_HERMES_E2E === '1')('installed real her
       throw new Error(`REAL_HERMES_E2E_UNAVAILABLE: executable=${command} version=${versionText}`)
     }
 
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-real-hermes-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-real-hermes-"))
     roots.push(root)
     const workspace = join(root, 'workspace')
     await mkdir(workspace, { mode: 0o700 })
@@ -61,7 +61,7 @@ describe.runIf(process.env.AGENTMUX_REAL_HERMES_E2E === '1')('installed real her
     }
 
     // The behaviour under test: the plan follows the launch env, never the developer's real home.
-    const plan = createHermesManagedHookPlan(launchEnv)
+    const plan = (new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: fixturePath("unused-workspace"), env: launchEnv })!)
     expect(plan.mutations.map((mutation) => mutation.path)).toEqual([
       join(hermesHome, 'config.yaml'),
       join(hermesHome, 'shell-hooks-allowlist.json')
@@ -93,7 +93,7 @@ describe.runIf(process.env.AGENTMUX_REAL_HERMES_E2E === '1')('installed real her
     // parks at an empty composer, so oneshot is the only way to begin a turn without a human typing.
     const fired = await execFileAsync(
       command,
-      ['-z', 'reply with READY', '-m', 'claude-3-5-haiku-20241022', '--provider', 'anthropic'],
+      ['-z', 'reply with READY', '-m', ("claude-3-5-haiku-" + (fixtureDay(1, ''))), '--provider', 'anthropic'],
       { cwd: workspace, env: { ...process.env, ...launchEnv }, timeout: 180_000, maxBuffer: 1024 * 1024 }
     ).catch((error: unknown) => error as { stdout?: string; stderr?: string })
     // The turn must die at auth, never on a spend — that is what keeps this test free to run.

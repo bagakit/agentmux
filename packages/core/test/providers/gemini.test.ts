@@ -1,6 +1,6 @@
 import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { GEMINI_HOOK_EVENTS, createGeminiManagedHookPlan } from '../../src/providers/gemini.js'
 import { createAntigravityManagedHookPlan } from '../../src/providers/antigravity.js'
 import { GEMINI_HOOK_DIALECT, canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
@@ -126,7 +126,7 @@ describe('Gemini provider', () => {
   })
 
   describe('装到 settings.json，且不碰 Antigravity 在同一目录下的配置', () => {
-    const plan = resolveManagedHookPlan('gemini', upstreamFixturePath("repo"))
+    const plan = (new AgentProviderRegistry().get('gemini').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo") }) ?? null)
 
     it('写的是 ~/.gemini/settings.json，与 Antigravity 的 config/hooks.json 是不同文件', () => {
       expect(plan?.mutations).toHaveLength(1)

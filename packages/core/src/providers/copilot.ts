@@ -176,6 +176,7 @@ export function createCopilotManagedHookPlan(env?: Readonly<Record<string, strin
 
 export function createCopilotProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ env }) => createCopilotManagedHookPlan(env),
     catalog: catalog({
       id: 'copilot', label: 'Copilot', executable: 'copilot', expectedProcess: 'copilot',
       promptDelivery: 'positional-argv',

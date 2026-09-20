@@ -92,6 +92,7 @@ export function createHermesManagedHookPlan(env?: Readonly<Record<string, string
 
 export function createHermesProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ env }) => createHermesManagedHookPlan(env),
     catalog: catalog({
       id: 'hermes', label: 'Hermes', executable: 'hermes', expectedProcess: 'hermes',
       promptDelivery: 'hermes-query',

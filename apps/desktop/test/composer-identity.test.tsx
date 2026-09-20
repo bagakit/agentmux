@@ -12,8 +12,8 @@ const dom = composerDOM()
 // 同一个控件，composer 不该有第二份。所以这里读 `aria-label`：它同时是无障碍名和悬停面板的
 // 标题来源，而旧的 `title` 只有鼠标用户看得到。
 //
-// 措辞也跟着走同一张表：`running` 读作 `Idle`（进程活着但没在干活），`exited` 读作
-// `Stopped`。这不是这个文件的发明，AgentAvatar.tsx:59 与 ProjectActivity.tsx:108 用的是同一个词。
+// 措辞也跟着走同一张表：`running` 读作 `Status unknown`（进程活着，工作状态未确认），`exited` 读作
+// `Stopped`。这不是这个文件的发明，共享 AgentAvatar 持有该措辞。
 const identityName = (element: Element): string | null =>
   element.querySelector('[role="img"], [role="button"], button')?.getAttribute('aria-label') ?? null
 
@@ -28,27 +28,27 @@ it('shows and updates the actual Session identity, including same-provider sibli
   expect(dom.container.querySelector('.composer__mailbox')?.parentElement).toBe(identity().parentElement)
   expect(identity().parentElement?.parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
   expect(identity().parentElement?.querySelectorAll('.agent-avatar')).toHaveLength(1)
-  expect(identityName(identity())).toBe('Review queue · Idle')
+  expect(identityName(identity())).toBe('Review queue · Status unknown')
   const codex = identity().querySelector('.agent-avatar__mark')!.innerHTML
   for (const mode of ['collapsed', 'current', 'expanded']) {
     expect(dom.container.querySelector('.composer-tools')?.getAttribute('data-mode')).toBe(mode)
-    expect(identity().querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Review queue · Idle')
+    expect(identity().querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Review queue · Status unknown')
     await dom.click('.composer-tool--mode')
   }
   await dom.render(<AgentSessionComposer key="b" sessionId="b" tabName="Release" />)
-  expect(identityName(identity())).toBe('Fix sizing · Idle')
+  expect(identityName(identity())).toBe('Fix sizing · Status unknown')
   expect(identity().querySelector('.agent-avatar__mark')!.innerHTML).toBe(codex)
   await dom.render(<AgentSessionComposer key="c" sessionId="c" tabName="Release" />)
-  expect(identityName(identity())).toBe('Investigate · Idle')
+  expect(identityName(identity())).toBe('Investigate · Status unknown')
   expect(identity().querySelector('.agent-avatar__mark')!.innerHTML).not.toBe(codex)
   await act(async () => useAppStore.setState({ agentNames: { c: 'Renamed investigation' } }))
-  expect(identityName(identity())).toBe('Renamed investigation · Idle')
-  expect(identity().querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Renamed investigation · Idle')
+  expect(identityName(identity())).toBe('Renamed investigation · Status unknown')
+  expect(identity().querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Renamed investigation · Status unknown')
 })
 
 it('uses the authored Tab as fallback without manufacturing a numbered terminal identity', async () => {
   await dom.render(<AgentSessionComposer sessionId="agent-1" tabName="Release review" />)
-  expect(identityName(dom.container.querySelector('.composer-agent-identity')!)).toBe('Release review · Idle')
+  expect(identityName(dom.container.querySelector('.composer-agent-identity')!)).toBe('Release review · Status unknown')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  expect(identityName(dom.container.querySelector('.composer-agent-identity')!)).toBe('codex · Idle')
+  expect(identityName(dom.container.querySelector('.composer-agent-identity')!)).toBe('codex · Status unknown')
 })

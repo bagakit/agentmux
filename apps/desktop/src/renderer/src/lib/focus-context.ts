@@ -18,6 +18,7 @@ export type FocusContext = {
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
+  runId: string; workingEnteredAt: number | null
   workspace: WorkspaceRecord | undefined
   originAddress?: string
 }
@@ -26,11 +27,18 @@ function activityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   return activity && isAgentActivityStatusSource(activity.source) ? activity.stateEnteredAt : undefined
 }
+function workingEntryTime(session: SessionSnapshot): number | null {
+  const activity = session.kind === 'agent' ? session.semanticStatus : undefined
+  const time = activity?.stateEnteredAt
+  return session.processState === 'running' && session.status.state === 'working'
+    && activity?.state === 'working' && isAgentActivityStatusSource(activity.source)
+    && time !== undefined && Number.isFinite(time) && time > 0 ? time : null
+}
 export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean): FocusBucket {
   const state = session.status.state
   if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
   if (turnWorking(state)) return 'working'
-  if (hasCurrentResult && (state === 'done' || state === 'running')) return 'results'
+  if (hasCurrentResult && state === 'done') return 'results'
   return 'idle'
 }
 function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
@@ -54,7 +62,10 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     detail = facts.length ? facts.join(' · ') : session.processState === 'running'
       ? 'Run is alive · Connection status unknown' : session.processState === 'interrupted'
         ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
-  } else if (bucket === 'results' && result) detail = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
+  } else if (result && (bucket === 'results' || bucket === 'idle' && state === 'running')) {
+    const response = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
+    detail = state === 'running' ? `Response · ${response}` : response
+  }
   else {
     const activity = sessionRecentActivity(session, items, session.workspacePath)
     if (activity !== state) detail = activity
@@ -66,7 +77,8 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   }
   return { id: session.id, name, detail, state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
-    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt }
+    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt,
+    runId: session.control.run.runId, workingEnteredAt: workingEntryTime(session) }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
@@ -74,6 +86,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolea
     && a.status.detail === b.status.detail
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
+    && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }
 export type FocusProjection = { contexts: FocusContext[]; laneContexts: FocusContext[]; pmoAttention: string[] }
