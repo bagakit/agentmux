@@ -100,7 +100,10 @@ describe('WorkspaceFiles binary owner', () => {
     const { root, workspace, files } = await fixture()
     await writeFile(join(root, 'large.bin'), '')
     await truncate(join(root, 'large.bin'), WORKSPACE_FILE_MAX_BYTES + 1)
-    await expect(files.readBytes(workspace, 'large.bin')).rejects.toMatchObject({ code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+    let failure: unknown
+    try { await files.readBytes(workspace, 'large.bin') } catch (error) { failure = error }
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({ code: 'WORKSPACE_FILE_BYTE_LIMIT' })
     await expect(files.readBytes(workspace, 'large.bin', { maxBytes: WORKSPACE_FILE_MAX_READ_BYTES + 1 })).rejects.toThrow('maxBytes')
     await expect(files.readBytes(workspace, 'large.bin', { offset: -1 })).rejects.toThrow('offset')
     await expect(files.writeBytes(workspace, { path: 'too-large.bin', bytes: Buffer.alloc(WORKSPACE_FILE_MAX_BYTES + 1) })).resolves.toMatchObject({ status: 'error', code: 'WORKSPACE_FILE_BYTE_LIMIT' })
