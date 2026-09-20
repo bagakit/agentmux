@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
+import * as activityModule from '../src/renderer/src/components/ProjectActivity'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 const initial = useAppStore.getState()
@@ -115,6 +116,7 @@ it('rolls hidden descendant attention into the real collapsed Folder without dup
 })
 
 it('does not rescan unrelated Sessions as the number of Topic consumers grows', async () => {
+  const activityConsumers = vi.spyOn(activityModule, 'ProjectActivity')
   let reads = 0
   const unrelated = Array.from({ length: 120 }, (_, index) => {
     const session = agent(`elsewhere-${index}`, '/elsewhere', 'working')
@@ -126,9 +128,38 @@ it('does not rescan unrelated Sessions as the number of Topic consumers grows', 
   expect(unrelated).toHaveLength(120)
   expect(reads).toBe(240) // One location index in Folders and one shared Topic owner index.
   expect(container.querySelectorAll('.project-activity')).toHaveLength(0)
+  expect(activityConsumers).not.toHaveBeenCalled()
   list.mockResolvedValue(Array.from({ length: 80 }, (_, index) => topic(`view:t${index}`, `Topic ${index}`)))
   await act(async () => useAppStore.setState({ workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: 1 } }))
   expect(container.querySelectorAll('.space-topic-row')).toHaveLength(80)
   expect(reads).toBe(240)
   expect(container.querySelectorAll('.project-activity')).toHaveLength(0)
+  expect(activityConsumers).not.toHaveBeenCalled() // Empty rows mount no fact consumers.
+})
+
+it('a real Topic activity consumer ignores unrelated timelines but updates from its own Session facts', async () => {
+  const a = topic('view:a', 'Alpha notes')
+  const owned = agent('owned', `${scratch.path}/${a.directoryPath}`, 'working')
+  let statusReads = 0
+  const status = owned.status
+  Object.defineProperty(owned, 'status', { enumerable: false, get: () => { statusReads += 1; return status } })
+  await mount([a], [owned])
+  const activity = heat('[data-space-nav="topic:view:a"]')!
+  expect(activity).not.toBeNull()
+  expect(activity.getAttribute('aria-label')).toContain('1 Working')
+  const originalTitle = activity.title
+  statusReads = 0
+  await act(async () => useAppStore.setState({ timelines: {
+    elsewhere: { agentSessionId: 'elsewhere', revision: 1, items: [] }
+  } }))
+  expect(statusReads).toBe(0)
+  expect(activity.title).toBe(originalTitle)
+  await act(async () => useAppStore.setState({ timelines: {
+    ...useAppStore.getState().timelines,
+    owned: { agentSessionId: 'owned', revision: 1, items: [{ id: 'step', kind: 'tool_call', title: 'Review Space navigation',
+      status: 'streaming', createdAt: 1, updatedAt: 1 }] }
+  } }))
+  expect(statusReads).toBeGreaterThan(0)
+  expect(activity.title).toContain('Review Space navigation')
+  expect(useAppStore.getState().sessions).toEqual([owned])
 })
