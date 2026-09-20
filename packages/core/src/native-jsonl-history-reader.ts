@@ -22,6 +22,8 @@ type Cursor = {
 
 export type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number }
 
+export type NativeHistoryReadBudget = { bytesRead: number; startedAt: number }
+
 function failure(code: string, message: string): never {
   throw new AgentMuxError(message, `AGENT_SESSION_HISTORY_${code}`)
 }
@@ -43,10 +45,40 @@ function decodeCursor(text: string): Cursor {
   }
 }
 
+/** Synchronous reservation and bounded physical byte reading shared across all page readers. */
+export async function readNativeHistoryBytes(
+  file: FileHandle,
+  position: number,
+  length: number,
+  signal: AbortSignal,
+  budget: NativeHistoryReadBudget
+): Promise<Buffer> {
+  signal.throwIfAborted()
+  if (Date.now() - budget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
+    failure('TIMEOUT', 'Native transcript page timed out.')
+  }
+  if (!Number.isSafeInteger(position) || position < 0 || !Number.isSafeInteger(length) || length < 0) {
+    failure('INVALID_TRANSCRIPT', 'Native transcript read range is invalid.')
+  }
+  if (budget.bytesRead + length > SESSION_HISTORY_MAX_PAGE_BYTES) {
+    failure('TOO_LARGE', 'Reading this native history page exceeds its byte budget.')
+  }
+  budget.bytesRead += length
+  const data = Buffer.alloc(length)
+  const { bytesRead } = await file.read(data, 0, length, position)
+  signal.throwIfAborted()
+  if (Date.now() - budget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
+    failure('TIMEOUT', 'Native transcript page timed out.')
+  }
+  if (bytesRead !== length) {
+    failure('SOURCE_CHANGED', 'Native transcript was truncated during reading.')
+  }
+  return data
+}
+
 /** Bounded, read-only physical JSONL paging. Provider readers own every record's meaning. */
 export class NativeJsonlHistoryReader {
-  private bytesRead = 0
-  private readonly startedAt = Date.now()
+  private readonly budget: NativeHistoryReadBudget
   private readonly identity: { dev: number; ino: number }
   private position: number
   private cut: number
@@ -62,8 +94,10 @@ export class NativeJsonlHistoryReader {
     private readonly file: FileHandle,
     { dev, ino }: { dev: number; ino: number },
     size: number,
-    cursor?: Cursor
+    cursor: Cursor | undefined,
+    budget: NativeHistoryReadBudget
   ) {
+    this.budget = budget
     this.identity = { dev, ino }
     this.cut = cursor?.cut ?? size
     this.position = cursor?.before ?? size
@@ -72,8 +106,15 @@ export class NativeJsonlHistoryReader {
     this.tail = cursor?.tail ?? ''
   }
 
-  static async open(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
+  static async open(
+    context: AgentProviderSessionHistoryContext,
+    budget?: NativeHistoryReadBudget
+  ): Promise<NativeJsonlHistoryReader> {
+    const activeBudget = budget ?? { bytesRead: 0, startedAt: Date.now() }
     context.signal.throwIfAborted()
+    if (Date.now() - activeBudget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
+      return failure('TIMEOUT', 'Native transcript page timed out.')
+    }
     const path = context.transcriptPath
     if (!path || !isAbsolute(path)) return failure('LOCATOR_UNAVAILABLE', 'Native transcript path has not been established.')
     const cursor = context.cursor === undefined ? undefined : decodeCursor(context.cursor)
@@ -85,12 +126,15 @@ export class NativeJsonlHistoryReader {
     const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK)
     try {
       context.signal.throwIfAborted()
+      if (Date.now() - activeBudget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
+        return failure('TIMEOUT', 'Native transcript page timed out.')
+      }
       const current = await file.stat()
       if (!current.isFile()) return failure('INVALID_TRANSCRIPT', 'Native transcript is not a regular file.')
       if (cursor && (cursor.dev !== current.dev || cursor.ino !== current.ino || cursor.cut > current.size)) {
         return failure('SOURCE_CHANGED', 'Native transcript was replaced or truncated; reopen its newest page.')
       }
-      const reader = new NativeJsonlHistoryReader(context, file, current, current.size, cursor)
+      const reader = new NativeJsonlHistoryReader(context, file, current, current.size, cursor, activeBudget)
       if (cursor) await reader.verifyUnchanged()
       return reader
     } catch (error) {
@@ -101,22 +145,13 @@ export class NativeJsonlHistoryReader {
 
   private check(): void {
     this.context.signal.throwIfAborted()
-    if (Date.now() - this.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
+    if (Date.now() - this.budget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
       failure('TIMEOUT', 'Native transcript page timed out.')
     }
   }
 
-  private async read(position: number, length: number): Promise<Buffer> {
-    this.check()
-    if (this.bytesRead + length > SESSION_HISTORY_MAX_PAGE_BYTES) {
-      return failure('TOO_LARGE', 'Reading this native history page exceeds its byte budget.')
-    }
-    this.bytesRead += length
-    const data = Buffer.alloc(length)
-    const { bytesRead } = await this.file.read(data, 0, length, position)
-    this.check()
-    if (bytesRead !== length) return failure('SOURCE_CHANGED', 'Native transcript was truncated during reading.')
-    return data
+  private read(position: number, length: number): Promise<Buffer> {
+    return readNativeHistoryBytes(this.file, position, length, this.context.signal, this.budget)
   }
 
   private async blockEndingAt(end: number): Promise<Buffer> {
