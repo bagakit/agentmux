@@ -577,10 +577,36 @@ function SurfaceContent({
   return assertUnreachableSurface(surface)
 }
 
+type RegionSwapTargets = Parameters<typeof regionSwapMenuEntries>[0]['regions']
+
+function WorkbenchRegionTree(props: {
+  tab: WorkbenchTab
+  groupId: string
+  surfaceVisible: boolean
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+}) {
+  const { tab } = props
+  const sessions = useWorkbenchTabSessions(tab)
+  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
+  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
+  const swapTargets = useMemo(() => {
+    const agentFactsFor = makeAgentFactsFor(sessions, agentNames, timelines)
+    return regionIds(tab.layout.root).flatMap((regionId) => {
+      const region = tab.regions[regionId]
+      if (!region) return []
+      const facts = region.kind === 'agent' ? agentFactsFor(region.sessionId) : null
+      return [{ regionId, label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions) }]
+    })
+  }, [sessions, agentNames, timelines, tab.regions, tab.layout.root])
+  return <WorkbenchRegionNode {...props} node={tab.layout.root} nodePath="" swapTargets={swapTargets} />
+}
+
 function WorkbenchRegionNode({
   node,
   nodePath,
   tab,
+  swapTargets,
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
@@ -589,6 +615,7 @@ function WorkbenchRegionNode({
   node: WorkbenchRegionLayoutNode
   nodePath: string
   tab: WorkbenchTab
+  swapTargets: RegionSwapTargets
   groupId: string
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
@@ -599,6 +626,7 @@ function WorkbenchRegionNode({
       <WorkbenchRegionLeaf
         node={node}
         tab={tab}
+        swapTargets={swapTargets}
         groupId={groupId}
         surfaceVisible={surfaceVisible}
         nativeSurfacesVisible={nativeSurfacesVisible}
@@ -611,6 +639,7 @@ function WorkbenchRegionNode({
       node={node}
       nodePath={nodePath}
       tab={tab}
+      swapTargets={swapTargets}
       groupId={groupId}
       surfaceVisible={surfaceVisible}
       nativeSurfacesVisible={nativeSurfacesVisible}
@@ -624,6 +653,7 @@ function WorkbenchRegionNode({
 function WorkbenchRegionLeaf({
   node,
   tab,
+  swapTargets,
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
@@ -631,6 +661,7 @@ function WorkbenchRegionLeaf({
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
+  swapTargets: RegionSwapTargets
   groupId: string
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
@@ -642,7 +673,6 @@ function WorkbenchRegionLeaf({
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const swapRegions = useAppStore((state) => state.swapRegions)
   const promoteRegionToTab = useAppStore((state) => state.promoteRegionToTab)
-  const sessions = useWorkbenchTabSessions(tab)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
@@ -733,10 +763,7 @@ function WorkbenchRegionLeaf({
       // Object.values 的插入顺序——这样同名多格的编号（Terminal 1 / 2…）与用户眼里的位置对得上。
       swapMenu={regionSwapMenuEntries({
         regionId: node.regionId,
-        regions: regionIds(tab.layout.root).flatMap((regionId) => {
-          const region = tab.regions[regionId]
-          return region ? [{ regionId, label: regionSurfaceLabel(region, sessions) }] : []
-        }),
+        regions: swapTargets,
         swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, b)
       })}
       // 「单独变成一个 tab」（#487）：把右键点中的这一格从本 Tab 摘出、单独成为一张新 Tab。只在多格时
@@ -819,6 +846,7 @@ function WorkbenchRegionBranch({
   node,
   nodePath,
   tab,
+  swapTargets,
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
@@ -827,6 +855,7 @@ function WorkbenchRegionBranch({
   node: Extract<WorkbenchRegionLayoutNode, { type: 'split' }>
   nodePath: string
   tab: WorkbenchTab
+  swapTargets: RegionSwapTargets
   groupId: string
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
@@ -858,6 +887,7 @@ function WorkbenchRegionBranch({
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           tab={tab}
+          swapTargets={swapTargets}
           groupId={groupId}
           surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
@@ -876,6 +906,7 @@ function WorkbenchRegionBranch({
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           tab={tab}
+          swapTargets={swapTargets}
           groupId={groupId}
           surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
@@ -1398,8 +1429,8 @@ export function WorkspaceWorkbench({
         const tabVisible = targetId !== null || (visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
-          {ownerId ? <WorkbenchRegionNode
-            node={tab.layout.root} nodePath="" tab={tab} groupId={ownerId}
+          {ownerId ? <WorkbenchRegionTree
+            tab={tab} groupId={ownerId}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
             interactiveResize={interactiveResize}

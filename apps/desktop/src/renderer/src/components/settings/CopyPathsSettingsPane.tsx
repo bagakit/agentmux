@@ -29,7 +29,7 @@ export function CopyPathsSettingsPane({ copyPathsAsAbsolute, onSave }: {
   return (
     <div className="settings-pane-stack">
       <section className="settings-group">
-        <header><span>Home directory in copied paths</span><small>{saved ? 'Absolute' : 'Abbreviated'}</small></header>
+        <header><span>Home directory in copied paths</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
           <input
             type="checkbox"

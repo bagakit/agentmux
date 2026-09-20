@@ -209,11 +209,13 @@ export function assertUiRuntimeObservation(observation, confirmation) {
 /** Preflight before closing the GUI. Never signals or starts a Runtime. */
 export async function prepareRuntimeUpgrade(currentApp, candidateApp) {
   const old = await artifact(currentApp), candidate = await artifact(candidateApp)
-  fail(old.socketPath === candidate.socketPath && old.stateDirectory === candidate.stateDirectory,
-    'Runtime upgrade changes the durable host address. No application was changed.')
+  fail(old.socketPath === candidate.socketPath,
+    'Runtime upgrade changes the host socket address. No application was changed.')
   const liveness = await probeSocketLiveness(old.socketPath)
   if (liveness === 'dead') return null
   fail(liveness === 'alive', 'Runtime listener liveness is unknown; no application was changed.')
+  fail(old.stateDirectory === candidate.stateDirectory,
+    'Runtime upgrade changes the durable host address. No application was changed.')
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-install-sdk-'))
   try {
     const oldSdk = await extractSdk(old, join(temporary, 'old'))

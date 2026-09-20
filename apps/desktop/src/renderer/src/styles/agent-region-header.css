@@ -8,3 +8,4 @@
 .agent-region-header__more { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; }
 .agent-region-header__more:hover, .agent-region-header__more[data-state='open'] { color: var(--text); background: var(--surface-3); }
 .agent-region-menu { max-height: calc(100vh - 2 * var(--sp-4)); overflow-y: auto; }
+.agent-region-menu, .region-context-menu { max-width: min(40ch, calc(100vw - 2 * var(--sp-4))); }

@@ -2,6 +2,7 @@ const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs/promises'), path = require('node:path')
+const swapProof = require('./swap.cjs')
 const [html, privateRoot, evidence, probe = 'complete'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -141,6 +142,7 @@ app.whenReady().then(async()=>{
     await waitFor('Boolean(window.identityMenu)')
     if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
+    else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     else{
       for(const width of [640,420,320])for(const mode of ['terminal','activity','history','cold','notice','search','readonly']){
         result.stage={width,mode};await seed(width,mode);const names=await identity()
@@ -161,6 +163,7 @@ app.whenReady().then(async()=>{
       for(const width of [640,320])for(const label of ['Copy Region Address','Split','Move to New Tab'])await selection(label,width)
       await selection('Copy Region Address',320,'touch');await selection('Copy Region Address',320,'keyboard')
       assert.equal(result.selections.length,8)
+      result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     }
     result.passed=true
   }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack,stage:result.stage}}

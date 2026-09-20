@@ -3,11 +3,14 @@ import '../agent-region-actions/entry'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
+import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
 const tabId = 'region-actions-tab', leftId = 'region-actions-target', rightId = 'region-actions-survivor'
-const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher']
+const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher', 'Build reviewer']
 const original = (window as any).regionActions
+const first = useAppStore.getState().sessions[0]!
+const third = (await api.sessions.launchAgent({ executorId: first.executorId!, hostId: 'local', workspacePath: first.workspacePath })).session
 const clipboard: string[] = [], resizes: unknown[] = [], selections: unknown[] = []
 const copy = api.ui.writeClipboardText, resize = api.sessions.resize
 api.ui.writeClipboardText = async text => { clipboard.push(text); await copy(text) }
@@ -21,7 +24,7 @@ for(const type of ['pointerdown','click','keydown'])document.addEventListener(ty
 }, true)
 function naming() {
   const sessions = useAppStore.getState().sessions
-  flushSync(() => useAppStore.setState({sessions: sessions.map((session, index) => index === 1 ? {
+  flushSync(() => useAppStore.setState({sessions: sessions.map((session, index) => index > 0 ? {
     ...session, providerId: sessions[0]!.providerId, executorId: sessions[0]!.executorId, label: sessions[0]!.label
   } : session), agentNames: Object.fromEntries(sessions.map((session, index) => [session.id, names[index]]))}))
 }
@@ -29,10 +32,25 @@ const probe = {
   names,
   mode(mode: 'terminal' | 'cold' | 'notice') { const generation = original.mode(mode); naming(); return generation },
   observe() { const generation = original.observe(); naming(); return generation },
+  swap() {
+    const generation = original.mode('terminal', third); naming()
+    const state = useAppStore.getState(), sessions = state.sessions
+    flushSync(() => useAppStore.setState({
+      tabs: { ...state.tabs, 'unrelated-swap-tab': createWorkbenchTab('unrelated-swap-tab', {
+        regionId: 'unrelated-swap-region', kind: 'launcher', workspaceId
+      }) },
+      agentComposerDrafts: Object.fromEntries(sessions.map(session => [session.id, `Unsent original ${session.id}`])),
+      agentSteerQueues: Object.fromEntries(sessions.map(session => [session.id, [{ operationId: `pending-${session.id}`,
+        runId: session.control.run.runId, text: `Unsent pending ${session.id}`, status: 'queued', enqueuedAt: 1 }]]))
+    }))
+    return generation
+  },
+  rename(index: number, name: string | null) { flushSync(() => useAppStore.getState().renameAgent(useAppStore.getState().sessions[index]!.id, name)) },
   focusNeighbor() { flushSync(() => useAppStore.getState().focusRegion(workspaceId, tabId, rightId, 'pointer')) },
   facts() {
     const state = useAppStore.getState()
     return { ...original.facts(), active: state.tabs[tabId]?.layout.activeRegionId, tabs: state.tabs,
+      drafts: state.agentComposerDrafts, queues: state.agentSteerQueues, names: state.agentNames,
       regionAddress: formatRegionAddress(leftId), clipboard: [...clipboard], resizes: [...resizes], selections: [...selections] }
   },
   terminal() {
