@@ -346,25 +346,31 @@
    Composer 争同一条边界），accent 表达状态而非装饰。用琥珀而非红：事实是「能干活，只是少一项能力」，
    不是「你完了」。它随条件消失而非随用户点关闭，因此不给关闭键。 */
 .service-window {
-  margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4);
-  display: grid; grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-4); align-items: start;
-  border: 1px solid color-mix(in oklab, var(--amber) 24%, var(--line-soft));
-  border-radius: var(--radius); background: radial-gradient(120% 120% at 0 0, color-mix(in oklab, var(--amber) 8%, transparent), transparent 52%), var(--surface-1); box-shadow: var(--elev-2), var(--hl);
+  margin:var(--sp-2) var(--sp-3) 0; padding:var(--sp-3);
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-3); align-items: start;
+  border: 0; border-radius: var(--radius-sm); background: var(--surface-1);
 }
 .service-window__icon { display: inline-flex; color: var(--amber); }
 /* 分不清是哪一类时语气更沉：从琥珀让出到中性，因为没有证据说该染成「需要注意」。 */
 .service-window[data-kind='indeterminate'] .service-window__icon { color: var(--text-3); }
-.service-window__body { min-width: 0; display: grid; gap:var(--sp-1); }
+.service-window__body { min-width: 0; display: grid; gap:var(--sp-1); overflow-wrap: anywhere; white-space: pre-wrap; }
 /* 三行：哪一步没走通（主）、现在按什么状态在跑、要恢复该做什么。 */
 .service-window__step { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
 .service-window__mode { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
-.service-window__restore { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.service-window__restore { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
+.service-window__details { font-size: var(--fs-meta); color: var(--text-2); }
+.service-window__details > summary { width: fit-content; cursor: pointer; color: var(--text-2); }
+.service-window__details > summary:focus-visible, .service-window__original:focus-visible { outline: var(--focus-line) solid 1px; outline-offset: 2px; }
+.service-window__original { display: grid; gap: var(--sp-2); max-height: min(18rem, 40vh); overflow-y: auto; padding-block: var(--sp-2); user-select: text; }
+.service-window__original > strong { font-size: var(--fs-body); }
 /* 错位 Agent 告示（T-005）：服务窗 + 一枚「找回」动作键，语汇沿用服务窗，键靠右对齐。 */
 
 /* 连续推进面板：一条状态告示 + 一排控制键，语汇沿用紧邻的 .service-window（Surface 填充 + elevation，
    不描边——描边会与 Composer 争同一条边界）。状态用文字表达，控制键是无底色的图标键，同 .icon-button。 */
-.continuous-progress-control { color: var(--text-2); font-size: var(--fs-meta); padding: var(--sp-1) var(--sp-3); }
-.continuous-progress-control > summary { cursor: pointer; }
+.continuous-progress-control { grid-column: 1 / -1; min-width: 0; color: var(--text-2); font-size: var(--fs-meta); padding: var(--sp-1) var(--sp-3); }
+.continuous-progress-control > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.continuous-progress-control__label { white-space: nowrap; }
+.continuous-progress-control__status { flex-basis: 100%; color: var(--text-2); overflow-wrap: anywhere; }
 .continuous-progress-control__target { display: block; overflow-wrap: anywhere; }
 .continuous-progress-control form { display: grid; gap: var(--sp-2); }
 .continuous-progress-control label { display: grid; gap: var(--sp-1); }

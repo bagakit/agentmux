@@ -285,6 +285,11 @@ export function SessionPane({
             : 'Creation is confirmed. Process observation and input availability are not yet confirmed.',
           restore: 'Check again to re-read this same Session and Timeline. No new Agent will be created.'
         }
+      }} summary={{
+        step: 'Agent created; projection unconfirmed',
+        mode: session?.processState === 'running' ? 'Confirmed Session running; input remains available.'
+          : 'Creation confirmed; process and input unconfirmed.',
+        restore: 'Check again for this same Session and Timeline.'
       }} />
       {!readOnly ? <button type="button" className="small-button" disabled={refreshing}
         onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null}

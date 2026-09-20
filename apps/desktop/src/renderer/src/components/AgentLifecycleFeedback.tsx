@@ -22,8 +22,13 @@ export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObse
   const current = 'subject' in owner ? retained.current : message && failure && lifecycleFailureBelongsTo(failure, owner) ? { failure, message } : null
   if (!current) return null
   if (dismissed && !('subject' in owner)) return <button type="button" className="small-button" onClick={reopen}>Show recovery error</button>
+  const notice = agentLifecycleFailureNotice(current.failure, current.message)
   return <div className="agent-launch-notice">
-    <ServiceWindowNotice notice={agentLifecycleFailureNotice(current.failure, current.message)} />
+    <ServiceWindowNotice notice={notice} summary={{ step: notice.notice.step,
+      mode: current.failure.step === 'launch' ? 'Agent availability unconfirmed; draft and workbench kept.'
+        : `Run last observed ${current.failure.lastProcessState}; availability unconfirmed. Session, workbench and draft kept.`,
+      restore: current.failure.step === 'launch' ? 'Review details; retry Start agent with the preserved draft.'
+        : 'Review details; retry Resume for this same Session.' }} />
     {refreshObservation ? <button type="button" className="small-button" disabled={busy} onClick={refreshObservation}>Refresh observation</button> : null}
     <button type="button" className="small-button" disabled={busy} onClick={retry}>Retry {current.failure.step === 'launch' ? 'Start agent' : 'Resume'}</button>
     {!('subject' in owner) ? <button type="button" className="small-button" onClick={dismiss}>Dismiss</button> : null}

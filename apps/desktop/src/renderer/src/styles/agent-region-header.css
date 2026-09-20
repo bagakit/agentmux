@@ -1,6 +1,8 @@
 /* One Session identity above its native/recorded content; the original Workbench X retains its slot. */
-.agent-surface:has(> .agent-region-header) { grid-template-rows: auto minmax(0, 1fr) auto; }
-.agent-surface:has(> .agent-region-header):has(> .agent-launch-notice) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.agent-surface:has(> .agent-region-header) { display: flex; flex-direction: column; }
+.agent-surface:has(> .agent-region-header) > .agent-body { flex: 1 1 0; }
+.agent-surface:has(> .agent-region-header) > :not(.agent-body) { flex-shrink: 0; }
+.agent-surface:has(> .agent-region-header) > .agent-launch-notice { flex: 0 1 auto; max-height: 35%; overflow-y: auto; }
 .agent-region-header { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: var(--sp-8); padding: 0 var(--region-close-clearance, var(--sp-3)) 0 var(--sp-3); background: var(--surface-1); }
 .agent-region-header__name { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .agent-region-header__meta { flex: 0 1 35%; min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
