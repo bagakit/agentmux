@@ -94,7 +94,7 @@ async function capture(name) {
   const png=(await win.webContents.capturePage()).toPNG();assert.ok(png.length>0,'Actual captured image is nonempty');await fs.writeFile(path.join(evidence,name+'.png'),png)
   return createHash('sha256').update(png).digest('hex')
 }
-async function composerVisual() {
+async function composerVisual(layoutOwning=false) {
   result.captureOnly=true;result.aestheticReview='not-performed'
   const composer=`${surface}.querySelector('.composer')`,editor=`${composer}.querySelector('[role="textbox"]')`
   const toggle=`${composer}.querySelector('.composer-tool--mode')`,control=`${composer}.querySelector('.continuous-progress-control')`
@@ -102,6 +102,30 @@ async function composerVisual() {
     result.stage={width,state};await waitFor(visible(editor));await waitFor(visible(`${control}?.querySelector('summary')`));await painted()
     const file=`${width}-composer-${state}.png`,png=await capture(file.slice(0,-4))
     result.frames.push({width,state,file,png})
+    if(layoutOwning&&state==='progress-open'){
+      const observed=await evaluate(`(()=>{
+        const composer=${composer},form=composer.querySelector('.continuous-progress-control form')
+        const checkbox=form.querySelector('input[type="checkbox"]'),label=checkbox.closest('label')
+        const text=Array.from(label.childNodes).find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim())
+        const range=document.createRange();range.selectNodeContents(text)
+        const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
+        const fields=Array.from(form.querySelectorAll('input:not([type="checkbox"]),textarea')).map(node=>{
+          const style=getComputedStyle(node);return {rect:rect(node),font:style.fontFamily,fontSize:style.fontSize,paddingTop:parseFloat(style.paddingTop),paddingLeft:parseFloat(style.paddingLeft),radius:parseFloat(style.borderTopLeftRadius)}
+        })
+        return {checkbox:rect(checkbox),text:rect(range),fields,parentFont:getComputedStyle(form).fontFamily,parentFontSize:getComputedStyle(form).fontSize,draft:composer.querySelector('[role="textbox"]').textContent}
+      })()`)
+      result.progressLayouts??=[];result.progressLayouts.push({width,...observed})
+      assert.equal(observed.fields.length,2,'Actual unbound form retains its two editing fields')
+      assert.ok(observed.checkbox.width>0&&observed.checkbox.width<observed.fields[0].rect.width,'Checkbox must retain intrinsic width rather than stretch with editing fields')
+      assert.ok(observed.text.left>=observed.checkbox.right,'Checkbox precedes its associated text on the same row')
+      assert.ok(observed.text.top<observed.checkbox.bottom&&observed.checkbox.top<observed.text.bottom,'Checkbox and associated text share a readable row')
+      for(const field of observed.fields){
+        assert.equal(field.font,observed.parentFont,'Editing fields retain the current form typography')
+        assert.equal(field.fontSize,observed.parentFontSize,'Editing fields do not shrink the form text')
+        assert.ok(field.paddingTop>0&&field.paddingLeft>0&&field.radius>0,'Editing fields retain intentional inset and shape')
+      }
+      assert.match(observed.draft,/This draft remains unsent\./,'Opening progress retains the actual long draft')
+    }
   }
   async function draft(text){
     await waitFor(visible(editor));await click(editor)
@@ -123,6 +147,7 @@ async function composerVisual() {
     await phase('collapsed');await frame(width,'one-line-return')
   }
   assert.ok(result.frames.length>0,'Actual composer scenes are nonempty')
+  if(layoutOwning)assert.equal(result.progressLayouts?.length,2,'Both actual widths have a nonempty form observation')
 }
 async function selection(label,width,input='mouse') {
   await seed(width);await identity();await open()
@@ -170,7 +195,7 @@ app.whenReady().then(async()=>{
     result.consoleErrors=[];win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
-    if(probe==='composer-visual')await composerVisual()
+    if(probe==='composer-visual'||probe==='composer-layout-owning')await composerVisual(probe==='composer-layout-owning')
     else if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
     else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})

@@ -374,7 +374,10 @@
 .continuous-progress-control__target { display: block; overflow-wrap: anywhere; }
 .continuous-progress-control form { display: grid; gap: var(--sp-2); }
 .continuous-progress-control label { display: grid; gap: var(--sp-1); }
-.continuous-progress-control input, .continuous-progress-control textarea { width: 100%; min-width: 0; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); }
+.continuous-progress-control input:not([type='checkbox']), .continuous-progress-control textarea { width: 100%; min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
+.continuous-progress-control label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: var(--sp-2); }
+.continuous-progress-control input[type='checkbox'] { flex: none; width: auto; margin: 0; accent-color: var(--blue); }
+.continuous-progress-control :is(input, textarea):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .continuous-progress-control .continuous-progress-panel { margin: 0; padding: var(--sp-2) 0; background: transparent; box-shadow: none; }
 .continuous-progress-panel { margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4); display: grid; gap:var(--sp-2); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
 .continuous-progress-panel__summary { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap:var(--sp-2) var(--sp-4); }
