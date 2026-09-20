@@ -694,6 +694,12 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:replay', async (event, attachmentId: string, afterByte: number) => (
     args.runtime.readSessionReplay(event.sender.id, attachmentId, afterByte)
   ))
+  handleWithEvent('sessions:refreshAttachment', async (event, session: SessionControl, attachmentId: string | null, afterByte: number) => {
+    const result = await args.runtime.refreshSessionAttachment(event.sender.id, session, attachmentId, afterByte, config)
+    if (!event.sender.isDestroyed()) return result
+    if (attachmentId === null) await args.runtime.detachSession(event.sender.id, result.attachmentId)
+    throw new Error('The Desktop View disappeared before its observation refresh was delivered.')
+  })
   handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })

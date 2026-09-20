@@ -6,6 +6,7 @@ import type {
   AgentMuxClientEvent,
   AgentMuxEvidence,
   AgentMuxInteractionRequest,
+  AgentMuxObservationOrigin,
   AgentMuxRun,
   AgentMuxRunDataEvent,
   AgentMuxRunExitEvent,
@@ -57,9 +58,10 @@ export class AgentMuxClientEventPublisher {
     }
   }
 
-  publishRunState(run: AgentMuxRun, agentSessionId?: string): void {
+  publishRunState(run: AgentMuxRun, agentSessionId?: string, observationOrigin?: AgentMuxObservationOrigin): void {
     this.publish({
       type: 'process-state',
+      ...(observationOrigin ? { observationOrigin } : {}),
       ...(agentSessionId === undefined ? {} : { agentSessionId }),
       run: runRef(run),
       state: run.state,

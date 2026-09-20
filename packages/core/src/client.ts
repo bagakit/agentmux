@@ -111,6 +111,7 @@ import type {
   AgentMuxAgentWriteInput,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
+  AgentMuxObservationOrigin,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
   AgentMuxRun,
@@ -1079,10 +1080,10 @@ export class AgentMuxClient {
    * （runtime-controller 在没有既有 owner 时调 `reattachAgent`，即一次视图重挂）。
    *
    * 谁**不会**：用户点 Resume。这条降级只在进程还在跑时产生，而 Resume 走 `ensureAgentContinuity`，
-   * 对 running 的 Run 判出 `reattachable` 就直接返回投影，不碰 attach——实跑验证过 attach 调用数为 0、
-   * 标记原样留着。渲染端的服务窗文案据此点名「切走再切回」而不是 Resume（见 service-window-notice.ts）。
+   * 对 running 的 Run 判出 `reattachable` 就直接返回投影，不碰 attach；观察刷新沿公开
+   * refreshRunAttachment 重建原 live owner，真实 attach 成功后才撤销输出通道事实。
    */
-  private async clearOutputChannel(session: AgentMuxStoredAgentSession): Promise<void> {
+  private async clearOutputChannel(session: AgentMuxStoredAgentSession, observationOrigin?: AgentMuxObservationOrigin): Promise<void> {
     if (!session.terminalOutputChannel) return
     const next = await this.updateExactAgentSession(
       session.agentSessionId,
@@ -1094,7 +1095,8 @@ export class AgentMuxClient {
         return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }
       }
     )
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next),
+      ...(observationOrigin ? { observationOrigin } : {}) })
   }
 
   /**
@@ -1597,15 +1599,39 @@ export class AgentMuxClient {
   }
 
   async attachTerminal(runId: string, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {
+    return await this.attachTerminalRun(runId, afterByte, view)
+  }
+
+  private async attachTerminalRun(runId: string, afterByte: number, view: AgentMuxRunAttachmentView,
+    observationOrigin?: AgentMuxObservationOrigin): Promise<AgentMuxRunAttachment> {
     this.requireConnected()
-    const attached = await this.kernel.attach(runId, afterByte, undefined, view)
+    const attached = await this.kernel.attach(runId, afterByte, observationOrigin ? snapshot => {
+      if (snapshot.run.runId !== runId || this.registry.findByRun(runRef(runId))) {
+        throw new AgentMuxError('Terminal refresh returned another Run or Session.', 'STALE_AGENT_SESSION_BINDING')
+      }
+    } : undefined, view, Boolean(observationOrigin))
     if (this.registry.findByRun(runRef(runId))) {
       await this.kernel.detach(runId)
       throw new AgentMuxError('Requested Run belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
     }
     this.runPids.set(runId, attached.run.pid)
     const run = this.projectRun(attached.run)
-    this.publisher.publishRunState(run)
+    this.publisher.publishRunState(run, undefined, observationOrigin)
+    return { ...attached, run }
+  }
+
+  /** Replace this client's live observation of an exact Run, keeping its process and Input untouched. */
+  async refreshRunAttachment(ref: AgentMuxRunRef, afterByte = 0,
+    view: AgentMuxRunAttachmentView = 'raw', operationId: string = randomUUID()): Promise<AgentMuxRunAttachment> {
+    this.requireConnected()
+    safeId(operationId, 'Attachment refresh operation id')
+    if (this.registry.isRetiredRun(ref)) throw new AgentMuxError('Retired Agent Run cannot be refreshed.', 'STALE_AGENT_SESSION_BINDING')
+    const observationOrigin: AgentMuxObservationOrigin = { kind: 'attachment-refresh', operationId, run: { ...ref } }
+    const agent = this.registry.findByRun(ref)
+    if (!agent) return await this.attachTerminalRun(ref.runId, afterByte, view, observationOrigin)
+    const { session, attached } = await this.attachAgentRun(agent.agentSessionId, afterByte, undefined, view, observationOrigin)
+    const run = this.projectRun(attached.run, session)
+    this.publisher.publishRunState(run, session.agentSessionId, observationOrigin)
     return { ...attached, run }
   }
 
@@ -2166,7 +2192,8 @@ export class AgentMuxClient {
     agentSessionId: string,
     afterByte = 0,
     beforeLive?: (snapshot: CtxmuxAdapterAttachment, session: AgentMuxStoredAgentSession) => void,
-    view: AgentMuxRunAttachmentView = 'raw'
+    view: AgentMuxRunAttachmentView = 'raw',
+    observationOrigin?: AgentMuxObservationOrigin
   ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
@@ -2178,7 +2205,8 @@ export class AgentMuxClient {
       this.assertAgentRun(session, snapshot.run)
     }
     const attached = await this.kernel.attach(session.run.runId, afterByte,
-      beforeLive ? (snapshot) => { validate(snapshot); beforeLive(snapshot, session) } : undefined, view)
+      beforeLive || observationOrigin ? (snapshot) => { validate(snapshot); beforeLive?.(snapshot, session) } : undefined,
+      view, Boolean(observationOrigin))
     try {
       validate(attached)
     } catch (error) {
@@ -2196,8 +2224,8 @@ export class AgentMuxClient {
     // 恢复路径：实时通道又通了，撤下「输出通道断了」的降级事实。放在这处共享核心而非两个调用方各自
     // 抄一遍——它对两条路（自动重连 / 用户 Resume）的处置相同，不像 process-state/replay 那样分叉。
     // 缺席即 no-op（clearOutputChannel 早退），所以对没进过降级的正常 attach 零成本。
-    await this.clearOutputChannel(session)
-    return { session, attached }
+    await this.clearOutputChannel(session, observationOrigin)
+    return { session: this.requireAgentSession(agentSessionId), attached }
   }
 
   // Per-Agent-Session serialization of continuity attempts. NOT what bounds new Runs to one — the

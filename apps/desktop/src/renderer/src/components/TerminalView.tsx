@@ -84,7 +84,7 @@ import {
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
-import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
@@ -180,7 +180,8 @@ export function TerminalView({
   visible = true,
   autoFocus = true,
   readOnly = false,
-  linkOrigin
+  linkOrigin,
+  onObservationRefresh
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -197,6 +198,7 @@ export function TerminalView({
   autoFocus?: boolean
   readOnly?: boolean
   linkOrigin: OpenHttpLinkOrigin
+  onObservationRefresh?(refresh: (() => Promise<void>) | null): void
 }) {
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
@@ -205,6 +207,9 @@ export function TerminalView({
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
+  const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
+  const onObservationRefreshRef = useRef(onObservationRefresh)
+  onObservationRefreshRef.current = onObservationRefresh
   const webglVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
   const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
@@ -264,6 +269,9 @@ export function TerminalView({
   const [revealOverdue, setRevealOverdue] = useState(false)
   const [liveOutputReady, setLiveOutputReady] = useState(false)
   const [attachFailed, setAttachFailed] = useState(false)
+  const [attachmentFailure, setAttachmentFailure] = useState<{ step: string; message: string } | null>(null)
+  const [refreshingObservation, setRefreshingObservation] = useState(false)
+  const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverVanishedRunRef = useRef<string | null>(null)
   const recoverSession = useAppStore((state) => state.recoverSession)
   const [hasOutput, setHasOutput] = useState(false)
@@ -422,6 +430,8 @@ export function TerminalView({
     // cannot be reported as ready or accidentally invite input.
     setLiveOutputReady(false)
     setAttachFailed(false)
+    setAttachmentFailure(null)
+    setRefreshingObservation(false)
     setHasOutput(false)
     setReplayGap(false)
     setRuntimeHistoryGap(false)
@@ -645,6 +655,8 @@ export function TerminalView({
     let attachmentId: string | null = null
     let readyForLiveOutput = false
     let replayingContinuation = true
+    let observationPending = false
+    let continuationKnown = false
     const acceptsCurrentInput = (): boolean =>
       !readOnlyRef.current && terminalAcceptsInput({
         canControlRun: canControlRunRef.current,
@@ -683,10 +695,22 @@ export function TerminalView({
     // this decoder never participates in the byte cursor, overlap, or terminal writes.
     const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
+    const preserveRowResizeSelection = (resize: () => void): void => {
+      const selected = terminal.getSelectionPosition()
+      const cols = terminal.cols
+      const buffer = terminal.buffer.active
+      resize()
+      // xterm clears selections even when only unused screen rows change. A nearby
+      // service window must retain the user's selected history at the same columns.
+      if (selected && terminal.cols === cols && terminal.buffer.active === buffer) {
+        const length = (selected.end.y - selected.start.y) * cols + selected.end.x - selected.start.x
+        terminal.select(selected.start.x, selected.start.y, length)
+      }
+    }
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
-      fit: () => fit.fit(),
-      applyOwnerGrid: ({ cols, rows }) => terminal.resize(cols, rows),
+      fit: () => preserveRowResizeSelection(() => fit.fit()),
+      applyOwnerGrid: ({ cols, rows }) => preserveRowResizeSelection(() => terminal.resize(cols, rows)),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => {
         // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
@@ -767,15 +791,25 @@ export function TerminalView({
 
     // Initial attach and reconnect consume the same authoritative ordering. Synthetic bytes
     // bypass original-output inspectors, while input readiness keeps its existing live owner.
-    const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }): Promise<void> => {
+    const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }, preserve = false): Promise<void> => {
       // Exhaust the same ordering iterator before changing the canvas. Steps hold byte views,
       // not copied payload; an invalid tail or revision cannot leave a partially restored seed.
       const steps = [...terminalContinuationSteps(snapshot)]
+      if (preserve && (!continuationKnown || snapshot.terminal.type !== 'basic-vt' ||
+        snapshot.terminal.checkpoint.throughByte > cursor || steps.some(step => step.type === 'resized' &&
+          step.resizeRevision > resizeRevision && step.throughByte < cursor))) {
+        // A later seed cannot fill the missing interval without replacing this Region's history.
+        // Keep its canvas and disclose the continuation gap; the new live stream starts at its real cut.
+        acceptUncontinuedSnapshot(snapshot, snapshot.terminal.type === 'unknown' || snapshot.terminal.type === 'unavailable'
+          ? snapshot.terminal : { type: 'unavailable', reason: 'source_gap' })
+        return
+      }
       replayingContinuation = true
       try {
         for (const step of steps) {
           if (disposed) return
           if (step.type === 'restore') {
+            if (preserve) continue
             viewport.acceptOwnerSize(step.checkpoint.size)
             await restoreTerminalCheckpoint(step.restoreBytes, async (data) => {
               if (!disposed) await terminalWrite(terminal, data)
@@ -783,26 +817,35 @@ export function TerminalView({
             cursor = step.checkpoint.throughByte
             resizeRevision = step.checkpoint.resizeRevision
           } else if (step.type === 'resized') {
+            if (preserve && step.resizeRevision <= resizeRevision) continue
             viewport.acceptOwnerSize(step.size)
             resizeRevision = step.resizeRevision
           } else {
-            cursor = await hydrateTerminalReplay([step], writeOutput) ?? cursor
+            if (preserve) {
+              const composed = composeTerminalLiveOutputWrite([step], cursor)
+              if (composed.gap) throw new Error('Refresh does not cover this Region’s displayed byte cursor.')
+              if (composed.dataBytes.byteLength) await writeOutput(composed.dataBytes)
+              cursor = composed.cursor
+            } else cursor = await hydrateTerminalReplay([step], writeOutput) ?? cursor
           }
         }
         resizeRevision = snapshot.resizeRevision
+        continuationKnown = snapshot.terminal.type === 'basic-vt'
+        if (continuationKnown) setContinuationAbsence(null)
       } finally {
         replayingContinuation = !readyForLiveOutput
       }
     }
 
-    const acceptUncontinuedSnapshot = (snapshot: AgentMuxRunAttachment, absence: TerminalContinuationAbsence): void => {
+    const acceptUncontinuedSnapshot = (snapshot: { run: Pick<AgentMuxRunAttachment['run'], 'latestOutputBytes'> & Partial<Pick<AgentMuxRunAttachment['run'], 'cols' | 'rows'>>; resizeRevision: number }, absence: TerminalContinuationAbsence): void => {
       // This is the snapshot processing fence, never an ACK or proof that old bytes were read.
       cursor = Math.max(cursor, snapshot.run.latestOutputBytes)
       resizeRevision = snapshot.resizeRevision
-      if (snapshot.run.cols !== null && snapshot.run.rows !== null) {
+      if (typeof snapshot.run.cols === 'number' && typeof snapshot.run.rows === 'number') {
         viewport.acceptOwnerSize({ cols: snapshot.run.cols, rows: snapshot.run.rows })
       }
       liveGapRedrawPending = false
+      continuationKnown = false
       setContinuationAbsence({ ...absence, duringReconnect: true })
     }
 
@@ -904,7 +947,7 @@ export function TerminalView({
       if (output) {
         liveOutputQueue.admit(output)
       }
-      if (liveDrain) return
+      if (liveDrain || observationPending) return
       const drain = drainLiveOutput()
       liveDrain = drain
       outputTail = drain
@@ -1098,18 +1141,32 @@ export function TerminalView({
       reveal(decision.overdue)
     }, TERMINAL_REVEAL_DEADLINE_MS)
 
-    void (async () => {
+    const attach = async (refresh = false): Promise<void> => {
+      const preserve = refresh && readyForLiveOutput
       try {
-        const result = await api.sessions.attach(session.control, 0)
+        if (refresh) {
+          const metadata = await refreshSession(session.id)
+          if (disposed) return
+          if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
+            throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
+          }
+        }
+        await outputTail
+        if (disposed) return
+        const remembered = rememberTerminalViewport(terminal.buffer.active.viewportY, terminal.buffer.active.baseY)
+        observationPending = refresh
+        const result = refresh
+          ? await api.sessions.refreshAttachment(session.control, attachmentId, cursor)
+          : await api.sessions.attach(session.control, 0)
         if (disposed) {
-          await api.sessions.detach(result.attachmentId)
+          if (attachmentId === null) await api.sessions.detach(result.attachmentId)
           return
         }
         attachmentId = result.attachmentId
         if (result.terminal.type === 'not-requested') throw new Error('The Runtime did not provide the requested terminal representation.')
         const restored = result.terminal.type === 'basic-vt'
         const hasReplay = restored || result.replay.some((chunk) => chunk.dataBytes.byteLength > 0)
-        if (!restored && result.currentSize) viewport.acceptOwnerSize(result.currentSize)
+        if (!preserve && !restored && result.currentSize) viewport.acceptOwnerSize(result.currentSize)
         setReplaySizeUnknown(hasReplay && !restored && result.currentSize === null)
         if (result.terminal.type === 'unknown' || result.terminal.type === 'unavailable') setContinuationAbsence(result.terminal)
         if (result.gap && !restored) {
@@ -1121,8 +1178,17 @@ export function TerminalView({
         await applyContinuation({
           run: { ...session.control.run, latestOutputBytes: result.session.latestOutputBytes },
           terminal: result.terminal, replay: result.replay, resizeRevision: result.resizeRevision
-        })
+        }, preserve)
         if (disposed) return
+        setAttachFailed(false)
+        setAttachmentFailure(null)
+        if (preserve) {
+          const position = restoreTerminalViewport(remembered, terminal.buffer.active.baseY)
+          if (position.kind === 'latest') terminal.scrollToBottom()
+          else terminal.scrollToLine(position.line)
+          reveal()
+          return
+        }
         setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
         // Only the first hidden frame belongs to initial positioning. The reveal deadline may
         // already have made this buffer readable; a late replay must preserve the user's scroll.
@@ -1161,7 +1227,7 @@ export function TerminalView({
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
-          if (vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
+          if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
             // The durable Agent Session is still the owner. Ask the store to perform the
             // Core continuity decision; when it produces a new Run, this component's existing
             // run-id dependency reattaches the same terminal without a second xterm surface.
@@ -1171,21 +1237,45 @@ export function TerminalView({
             return
           }
           setAttachFailed(true)
-          await terminalWrite(
-            terminal,
-            `\r\n\u001b[31m[Attach failed: ${detail}]\u001b[0m\r\n`
-          )
+          setAttachmentFailure({ step: refresh ? 'Refreshing this Region’s observation' : 'Attaching this Region’s output', message: detail })
           // Preserve an already-visible deadline warning when attach fails late. Clearing it would
           // turn the only honest diagnosis into a silent failure after the canvas was handed back.
           reveal(false, false)
         }
+      } finally {
+        observationPending = false
+        if (!disposed && readyForLiveOutput && liveOutputQueue.length) scheduleLiveOutputDrain()
       }
-    })()
+    }
+    let operation: Promise<void> | null = null
+    const refreshObservation = (): Promise<void> => {
+      if (operation) return operation
+      setRefreshingObservation(true)
+      const waiting = setTimeout(() => {
+        if (!disposed) setAttachmentFailure({ step: 'Refreshing this Region’s observation',
+          message: 'The observation reply is still pending. Current Run availability and input delivery are unconfirmed.' })
+      }, TERMINAL_REVEAL_DEADLINE_MS)
+      const current = attach(true).finally(() => {
+        clearTimeout(waiting)
+        if (operation === current) operation = null
+        if (!disposed) setRefreshingObservation(false)
+      })
+      operation = current
+      return current
+    }
+    const initial = attach().finally(() => { if (operation === initial) operation = null })
+    operation = initial
+    refreshObservationRef.current = refreshObservation
+    onObservationRefreshRef.current?.(refreshObservation)
 
     viewport.observeViewport()
     if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      if (refreshObservationRef.current === refreshObservation) {
+        refreshObservationRef.current = null
+        onObservationRefreshRef.current?.(null)
+      }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()
@@ -1380,6 +1470,12 @@ export function TerminalView({
   const continuationNotice = serviceNoticeToRender(classifyServiceNotice(
     terminalContinuationOutcome(continuationAbsence, session.processState)
   ))
+  const sessionObservationNotice = session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null
+  const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
+    step: attachmentFailure.step,
+    mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}; current availability and input delivery are unconfirmed. Your Session, history and draft are kept.`,
+    restore: 'Refresh observation to re-read this Session and reopen its output connection. Unknown Input is never replayed.'
+  } } : null
 
   return (
     <Fragment>
@@ -1488,12 +1584,16 @@ export function TerminalView({
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
-          {revealNotice || replayGeometryNotice || viewportSyncNotice || continuationNotice ? (
+          {sessionObservationNotice || attachmentNotice || revealNotice || replayGeometryNotice || viewportSyncNotice || continuationNotice ? (
             <div className="terminal-service-window">
+              <ServiceWindowNotice notice={attachmentNotice} />
+              <ServiceWindowNotice notice={sessionObservationNotice} />
               <ServiceWindowNotice notice={revealNotice} />
               <ServiceWindowNotice notice={replayGeometryNotice} />
               <ServiceWindowNotice notice={viewportSyncNotice} />
               <ServiceWindowNotice notice={continuationNotice} />
+              <button type="button" className="small-button" disabled={refreshingObservation}
+                onClick={() => void refreshObservationRef.current?.()}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button>
             </div>
           ) : null}
           {!hydrating && !historyReadFailure && (replayGap || runtimeHistoryGap) ? (

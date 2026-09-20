@@ -81,6 +81,7 @@ type SessionAttachmentOwner = {
   control: SessionControl
   controlIdentity: string
   attachmentIds: Set<string>
+  refresh?: Promise<SessionAttachResult>
 }
 
 type SessionAttachmentLease = {
@@ -860,7 +861,8 @@ export class RuntimeController {
     webContentsId: number,
     control: SessionControl,
     afterByte: number,
-    config: AppConfig
+    config: AppConfig,
+    refresh?: { attachmentId: string | null }
   ): Promise<SessionAttachResult> {
     const key = sessionAttachmentKey(control)
     const rendererGeneration = this.rendererGenerations.get(webContentsId) ?? 0
@@ -873,7 +875,9 @@ export class RuntimeController {
       }
       let retainedRun: { runId: string } | null = null
       try {
-        const attached = existing
+        const attached = refresh
+          ? await client.refreshRunAttachment(control.run, afterByte, 'terminal')
+          : existing
           ? await client.readRunReplay(control.run, afterByte, 'terminal')
           : control.kind === 'agent'
             ? (await client.reattachAgent(control.agentSessionId, afterByte, 'terminal')).attachment
@@ -899,7 +903,8 @@ export class RuntimeController {
             attached.run.acceptedInputBytes
           )
         }
-        const attachmentId = randomUUID()
+        const attachmentId = refresh?.attachmentId ?? randomUUID()
+        if (refresh?.attachmentId) this.requireSessionAttachmentLease(webContentsId, refresh.attachmentId, key)
         const owner = existing ?? { control, controlIdentity: identity, attachmentIds: new Set<string>() }
         owner.attachmentIds.add(attachmentId)
         this.sessionAttachmentOwners.set(key, owner)
@@ -927,6 +932,36 @@ export class RuntimeController {
         throw error
       }
     })
+  }
+
+  /** Reopen the shared Core observation, retaining every Region's original lease. */
+  async refreshSessionAttachment(webContentsId: number, control: SessionControl,
+    attachmentId: string | null, afterByte: number, config: AppConfig): Promise<SessionAttachResult> {
+    const key = sessionAttachmentKey(control)
+    if (attachmentId) this.requireSessionAttachmentLease(webContentsId, attachmentId, key)
+    const owner = this.sessionAttachmentOwners.get(key)
+    if (owner && owner.controlIdentity !== sessionControlIdentity(control)) throw new Error('Attachment refresh belongs to another Session.')
+    let refresh = owner?.refresh
+    if (!refresh) {
+      refresh = this.attachSession(webContentsId, control, afterByte, config, { attachmentId })
+      if (owner) owner.refresh = refresh
+    }
+    try {
+      const result = await refresh
+      if (!attachmentId) return result
+      this.requireSessionAttachmentLease(webContentsId, attachmentId, key)
+      return { ...result, attachmentId }
+    } finally {
+      if (owner?.refresh === refresh) delete owner.refresh
+    }
+  }
+
+  private requireSessionAttachmentLease(webContentsId: number, attachmentId: string, key: string): void {
+    const lease = this.sessionAttachmentLeases.get(attachmentId)
+    if (!lease || lease.webContentsId !== webContentsId || lease.key !== key ||
+      !this.sessionAttachmentOwners.get(key)?.attachmentIds.has(attachmentId)) {
+      throw new Error('Attachment refresh requires this exact Session and Desktop client lease.')
+    }
   }
 
   async readSessionReplay(webContentsId: number, attachmentId: string, afterByte: number): Promise<SessionReplayResult> {

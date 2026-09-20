@@ -822,7 +822,7 @@ type AppState = {
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  refreshSession(sessionId: string): Promise<void>
+  refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
@@ -6044,6 +6044,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           !hasAttachedSessionView(state.tabs, sessionId) || (live && !sessionOwnsControl(live, control))) return state
         return reduceDetachedAgentLaunch(state, result).state
       })
+      return result.session
     } else {
       try {
         const session = await api.sessions.refresh(control)
@@ -6053,9 +6054,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             !live || !sessionOwnsControl(live, control) || !hasAttachedSessionView(state.tabs, sessionId)) return state
           return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
         })
-      } catch (error) { get().reportError(error) }
+        return session
+      } catch (error) { get().reportError(error); throw error }
     }
-    void get().flushAgentSteerQueue(sessionId)
   },
   async recoverSession(sessionId, operationId) {
     const before = get()
@@ -6227,6 +6228,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   applyEvent(event) {
     const core = event.event
+    // Only a projection produced by this exact observation is excluded from automatic delivery.
+    // Independent Hook completion, automatic reconnect and explicit sends keep their existing intent.
+    const projectedRun = core.type === 'agent-session' ? core.session.run
+      : 'run' in core ? core.run : 'evidence' in core ? core.evidence.run : undefined
+    const observationRefresh = core.observationOrigin?.kind === 'attachment-refresh' &&
+      core.observationOrigin.run.runId === projectedRun?.runId
     // Diagnostics use the existing notice owner, even while membership is reconciling.
     // They never replace semantic state or its clock.
     const diagnostic = runtimeDiagnosticNotice(get(), event)
@@ -6258,9 +6265,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : reduced.state
     })
     if (core.type === 'agent-timeline' && get().agentSteerQueues[core.agentSessionId] !== pendingBefore &&
-      !agentSteerDrains.has(core.agentSessionId)) void get().flushAgentSteerQueue(core.agentSessionId)
+      !observationRefresh && !agentSteerDrains.has(core.agentSessionId)) void get().flushAgentSteerQueue(core.agentSessionId)
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+    if (observationRefresh) return
     if (core.type === 'connection-state' && core.state === 'restored') {
       for (const session of get().sessions) {
         if (session.hostId === event.hostId && get().agentSteerQueues[session.id]?.length) void get().flushAgentSteerQueue(session.id)
