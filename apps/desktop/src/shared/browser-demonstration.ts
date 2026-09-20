@@ -21,3 +21,6 @@ export type BrowserDemonstrationDraft = {
   warning?: string
 }
 export type BrowserDemonstrationDocument = { version: 1; drafts: BrowserDemonstrationDraft[] }
+
+/** The live Browser projection and read API share this single draft/warning contract. */
+export type BrowserDemonstrationState = { draft: BrowserDemonstrationDraft | null; warning?: string }

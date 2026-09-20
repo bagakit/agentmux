@@ -94,6 +94,7 @@ import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_J
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
+import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DEMONSTRATION_FILE } from './browser-demonstration-recorder.js'
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
@@ -199,6 +200,9 @@ export async function registerIpc(args: {
     new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
   )
   await browserOperationJournal.ready()
+  const browserDemonstrations = new BrowserDemonstrationRecorder(
+    new BrowserDemonstrationFileStore(join(app.getPath('userData'), BROWSER_DEMONSTRATION_FILE))
+  )
   const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore(), {
     // Read the current owner fact so a remembered answer or explicit Forget takes effect immediately.
     rememberedSchemes: async () => config.browser.appLinkSchemes ?? {},
@@ -212,7 +216,7 @@ export async function registerIpc(args: {
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
   }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')),
-  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')))
+  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')), browserDemonstrations)
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
@@ -883,6 +887,18 @@ export async function registerIpc(args: {
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)
     return await browsers.selectElement(id)
+  })
+  handleWithEvent('browser:startDemonstration', async (event, id: string) => {
+    requireTrustedSender('browser:startDemonstration', event)
+    return await browsers.startDemonstration(id)
+  })
+  handleWithEvent('browser:stopDemonstration', async (event, id: string) => {
+    requireTrustedSender('browser:stopDemonstration', event)
+    return await browsers.stopDemonstration(id)
+  })
+  handleWithEvent('browser:getDemonstration', async (event, id: string) => {
+    requireTrustedSender('browser:getDemonstration', event)
+    return await browsers.getDemonstration(id)
   })
   handleWithEvent('browser:answerAppLink', async (event, id: string, allow: boolean, remember: boolean) => {
     requireTrustedSender('browser:answerAppLink', event)
