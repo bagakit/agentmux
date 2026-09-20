@@ -51,5 +51,6 @@ it('keeps empty categories discoverable in the shared filter without repeating p
   expect([...select.options].map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle'])
   await act(async () => { select.value = 'results'; select.dispatchEvent(new Event('change', { bubbles: true })) })
   expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(context => context.dataset.sessionId)).toEqual(['a'])
-  expect(container.querySelector('.focus-context-group[data-empty="true"]')).toBeNull()
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['attention', 'true'], ['working', 'true'], ['results', 'false'], ['idle', 'true']])
+  expect(container.textContent).not.toContain('Nothing here')
 })
