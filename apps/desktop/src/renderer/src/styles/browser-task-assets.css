@@ -1,0 +1,13 @@
+.browser-task-asset { font-size: var(--fs-micro); }
+.browser-task-asset__field { min-width: 0; display: grid; grid-template-columns: minmax(64px, .35fr) minmax(0, 1fr); align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-3); }
+.browser-task-asset__field input, .browser-task-asset__field select, .browser-task-asset .browser-rsi-replay__steps input:not([type='checkbox']) { min-width: 0; width: 100%; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; }
+.browser-task-asset__check { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-3); }
+.browser-task-asset__check input { margin: 0; accent-color: var(--green-2); }
+.browser-task-asset__step-actions { display: inline-flex; gap: var(--sp-1); opacity: 0; }
+.browser-task-asset .browser-rsi-replay__steps li:hover .browser-task-asset__step-actions, .browser-task-asset .browser-rsi-replay__steps li:focus-within .browser-task-asset__step-actions { opacity: 1; }
+.browser-task-asset__parameters, .browser-task-asset__version { min-width: 0; padding: var(--sp-2) var(--sp-3); }
+.browser-task-asset summary { color: var(--text-3); cursor: pointer; }
+.browser-task-asset__parameter { padding-block: var(--sp-1); }
+.browser-task-asset__parameter .browser-task-asset__field { padding-inline: 0; }
+.browser-task-asset__progress { margin: var(--sp-2) 0; color: var(--amber-text); line-height: 1.45; overflow-wrap: anywhere; }
+.browser-task-asset__version > .browser-task-asset__field { padding-inline: 0; }
