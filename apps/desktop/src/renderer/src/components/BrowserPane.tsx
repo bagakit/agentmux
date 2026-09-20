@@ -41,6 +41,7 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationRail, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
   ScreenshotEditor,
   type ScreenshotCompleteInput
@@ -144,6 +145,7 @@ export function BrowserPane({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null)
+  const [selectedStep, setSelectedStep] = useState<{ operationId: string; sequence: number } | null>(null)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
@@ -157,6 +159,7 @@ export function BrowserPane({
     setTimelineOpen(false)
     setOperationHistory([])
     setSelectedOperationId(null)
+    setSelectedStep(null)
     setHistoryError(null)
     setReplayPlan(null)
     setReplayOutcome(undefined)
@@ -559,6 +562,8 @@ export function BrowserPane({
   }
 
   const timelineOperation = operationForTimeline()
+  const timelineSelectedStep = selectedStep?.operationId === timelineOperation?.id
+    ? timelineOperation?.steps.find(step => step.sequence === selectedStep?.sequence) : undefined
   // A persistence warning belongs to the current live projection. Do not attach it to a historical
   // operation after the user selects another record; the timeline and warning must share one identity.
   const timelineWarning = timelineOperation?.id === tab.activity?.operation?.id ? tab.activity?.warning : undefined
@@ -835,12 +840,17 @@ export function BrowserPane({
             onClose={() => setTimelineOpen(false)}
             onSelect={(operation) => {
               setSelectedOperationId(operation.id)
+              setSelectedStep(null)
               setReplayPlan(null)
               setReplayOutcome(undefined)
             }}
           />
           <BrowserOperationTimeline
             operation={timelineOperation}
+            {...(timelineSelectedStep ? { selectedSequence: timelineSelectedStep.sequence } : {})}
+            onSelectStep={(step) => {
+              if (timelineOperation) setSelectedStep({ operationId: timelineOperation.id, sequence: step.sequence })
+            }}
             {...(timelineWarning ? { warning: timelineWarning } : {})}
             onReplay={(operation) => {
               setReplayOutcome(undefined)
@@ -858,6 +868,8 @@ export function BrowserPane({
               }).catch(reportError)
             }}
           />
+          {timelineOperation && timelineSelectedStep
+            ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
           {replayPlan ? (
             <BrowserReplayPreview
               plan={replayPlan}

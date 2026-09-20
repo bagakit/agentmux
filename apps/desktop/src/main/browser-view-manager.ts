@@ -34,6 +34,9 @@ import {
 } from './browser-app-link.js'
 import { BROWSER_PAGE_FUNCTION_NAMES, runBrowserScript } from './browser-script-runner.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
+import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
+import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
+import type { BrowserPageSnapshot } from '../shared/contracts.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -333,7 +336,8 @@ export class BrowserViewManager {
      * （本仓吃过这个亏）。
      */
     private readonly appLinks: AppLinkHost,
-    private readonly operationJournal?: BrowserOperationJournal
+    private readonly operationJournal?: BrowserOperationJournal,
+    private readonly stepEvidence?: BrowserStepEvidenceStore
   ) {}
 
   resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
@@ -936,7 +940,7 @@ export class BrowserViewManager {
         const finalPhase = operation.phase === 'completed' || operation.phase === 'failed' || operation.phase === 'indeterminate' || operation.phase === 'stopped'
           ? operation.phase
           : 'indeterminate'
-        void this.operationJournal.finish(operation.id, finalPhase, {
+        await this.operationJournal.finish(operation.id, finalPhase, {
           summary: operation.summary,
           ...(operation.warning ? { warning: operation.warning } : {})
         })
@@ -1004,6 +1008,26 @@ export class BrowserViewManager {
    */
   async getOperation(operationId: string): Promise<BrowserOperation | null> {
     return this.operationJournal ? await this.operationJournal.get(operationId) : null
+  }
+
+  async getStepEvidence(operationId: string, sequence: number): Promise<BrowserStepEvidenceRead> {
+    const operation = await this.getOperation(operationId)
+    const step = operation?.steps.find(item => item.sequence === sequence)
+    const result: BrowserStepEvidenceRead = { operationId, sequence, status: 'not-recorded', items: [] }
+    if (!step) return { ...result, status: 'unavailable', warning: 'This operation step is no longer retained. Its page was not recaptured.' }
+    if (step.evidenceWarning) result.warning = step.evidenceWarning
+    if (!step.evidence?.length) return { ...result, ...(step.evidenceWarning ? { status: 'unavailable' as const } : {}) }
+    for (const reference of step.evidence) {
+      try {
+        if (!this.stepEvidence || reference.operationId !== operationId || reference.sequence !== sequence ||
+            reference.browserId !== operation?.browserId) throw new Error('Evidence identity is unavailable.')
+        result.items.push(await this.stepEvidence.read(reference))
+      } catch {
+        result.warning = 'Some recorded evidence is unavailable or no longer retained. The step record remains; inspect the page before retrying an action.'
+      }
+    }
+    result.status = result.items.length ? 'available' : 'unavailable'
+    return result
   }
 
   returnControl(id: string): BrowserSnapshot {
@@ -1130,14 +1154,35 @@ export class BrowserViewManager {
           ...(step.replay ? { replay: step.replay } : {})
         })
       }
+      const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string): Promise<void> => {
+        if (!this.stepEvidence) return
+        try {
+          const reference = await recordBrowserStepEvidence(this.stepEvidence, {
+            operationId: operation.id, sequence: step.sequence, browserId: entry.id, navigationId
+          }, content)
+          step.evidence = [...(step.evidence ?? []), reference]
+        } catch {
+          step.evidenceWarning = 'Step evidence could not be saved. The action result is retained; inspect the page and check local storage before recording again.'
+          operation.warning ??= step.evidenceWarning
+        }
+      }
       try {
         const value = await dispatch(name, args)
         step.status = 'completed'
         step.finishedAt = Date.now()
         step.summary = summarizeBrowserValue(value)
+        if (this.stepEvidence && name === 'snapshot') {
+          const snapshot = value as BrowserPageSnapshot
+          await saveEvidence(pageStepEvidence(snapshot), snapshot.navigationId)
+        } else if (this.stepEvidence && name === 'captureScreenshot') {
+          const capture = value as BrowserScreenshotCapture
+          await saveEvidence(screenshotStepEvidence(capture), capture.navigationId)
+        }
         if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {
           status: 'completed',
           summary: step.summary,
+          ...(step.evidence ? { evidence: step.evidence } : {}),
+          ...(step.evidenceWarning ? { evidenceWarning: step.evidenceWarning } : {}),
           ...(step.target ? { target: step.target } : {}),
           ...(step.replay ? { replay: step.replay } : {})
         })
@@ -1147,9 +1192,18 @@ export class BrowserViewManager {
         step.status = takeover.at !== null ? 'stopped' : 'failed'
         step.finishedAt = Date.now()
         step.summary = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+        await saveEvidence({
+          kind: 'diagnostic', code: 'page-call-failed',
+          message: `Step ${step.sequence} (${name}) did not report completion. Side effects may already have occurred.`,
+          nextAction: takeover.at !== null
+            ? 'Human control is active. Wait for the user to return control before continuing.'
+            : 'Inspect the page and take a fresh snapshot before deciding whether this action can be retried.'
+        }, entry.navigationId)
         if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {
           status: step.status,
           summary: step.summary,
+          ...(step.evidence ? { evidence: step.evidence } : {}),
+          ...(step.evidenceWarning ? { evidenceWarning: step.evidenceWarning } : {}),
           ...(step.target ? { target: step.target } : {}),
           ...(step.replay ? { replay: step.replay } : {})
         })
