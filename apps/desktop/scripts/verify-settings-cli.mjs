@@ -16,8 +16,9 @@ import { browserSettingsProof } from './fixtures/settings-cli/browser.mjs'
 import { workspaceSettingsProof } from './fixtures/settings-cli/workspaces.mjs'
 import { hostsSettingsProof } from './fixtures/settings-cli/hosts.mjs'
 import { crashLogDiagnosticsProof } from './fixtures/settings-cli/diagnostics.mjs'
+import { executorRefreshProof } from './fixtures/settings-cli/executor-refresh.mjs'
 
-export async function verifySettingsCli({ browser = false, workspaces = false, hosts = false, diagnostics = false, ownerTiming = false } = {}) {
+export async function verifySettingsCli({ browser = false, workspaces = false, hosts = false, diagnostics = false, executorRefresh = false, ownerTiming = false } = {}) {
   // Real bundled Desktop/Main IPC + Core + built CLI. Only initial private fixture materialization
   // writes configuration directly; every setting operation after launch goes through the product owner.
   const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
@@ -39,7 +40,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
   const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
   const receipt = { schema: 'agentmux.settings-cli-desktop-proof.v1', passed: false, cli: [], facts: {}, cleanup: {},
     fixture: { userData, privateHome, runtimeDirectory, workspacePath, topicsPath, syntheticPty: true, ownerTimingInstrumented: ownerTiming } }
-  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof, workspaceProof, hostsProof, diagnosticsProof
+  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof, workspaceProof, hostsProof, diagnosticsProof, refreshProof
 
   async function waitFor(label, read, budget = 20_000) {
     const end = Math.min(deadline, Date.now() + budget)
@@ -51,7 +52,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     const directories = ['apps/desktop/src', 'packages/core/src', 'packages/demand/src', 'packages/layout/src',
       'apps/desktop/out', 'packages/core/dist', 'packages/demand/dist',
       'apps/desktop/scripts/fixtures/settings-cli']
-    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/verify-settings-hosts-cli.mjs', 'apps/desktop/scripts/verify-crash-log-diagnostics-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
+    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/verify-settings-hosts-cli.mjs', 'apps/desktop/scripts/verify-crash-log-diagnostics-cli.mjs', 'apps/desktop/scripts/verify-settings-executor-refresh-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
       'packages/core/bin/agentmux', 'packages/core/package.json', 'apps/desktop/package.json',
       'packages/core/scripts/build.mjs', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json']
     const dependencies = {}
@@ -242,6 +243,8 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     const executable=join(workspacePath,'private-cat.sh'), splitFile=join(workspacePath,'split.txt')
     await writeFile(executable,'#!/bin/sh\nprintf "Private settings proof PTY\\n"\nexec /bin/cat\n',{mode:0o700})
     await writeFile(splitFile,'The original file Region stays present.\n')
+    const refreshDirectory = join(root, 'refresh-directory')
+    if (executorRefresh) await mkdir(refreshDirectory)
     Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:environment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
     const store=new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))
     client=await connectLocalAgentMux({store})
@@ -253,7 +256,8 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     ownedRunProcess=await runIdentity(originalRun.pid); assert.ok(ownedRunProcess)
     await client.dispose(); client=null
     await writeFile(configPath,JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private settings fixture'}],
-      executors:{probe:{label:'Private cat',providerId:'codex',command:executable,args:[],env:{CODEX_HOME:codexHome,HOME:privateHome},injectAgentMuxGuide:false}},
+      executors:{probe:{label:'Private cat',providerId:'codex',command:executable,args:[],env:{CODEX_HOME:codexHome,HOME:privateHome},injectAgentMuxGuide:false},
+        ...(executorRefresh ? {review:{label:'Review executor',providerId:'claude',command:refreshDirectory,args:[],env:{},injectAgentMuxGuide:false}} : {})},
       workspaces:[{id:workspaceId,name:'Settings CLI fixture',hostId:'local',path:workspacePath,kind:'folder'},
         {id:'__scratch__',name:'Topics',hostId:'local',path:topicsPath,kind:'folder'}],
       appearance:{terminalTheme:'graphite',appAppearance:'dark'},copyPathsAsAbsolute:false,notifications:{mode:'off'},
@@ -380,6 +384,11 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       receipt.facts.diagnostics=diagnosticsProof.facts
       await diagnosticsProof.exercise()
     }
+    if (executorRefresh) {
+      refreshProof=executorRefreshProof({probe:first,desktopRoot,command,configPath,waitFor,section,evidence,phase:value=>{phase=value}})
+      receipt.facts.executorRefresh=refreshProof.facts
+      await refreshProof.exercise()
+    }
     assert.deepEqual((await ui(first)).controlRequests,[],'Settings never use the Renderer Control bridge')
     const trustedKeys=await first.cdp.evaluate('window.__settingsCliProof.keys')
     assert.ok(trustedKeys.length>0); assert.ok(trustedKeys.every(event=>event.trusted===true))
@@ -405,6 +414,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (workspaceProof) await workspaceProof.verifyRestart(second)
     if (hostsProof) await hostsProof.verifyRestart(second)
     if (diagnosticsProof) await diagnosticsProof.verifyRestart(second)
+    if (refreshProof) await refreshProof.verifyRestart(second)
     const snapshot=await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
     const attached=snapshot.sessions.find(value=>value.id===session.agentSessionId)
     assert.equal(attached?.processState,'running'); assert.equal(attached.control.run.runId,session.run.runId)
@@ -425,6 +435,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (workspaceProof) await workspaceProof.verifyNoView()
     if (hostsProof) await hostsProof.verifyNoView()
     if (diagnosticsProof) await diagnosticsProof.verifyNoView(second)
+    if (refreshProof) await refreshProof.verifyNoView()
     await terminate(second)
     phase='offline-owner'
     const offlineBytes=await readFile(configPath)
@@ -436,6 +447,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (workspaceProof) await workspaceProof.verifyOffline()
     if (hostsProof) await hostsProof.verifyOffline()
     if (diagnosticsProof) await diagnosticsProof.verifyOffline()
+    if (refreshProof) await refreshProof.verifyOffline()
     phase='same-healthy-run'
     client=await connectLocalAgentMux({store})
     const run=(await client.listRuns()).find(value=>value.runId===session.run.runId)

@@ -105,6 +105,7 @@ it('missing type and unknown read reasons remain distinct and disappear when the
   await act(async () => useAppStore.setState({ executorDetections: { ...seed(), [executorDetectionKey('local', 'codex')]: {
     state: 'error', input, result: { input, executable: input.command, availability: 'check-failed', cause: { code: 'EIO', message: 'original I/O reason' } }, detail: 'EIO: original I/O reason' } } }))
   expect(status()).toBe('Check failed'); expect(card().textContent).toContain('EIO: original I/O reason')
+  expect(card().querySelector('.agent-settings-fields')!.firstElementChild?.textContent).toBe('EIO: original I/O reason')
   const changed = { ...config, executors: { ...config.executors, codex: { ...config.executors.codex!, command: 'later' } } }
   await dom.render(<AgentSettingsPane config={changed} onSave={onSave} />)
   expect(status()).toBe('Not checked'); expect(card().textContent).not.toContain('original I/O reason')
