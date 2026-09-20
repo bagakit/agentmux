@@ -18,17 +18,19 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, re
     aria-label={`Agent ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; Session ${sessionId}`}>
     <strong className="agent-region-header__name" title={name}>{name}</strong>
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
-    <span className="agent-region-header__meta" title={`${executorLabel}; Session ${sessionId}`}>
-      {executorLabel} · {sessionId.slice(0, 8)}
-    </span>
     {onHistory || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Root>
-      <DropdownMenu.Trigger className="agent-region-header__more" title="More actions"
-        aria-label={`More actions for ${name}`} onPointerDown={(event) => event.stopPropagation()}>
+      <DropdownMenu.Trigger className="agent-region-header__more"
+        aria-label={`More actions for ${name}`} title={`${name}; ${executorLabel}; Session ${sessionId}`}
+        onPointerDown={(event) => event.stopPropagation()}>
         <MoreHorizontal size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
         data-owner-region-id={regionId} data-agent-session-id={sessionId} side="bottom" align="end" sideOffset={4} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}>
+        <DropdownMenu.Label className="agent-region-menu__context">
+          <span>{name}</span><span>Executor: {executorLabel}</span><span>Session: {sessionId}</span>
+        </DropdownMenu.Label>
+        <DropdownMenu.Separator className="tab-context-menu__separator" />
         {onRefreshObservation ? <DropdownMenu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
           <RotateCcw size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
         </DropdownMenu.Item> : null}
