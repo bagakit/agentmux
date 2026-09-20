@@ -1,3 +1,5 @@
+import type { BrowserStepEvidenceReference } from './browser-step-evidence'
+
 /** Browser activity belongs to Desktop Main, independently of Agent/PTY timelines. */
 export type BrowserOperator = { id: string; name: string; providerId?: string }
 export type BrowserOperationPhase = 'preparing' | 'running' | 'waiting' | 'human' | 'completed' | 'failed' | 'indeterminate' | 'stopped'
@@ -23,6 +25,8 @@ export type BrowserOperationStep = {
   target?: BrowserReplayTarget
   /** Result shape/size only, never raw page data or script errors with echoed secrets. */
   summary?: string
+  evidence?: BrowserStepEvidenceReference[]
+  evidenceWarning?: string
   replay?: BrowserReplayStep
 }
 export type BrowserOperation = {

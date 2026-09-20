@@ -92,6 +92,7 @@ import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
+import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { pastedDirectory } from './pasted-directory.js'
@@ -208,7 +209,7 @@ export async function registerIpc(args: {
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
-  }, browserOperationJournal)
+  }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')))
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
@@ -848,6 +849,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getOperation', async (event, operationId: string) => {
     requireTrustedSender('browser:getOperation', event)
     return await browsers.getOperation(operationId)
+  })
+  handleWithEvent('browser:getStepEvidence', async (event, operationId: string, sequence: number) => {
+    requireTrustedSender('browser:getStepEvidence', event)
+    return await browsers.getStepEvidence(operationId, sequence)
   })
   // 取消不过 `agentAutomation` 闸，而 runScript 过。这不是漏了：那个闸挡的是「让 Agent 去驱动页面」，
   // 而这条是**停下**驱动。开关关掉之后仍然能停掉一个正在跑的操作，否则用户一旦关掉总开关就再也

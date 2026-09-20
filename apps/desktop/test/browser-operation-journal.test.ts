@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -26,6 +29,26 @@ class MemoryStore implements BrowserOperationJournalStore {
 }
 
 describe('BrowserOperationJournal', () => {
+  it('distinguishes a healthy first use from damaged or unreadable durable history', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'amx-journal-first-use-'))
+    try {
+      const path = join(directory, 'operations.json')
+      const fresh = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+      await expect(fresh.list()).resolves.toEqual([])
+      expect(fresh.getPersistenceWarning()).toBeUndefined()
+
+      await writeFile(path, '{invalid json')
+      const damaged = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+      await expect(damaged.list()).resolves.toEqual([])
+      expect(damaged.getPersistenceWarning()).toContain('damaged or unreadable')
+
+      const unreadable = new BrowserOperationJournal(new BrowserOperationFileStore(directory))
+      await expect(unreadable.list()).resolves.toEqual([])
+      expect(unreadable.getPersistenceWarning()).toContain('damaged or unreadable')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
   it('gives one ordered identity to a run and redacts sensitive replay values', async () => {
     const store = new MemoryStore()
     let now = 100

@@ -137,6 +137,7 @@ vi.mock('../src/main/browser-page-dispatch.js', () => ({
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal.js'
+import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
 import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
 
 const profiles: BrowserProfileResolver = {
@@ -156,7 +157,7 @@ function fakeWindow(): any {
   }
 }
 
-async function managerWithBrowser(journal?: BrowserOperationJournal): Promise<{
+async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -174,7 +175,7 @@ async function managerWithBrowser(journal?: BrowserOperationJournal): Promise<{
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal)
+  }, journal, evidence)
   await manager.create('b1', 'https://example.invalid/')
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
@@ -208,6 +209,55 @@ function takeoverOnFirstCall(contents: any, type = 'mouseDown'): string[] {
   })
   return seen
 }
+
+describe('runScript records readable evidence for the exact step', () => {
+  it('retains a completed observation and action before a failure, with durable evidence in the receipt', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'amx-step-wiring-'))
+    const journalPath = join(root, 'journal.json')
+    const evidence = new BrowserStepEvidenceStore(join(root, 'evidence'))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(journalPath))
+    const { manager } = await managerWithBrowser(journal, evidence)
+    createDispatch.mockImplementationOnce(context => async name => {
+      if (name === 'snapshot') return { ...context.pageInfo(), nodes: [{ ref: '@e1', role: 'button', name: 'Reveal', depth: 0, backendNodeId: 7 }], missingFrames: [] }
+      if (name === 'click') return true
+      throw new Error('page refused: private-input-never-in-diagnostic')
+    })
+    try {
+      const report = await manager.runScript('b1', 'await snapshot(); await click("@e1"); await elementContext("@e404")')
+      expect(report.outcome.kind).toBe('script-failed')
+      expect(report.runOperation.steps.map(value => [value.sequence, value.status])).toEqual([[1, 'completed'], [2, 'completed'], [3, 'failed']])
+      const saved = await manager.getStepEvidence(report.runOperation.id, 3)
+      expect(saved.status).toBe('available')
+      expect(saved.items).toHaveLength(1)
+      expect(saved.items[0]?.reference).toMatchObject({ operationId: report.runOperation.id, sequence: 3, browserId: 'b1', kind: 'diagnostic' })
+      expect(saved.items[0]?.content).toMatchObject({ kind: 'diagnostic', nextAction: expect.stringContaining('fresh snapshot') })
+      expect(JSON.stringify(saved)).not.toContain('private-input')
+      const first = await manager.getStepEvidence(report.runOperation.id, 1)
+      expect(first.items[0]?.content).toMatchObject({ kind: 'page', text: expect.stringContaining('Reveal') })
+      await expect(manager.getStepEvidence(report.runOperation.id, 2)).resolves.toMatchObject({ status: 'not-recorded', items: [] })
+      const restarted = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(journalPath)), new BrowserStepEvidenceStore(join(root, 'evidence')))
+      try {
+        await expect(restarted.manager.getStepEvidence(report.runOperation.id, 3)).resolves.toEqual(saved)
+        await expect(restarted.manager.getOperation(report.runOperation.id)).resolves.toMatchObject({ phase: 'failed' })
+      } finally { restarted.manager.dispose() }
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('does not turn a completed action into failure when evidence cannot be saved', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'amx-step-unavailable-'))
+    const evidence = new BrowserStepEvidenceStore(join(root, 'evidence'))
+    vi.spyOn(evidence, 'write').mockRejectedValue(new Error('disk full'))
+    const { manager } = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'journal.json'))), evidence)
+    createDispatch.mockImplementationOnce(context => async () => ({ ...context.pageInfo(), nodes: [], missingFrames: [] }))
+    try {
+      const report = await manager.runScript('b1', 'await snapshot(); return "action-kept"')
+      expect(report).toMatchObject({ result: 'action-kept', outcome: { kind: 'completed' } })
+      expect(report.runOperation.steps.map(value => value.status)).toEqual(['completed'])
+      expect(report.runOperation.warning).toContain('could not be saved')
+      await expect(manager.getStepEvidence(report.runOperation.id, 1)).resolves.toMatchObject({ status: 'unavailable', warning: expect.stringContaining('action result is retained'), items: [] })
+    } finally { manager.dispose() }
+  }, 30_000)
+})
 
 describe('runScript 把页面调用交给派发层', () => {
   it('Agent 程序调页面函数，落到 createBrowserPageDispatch 建的那个闭包上', async () => {

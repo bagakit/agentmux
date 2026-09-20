@@ -60,6 +60,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:runScript': 'Browser automation',
   'browser:listOperationHistory': 'Browser activity history',
   'browser:getOperation': 'Browser activity history',
+  'browser:getStepEvidence': 'Browser step evidence',
   'browser:replayPlan': 'Browser replay plan',
   'browser:returnControl': 'Browser handoff',
   'browser:stopOperationById': 'Browser handoff',

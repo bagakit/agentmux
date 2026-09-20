@@ -75,8 +75,8 @@ export interface BrowserOperationJournalStore {
 
 /**
  * The file store is intentionally independent of Electron. Main creates it with its userData path;
- * tests and embedders can use a temporary path. A damaged or missing journal is an empty journal,
- * because an activity history must never stop a healthy Browser from opening.
+ * tests and embedders can use a temporary path. A missing journal is a healthy first use; damage or
+ * unreadable history remains observable without stopping a healthy Browser from opening.
  */
 export class BrowserOperationFileStore implements BrowserOperationJournalStore {
   private saveTail: Promise<void> = Promise.resolve()
@@ -87,7 +87,8 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     try {
       const parsed: unknown = JSON.parse(await readFile(this.path, 'utf8'))
       return isJournalDocument(parsed) ? parsed : null
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyDocument()
       return null
     }
   }
@@ -125,6 +126,8 @@ export type BrowserOperationStepFinish = {
   summary?: string
   replay?: BrowserReplayStep
   target?: BrowserReplayTarget
+  evidence?: BrowserOperationStep['evidence']
+  evidenceWarning?: string
 }
 
 /**
@@ -289,6 +292,8 @@ export class BrowserOperationJournal {
     if (input.summary !== undefined) step.summary = clampProse(input.summary)
     if (input.target !== undefined) step.target = sanitizeTarget(input.target)
     if (input.replay !== undefined) step.replay = sanitizeReplay(input.replay)
+    if (input.evidence !== undefined) step.evidence = input.evidence
+    if (input.evidenceWarning !== undefined) step.evidenceWarning = clampProse(input.evidenceWarning)
     this.publish({ type: 'step-finished', operationId, at: step.finishedAt, step })
     await this.persist()
     return cloneStep(step)
