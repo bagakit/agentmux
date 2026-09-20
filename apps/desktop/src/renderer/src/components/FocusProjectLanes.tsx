@@ -1,16 +1,14 @@
 import { ChevronRight, GitBranch, Hash } from 'lucide-react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { FocusProjectLane } from '../lib/focus-project-lanes'
 import { ProjectIcon } from './ProjectIcon'
 
-export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, renderLane, columns, style }: {
+export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, renderLane }: {
   lanes: readonly FocusProjectLane[]; selectedWorkspaceId: string
   onSelect(workspaceId: string): void; renderLane(lane: FocusProjectLane, heading: ReactNode): ReactNode
-  columns?: ReactNode; style?: CSSProperties
 }) {
-  return <section className="focus-project-lanes" aria-label="Project contexts" style={style}>
+  return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows">
-      {columns}
       {lanes.map(lane => <article className={`focus-project-lanes__row${selectedWorkspaceId === lane.projectId ? ' is-selected' : ''}`} data-project-id={lane.projectId} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
@@ -24,6 +22,6 @@ export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, render
         )}</div>
       </article>)}
     </div>
-    {lanes.length === 0 && !columns ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
+    {lanes.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
   </section>
 }

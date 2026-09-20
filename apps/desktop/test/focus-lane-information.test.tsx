@@ -105,8 +105,8 @@ async function projectStates() {
 const changeFilter = (value: string) => act(async () => { const select = container.querySelector<HTMLSelectElement>('[aria-label="Focus state filter"]')!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })) })
 it('keeps four stable status positions with zero counts and no repeated row empty state', async () => {
   await mount()
-  const columns = [...container.querySelectorAll<HTMLElement>('.focus-state-columns__heading')]
-  expect(columns.map(el => [el.dataset.bucket, el.getAttribute('aria-label')])).toEqual([['attention', 'Attention · 0'], ['working', 'Working · 0'], ['results', 'Results · 0'], ['idle', 'Idle / Recovery · 1']])
+  const columns = [...container.querySelectorAll<HTMLElement>('.focus-context-group__header')]
+  expect(columns.map(el => [el.parentElement!.dataset.bucket, el.getAttribute('aria-label')])).toEqual([['attention', 'Attention · 0'], ['working', 'Working · 0'], ['results', 'Results · 0'], ['idle', 'Idle / Recovery · 1']])
   expect([...container.querySelectorAll<HTMLElement>('.focus-project-lanes__groups > section')].map(el => el.dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle'])
   expect(container.querySelectorAll('.focus-context')).toHaveLength(1)
   expect(container.textContent).not.toContain('Nothing here')
@@ -159,4 +159,16 @@ it('bounds icon reads to new lane consumers when a retained project returns to t
   expect(row('old-one').closest('[aria-label="Disconnected projects"]')).toBeNull()
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => ({ ...s, latestOutputBytes: 999, status: { ...s.status, observedAt: 999 } })) })))
   expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'old', 'other', 'old'])
+})
+it('allocates each lane from its own state counts while keeping the same four meanings', async () => {
+  await projectStates()
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions.map(s => s.id === 'old-one' ? { ...s, processState: 'running' as const, status: { ...s.status, state: 'working' as const } } : s), { ...base, id: 'work-two', status: { ...base.status, state: 'working' as const } }, { ...base, id: 'work-three', status: { ...base.status, state: 'working' as const } }, { ...base, id: 'failed', status: { ...base.status, state: 'error' as const, detail: 'Run exited: code 7' } }] })))
+  await mount()
+  const lanes = [...container.querySelectorAll<HTMLElement>('.focus-project-board > .focus-project-lanes [data-lane-id]')]
+  expect(lanes.map(lane => lane.dataset.projectId)).toEqual(['repo', 'old'])
+  const groups = lanes.map(lane => lane.querySelector<HTMLElement>('.focus-project-lanes__groups')!)
+  expect(groups.map(group => group.style.getPropertyValue('--focus-state-columns'))).toEqual(['minmax(160px, 1fr) minmax(160px, 3fr) 36px minmax(160px, 1fr)', '36px minmax(160px, 1fr) 36px minmax(160px, 1fr)'])
+  expect(groups.map(group => [...group.querySelectorAll<HTMLElement>('.focus-context-group')].map(section => section.dataset.bucket))).toEqual([['attention', 'working', 'results', 'idle'], ['attention', 'working', 'results', 'idle']])
+  expect(groups.map(group => [...group.querySelectorAll('.focus-context-group__header')].map(header => header.getAttribute('aria-label')))).toEqual([['Attention · 1', 'Working · 3', 'Results · 0', 'Idle / Recovery · 1'], ['Attention · 0', 'Working · 1', 'Results · 0', 'Idle / Recovery · 1']])
+  expect(container.querySelector('.focus-state-columns')).toBeNull()
 })
