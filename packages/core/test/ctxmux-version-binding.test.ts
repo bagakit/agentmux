@@ -134,9 +134,9 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
  * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
  */
 const IDENTITY_HASHES = [
-  'ec637607946718c8bdec0a215b47a72f4a1692da',
-  '699207e07a62cdea1201b2f7e32483a0ecc43124',
-  'ddd46ca9a9293742490466f1a806bb7cc2ed9798b97d0fa0509befec3baeda6b'
+  '5c2fb50394bbf5d3b984e5f30608ba38566a3389',
+  '8e44d969da590351167e3a1784279e47201a3056',
+  '766c488c7f6a116fda7b84dce47f6dc5108e0fe163ea62109d9b715a99c2625b'
 ] as const
 
 /**

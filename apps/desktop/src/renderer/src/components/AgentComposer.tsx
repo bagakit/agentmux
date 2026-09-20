@@ -1,11 +1,12 @@
 import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion'
 import type { ReactNode, Ref } from 'react'
-import { AtSign, ArrowUp, Paperclip, Square } from 'lucide-react'
+import { AtSign, ArrowUp, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
 import { InlineComposer } from './InlineComposer'
+import { ComposerReferenceTool } from './ComposerReferenceTool'
 import type { ReadPastedImage } from './ConversationImage'
 import type { ComposerSemanticReference } from '../lib/composer-semantic-reference'
 
@@ -201,15 +202,8 @@ export function AgentComposer({
       <div className="composer__toolbar">
         <div>
           {tools}
-          <button
-            type="button"
-            className="composer-tool"
-            disabled={disabled || !onAttach}
-            onClick={onAttach}
-            aria-label="Reference files for the Agent to read" title="Reference files for the Agent to read"
-          >
-            <Paperclip size={14} /> <span className="composer-tool__label">Files</span>
-          </button>
+          <ComposerReferenceTool disabled={disabled} onSelect={onAttach}
+            label="Reference files for the Agent to read" />
           {/* A shortcut to the file already open, not a second way to attach — so it appears only
               when there is one, rather than sitting permanently greyed out. */}
           {activeFile && onReferenceActiveFile ? (

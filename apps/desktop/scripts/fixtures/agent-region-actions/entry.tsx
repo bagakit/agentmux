@@ -8,6 +8,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
+import type { SessionSnapshot } from '../../../src/shared/contracts'
 
 await useAppStore.getState().initialize()
 const originals = (await api.sessions.snapshot()).sessions.filter(session => session.kind === 'agent').slice(0, 2)
@@ -24,8 +25,9 @@ for (const type of ['click', 'keydown']) document.addEventListener(type, event =
 }, true)
 let generation = 0
 const probe = {
-  mode(mode: 'terminal' | 'cold' | 'notice') {
+  mode(mode: 'terminal' | 'cold' | 'notice', third?: SessionSnapshot) {
     const sessions = structuredClone(originals)
+    if (third) sessions.push(structuredClone(third))
     if (mode === 'cold') {
       const semanticStatus = { state: 'done' as const, source: 'native-hook' as const,
         observedAt: Date.now(), stateEnteredAt: Date.now() - 86_401_000 }
@@ -33,6 +35,13 @@ const probe = {
     }
     let tab = createWorkbenchTab(tabId, { regionId: targetId, kind: 'agent', phase: 'attached', workspaceId, sessionId: sessions[0]!.id })
     tab = addWorkbenchRegion(tab, targetId, 'right', { regionId: survivorId, kind: 'agent', phase: 'attached', workspaceId, sessionId: sessions[1]!.id })
+    if (third) {
+      tab = addWorkbenchRegion(tab, survivorId, 'right', {
+        regionId: 'region-actions-third', kind: 'agent', phase: 'attached', workspaceId, sessionId: sessions[2]!.id
+      })
+      if (tab.layout.root.type !== 'split') throw new Error('Three Region fixture requires its actual split')
+      tab.layout.root.ratio = 1 / 3
+    }
     useAppStore.setState({ sessions, tabs: { [tabId]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('region-actions-group', [tabId]) },
       activeWorkspaceId: workspaceId, mainSurface: 'workbench',
       viewModes: Object.fromEntries(sessions.map(session => [session.id, 'terminal'])),
