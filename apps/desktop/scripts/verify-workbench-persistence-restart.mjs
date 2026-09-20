@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/dist/index.js'
+import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
 
@@ -32,17 +33,19 @@ const deadline = Date.now() + 110_000
 const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-file'
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
+const goalsAlignmentProof = process.argv.includes('--goals-alignment')
 const regionCloseProof = process.argv.includes('--close-region')
 const identityMenuProof = process.argv.includes('--identity-menu')
 const swapNameProof = process.argv.includes('--swap-names')
 assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Agent Swap is a separate identity case, never the original close case')
+assert.ok(!goalsAlignmentProof || (!regionCloseProof && !identityMenuProof && !swapNameProof), 'Goals is a separate original-workspace recovery case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
 let client, session, producer, failure, result, ownedRunProcess, seedReport
 const swapPeers = []
-let swapFixture, swapBefore, swapSelection
+let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -96,6 +99,13 @@ async function launch(label) {
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
+  if (goalsAlignmentProof && label === 'second') {
+    goalsRestored = await restoreGoalsBeforeSpace({ cdp, fixture: goalsFixture, accepted: goalsAccepted,
+      expectedWorkbench: goalsExpectedWorkbench, expectedFocus: goalsExpectedFocus, waitFor,
+      focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: randomUUID(), operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
+        assert.equal(reply.ok, true, JSON.stringify(reply)) } })
+  }
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''}${swapNameProof ? ` && document.querySelector('[data-workbench-region-id="crash-third"] .composer [role="textbox"]')` : ''})`))
   } catch (error) {
     const observed = await cdp.evaluate(`({text:document.querySelector('main')?.innerText.slice(0,800),
@@ -255,6 +265,7 @@ try {
         __scratch__: { root: { type: 'leaf', groupId: scratchGroupId }, groups: [{ id: scratchGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: scratchGroupId } }
     } } }
   if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName })
+  if (goalsAlignmentProof) goalsFixture = await createGoalsRestartFixture({ root, userData, workspaceId, session })
   await seedWorkbench(seed)
   const first = await launch('first')
   await delay(600) // Establish the pre-edit hydrated baseline, never flush a post-edit value.
@@ -358,22 +369,31 @@ try {
     delete expectedTab.regions[fileRegionId]
     lastEditAt=Date.now()
   }
+  if (goalsAlignmentProof) {
+    goalsAccepted = await approveGoalsInActualUI({ cdp: first.cdp, fixture: goalsFixture, activateButton, waitFor })
+    const goalsBeforeCrash = await readGoalsSurface(first.cdp)
+    assert.equal(goalsBeforeCrash.surface, 'board'); assert.equal(goalsBeforeCrash.selectedDemandId, goalsFixture.id)
+    assert.deepEqual(goalsBeforeCrash.workbench, expectedWorkbench); assert.deepEqual(goalsBeforeCrash.focus, before.focus)
+    goalsExpectedWorkbench = expectedWorkbench; goalsExpectedFocus = before.focus
+    lastEditAt = Date.now()
+  }
   await assertPrivateRunOutsideElectronGroup(first.child.pid, originalRun.pid)
   await delay(Math.max(0, lastEditAt + 2_000 - Date.now()))
   const immediatelyBeforeCrash = await surface(first.cdp)
   const observer = await first.cdp.evaluate('window.__crashProof')
   const crashAt = Date.now()
   const hooks = observer.hooks.filter(event => event.at >= lastEditAt)
-  assert.ok(hooks.length >= 12, 'The producer must keep emitting real accepted Renderer events during the fixed two-second window')
+  assert.ok(hooks.length >= 12, 'The producer must keep emitting real accepted Renderer events during the fixed two-second window; ' + JSON.stringify({lastEditAt,crashAt,eventCount:hooks.length,totalEvents:observer.hooks.length,lastEvents:observer.hooks.slice(-6),lastPosts:acknowledgements.slice(-6),producerExit:producer.exitCode,producerSignal:producer.signalCode}))
   const gaps = [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at]
   assert.ok(Math.max(...gaps) < 400, 'No quiet debounce interval may occur before the abrupt crash')
   assert.equal(producer.exitCode, null); assert.equal(producer.signalCode, null)
   assert.equal(acknowledgements.at(-1)?.status, 204); assert.ok(crashAt-acknowledgements.at(-1).at < 400)
   assert.deepEqual(observer.unloads, [])
-  assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60)
+  if (!goalsAlignmentProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
+  assert.equal(immediatelyBeforeCrash.draft, newDraft)
   assert.deepEqual(immediatelyBeforeCrash.queued, expectedQueue, 'Actual queue order and its recorded or unknown times must be written before the abrupt crash')
   // The sole surviving Region stays active in durable layout; its ring has no competing choice.
-  assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
+  if (!goalsAlignmentProof) assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
   first.cdp.close()
   process.kill(-first.child.pid, 'SIGKILL') // Exact detached private Electron group; the Run is outside it.
   await waitFor('first abrupt exit', () => first.child.signalCode !== null || first.child.exitCode !== null, 5_000)
@@ -385,7 +405,7 @@ try {
   assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
-    regionClose: regionCloseProof,
+    regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
