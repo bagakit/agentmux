@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
-import { access } from 'node:fs/promises'
+import { access, stat } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -56,7 +56,7 @@ import {
   type HandoffResult
 } from './agent-handoff.js'
 import { advanceDelivery, type AgentThread } from './agent-message.js'
-import type { AgentMuxExecutorProbeOutcome } from './control.js'
+import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { agentPromptCondition, validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
@@ -454,35 +454,40 @@ function projectRunWith(
   }
 }
 
-/**
- * 一次探测的三态结局——唯一一处把「查不成 / 没装 / 装了」分开的地方。
- *
- * `hasExecutable` 此前用一个 boolean 同时表达「文件不在」和「PATH 空到根本没候选可查」，于是环境退化
- * （PATH 被清空、命令又是相对名）被当成「没装」——那正是实战里那次误报。分档判据：
- *   - 相对命令 + 空 PATH → 零候选 → 我们**没查成**（check-failed），不是断言它不在。
- *   - 有候选但没有一个可执行（或绝对路径不存在）→ 查成了，确实**不在**（missing）。
- *   - 任一候选可执行 → available。
- *
- * 启动闸（{@link hasExecutable}）保持 boolean：`=== 'available'` 才放行，于是 check-failed 也拒绝启动，
- * 与原先「非 available 一律不启动」的行为完全一致，无回归。
- */
-async function classifyExecutable(executable: string): Promise<AgentMuxExecutorProbeOutcome> {
+/** X_OK also accepts searchable directories. Check the file kind first; later valid candidates win over earlier failures. */
+async function classifyExecutable(executable: string): Promise<AgentMuxExecutorProbeResult> {
   const candidates = isAbsolute(executable) || executable.includes('/')
     ? [executable]
     : (process.env.PATH ?? '').split(delimiter).filter(Boolean).map((directory) => join(directory, executable))
-  // 相对命令却一个候选都没有：PATH 是空的——环境不完整，我们查不了，不能替它断言「没装」。
-  if (candidates.length === 0) return 'check-failed'
+  if (candidates.length === 0) return { executable, availability: 'check-failed', cause: {
+    code: 'EXECUTABLE_SEARCH_UNAVAILABLE',
+    message: `No candidate path was searchable for "${executable}". Check PATH and the shell environment this app was launched from.`
+  } }
+  let unknown: { code: string; message: string } | undefined
+  let notFile: { code: string; message: string } | undefined
   for (const candidate of candidates) {
     try {
+      const metadata = await stat(candidate)
+      if (!metadata.isFile()) {
+        notFile ??= { code: 'EXECUTABLE_NOT_FILE', message: `${candidate} is ${metadata.isDirectory() ? 'a directory' : 'not a regular file'}; expected a regular executable file.` }
+        continue
+      }
       await access(candidate, fsConstants.X_OK)
-      return 'available'
-    } catch {}
+      return { executable, availability: 'available' }
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code : 'EXECUTABLE_CHECK_FAILED'
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        unknown ??= { code, message: error instanceof Error ? error.message : String(error) }
+      }
+    }
   }
-  return 'missing'
+  if (unknown) return { executable, availability: 'check-failed', cause: unknown }
+  return { executable, availability: 'missing', ...(notFile ? { cause: notFile } : {}) }
 }
 
 async function hasExecutable(executable: string): Promise<boolean> {
-  return (await classifyExecutable(executable)) === 'available'
+  return (await classifyExecutable(executable)).availability === 'available'
 }
 
 /**
@@ -504,13 +509,20 @@ async function executorUnavailableError(
   label: string,
   executable: string
 ): Promise<AgentMuxError> {
-  return await classifyExecutable(executable) === 'check-failed'
-    ? new AgentMuxError(
-        `Could not verify whether ${label} is installed on this host: no candidate path was searchable for "${executable}". Check PATH and the shell environment this app was launched from.`,
-        'AGENT_NOT_FOUND',
-        'executor-check-failed'
-      )
-    : new AgentMuxError(`${label} is not installed on this host.`, 'AGENT_NOT_FOUND', 'executor-missing')
+  const result = await classifyExecutable(executable)
+  if (result.availability === 'check-failed') {
+    return new AgentMuxError(
+      `Could not verify the ${label} executable on this host: ${result.cause.code}: ${result.cause.message}`,
+      'AGENT_NOT_FOUND',
+      'executor-check-failed'
+    )
+  }
+  if (result.availability === 'available') {
+    return new AgentMuxError(`${label} executable availability changed while preparing the launch. Retry the launch.`, 'AGENT_NOT_FOUND', 'executor-check-failed')
+  }
+  return new AgentMuxError(result.cause
+    ? `The configured ${label} executable is not available: ${result.cause.message}`
+    : `${label} is not installed on this host.`, 'AGENT_NOT_FOUND', 'executor-missing')
 }
 
 export class AgentMuxClient {
@@ -1479,7 +1491,7 @@ export class AgentMuxClient {
    * 三态归类：`probeAgent` 里的 boolean `installed` 会把「查不成」折进「没装」，而发现列表必须区分二者
    * （那正是那次误报要防的）。启动路径仍走 `probeAgent().installed`（=== 'available'），行为不变。
    */
-  async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string): Promise<AgentMuxExecutorProbeOutcome> {
+  async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string): Promise<AgentMuxExecutorProbeResult> {
     this.requireConnected()
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
     // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。

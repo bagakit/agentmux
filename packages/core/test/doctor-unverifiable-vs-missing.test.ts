@@ -1,10 +1,23 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import { AgentMuxClient as RealClient } from '../src/client.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
 import type { AgentMuxRuntimeDiagnostics } from '../src/types.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+
+const readFailure = vi.hoisted(() => ({ path: '' }))
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, stat: async (...args: Parameters<typeof actual.stat>) => {
+    if (readFailure.path && String(args[0]) === readFailure.path) throw Object.assign(new Error('controlled doctor executable I/O failure'), { code: 'EIO' })
+    return await actual.stat(...args)
+  } }
+})
 
 /**
  * 守「诊断分得清『查不成』与『没装』」。
@@ -30,7 +43,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   arch: 'arm64',
   supported: true,
   ctxmux: {
-    state: { configuredDirectory: upstreamFixturePath("fixture/future"), servingDirectory: null },
+    state: { configuredDirectory: fixturePath("fixture/future"), servingDirectory: null },
     serving: { buildIdentity: 'ctxmux-fixture', protocolVersion: 12, instanceId: 'daemon-fixture', sourceCommit: null },
     bundled: { version: '0.1.0', sourceCommit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7', artifactPlatform: 'darwin-arm64' },
     ready: true,
@@ -51,7 +64,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
  * 换成固定值——连接与 runtime 诊断不是被测对象，且不该让这条用例依赖本机有没有在跑 daemon。
  */
 function clientWithRealProbes(): AgentMuxClient {
-  const client = new RealClient()
+  const client = new RealClient({ store: new AgentMuxMemoryAgentSessionStore() })
   const internals = client as unknown as {
     connected: boolean
     kernel: { isConnected(): boolean }
@@ -101,7 +114,7 @@ describe('doctor 区分「查不成」与「没装」', () => {
   it('查成了、确实没装 → 照旧说没装（新状态没有吃掉旧状态）', async () => {
     const previousPath = process.env.PATH
     // 绝对路径候选存在但指向空目录 ⇒ 查成了，确实没装。判据不能宽到把这一档也说成「查不成」。
-    process.env.PATH = upstreamFixturePath("nonexistent-agentmux-doctor-probe")
+    process.env.PATH = fixturePath("nonexistent-agentmux-doctor-probe")
     try {
       const { probe, action } = await codexReport()
       expect(probe, '真的没装却报成了查不成——判据过宽').toBe('missing')
@@ -110,5 +123,27 @@ describe('doctor 区分「查不成」与「没装」', () => {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
     }
+  })
+
+  it('consumes the actual classifier cause for an unknown read and a confirmed directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-doctor-file-kind-'))
+    const executable = join(root, 'executable')
+    try {
+      await writeFile(executable, '#!/bin/sh\n'); await chmod(executable, 0o755)
+      readFailure.path = executable
+      const unknown = await diagnoseAgentMux({ client: clientWithRealProbes(), commandOverrides: { codex: executable } })
+      const failed = unknown.agents.find((agent) => agent.id === 'codex')
+      expect(failed).toBeDefined()
+      expect(failed?.probe).toBe('unverifiable')
+      expect(failed?.action).toContain('EIO: controlled doctor executable I/O failure')
+      expect(failed?.action).not.toMatch(/no candidate path|PATH|Install /)
+      readFailure.path = ''
+      const directory = await diagnoseAgentMux({ client: clientWithRealProbes(), commandOverrides: { codex: root } })
+      const notFile = directory.agents.find((agent) => agent.id === 'codex')
+      expect(notFile).toBeDefined()
+      expect(notFile?.probe).toBe('missing')
+      expect(notFile?.action).toContain('is a directory; expected a regular executable file')
+      expect(notFile?.action).not.toMatch(/^Install /)
+    } finally { readFailure.path = ''; await rm(root, { recursive: true, force: true }) }
   })
 })

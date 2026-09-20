@@ -43,13 +43,18 @@
 .surface-tool-panel { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 36px minmax(0, 1fr); background: var(--surface-1); }
 .surface-tool-activitybar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:0 var(--sp-3) 0 var(--sp-2); overflow: visible; background: var(--surface-0); box-shadow: inset 0 -1px var(--line-soft); }
 .surface-tool-activitybar--compact-chrome { grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-2); padding:0 var(--sp-2) 0 0; }
-.surface-tool-activitybar--compact-chrome > .sidebar-toggle-chrome { width: auto; height: auto; flex: 0 0 auto; gap:var(--sp-1); padding:0; background:transparent; box-shadow:none; }
+.surface-tool-activitybar--compact-chrome > .sidebar-toggle-chrome { width: auto; height: auto; flex: 0 0 auto; gap:var(--sp-1); padding-top:0; padding-right:0; padding-bottom:0; background:transparent; box-shadow:none; }
 .surface-tool-activitybar--compact-chrome > span { display: none; }
 .surface-tool-activitybar nav { display: flex; align-items: center; gap:1px; }
 .surface-tool-activitybar nav button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .surface-tool-activitybar nav button:hover { color: var(--text); background: var(--surface-3); }
 .surface-tool-activitybar nav button.selected { color: var(--green); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); }
 .surface-tool-activitybar > span { min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.surface-tool-activitybar--space { display: flex; }
+.surface-tool-activitybar--space nav { flex: 1; min-width: 0; }
+.surface-tool-create.icon-button { width: 28px; height: 28px; flex: 0 0 auto; color: var(--text-2); }
+.surface-tool-create.icon-button:disabled { opacity: .55; cursor: wait; }
+.browser-tools-panel { height: 100%; min-height: 0; padding: var(--sp-3); overflow: auto; background: var(--surface-0); }
 .surface-tool-content { min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .workspace-tool-explorer { height: 100%; min-height: 0; display: grid; grid-template-rows: 40px minmax(0, 1fr); }
 .workspace-tool-context { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); background: var(--surface-0); }
@@ -80,13 +85,9 @@
 .workspace-tools-resize-handle:hover::after,
 .workspace-tools-resize-handle[data-resize-handle-active]::after { background: var(--green-2); }
 .surface-tool-panel .file-explorer { height: 100%; }
-.surface-tool-action-surface,
 .surface-tool-summary { min-height: 100%; display: flex; flex-direction: column; align-items: flex-start; padding:var(--sp-6) var(--sp-5); overflow: auto; background: linear-gradient(150deg, var(--surface-1) 0%, var(--bg) 58%); }
-.surface-tool-action-surface__icon,
 .surface-tool-summary__icon { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; margin-bottom:var(--sp-5); border-radius: var(--radius); color: var(--green); background: var(--green-bg); box-shadow: 0 10px 24px var(--scrim-1); }
-.surface-tool-action-surface h2,
 .surface-tool-summary h2 { margin:var(--sp-2) 0 var(--sp-3); font-size: var(--fs-display); letter-spacing: -.03em; }
-.surface-tool-action-surface > p,
 .surface-tool-summary > p { margin:0 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
 .workspace-topics-panel > .primary-button { margin-bottom:var(--sp-5); }
 .workspace-topics-panel--index { padding:var(--sp-3); background: var(--surface-1); }
@@ -136,7 +137,6 @@
 /* 已 pin 的静息态标记：品牌绿小 Pin，扫一眼列表就分辨得出（不靠 hover）。行首可空槽里的东西
    （同 leading spinner，只在 pinned 时占位），不是按钮——切换 pin 的动作在右键菜单里。 */
 .workspace-topic-entry__pin { flex: 0 0 auto; color: var(--green); }
-.surface-tool-action-surface > .primary-button { margin-bottom:var(--sp-6); }
 .surface-tool-unavailable { width: 100%; min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4); border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); }
 .surface-tool-unavailable > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .surface-tool-unavailable strong { color: var(--text-2); font-size: var(--fs-meta); }

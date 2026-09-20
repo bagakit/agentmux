@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,7 +19,7 @@ const priorArgv = [...process.argv]
 const priorExitCode = process.exitCode
 let dispose: ReturnType<typeof vi.spyOn> | undefined
 const runtime: AgentMuxRuntimeDiagnostics = { nodeVersion: '24.0.0', platform: 'darwin', arch: 'arm64', supported: true,
-  ctxmux: { state: { configuredDirectory: upstreamFixturePath("fixture/future"), servingDirectory: null }, serving: { buildIdentity: 'fixture', protocolVersion: 17, instanceId: 'fixture', sourceCommit: null }, bundled: { version: '0.1.0', sourceCommit: 'c168c0ab9cd849bfade68461b62684982c71f688', artifactPlatform: 'darwin-arm64' }, ready: true,
+  ctxmux: { state: { configuredDirectory: fixturePath("fixture/future"), servingDirectory: null }, serving: { buildIdentity: 'fixture', protocolVersion: 17, instanceId: 'fixture', sourceCommit: null }, bundled: { version: '0.1.0', sourceCommit: 'c168c0ab9cd849bfade68461b62684982c71f688', artifactPlatform: 'darwin-arm64' }, ready: true,
     capabilities: { transport: 'local-unix', orderedOutputBytes: true, boundedReplay: true, recoverableInput: true, resize: true, interrupt: true, completeStop: true } } }
 afterEach(async () => {
   vi.restoreAllMocks(); process.argv = [...priorArgv]; process.exitCode = priorExitCode
@@ -43,7 +43,7 @@ describe('actual doctor CLI body to public Core inspection', () => {
     vi.spyOn(client,'runtimeIdentity').mockReturnValue({hostId:'local',buildIdentity:'fixture',protocolVersion:17,instanceId:'fixture',processId:null})
     vi.spyOn(client,'runtimeDiagnostics').mockResolvedValue(runtime)
     vi.spyOn(client,'probeAgent').mockResolvedValue({providerId:provider.id,executable:provider.executable,installed:true,capabilities:provider.catalog.capabilities})
-    vi.spyOn(client,'probeExecutorAvailability').mockResolvedValue('available')
+    vi.spyOn(client,'probeExecutorAvailability').mockResolvedValue({ executable: 'codex', availability: 'available' })
     dispose=vi.spyOn(client,'dispose')
     const inspect=vi.spyOn(client,'inspectManagedHooks')
     const lines:string[]=[]

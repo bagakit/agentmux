@@ -3,6 +3,7 @@ import type { AgentFocusHistoryEntry } from './agent-focus'
 export const FOCUS_WINDOW_HOURS = [1, 4, 12, 24] as const
 export type FocusTimeWindow = { start: number; end: number }
 export type FocusTimeSegment = AgentFocusHistoryEntry & { end: number | undefined; left: number; width: number | undefined }
+export type FocusWorkSegment = { enteredAt: number; left: number; width: number }
 export const HOUR_MS = 60 * 60 * 1000
 
 export function focusTimeWindow(anchor: number, hours: number): FocusTimeWindow {
@@ -11,6 +12,14 @@ export function focusTimeWindow(anchor: number, hours: number): FocusTimeWindow 
 
 export function focusTimePosition(time: number, window: FocusTimeWindow): number {
   return (time - window.start) / (window.end - window.start) * 100
+}
+
+/** A current proven working state extends to Now; it does not establish the Run's lifetime. */
+export function focusWorkSegment(enteredAt: number | null, window: FocusTimeWindow, now: number): FocusWorkSegment | null {
+  if (enteredAt === null || !Number.isFinite(enteredAt) || enteredAt <= 0 || enteredAt > now || now < window.start || enteredAt > window.end) return null
+  const left = focusTimePosition(Math.max(window.start, enteredAt), window)
+  const right = focusTimePosition(Math.min(window.end, now), window)
+  return { enteredAt, left, width: Math.max(0, right - left) }
 }
 
 export function focusTimeSegments(entries: readonly AgentFocusHistoryEntry[], window: FocusTimeWindow, now: number): Map<string, FocusTimeSegment[]> {

@@ -4374,6 +4374,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               [executorDetectionKey(hostId, executorId)]: {
                 state,
                 result,
+                ...(result.availability !== 'available' && result.cause ? { detail: `${result.cause.code}: ${result.cause.message}` } : {}),
                 observedAt: Date.now()
               }
             }

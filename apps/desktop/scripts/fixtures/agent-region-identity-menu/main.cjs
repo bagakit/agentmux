@@ -91,8 +91,38 @@ async function geometry(readonly) {
       readOnly:!!s.querySelector('.agent-region-header__mode'),search:!!s.querySelector('.terminal-search'),notice:!!s.querySelector('.agent-launch-notice')}})()`)
 }
 async function capture(name) {
-  const png=(await win.webContents.capturePage()).toPNG();await fs.writeFile(path.join(evidence,name+'.png'),png)
+  const png=(await win.webContents.capturePage()).toPNG();assert.ok(png.length>0,'Actual captured image is nonempty');await fs.writeFile(path.join(evidence,name+'.png'),png)
   return createHash('sha256').update(png).digest('hex')
+}
+async function composerVisual() {
+  result.captureOnly=true;result.aestheticReview='not-performed'
+  const composer=`${surface}.querySelector('.composer')`,editor=`${composer}.querySelector('[role="textbox"]')`
+  const toggle=`${composer}.querySelector('.composer-tool--mode')`,control=`${composer}.querySelector('.continuous-progress-control')`
+  async function frame(width,state){
+    result.stage={width,state};await waitFor(visible(editor));await waitFor(visible(`${control}?.querySelector('summary')`));await painted()
+    const file=`${width}-composer-${state}.png`,png=await capture(file.slice(0,-4))
+    result.frames.push({width,state,file,png})
+  }
+  async function draft(text){
+    await waitFor(visible(editor));await click(editor)
+    for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',modifiers:4,windowsVirtualKeyCode:65})
+    await win.webContents.debugger.sendCommand('Input.insertText',{text})
+    await waitFor(`${editor}.textContent.includes(${JSON.stringify(text.split('\n').at(-1))})`)
+  }
+  async function phase(expected){
+    await waitFor(visible(toggle));await click(toggle)
+    await waitFor(`${composer}.querySelector('.composer-tools').dataset.mode===${JSON.stringify(expected)}`)
+  }
+  for(const width of [640,320]){
+    result.stage={width,state:'one-line-short'};await seed(width);await waitFor(visible(editor));await waitFor(visible(`${control}?.querySelector('summary')`))
+    await draft('Review this workspace and keep the current draft.');await frame(width,'one-line-short')
+    await phase('current');await frame(width,'tools-short')
+    await phase('expanded');await draft('Review the current workspace.\nExplain the finding and its impact.\nKeep the original working surface.\nSuggest a focused next step.\nThis draft remains unsent.');await frame(width,'expanded-long')
+    await click(`${control}.querySelector('summary')`);await waitFor(`${control}.open`);await waitFor(visible(`${control}.querySelector('form')`));await frame(width,'progress-open')
+    await click(`${control}.querySelector('summary')`);await waitFor(`!${control}.open`);await frame(width,'progress-closed')
+    await phase('collapsed');await frame(width,'one-line-return')
+  }
+  assert.ok(result.frames.length>0,'Actual composer scenes are nonempty')
 }
 async function selection(label,width,input='mouse') {
   await seed(width);await identity();await open()
@@ -140,7 +170,8 @@ app.whenReady().then(async()=>{
     result.consoleErrors=[];win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
-    if(probe==='name'){await seed(640);result.names=await identity()}
+    if(probe==='composer-visual')await composerVisual()
+    else if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
     else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     else{
