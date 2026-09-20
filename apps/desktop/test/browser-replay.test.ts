@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { buildReplayScript } from '../src/main/browser-view-manager'
+import { buildReplayScript } from '../src/main/browser-replay-compiler'
 import { BROWSER_OPERATION_PHASES, narrowBrowserOperation } from '../src/shared/browser-operation'
 
 /**
@@ -50,7 +50,7 @@ describe('Browser semantic replay', () => {
     await runReplayScript(script, {
       pageInfo: async () => ({ url: 'https://example.test/list' }),
       snapshot: async () => ({
-        nodes: [
+        observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [
           { ref: '@e1', role: 'button', name: 'Delete' },
           { ref: '@e2', role: 'button', name: 'Delete' },
           { ref: '@e3', role: 'button', name: 'Delete' }
@@ -74,7 +74,7 @@ describe('Browser semantic replay', () => {
     await expect(
       runReplayScript(script, {
         pageInfo: async () => ({ url: 'https://example.test/somewhere-else' }),
-        snapshot: async () => ({ nodes: [{ ref: '@e1', role: 'button', name: 'Delete' }] }),
+        snapshot: async () => ({ observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'button', name: 'Delete' }] }),
         click: async (ref: unknown) => {
           clicked.push(ref)
         }
@@ -95,7 +95,7 @@ describe('Browser semantic replay', () => {
       runReplayScript(script, {
         pageInfo: async () => ({ url: 'https://example.test/list' }),
         // 只剩一个同名元素：录的是第 2 个，回放时它不存在了。
-        snapshot: async () => ({ nodes: [{ ref: '@e1', role: 'button', name: 'Delete' }] }),
+        snapshot: async () => ({ observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'button', name: 'Delete' }] }),
         click: async (ref: unknown) => {
           clicked.push(ref)
         }
@@ -118,7 +118,7 @@ describe('Browser semantic replay', () => {
         // 录的时候有 3 个，现在只有 2 个。第 2 个**存在**，所以 `!targetNode` 拦不住这一条——
         // 只有总数判据能拦。把它写死成永远放行（`matches.length < 0`）必须让这条红。
         snapshot: async () => ({
-          nodes: [
+          observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [
             { ref: '@e1', role: 'button', name: 'Delete' },
             { ref: '@e2', role: 'button', name: 'Delete' }
           ]
@@ -161,7 +161,7 @@ describe('Browser semantic replay', () => {
         },
         snapshot: async () => {
           called.push('snapshot')
-          return { nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }
+          return { observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }
         },
         fillInput: async () => {
           called.push('fillInput')
@@ -196,7 +196,7 @@ describe('Browser semantic replay', () => {
     await expect(
       runReplayScript(script, {
         pageInfo: async () => ({ url: 'https://example.test/' }),
-        snapshot: async () => ({ nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }),
+        snapshot: async () => ({ observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }),
         click: async () => { called.push('click'); return null },
         js
       })
@@ -217,7 +217,7 @@ describe('Browser semantic replay', () => {
     await expect(
       runReplayScript(script, {
         pageInfo: async () => ({ url: 'https://example.test/' }),
-        snapshot: async () => ({ nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }),
+        snapshot: async () => ({ observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'button', name: 'Submit' }] }),
         click: async () => { called.push('click'); return null }
       })
     ).resolves.toMatchObject({ replayOf: 'op-ok' })

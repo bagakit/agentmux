@@ -11,9 +11,10 @@ const require = createRequire(path.join(root, 'package.json'))
 const main = 'apps/desktop/src/main/browser-demonstration-recorder.ts'
 const test = 'apps/desktop/test/browser-demonstration-recorder.test.ts'
 const capture = 'apps/desktop/src/main/browser-demonstration-capture.ts'
+const target = 'apps/desktop/src/main/browser-semantic-target.ts'
 const surface = 'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx'
 const tests = [test, 'apps/desktop/test/browser-demonstration-capture.test.ts', 'apps/desktop/test/browser-demonstration-surface.test.tsx']
-const inputs = [main, capture, surface, ...tests,
+const inputs = [main, capture, target, surface, ...tests,
   'apps/desktop/src/main/browser-cdp-session.ts', 'apps/desktop/src/main/browser-page-snapshot.ts',
   'apps/desktop/src/main/browser-snapshot-query.ts', 'apps/desktop/src/main/browser-selection-script.ts',
   'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/browser-operation.ts',
@@ -37,8 +38,8 @@ const cases = [
 cases.push(
   [capture, 'untrusted-event-enters-capture', 'if (event.isTrusted !== true) return;', 'if (false) return;'],
   [capture, 'hover-triggers-observation', '!NATIVE_INPUTS.has(input.type)', 'false'],
-  [capture, 'backend-identity-guessed', 'candidate.backendNodeId === backendNodeId', 'candidate.backendNodeId > 0'],
-  [capture, 'ambiguous-target-approved', 'matches.length !== 1', 'matches.length < 1'],
+  [target, 'backend-identity-guessed', 'candidate.backendNodeId === backendNodeId', 'candidate.backendNodeId > 0'],
+  [target, 'ambiguous-target-approved', 'matches.length !== 1', 'matches.length < 1'],
   [capture, 'isolated-world-unproven', 'response.result?.value === true', 'true'],
   [capture, 'owner-not-released', 'this.session?.detach()', 'void 0'],
   [capture, 'cleanup-warning-discarded', 'if (cleanupWarning) this.warning = cleanupWarning', 'void 0'],
