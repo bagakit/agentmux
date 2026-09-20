@@ -8,10 +8,21 @@ import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES } from '../src/shared/workspace-file-bytes.js'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 
-const race = vi.hoisted(() => ({ beforeInput: null as null | (() => Promise<void>) }))
+const race = vi.hoisted(() => ({ beforeInput: null as null | (() => Promise<void>), beforePublish: false }))
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
+    if (args[0] === process.execPath && race.beforePublish) {
+      const values = [...args[1]!]
+      const source = values[2]!
+      const anchor = '          if (request.exclusive) {'
+      expect(source.split(anchor)).toHaveLength(2)
+      // A controlled competitor creates the real target after the final revision check.
+      // The commit syscall and path confinement remain the actual production worker.
+      values[2] = source.replace(anchor, `          const competitor = await open(request.name, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)\n          try { await competitor.writeFile(Buffer.from([77, 0, 255])) } finally { await competitor.close() }\n` + anchor)
+      args[1] = values
+      race.beforePublish = false
+    }
     const child = actual.spawn(...args)
     if (args[0] === process.execPath && child.stdin) {
       const end = child.stdin.end.bind(child.stdin)
@@ -39,6 +50,7 @@ async function fixture() {
 }
 afterEach(async () => {
   race.beforeInput = null
+  race.beforePublish = false
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -61,6 +73,27 @@ describe('WorkspaceFiles binary owner', () => {
     expect(await readFile(join(root, 'keep.bin'))).toEqual(original)
     await writeFile(join(root, 'keep.bin'), Buffer.from([0, 255, 3]))
     await expect(files.readBytes(workspace, 'keep.bin', { expectedRevision: revision(original) })).rejects.toMatchObject({ code: 'WORKSPACE_FILE_REVISION_MISMATCH' })
+  })
+
+  it('snapshots a file larger than a public chunk in one bounded verified scan', async () => {
+    const { root, workspace, files } = await fixture()
+    const bytes = Buffer.alloc(WORKSPACE_FILE_MAX_READ_BYTES + 3, 128)
+    bytes[0] = 0
+    bytes[bytes.length - 1] = 255
+    await writeFile(join(root, 'upload.bin'), bytes)
+    const snapshot = await files.snapshotBytes(workspace, 'upload.bin')
+    expect(Buffer.from(snapshot.bytes).equals(bytes)).toBe(true)
+    expect({ ...snapshot, bytes: undefined }).toEqual({ bytes: undefined, totalBytes: bytes.length, revision: revision(bytes), offset: 0, returnedBytes: bytes.length, nextOffset: null, readCost: { payloadBytes: bytes.length } })
+    await expect(files.snapshotBytes(workspace, 'upload.bin', { expectedRevision: revision(Buffer.from([1])) })).rejects.toMatchObject({ code: 'WORKSPACE_FILE_REVISION_MISMATCH' })
+  })
+
+  it('atomically preserves a competitor created after the final revision check', async () => {
+    const { root, workspace, files } = await fixture()
+    race.beforePublish = true
+    const competitor = Buffer.from([77, 0, 255])
+    await expect(files.writeBytes(workspace, { path: 'contended.bin', bytes: Buffer.from([0, 1]) })).resolves.toEqual({ status: 'conflict', observedRevision: revision(competitor) })
+    expect(await readFile(join(root, 'contended.bin'))).toEqual(competitor)
+    expect(race.beforePublish).toBe(false)
   })
 
   it('rejects outside links and traversal for both publishing and reading bytes', async () => {
@@ -104,6 +137,10 @@ describe('WorkspaceFiles binary owner', () => {
     try { await files.readBytes(workspace, 'large.bin') } catch (error) { failure = error }
     expect(failure).toBeInstanceOf(Error)
     expect(failure).toMatchObject({ code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+    let snapshotFailure: unknown
+    try { await files.snapshotBytes(workspace, 'large.bin') } catch (error) { snapshotFailure = error }
+    expect(snapshotFailure).toBeInstanceOf(Error)
+    expect(snapshotFailure).toMatchObject({ code: 'WORKSPACE_FILE_BYTE_LIMIT' })
     await expect(files.readBytes(workspace, 'large.bin', { maxBytes: WORKSPACE_FILE_MAX_READ_BYTES + 1 })).rejects.toThrow('maxBytes')
     await expect(files.readBytes(workspace, 'large.bin', { offset: -1 })).rejects.toThrow('offset')
     await expect(files.writeBytes(workspace, { path: 'too-large.bin', bytes: Buffer.alloc(WORKSPACE_FILE_MAX_BYTES + 1) })).resolves.toMatchObject({ status: 'error', code: 'WORKSPACE_FILE_BYTE_LIMIT' })

@@ -32,7 +32,8 @@ import {
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
-import { BROWSER_PAGE_FUNCTION_NAMES, runBrowserScript } from './browser-script-runner.js'
+import { runBrowserScript } from './browser-script-runner.js'
+import { buildReplayScript } from './browser-replay-compiler.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
 import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
@@ -133,60 +134,6 @@ function startBrowserOperationStep(operation: BrowserOperation, method: string, 
   operation.steps.push(step)
   operation.summary = `Running ${method}`
   return step
-}
-
-/**
- * 回放脚本里允许出现的动词。**白名单，不是黑名单**（「禁止清单必漏」）。
- *
- * 为什么必须有这道闸：`buildReplayScript` 把 `step.method` **原样拼进脚本源码**——
- * `await ${step.method}(...)`。同一个函数里 target 和 args 都走 `JSON.stringify`，只有 method 是裸的。
- * 而 method 的值来自子进程经 IPC 送回来的页面调用名（browser-script-runner.ts 的 `page-call`，
- * 主进程侧 `onPageCall(String(call.name), …)`）：Agent 的程序跑在一个带 IPC 的普通 Node 子进程里，
- * 自己 `process.send({kind:'page-call', name:'…'})` 就能把任意字符串送进来。派发层虽然会用
- * `default` 分支拒绝这个名字，但 `startBrowserOperationStep` 是在**派发之前**记的步骤，所以那个
- * 名字已经进了日志；持久化边界 `sanitizeReplay` 对 method 只 `clamp` 长度、不校验取值。
- *
- * 于是 `method = "click(''); await js('…'); //"` 在回放时会变成可执行语句，还能够到 `js`——
- * 而 `js` 正是 `sanitizeReplay` 特意用 `blockedReason` 挡住的那条逃生口。挡了参数没挡动词，
- * 等于没挡。
- *
- * 取值与注入给脚本的那份名单同源（`BROWSER_PAGE_FUNCTION_NAMES`）：能被回放的动词，
- * 不可能多于能被调用的动词。手抄第二份会漂移，而漂移的那一份不报错，只是悄悄放宽了。
- */
-const REPLAYABLE_METHODS: ReadonlySet<string> = new Set(BROWSER_PAGE_FUNCTION_NAMES)
-
-export function buildReplayScript(plan: BrowserReplayPlan): string {
-  const expectedUrl = JSON.stringify(safeBrowserUrl(plan.url))
-  const steps = plan.steps.map((step) => {
-    if (step.blockedReason) return `throw new Error(${JSON.stringify(step.blockedReason)})`
-    // 不在名单里就不拼进源码，换成一句抛。说清是哪个名字——这一步本来就回放不了，
-    // 静默跳过会让回放"少做一步却报成功"，那比抛更糟。
-    if (!REPLAYABLE_METHODS.has(step.method)) {
-      return `throw new Error(${JSON.stringify(
-        `Recorded step "${step.method}" is not a replayable Browser page function; inspect the operation history before retrying.`
-      )})`
-    }
-    if (step.target) {
-      const target = JSON.stringify(step.target)
-      const args = JSON.stringify(step.args)
-      return `{
-        const page = await snapshot();
-        const expected = ${target};
-        const matches = page.nodes.filter((node) => node.role === expected.role && node.name === expected.name);
-        const targetNode = matches[expected.ordinal - 1];
-        if (!targetNode || matches.length !== expected.count) throw new Error('Replay target changed; inspect the page before retrying.');
-        await ${step.method}(targetNode.ref${step.method === 'click' || step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});
-      }`
-    }
-    const args = JSON.stringify(step.args)
-    return `await ${step.method}(...${args})`
-  }).join('\n')
-  return `const pageIdentity = await pageInfo();
-  if (${expectedUrl} !== 'about:blank' && pageIdentity.url.split('?')[0].split('#')[0] !== ${expectedUrl}.split('?')[0].split('#')[0]) {
-  throw new Error('Replay page identity changed; inspect the current page before retrying.')
-}
-${steps}
-return { replayOf: ${JSON.stringify(plan.operationId)}, steps: ${plan.steps.length} }`
 }
 
 /**

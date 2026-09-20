@@ -41,6 +41,7 @@ type LocalWorkerRequest =
       action: 'write'
       name: string
       expectedRevision: string | null
+      exclusive?: true
       fault?: 'temporary-write' | 'replace'
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
@@ -85,7 +86,7 @@ export function workspaceFileObserverCount(): number {
 export const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
+import { constants, link, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, sep } from 'node:path'
 
@@ -278,9 +279,19 @@ try {
           if (request.fault === 'replace') {
             throw Object.assign(new Error('Injected atomic replace failure'), { code: 'INJECTED_REPLACE' })
           }
-          await rename(temporaryName, request.name)
-          temporaryExists = false
-          process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
+          if (request.exclusive) {
+            try {
+              await link(temporaryName, request.name)
+              process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
+            } catch (error) {
+              if (error?.code !== 'EEXIST') throw error
+              process.stdout.write(JSON.stringify({ status: 'conflict', observedRevision: (await currentFile(request.name)).revision }))
+            }
+          } else {
+            await rename(temporaryName, request.name)
+            temporaryExists = false
+            process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
+          }
         }
       } finally {
         if (handle) await handle.close().catch(() => {})
@@ -1164,16 +1175,26 @@ export class WorkspaceFiles {
     if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > WORKSPACE_FILE_MAX_BYTES) {
       return { status: 'error', code: 'WORKSPACE_FILE_BYTE_LIMIT', message: 'Workspace file exceeds the byte transfer budget.' }
     }
-    return await this.writeContent(workspace, { path: input.path, content: Buffer.from(input.bytes), expectedRevision: null })
+    return await this.writeContent(workspace, { path: input.path, content: Buffer.from(input.bytes), expectedRevision: null, exclusive: true })
   }
 
   /** Strict root confinement; unlike Explorer reads, a byte transfer cannot follow an outside link. */
   async readBytes(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions = {}): Promise<WorkspaceFileByteRead> {
-    if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
     const offset = options.offset ?? 0, maxBytes = options.maxBytes ?? WORKSPACE_FILE_MAX_READ_BYTES
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > WORKSPACE_FILE_MAX_READ_BYTES) {
       throw new Error(`Byte reads require an integer offset and maxBytes from 1 to ${WORKSPACE_FILE_MAX_READ_BYTES}.`)
     }
+    return await this.readByteRange(workspace, requestedPath, { ...options, offset, maxBytes })
+  }
+
+  /** Main-only bounded snapshot for operation-owned upload staging; one worker scan verifies the bytes. */
+  async snapshotBytes(workspace: WorkspaceRecord, requestedPath: string, options: Pick<WorkspaceFileByteReadOptions, 'expectedRevision'> = {}): Promise<WorkspaceFileByteRead> {
+    return await this.readByteRange(workspace, requestedPath, { ...options, offset: 0, maxBytes: WORKSPACE_FILE_MAX_BYTES })
+  }
+
+  private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number }): Promise<WorkspaceFileByteRead> {
+    if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
+    const { offset, maxBytes } = options
     const resolved = await localExistingPathWithin(workspace.path, requestedPath)
     const document = JSON.parse((await runLocalWorker(dirname(resolved.target), resolved.root, {
       action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: WORKSPACE_FILE_MAX_BYTES,
@@ -1185,7 +1206,7 @@ export class WorkspaceFiles {
 
   private async writeContent(
     workspace: WorkspaceRecord,
-    input: { path: string; content: string | Uint8Array; expectedRevision: string | null },
+    input: { path: string; content: string | Uint8Array; expectedRevision: string | null; exclusive?: true },
     beforeWrite?: () => void | Promise<void>
   ): Promise<WorkspaceFileWriteResult> {
     const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
@@ -1211,6 +1232,7 @@ export class WorkspaceFiles {
               action: 'write',
               name: resolved.name,
               expectedRevision: input.expectedRevision,
+              ...(input.exclusive ? { exclusive: true as const } : {}),
               ...(fault ? { fault } : {})
             }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
           } catch (error) {

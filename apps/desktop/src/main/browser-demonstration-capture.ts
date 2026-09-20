@@ -3,6 +3,7 @@ import type { WebContents } from 'electron'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
 import type { BrowserReplayTarget } from '../shared/browser-operation.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
+import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
 import { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import { captureBrowserPageSnapshot, type BrowserPageCapture } from './browser-page-snapshot.js'
 import { BROWSER_SELECTION_WORLD_ID } from './browser-selection-script.js'
@@ -240,20 +241,7 @@ export class BrowserDemonstrationCapture {
       }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
       const objectId = result.result?.objectId
       if (result.exceptionDetails || !objectId) return undefined
-      const described = await session.sendCommand('DOM.describeNode', { objectId }) as { node?: { backendNodeId?: number } }
-      const backendNodeId = described.node?.backendNodeId
-      if (!backendNodeId || !this.live(generation)) return undefined
-      const partial = await session.sendCommand('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false }) as { nodes?: { backendDOMNodeId?: number; ignored?: boolean; role?: { value?: string }; name?: { value?: string } }[] }
-      const actual = partial.nodes?.find(node => node.backendDOMNodeId === backendNodeId && !node.ignored)
-      // Exact event target, not an ancestor chosen by CSS or a guessed selector.
-      if (!actual?.role?.value || !actual.name?.value?.trim()) return undefined
-      const full = await snapshot()
-      if (!this.live(generation)) return undefined
-      const node = full.nodes.find(candidate => candidate.backendNodeId === backendNodeId && !candidate.sessionId)
-      if (!node || !node.ref || !node.name) return undefined
-      const matches = full.nodes.filter(candidate => candidate.role === node.role && candidate.name === node.name && !candidate.sessionId)
-      if (matches.length !== 1 || matches[0]?.backendNodeId !== backendNodeId) return undefined
-      return { role: node.role, name: node.name, ordinal: 1, count: 1 }
+      return await verifyBrowserSemanticTarget({ send: session.sendCommand, objectId, getSnapshot: snapshot, isCurrent: () => this.live(generation) })
     } catch {
       if (this.live(generation)) this.warn('A recorded target could not be verified. The step remains blocked for review; the Browser is usable.')
       return undefined

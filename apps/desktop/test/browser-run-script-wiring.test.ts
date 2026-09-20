@@ -994,7 +994,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     createDispatch.mockImplementationOnce((context) => async (name, args) => {
       calls.push({ name, args })
       if (name === 'pageInfo') return { url: 'https://example.invalid/' }
-      if (name === 'snapshot') return { nodes: [{ ref: '@fresh', role: 'button', name: 'Continue' }] }
+      if (name === 'snapshot') return { observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@fresh', role: 'button', name: 'Continue' }] }
       if (name === 'click') context.recordTarget?.(target)
       return null
     })
@@ -1002,7 +1002,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     expect(replay.outcome.kind).toBe('completed')
     expect(calls).toEqual([
       { name: 'pageInfo', args: [] },
-      { name: 'snapshot', args: [] },
+      { name: 'snapshot', args: [{ maxNodes: 1000 }] },
       { name: 'click', args: ['@fresh'] }
     ])
     expect(replay.runOperation).toMatchObject({ replayOf: original.runOperation!.id })
@@ -1035,7 +1035,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
       if (name === 'pageInfo') return { url: 'https://example.invalid/' }
       if (name === 'snapshot') {
         return {
-          nodes: [
+          observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [
             { ref: '@a', role: 'button', name: 'Delete' },
             { ref: '@b', role: 'button', name: 'Delete' },
             { ref: '@c', role: 'button', name: 'Delete' }
@@ -1082,7 +1082,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
       if (name === 'pageInfo') return { url: 'https://example.invalid/' }
       if (name === 'snapshot') {
         return {
-          nodes: [
+          observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [
             { ref: '@a', role: 'button', name: 'Delete' },
             { ref: '@b', role: 'button', name: 'Delete' },
             { ref: '@c', role: 'button', name: 'Delete' }
