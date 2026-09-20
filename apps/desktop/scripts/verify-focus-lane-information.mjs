@@ -8,7 +8,7 @@ const proof = resolve(root, '.bagakit/feature-tracker/focus-lane-information-art
 const read = name => JSON.parse(readFileSync(resolve(proof, name), 'utf8'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const slice = process.argv.includes('--slice') ? process.argv[process.argv.indexOf('--slice') + 1] : 'joined'
-assert.ok(['projection', 'lanes', 'joined'].includes(slice), 'Unknown qualification slice')
+assert.ok(['projection', 'lanes', 'lane-widths', 'joined'].includes(slice), 'Unknown qualification slice')
 function verifyProjection() {
  const receipt = read('projection-qualification.json'), inputs = read('projection-inputs.json'), runs = read('projection-execution.json')
  assert.equal(receipt.feature, 'f-2eq8fwvcm'); assert.equal(receipt.scope, 'projection'); assert.equal(receipt.installed, false)
@@ -64,5 +64,38 @@ function verifyLanes() {
  for (const caller of Object.values(callers)) { assert.ok(caller.hits.length > 0); assert.ok(caller.hits.every(hit => !hit.startsWith(caller.definition + ':'))) }
  return receipt
 }
-const result = slice === 'projection' ? verifyProjection() : slice === 'lanes' ? verifyLanes() : { projection: verifyProjection(), lanes: verifyLanes() }
+function verifyLaneWidths() {
+ const receipt = read('width-qualification.json'), inputs = read('width-inputs.json')
+ assert.equal(receipt.feature, 'f-2eq8fwvcm'); assert.equal(receipt.scope, 'lane-widths'); assert.equal(receipt.installed, false)
+ execFileSync('git', ['merge-base', '--is-ancestor', receipt.commit, 'main'], { cwd: root })
+ assert.equal(Object.keys(inputs).length, 13)
+ for (const [name, expected] of Object.entries(inputs)) assert.equal(hash(execFileSync('git', ['show', receipt.commit + ':' + name], { cwd: root })), expected, name)
+ const runs = read('width-execution.json')
+ for (const label of ['original-shared', 'candidate', 'shared-widths', 'restored']) {
+  const run = runs[label], report = read('width-' + label + '.json'), loaded = read('width-' + label + '-loaded.json')
+  assert.equal(report.numTotalTests, 11); assert.equal(Object.keys(loaded).length, 10)
+  for (const [name, actual] of Object.entries(loaded)) assert.equal(actual.before, inputs[name], name)
+  assert.equal(report.numPassedTests, run.passed); assert.equal(report.numFailedTests, run.failed)
+  if (label === 'candidate' || label === 'restored') { assert.equal(run.exitCode, 0); assert.equal(run.failed, 0) }
+  else { assert.notEqual(run.exitCode, 0); assert.ok(run.failed > 0); assert.ok(run.failures.length > 0); assert.ok(run.failures.every(f => f.startsWith('AssertionError:'))); assert.ok(Object.values(loaded).some(input => input.before !== input.effective)) }
+ }
+ const visual = read('width-visual-qualification.json'), geometry = read('width-visual-execution.json'), build = read('width-visual-build.json')
+ assert.equal(visual.sourceCssSha256, inputs['apps/desktop/src/renderer/src/styles/focus.css']); assert.equal(build.sourceCssSha256, visual.sourceCssSha256)
+ assert.equal(visual.personallyReviewed, true); assert.equal(geometry.actualGeometryPassed, true); assert.deepEqual(geometry.widths, [1600, 1000, 320])
+ assert.equal(Object.keys(build.loadedSourceInputs).length, 9)
+ for (const [name, actual] of Object.entries(build.loadedSourceInputs)) assert.equal(actual, inputs[name], name)
+ assert.equal(geometry.bounds.length, 3)
+ for (const bound of geometry.bounds) { assert.ok(bound.geometry.cards.length > 0); assert.ok(bound.geometry.lanes.length >= 3); for (const lane of bound.geometry.lanes) assert.deepEqual(lane.columns.map(c => c.bucket), ['attention', 'working', 'results', 'idle']) }
+ assert.equal(geometry.mutants.length, 2)
+ for (const mutant of geometry.mutants) { assert.equal(mutant.error.name, 'AssertionError'); assert.equal(mutant.assertionRed, true); assert.equal(mutant.restoredGreen, true); assert.equal(build.variants[mutant.label].originalOccurrences, 1); assert.ok(mutant.geometry.css.some(url => url.endsWith('/' + mutant.label + '.css'))) }
+ assert.ok(Object.keys(visual.artifacts).length >= 6)
+ for (const [name, expected] of Object.entries(visual.artifacts)) assert.equal(hash(readFileSync(resolve(proof, name))), expected, name)
+ const types = read('width-types.json')
+ for (const [label, typeRun] of Object.entries(types)) { assert.equal(typeRun.exitCode, 0); assert.equal(typeRun.listFilesExitCode, 0); assert.equal(Object.keys(typeRun.inputHashes).length, label === 'production' ? 9 : 11); for (const [name, actual] of Object.entries(typeRun.inputHashes)) assert.equal(actual, inputs[name], name) }
+ const adjacent = read('width-adjacent.json'); assert.equal(adjacent.numTotalTests, 23); assert.equal(adjacent.numPassedTests, 23); assert.equal(adjacent.numFailedTests, 0)
+ const callers = read('width-callers.json'); assert.ok(Object.keys(callers).length > 0)
+ for (const caller of Object.values(callers)) { assert.ok(caller.hits.length > 0); assert.ok(caller.hits.every(hit => !hit.startsWith(caller.definition + ':'))) }
+ return receipt
+}
+const result = slice === 'projection' ? verifyProjection() : slice === 'lanes' ? verifyLanes() : slice === 'lane-widths' ? verifyLaneWidths() : { projection: verifyProjection(), historicalSharedLanes: verifyLanes(), currentLaneWidths: verifyLaneWidths() }
 console.log(JSON.stringify({ result: 'PASS', slice, qualified: result, boundary: 'Focus lane information Source only; no installed/Runtime/full Focus/competitor claim.' }))

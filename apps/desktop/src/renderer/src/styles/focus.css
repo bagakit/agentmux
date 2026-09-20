@@ -22,24 +22,18 @@
 .focus-project-lanes__row[data-recovery='removed'] { border-top-style: dashed; }
 .focus-project-lanes__axis:hover { color: var(--text); }
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
-.focus-project-lanes__groups, .focus-state-columns { min-width: 0; display: grid; grid-template-columns: var(--focus-state-columns); align-content: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
-.focus-state-columns { position: sticky; top: 0; z-index: 3; background: var(--surface-1); border-bottom: 1px solid var(--line); }
-.focus-state-columns__heading { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; min-height: 26px; padding: 0 var(--sp-1); font-size: var(--fs-micro); color: var(--text-3); }
-.focus-state-columns__heading strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
-.focus-state-columns__heading > svg { flex: none; }
-.focus-state-columns__heading > span { margin-left: auto; font-variant-numeric: tabular-nums; }
-.focus-state-columns__heading[data-empty='true'] strong { display: none; }
-.focus-state-columns__heading[data-bucket='attention'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
-.focus-state-columns__heading[data-bucket='working'] { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
-.focus-state-columns__heading[data-bucket='results'] { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
+.focus-project-lanes__groups { min-width: 0; display: grid; grid-template-columns: var(--focus-state-columns); align-content: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
 .focus-context-group { min-width: 0; }
-.focus-context-group__cards, .focus-disconnected-projects__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); align-content: start; gap: var(--sp-1); }
+.focus-context-group__cards, .focus-disconnected-projects__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); align-content: start; gap: var(--sp-1); }
 .focus-context-group__cards > .focus-context, .focus-disconnected-projects__cards > .focus-context { max-width: 320px; }
 .focus-context-group__cards > .focus-recovery-toggle { grid-column: 1 / -1; }
-.focus-context-group__header { display: none; }
-.focus-context-group__header { min-height: 24px; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-group__header { display: flex; min-height: 24px; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-group__header strong { font-weight: 500; }
 .focus-context-group__header span { font-variant-numeric: tabular-nums; }
+.focus-context-group[data-empty='true'] .focus-context-group__header strong { display: none; }
+.focus-context-group[data-bucket='attention'] > .focus-context-group__header { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
+.focus-context-group[data-bucket='working'] > .focus-context-group__header { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
+.focus-context-group[data-bucket='results'] > .focus-context-group__header { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
 .focus-context { width: 100%; min-width: 0; min-height: 52px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-context:hover { background: var(--surface-2); }
 .focus-context.is-selected { background: var(--surface-3); color: var(--text); }
@@ -58,11 +52,7 @@
 @container (max-width: 680px) {
   .focus-project-lanes__row { grid-template-columns: minmax(0, 1fr); }
   .focus-project-lanes__groups { display: flex; flex-direction: column; }
-  .focus-state-columns { display: flex; gap: var(--sp-2); }
-  .focus-state-columns__heading { flex: 1; }
-  .focus-state-columns__heading strong { display: none; }
   .focus-context-group[data-empty='true'] { display: none; }
-  .focus-context-group__header { display: flex; }
 }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .focus-disconnected-projects { flex: none; min-height: 0; max-height: 45%; overflow: auto; border-top: 1px solid var(--line); }
