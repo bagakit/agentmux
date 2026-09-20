@@ -151,18 +151,31 @@ export class BrowserCdpSession {
    * 收摊。**不 detach 的后果是静默的**：用户此后再也打不开这个页面的 DevTools，而且没有任何提示。
    * 所以这一步必须在 finally 里，且它自己不许抛——它是收尾，不能把真正的失败盖掉。
    */
-  detach(): void {
-    this.contents.debugger.off('detach', this.onDetach)
-    this.contents.debugger.off('message', this.onMessage)
+  detach(): string | null {
     this.frameSenders.clear()
     this.listeners.clear()
-    if (this.gone !== null) return
+    // A destroyed WebContents also destroys its debugger wrapper: even reading `.off` can throw.
+    if (this.contents.isDestroyed()) return null
+    const failures: string[] = []
+    for (const remove of [
+      () => this.contents.debugger.off('detach', this.onDetach),
+      () => this.contents.debugger.off('message', this.onMessage)
+    ]) {
+      try {
+        remove()
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error))
+      }
+    }
     try {
-      if (!this.contents.isDestroyed() && this.contents.debugger.isAttached()) {
+      if (this.gone === null && this.contents.debugger.isAttached()) {
         this.contents.debugger.detach()
       }
-    } catch {
-      /* 已经被踢掉或页面没了。两种都无事可做。 */
+    } catch (error) {
+      if (!this.contents.isDestroyed()) failures.push(error instanceof Error ? error.message : String(error))
     }
+    return failures.length > 0
+      ? `Browser debugger cleanup could not finish (${failures.join('; ')}). The program result is retained. Close DevTools or reopen this Browser before driving it again.`
+      : null
   }
 }

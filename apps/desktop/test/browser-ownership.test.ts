@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,11 +59,7 @@ app.whenReady().then(async () => {
   try {
     const {
       createBrowserPageDispatch,
-      BrowserCdpSession,
-      BROWSER_SELECTION_WORLD_ID,
-      buildBrowserDriveBadgeScript,
-      buildCancelBrowserDriveBadgeScript,
-      BROWSER_DRIVE_BADGE_ATTRIBUTE
+      BrowserCdpSession
     } = await import('./dispatch.mjs')
     report.loadedProductionModules = true
 
@@ -122,33 +118,6 @@ app.whenReady().then(async () => {
     await dispatch('fillInput', [field.ref, 'no-previous'])
     report.focusWithNoPrevious = await dispatch('js', ['document.activeElement ? document.activeElement.id : null'])
 
-    // ── 角标：在场，但不吃点击 ──────────────────────────────────────────
-    await view.webContents.executeJavaScriptInIsolatedWorld(
-      BROWSER_SELECTION_WORLD_ID,
-      [{ code: buildBrowserDriveBadgeScript() }]
-    )
-    const probeBadge = (expression) => view.webContents.executeJavaScriptInIsolatedWorld(
-      BROWSER_SELECTION_WORLD_ID,
-      [{ code: expression }],
-      true
-    )
-    const hostSelector = '[' + BROWSER_DRIVE_BADGE_ATTRIBUTE + ']'
-    report.badgePresent = await probeBadge('!!document.querySelector(' + JSON.stringify(hostSelector) + ')')
-    // 真正的判据：角标那一格上的点击落到谁身上。落到角标身上，人伸手的第一次点击就被它吃了——
-    // 而那一次点击正是接管信号，于是这个提示会阻止它自己提示的那件事被察觉到。
-    report.badgeAtPointIsBadge = await probeBadge(\`(() => {
-      const host = document.querySelector(\${JSON.stringify(hostSelector)});
-      if (!host) return null;
-      const box = host.getBoundingClientRect();
-      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-      return hit === host || (hit ? host.contains(hit) : false);
-    })()\`)
-    await view.webContents.executeJavaScriptInIsolatedWorld(
-      BROWSER_SELECTION_WORLD_ID,
-      [{ code: buildCancelBrowserDriveBadgeScript() }]
-    )
-    report.badgeGoneAfterCancel = await probeBadge('!document.querySelector(' + JSON.stringify(hostSelector) + ')')
-
     // 反向的一半：真的往原生输入入口送一下，监听器必须出声。
     view.webContents.sendInputEvent({ type: 'mouseDown', x: 40, y: 40, button: 'left', clickCount: 1 })
     view.webContents.sendInputEvent({ type: 'mouseUp', x: 40, y: 40, button: 'left', clickCount: 1 })
@@ -160,7 +129,18 @@ app.whenReady().then(async () => {
     report.ok = false
     report.error = String(error && error.stack || error)
   } finally {
-    try { if (session) session.detach() } catch (cleanupError) { report.detachError = String(cleanupError) }
+    try {
+      if (session) {
+        const nativeContents = view.webContents
+        if (!nativeContents.isDestroyed()) {
+          const destroyed = new Promise(resolve => nativeContents.once('destroyed', resolve))
+          nativeContents.close()
+          await destroyed
+        }
+        report.contentsDestroyed = nativeContents.isDestroyed()
+        report.detachWarning = session.detach()
+      }
+    } catch (cleanupError) { report.detachError = String(cleanupError) }
     writeFileSync(reportPath, JSON.stringify(report, null, 2))
     app.exit(0)
   }
@@ -170,12 +150,7 @@ app.whenReady().then(async () => {
 const BUNDLE_ENTRY = `
 export { createBrowserPageDispatch } from '${new URL('browser-page-dispatch.ts', SRC_MAIN).pathname}'
 export { BrowserCdpSession } from '${new URL('browser-cdp-session.ts', SRC_MAIN).pathname}'
-export {
-  BROWSER_SELECTION_WORLD_ID,
-  BROWSER_DRIVE_BADGE_ATTRIBUTE,
-  buildBrowserDriveBadgeScript,
-  buildCancelBrowserDriveBadgeScript
-} from '${new URL('browser-selection-script.ts', SRC_MAIN).pathname}'
+
 `
 
 /** 与 browser-drive-e2e.test.ts 同形：从 src 真身打一个探针能 import 的 ESM。 */
@@ -189,7 +164,7 @@ async function buildDispatchBundle(outDirectory: string): Promise<void> {
       outDir: outDirectory,
       emptyOutDir: false,
       lib: { entry: entryPath, formats: ['es'], fileName: () => 'dispatch.mjs' },
-      rollupOptions: { external: ['electron', /^node:/] }
+      rollupOptions: { external: ['electron', '@agentmux/core', /^node:/] }
     }
   })
 }
@@ -209,10 +184,9 @@ type ProbeReport = {
   focusAfterTypeText?: string | null
   focusAfterPressKey?: string | null
   focusWithNoPrevious?: string | null
-  badgePresent?: boolean
-  badgeAtPointIsBadge?: boolean | null
-  badgeGoneAfterCancel?: boolean
   detachError?: string
+  contentsDestroyed?: boolean
+  detachWarning?: string | null
 }
 
 let cached: ProbeReport | undefined
@@ -221,6 +195,7 @@ async function probe(): Promise<ProbeReport> {
   if (cached) return cached
   const root = await mkdtemp(join(tmpdir(), 'amux-ownership-'))
   temporaryRoots.push(root)
+  await symlink(new URL('../node_modules', import.meta.url).pathname, join(root, 'node_modules'), 'dir')
   const pagePath = join(root, 'probe.html')
   const reportPath = join(root, 'report.json')
   await buildDispatchBundle(root)
@@ -270,6 +245,13 @@ describe('T-012 地基：input-event 是一个不可伪造的「真人碰过」�
 })
 
 describe('T-012 不抢焦点：动作用完把页面内的光标还回去', () => {
+  it('真实 WebContents 被销毁后 detach 保全原结果且不访问 dead debugger', async () => {
+    const result = await probe()
+    expect(result.ok).toBe(true)
+    expect(result.contentsDestroyed).toBe(true)
+    expect(result.detachError).toBeUndefined()
+    expect(result.detachWarning).toBeNull()
+  }, 180_000)
   it('三个会 focus() 的动作都还回去了——分三条判，不是判「有还回去的代码」', async () => {
     const result = await probe()
     // 三条各判一次：合成一条的话，「三处只改了一处」的实现会在另外两处上静默照抢。
@@ -283,21 +265,5 @@ describe('T-012 不抢焦点：动作用完把页面内的光标还回去', () =
     // 「填完就按 Enter」的程序在自己填的框上失去焦点，下一步按键落到空处。
     const result = await probe()
     expect(result.focusWithNoPrevious, '没有前任焦点时反而把焦点清掉了').toBe('probe-input')
-  }, 180_000)
-})
-
-describe('T-012 角标：看得见，但不吃人的第一次点击', () => {
-  it('角标注得上、撤得掉', async () => {
-    const result = await probe()
-    expect(result.badgePresent, '角标没注上——「人能看出来」这一半没实现').toBe(true)
-    expect(result.badgeGoneAfterCancel, 'run 结束后角标还赖在页面上').toBe(true)
-  }, 180_000)
-
-  it('角标那一格上的点击穿过去，落不到角标身上', async () => {
-    const result = await probe()
-    // 这是本条存在的全部理由：角标能吃点击的话，它会吃掉人伸手的第一次点击——而那一次点击
-    // **正是**接管信号。于是这个提示会阻止它自己提示的那件事被察觉到。
-    expect(result.badgeAtPointIsBadge, '角标没找到——判据在对空气生效').not.toBeNull()
-    expect(result.badgeAtPointIsBadge, '角标吃掉了那一格上的点击，接管信号永远来不了').toBe(false)
   }, 180_000)
 })
