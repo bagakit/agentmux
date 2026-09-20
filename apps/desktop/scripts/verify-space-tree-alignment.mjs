@@ -34,7 +34,17 @@ try {
   result.exit = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 35000 })
   result.native = JSON.parse(await fs.readFile(path.join(privateRoot, 'native.json'), 'utf8'))
-  for (const name of ['default.png', 'compact.png', 'dense.png', 'narrow.png', 'scrolled.png', 'collapsed.png', 'found.png', 'no-results.png', 'restored.png']) {
+  if (result.exit.exitCode === 0 && result.native.passed) {
+    result.restartExit = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, 'restore'],
+      { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 35000 })
+    result.restartNative = JSON.parse(await fs.readFile(path.join(privateRoot, 'native.json'), 'utf8'))
+    assert.equal(result.restartExit.exitCode, 0, result.restartNative.failure?.message)
+    assert.equal(result.restartNative.passed, true)
+    assert.notEqual(result.native.pid, result.restartNative.pid)
+    assert.deepEqual(result.restartNative.restart.retained, result.native.durable)
+  }
+
+  for (const name of ['default.png', 'compact.png', 'dense.png', 'narrow.png', 'scrolled.png', 'collapsed.png', 'found.png', 'no-results.png', 'restored.png', 'rich-274.png', 'rich-180.png', 'light.png', 'restart.png', 'disclosure-hover.png', 'disclosure-focus.png']) {
     await fs.copyFile(path.join(privateRoot, name), path.join(proof, name)).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
   assert.equal(result.exit.timedOut, false)

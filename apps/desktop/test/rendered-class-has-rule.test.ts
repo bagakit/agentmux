@@ -263,7 +263,6 @@ describe('渲染出来的 class 必须有规则', () => {
     // 才能一次性删组件 + 删 consumer + 移除本豁免。
     'project-rail-toolbar__button',
     'project-rail-toolbar__group',
-    'scratch-workspace-row__identity', // 与已有规则的 .project-rail-row__identity 同挂一个元素
     'workbench-tab__rename', // 见下：唯一存疑项，已在报告中单列
     'workspace-composer__fields--project', // 布局全在基类 .workspace-composer__fields 上
     'workspace-workbench--merged' // rootIsLeaf 分支才挂，样式全在基类 .workspace-workbench 上
