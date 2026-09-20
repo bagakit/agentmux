@@ -18,6 +18,7 @@
     "probe:file-editing": "node scripts/probe-file-editing.mjs",
     "report:package": "node scripts/report-desktop-package.mjs",
     "audit:features": "node scripts/audit-feature-history.mjs",
+    "capture:visual": "node scripts/verify-agent-region-identity-menu.mjs --visual-only",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs"

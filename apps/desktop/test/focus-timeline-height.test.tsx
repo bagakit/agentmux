@@ -7,20 +7,36 @@ import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store'
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 const baseline = useAppStore.getState()
-let root: Root, container: HTMLDivElement, resizeCallback: () => void, available = 800
+let root: Root, container: HTMLDivElement, resizeCallback: () => void, available = 800, headerHeight = 28
+const observed: Element[] = []
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resizeCallback = callback } observe() {} disconnect() {} })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: available, width: 1200, height: available, toJSON() {} }))
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resizeCallback = callback } observe(target: Element) { observed.push(target) } disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const height = this.classList.contains('recent-focus__header') ? headerHeight : available
+    return { x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: height, width: 1200, height, toJSON() {} }
+  })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), { sessions } = await api.sessions.snapshot()
   useAppStore.setState({ config, sessions, timelines: {}, tabs: {}, agentNames: {}, focusTimelineHeight: 96, agentFocus: { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: Date.now() - 60_000 }] }, pmo: { sessionId: null } } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); available = 800 })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); available = 800; headerHeight = 28; observed.length = 0 })
 const handle = () => container.querySelector<HTMLElement>('[aria-label="Resize Focus timeline"]')!
 const timeline = () => container.querySelector<HTMLElement>('.recent-focus')!
 const key = (value: string) => act(async () => handle().dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })))
+it('keeps one complete track below a wrapping header without rewriting the saved height and restores wide geometry', async () => {
+  const focus = useAppStore.getState().agentFocus, save = vi.spyOn(useAppStore.getState(), 'setFocusTimelineHeight')
+  expect(timeline().style.height).toBe('96px')
+  expect(observed).toContain(container.querySelector('.recent-focus__header'))
+  headerHeight = 60; await act(async () => resizeCallback())
+  expect(timeline().style.height).toBe('103px'); expect(handle().getAttribute('aria-valuemin')).toBe('103')
+  expect(useAppStore.getState().focusTimelineHeight).toBe(96); expect(save).not.toHaveBeenCalled()
+  headerHeight = 28; await act(async () => resizeCallback())
+  expect(timeline().style.height).toBe('96px'); expect(useAppStore.getState().agentFocus).toBe(focus)
+  headerHeight = 60; available = 200; await act(async () => resizeCallback())
+  expect(timeline().style.height).toBe('82px'); expect(useAppStore.getState().focusTimelineHeight).toBe(96)
+})
 it('drags upward to grow, saves once at pointer-up, and keeps the main workspace usable', async () => {
   const save = vi.spyOn(useAppStore.getState(), 'setFocusTimelineHeight')
   expect(handle().getAttribute('aria-orientation')).toBe('horizontal'); expect(timeline().style.height).toBe('96px')

@@ -101,6 +101,8 @@
    同一 Closure 内则给现有 Feature 追加 task。每个 task 必须有可证伪的 acceptance 与
    verification command。
 
+界面视觉改动的交付执行 [Agent 主观审美端到端验证](docs/guides/agent-visual-e2e-review.md)：Agent 根据本次改动选择实际场景，采图并安排独立 Agent 看图评审；修正后重拍复验。打包或更新 Renderer 前带上这份结论，不能用采图命令成功代替审美通过。
+
 判 task done 要过两把尺，缺任一把都不算交付：
 
 - **变异测试**：改坏实现，确认对应测试变红。证明"这行代码在被测试用到"。

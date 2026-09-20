@@ -533,13 +533,38 @@ export class RuntimeController {
 
   async detect(executorId: AgentExecutorId, hostId: string, config: AppConfig): Promise<ExecutorDetection> {
     const executor = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
-    if (!executor) throw new Error(`Missing Agent Executor configuration: ${executorId}`)
-    const client = await this.connectedClient(hostId)
-    return {
+    if (!executor) throw Object.assign(new Error(`Agent Executor not found: ${executorId}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
+    const host = config.hosts.find((item) => item.id === hostId)
+    if (!host) throw Object.assign(new Error(`Host not found: ${hostId}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
+    const input = structuredClone({
       executorId,
       providerId: executor.providerId,
-      hostId,
-      availability: await client.probeExecutorAvailability(executor.providerId, executor.command)
+      command: executor.command,
+      host
+    })
+    const owner = this.hosts.get(hostId)
+    const signature = JSON.stringify(input.host)
+    let executable: string | undefined
+    // Only this diagnostic requires a stable connection owner. Existing input routes keep their own contract.
+    const assertOwner = (): RuntimeHost => {
+      if (!owner || this.hosts.get(hostId) !== owner || this.hostSignatures.get(hostId) !== signature || this.hostReconfigurationReservations.has(hostId)) {
+        throw Object.assign(new Error(`Host ${hostId} connection is unavailable or changed during the executable check. Refresh this check.`), { code: 'EXECUTOR_HOST_CHANGED' })
+      }
+      return owner
+    }
+    try {
+      const current = assertOwner()
+      await current.client.connect()
+      assertOwner()
+      const result = await current.client.probeExecutorAvailability(input.providerId, input.command)
+      executable = result.executable
+      assertOwner()
+      return { input, ...result }
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code : 'EXECUTOR_CHECK_FAILED'
+      return { input, availability: 'check-failed', ...(executable === undefined ? {} : { executable }),
+        cause: { code, message: error instanceof Error ? error.message : String(error) } }
     }
   }
 

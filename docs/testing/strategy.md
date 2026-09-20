@@ -96,6 +96,8 @@ CtxMux 的实际边界是：同一用户、本地、非提权 daemon；每次信
 
 ## Gate
 
+UI 交付按 [独立 Agent 看图评审](../guides/agent-visual-e2e-review.md) 采图、实际看图、修正后重拍，并在打包或更新 Renderer 前消费本批候选的意见。首个 Message Tool 示例入口是 `pnpm --filter @agentmux/desktop capture:visual`。采图成功不判审美，preview API 的真实 Renderer 证据不冒充 CLI/Native；流程由 Agent 执行，不增加自动发布拦截器。
+
 ```bash
 pnpm typecheck
 pnpm test:fast       # pure domains, Desktop owners, no packed native fixture

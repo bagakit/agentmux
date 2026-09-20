@@ -36,7 +36,7 @@ import type {
   AgentMuxControlRequest,
   AgentMuxControlResult,
   AgentMuxControlCrashLogFact,
-  AgentMuxExecutorProbeOutcome,
+  AgentMuxExecutorProbeResult,
   AgentTimelineItem,
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
@@ -1002,15 +1002,16 @@ export type HostCheckResult = {
   detail: string
 }
 
-export type ExecutorDetection = {
+export type ExecutorDetectionInput = {
   executorId: AgentExecutorId
   providerId: AgentProviderId
-  hostId: string
-  // 三态探测结局：available / missing / check-failed。boolean `installed` 会把「查不成」折进「没装」，
-  // 而发现列表必须区分二者（环境退化那次误报的教训）。第四态 `unknown`（还没查）不在这里——它是
-  // 「detect 还没返回」，由 store 侧的 checking 状态承载，不是一次探测能得出的结论。
-  availability: AgentMuxExecutorProbeOutcome
+  command: string
+  host: HostConfig
 }
+export type ExecutorDetection = { input: ExecutorDetectionInput } & (
+  | AgentMuxExecutorProbeResult
+  | { availability: 'check-failed'; cause: { code: string; message: string }; executable?: undefined }
+)
 
 export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest
 export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult
@@ -1387,14 +1388,9 @@ export type AgentMuxDesktopApi = {
      */
     readPastedImage(path: string): Promise<PastedImage | null>
     /**
-     * Reveal the local crash-evidence file in the OS file manager, or report that nothing has been
-     * written yet.
-     *
-     * The log is append-only NDJSON in userData and has never had a reader — evidence the app collects
-     * about its own failures was, until this, visible only to someone who knew the path. `false` means
-     * the file does not exist, which is the good case (no crashes recorded), and the caller must say so
-     * rather than silently doing nothing. Reveal rather than an in-app viewer on purpose: the file is a
-     * support artifact people attach to a report, and the OS file manager is where attaching happens.
+     * Request the fixed local crash log in the file manager, or return its absence or check failure.
+     * A request does not prove the file manager is visible; absence does not prove no crash occurred.
+     * The receipt preserves the known path and original cause without reading or uploading contents.
      */
     revealCrashLog(): Promise<CrashLogRevealResult>
     /**
