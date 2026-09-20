@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 describe('Demand timeline projection', () => {
   it('renders activities and decisions in the fixed detail workspace', async () => {
-    const source = await readFile(fileURLToPath(new URL('../src/renderer/src/components/GlobalBoardSurface.tsx', import.meta.url)), 'utf8')
-    expect(source).toContain('global-demand-workspace__timeline')
+    const source = await readFile(fileURLToPath(new URL('../src/renderer/src/components/GoalDetail.tsx', import.meta.url)), 'utf8')
+    expect(source).toContain('goals-activity')
     expect(source).toContain('demand.activities')
     expect(source).toContain('demand.decisions')
   })

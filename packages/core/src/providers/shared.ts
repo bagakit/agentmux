@@ -156,7 +156,7 @@ export async function inspectHookDisableSetting(
   if (!target) throw new Error('The managed Hook plan is empty.')
   const file = await readManagedHookTarget(target.path)
   if (!file) return { active: false, code: 'HOOK_CONFIGURATION_CHANGED', action: 'The Hook configuration changed during inspection. Inspect this scope again.' }
-  const config = JSON.parse(file.content.toString('utf8')) as Record<string, unknown>
+  const config = JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(file.content)) as Record<string, unknown>
   if (Object.hasOwn(config, nativeKey) && typeof config[nativeKey] !== 'boolean') {
     throw new AgentMuxError('Native Hook disable setting is not a boolean.', 'HOOK_TARGET_UNPARSEABLE')
   }

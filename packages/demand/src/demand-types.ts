@@ -1,3 +1,5 @@
+import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
+
 export const DEMAND_STORE_SCHEMA = 'agentmux.demand-store.v1' as const
 export const DEMAND_RECEIPT_SCHEMA = 'agentmux.demand-receipt.v1' as const
 export const DEMAND_CLI_SCHEMA = 'agentmux.demand-cli.v1' as const
@@ -50,6 +52,8 @@ export type Demand = {
   sessionIds: string[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
+  alignment?: DemandAlignment
+  grounding?: DemandGrounding
   createdAt: number
   updatedAt: number
 }
@@ -81,7 +85,7 @@ export type CreateDemandInput = {
 export type UpdateDemandInput = Partial<Pick<
   Demand,
   'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex'
->>
+>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
 
 export type DemandReceipt = {
   schema: typeof DEMAND_RECEIPT_SCHEMA

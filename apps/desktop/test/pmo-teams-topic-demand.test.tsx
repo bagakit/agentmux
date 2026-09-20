@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 describe('PMO Teams Demand intake', () => {
   it('injects a clarification-first prompt into the fixed PMO Topic', async () => {
     const source = await readFile(fileURLToPath(new URL('../src/renderer/src/components/GlobalBoardSurface.tsx', import.meta.url)), 'utf8')
-    expect(source).toContain('Mote，默认角色是 PMO')
-    expect(source).toContain('不要重复创建 Demand')
+    expect(source).toContain("openMote(demandId, 'grill')")
+    expect(source).toContain('await requestDemandPmoTask(demandId, mode)')
     expect(source).toContain('requestPmoTeamsTopicFloatingOpen')
   })
 })
