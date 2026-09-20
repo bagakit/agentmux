@@ -697,9 +697,7 @@ const mockApi: AgentMuxDesktopApi = {
     // conversation renderer treats it exactly as "not a readable pasted image" and keeps the plain-text
     // reference, the same pre-feature behaviour. Not a throw — null IS the documented fallback signal.
     readPastedImage: async () => null,
-    // No file manager to reveal into, and no crash log here either — main writes it. `false` is the
-    // same answer the desktop gives for "nothing recorded", and the caller already has to say that out
-    // loud, so this needs no second wording.
+    // Browser preview has no Desktop crash log or native file-manager owner.
     revealCrashLog: async () => ({ path: '', outcome: 'check-failed', cause: { code: 'CONTROL_UNAVAILABLE', message: 'Crash log diagnostics require the Desktop host.' } }),
     // A browser tab has no OS notification channel we own, so this reports unsupported rather than
     // claiming delivery. The caller's contract already handles that by falling back to the in-window
@@ -735,12 +733,14 @@ const mockApi: AgentMuxDesktopApi = {
       }))
   },
   executors: {
-    detect: async (executorId, hostId) => ({
-      executorId,
-      providerId: mockConfig.executors[executorId]?.providerId ?? 'codex',
-      hostId,
-      availability: hostId === 'studio' && ['hermes', 'pi'].includes(executorId) ? 'missing' : 'available'
-    })
+    detect: async (executorId, hostId) => {
+      const executor = Object.hasOwn(mockConfig.executors, executorId) ? mockConfig.executors[executorId] : undefined
+      const host = mockConfig.hosts.find((item) => item.id === hostId)
+      if (!executor || !host) throw new Error('The requested Executor or Host does not exist.')
+      return { input: structuredClone({ executorId, providerId: executor.providerId, command: executor.command, host }),
+        executable: executor.command,
+        availability: hostId === 'studio' && ['hermes', 'pi'].includes(executorId) ? 'missing' : 'available' }
+    }
   },
   control: {
     onRequest(listener) {

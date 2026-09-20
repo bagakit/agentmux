@@ -5,6 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { readDroidSessionHistoryPage } from './droid-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -43,17 +44,37 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：每个事件的基础键里都有 `hook_event_name`（见上方 DROID_HOOK_EVENTS 的说明）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
-    // 只有一种收尾事件——它没有 Claude/grok 那样的 `StopFailure`/`StopCancelled` 变体
-    // （zod 枚举里就这九个），所以不必照抄那两家的多条收尾。
-    { events: ['Stop'], state: 'done' },
+    // predecision Stop：官方在完整 Agent loop 返回、持久化 outcome 前就派发 Stop hook。
+    // 它不代表轮次结束或成功完成，故显式声明 state: 'unknown', lifecycleEvent: null，
+    // 阻止从默认方言补 turn-end，不产生新 readiness，也不判定 done/completion。
+    { events: ['Stop'], state: 'unknown', lifecycleEvent: null },
+    // Notification 中 notification_type: idle_prompt 是用户取消/中断后的 turn 收尾事实，
+    // 跳过 Stop，语义状态保持 unknown（非成功 done），生命周期事件记 turn-end。
+    {
+      events: ['Notification'],
+      matches: (payload) =>
+        payload.notification_type === 'idle_prompt' || payload.notificationType === 'idle_prompt',
+      state: 'unknown',
+      lifecycleEvent: 'turn-end'
+    },
+    // 普通系统通知保持中立 unknown，既不是工作中也不是轮次结束。
+    {
+      events: ['Notification'],
+      state: 'unknown'
+    },
     {
       events: [
         'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-        'SubagentStop', 'PreCompact', 'Notification'
+        'SubagentStop', 'PreCompact'
       ],
       state: 'working'
     }
   ],
+  // 携带非空 calling_session_id 的 SessionStart 为子会话主体，禁止晋升为主 Session 的恢复定位符。
+  subagentSubject: (payload) => {
+    const calling = payload.calling_session_id ?? payload.callingSessionId
+    return typeof calling === 'string' && calling.trim().length > 0
+  },
   // **不声明 subagentTracking**：事件全集里只有 `SubagentStop`，没有对应的 start。子代理在途记账
   // 要求 start/stop 成对（花名册加一才能减一），只装 stop 会让计数变成负数，并且会压制主 Agent 的
   // 收尾——它会一直等一个永远等不到的减一。与 Hermes 同一个判断。
@@ -105,6 +126,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
 export function createDroidProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
     planManagedHooks: ({ env }) => createDroidManagedHookPlan(env),
+    readSessionHistoryPage: readDroidSessionHistoryPage,
     catalog: catalog({
       id: 'droid', label: 'Droid', executable: 'droid', expectedProcess: 'droid',
       promptDelivery: 'positional-argv',

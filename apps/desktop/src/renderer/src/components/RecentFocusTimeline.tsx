@@ -6,7 +6,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
 import { AgentAvatar } from './AgentAvatar'
-import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
+import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWorkSegment, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 
 function clock(timestamp: number): string { return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
 function dateClock(timestamp: number): string { return new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
@@ -17,13 +17,25 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ context, segments, selecte
 }) {
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
   const timeline = useAppStore(state => state.timelines[context.id])
-  const messages = useMemo(() => timeline?.items.filter(item => item.kind === 'user_message' && item.createdAt >= window.start && item.createdAt <= window.end && item.createdAt <= now) ?? [], [timeline, window, now])
-  if (!segments.length && !messages.length) return null
+  const messages = useMemo(() => timeline?.items.filter(item => item.kind === 'user_message' && item.source === 'user' && item.authorAgentSessionId === undefined && item.createdAt >= window.start && item.createdAt <= window.end && item.createdAt <= now) ?? [], [timeline, window, now])
   const position = focusTimePosition(now, window)
+  const liveNow = context.processState === 'running' && position >= 0 && position <= 100
+  const working = context.kind === 'agent' && context.processState === 'running' && context.state === 'working'
+  const work = working ? focusWorkSegment(context.workingEnteredAt, window, now) : null
+  if (!segments.length && !messages.length && !liveNow && !work) return null
+  const currentFact = `Run alive · ${context.stateLabel}${working && !work ? ' · Work start unknown' : ''} · Run start unknown`
   return <div className="recent-focus__track" data-focus-timeline-id={context.id}>
     <span className="recent-focus__gutter" title={`${context.name} · ${context.workspaceName}`}>{context.kind === 'agent' ? <AgentAvatar sessionId={context.id} label={context.name} providerId={context.providerId ?? undefined} state={context.state} size={14} /> : <SquareTerminal size={13} />}<span>{context.name}</span></span>
     <div className="recent-focus__lane">
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
+      {work ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
+        style={{ left: `${work.left}%`, width: `${work.width}%` }}
+        aria-label={`Return to ${context.name}, working since ${dateClock(work.enteredAt)}, Run start unknown`}
+        title={`${context.name} · Working since ${dateClock(work.enteredAt)} · Work state, not Run duration`}
+        onClick={() => onSelect(context.id)} /> : null}
+      {liveNow ? <button type="button" className={`recent-focus__live${working ? ' is-working' : ''}`} data-run-state="running" data-run-id={context.runId}
+        style={{ left: `${position}%` }} aria-label={`Return to ${context.name}, ${currentFact}, current time ${clock(now)}`}
+        title={`${currentFact} · Current time ${dateClock(now)}`} onClick={() => onSelect(context.id)} /> : null}
       {segments.map((item, index) => <button key={`${item.focusedAt}:${index}`} type="button" className={`recent-focus__segment${selected ? ' is-current' : ''}${item.end === undefined ? ' is-open' : ''}`}
         style={{ left: `${item.left}%`, width: item.width === undefined ? undefined : `${item.width}%` }}
         data-focused-at={item.focusedAt} data-known-end={item.end} aria-current={selected ? 'true' : undefined}
@@ -31,8 +43,8 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ context, segments, selecte
         title={`${context.name} · ${context.workspaceName} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
         onClick={() => onSelect(context.id)}><span>{clock(item.focusedAt)}</span></button>)}
       {messages.map(message => <button key={message.id} type="button" className="recent-focus__message" data-message-id={message.id} data-message-at={message.createdAt}
-        style={{ left: `${focusTimePosition(message.createdAt, window)}%` }} aria-label={`User message in ${context.name} at ${clock(message.createdAt)}`}
-        title={`${context.name} · ${dateClock(message.createdAt)}\n${(message.content ?? message.title).slice(0, 160)}`} onClick={() => onPreview(message)}><MessageSquare size={10} /></button>)}
+        style={{ left: `${focusTimePosition(message.createdAt, window)}%` }} aria-label={`Prompt in ${context.name} at ${clock(message.createdAt)}, sender not recorded`}
+        title={`${context.name} · ${dateClock(message.createdAt)} · Prompt · Sender not recorded\n${(message.content ?? message.title).slice(0, 160)}`} onClick={() => onPreview(message)}><MessageSquare size={10} /></button>)}
     </div>
   </div>
 })
@@ -57,20 +69,29 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const savedHeight = useAppStore(state => state.focusTimelineHeight)
   const saveHeight = useAppStore(state => state.setFocusTimelineHeight)
   const timelineRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
   const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
   const drag = useRef<{ y: number; height: number; next: number } | null>(null)
   const [draftHeight, setDraftHeight] = useState<number | null>(null)
   const [maximum, setMaximum] = useState(FOCUS_TIMELINE_HEIGHT_MAX)
-  const minimum = Math.min(FOCUS_TIMELINE_HEIGHT_MIN, maximum)
+  const [headerHeight, setHeaderHeight] = useState(28)
+  const minimum = Math.min(Math.max(FOCUS_TIMELINE_HEIGHT_MIN, headerHeight + 18 + 24 + 1), maximum)
   const height = Math.min(maximum, Math.max(minimum, draftHeight ?? savedHeight))
   useEffect(() => {
     const parent = timelineRef.current?.parentElement
     if (!parent || typeof ResizeObserver === 'undefined') return
-    const update = () => { const available = parent.getBoundingClientRect().height; if (available > 0) setMaximum(Math.min(FOCUS_TIMELINE_HEIGHT_MAX, Math.max(28, Math.floor((available - 36) / 2)))) }
+    const update = () => {
+      const available = parent.getBoundingClientRect().height
+      if (available > 0) setMaximum(Math.min(FOCUS_TIMELINE_HEIGHT_MAX, Math.max(28, Math.floor((available - 36) / 2))))
+      const measuredHeader = headerRef.current?.getBoundingClientRect().height ?? 0
+      if (measuredHeader > 0) setHeaderHeight(Math.ceil(measuredHeader))
+    }
     const observer = new ResizeObserver(update)
-    observer.observe(parent); update()
+    observer.observe(parent)
+    if (headerRef.current) observer.observe(headerRef.current)
+    update()
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
@@ -106,8 +127,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     {mode !== 'collapsed' ? <div className="recent-focus__resize" role="separator" tabIndex={0} aria-label="Resize Focus timeline" aria-orientation="horizontal" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={height}
       onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); drag.current = { y: event.clientY, height, next: height }; document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none' }}
       onKeyDown={event => { const next = event.key === 'ArrowUp' ? height + 16 : event.key === 'ArrowDown' ? height - 16 : event.key === 'Home' ? minimum : event.key === 'End' ? maximum : null; if (next !== null) { event.preventDefault(); saveHeight(Math.min(maximum, Math.max(minimum, next))) } }} /> : null}
-    <header className="recent-focus__header">
-      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Shows up to 2000 retained focus switches and Core's retained user messages (up to 200 per Session). Earlier unrecorded periods may be empty.">{dateClock(range.start)} — {dateClock(range.end)}</span></span>
+    <header ref={headerRef} className="recent-focus__header">
+      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; Now marks live Runs; thin clips show focus visits. Run start times are unknown. Shows up to 2000 retained focus switches and Core recorded prompts (up to 200 per Session). Earlier unrecorded periods may be empty.">{dateClock(range.start)} — {dateClock(range.end)}</span></span>
       <span className="recent-focus__controls">
         {mode !== 'collapsed' ? <><input type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" value={localDateTime(anchor ?? now)} onChange={event => { const next = new Date(event.target.value).getTime(); if (Number.isFinite(next)) inspectWindow(next) }} />
         <button type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
@@ -127,9 +148,9 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         <p className="recent-focus__empty">No retained records in this window. Choose another time or return to Now.</p>
       </div>
     </div> : null}
-    {preview && previewContext ? <div ref={previewRef} tabIndex={-1} className="recent-focus__message-preview" role="dialog" aria-label="User message">
-      <header><strong>{previewContext.name}</strong><time>{dateClock(preview.createdAt)}</time><button type="button" className="icon-button" aria-label="Close user message" onClick={() => setPreview(null)}><X size={12} /></button></header>
-      <p>{preview.content ?? preview.title}</p><button type="button" onClick={() => { onSelect(preview.agentSessionId); setPreview(null) }}>Return to Context</button>
+    {preview && previewContext ? <div ref={previewRef} tabIndex={-1} className="recent-focus__message-preview" role="dialog" aria-label="Message">
+      <header><strong>{previewContext.name}</strong><time>{dateClock(preview.createdAt)}</time><button type="button" className="icon-button" aria-label="Close message" onClick={() => setPreview(null)}><X size={12} /></button></header>
+      <p>Prompt · Sender not recorded</p><p>{preview.content ?? preview.title}</p><button type="button" onClick={() => { onSelect(preview.agentSessionId); setPreview(null) }}>Return to Context</button>
     </div> : null}
   </section>
 })

@@ -176,10 +176,9 @@ export type AgentMuxControlActiveAgent = {
  *
  * 这四态是四件不同的事，任何两态折成一态都是缺陷：
  *   - `unknown`：还没查（或正在查）。不是「没有」，只是此刻没有结论。
- *   - `check-failed`：查了但没查成——环境不完整（PATH 被清空而命令是相对名，探测拿不到任何候选路径）。
- *     这正是那次实战误报的形态：环境退化被当成了「没装」。
- *   - `missing`：查成了，确实不在——候选路径都在场，没有一个可执行；或绝对路径指向的文件不存在。
- *   - `available`：查成了，可执行文件在场。
+ *   - `check-failed`：未能取得结论，例如没有候选路径，或读取/权限检查失败。保留检查的原始原因。
+ *   - `missing`：候选均明确不可用，未取得普通可执行文件；不等于所有路径都不存在。
+ *   - `available`：至少一个候选是普通文件且通过可执行权限检查。
  *
  * 为什么是元组而不是纯 union：与 {@link AGENTMUX_CONTROL_ERROR_CODES} 同源——线上校验（control-host
  * parseExecutors）需要一个能**在运行时拿在手里**的成员集合来判合法性，纯 union 在运行时无迹可寻。
@@ -189,8 +188,12 @@ export type AgentMuxControlActiveAgent = {
 const AGENTMUX_EXECUTOR_AVAILABILITIES = ['unknown', 'check-failed', 'missing', 'available'] as const
 export type AgentMuxExecutorAvailability = typeof AGENTMUX_EXECUTOR_AVAILABILITIES[number]
 
-/** 探测（真去查一次）只可能得出后三态之一——`unknown` 是「还没查」，探不出来。 */
-export type AgentMuxExecutorProbeOutcome = Exclude<AgentMuxExecutorAvailability, 'unknown'>
+/** One observed executable fact. A failed check carries its actual cause. */
+export type AgentMuxExecutorProbeResult = { executable: string } & (
+  | { availability: 'available' }
+  | { availability: 'missing'; cause?: { code: string; message: string } }
+  | { availability: 'check-failed'; cause: { code: string; message: string } }
+)
 
 /** 入站的这个值是不是一个合法可用性档位。成员集合派生自 {@link AGENTMUX_EXECUTOR_AVAILABILITIES}。 */
 export function isAgentMuxExecutorAvailability(value: unknown): value is AgentMuxExecutorAvailability {

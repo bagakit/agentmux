@@ -26,7 +26,7 @@ beforeEach(async () => {
   vi.spyOn(client, 'runtimeIdentity').mockReturnValue({ hostId: 'local', buildIdentity: 'fixture', protocolVersion: 17, instanceId: 'fixture-runtime', processId: null })
   vi.spyOn(client, 'runtimeDiagnostics').mockResolvedValue(runtime)
   vi.spyOn(client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: providers.get(id).executable, installed: true, capabilities: providers.get(id).catalog.capabilities }))
-  vi.spyOn(client, 'probeExecutorAvailability').mockResolvedValue('available')
+  vi.spyOn(client, 'probeExecutorAvailability').mockResolvedValue({ executable: 'codex', availability: 'available' })
 })
 afterEach(async () => { await client.dispose(); await rm(root, { recursive: true, force: true }) })
 

@@ -167,12 +167,12 @@ describe('Droid provider', () => {
   })
 
   describe('收尾只有一种，且没有 SessionEnd', () => {
-    it('Stop 判 done、是 turn-end、也是用量落定点', () => {
+    it('Stop 属于 predecision hook，明确判 unknown 且 lifecycleEvent: null，阻止默认方言补充 turn-end', () => {
       const event = hookIn('run-stop')('Stop', {
         stop_hook_active: false, tool_execution_count: 3, elapsed_time: 4200
       })
-      expect<AgentSemanticState>(event.semanticState).toBe('done')
-      expect(canonicalHookLifecycleEvent('Stop')).toBe('turn-end')
+      expect<AgentSemanticState>(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
       expect(USAGE_FINALIZATION_EVENTS.has('Stop')).toBe(true)
     })
 
@@ -204,8 +204,8 @@ describe('Droid provider', () => {
     it('SubagentStop 判 working，且不压制紧随其后的 Stop', () => {
       const hook = hookIn('run-subagent')
       expect(hook('SubagentStop').semanticState).toBe('working')
-      // 没有记账，收尾就该立刻兑现。这条守「不记账」这个决定的实际后果。
-      expect(hook('Stop', { stop_hook_active: false }).semanticState).toBe('done')
+      // 没有记账，Stop 按自身规则如实判定（predecision unknown，不补假 done）
+      expect(hook('Stop', { stop_hook_active: false }).semanticState).toBe('unknown')
     })
   })
 
@@ -218,11 +218,22 @@ describe('Droid provider', () => {
       expect(canonicalHookLifecycleEvent('PreCompact')).toBeUndefined()
     })
 
-    it('Notification 判 working——它不是收尾也不是等待', () => {
-      const event = hookIn('run-notify')('Notification', {
-        notification_type: 'permission', message: 'needs approval'
+    it('Notification 中 idle_prompt 判为取消收尾（turn-end、未知语义状态），普通通知保持中立未知', () => {
+      // idle_prompt 是用户中断/取消后的原生 turn 收尾事实（跳过 Stop），语义状态非 done、生命周期为 turn-end
+      const idlePromptEvent = hookIn('run-notify-idle')('Notification', {
+        notification_type: 'idle_prompt',
+        message: 'Waiting for input after cancellation'
       })
-      expect(event.semanticState).toBe('working')
+      expect(idlePromptEvent.semanticState).toBe('unknown')
+      expect(idlePromptEvent.lifecycleEvent).toBe('turn-end')
+
+      // 普通通知（非 idle_prompt）保持中立 unknown，既不是 working 也不是 turn-end
+      const ordinaryEvent = hookIn('run-notify-ordinary')('Notification', {
+        notification_type: 'permission',
+        message: 'needs approval'
+      })
+      expect(ordinaryEvent.semanticState).toBe('unknown')
+      expect(ordinaryEvent.lifecycleEvent).toBeUndefined()
     })
   })
 
@@ -265,6 +276,16 @@ describe('Droid provider', () => {
         sessionId: 'droid-session-1',
         transcriptPath: '/tmp/droid/transcript.jsonl'
       })
+    })
+
+    it('携带 calling_session_id 的子 SessionStart 被判定为子主体，不晋升为主 session 的 native handle', () => {
+      const childEvent = hookIn('run-child')('SessionStart', {
+        source: 'subagent',
+        calling_session_id: 'parent-session-123',
+        session_id: 'child-session-456',
+        transcript_path: '/tmp/droid/child.jsonl'
+      })
+      expect(childEvent.nativeHandle).toBeUndefined()
     })
 
     it('resume 走 --resume，不走 --session-id', () => {
@@ -314,6 +335,10 @@ describe('Droid provider', () => {
         nativeHandle: { kind: 'provider', providerId: 'droid', sessionId: 's-1' },
         prompt: 'keep going', args: [], ...ws
       }).args).toEqual(['--resume', 's-1', 'keep going'])
+    })
+
+    it('provides readSessionHistoryPage for native conversation history', () => {
+      expect(droid.readSessionHistoryPage).toBeTypeOf('function')
     })
   })
 })

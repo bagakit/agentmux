@@ -1,9 +1,22 @@
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import { AgentMuxClient as RealClient } from '../src/client.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
 import type { AgentMuxRuntimeDiagnostics } from '../src/types.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+
+const readFailure = vi.hoisted(() => ({ path: '' }))
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, stat: async (...args: Parameters<typeof actual.stat>) => {
+    if (readFailure.path && String(args[0]) === readFailure.path) throw Object.assign(new Error('controlled doctor executable I/O failure'), { code: 'EIO' })
+    return await actual.stat(...args)
+  } }
+})
 
 /**
  * 守「诊断分得清『查不成』与『没装』」。
@@ -50,7 +63,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
  * 换成固定值——连接与 runtime 诊断不是被测对象，且不该让这条用例依赖本机有没有在跑 daemon。
  */
 function clientWithRealProbes(): AgentMuxClient {
-  const client = new RealClient()
+  const client = new RealClient({ store: new AgentMuxMemoryAgentSessionStore() })
   const internals = client as unknown as {
     connected: boolean
     kernel: { isConnected(): boolean }
@@ -109,5 +122,27 @@ describe('doctor 区分「查不成」与「没装」', () => {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
     }
+  })
+
+  it('consumes the actual classifier cause for an unknown read and a confirmed directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-doctor-file-kind-'))
+    const executable = join(root, 'executable')
+    try {
+      await writeFile(executable, '#!/bin/sh\n'); await chmod(executable, 0o755)
+      readFailure.path = executable
+      const unknown = await diagnoseAgentMux({ client: clientWithRealProbes(), commandOverrides: { codex: executable } })
+      const failed = unknown.agents.find((agent) => agent.id === 'codex')
+      expect(failed).toBeDefined()
+      expect(failed?.probe).toBe('unverifiable')
+      expect(failed?.action).toContain('EIO: controlled doctor executable I/O failure')
+      expect(failed?.action).not.toMatch(/no candidate path|PATH|Install /)
+      readFailure.path = ''
+      const directory = await diagnoseAgentMux({ client: clientWithRealProbes(), commandOverrides: { codex: root } })
+      const notFile = directory.agents.find((agent) => agent.id === 'codex')
+      expect(notFile).toBeDefined()
+      expect(notFile?.probe).toBe('missing')
+      expect(notFile?.action).toContain('is a directory; expected a regular executable file')
+      expect(notFile?.action).not.toMatch(/^Install /)
+    } finally { readFailure.path = ''; await rm(root, { recursive: true, force: true }) }
   })
 })

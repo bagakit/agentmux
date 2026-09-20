@@ -1,8 +1,22 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+
+const faults = vi.hoisted(() => new Map<string, { operation: 'stat' | 'access'; code: string; message: string }>())
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  function fault(path: unknown, operation: 'stat' | 'access') {
+    const input = faults.get(String(path))
+    if (input?.operation === operation) throw Object.assign(new Error(input.message), { code: input.code })
+  }
+  return { ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => { fault(args[0], 'stat'); return await actual.stat(...args) },
+    access: async (...args: Parameters<typeof actual.access>) => { fault(args[0], 'access'); return await actual.access(...args) }
+  }
+})
 
 // probeExecutorAvailability 的三态判据，跑**真的** classifyExecutable（走真文件系统与真 PATH 解析），
 // 不是 mock。要害在于把两件被 boolean `installed` 折在一起的事分开：
@@ -15,13 +29,15 @@ import { AgentMuxClient } from '../src/client.js'
 const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
+  faults.clear()
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
 
 // 造一个已连接的 client，只为让 requireConnected 放行——probeExecutorAvailability 不碰 kernel，
 // 只解析命令再查文件系统。vitest 只转译不查类型，允许改私有面。
 function connectedClient(): AgentMuxClient {
-  const client = new AgentMuxClient()
+  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
   const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean } }
   internals.connected = true
   internals.kernel = { isConnected: () => true }
@@ -36,7 +52,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     await writeFile(bin, '#!/bin/sh\n')
     await chmod(bin, 0o755)
     // commandOverride 是绝对路径 → 只有这一条候选，且它可执行。
-    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toBe('available')
+    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'available' })
   })
 
   it('reports missing when the resolved command exists as a path but is not executable', async () => {
@@ -44,7 +60,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     roots.push(root)
     // 绝对路径（含 '/'）→ 候选非空，但文件不存在 → 查成了，确实没装。
     await expect(connectedClient().probeExecutorAvailability('codex', join(root, 'does-not-exist')))
-      .resolves.toBe('missing')
+      .resolves.toEqual({ executable: join(root, 'does-not-exist'), availability: 'missing' })
   })
 
   it('reports check-failed when a relative command has no PATH candidates to probe', async () => {
@@ -56,11 +72,53 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
       const outcome = await connectedClient().probeExecutorAvailability('codex')
       // 单钉这条：零候选必须报 check-failed。把 client.ts 里 `candidates.length === 0` 那支折成
       // 'missing'（或删掉），这条红——那正是那次误报的形态。
-      expect(outcome).toBe('check-failed')
+      expect(outcome).toEqual({ executable: 'codex', availability: 'check-failed', cause: {
+        code: 'EXECUTABLE_SEARCH_UNAVAILABLE',
+        message: 'No candidate path was searchable for "codex". Check PATH and the shell environment this app was launched from.'
+      } })
     } finally {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
     }
+  })
+
+  it('rejects a searchable directory while keeping an executable file and its symlink available', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-kind-')); roots.push(root)
+    const bin = join(root, 'executable'), link = join(root, 'linked-executable')
+    await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755); await symlink(bin, link)
+    const client = connectedClient()
+    await expect(client.probeExecutorAvailability('codex', root)).resolves.toEqual({ executable: root, availability: 'missing', cause: {
+      code: 'EXECUTABLE_NOT_FILE', message: `${root} is a directory; expected a regular executable file.`
+    } })
+    await expect(client.probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'available' })
+    await expect(client.probeExecutorAvailability('codex', link)).resolves.toEqual({ executable: link, availability: 'available' })
+  })
+
+  it('preserves unknown stat and access causes instead of claiming an executable is absent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-read-')); roots.push(root)
+    const bin = join(root, 'executable'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
+    faults.set(bin, { operation: 'stat', code: 'EIO', message: 'controlled stat I/O failure' })
+    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EIO', message: 'controlled stat I/O failure' } })
+    faults.set(bin, { operation: 'access', code: 'EACCES', message: 'controlled execute access denial' })
+    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EACCES', message: 'controlled execute access denial' } })
+  })
+
+  it('prefers a later ordinary executable over a directory or unknown earlier candidate, preserving unknown when none succeeds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-path-')); roots.push(root)
+    const first = join(root, 'first'), second = join(root, 'second')
+    await mkdir(join(first, 'probe-command'), { recursive: true }); await mkdir(second)
+    const bin = join(second, 'probe-command'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
+    vi.stubEnv('PATH', `${first}:${second}`)
+    const client = connectedClient()
+    await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'available' })
+    faults.set(join(first, 'probe-command'), { operation: 'stat', code: 'EIO', message: 'controlled first candidate failure' })
+    await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'available' })
+    await rm(bin)
+    await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'check-failed', cause: { code: 'EIO', message: 'controlled first candidate failure' } })
+    faults.clear()
+    await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'missing', cause: {
+      code: 'EXECUTABLE_NOT_FILE', message: `${join(first, 'probe-command')} is a directory; expected a regular executable file.`
+    } })
   })
 })
 
@@ -112,5 +170,17 @@ describe('启动闸拒绝时的理由：查不成 ≠ 没装', () => {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
     }
+  })
+
+  it('keeps a failed executable read and a confirmed directory distinct in launch rejection messages', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-gate-cause-')); roots.push(root)
+    const bin = join(root, 'executable'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
+    faults.set(bin, { operation: 'access', code: 'EIO', message: 'controlled launch verification failure' })
+    const unknown = await launchError(bin)
+    expect(unknown.message).toContain('EIO: controlled launch verification failure')
+    expect(unknown.message).not.toMatch(/not installed|no candidate path|PATH/)
+    const notFile = await launchError(root)
+    expect(notFile.message).toContain('is a directory; expected a regular executable file')
+    expect(notFile.message).not.toContain('not installed')
   })
 })

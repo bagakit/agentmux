@@ -14,12 +14,13 @@ import {
   LoaderCircle,
   MessageSquarePlus,
   NotebookText,
+  Plus,
   RadioTower,
   Send,
   SlidersHorizontal,
   Trash2
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   BrowserToolbarConfig,
   SessionSnapshot,
@@ -86,40 +87,6 @@ const BOARD_TOOL: ToolDefinition<'branch-board'> = {
   label: 'Branch Board',
   description: 'Inspect project Branches by run status',
   icon: Columns3
-}
-
-function ToolActionSurface({
-  icon,
-  eyebrow,
-  title,
-  description,
-  actionLabel,
-  busy,
-  onAction,
-  children
-}: {
-  icon: ReactNode
-  eyebrow: string
-  title: string
-  description: string
-  actionLabel: string
-  busy?: boolean
-  onAction: () => void
-  children?: ReactNode
-}) {
-  return (
-    <section className="surface-tool-action-surface">
-      <div className="surface-tool-action-surface__icon">{icon}</div>
-      <div className="eyebrow">{eyebrow}</div>
-      <h2>{title}</h2>
-      <p>{description}</p>
-      <button className="primary-button" type="button" disabled={busy} onClick={onAction}>
-        {busy ? <LoaderCircle className="spin" size={14} /> : icon}
-        {busy ? 'Opening…' : actionLabel}
-      </button>
-      {children}
-    </section>
-  )
 }
 
 export function BrowserToolbarPreferences({
@@ -327,9 +294,9 @@ function WorkspaceFilesTool({
         >
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
-        <span>
+        <span title={workspace.path}>
           <strong>{workspace.name}</strong>
-          <small>{isScratch ? 'Topic wiki' : (workspace.branch ?? workspace.path)}</small>
+          {isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
@@ -399,7 +366,7 @@ export function WorkspaceAgentsTool({
           <div className="workspace-agents-tool__empty">
             <Bot size={18} />
             <strong>No Agents in this workspace</strong>
-            <span>Start one from a new Tab. Choose “Keep Session” on close to leave it running here.</span>
+            <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
         ) : groups.map((group) => {
           if (group.sessions.length === 0) return null
@@ -512,6 +479,7 @@ export function SurfaceToolDock({
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const createBrowser = useAppStore((state) => state.createBrowser)
+  const openLauncher = useAppStore((state) => state.openLauncher)
   const selectSession = useAppStore((state) => state.selectSession)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
@@ -598,7 +566,7 @@ export function SurfaceToolDock({
 
   return (
     <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Goals' : 'Space'} tools`}>
-      <header className={`surface-tool-activitybar ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
+      <header className={`surface-tool-activitybar ${isBoard ? '' : 'surface-tool-activitybar--space'} ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
         <nav aria-label={`${isBoard ? 'Goals' : 'Space'} tool selection`}>
           {tools.map((tool) => {
@@ -620,7 +588,30 @@ export function SurfaceToolDock({
             )
           })}
         </nav>
-        <span>{tools.find((tool) => tool.id === selectedTool)?.label}</span>
+        {isBoard ? <span>{BOARD_TOOL.label}</span> : null}
+        {!isBoard && selectedTool === 'agents' && workspace && layout ? (
+          <button
+            type="button"
+            className="surface-tool-create icon-button"
+            aria-label="New Agent"
+            title="New Agent — choose an Executor"
+            onClick={() => openLauncher(activePaneId)}
+          >
+            <Plus size={15} />
+          </button>
+        ) : null}
+        {!isBoard && selectedTool === 'browser-tools' && workspace ? (
+          <button
+            type="button"
+            className="surface-tool-create icon-button"
+            aria-label="New Browser"
+            title={startingBrowser ? 'Opening Browser…' : 'New Browser'}
+            disabled={startingBrowser}
+            onClick={() => void openBrowser()}
+          >
+            {startingBrowser ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}
+          </button>
+        ) : null}
       </header>
       <div className="surface-tool-content">
         {!isBoard && selectedTool === 'files-branches' && workspace ? (
@@ -634,15 +625,7 @@ export function SurfaceToolDock({
           />
         ) : null}
         {!isBoard && effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
-          <ToolActionSurface
-            icon={<Globe2 size={17} />}
-            eyebrow="Browser Tools"
-            title="Open a browser tab"
-            description="Open a Main-owned browser in the focused Universal Pane, then choose which controls stay on its Browser bar."
-            actionLabel="New Browser"
-            busy={startingBrowser}
-            onAction={() => void openBrowser()}
-          >
+          <section className="browser-tools-panel" aria-label="Browser Tools">
             <BrowserToolbarPreferences
               toolbar={config.browser.toolbar}
               saving={savingBrowserToolbar}
@@ -664,7 +647,7 @@ export function SurfaceToolDock({
                 selectSession(sessionId, activePaneId)
               }}
             />
-          </ToolActionSurface>
+          </section>
         ) : null}
         {isBoard ? <BoardToolList hostId={project?.hostId ?? workspace?.hostId ?? 'local'} /> : null}
         {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}

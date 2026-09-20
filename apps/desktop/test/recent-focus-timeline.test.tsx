@@ -43,8 +43,9 @@ describe('Recent Focus timeline', () => {
 
   it('queries arbitrary history, moves/resizes windows, holds the query through clock ticks and returns to Now', async () => {
     const onSelect = vi.fn(), old = NOW - 7 * 24 * HOUR_MS; await render(onSelect, [{ sessionId: 'one', focusedAt: old - HOUR_MS }, { sessionId: 'two', focusedAt: old }])
-    expect(container.querySelectorAll('.recent-focus__track')).toHaveLength(0)
-    expect(container.querySelector('.recent-focus__empty')!.textContent).toContain('No retained records')
+    expect(container.querySelectorAll('.recent-focus__track')).toHaveLength(2)
+    expect(container.querySelectorAll('.recent-focus__segment')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-run-state="running"]')).toHaveLength(2)
     await changeDate(old); expect(range()).toEqual([old - 3 * HOUR_MS, old + HOUR_MS]); expect(container.querySelectorAll('.recent-focus__track')).toHaveLength(2)
     expect(container.querySelector('.recent-focus__playhead')).toBeNull()
     await click('Previous focus window'); expect(range()).toEqual([old - 7 * HOUR_MS, old - 3 * HOUR_MS])

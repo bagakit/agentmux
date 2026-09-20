@@ -116,10 +116,10 @@ async function probeAgent(
     // 把两者折成 false。诊断恰恰是最不能折的地方：用户来这里就是为了知道病因。两次探测共用
     // probeCapabilities 里那一份命令解析（commandOverride 优先，否则 catalog executable），所以它们
     // 看的一定是同一条命令，不会各自解析出不同的东西。
-    const availability = await client.probeExecutorAvailability(catalog.id, commandOverride)
-    const probe = availability === 'available'
+    const result = await client.probeExecutorAvailability(catalog.id, commandOverride)
+    const probe = result.availability === 'available'
       ? 'found'
-      : availability === 'check-failed' ? 'unverifiable' : 'missing'
+      : result.availability === 'check-failed' ? 'unverifiable' : 'missing'
     return {
       id: catalog.id,
       label: catalog.label,
@@ -127,10 +127,11 @@ async function probeAgent(
       probe,
       action: probe === 'found'
         ? null
-        : probe === 'unverifiable'
-          // 指向环境，不是指向安装。这句话与启动闸拒绝时说的是同一件事，措辞也应当同源地读起来一致。
-          ? `Could not verify ${catalog.label} on this Host: no candidate path to probe. Check PATH and your shell environment, then rerun doctor.`
-          : `Install ${catalog.label} on this Host or configure an explicit executable.`,
+        : result.availability === 'check-failed'
+          ? `Could not verify ${catalog.label} on this Host: ${result.cause.code}: ${result.cause.message} Fix the executable check, then rerun doctor.`
+          : result.availability === 'missing' && result.cause
+            ? `${result.cause.message} Configure a regular executable file, then rerun doctor.`
+            : `Install ${catalog.label} on this Host or configure an explicit executable.`,
       capabilities: { ...capability.capabilities },
       hook: { ...catalog.hookStrategy },
       hookInstallation,

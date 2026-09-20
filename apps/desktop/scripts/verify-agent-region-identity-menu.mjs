@@ -13,9 +13,11 @@ const require=createRequire(import.meta.url), exec=promisify(execFile), {build}=
 const privateRoot=await mkdtemp('/tmp/amx-identity-menu-')
 const evidence=join(repository,'.tmp/agent-region-identity-menu',`attempt-${Date.now()}`), fixture=join(desktop,'scripts/fixtures/agent-region-identity-menu')
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
-const result={schema:'agentmux.region-identity-menu-delivery.v1',passed:false,sourceBefore:{},sourceAfter:{},mutations:[],callers:[],cleanup:{},userRunTouched:false}
-const sourceFiles=(await exec('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:repository,maxBuffer:32*1024*1024})).stdout.split('\0').filter(Boolean)
-assert.ok(sourceFiles.length>0)
+const visualOnly=process.argv.includes('--visual-only')
+const result={schema:'agentmux.region-identity-menu-delivery.v1',passed:false,sourceBefore:{},sourceAfter:{},mutations:[],callers:[],cleanup:{},userRunTouched:false,
+  ...(visualOnly?{captureOnly:true,aestheticReview:'not-performed'}:{})}
+const sourceFiles=visualOnly?[]:(await exec('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:repository,maxBuffer:32*1024*1024})).stdout.split('\0').filter(Boolean)
+if(!visualOnly)assert.ok(sourceFiles.length>0)
 async function sources(){return Object.fromEntries(await Promise.all(sourceFiles.map(async name=>[name,hash(await readFile(join(repository,name)))])))}
 async function compiled(directory){
   const entries=await readdir(directory,{recursive:true,withFileTypes:true}),files={}
@@ -99,10 +101,24 @@ async function restart(swapNames=false){
   return{outcome,detachedRuns,receipt}
 }
 try{
-  await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim();result.sourceBefore=await sources()
+  await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
+  if(!visualOnly)result.sourceBefore=await sources()
   const swapOnly=process.argv.includes('--swap-render-only')
-  result.render=await renderer('fixed',swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
-  if(!process.argv.includes('--render-only')&&!swapOnly){
+  result.render=await renderer('fixed',visualOnly?'composer-visual':swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  if(visualOnly){
+    await writeFile(join(evidence,'review.md'),[
+      '# 本次采图：等待独立 Agent 实际看图',
+      '',
+      '采集成功不等于审美通过。实际场景使用 WorkspaceWorkbench → SessionPane → AgentSessionComposer 和产品 CSS；数据来自 preview API，不证明真实 CLI、Native 或安装。未操作用户 App/Run。',
+      `HEAD 诊断：\`${result.sourceCommit}\`。采集当前工作树的私有编译；HEAD 不代表未提交内容。实际产物身份见 [compiled.json](fixed/compiled.json)，采集结果见 [render.json](fixed/render.json)。`,
+      '',
+      ...result.render.rendered.frames.map(frame=>`- ${frame.width}px Region / ${frame.state}：[截图](fixed/${frame.file}) · SHA-256 \`${frame.png}\``),
+      '',
+      '独立 Agent：先读 docs/design/agentmux-desktop-interaction.md 与 docs/design/agentmux-surface-density.md 的有关约束，逐张打开以上完整截图，结合真实操作顺序判断主次、紧凑、对齐、留白、可读性和控件清晰性。说明具体位置、观感与修正建议；未看到或未确认的范围写明未知。不要用像素阈值、差异分数或 CSS 在场替代看图。',
+      '在短评审记录中写下实际看过的截图、结论和边界。需修改时修正后重新采集同一场景，并由独立 Agent 再看图；不能把这份采图清单当作已完成评审。',
+      ''
+    ].join('\n'))
+  }else if(!process.argv.includes('--render-only')&&!swapOnly){
     await mutation('name',join(desktop,'src/renderer/src/components/AgentRegionHeader.tsx'),'>{name}</strong>',">{''}</strong>",'name',/Actual Agent name is nonempty/)
     await mutation('target',join(desktop,'src/renderer/src/components/WorkspaceWorkbench.tsx'),
       'split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction)',
@@ -115,12 +131,13 @@ try{
       'swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, tab.layout.activeRegionId)','swap-target',/The original source swaps only with the selected third target/)
     await productionCallers();result.restart=await restart();result.swapRestart=await restart(true)
   }else result.diagnosticOnly=true
-  result.sourceAfter=await sources();assert.deepEqual(result.sourceAfter,result.sourceBefore);result.passed=true
+  if(!visualOnly){result.sourceAfter=await sources();assert.deepEqual(result.sourceAfter,result.sourceBefore)}
+  result.passed=true
 }catch(error){result.failure={name:error.name,message:error.message}}
 finally{
   await stopProbeProcesses(process.pid+1000000000,privateRoot);result.cleanup.remaining=await listProbeProcesses(process.pid+1000000000,privateRoot);assert.deepEqual(result.cleanup.remaining,[])
   await rm(privateRoot,{recursive:true});result.cleanup.rootRemoved=true
   await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2))
 }
-console.log(JSON.stringify({passed:result.passed,diagnosticOnly:result.diagnosticOnly,frames:result.render?.rendered.frames.length,receipt:join(evidence,'receipt.json'),failure:result.failure}))
+console.log(JSON.stringify({passed:result.passed,captureOnly:result.captureOnly,aestheticReview:result.aestheticReview,diagnosticOnly:result.diagnosticOnly,frames:result.render?.rendered.frames.length,receipt:join(evidence,'receipt.json'),...(visualOnly?{review:join(evidence,'review.md')}:{}) ,failure:result.failure}))
 if(!result.passed)process.exitCode=1

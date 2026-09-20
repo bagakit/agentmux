@@ -42,7 +42,7 @@ describe('actual doctor CLI body to public Core inspection', () => {
     vi.spyOn(client,'runtimeIdentity').mockReturnValue({hostId:'local',buildIdentity:'fixture',protocolVersion:17,instanceId:'fixture',processId:null})
     vi.spyOn(client,'runtimeDiagnostics').mockResolvedValue(runtime)
     vi.spyOn(client,'probeAgent').mockResolvedValue({providerId:provider.id,executable:provider.executable,installed:true,capabilities:provider.catalog.capabilities})
-    vi.spyOn(client,'probeExecutorAvailability').mockResolvedValue('available')
+    vi.spyOn(client,'probeExecutorAvailability').mockResolvedValue({ executable: 'codex', availability: 'available' })
     dispose=vi.spyOn(client,'dispose')
     const inspect=vi.spyOn(client,'inspectManagedHooks')
     const lines:string[]=[]

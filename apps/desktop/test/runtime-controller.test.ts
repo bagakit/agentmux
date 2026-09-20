@@ -145,7 +145,7 @@ const runtimeFixture = vi.hoisted(() => {
     }))
     readonly statusAgent = vi.fn()
     // 三态探测：默认 available，各用例按需 mockResolvedValueOnce 改成 missing / check-failed。
-    readonly probeExecutorAvailability = vi.fn(async (): Promise<'available' | 'missing' | 'check-failed'> => 'available')
+    readonly probeExecutorAvailability = vi.fn(async (_providerId: string, command: string): Promise<import('@agentmux/core').AgentMuxExecutorProbeResult> => ({ executable: command, availability: 'available' }))
     readonly agentSession = vi.fn(() => ({
       kind: 'agent' as const,
       agentSessionId: 'agent-1',
@@ -468,13 +468,13 @@ describe('RuntimeController configuration transaction', () => {
       }
     }
 
-    client.probeExecutorAvailability.mockResolvedValueOnce('available')
+    client.probeExecutorAvailability.mockResolvedValueOnce({ executable: 'codex', availability: 'available' })
     await expect(controller.detect('codex-review', 'local', config))
       .resolves.toMatchObject({ availability: 'available' })
-    client.probeExecutorAvailability.mockResolvedValueOnce('missing')
+    client.probeExecutorAvailability.mockResolvedValueOnce({ executable: 'codex', availability: 'missing' })
     await expect(controller.detect('codex-review', 'local', config))
       .resolves.toMatchObject({ availability: 'missing' })
-    client.probeExecutorAvailability.mockResolvedValueOnce('check-failed')
+    client.probeExecutorAvailability.mockResolvedValueOnce({ executable: 'codex', availability: 'check-failed', cause: { code: 'EIO', message: 'controlled executable read failure' } })
     const checkFailed = await controller.detect('codex-review', 'local', config)
     // 单钉这条判据：探测说 check-failed，detect 就必须报 check-failed，绝不许退化成 missing。
     // 破坏点：runtime-controller.detect 里若把三态压回 boolean 再 ready?missing，这条红。
@@ -496,6 +496,56 @@ describe('RuntimeController configuration transaction', () => {
     // 判据落在**实际序列化的那份对象**上，不是「object 里没有 env 字段」——后者在有人把 env 塞进
     // 一个内部对象再 spread 出来时会假绿。这里断言整个 JSON 里不含那个秘密值。
     expect(JSON.stringify(detection)).not.toContain('sk-secret-value')
+  })
+
+  it.each(['connect', 'probe'] as const)('rejects this diagnostic when the same Host owner changes during %s', async (stage) => {
+    // Controlled clients exercise the actual RuntimeController transaction and detect owner.
+    // They do not prove SSH support or the health of an external Runtime.
+    const controller = await configuredController()
+    const config: AppConfig = { ...localConfig, hosts: [...localConfig.hosts, remoteHost], executors: {
+      review: { label: 'Review', providerId: 'codex', command: 'authored-review', args: [], env: {}, injectAgentMuxGuide: true }
+    } }
+    controller.commit(await controller.prepare(config))
+    const healthy = runtimeFixture.FakeClient.instances[0]!
+    const original = runtimeFixture.FakeClient.instances[1]!
+    const entered = deferred<void>(), release = deferred<void>(), dispose = deferred<void>()
+    original.dispose.mockImplementationOnce(async () => await dispose.promise)
+    if (stage === 'connect') original.connect.mockImplementationOnce(async () => { entered.resolve(); await release.promise })
+    else original.probeExecutorAvailability.mockImplementationOnce(async () => {
+      entered.resolve(); await release.promise
+      return { executable: 'provider-resolved-review', availability: 'available' }
+    })
+    const pending = controller.detect('review', 'remote', config)
+    try {
+      await entered.promise
+      const changed: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'later.example.test' }] }
+      controller.commit(await controller.prepare(changed))
+      expect(runtimeFixture.FakeClient.instances).toHaveLength(3)
+      const replacement = runtimeFixture.FakeClient.instances[2]!
+      release.resolve()
+      const result = await pending
+      expect(result).toMatchObject({
+        input: { executorId: 'review', providerId: 'codex', command: 'authored-review', host: remoteHost },
+        availability: 'check-failed', cause: { code: 'EXECUTOR_HOST_CHANGED', message: expect.stringContaining('changed') }
+      })
+      if (stage === 'connect') {
+        expect(result).not.toHaveProperty('executable')
+        expect(original.probeExecutorAvailability).not.toHaveBeenCalled()
+      } else {
+        expect(result.executable).toBe('provider-resolved-review')
+        expect(original.probeExecutorAvailability).toHaveBeenCalledExactlyOnceWith('codex', 'authored-review')
+      }
+      expect(replacement.probeExecutorAvailability).not.toHaveBeenCalled()
+      expect(healthy.stopAgent).not.toHaveBeenCalled(); expect(healthy.stopTerminal).not.toHaveBeenCalled()
+      expect(healthy.writeTerminal).not.toHaveBeenCalled()
+      healthy.listRuns.mockResolvedValue([{ runId: 'healthy-terminal', acceptedInputBytes: 0 }])
+      await controller.write({ kind: 'terminal', hostId: 'local', runId: 'healthy-terminal', run: { runId: 'healthy-terminal' } }, 'Still working', 'user')
+      expect(healthy.writeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: 'healthy-terminal' }, expect.objectContaining({ data: 'Still working' }))
+    } finally {
+      release.resolve(); dispose.resolve()
+      await pending
+      await controller.dispose()
+    }
   })
 
   it('does not advance host truth when Runtime discovery fails and retries the same config', async () => {
