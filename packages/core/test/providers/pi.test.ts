@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { PI_HOOK_EVENTS, PI_HOOKS, createPiManagedHookPlan } from '../../src/providers/pi.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
@@ -10,7 +10,7 @@ import type { AgentSemanticState } from '../../src/types.js'
 /**
  * T-005 的 Provider 测试。
  *
- * 证据来自**上游自己的源码**：`home/proj/github/pi`（即 `earendil-works/pi`，本机可读的
+ * 证据来自**上游自己的源码**：`home//proj/github/pi`（即 `earendil-works/pi`，本机可读的
  * 第一方仓库）。每条断言的期望值都逐字取自那里的类型声明与加载器实现，不是从任何第三方项目的实现反推。
  *
  * 这些断言证明「声明与上游合同相符」。它**不**证明跑过一次真实 Pi 会话——本机没有装 pi，事件是构造的
@@ -483,10 +483,10 @@ describe('Pi provider', () => {
   })
 
   describe('接到 registry 的 managed 安装路径上', () => {
-    it('resolveManagedHookPlan 按 id 找得到它，且不需要 endpoint', () => {
+    it('Provider.planManagedHooks 按 id 找得到它，且不需要 endpoint', () => {
       // 与 opencode 相反：那家没有 endpoint 就必须弃权（返回 null），Pi 在修复路径（没有 Binding）
       // 也照常产出一份完全有效的 plan——因为内容在运行时才取 endpoint。
-      const resolved = resolveManagedHookPlan('pi', '/tmp/ws', { PI_CODING_AGENT_DIR: '/tmp/pi-agent-dir' })
+      const resolved = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: '/tmp/ws', env: { PI_CODING_AGENT_DIR: '/tmp/pi-agent-dir' } }) ?? null)
       expect(resolved?.providerId).toBe('pi')
       expect(resolved?.mutations[0]!.path).toBe('/tmp/pi-agent-dir/extensions/agentmux.js')
     })

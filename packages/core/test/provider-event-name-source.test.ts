@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { runAgentHookCommand } from '../src/agent-hook-command.js'
 import { HOOK_EVENT_NAME_PAYLOAD_KEYS } from '../src/agent-hook-event.js'
 
@@ -196,7 +196,7 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
       // 缺声明就是本 task 要挡的漏配：AgentMux 亲手写它的配置，却没人保证子进程解析得出事件名。
       expect(source, `${providerId} 是 explicit-managed，必须声明 eventNameSource`).toBeDefined()
 
-      const plan = resolveManagedHookPlan(providerId, '/repo/app', { HERMES_HOME: '/tmp/hermes' })
+      const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: '/repo/app', env: { HERMES_HOME: '/tmp/hermes' } }) ?? null)
       expect(plan, `${providerId} 应有安装计划`).not.toBeNull()
       const commands = plan!.mutations.flatMap((mutation) => commandsFromPlan(mutation.content))
       expect(commands.length, `${providerId} 的安装计划里应有 hook 命令`).toBeGreaterThan(0)
@@ -237,12 +237,7 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
       const declared = [...new Set(provider.hook.rules.flatMap((rule) => rule.events))].sort()
       expect(declared.length, `${providerId} 应至少声明一个事件`).toBeGreaterThan(0)
 
-      const plan = resolveManagedHookPlan(
-        providerId,
-        '/repo/app',
-        { AGENTMUX_HOOK_URL: HOOK_URL, AGENTMUX_HOOK_TOKEN: HOOK_TOKEN },
-        { url: HOOK_URL, token: HOOK_TOKEN }
-      )
+      const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: '/repo/app', env: { AGENTMUX_HOOK_URL: HOOK_URL, AGENTMUX_HOOK_TOKEN: HOOK_TOKEN }, endpoint: { url: HOOK_URL, token: HOOK_TOKEN } }) ?? null)
       expect(plan, `${providerId} 应有安装计划`).not.toBeNull()
       expect(plan!.mutations.length, `${providerId} 只写它自己那一份代码文件`).toBe(1)
 
@@ -406,6 +401,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
 
       const dir = await mkdtemp(join(tmpdir(), 'agentmux-evtsrc-'))
       try {
+        vi.stubEnv('AGENTMUX_ENV', '1')
         vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
         vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
         // 关键：默认不给旗标、不给 env。flag provider 才走 argv 的 `--event`（生产真路）；payload

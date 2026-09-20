@@ -100,6 +100,7 @@ export function createGrokManagedHookPlan(homeOverride?: string): AgentManagedHo
 
 export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: () => createGrokManagedHookPlan(),
     catalog: catalog({
       id: 'grok', label: 'Grok', executable: 'grok', expectedProcess: 'grok', promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },

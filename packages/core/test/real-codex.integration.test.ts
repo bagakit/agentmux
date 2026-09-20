@@ -5,13 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  AgentManagedHookInstaller,
-  AgentMuxFileAgentSessionStore,
-  connectLocalAgentMux,
-  createCodexManagedHookPlan,
-  type AgentMuxClientEvent
-} from '../dist/index.js'
+import { AgentProviderRegistry, AgentManagedHookInstaller, AgentMuxFileAgentSessionStore, connectLocalAgentMux, type AgentMuxClientEvent } from '../dist/index.js'
 
 const execFileAsync = promisify(execFile)
 const roots: string[] = []
@@ -152,7 +146,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     await mkdir(workspace, { mode: 0o700 })
     await execFileAsync('git', ['init', '--quiet', workspace], { timeout: 5_000, maxBuffer: 64 * 1024 })
     const installer = new AgentManagedHookInstaller(join(root, 'hook-state'))
-    const preview = await installer.preview(createCodexManagedHookPlan(workspace))
+    const preview = await installer.preview((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: workspace })!))
     const hookReceipt = await installer.install(preview.id)
     const trustOverride = `projects={${JSON.stringify(workspace)}={trust_level="trusted"}}`
     const codexArgs = [

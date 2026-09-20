@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import {
-  AgentProviderRegistry,
-  resolveManagedHookPlan,
-  splitLaunchPromptByDelivery
-} from '../../src/agent-provider.js'
+import { AgentProviderRegistry, splitLaunchPromptByDelivery } from '../../src/agent-provider.js'
 import { composeAgentLaunchPrompt } from '../../src/agent-outbound-message.js'
 import { KIMI_HOOKS } from '../../src/providers/kimi.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -13,7 +9,7 @@ import type { AgentSemanticState } from '../../src/types.js'
 /**
  * T-016 的 Provider 测试。
  *
- * 证据来自**读第一方源码** `~/proj/github/kimi-cli`（`1.49.0`），主要是
+ * 证据来自**读第一方源码** `proj/github/kimi-cli`（`1.49.0`），主要是
  * `src/kimi_cli/hooks/{config,events}.py`、`src/kimi_cli/cli/__init__.py`、
  * `src/kimi_cli/ui/shell/__init__.py` 与它自带的 `docs/en/`。见
  * docs/reviews/agentmux-provider-cli-evidence.md 的《T-009…T-016 的证据面盘查》。
@@ -172,7 +168,7 @@ describe('Kimi provider', () => {
     it('unmanaged 意味着 Core 不为它解析任何安装计划', () => {
       // 这条是上面 unmanaged 声明的**行为**面：只断言字段相等，改成 explicit-managed 后
       // 字段断言会红，但「到底会不会去装」没人守。
-      expect(resolveManagedHookPlan('kimi', '/tmp/agentmux-kimi', {})).toBeNull()
+      expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: '/tmp/agentmux-kimi', env: {} }) ?? null)).toBeNull()
     })
   })
 
@@ -273,7 +269,8 @@ describe('Kimi provider', () => {
       // 而那个洞的后果最重——失败收尾时子代理还在跑，mainStopPending 没被置上，等最后一个
       // SubagentStop 落地时它只会返回 working，这个 Agent 就永久停在运行中，再没有事件能救回来。
       const hook = hookIn(`run-subagent-${mainStop}`)
-      expect(hook('SubagentStart', { agent_name: 'reviewer' }).semanticState).toBe('working')
+      // 子代理开始只记子事实；不能冒称主 Agent 正在工作。
+      expect(hook('SubagentStart', { agent_name: 'reviewer' }).semanticState).toBe('unknown')
       // 主 Agent 说收尾了，但子代理还在跑——必须压住，否则界面提前翻完成、还会误发完成通知。
       expect(hook(mainStop).semanticState).toBe('working')
       expect(hook('SubagentStop', { agent_name: 'reviewer' }).semanticState).toBe('done')

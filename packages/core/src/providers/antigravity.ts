@@ -58,6 +58,7 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
 
 export function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: () => createAntigravityManagedHookPlan(),
     catalog: catalog({
       id: 'antigravity', label: 'Antigravity', executable: 'agy', expectedProcess: 'agy',
       promptDelivery: 'flag-prompt-interactive',

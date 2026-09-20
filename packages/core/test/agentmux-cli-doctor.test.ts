@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxClient as Client } from '../src/client.js'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxRuntimeDiagnostics } from '../src/types.js'
@@ -34,7 +34,7 @@ describe('actual doctor CLI body to public Core inspection', () => {
     const installer = new AgentManagedHookInstaller(join(root,'receipts'))
     const client = new AgentMuxClient({providers:[provider],hookInstaller:installer,store:new AgentMuxMemoryAgentSessionStore()})
     bridge.client=client
-    const resolved=resolveManagedHookPlan('claude',root,{})!
+    const resolved=(new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     await mkdir(join(root,'.claude'));await writeFile(resolved.mutations[0]!.path,'{"secret":"never-report"}')
     const before=await readFile(resolved.mutations[0]!.path,'utf8')
     vi.spyOn(process,'cwd').mockReturnValue(root)

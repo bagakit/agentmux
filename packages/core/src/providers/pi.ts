@@ -246,6 +246,7 @@ export function createPiManagedHookPlan(env?: Readonly<Record<string, string>>):
 
 export function createPiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ env }) => createPiManagedHookPlan(env),
     readSessionHistoryPage: readPiSessionHistoryPage,
     catalog: catalog({
       composer: {"skillRoots": [".pi/agent/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}]},

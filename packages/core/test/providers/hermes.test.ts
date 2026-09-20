@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { HERMES_HOOK_EVENTS, HERMES_HOOKS, createHermesManagedHookPlan } from '../../src/providers/hermes.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
@@ -153,7 +153,7 @@ describe('Hermes provider', () => {
       // 上面两条行为断言直接调 normalizeHook，绕过了「这个事件会不会到达」。撤掉安装后它们照旧
       // 全绿（实测确认过）——所以必须单独钉住接线：config.yaml 让 Hermes 触发它，allowlist 让这次
       // 触发不卡在同意提示上。少任何一份，上面验的行为在产品里永远走不到。
-      const plan = resolveManagedHookPlan('hermes', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ command: string }>>
       }
@@ -223,7 +223,7 @@ describe('Hermes provider', () => {
     it('两个 mutation 的事件集都恰好等于声明的清单', () => {
       // config.yaml 装事件，allowlist 授权同一批 (event, command) 对。两份少任何一边，
       // 事件要么不触发、要么触发时卡在一个交互式同意提示上（非 TTY 下直接注册失败）。
-      const plan = resolveManagedHookPlan('hermes', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as { hooks: Record<string, unknown> }
       expect(Object.keys(config.hooks).sort()).toEqual([...HERMES_HOOK_EVENTS].sort())
       const allowlist = JSON.parse(plan!.mutations[1]!.content) as {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
@@ -32,7 +32,7 @@ afterEach(async () => { await client.dispose(); await rm(root, { recursive: true
 
 describe('actual Core disk observations consumed by Doctor', () => {
   it('captures pre-connect absence then preserves it when ordinary connection repairs the same private files', async () => {
-    const resolved = resolveManagedHookPlan('claude', root, {})!
+    const resolved = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     vi.mocked(client.connect).mockImplementation(async () => { await installer.ensure(resolved) })
     const inspected = vi.spyOn(client, 'inspectManagedHooks')
     const report = await diagnoseAgentMux({ client, workspacePath: root, env: {} })
@@ -47,7 +47,7 @@ describe('actual Core disk observations consumed by Doctor', () => {
   })
 
   it('keeps malformed scoped facts on unreachable Runtime and never prints config content or command', async () => {
-    const resolved = resolveManagedHookPlan('claude', root, {})!
+    const resolved = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     await mkdir(join(root, '.claude'))
     await writeFile(resolved.mutations[0]!.path, '{private-credential-do-not-report')
     vi.mocked(client.connect).mockRejectedValue(new Error('synthetic Runtime unavailable'))
@@ -77,7 +77,7 @@ describe('actual Core disk observations consumed by Doctor', () => {
     const other = new AgentMuxClient({ providers: [provider], hookInstaller: installer, store: new AgentMuxMemoryAgentSessionStore() })
     const env = { OPENCODE_CONFIG_DIR: join(root, 'private-opencode') }
     const endpoint = { url: 'http://127.0.0.1:65535/hook', token: 'private-existing-binding-token' }
-    const resolved = resolveManagedHookPlan('opencode', root, env, endpoint)!
+    const resolved = (new AgentProviderRegistry().get('opencode').planManagedHooks?.({ workspacePath: root, env: env, endpoint: endpoint }) ?? null)!
     await installer.ensure(resolved)
     try {
       const result = await other.inspectManagedHooks('opencode', { workspacePath: root, env, endpoint })
@@ -90,7 +90,7 @@ describe('actual Core disk observations consumed by Doctor', () => {
   it('keeps current disk targets when a native activation reader fails, without connect, stop or create', async () => {
     const base = new AgentProviderRegistry().get('claude')
     const other = new AgentMuxClient({ providers: [{ ...base, inspectHookActivation: async () => { throw new Error('private-native-stderr') } }], hookInstaller: installer, store: new AgentMuxMemoryAgentSessionStore() })
-    const resolved = resolveManagedHookPlan('claude', root, {})!
+    const resolved = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     await installer.ensure(resolved)
     const connect = vi.spyOn(other, 'connect'), stop = vi.spyOn(other, 'stopAgent'), create = vi.spyOn(other, 'createAgent')
     try {

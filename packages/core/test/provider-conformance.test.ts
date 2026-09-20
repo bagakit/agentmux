@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import {
-  AgentProviderRegistry,
-  defineAgentProvider,
-  resolveManagedHookPlan,
-  type AgentProvider
-} from '../src/agent-provider.js'
+import { AgentProviderRegistry, defineAgentProvider, type AgentProvider } from '../src/agent-provider.js'
 import { createCodexProvider } from '../src/providers/index.js'
-import { HOOK_INSTALLATION_BY_PROVIDER } from '../src/providers/shared.js'
 import { AgentMuxError } from '../src/errors.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/types.js'
 import { BUILT_IN_AGENT_LABELS } from '../src/agent-provider-id.js'
@@ -51,12 +45,7 @@ describe('built-in Provider conformance', () => {
       const { capabilities, hookStrategy } = provider.catalog
       // endpoint 一律给足：需要它的 Provider（写投递代码进文件的那类）才产得出 plan，不需要的
       // 会忽略它。缺席行为由下面单独一条守——两侧都要钉，只钉一侧会让「永远不装」也能过。
-      const managedPlan = resolveManagedHookPlan(
-        provider.id,
-        '/tmp/agentmux-provider-conformance',
-        { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' },
-        endpoint
-      )
+      const managedPlan = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: '/tmp/agentmux-provider-conformance', env: { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' }, endpoint: endpoint }) ?? null)
 
       // `hookStrategy.kind` is the SINGLE source of "does this provider emit native hooks". It used to
       // be mirrored by a `capabilities.hookEvents` boolean that nothing read (the real consumers —
@@ -89,11 +78,7 @@ describe('built-in Provider conformance', () => {
     for (const provider of providers) {
       const { hookStrategy } = provider.catalog
       if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') continue
-      const withoutEndpoint = resolveManagedHookPlan(
-        provider.id,
-        '/tmp/agentmux-provider-conformance',
-        { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' }
-      )
+      const withoutEndpoint = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: '/tmp/agentmux-provider-conformance', env: { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' } }) ?? null)
       if (withoutEndpoint === null) continue
       // 产出了就必须是完整可装的——不允许「产出一份空 plan」这种中间态。
       expect(withoutEndpoint.providerId).toBe(provider.id)
@@ -105,28 +90,13 @@ describe('built-in Provider conformance', () => {
     }
   })
 
-  /**
-   * `HOOK_INSTALLATION_BY_PROVIDER`（providers/shared.ts）是 hook 安装归属的**类型层 SSOT**：
-   * `ProviderRequiringManagedHookResolver` 从它派生，`MANAGED_HOOK_PLAN_RESOLVERS` 拿那个类型当键域，
-   * 于是「声明了 explicit-managed 却漏挂 resolver」变成编译错误。但那张表是各 catalog `hookStrategy` 的
-   * **第二处投影**（类型层拿不回 catalog 里的字面量，只能另抄一份），两处天然会漂。
-   *
-   * 这条把两处投影逐 id 双向钉死：表里的分类必须等于该 provider catalog `hookStrategy` 的实际分类。
-   * 少了它，有人把某家 catalog 从 explicit-managed 改成 unmanaged 却忘了改这张表时——编译期守卫会
-   * 继续**要求**一条本不该有的 resolver（或反过来放行一个缺口），而没有任何东西发红。判据落在这里，
-   * `MANAGED_HOOK_PLAN_RESOLVERS` 的编译期保证才真正锚在 catalog 上，而不是锚在一份可能撒谎的副本上。
-   */
-  it('HOOK_INSTALLATION_BY_PROVIDER 逐 id 等于各 catalog hookStrategy 的实际分类（两处投影不漂）', () => {
-    const fromCatalog = Object.fromEntries(
-      providers.map((provider) => {
-        const strategy = provider.catalog.hookStrategy
-        return [provider.id, strategy.kind === 'none' ? 'none' : strategy.installation]
-      })
-    )
-    // 双向 `toEqual`：表里多一家 / 少一家 / 任一家分类不同都红。
-    expect({ ...HOOK_INSTALLATION_BY_PROVIDER }).toEqual(fromCatalog)
-    // 前提自检：这张表里至少一家是 explicit-managed（否则守卫的键域退化成空集，编译期什么都强制不了）。
-    expect(Object.values(HOOK_INSTALLATION_BY_PROVIDER)).toContain('explicit-managed')
+  it('contributes planning exactly for the non-empty registered managed capability set', () => {
+    expect(providers.length).toBeGreaterThan(0)
+    const managed = providers.filter(provider => provider.catalog.hookStrategy.kind === 'native' &&
+      provider.catalog.hookStrategy.installation === 'explicit-managed')
+    expect(managed.length).toBeGreaterThan(0)
+    expect(providers.filter(provider => typeof provider.planManagedHooks === 'function').map(provider => provider.id))
+      .toEqual(managed.map(provider => provider.id))
   })
 
   // AgentCapabilities は "each field describes an axis Core actually branches on". Two booleans used to

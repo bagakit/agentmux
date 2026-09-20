@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { resolveManagedHookPlan } from '../../src/agent-provider.js'
+import {  } from '../../src/agent-provider.js'
 import { GROK_HOOK_EVENTS } from '../../src/providers/grok.js'
 import { canonicalHookLifecycleEvent, GROK_HOOK_DIALECT } from '../../src/agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS, hookResponseFor } from '../../src/agent-hook-command.js'
@@ -176,7 +176,7 @@ describe('Grok provider', () => {
   })
 
   describe('managed install 只落在受信目录，且不污染别家配置', () => {
-    const plan = resolveManagedHookPlan('grok', '/repo')
+    const plan = (new AgentProviderRegistry().get('grok').planManagedHooks?.({ workspacePath: '/repo' }) ?? null)
 
     it('装到 ~/.grok/hooks/ 下自有文件，绝不写 Claude 或 Cursor 的配置', () => {
       expect(plan).not.toBeNull()

@@ -23,14 +23,7 @@ import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import {
-  AgentMuxFileAgentSessionStore,
-  AgentProviderRegistry,
-  connectLocalAgentMux,
-  loadAgentSessions,
-  resolveManagedHookPlan,
-  type AgentProvider
-} from '@agentmux/core'
+import { AgentMuxFileAgentSessionStore, AgentProviderRegistry, connectLocalAgentMux, loadAgentSessions, type AgentProvider } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 
 vi.hoisted(() => {
@@ -284,11 +277,11 @@ describe('public Hook native identity survives a new Client and Desktop durable 
       command:cliPath,args:[],env:environment,injectAgentMuxGuide:false } },
       workspaces:[{id:'workspace-a',name:'Private identity fixture',hostId:'local',path:workspace,kind:'folder'}] }
     const nativeSpec = provider.hook.nativeHandle!
-    const fixture = { root,agentSessionId:sessionId,providerId:provider.id,agentMuxCli:resolve('packages/core/bin/agentmux'),
+    const fixture = { root,agentSessionId:sessionId,providerId:provider.id,agentMuxCli:resolve(import.meta.dirname, '../../../packages/core/bin/agentmux'),
       format,nativeId,transcript,trace:tracePath,question:`question-${provider.id}`,answer:`answer-${provider.id}`,
       event:format === 'pi' ? 'agent_start' : 'SessionStart',sessionKey:nativeSpec.sessionIdKeys[0],
       transcriptKey:nativeSpec.transcriptPathKeys?.[0] ?? 'transcript_path',handshake:provider.terminalHandshake }
-    await mkdir(workspace); await mkdir(runtime); await writeFile(tracePath,'')
+    await mkdir(workspace); await mkdir(runtime); await mkdir(join(runtime,'state')); await writeFile(tracePath,'')
     await writeFile(cliPath,nativeCli,{mode:0o700}); await writeFile(fixturePath,JSON.stringify(fixture))
     const readTrace = async () => {
       const text = (await readFile(tracePath,'utf8')).trim()
@@ -307,22 +300,26 @@ describe('public Hook native identity survives a new Client and Desktop durable 
     }
     fixtureHome.path = join(root,'home')
     await mkdir(fixtureHome.path)
-    const repairPlan = resolveManagedHookPlan(provider.id,workspace,environment)
+    const repairPlan = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspace, env: environment }) ?? null)
     expect(repairPlan?.mutations.length).toBeGreaterThan(0)
     for (const mutation of repairPlan!.mutations) expect(mutation.path.startsWith(root+'/')).toBe(true)
-    const daemonPath = resolve('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd')
+    const daemonPath = resolve(import.meta.dirname, '../../../packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd')
     const daemonEnv = Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('AGENTMUX_')))
     expect(Object.keys(daemonEnv).filter(name=>name.startsWith('AGENTMUX_'))).toEqual([])
     // Own child and exact namespace: cleanup never selects an installed daemon or user Session.
     const daemon = spawn(daemonPath,['--socket',join(runtime,'ctxmux.sock'),'--state-dir',join(runtime,'state','ctxmux'),'--readiness-fd','3'],
-      {env:daemonEnv,stdio:['ignore','ignore','ignore','pipe']})
-    const daemonExit = once(daemon,'exit')
+      {env:daemonEnv,stdio:['ignore','ignore','pipe','pipe']})
+    let daemonStderr = ''
+    daemon.stderr!.on('data', data => { daemonStderr += String(data) })
+    const daemonExit = once(daemon,'close')
     let first: Awaited<ReturnType<typeof connectLocalAgentMux>> | undefined
     let desktop: RuntimeController | undefined
     let disposeUi: (() => void) | undefined
     const persistenceOptions = useAppStore.persist.getOptions()
     try {
-      await once(daemon.stdio[3]!,'data')
+      await Promise.race([once(daemon.stdio[3]!,'data'), daemonExit.then(result => {
+        throw new Error(`Private ctxmuxd closed before readiness: ${JSON.stringify(result)} ${daemonStderr}`)
+      })])
       const firstStore = new AgentMuxFileAgentSessionStore(storePath)
       first = await connectLocalAgentMux({store:firstStore})
       expect(await loadAgentSessions(firstStore)).toEqual([])

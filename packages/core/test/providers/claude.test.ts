@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
-import { AgentProviderRegistry, defineAgentProvider, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
 import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
@@ -76,7 +76,7 @@ describe('Claude provider', () => {
 
     it('三个补装的事件确实写进了 settings.json，而不只是进了常量清单', () => {
       // 常量清单绿了但计划没渲染出来，等于装了个假。这条读真实渲染结果。
-      const plan = resolveManagedHookPlan('claude', '/tmp/work')
+      const plan = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)
       const written = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>
       }

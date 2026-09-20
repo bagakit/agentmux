@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { OPENCODE_HOOK_EVENTS, OPENCODE_HOOKS, createOpenCodeManagedHookPlan } from '../../src/providers/opencode.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
  * T-009 的 Provider 测试。
  *
- * 证据来自**上游自己的源码**：`home/proj/github/opencode`（本机可读的第一方仓库）。
+ * 证据来自**上游自己的源码**：`home//proj/github/opencode`（本机可读的第一方仓库）。
  * 每条断言的期望值都逐字取自那里的生成类型与加载器实现，不是从任何第三方项目的实现反推。
  *
  * 这些断言证明「声明与上游合同相符」。它**不**证明跑过一次真实 OpenCode 会话——本机没有装 opencode，
@@ -205,8 +205,8 @@ describe('OpenCode provider', () => {
     })
 
     it('装的位置与 workspace 无关', () => {
-      const a = resolveManagedHookPlan('opencode', '/repo/a', {}, endpoint)
-      const b = resolveManagedHookPlan('opencode', '/repo/b', {}, endpoint)
+      const a = (new AgentProviderRegistry().get('opencode').planManagedHooks?.({ workspacePath: '/repo/a', env: {}, endpoint: endpoint }) ?? null)
+      const b = (new AgentProviderRegistry().get('opencode').planManagedHooks?.({ workspacePath: '/repo/b', env: {}, endpoint: endpoint }) ?? null)
       expect(a?.mutations[0]?.path).toBe(b?.mutations[0]?.path)
     })
   })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
@@ -61,14 +61,14 @@ describe('Droid provider', () => {
     it('顶层键就是事件名，不套 hooks:——套了整份配置会被判无效', () => {
       // zod：`object({ PreToolUse: array(...).optional(), …, hooksDisabled: boolean().optional() })`。
       // 照 Claude 的形状多包一层 `hooks` 不是"少响几个事件"，是一个都不响（整份配置被 schema 拒掉）。
-      const plan = resolveManagedHookPlan('droid', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<string, unknown>
       expect(Object.keys(config).sort()).toEqual([...DROID_HOOK_EVENTS].sort())
       expect(config).not.toHaveProperty('hooks')
     })
 
     it('每条 hook 条目是 {type:command, command, timeout}，包在事件的数组里', () => {
-      const plan = resolveManagedHookPlan('droid', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<
         string,
         Array<{ matcher?: string; hooks: Array<{ type: string; command: string; timeout: number }> }>
@@ -84,7 +84,7 @@ describe('Droid provider', () => {
     })
 
     it('只有两个工具事件带 matcher——别处写 matcher 是噪音', () => {
-      const plan = resolveManagedHookPlan('droid', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<
         string, Array<{ matcher?: string }>
       >
@@ -102,7 +102,7 @@ describe('Droid provider', () => {
       //
       // **先验行为、再验策略名**：反过来写的话，策略名那条会先抛，后面几条行为断言就成了死代码——
       // 换错策略时它们一条都跑不到，于是"这份配置具体怎么坏"根本没人守。
-      const plan = resolveManagedHookPlan('droid', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const mutation = plan!.mutations[0]!
       const existing = JSON.stringify({
         PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/home/me/audit.sh' }] }],
@@ -124,8 +124,8 @@ describe('Droid provider', () => {
 
     it('装的位置与 workspace 无关——resolver 不该拿 workspacePath 派生路径', () => {
       // 这条守 index.ts 的接线：droid 是 user 层安装，两个不同 workspace 必须解析到同一份文件。
-      const a = resolveManagedHookPlan('droid', '/repo/one')
-      const b = resolveManagedHookPlan('droid', '/repo/two')
+      const a = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/one' }) ?? null)
+      const b = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: '/repo/two' }) ?? null)
       expect(a!.mutations[0]!.path).toBe(b!.mutations[0]!.path)
       expect(a!.mutations[0]!.path).toContain('/.factory/hooks.json')
     })

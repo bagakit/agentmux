@@ -9,7 +9,7 @@ import {
   hookCommandTimeout
 } from '../src/providers/shared.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/agent-provider-id.js'
-import { resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 
 // ---------------------------------------------------------------------------
 // 「受管 Hook 命令超时只有一个 SSOT——值与键都是」的守卫（F6）。
@@ -29,7 +29,7 @@ import { resolveManagedHookPlan } from '../src/agent-provider.js'
 //        `getSymbolAtLocation` 解析不到目标符号，判据 B 立即红（自检 B2）。
 //   坑② 数符号出现次数会被另一种拼法绕过：数 `HOOK_COMMAND_TIMEOUT_SECONDS` 出现几次，挡不住有人内联
 //        `10`。→ 判据 A 不数符号，而是用 TypeScript 自己的 parser 枚举 `providers/` 下 `timeout`/`timeoutSec`
-//        这两个属性位上的**每一个** PropertyAssignment，断言它们的初始化器都不是数字字面量。注释/字符串里的
+//        受管计划生成函数内这两个属性位上的**每一个** PropertyAssignment；读取 activation 的投影不算安装声明。注释/字符串里的
 //        `timeout: 10` 天然不算（走 parser 不走正则）。`timeoutSec` 显式在禁区键集合里（少了它 copilot 漏网，
 //        这正是本 task 的关键点）。重构后这两个属性位已归零——键改成计算属性了——所以判据 A 今天扫到 0 个
 //        offender 是**正确**的绿；真正防「有人把 helper 拆开、又在某个 provider 里手写回 `timeout: 10`」。
@@ -41,7 +41,7 @@ import { resolveManagedHookPlan } from '../src/agent-provider.js'
 //
 // 本守卫看不见什么（未消除的盲点，照实写在这里）：
 //   1. 判据 A/A2/B 不执行代码——它们证明「属性位没有裸数字、且 helper 的值是那个常量符号」，不证明这个值
-//      在运行时真的被写进配置。**这条缝由本文件末尾的判据 D 补上**（走 `resolveManagedHookPlan` 的真实
+//      在运行时真的被写进配置。**这条缝由本文件末尾的判据 D 补上**（走 `Provider.planManagedHooks` 的真实
 //      产物、两个方向都断言）。
 //      〔已撤回的旧说法，留在这里以免有人再信它〕本段原先写的是「那由各 provider 的行为测试（test/providers/*.test.ts
 //      逐家 parse 出 JSON 断言 timeout 等于常量）负责。两层配对交付，缺一层都留洞」——**这句话在本仓是假的**：
@@ -83,6 +83,45 @@ function parse(path: string, source: string): ts.SourceFile {
   return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 }
 
+/** 扫实际生成计划的类型边界；activation 的读取投影不写安装配置。 */
+type PlanScope = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction
+/** 从实际贡献 callback 沿 TypeChecker 已解析的调用声明取生成 owner；别名与推导不改调用关系。 */
+function generatedPlanScan(overrides?: ReadonlyMap<string, string>) {
+  const { checker, program } = programForProviders(overrides)
+  const scopes = new Set<PlanScope>(), contributions: PlanScope[] = [], findings: Finding[] = []
+  const collect = (scope: PlanScope): void => {
+    if (scopes.has(scope)) return
+    scopes.add(scope)
+    const source = scope.getSourceFile()
+    findings.push(...forbiddenKeyValues(source, source.fileName, [scope]))
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const declaration = checker.getResolvedSignature(node)?.declaration
+        if (declaration && declaration.getSourceFile().fileName.startsWith(providersDir + '/') &&
+            (ts.isFunctionDeclaration(declaration) || ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration)) && declaration.body) {
+          collect(declaration)
+        }
+      }
+      node.forEachChild(walk)
+    }
+    scope.forEachChild(walk)
+  }
+  for (const path of providerFiles()) {
+    const source = program.getSourceFile(path)!
+    const walk = (node: ts.Node): void => {
+      if (ts.isPropertyAssignment(node) && propertyKeyName(node.name) === 'planManagedHooks') {
+        const initializer = node.initializer
+        if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) throw new Error('贡献 callback 形状改变，需核对生成 owner 扫描')
+        contributions.push(initializer)
+        collect(initializer)
+      }
+      node.forEachChild(walk)
+    }
+    source.forEachChild(walk)
+  }
+  return { scopes: [...scopes], contributions, findings }
+}
+
 // --- 判据 A：文本/AST 层——providers/ 下 timeout/timeoutSec 属性位不许出现裸数字 ----------------------
 
 type Finding = { path: string; key: string; kind: string; text: string }
@@ -109,7 +148,7 @@ function propertyKeyName(name: ts.PropertyName): string | null {
  * 归一，所以标识符 / 字符串字面量 / 常量计算键三种拼法都算——换拼法绕不过去。运行时计算键 `[expr]: …`
  * （非常量字符串）静态判不出键名，不在此列，本守卫对它失明（见文件头盲点 2）。
  */
-function forbiddenKeyValues(sourceFile: ts.SourceFile, path: string): Finding[] {
+function forbiddenKeyValues(sourceFile: ts.SourceFile, path: string, roots: readonly ts.Node[] = [sourceFile]): Finding[] {
   const found: Finding[] = []
   const walk = (node: ts.Node): void => {
     if (ts.isPropertyAssignment(node)) {
@@ -125,7 +164,7 @@ function forbiddenKeyValues(sourceFile: ts.SourceFile, path: string): Finding[] 
     }
     node.forEachChild(walk)
   }
-  sourceFile.forEachChild(walk)
+  roots.forEach(walk)
   return found
 }
 
@@ -306,22 +345,43 @@ function badComputedKeyTimeoutSites(overrides?: ReadonlyMap<string, string>): {
 
 describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () => {
   const files = providerFiles()
-  const findings = files.flatMap((path) => forbiddenKeyValues(parse(path, readFileSync(path, 'utf8')), path))
+  const { scopes, contributions, findings } = generatedPlanScan()
 
-  // 判据 A：providers/ 下 timeout/timeoutSec 这两个属性位**一个都不许有**——不论值怎么写。
-  it('判据 A：providers/ 下没有任何手写的 timeout/timeoutSec 属性位（值怎么写都不行）', () => {
+  // 判据 A：实际生成受管计划的函数内不许手写超时属性；读取 activation 投影不写配置。
+  it('判据 A：生成受管计划的函数内没有任何手写的 timeout/timeoutSec 属性位（值怎么写都不行）', () => {
     // 重构后所有超时都走 `...hookCommandTimeout(<id>)` 的计算键 spread，`timeout:`/`timeoutSec:` 这两个
-    // **字面属性位**在 providers/ 里应当归零。所以判据不是「值不能是数字字面量」而是更严的「这个属性位不该出现」：
+    // **字面属性位**在受管计划生成函数里应当归零。所以判据不是「值不能是数字字面量」而是更严的「这个属性位不该出现」：
     // 后者顺带堵死一族「换个值的写法」的绕过——`timeout: 5+5`（BinaryExpression）、`timeout: Number(10)`（Call）、
     // `timeout: 0x0a`、`timeout: T`（指向本地 const 的标识符）都产生一个 timeout 属性位，但都不是 NumericLiteral，
     // 只查「值是不是裸数字」会全部放行。键侧三种拼法（标识符/字符串/常量计算键）已由 `propertyKeyName` 归一。
+    expect(scopes.length, '没有扫到实际受管计划生成函数').toBeGreaterThan(0)
+    const managed = new AgentProviderRegistry().list().filter(provider => provider.catalog.hookStrategy.kind === 'native' &&
+      provider.catalog.hookStrategy.installation === 'explicit-managed')
+    expect(managed.length).toBeGreaterThan(0)
+    expect(contributions).toHaveLength(managed.length)
+    for (const contribution of contributions) expect(scopes).toContain(contribution)
     const offenders = findings
     expect(
       offenders,
       `这些 timeout/timeoutSec 属性位是手写的（会静默漂移；copilot 一旦被抄成 timeout 会静默换超时）。` +
-        `providers/ 下不该再出现这个属性位，应改为 spread \`${HELPER_NAME}(<providerId>)\`：\n` +
+        `受管计划生成函数内不该出现这个属性位，应改为 spread \`${HELPER_NAME}(<providerId>)\`：\n` +
         offenders.map((o) => `  ${o.path} → ${o.key}: ${o.text} [${o.kind}]`).join('\n')
     ).toEqual([])
+  })
+
+  it.each(['alias', 'inferred'])('生成计划用 %s 返回类型时仍扫描真实 owner，手写 timeout 不能漏过', mode => {
+    const path = join(providersDir, 'claude.ts')
+    const original = readFileSync(path, 'utf8')
+    const typed = mode === 'alias'
+      ? original.replace('): AgentManagedHookPlan {', '): ManagedPlan {') + '\ntype ManagedPlan = AgentManagedHookPlan\n'
+      : original.replace('): AgentManagedHookPlan {', ') {')
+    expect(typed).not.toBe(original)
+    const mutated = typed.replace(`...${HELPER_NAME}('claude')`, `timeout: ${CONST_NAME}`)
+    expect(mutated).not.toBe(typed)
+    const { findings: bad, contributions: registered, scopes: covered } = generatedPlanScan(new Map([[path, mutated]]))
+    expect(registered.length).toBeGreaterThan(0)
+    for (const contribution of registered) expect(covered).toContain(contribution)
+    expect(bad.filter(site => site.path === path)).toEqual([expect.objectContaining({ key: 'timeout', text: CONST_NAME })])
   })
 
   it('自检 A0：至少有一处非数字字面量的写法也会被判据 A 抓——不是只挡裸数字', () => {
@@ -524,7 +584,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
 // 九家非 null 里有五家（codex / claude / grok / gemini / antigravity）在行为侧根本没有这条断言。
 // 所以那句话在**今天的仓库里是假的**，已在文件头改写；判据 D 就是把那半层补齐的东西。
 //
-// 判据形状（走真实生成路径，不读源码文本）：`resolveManagedHookPlan` 是九家共同的出口，
+// 判据形状（走真实生成路径，不读源码文本）：`Provider.planManagedHooks` 是九家共同的出口，
 // 逐家解析它产出的每份 mutation JSON，枚举**每一个带 command 的对象**，然后：
 //   · 映射值非 null ⇒ 每个 hook 定义都必须带**那一家自己的键**、值等于 SSOT 常量；
 //   · 映射值为 null ⇒ 产物里不许出现任何 FORBIDDEN_KEYS 属性位（否则表在撒谎）。
@@ -583,7 +643,7 @@ function planCommandObjects(providerId: string): {
   parsed: CommandBearingObject[]
   unparsedFiles: string[]
 } {
-  const plan = resolveManagedHookPlan(providerId as Parameters<typeof resolveManagedHookPlan>[0], PROBE_WORKSPACE)
+  const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: PROBE_WORKSPACE }) ?? null)
   const parsed: CommandBearingObject[] = []
   const unparsedFiles: string[] = []
   for (const mutation of plan?.mutations ?? []) {

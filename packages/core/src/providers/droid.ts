@@ -104,6 +104,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
 
 export function createDroidProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    planManagedHooks: ({ env }) => createDroidManagedHookPlan(env),
     catalog: catalog({
       id: 'droid', label: 'Droid', executable: 'droid', expectedProcess: 'droid',
       promptDelivery: 'positional-argv',

@@ -34,9 +34,10 @@
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .focus-context__identity { display: flex; align-items: baseline; min-width: 0; gap: var(--sp-2); }
 .focus-context__identity strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
-.focus-context__identity small { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
-.focus-context[data-bucket='attention'] .focus-context__identity small { color: var(--amber); }
-.focus-context[data-state='error'] .focus-context__identity small { color: var(--red); }
+.focus-context__state { flex: none; }
+.focus-context__state small { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.focus-project-lanes__axis .project-rail-row__icon { flex: none; }
+.focus-project-lanes__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
 .focus-context__detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-micro); line-height: 1.4; }
 .focus-context__open { flex: none; opacity: 0; color: var(--text-3); }
 .focus-context:hover .focus-context__open, .focus-context:focus-visible .focus-context__open { opacity: 1; }
@@ -59,7 +60,7 @@
 .recent-focus__title { min-width: 0; }
 .recent-focus__title strong { font-weight: 500; color: var(--text-2); white-space: nowrap; }
 .recent-focus__range { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.recent-focus__controls { flex: none; gap: 2px; }
+.recent-focus__controls { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; justify-content: flex-end; gap: 2px; }
 .recent-focus__controls .icon-button { width: 22px; height: 22px; }
 .recent-focus__controls button:disabled { opacity: .35; cursor: default; }
 .recent-focus__controls input, .recent-focus__controls select, .recent-focus__now { min-width: 0; height: 22px; padding: 0 3px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); font: inherit; font-variant-numeric: tabular-nums; }
@@ -79,9 +80,14 @@
 .recent-focus__time-scale time:last-of-type { transform: translateX(-100%); }
 .recent-focus__track { height: 24px; }
 .recent-focus__lane { position: relative; min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line-soft); background: repeating-linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 1px, transparent 1px, transparent 25%); }
-.recent-focus__segment { position: absolute; top: 3px; bottom: 3px; min-width: 8px; padding: 0 4px; overflow: hidden; border: 0; border-radius: 2px; background: var(--surface-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
+.recent-focus__segment { position: absolute; top: 18px; bottom: 2px; min-width: 8px; padding: 0; overflow: hidden; border: 0; border-radius: 1px; background: var(--text-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
+.recent-focus__segment span { visibility: hidden; }
 .recent-focus__segment.is-open { width: 8px; border-right: 1px dashed var(--text-3); }
-.recent-focus__segment.is-current { background: color-mix(in srgb, var(--green) 22%, var(--surface-3)); color: var(--text); }
+.recent-focus__segment.is-current { background: var(--text); }
+.recent-focus__working { position: absolute; top: 4px; height: 11px; min-width: 2px; padding: 0; border: 0; border-radius: 2px; background: color-mix(in srgb, var(--green) 30%, var(--surface-3)); cursor: pointer; }
+.recent-focus__live { position: absolute; top: 4px; z-index: 3; width: 8px; height: 11px; padding: 0; transform: translateX(-50%); border: 1px solid var(--text-3); border-radius: 2px; background: var(--surface-1); cursor: pointer; }
+.recent-focus__live.is-working { border-color: var(--green); background: var(--green); }
+.recent-focus__working:hover, .recent-focus__working:focus-visible, .recent-focus__live:hover, .recent-focus__live:focus-visible { z-index: 4; outline: 1px solid var(--green); outline-offset: 1px; }
 .recent-focus__segment:hover, .recent-focus__segment:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 2; background: var(--green); pointer-events: none; }
 .recent-focus__playhead--ruler::before { position: absolute; top: 0; left: -3px; width: 7px; height: 5px; background: var(--green); clip-path: polygon(0 0, 100% 0, 50% 100%); content: ''; }

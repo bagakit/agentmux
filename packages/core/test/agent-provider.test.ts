@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
-import { AgentProviderRegistry, createAntigravityManagedHookPlan, createClaudeManagedHookPlan, createCodexManagedHookPlan, createHermesManagedHookPlan, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/agent-launch-option.js'
 
 describe('built-in agent providers', () => {
@@ -601,11 +601,11 @@ describe('built-in agent providers', () => {
   })
 
   it('generates Antigravity managed hook plan with global path, agentmux-status bundle, and tool schemas', () => {
-    const plan = createAntigravityManagedHookPlan('/tmp/fake-home')
+    const plan = (new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: '/unused-workspace' })!)
     expect(plan.providerId).toBe('antigravity')
     expect(plan.mutations).toHaveLength(1)
     const mutation = plan.mutations[0]
-    expect(mutation?.path).toBe('/tmp/fake-home/.gemini/config/hooks.json')
+    expect(mutation?.path).toBe(`${homedir()}/.gemini/config/hooks.json`)
     const parsed = JSON.parse(mutation?.content ?? '{}') as {
       'agentmux-status': Record<string, Array<{ type?: string; matcher?: string; hooks?: unknown[]; command?: string }>>
     }
@@ -620,7 +620,7 @@ describe('built-in agent providers', () => {
   })
 
   it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
-    const mutation = createCodexManagedHookPlan('/tmp/work').mutations[0]
+    const mutation = (new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: '/tmp/work' })!).mutations[0]
     expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
     // 子代理在途压制的产品接线：SubagentStop 必须被真正安装，否则 Provider CLI 永不发这个事件，
     // 花名册永不减一，主 Stop 被永远压住，Agent 卡在 working 出不来。start 同样必须在，否则记不上。
@@ -632,7 +632,7 @@ describe('built-in agent providers', () => {
   })
 
   it('generates a workspace-scoped Claude settings.json merge that preserves foreign settings', () => {
-    const plan = createClaudeManagedHookPlan('/tmp/work')
+    const plan = (new AgentProviderRegistry().get("claude").planManagedHooks!({ workspacePath: '/tmp/work' })!)
     expect(plan.providerId).toBe('claude')
     const mutation = plan.mutations[0]
     expect(mutation?.path).toBe('/tmp/work/.claude/settings.json')
@@ -654,11 +654,11 @@ describe('built-in agent providers', () => {
 
   it('resolves the managed hook plan for JSON- and YAML-config native providers, null for the rest', () => {
     // JSON-config providers: codex and claude write into the workspace, antigravity into global ~/.gemini.
-    expect(resolveManagedHookPlan('codex', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.codex/hooks.json')
-    expect(resolveManagedHookPlan('claude', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.claude/settings.json')
-    expect(resolveManagedHookPlan('antigravity', '/tmp/work')?.providerId).toBe('antigravity')
+    expect((new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)?.mutations[0]?.path).toBe('/tmp/work/.codex/hooks.json')
+    expect((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)?.mutations[0]?.path).toBe('/tmp/work/.claude/settings.json')
+    expect((new AgentProviderRegistry().get('antigravity').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)?.providerId).toBe('antigravity')
     // hermes writes into its global ~/.hermes: the YAML config plus the consent allowlist (two mutations).
-    const hermesPlan = resolveManagedHookPlan('hermes', '/tmp/work')
+    const hermesPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)
     expect(hermesPlan?.providerId).toBe('hermes')
     expect(hermesPlan?.mutations.map((mutation) => mutation.path.replace(homedir(), '~'))).toEqual([
       '~/.hermes/config.yaml',
@@ -669,20 +669,20 @@ describe('built-in agent providers', () => {
     // A launch env carrying HERMES_HOME repoints the install to that dir directly (no `.hermes` append) —
     // hermes reads its config dir from $HERMES_HOME, so the installer must target the same dir the process
     // will read. This is the isolation lever the real-hermes e2e leans on.
-    const scopedPlan = resolveManagedHookPlan('hermes', '/tmp/work', { HERMES_HOME: '/tmp/scratch-hermes' })
+    const scopedPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: '/tmp/work', env: { HERMES_HOME: '/tmp/scratch-hermes' } }) ?? null)
     expect(scopedPlan?.mutations.map((mutation) => mutation.path)).toEqual([
       '/tmp/scratch-hermes/config.yaml',
       '/tmp/scratch-hermes/shell-hooks-allowlist.json'
     ])
     // pi 现在有 plan builder：它装一份自己独占的 in-process JS 扩展。用 env 把 agent dir 指到临时目录，
     // 免得这条断言依赖跑测试那台机器的 home。
-    const piPlan = resolveManagedHookPlan('pi', '/tmp/work', { PI_CODING_AGENT_DIR: '/tmp/scratch-pi' })
+    const piPlan = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: '/tmp/work', env: { PI_CODING_AGENT_DIR: '/tmp/scratch-pi' } }) ?? null)
     expect(piPlan?.providerId).toBe('pi')
     expect(piPlan?.mutations.map((mutation) => mutation.path)).toEqual(['/tmp/scratch-pi/extensions/agentmux.js'])
     // kimi 声明 native hook 但没有 plan builder（TOML 配置面，见 providers/kimi.ts 那段），于是解析成
     // null、不被自动安装。非 hook 的 Provider 同理。
-    expect(resolveManagedHookPlan('kimi', '/tmp/work')).toBeNull()
-    expect(resolveManagedHookPlan('traex', '/tmp/work')).toBeNull()
+    expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)).toBeNull()
+    expect((new AgentProviderRegistry().get('traex').planManagedHooks?.({ workspacePath: '/tmp/work' }) ?? null)).toBeNull()
   })
 
   it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
@@ -690,7 +690,7 @@ describe('built-in agent providers', () => {
     // the .js as Node (and a real node binary ignores the var). AGENTMUX_HOOK_PROVIDER lets the shared
     // hook binary emit the provider-correct decision schema without confusing antigravity with gemini.
     const codexCommand = (
-      JSON.parse(createCodexManagedHookPlan('/tmp/work').mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: '/tmp/work' })!).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
       }
     ).hooks['SessionStart']?.[0]?.hooks?.[0]?.command ?? ''
@@ -699,7 +699,7 @@ describe('built-in agent providers', () => {
     expect(codexCommand).toContain('agentmux-hook.js')
 
     const antigravityCommand = (
-      JSON.parse(createAntigravityManagedHookPlan('/tmp/fake-home').mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: '/unused-workspace' })!).mutations[0]?.content ?? '{}') as {
         'agentmux-status': Record<string, Array<{ command?: string }>>
       }
     )['agentmux-status']['PreInvocation']?.[0]?.command ?? ''
@@ -712,7 +712,7 @@ describe('built-in agent providers', () => {
     // `VAR=val exec …` prefix the other providers use would make `ELECTRON_RUN_AS_NODE=1` argv[0].
     // `/usr/bin/env` parses the NAME=value operands itself, then execs the interpreter with them applied.
     const command = (
-      JSON.parse(createHermesManagedHookPlan({ HERMES_HOME: '/tmp/fake-home' }).mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: '/unused-workspace', env: { HERMES_HOME: '/tmp/fake-home' } })!).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ command?: string }>>
       }
     ).hooks['pre_tool_call']?.[0]?.command ?? ''
@@ -723,7 +723,7 @@ describe('built-in agent providers', () => {
     // The allowlist approval must gate the SAME command string, byte-for-byte — hermes matches (event,
     // command) exactly, so any divergence would leave the hook un-approved and silently skipped.
     const approvals = (
-      JSON.parse(createHermesManagedHookPlan({ HERMES_HOME: '/tmp/fake-home' }).mutations[1]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: '/unused-workspace', env: { HERMES_HOME: '/tmp/fake-home' } })!).mutations[1]?.content ?? '{}') as {
         approvals: Array<{ event?: string; command?: string }>
       }
     ).approvals

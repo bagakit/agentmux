@@ -16,9 +16,9 @@ import {
 import {
   AgentProviderRegistry,
   resolveAgentExecutable,
-  resolveManagedHookPlan,
   splitLaunchPromptByDelivery,
-  type AgentProvider
+  type AgentProvider,
+  type AgentManagedHookPlanContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
 import { nativeHookHasSubagentSubject, releaseSubagentRoster } from './hook-normalizer.js'
@@ -93,7 +93,7 @@ import {
   type AgentMuxAgentContinuityResult
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
-import { AgentManagedHookInstaller, type AgentManagedHookInspection } from './managed-hook-installer.js'
+import { AgentManagedHookInstaller, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
 import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
@@ -1249,7 +1249,7 @@ export class AgentMuxClient {
       const planEnv = options.env === undefined ? undefined : Object.fromEntries(
         Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
       )
-      const plan = resolveManagedHookPlan(providerId, workspacePath, planEnv, options.endpoint)
+      const plan = this.managedHookPlan(provider, { workspacePath, ...(planEnv ? { env: planEnv } : {}), ...(options.endpoint ? { endpoint: options.endpoint } : {}) })
       if (!plan) return skipped('HOOK_PLAN_CONTEXT_UNAVAILABLE', 'Provide the existing native binding context or a managed Hook plan; inspection does not create a binding.')
       const disk = await this.hookInstaller.inspect(plan)
       if (disk.status !== 'installed' || !provider.inspectHookActivation) return { ...disk, workspacePath }
@@ -1276,9 +1276,11 @@ export class AgentMuxClient {
       }
       return { ...disk, workspacePath, checkedAt: Date.now(), status: activation.active ? 'installed' : 'partial',
         code: activation.code, action: activation.action }
-    } catch {
-      return { providerId, workspacePath, checkedAt: Date.now(), status: 'error', code: 'MANAGED_HOOK_CHECK_FAILED',
-        action: 'The scoped Hook inspection did not complete. Check the Provider configuration and native reader, then inspect again.', targets: [] }
+    } catch (error) {
+      return { providerId, workspacePath, checkedAt: Date.now(), status: 'error',
+        code: error instanceof AgentMuxError ? error.code : 'MANAGED_HOOK_CHECK_FAILED',
+        action: 'The scoped Hook inspection did not complete. Check the Provider configuration and native reader, then inspect again.' +
+          (error instanceof AgentMuxError ? ` ${error.message}` : ''), targets: [] }
     }
   }
 
@@ -1963,7 +1965,6 @@ export class AgentMuxClient {
       )
       await this.ensureManagedHooks(
         provider,
-        input.providerId,
         input.workspacePath,
         agentSessionId,
         input.env ?? {},
@@ -2098,9 +2099,22 @@ export class AgentMuxClient {
    * Without a Binding, a Provider that needs it must decline to produce a plan rather than write one
    * carrying a dead token. A connection alone never supplies the Executor's configuration environment.
    */
+  private managedHookPlan(provider: AgentProvider, context: AgentManagedHookPlanContext): AgentManagedHookPlan | null {
+    let plan: AgentManagedHookPlan | null
+    try {
+      plan = provider.planManagedHooks?.(context) ?? null
+    } catch (cause) {
+      if (cause instanceof AgentMuxError) throw cause
+      throw new AgentMuxError(cause instanceof Error ? cause.message : String(cause), 'HOOK_PLAN_FAILED')
+    }
+    if (plan && plan.providerId !== provider.id) {
+      throw new AgentMuxError(`Managed Hook plan for ${provider.id} belongs to ${plan.providerId}.`, 'HOOK_PLAN_PROVIDER_MISMATCH')
+    }
+    return plan
+  }
+
   private async ensureManagedHooks(
     provider: AgentProvider,
-    providerId: AgentProviderId,
     workspacePath: string,
     agentSessionId: string,
     env: Readonly<Record<string, string>>,
@@ -2109,8 +2123,8 @@ export class AgentMuxClient {
     const hookStrategy = provider.catalog.hookStrategy
     if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
     try {
-      const plan = resolveManagedHookPlan(providerId, workspacePath, env, endpoint)
-      if (!plan) return
+      const plan = this.managedHookPlan(provider, { workspacePath, env, ...(endpoint ? { endpoint } : {}) })
+      if (!plan) throw new AgentMuxError('The exact managed Hook planning context is unavailable.', 'HOOK_PLAN_CONTEXT_UNAVAILABLE')
       await this.hookInstaller.ensure(plan)
     } catch (error) {
       this.publisher.publish({
@@ -2314,7 +2328,6 @@ export class AgentMuxClient {
       // 对 pi 也是（它运行时从自己进程的环境变量取值，token 一个字节都不落盘）。
       await this.ensureManagedHooks(
         provider,
-        current.providerId,
         current.workspacePath,
         current.agentSessionId,
         input.env ?? {},
@@ -2517,7 +2530,6 @@ export class AgentMuxClient {
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
       await this.ensureManagedHooks(
         this.providers.get(current.providerId),
-        current.providerId,
         current.workspacePath,
         current.agentSessionId,
         input.env,

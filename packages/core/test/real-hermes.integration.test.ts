@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AgentManagedHookInstaller, createHermesManagedHookPlan } from '../dist/index.js'
+import { AgentProviderRegistry, AgentManagedHookInstaller } from '../dist/index.js'
 
 const execFileAsync = promisify(execFile)
 const roots: string[] = []
@@ -60,7 +60,7 @@ describe.runIf(process.env.AGENTMUX_REAL_HERMES_E2E === '1')('installed real her
     }
 
     // The behaviour under test: the plan follows the launch env, never the developer's real home.
-    const plan = createHermesManagedHookPlan(launchEnv)
+    const plan = (new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: '/unused-workspace', env: launchEnv })!)
     expect(plan.mutations.map((mutation) => mutation.path)).toEqual([
       join(hermesHome, 'config.yaml'),
       join(hermesHome, 'shell-hooks-allowlist.json')

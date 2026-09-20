@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
-import { BUILT_IN_AGENT_PROVIDERS, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry, BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 
 const directories: string[] = []
 
@@ -192,13 +192,13 @@ describe('explicit managed Hook installation', () => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
       const before = Date.now()
-      const first = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+      const first = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
 
       vi.setSystemTime(new Date('2025-07-04T12:34:56.789Z'))
       // 挡板：假时钟必须真的动了。若 vitest 某天不再伪造 Date，上面两次取值会相同，
       // 这条判据就退化成「同一时刻调两次」——恒真。让那种失明响亮变红。
       expect(Date.now()).toBeGreaterThan(before)
-      const second = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+      const second = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
 
       for (const [index, provider] of managed.entries()) {
         // 声明了 explicit-managed 就必须真能解析出计划：解析器表漏一家会在这里露出来，

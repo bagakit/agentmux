@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { parseDocument } from 'yaml'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentManagedHookInstaller, type AgentManagedHookPlan } from '../src/managed-hook-installer.js'
-import { BUILT_IN_AGENT_PROVIDERS, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry, BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 
 const scope = vi.hoisted(() => ({ home: '', growPath: '', unreadable: '' }))
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => scope.home }))
@@ -34,7 +34,7 @@ describe('fresh managed Hook disk observations', () => {
   it('observes every existing managed Provider plan and every companion without a second path registry', async () => {
     const providers = BUILT_IN_AGENT_PROVIDERS.filter(provider => provider.catalog.hookStrategy.kind === 'native' && provider.catalog.hookStrategy.installation === 'explicit-managed')
     expect(providers.length).toBeGreaterThanOrEqual(11)
-    const plans = providers.map(provider => resolveManagedHookPlan(provider.id, root, {}, { url: 'http://127.0.0.1:65535/hook', token: 'private-fixture-token' })!)
+    const plans = providers.map(provider => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: root, env: {}, endpoint: { url: 'http://127.0.0.1:65535/hook', token: 'private-fixture-token' } }) ?? null)!)
     expect(plans.length).toBe(providers.length)
     for (const resolved of plans) {
       expect(resolved).not.toBeNull()
@@ -84,7 +84,7 @@ describe('fresh managed Hook disk observations', () => {
   })
 
   it('observes multi-file companion loss without creating any missing target, directory or receipt', async () => {
-    const resolved = resolveManagedHookPlan('hermes', root, {})!
+    const resolved = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     expect(resolved.mutations.length).toBe(2)
     for (let i = 0; i < 6; i++) expect((await installer.inspect(resolved)).status).toBe('not_installed')
     expect(await readdir(root)).toEqual([])
@@ -122,7 +122,7 @@ describe('fresh managed Hook disk observations', () => {
       : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, entry]) => [key, reverse(entry)])) : value
     await writeFile(jsonPlan.mutations[0]!.path, JSON.stringify(reverse(JSON.parse(jsonPlan.mutations[0]!.content))))
     expect((await installer.inspect(jsonPlan)).status).toBe('installed')
-    const hermes = resolveManagedHookPlan('hermes', root, {})!
+    const hermes = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
     await installer.ensure(hermes)
     const yaml = parseDocument(await readFile(hermes.mutations[0]!.path, 'utf8'))
     yaml.commentBefore = ' user comment'

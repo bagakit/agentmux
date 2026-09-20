@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import {
   CURSOR_HOOK_EVENTS,
   createCursorManagedHookPlan,
@@ -209,7 +209,7 @@ describe('Cursor provider', () => {
   })
 
   describe('装到 user 层的 hooks.json，并预置 workspace trust marker', () => {
-    const plan = resolveManagedHookPlan('cursor', '/repo/app')
+    const plan = (new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
 
     it('两个 mutation 同时下发：hooks 配置 + trust marker', () => {
       // 缺了 marker，Cursor 会用一个交互式 trust 提示吃掉第一个 prompt——用户看到的是
@@ -221,12 +221,12 @@ describe('Cursor provider', () => {
 
     it('计划真的能被启动路径那道门取到，而不只是一个导出的函数', () => {
       // client.ts 的 ensureManagedHooks 先判 `hookStrategy.installation === 'explicit-managed'`，
-      // 再调 resolveManagedHookPlan。两者少任何一半，安装器就永远拿不到 cursor 的计划——那时
+      // 再调 Provider.planManagedHooks。两者少任何一半，安装器就永远拿不到 cursor 的计划——那时
       // 上面所有断言依然全绿，因为它们直接调的是工厂函数。这条把接线本身钉住。
       expect(cursor.catalog.hookStrategy).toEqual({ kind: 'native', installation: 'explicit-managed' })
-      expect(resolveManagedHookPlan('cursor', '/repo/app')).not.toBeNull()
+      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)).not.toBeNull()
       // env 也必须真的一路穿到解析器，否则 CURSOR_DATA_DIR 只在直调工厂时生效、在启动路径上失效。
-      expect(resolveManagedHookPlan('cursor', '/repo/app', { CURSOR_DATA_DIR: '/tmp/cd' })!.mutations[0]!.path)
+      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: '/repo/app', env: { CURSOR_DATA_DIR: '/tmp/cd' } }) ?? null)!.mutations[0]!.path)
         .toBe('/tmp/cd/hooks.json')
     })
 
@@ -256,7 +256,7 @@ describe('Cursor provider', () => {
 
     it('trust marker 路径按 workspace 派生，slug 与 Cursor 的三步变换逐字一致', () => {
       // 差一步就写到另一个目录，marker 形同不存在。
-      expect(cursorTrustMarkerPath('/Users/me/proj/priv/my-app', {}))
+      expect(cursorTrustMarkerPath('home//proj/priv/my-app', {}))
         .toContain('/projects/Users-me-proj-priv-my-app/.workspace-trusted')
       // 连续的非字母数字折叠成一个 `-`，首尾的 `-` 去掉。
       expect(cursorTrustMarkerPath('/a//b__c.d/', {}))

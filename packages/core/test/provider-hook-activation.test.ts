@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentProviderRegistry, resolveManagedHookPlan, type AgentProviderHookActivationContext } from '../src/agent-provider.js'
+import { AgentProviderRegistry, type AgentProviderHookActivationContext } from '../src/agent-provider.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { withCodexNativeRead } from '../src/providers/codex-native-read.js'
@@ -16,7 +16,7 @@ beforeEach(async () => {
 afterEach(async () => { await client.dispose(); await rm(root, { recursive: true, force: true }) })
 
 async function nativeFixture(mode = 'normal') {
-  const plan = resolveManagedHookPlan('codex', root, {})!
+  const plan = (new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
   for (const mutation of plan.mutations) { await mkdir(join(root, '.codex'), { recursive: true }); await writeFile(mutation.path, mutation.content) }
   const hooks: Record<string, unknown>[] = []
   for (const mutation of plan.mutations) for (const [event, groups] of Object.entries(JSON.parse(mutation.content).hooks) as [string, { matcher?: string; hooks: { command: string; timeout: number }[] }[]][]) {
@@ -138,7 +138,7 @@ describe('native Hook activation through public scoped Core API', () => {
     const activation = vi.fn((_context: AgentProviderHookActivationContext) => new Promise<{active:boolean;code:string;action:null}>(resolve => completions.push(resolve)))
     const installer = new AgentManagedHookInstaller(join(root,'receipts'))
     const other = new AgentMuxClient({ providers:[{...base,inspectHookActivation:activation}],hookInstaller:installer,store:new AgentMuxMemoryAgentSessionStore() })
-    await installer.ensure(resolveManagedHookPlan('claude',root,{})!)
+    await installer.ensure((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!)
     const controls = [vi.spyOn(other,'connect'),vi.spyOn(other,'createAgent'),vi.spyOn(other,'stopAgent')]
     try {
       const reads = [0,1,2,3].map(()=>other.inspectManagedHooks('claude',{workspacePath:root}))
@@ -171,7 +171,7 @@ describe('native Hook activation through public scoped Core API', () => {
 
   it.each([['claude','disableAllHooks'],['droid','hooksDisabled']] as const)('reads %s native disabled flag from the same scoped target',async(providerId,key)=>{
     const env=providerId==='droid'?{FACTORY_HOME_OVERRIDE:root}:{}
-    const plan=resolveManagedHookPlan(providerId,root,env)!
+    const plan=(new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: root, env: env }) ?? null)!
     await new AgentManagedHookInstaller(join(root,'receipts')).ensure(plan)
     const path=plan.mutations[0]!.path
     const parsed=JSON.parse(await readFile(path,'utf8'))

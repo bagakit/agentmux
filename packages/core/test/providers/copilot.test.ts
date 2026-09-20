@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
@@ -74,7 +74,7 @@ describe('Copilot provider', () => {
     it('配置形状：version 是字面量 1、条目在 hooks 下、每条带 timeoutSec', () => {
       // 实测 schema：`version: Invalid literal value, expected 1`；字段名是 `timeoutSec` 而不是
       // `timeout`——写 `timeout` 会被剥掉然后静默用它自己的默认超时（不是报错，是换了行为）。
-      const plan = resolveManagedHookPlan('copilot', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         version: number
         hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string; timeoutSec: number }> }>>
@@ -96,7 +96,7 @@ describe('Copilot provider', () => {
     it('matcher 是正则不是 glob——写 * 会让整个桶失效', () => {
       // 实测：`matcher: '*'` 被当作**无效正则**拒掉（那个桶一个事件都不响），`'.*'` 正常。这与 droid
       // 恰好相反（droid 的 `'*'` 是合法 glob），所以两家不能互抄这个字面量。
-      const plan = resolveManagedHookPlan('copilot', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ matcher?: string }>>
       }
@@ -114,7 +114,7 @@ describe('Copilot provider', () => {
       // 那个目录下**任意文件名**都会被加载（实测），所以 AgentMux 可以整文件拥有——于是不需要合并
       // 策略。这条同时守住两个绝不能碰的位置：用户级 `config.json`（装着模型/授权规则等全部设置）
       // 与仓库级 `.github/hooks/`（会被提交进用户仓库）。
-      const plan = resolveManagedHookPlan('copilot', '/repo/app')
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: '/repo/app' }) ?? null)
       expect(plan!.mutations).toHaveLength(1)
       const [mutation] = plan!.mutations
       expect(mutation!.path).toContain('/.copilot/hooks/agentmux.json')
@@ -134,8 +134,8 @@ describe('Copilot provider', () => {
     })
 
     it('装的位置与 workspace 无关——resolver 不该拿 workspacePath 派生路径', () => {
-      const a = resolveManagedHookPlan('copilot', '/repo/one')
-      const b = resolveManagedHookPlan('copilot', '/repo/two')
+      const a = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: '/repo/one' }) ?? null)
+      const b = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: '/repo/two' }) ?? null)
       expect(a!.mutations[0]!.path).toBe(b!.mutations[0]!.path)
     })
   })
@@ -253,7 +253,8 @@ describe('Copilot provider', () => {
       const runId = 'run-subagent'
       releaseSubagentRoster(runId)
       const hook = hookIn(runId)
-      expect(hook('subagentStart', { agentName: 'reviewer' }).semanticState).toBe('working')
+      // 子代理开始只记子事实；不能冒称主 Agent 正在工作。
+      expect(hook('subagentStart', { agentName: 'reviewer' }).semanticState).toBe('unknown')
       expect(hook('agentStop', { stopReason: 'end_turn' }).semanticState).toBe('working')
       expect(hook('subagentStop', { agentName: 'reviewer', agentId: 'ag-1' }).semanticState).toBe('done')
       releaseSubagentRoster(runId)
