@@ -2682,6 +2682,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async executeControl(request, signal) {
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
+        request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
         request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||

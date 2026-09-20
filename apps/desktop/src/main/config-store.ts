@@ -3,7 +3,7 @@ import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
-import type { AppConfig, ComposerShortcut, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
@@ -77,6 +77,19 @@ const workspaceSchema = z
     branch: z.string().min(1).optional()
   })
   .strict()
+
+// Registration accepts a blank optional name: Main derives the final nonempty name after parsing.
+export const createWorkspaceInputSchema = workspaceSchema.pick({ hostId: true, path: true })
+  .extend({ name: z.string().optional() }).strict()
+// Zod includes explicit undefined for optional fields; JSON and the shared contract omit them.
+type ParsedWorkspaceInput = {
+  [Key in keyof z.infer<typeof createWorkspaceInputSchema>]: Exclude<z.infer<typeof createWorkspaceInputSchema>[Key], undefined>
+}
+const _workspaceInputMatchesContract: [
+  ParsedWorkspaceInput extends CreateWorkspaceInput ? true : never,
+  CreateWorkspaceInput extends ParsedWorkspaceInput ? true : never
+] = [true, true]
+void _workspaceInputMatchesContract
 
 const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string, ...string[]]
 

@@ -253,6 +253,15 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
   if (isSettingsResourceOperation(source.operation)) return settingsResourceRequest(source)
+  if (source.operation === 'settings.workspaces.add') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'input'], code)
+    if (!Object.hasOwn(source, 'input')) throw new AgentMuxError('Workspace add input is required.', code)
+    const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      input: settingsResourceRecord(source.input, code) }
+    settingsResourceBudget(request, code)
+    return request
+  }
   if (source.operation === 'settings.browser.links.list' || source.operation === 'settings.browser.links.forget') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.browser.links.forget' ? ['scheme'] : [])], code)
@@ -839,6 +848,16 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'settings.workspaces.add') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    settingsResourceEnvelope(result, ['item', 'changed'], code)
+    if (!Object.hasOwn(result, 'item') || !Object.hasOwn(result, 'changed') || typeof result.changed !== 'boolean') {
+      throw new AgentMuxError('Workspace add commit is invalid.', code)
+    }
+    return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { item: resourceItem(result.item), changed: result.changed } })
+  }
   if (operation === 'settings.browser.links.list' || operation === 'settings.browser.links.forget') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
