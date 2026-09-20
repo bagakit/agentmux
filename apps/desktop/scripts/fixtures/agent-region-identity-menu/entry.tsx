@@ -30,6 +30,20 @@ function naming() {
 }
 const probe = {
   names,
+  terminalLoading() {
+    const attach = api.sessions.attach
+    let release!: () => void
+    const waiting = new Promise<void>(done => { release = done })
+    const timeout = setTimeout(release, 10_000)
+    api.sessions.attach = async (...args) => { await waiting; return attach(...args) }
+    const generation = original.mode('terminal'); naming()
+    const state = useAppStore.getState()
+    flushSync(() => useAppStore.setState({ sessions: state.sessions.map(session => session.kind === 'agent' ? {
+      ...session, terminalCapability: { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout',
+        run: session.control.run, observedAt: Date.now() }
+    } : session) }))
+    return { generation, release() { clearTimeout(timeout); api.sessions.attach = attach; release() } }
+  },
   mode(mode: 'terminal' | 'cold' | 'notice') { const generation = original.mode(mode); naming(); return generation },
   observe() { const generation = original.observe(); naming(); return generation },
   swap() {

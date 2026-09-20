@@ -15,7 +15,10 @@ const evidence=join(repository,'.tmp/agent-region-identity-menu',`attempt-${Date
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const visualOnly=process.argv.includes('--visual-only')
 const progressLayoutOwning=process.argv.includes('--progress-layout-owning')
+const terminalLoadingOwning=process.argv.includes('--terminal-loading-owning')
 assert.ok(!progressLayoutOwning||visualOnly,'Progress layout owning uses only the private visual fixture')
+assert.ok(!terminalLoadingOwning||visualOnly,'Terminal loading owning uses only the private visual fixture')
+assert.ok(!terminalLoadingOwning||!progressLayoutOwning,'The private owning modes have distinct scenes')
 const result={schema:'agentmux.region-identity-menu-delivery.v1',passed:false,sourceBefore:{},sourceAfter:{},mutations:[],callers:[],cleanup:{},userRunTouched:false,
   ...(visualOnly?{captureOnly:true,aestheticReview:'not-performed'}:{})}
 const sourceFiles=visualOnly?[]:(await exec('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:repository,maxBuffer:32*1024*1024})).stdout.split('\0').filter(Boolean)
@@ -33,7 +36,7 @@ async function renderer(label,probe='complete'){
     export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.identityTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)}
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
-  const cssPath=join(desktop,'src/renderer/src/styles/agent.css'),cssBefore=await readFile(cssPath)
+  const cssPath=join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
   const loadedSourceInputs={},importedStyleInputs={}
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',transform(source,id){
@@ -118,7 +121,7 @@ try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   if(!visualOnly)result.sourceBefore=await sources()
   const swapOnly=process.argv.includes('--swap-render-only')
-  result.render=await renderer('fixed',visualOnly?(progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  result.render=await renderer('fixed',visualOnly?(terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
     await writeFile(join(evidence,'review.md'),[
       '# 本次采图：等待独立 Agent 实际看图',
