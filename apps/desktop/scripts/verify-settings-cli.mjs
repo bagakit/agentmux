@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
@@ -13,8 +13,9 @@ import { preferenceProof, preferenceVocabulary } from './fixtures/settings-cli/p
 import { fontInput, replaceFontText, verifyFontDraft } from './fixtures/settings-cli/font.mjs'
 import { verifyRadioKeyboard } from './fixtures/settings-cli/radio.mjs'
 import { browserSettingsProof } from './fixtures/settings-cli/browser.mjs'
+import { workspaceSettingsProof } from './fixtures/settings-cli/workspaces.mjs'
 
-export async function verifySettingsCli({ browser = false } = {}) {
+export async function verifySettingsCli({ browser = false, workspaces = false, ownerTiming = false } = {}) {
   // Real bundled Desktop/Main IPC + Core + built CLI. Only initial private fixture materialization
   // writes configuration directly; every setting operation after launch goes through the product owner.
   const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
@@ -35,8 +36,8 @@ export async function verifySettingsCli({ browser = false } = {}) {
     AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson') }
   const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
   const receipt = { schema: 'agentmux.settings-cli-desktop-proof.v1', passed: false, cli: [], facts: {}, cleanup: {},
-    fixture: { userData, privateHome, runtimeDirectory, workspacePath, topicsPath, syntheticPty: true } }
-  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof
+    fixture: { userData, privateHome, runtimeDirectory, workspacePath, topicsPath, syntheticPty: true, ownerTimingInstrumented: ownerTiming } }
+  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof, workspaceProof
 
   async function waitFor(label, read, budget = 20_000) {
     const end = Math.min(deadline, Date.now() + budget)
@@ -48,7 +49,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
     const directories = ['apps/desktop/src', 'packages/core/src', 'packages/demand/src', 'packages/layout/src',
       'apps/desktop/out', 'packages/core/dist', 'packages/demand/dist',
       'apps/desktop/scripts/fixtures/settings-cli']
-    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
+    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
       'packages/core/bin/agentmux', 'packages/core/package.json', 'apps/desktop/package.json',
       'packages/core/scripts/build.mjs', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json']
     const dependencies = {}
@@ -76,6 +77,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
     return { ...Object.fromEntries(entries), ...dependencies }
   }
   async function command(args, expectedCode = 0, input) {
+    const startedAt = Date.now()
     let result
     try {
       const execution = exec(process.execPath, [cli, ...args], { timeout: 10_000,
@@ -85,7 +87,8 @@ export async function verifySettingsCli({ browser = false } = {}) {
     }
     catch (error) { result = { code: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? '' } }
     const payload = JSON.parse(result.code === 0 ? result.stdout : result.stderr)
-    receipt.cli.push({ phase, args, ...(input === undefined ? {} : { input }), code: result.code, receipt: payload })
+    receipt.cli.push({ phase, args, ...(input === undefined ? {} : { input }), code: result.code, receipt: payload,
+      startedAt, elapsedMs: Date.now() - startedAt })
     assert.equal(result.code, expectedCode, JSON.stringify(payload))
     assert.equal(payload.ok, expectedCode === 0); assert.equal(typeof payload.requestId, 'string')
     return payload
@@ -150,6 +153,51 @@ export async function verifySettingsCli({ browser = false } = {}) {
       document.addEventListener('keydown',event=>window.__settingsCliProof.keys.push({key:event.key,trusted:event.isTrusted}))
       return true
     })()`)
+  }
+  async function observeMainSettings(probe) {
+    const mainPath = join(desktopRoot, 'out/main/index.js')
+    const lines = (await readFile(mainPath, 'utf8')).split('\n')
+    const found = lines.flatMap((line, index) => line.includes('if (request.operation === "settings.get" || request.operation === "settings.set")') ? [index] : [])
+    assert.equal(found.length, 1, 'One actual Main settings dispatch for bounded diagnostics')
+    const servers = lines.flatMap(line => [...line.matchAll(/const ([A-Za-z_$][\w$]*) = new AgentMuxControlServer\(/g)].map(match => match[1]))
+    assert.equal(servers.length, 1, 'One actual compiled public Control server owner')
+    const point = await probe.main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: found[0] })
+    const pending = command(['settings', 'get', copyKey])
+    pending.catch(() => {}) // Always await the original result after removing the owned breakpoint.
+    try {
+      const paused = await waitFor('Main diagnostics at real settings dispatch', () => probe.main.pauses.shift())
+      assert.ok(paused.hitBreakpoints?.includes(point.breakpointId))
+      const result = await probe.main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
+        expression: `(() => {
+          const facts=globalThis.__settingsOwnerDiagnostics={steps:[]};
+          const mark=(step,event)=>facts.steps.push({step,event,at:Date.now()});
+          const execute=${servers[0]}.control.execute;
+          ${servers[0]}.control.execute=async function(request){
+            facts.steps.push({step:'control',event:'enter',at:Date.now(),requestId:request.requestId,operation:request.operation,key:request.key});
+            try{const result=await execute.call(this,request);facts.steps.push({step:'control',event:'reply',at:Date.now(),requestId:request.requestId});return result}
+            catch(error){facts.steps.push({step:'control',event:'error',at:Date.now(),requestId:request.requestId,code:error.code});throw error}
+          };
+          const update=configOwner.update;let serial=0;
+          configOwner.update=function(apply){const id=++serial;facts.steps.push({step:'owner',event:'queued',id,at:Date.now()});
+            return update.call(this,current=>{facts.steps.push({step:'owner',event:'apply',id,at:Date.now()});return apply(current)})
+              .then(result=>{facts.steps.push({step:'owner',event:'settled',id,at:Date.now()});return result},error=>{facts.steps.push({step:'owner',event:'error',id,at:Date.now(),code:error.code});throw error})};
+          for(const [target,name] of [[args.runtime,'reserveExecutorConfigEdit'],[args.runtime,'prepare'],[args.configStore,'save']]){
+            const original=target[name];target[name]=async function(...input){mark(name,'begin');try{const result=await original.apply(this,input);mark(name,'end');return result}catch(error){mark(name,'error');throw error}}
+          }
+          for(const [target,name] of [[args.runtime,'commit'],[args.configStore,'validate']]){
+            const original=target[name];target[name]=function(...input){mark(name,'begin');try{const result=original.apply(this,input);mark(name,'end');return result}catch(error){mark(name,'error');throw error}}
+          }
+          const original=args.window.webContents.send;
+          args.window.webContents.send=function(channel,...input){if(channel===CONFIG_CHANGED_CHANNEL)mark('publication','send');return original.call(this,channel,...input)};
+          facts.current=()=>({appearance:configOwner.current.appearance,workspaces:configOwner.current.workspaces});
+          return true
+        })()`, returnByValue: true })
+      assert.equal(result.exceptionDetails, undefined); assert.equal(result.result.value, true)
+    } finally {
+      await probe.main.call('Debugger.removeBreakpoint', { breakpointId: point.breakpointId })
+      await probe.main.call('Debugger.resume')
+    }
+    await pending
   }
   async function surface(probe) {
     return probe.cdp.evaluate(`(() => {
@@ -224,6 +272,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
     assert.deepEqual(originalSurface.tabs,[tabId]); assert.deepEqual(originalSurface.regions,[agentRegionId,fileRegionId].sort()); assert.equal(originalSurface.splitPercent,70)
     assert.equal(originalSurface.workbench.layouts[workspaceId].activeGroupId,groupId)
     await observe(first)
+    if (ownerTiming) await observeMainSettings(first)
     preferences=preferenceProof({probe:first,vocabulary,entries:ordinaryEntries,set,command,configPath,waitFor,section,saved,ui,phase:value=>{phase=value}})
     receipt.facts.preferences=preferences.facts
     await preferences.initialize()
@@ -309,13 +358,20 @@ export async function verifySettingsCli({ browser = false } = {}) {
       receipt.facts.browser=browserProof.facts
       await browserProof.exercise()
     }
+    if (workspaces) {
+      workspaceProof=workspaceSettingsProof({probe:first,desktopRoot,root,command,configPath,waitFor,section,surface,originalSurface,workspaceId,
+        sessionId:session.agentSessionId,phase:value=>{phase=value}})
+      receipt.facts.workspaces=workspaceProof.facts
+      await workspaceProof.exercise()
+    }
     assert.deepEqual((await ui(first)).controlRequests,[],'Settings never use the Renderer Control bridge')
     const trustedKeys=await first.cdp.evaluate('window.__settingsCliProof.keys')
     assert.ok(trustedKeys.length>0); assert.ok(trustedKeys.every(event=>event.trusted===true))
     receipt.facts.trustedKeys=trustedKeys
     await activate(first.cdp,nodes('.window-status-bar button[aria-label="Settings"]'))
     const beforeRestart=await surface(first)
-    assert.deepEqual(beforeRestart,originalSurface,'Settings operations preserve the exact original durable and visible surface')
+    if (workspaceProof) assert.deepEqual(beforeRestart,workspaceProof.facts.expectedSurface,'Only the explicitly selected project layouts are added to the original exact surface')
+    else assert.deepEqual(beforeRestart,originalSurface,'Settings operations preserve the exact original durable and visible surface')
     receipt.facts.beforeRestart=beforeRestart
     phase='actual-desktop-restart'
     await terminate(first); second=await launch('second')
@@ -330,6 +386,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
       automation:browserProof.facts.final.agentAutomation,schemes:browserProof.facts.final.appLinkSchemes
     } : undefined)
     if (browserProof) await browserProof.verifyRestart(second)
+    if (workspaceProof) await workspaceProof.verifyRestart(second)
     const snapshot=await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
     const attached=snapshot.sessions.find(value=>value.id===session.agentSessionId)
     assert.equal(attached?.processState,'running'); assert.equal(attached.control.run.runId,session.run.runId)
@@ -347,6 +404,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
     assert.equal(noViewInspect.error.code,'CONTROL_UNAVAILABLE','The unavailable Renderer path must remain unavailable')
     receipt.facts.noView={windows:0,settings:await settings(),rendererControlError:noViewInspect.error.code}
     if (browserProof) await browserProof.verifyNoView()
+    if (workspaceProof) await workspaceProof.verifyNoView()
     await terminate(second)
     phase='offline-owner'
     const offlineBytes=await readFile(configPath)
@@ -355,6 +413,7 @@ export async function verifySettingsCli({ browser = false } = {}) {
     assert.deepEqual(await readFile(configPath),offlineBytes,'Offline CLI never substitutes a local write')
     receipt.facts.offline={code:offline.error.code,configUnchanged:true}
     if (browserProof) await browserProof.verifyOffline()
+    if (workspaceProof) await workspaceProof.verifyOffline()
     phase='same-healthy-run'
     client=await connectLocalAgentMux({store})
     const run=(await client.listRuns()).find(value=>value.runId===session.run.runId)
@@ -372,6 +431,11 @@ export async function verifySettingsCli({ browser = false } = {}) {
       receipt.failureUi=await ui(probe).catch(cause=>({error:cause.message}))
       if(preferences)receipt.failurePreferences=await preferences.capture(probe).catch(cause=>({error:cause.message}))
       try { const screenshot=await probe.cdp.call('Page.captureScreenshot'); await writeFile(join(evidence,'failure.png'),Buffer.from(screenshot.data,'base64')) } catch {}
+    }
+    if (ownerTiming && first?.main) {
+      receipt.failureMainDiagnostics=await first.main.evaluate(`(() => {const facts=globalThis.__settingsOwnerDiagnostics;return facts?{steps:facts.steps,current:facts.current()}:null})()`)
+        .catch(cause=>({error:cause.message}))
+      receipt.failureCommittedConfig=JSON.parse(await readFile(configPath,'utf8').catch(()=>'null'))
     }
   } finally {
     const cleanupErrors=[]

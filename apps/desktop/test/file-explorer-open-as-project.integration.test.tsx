@@ -71,6 +71,7 @@ describe('FileExplorer directory context menu', () => {
     configGet.mockImplementation(async () => currentConfig)
     addWorkspace.mockImplementation(async (_input: { hostId: string; path: string; name?: string }) => {
       currentConfig = config([...currentConfig.workspaces, created])
+      useAppStore.getState().setConfig(currentConfig)
       return created
     })
     useAppStore.setState({ config: currentConfig, activeWorkspaceId: workspace.id, loading: false })
@@ -93,7 +94,7 @@ describe('FileExplorer directory context menu', () => {
     expect(addWorkspace).toHaveBeenCalledWith({ hostId: 'local', path: '/repo/packages/core', name: 'core' })
     expect(useAppStore.getState().activeWorkspaceId).toBe('core-project')
     expect(useAppStore.getState().config?.workspaces).toContainEqual(created)
-    root.unmount()
+    await act(async () => root.unmount())
   })
 
   /** 渲染 FileExplorer 并对某一行开右键菜单，返回可点的 'Open as Project' 菜单项（可能为 undefined）。 */
@@ -113,20 +114,21 @@ describe('FileExplorer directory context menu', () => {
   }
 
   it('已注册的目录不重复添加，改选中已存在的项目', async () => {
-    // (b) 去重：config 已含 /repo/packages/core，右键该目录并点 Open as Project，
-    // 不能再 add 一遍，而是选中已有的那条。删掉 657-662 的 existing 分支 → add 被调用 → 本条红。
+    // Main owns same-location reuse; the Renderer uses the returned original identity.
     const existingPath = joinWorkspacePath(workspace.path, 'packages/core')
     const seeded = { ...created, id: 'already-here', path: existingPath }
     configGet.mockImplementation(async () => config([workspace, seeded]))
+    addWorkspace.mockResolvedValue(seeded)
     useAppStore.setState({ config: config([workspace, seeded]), activeWorkspaceId: workspace.id, loading: false })
 
     const { item, root } = await openMenu('packages/core')
     expect(item, '目录右键菜单未暴露 Open as Project').not.toBeUndefined()
     await act(async () => { item!.click() })
 
-    expect(addWorkspace).not.toHaveBeenCalled()
+    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', path: existingPath, name: 'core' })
+    expect(configGet).not.toHaveBeenCalled()
     expect(useAppStore.getState().activeWorkspaceId).toBe('already-here')
-    root.unmount()
+    await act(async () => root.unmount())
   })
 
   it('文件行不暴露 Open as Project 入口', async () => {
@@ -136,7 +138,7 @@ describe('FileExplorer directory context menu', () => {
 
     const { item, root } = await openMenu('README.md')
     expect(item, '文件行不应出现 Open as Project').toBeUndefined()
-    root.unmount()
+    await act(async () => root.unmount())
   })
 
   it('添加失败对用户可见（进 error 状态而非被吞）', async () => {
@@ -152,6 +154,6 @@ describe('FileExplorer directory context menu', () => {
     await act(async () => { item!.click() })
 
     expect(useAppStore.getState().error).toBeTruthy()
-    root.unmount()
+    await act(async () => root.unmount())
   })
 })

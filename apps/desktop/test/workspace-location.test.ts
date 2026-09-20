@@ -9,10 +9,8 @@ import {
 
 // ---------------------------------------------------------------------------
 // The single "same physical location" rule. `workspaces:chooseLocalFolder` and `workspaces:add` both
-// route their append through `insertOrGetWorkspace`, but those handlers live inside `registerIpc`'s
-// closure and no test can import them (the same reason rebind and fan-out were extracted). So this is
-// the reachable proof that picking / adding an already-registered folder is a no-op-with-feedback rather
-// than an append the schema then rejects with a raw zod dump.
+// delegate to the current-state registration owner. The registered owner is exercised in
+// settings-workspace-add-control.test.ts; this suite owns the shared physical-location rule itself.
 //
 // The load-bearing property is NORMALIZATION, not exact-string equality: a raw `===` check would pass an
 // exact-duplicate test while still shipping the reported bug (a trailing-slash variant slips through).
@@ -85,12 +83,7 @@ describe('insertOrGetWorkspace (the chooseLocalFolder / add append path)', () =>
   })
 })
 
-describe('both closure-locked append handlers route through the shared rule', () => {
-  // `workspaces:chooseLocalFolder` and `workspaces:add` live inside `registerIpc`'s closure — no test can
-  // import and run them (same reason rebind/fanout were extracted). Two write sites, so each needs its
-  // own proof that it appends THROUGH `insertOrGetWorkspace` rather than doing a raw
-  // `[...config.workspaces, item]` again: covering only one leaves the other silently broken, which this
-  // repo has been bitten by. The behavioral proof above covers the function; these two pin the wiring.
+describe('both existing IPC append paths use the shared current-state registration', () => {
   const ipc = readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
 
   /** The body of one `handle('<channel>', ...)` registration, up to the next handler. */
@@ -98,19 +91,22 @@ describe('both closure-locked append handlers route through the shared rule', ()
     const at = ipc.indexOf(`handle('${channel}'`)
     expect(at, `self-check: ${channel} handler not found`).toBeGreaterThan(-1)
     const next = ipc.indexOf("  handle('", at + 1)
-    return ipc.slice(at, next === -1 ? at + 800 : next)
+    expect(next, `self-check: ${channel} handler end not found`).toBeGreaterThan(at)
+    const body = ipc.slice(at, next)
+    expect(body).toContain(`handle('${channel}'`)
+    return body
   }
 
-  it('chooseLocalFolder appends through insertOrGetWorkspace, not a raw spread', () => {
+  it('chooseLocalFolder delegates after the native dialog to the shared owner', () => {
     const body = handlerBody('workspaces:chooseLocalFolder')
-    expect(body).toContain('insertOrGetWorkspace(')
+    expect(body).toContain('registerWorkspace(')
     // A raw re-append would silently reintroduce the bug the shared rule exists to remove.
     expect(body).not.toMatch(/workspaces:\s*\[\s*\.\.\.config\.workspaces/)
   })
 
-  it('add appends through insertOrGetWorkspace, not a raw spread', () => {
+  it('add delegates to the same current owner instead of calculating a pre-queue snapshot', () => {
     const body = handlerBody('workspaces:add')
-    expect(body).toContain('insertOrGetWorkspace(')
+    expect(body).toContain('registerWorkspace(')
     expect(body).not.toMatch(/workspaces:\s*\[\s*\.\.\.config\.workspaces/)
   })
 })

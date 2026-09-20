@@ -23,7 +23,6 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const hostChecks = useAppStore((state) => state.hostChecks)
   const checkHost = useAppStore((state) => state.checkHost)
-  const setConfig = useAppStore((state) => state.setConfig)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const launchAgent = useAppStore((state) => state.launchAgent)
   const readyHosts = config.hosts.filter((host) => hostChecks[host.id]?.state === 'ready')
@@ -68,8 +67,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
         path: projectPath.trim(),
         ...(name.trim() ? { name: name.trim() } : {})
       })
-      const latest = await api.config.get()
-      setConfig(latest)
+      // Main publishes the committed config before replying. A later get reply could be older.
       await selectWorkspace(workspace.id)
       if (executorId !== 'none') {
         const layout = useAppStore.getState().layouts[workspace.id]

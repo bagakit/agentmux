@@ -270,6 +270,9 @@ export type AgentMuxControlSettingsResourceJson = null | boolean | number | stri
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
+export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
+  operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
+}
 export type AgentMuxControlSettingsResourceRequest = RequestBase & (
   | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind }
   | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string }
@@ -509,6 +512,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsGetRequest
   | AgentMuxControlSettingsSetRequest
   | AgentMuxControlSettingsBrowserLinksRequest
+  | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
@@ -599,6 +603,7 @@ export type AgentMuxControlResult =
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry }
   | { operation: 'settings.browser.links.list'; entries: AgentMuxControlSettingsBrowserLinkEntry[] }
   | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
+  | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | AgentMuxControlSettingsResourceResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
@@ -808,6 +813,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'settings.set': 'short',
   'settings.browser.links.list': 'short',
   'settings.browser.links.forget': 'short',
+  'settings.workspaces.add': 'short',
   'settings.resource.list': 'short',
   'settings.resource.get': 'short',
   'settings.resource.add': 'short',

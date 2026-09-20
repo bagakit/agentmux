@@ -374,15 +374,18 @@ const mockApi: AgentMuxDesktopApi = {
     chooseLocalFolder: async () => null,
     rebindLocalFolder: async () => null,
     add: async (input) => {
+      const existing = mockConfig.workspaces.find(item => item.hostId === input.hostId && item.path === input.path)
+      if (existing) return structuredClone(existing)
       const item = {
         id: crypto.randomUUID(),
-        name: input.name || input.path.split('/').pop() || input.path,
+        name: input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.path,
         hostId: input.hostId,
         path: input.path,
         kind: 'folder' as const
       }
       mockConfig.workspaces.push(item)
-      return item
+      for (const listener of configListeners) listener(structuredClone(mockConfig))
+      return structuredClone(item)
     },
     listBranches: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find((item) => item.id === workspaceId)

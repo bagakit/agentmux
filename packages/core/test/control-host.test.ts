@@ -1010,6 +1010,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'settings.set': 'short',
       'settings.browser.links.list': 'short',
       'settings.browser.links.forget': 'short',
+      'settings.workspaces.add': 'short',
       'settings.resource.list': 'short',
       'settings.resource.get': 'short',
       'settings.resource.add': 'short',

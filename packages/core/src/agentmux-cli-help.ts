@@ -131,6 +131,28 @@ the CLI never writes configuration files. A timeout does not establish whether F
 list before deciding the next action.
 ${SETTINGS_AUTHORITY}`
 
+const WORKSPACE_ADD_HELP = `Register a project through the running host
+
+Usage: agentmux settings workspaces add --input <file|->
+
+Read bounded UTF-8 JSON locally from a file or stdin (-). The input is a field object with
+hostId, path and an optional name. The host validates it, assigns id and kind, then returns
+the actual committed item (id and value) and changed. Do not supply generated identity,
+output-only fields, launch/focus instructions or extra options. Input file names, including
+--help, are literal data; the host receives fields, never the input file path.
+
+Folder paths are sent and stored literally, including trailing spaces: the CLI does not
+trim, expand ~ or environment expressions, resolve an absolute path, inspect or create a
+directory. Main trims the optional name; an absent, empty or whitespace name uses the last
+nonempty folder path segment, or the path itself. Locations are compared using the host's
+existing rules. The same host/location returns the original complete item and changed=false.
+
+No managed Agent caller or open View is required. An unavailable host returns CONTROL_UNAVAILABLE;
+the CLI never writes configuration files. Registration does not select/focus a project,
+launch an Agent, run Git or create a worktree. Existing list projects discovery retains its
+client activity semantics; no settings workspaces list/get/update/remove commands are added.
+A timeout does not establish whether registration committed; inspect before deciding what to do next.`
+
 const HELP = new Map<string, string>([
   ['settings', `Read or change host-owned settings
 
@@ -141,6 +163,7 @@ Usage:
   agentmux settings browser links list
   agentmux settings browser links forget <literal scheme>
   agentmux settings browser links forget --input <file|->
+  agentmux settings workspaces add --input <file|->
 
 The running Desktop host owns setting keys, legal values and defaults. Get returns the
 supported entries with their current value, default, scalar kind and optional enum; partial
@@ -152,12 +175,15 @@ host returns CONTROL_UNAVAILABLE; the CLI never writes its configuration files d
 Success and failure use versioned JSON receipts. Set reports the committed entry only after
 persistence succeeds. A timeout does not prove whether a write committed; read before deciding
 what to do next. Run settings executors --help or settings prompts --help for resource input,
-or settings browser links --help for remembered link choices.
+settings browser links --help for remembered link choices, or settings workspaces --help
+for project registration.
 ${SETTINGS_AUTHORITY}`],
   ['settings.browser', BROWSER_LINKS_HELP],
   ['settings.browser.links', BROWSER_LINKS_HELP],
   ['settings.browser.links.list', BROWSER_LINKS_HELP],
   ['settings.browser.links.forget', BROWSER_LINKS_HELP],
+  ['settings.workspaces', WORKSPACE_ADD_HELP],
+  ['settings.workspaces.add', WORKSPACE_ADD_HELP],
   ['settings.executors', resourceHelp('executors')],
   ['settings.prompts', resourceHelp('prompts')],
   ['settings.resource.list', resourceHelp('executors|prompts')],
@@ -854,6 +880,7 @@ agentmux settings executors|prompts remove <id> [--input <file|->]
 agentmux settings browser links list
 agentmux settings browser links forget <literal scheme>
 agentmux settings browser links forget --input <file|->
+agentmux settings workspaces add --input <file|->
 \`\`\`
 
 Read the running host's supported entries before setting a value. Each entry reports its
@@ -869,6 +896,14 @@ current when the owner processes it; an absent answer is unchanged and the next 
 There is no allow/deny setter or list-snapshot comparison. A single scheme argument is literal
 data, even --help or --input. Alternatively supply exactly {"scheme": string} through bounded
 UTF-8 JSON file/stdin, including stored NUL keys that argv cannot represent. Never mix carriers.
+
+Workspace add takes a field object with hostId, literal path and optional name through the
+same bounded UTF-8 JSON carrier. Main owns validation, generated id/kind and name defaults.
+The CLI does not trim/expand/probe/create a folder; Main trims an optional name and derives
+an absent/empty/whitespace name from the folder path. The same host/location returns the
+original committed item with changed=false. Registration does not select/focus or launch;
+there are no settings workspaces list/get/update/remove commands. An unavailable owner has
+no direct-file fallback. Input file names such as --help remain data.
 
 For resources, add input is a field object with its ID only in the positional argument. Update
 input is {"changes": {...}, "expected": {...}} with nonempty changes and optional expected;
