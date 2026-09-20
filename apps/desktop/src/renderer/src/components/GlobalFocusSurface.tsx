@@ -78,20 +78,17 @@ export function GlobalFocusSurface() {
   const boardLanes = focusProjectLanes.filter(lane => liveProjects.has(lane.projectId))
   const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause } }
   const buckets = Object.keys(bucketMeta) as FocusBucket[]
-  const boardIds = new Set(boardLanes.flatMap(lane => lane.contextIds))
-  const counts = Object.fromEntries(buckets.map(bucket => [bucket, filtered.filter(row => boardIds.has(row.id) && row.bucket === bucket).length])) as Record<FocusBucket, number>
-  const columns = <div className="focus-state-columns" aria-label="Focus status columns">{buckets.map(bucket => {
-    const { label, icon: Icon } = bucketMeta[bucket]
-    return <div className="focus-state-columns__heading" data-bucket={bucket} data-empty={counts[bucket] === 0} key={bucket} title={`${label} · ${counts[bucket]}`} aria-label={`${label} · ${counts[bucket]}`}><Icon size={12} /><strong>{label}</strong><span>{counts[bucket]}</span></div>
-  })}</div>
-  const columnStyle = { '--focus-state-columns': buckets.map(bucket => counts[bucket] ? 'minmax(0, 1fr)' : '36px').join(' ') } as CSSProperties
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
-    return <>{heading}<div className="focus-project-lanes__groups">
+    const columnStyle = { '--focus-state-columns': buckets.map(bucket => {
+      const count = rows.filter(row => row.bucket === bucket).length
+      return count ? `minmax(160px, ${Math.min(count, 3)}fr)` : '36px'
+    }).join(' ') } as CSSProperties
+    return <>{heading}<div className="focus-project-lanes__groups" style={columnStyle}>
       {buckets.map(bucket => {
         const meta = bucketMeta[bucket], Icon = meta.icon, grouped = rows.filter(row => row.bucket === bucket)
         return <section className="focus-context-group global-agents-group" aria-label={meta.label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} key={bucket}>
-          <header className="focus-context-group__header"><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
+          <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
           <div className="focus-context-group__cards">{bucket === 'idle' ? <FocusRecoveryGroup contexts={grouped} selectedId={selectedId} searching={Boolean(search)} onSelect={focusExecutionSession} /> : grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })}
@@ -113,7 +110,7 @@ export function GlobalFocusSurface() {
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} columns={columns} style={columnStyle} />
+          {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}
           {filtered.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           <FocusDisconnectedProjects lanes={disconnectedLanes} contexts={rowsById} selectedId={selectedId} projectId={project} searching={Boolean(search)} onProject={setProject} onSelect={focusExecutionSession} />
         </div>
