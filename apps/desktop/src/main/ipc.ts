@@ -99,6 +99,7 @@ import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
+import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
@@ -269,6 +270,7 @@ export async function registerIpc(args: {
     })
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
+    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test') return await executeSettingsHostsControl(request, configOwner, args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
     }
@@ -325,13 +327,7 @@ export async function registerIpc(args: {
 
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
-  handle('hosts:check', async (input: HostConfig) => {
-    try {
-      return await args.runtime.checkHost(input)
-    } catch (error) {
-      return { ok: false, detail: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
   //

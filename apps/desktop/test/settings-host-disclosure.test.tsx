@@ -98,7 +98,7 @@ it('retains an open dirty field and focus when Host check facts and unrelated co
   await toggle(details, true)
   input.focus()
   await fill(input, 'authored.invalid')
-  await act(async () => useAppStore.setState({ hostChecks: { [saved.id]: { state: 'checking' } } }))
+  await act(async () => useAppStore.setState({ hostChecks: { [saved.id]: { state: 'checking', input: saved } } }))
   config = { ...config, hosts: [config.hosts[0]!, { ...saved, label: 'External label' }, { ...neighbor, hostname: 'changed.invalid' }] }
   await render()
   expect(hostname(details)).toBe(input)

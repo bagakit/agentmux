@@ -262,6 +262,18 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsResourceBudget(request, code)
     return request
   }
+  if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.hosts.test' ? ['id', 'input'] : [])], code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId }
+    if (source.operation === 'settings.hosts.list') return { ...base, operation: source.operation }
+    if (Object.hasOwn(source, 'id') === Object.hasOwn(source, 'input')) throw new AgentMuxError('Host Test requires exactly one ID or input.', code)
+    const request = Object.hasOwn(source, 'id')
+      ? { ...base, operation: source.operation, id: text(source.id, 'Host ID', code) }
+      : { ...base, operation: source.operation, input: settingsResourceRecord(source.input, code) }
+    settingsResourceBudget(request, code)
+    return request
+  }
   if (source.operation === 'settings.browser.links.list' || source.operation === 'settings.browser.links.forget') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.browser.links.forget' ? ['scheme'] : [])], code)
@@ -857,6 +869,22 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { item: resourceItem(result.item), changed: result.changed } })
+  }
+  if (operation === 'settings.hosts.list' || operation === 'settings.hosts.test') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    settingsResourceBudget(source, code)
+    const fields = settingsResourceRecord(result, code)
+    if (operation === 'settings.hosts.list') {
+      settingsResourceEnvelope(fields, ['hosts'], code)
+      if (!Array.isArray(fields.hosts)) throw new AgentMuxError('Host list is invalid.', code)
+      const hosts = fields.hosts.map(host => settingsResourceRecord(host, code))
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { hosts } }
+    }
+    settingsResourceEnvelope(fields, ['input', 'outcome', 'detail'], code)
+    if (fields.outcome !== 'ready' && fields.outcome !== 'unsupported' && fields.outcome !== 'check-failed') throw new AgentMuxError('Host check outcome is invalid.', code)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { input: settingsResourceRecord(fields.input, code), outcome: fields.outcome, detail: text(fields.detail, 'Host check detail', code) } }
   }
   if (operation === 'settings.browser.links.list' || operation === 'settings.browser.links.forget') {
     const code = 'CONTROL_PROTOCOL_ERROR'

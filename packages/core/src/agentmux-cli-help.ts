@@ -152,12 +152,34 @@ the CLI never writes configuration files. Registration does not select/focus a p
 launch an Agent, run Git or create a worktree. Existing list projects discovery retains its
 client activity semantics; no settings workspaces list/get/update/remove commands are added.
 A timeout does not establish whether registration committed; inspect before deciding what to do next.`
+const HOSTS_HELP = `Read saved Host configuration or test one exact connection
+
+Usage:
+  agentmux settings hosts list
+  agentmux settings hosts test <id>
+  agentmux settings hosts test --input <file|->
+
+One positional ID selects the committed Host when Main handles the command. It is literal
+data, including --help and --input; labels, focus and default Hosts are never inferred.
+Alternatively, --input reads one complete, strict Host configuration from bounded UTF-8 JSON.
+The two modes are mutually exclusive. Main receives the object, never the input file path.
+
+Test returns the captured input, outcome (ready, unsupported or check-failed) and detail.
+Exit 0 means the diagnostic request completed; inspect outcome to learn whether the connection
+was ready. This does not save configuration, start an Agent, or implement unsupported SSH.
+No managed caller or View is required. An offline Main fails without writing configuration.`
 
 const HELP = new Map<string, string>([
+  ['settings.hosts', HOSTS_HELP],
+  ['settings.hosts.list', HOSTS_HELP],
+  ['settings.hosts.test', HOSTS_HELP],
   ['settings', `Read or change host-owned settings
 
 Usage:
   agentmux settings get [target]
+  agentmux settings hosts list
+  agentmux settings hosts test <id>
+  agentmux settings hosts test --input <file|->
   agentmux settings set <key> <value>
   agentmux settings executors|prompts list|get|add|update|remove [arguments]
   agentmux settings browser links list

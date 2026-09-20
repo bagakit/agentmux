@@ -345,9 +345,8 @@ const mockApi: AgentMuxDesktopApi = {
       return () => configListeners.delete(listener)
     }
   },
-  hosts: { check: async (host) => host.kind === 'ssh'
-    ? { ok: false, detail: 'Remote Runs are not yet supported.' }
-    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 17' } },
+  hosts: { check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
+    detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }) },
   demands: {
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
     create: async (input) => {
