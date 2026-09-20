@@ -76,6 +76,49 @@ it('clears search with Escape before closing settings, including from a focused 
   expect(close).toHaveBeenCalledOnce()
 })
 
+it('returns Clear focus to the original search input so the next query can be typed directly', async () => {
+  const close = vi.fn()
+  await dom.render(<SettingsPanel onClose={close} initialSection="appearance" />)
+  await input('[aria-label="Terminal font size in pixels"]', '18')
+  const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+  expect(search.isConnected).toBe(true)
+  await input('[aria-label="Search settings"]', 'copy')
+  const clear = dom.container.querySelector<HTMLButtonElement>('[aria-label="Clear settings search"]')!
+  expect(clear.isConnected).toBe(true)
+  clear.focus()
+  await act(async () => clear.click())
+  expect(document.activeElement).toBe(search)
+  expect(search.value).toBe('')
+  expect(clear.isConnected).toBe(false)
+  await act(async () => {
+    const focused = document.activeElement as HTMLInputElement
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(focused, 'host')
+    focused.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(search.value).toBe('host')
+  expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Hosts')
+  expect(close).not.toHaveBeenCalled()
+  await input('[aria-label="Search settings"]', '')
+  await section('Appearance')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Terminal font size in pixels"]')!.value).toBe('18')
+})
+
+it('keeps one Copy Paths introduction and the actual path examples and scope', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="copy-paths" />)
+  const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="copy-paths"]')!
+  expect(pane.isConnected).toBe(true)
+  expect(pane.hidden).toBe(false)
+  expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Copy Paths')
+  expect(dom.container.querySelector('.settings-content__header p')!.textContent).toBe('Choose how paths look when you share them.')
+  expect(pane.querySelector('.settings-lead')).toBeNull()
+  const toggle = pane.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  expect(toggle.isConnected).toBe(true)
+  expect(pane.textContent).toContain('proj/app')
+  expect(pane.textContent).toContain('your own home directory')
+  expect(pane.textContent).toContain('Remote paths and paths belonging to another user always stay complete')
+  expect(pane.textContent).toContain('Applies to every Copy Path action')
+})
+
 it('prioritizes existing workspaces and retains the creation draft across disclosure and section switches', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(dom.container.querySelector('.workspace-settings-list')!.textContent).toContain('Project')

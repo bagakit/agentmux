@@ -21,8 +21,6 @@ export function CopyPathsSettingsPane({ copyPathsAsAbsolute, onSave }: {
   const draft = useSettingDraft(saved)
   const absolute = draft.value, setAbsolute = draft.setValue
   const saveState = useSettingsSave()
-
-
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
@@ -30,7 +28,6 @@ export function CopyPathsSettingsPane({ copyPathsAsAbsolute, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Choose how file paths look when you copy them. Use <code>~</code> for shorter local paths, or keep the full address.</p>
       <section className="settings-group">
         <header><span>Home directory in copied paths</span><small>{saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
